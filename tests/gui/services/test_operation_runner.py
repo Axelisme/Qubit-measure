@@ -102,7 +102,8 @@ class _FakeBg:
 class _FakeProgress:
     """Tracks make_factory and discard_operation calls."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, fail_discard: bool = False) -> None:
+        self._fail_discard = fail_discard
         self.factories: dict[int, MagicMock] = {}
         self.discard_calls: list[int] = []
 
@@ -113,6 +114,8 @@ class _FakeProgress:
 
     def discard_operation(self, operation_id: int) -> None:
         self.discard_calls.append(operation_id)
+        if self._fail_discard:
+            raise RuntimeError("discard boom")
 
 
 def _make_runner(
@@ -394,6 +397,65 @@ def test_on_terminal_receives_error_result_on_error():
     assert received[0].ok is False
     assert received[0].result is NO_RESULT
     assert received[0].error is exc
+
+
+def test_terminal_callback_exception_settles_failed_and_releases(caplog):
+    runner, gate, handles, progress, bg = _make_runner()
+    excl = ExclusionRequest(kind="run", owner_id="tab1")
+
+    def on_terminal(_bgr: BgResult, _settle: SettleFn) -> None:
+        raise RuntimeError("terminal boom")
+
+    spec = OperationSpec(
+        exclusion=excl,
+        owner_id="tab1",
+        wants_progress=True,
+        cancel_hook=None,
+        work=lambda _f: None,
+        run_in_pool=False,
+        on_terminal=on_terminal,
+    )
+    token = runner.begin(spec)
+
+    with caplog.at_level("ERROR"):
+        bg.deliver_result()
+
+    settled = handles.poll(token)
+    assert settled is not None
+    assert settled.status == "failed"
+    assert settled.error == "terminal boom"
+    assert progress.discard_calls == [token]
+    assert gate.release_calls == [token]
+    assert "operation terminal callback failed" in caplog.text
+
+
+def test_progress_discard_exception_still_settles_and_releases(caplog):
+    progress = _FakeProgress(fail_discard=True)
+    runner, gate, handles, _, bg = _make_runner(progress=progress)
+    excl = ExclusionRequest(kind="run", owner_id="tab1")
+
+    def on_terminal(_bgr: BgResult, settle: SettleFn) -> None:
+        settle(OperationOutcome("finished"))
+
+    spec = OperationSpec(
+        exclusion=excl,
+        owner_id="tab1",
+        wants_progress=True,
+        cancel_hook=None,
+        work=lambda _f: None,
+        run_in_pool=False,
+        on_terminal=on_terminal,
+    )
+    token = runner.begin(spec)
+
+    with caplog.at_level("ERROR"):
+        bg.deliver_result()
+
+    settled = handles.poll(token)
+    assert settled is not None and settled.status == "finished"
+    assert progress.discard_calls == [token]
+    assert gate.release_calls == [token]
+    assert "operation progress discard failed" in caplog.text
 
 
 # ---------------------------------------------------------------------------

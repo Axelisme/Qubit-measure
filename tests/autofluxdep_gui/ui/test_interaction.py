@@ -22,7 +22,9 @@ from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
+    QMessageBox,
     QSizePolicy,
+    QWidget,
 )
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.events.run import (
@@ -43,6 +45,7 @@ from zcu_tools.gui.session.events import (
     SessionEvent,
     SocChangedPayload,
 )
+from zcu_tools.gui.session.operation_handles import OperationOutcome
 
 from .._helpers import connect_mock, make_builder, make_measurement_builder
 
@@ -75,6 +78,16 @@ def _node_checkbox(win: MainWindow, row: int):
     widget = win._list._list.itemWidget(item)
     assert widget is not None
     return cast(Any, widget)._checkbox
+
+
+def _spin_until(condition, timeout: float = 1.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        if condition():
+            return True
+        time.sleep(0.001)
+    return False
 
 
 class _RowReceiver(QObject):
@@ -363,6 +376,7 @@ def test_node_list_teardown_is_idempotent_and_called_by_close_event(app):
     win._list.teardown()
 
     win.closeEvent(QCloseEvent())
+    QApplication.processEvents()
     win.closeEvent(QCloseEvent())
 
     assert win._list._torn_down is True
@@ -374,6 +388,7 @@ def test_main_window_close_flushes_persistence(app):
     ctrl.persist_all = persist_all  # type: ignore[method-assign]
 
     win.closeEvent(QCloseEvent())
+    QApplication.processEvents()
 
     persist_all.assert_called_once_with()
 
@@ -408,6 +423,7 @@ def test_main_window_close_removes_event_bus_subscriptions(app):
         assert has_owner(payload_type, win._bridge)
 
     win.closeEvent(QCloseEvent())
+    QApplication.processEvents()
 
     for payload_type in (
         SocChangedPayload,
@@ -428,6 +444,31 @@ def test_main_window_close_removes_event_bus_subscriptions(app):
         RunFailedPayload,
     ):
         assert not has_owner(payload_type, win._bridge)
+
+
+def test_main_window_close_waits_for_live_operation(app, monkeypatch):
+    ctrl, win = app
+    cancelled: list[bool] = []
+    token = ctrl._operation_handles.create(cancel_hook=lambda: cancelled.append(True))
+    persist_all = MagicMock()
+    ctrl.persist_all = persist_all  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *a, **k: QMessageBox.StandardButton.Yes,
+    )
+
+    event = QCloseEvent()
+    win.closeEvent(event)
+
+    assert not event.isAccepted()
+    QApplication.processEvents()
+    assert cancelled == [True]
+    persist_all.assert_not_called()
+
+    ctrl._operation_handles.settle(token, OperationOutcome("cancelled"))
+    assert _spin_until(lambda: persist_all.called)
+    assert ctrl.active_operation_count() == 0
 
 
 def test_predictor_button_opens_shared_predictor_dialog(app):
@@ -667,6 +708,49 @@ def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp, monke
     ctrl._background_svc.quiesce()
     win.close()
     win.deleteLater()
+
+
+def test_run_start_exception_does_not_escape_qt_slot(app, monkeypatch):
+    ctrl, win = app
+    shown: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
+    )
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("store failed")
+
+    monkeypatch.setattr(ctrl, "start_run", boom)
+
+    win._start()
+
+    assert not ctrl.is_running
+    assert win._list._run_btn.text() == "▶ Run"
+    assert any("store failed" in message for message in shown)
+
+
+def test_row_update_plotter_exception_is_logged_and_coalescing_released(
+    app, monkeypatch, caplog
+):
+    ctrl, win = app
+    canvas = QWidget()
+
+    class BrokenPlotter:
+        def update(self, _result, _idx) -> None:
+            raise RuntimeError("draw failed")
+
+    rendered = MagicMock()
+    monkeypatch.setattr(win._bridge, "row_rendered", rendered)
+    ctrl.state.run_results = {"qubit_freq": object()}
+    win._plots = {"qubit_freq": (canvas, BrokenPlotter())}
+
+    with caplog.at_level("ERROR"):
+        win._on_row_updated("qubit_freq", 0, time.monotonic())
+
+    assert win._plots["qubit_freq"][1] is None
+    rendered.assert_called_once_with("qubit_freq", 0)
+    assert "autofluxdep plot update failed" in caplog.text
+    canvas.deleteLater()
 
 
 def test_run_builds_liveplot_canvas_for_measurement_node(app):

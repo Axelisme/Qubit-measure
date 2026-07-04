@@ -12,6 +12,8 @@ went to the Caretaker, this codec stays as WorkspaceService's helper.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from zcu_tools.gui.app.main.adapter import (
     CfgNodeSpec,
     CfgNodeValue,
@@ -70,18 +72,21 @@ def raw_to_schema(base_schema: CfgSchema, raw_cfg: dict[str, object]) -> CfgSche
 
 
 def _section_value_to_raw(
-    spec: CfgSectionSpec, value: CfgSectionValue
+    spec: CfgSectionSpec,
+    value: CfgSectionValue,
+    *,
+    fill_missing_literals: bool = False,
 ) -> dict[str, object]:
-    # The value tree is complete (every spec field has an entry — guaranteed by
-    # adapter make_default_cfg validation + LiveModel). A ``None`` entry is only
-    # ever a disabled *optional ref* (ADR-0010), serialised to a ``{"__kind":
-    # "disabled"}`` marker. A ``None`` for any other node is an invariant
-    # violation (incomplete value tree) — fail fast rather than silently fill.
+    # The value tree is complete for user-editable fields. Literal fields may be
+    # omitted by form refresh paths because the spec is canonical; optional refs
+    # use ``None`` for the disabled marker (ADR-0010).
     payload: dict[str, object] = {}
     for key, node_spec in spec.fields.items():
         node_val = value.fields.get(key)
         if node_val is None:
-            if isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+            if isinstance(node_spec, LiteralSpec) and fill_missing_literals:
+                payload[key] = _node_value_to_raw(node_spec, DirectValue(None))
+            elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
                 payload[key] = {"__kind": "disabled"}
             else:
                 raise SessionCodecError(
@@ -89,11 +94,20 @@ def _section_value_to_raw(
                     f"{type(node_spec).__name__} (incomplete value tree)"
                 )
         else:
-            payload[key] = _node_value_to_raw(node_spec, node_val)
+            payload[key] = _node_value_to_raw(
+                node_spec,
+                node_val,
+                fill_missing_literals=fill_missing_literals,
+            )
     return payload
 
 
-def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
+def _node_value_to_raw(
+    spec: CfgNodeSpec,
+    value: CfgNodeValue,
+    *,
+    fill_missing_literals: bool = False,
+) -> object:
     if isinstance(spec, LiteralSpec):
         # Fixed-value field; the literal value is canonical.
         return {"__kind": "direct", "value": _to_json_compatible(spec.value)}
@@ -118,7 +132,11 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
         return {"__kind": "direct", "value": _to_json_compatible(value.value)}
     if isinstance(spec, CfgSectionSpec):
         assert isinstance(value, CfgSectionValue)
-        return _section_value_to_raw(spec, value)
+        return _section_value_to_raw(
+            spec,
+            value,
+            fill_missing_literals=fill_missing_literals,
+        )
     if isinstance(spec, ModuleRefSpec):
         assert isinstance(value, ModuleRefValue)
         return {
@@ -130,8 +148,10 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
                     spec,
                     value.chosen_key,
                     _value_discriminator(value.value, "type"),
+                    value_fields=value.value.fields.keys(),
                 ),
                 value.value,
+                fill_missing_literals=True,
             ),
         }
     if isinstance(spec, WaveformRefSpec):
@@ -145,8 +165,10 @@ def _node_value_to_raw(spec: CfgNodeSpec, value: CfgNodeValue) -> object:
                     spec,
                     value.chosen_key,
                     _value_discriminator(value.value, "style"),
+                    value_fields=value.value.fields.keys(),
                 ),
                 value.value,
+                fill_missing_literals=True,
             ),
         }
     return _to_json_compatible(value)
@@ -255,10 +277,14 @@ def _ref_value_from_raw(
         and isinstance(raw.get("value"), dict)
     ):
         chosen_key = raw["chosen_key"]
+        raw_value = raw["value"]
         value_spec = _select_allowed_spec(
-            spec, chosen_key, _raw_discriminator(raw["value"], "type")
+            spec,
+            chosen_key,
+            _raw_discriminator(raw_value, "type"),
+            value_fields=raw_value.keys(),
         )
-        nested = _section_value_from_raw(value_spec, raw["value"])
+        nested = _section_value_from_raw(value_spec, raw_value)
         return ModuleRefValue(
             chosen_key=chosen_key,
             value=nested,
@@ -278,10 +304,14 @@ def _waveform_ref_value_from_raw(
         and isinstance(raw.get("value"), dict)
     ):
         chosen_key = raw["chosen_key"]
+        raw_value = raw["value"]
         value_spec = _select_allowed_spec(
-            spec, chosen_key, _raw_discriminator(raw["value"], "style")
+            spec,
+            chosen_key,
+            _raw_discriminator(raw_value, "style"),
+            value_fields=raw_value.keys(),
         )
-        nested = _section_value_from_raw(value_spec, raw["value"])
+        nested = _section_value_from_raw(value_spec, raw_value)
         return WaveformRefValue(
             chosen_key=chosen_key,
             value=nested,
@@ -312,14 +342,18 @@ def _select_allowed_spec(
     spec: ModuleRefSpec | WaveformRefSpec,
     chosen_key: str,
     discriminator: object,
+    *,
+    value_fields: object | None = None,
 ) -> CfgSectionSpec:
     """Pick the allowed shape a ref's value actually uses (both directions).
 
     A ``<Custom:Label>`` key names the shape by label. A LINKED (library-named)
-    key does not — but the value/raw carries the shape's discriminator leaf
-    (``type`` for module refs, ``style`` for waveform refs, each locked to a
-    distinct ``LiteralSpec``), so the shape is recoverable without a
-    ``ModuleLibrary`` (this codec is pure, unlike ``find_allowed_spec``).
+    key does not — but the value/raw normally carries the shape's discriminator
+    leaf (``type`` for module refs, ``style`` for waveform refs, each locked to a
+    distinct ``LiteralSpec``). Some live form refresh paths omit locked literal
+    leaves, so the shape can also be recovered from the non-literal field set
+    when that is unambiguous. Both routes keep this codec pure, unlike
+    ``find_allowed_spec`` which consults a ``ModuleLibrary``.
 
     Fast-fails on no match rather than silently defaulting to ``allowed[0]`` —
     that default mis-shaped a multi-shape ref (e.g. a readout LINKED to a library
@@ -339,6 +373,10 @@ def _select_allowed_spec(
         leaf = allowed_spec.fields.get(disc_key)
         if isinstance(leaf, LiteralSpec) and leaf.value == discriminator:
             return allowed_spec
+    if discriminator is None and value_fields is not None:
+        by_fields = _select_allowed_spec_by_fields(spec, disc_key, value_fields)
+        if by_fields is not None:
+            return by_fields
     available = ", ".join(
         repr(getattr(s.fields.get(disc_key), "value", None)) for s in spec.allowed
     )
@@ -346,6 +384,24 @@ def _select_allowed_spec(
         f"Reference {chosen_key!r} has {disc_key}={discriminator!r}, but no allowed "
         f"shape matches (available {disc_key}: {available})"
     )
+
+
+def _select_allowed_spec_by_fields(
+    spec: ModuleRefSpec | WaveformRefSpec,
+    disc_key: str,
+    value_fields: object,
+) -> CfgSectionSpec | None:
+    if not isinstance(value_fields, Iterable):
+        return None
+    provided = {str(key) for key in value_fields} - {disc_key}
+    matches = [
+        allowed_spec
+        for allowed_spec in spec.allowed
+        if set(allowed_spec.fields) - {disc_key} == provided
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 __all__ = ["SessionCodecError", "schema_to_raw", "raw_to_schema"]

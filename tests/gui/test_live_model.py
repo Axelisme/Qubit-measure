@@ -627,6 +627,16 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
     assert field._binding_state is LibraryBindingState.LINKED
     assert field.has_missing_library_ref() is True
     assert field.is_valid() is False
+    out = field.get_value()
+    assert isinstance(out, WaveformRefValue)
+    assert out.value.fields["length"] == DirectValue(5.0)
+
+    # Other session refreshes keep the embedded snapshot instead of replacing it
+    # with an empty section while the library key is still missing.
+    field.refresh_external(SessionEvent.CONTEXT_SWITCHED)
+    out = field.get_value()
+    assert isinstance(out, WaveformRefValue)
+    assert out.value.fields["length"] == DirectValue(5.0)
 
     # Re-add an entry of that name → re-links to a valid LINKED ref.
     present["yes"] = True
@@ -635,3 +645,6 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
     assert field._binding_state is LibraryBindingState.LINKED
     assert field.has_missing_library_ref() is False
     assert field.is_valid() is True
+    out = field.get_value()
+    assert isinstance(out, WaveformRefValue)
+    assert out.value.fields["length"] == DirectValue(1.0)

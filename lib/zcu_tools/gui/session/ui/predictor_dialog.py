@@ -748,6 +748,13 @@ class PredictorDialog(QDialog):
                 freq_text = f"{freq:.4f}"
             except (PredictorNotLoaded, ValueError):
                 freq_text = "—"
+            except Exception as exc:
+                logger.exception(
+                    "predictor value-column frequency update failed: transition=%s",
+                    transition,
+                )
+                self._set_status(str(exc), error=True)
+                freq_text = "—"
             freq_item = self._table.item(row_idx, _COL_FREQ)
             if freq_item is not None:
                 freq_item.setText(freq_text)
@@ -782,6 +789,14 @@ class PredictorDialog(QDialog):
             )
             return f"{mat_result.mags[0, 0]:.5f}"
         except (PredictorNotLoaded, ValueError):
+            return "—"
+        except Exception as exc:
+            logger.exception(
+                "predictor value-column matrix update failed: transition=%s operator=%s",
+                transition,
+                operator,
+            )
+            self._set_status(str(exc), error=True)
             return "—"
 
     # ------------------------------------------------------------------
@@ -832,6 +847,10 @@ class PredictorDialog(QDialog):
                 flux_to_value=flux_to_value,
             )
         except (PredictorNotLoaded, ValueError) as exc:
+            self._set_status(str(exc), error=True)
+            return
+        except Exception as exc:
+            logger.exception("predictor frequency curve refresh failed")
             self._set_status(str(exc), error=True)
             return
 
@@ -889,6 +908,12 @@ class PredictorDialog(QDialog):
                 )
             )
         except (PredictorNotLoaded, ValueError) as exc:
+            self._set_status(str(exc), error=True)
+            return False
+        except Exception as exc:
+            logger.exception(
+                "predictor matrix curve refresh failed: operator=%s", operator
+            )
             self._set_status(str(exc), error=True)
             return False
 

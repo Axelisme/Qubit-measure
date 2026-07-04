@@ -21,6 +21,7 @@ for sloppy policy.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -32,6 +33,8 @@ from zcu_tools.gui.session.operation_handles import (
     OperationOutcome,
 )
 from zcu_tools.gui.session.ports import BackgroundExecutor, ExclusionGate, ProgressHub
+
+logger = logging.getLogger(__name__)
 
 # Sentinel re-exported so callers don't need to import from gui.background directly.
 __all__ = [
@@ -172,11 +175,15 @@ class OperationRunner:
             self._bg.submit(
                 lambda: spec.work(factory),
                 run_in_pool=spec.run_in_pool,
-                on_done=lambda r: spec.on_terminal(
-                    BgResult(ok=True, result=r, error=None), settle
+                on_done=lambda r: self._deliver_terminal(
+                    spec,
+                    settle,
+                    BgResult(ok=True, result=r, error=None),
                 ),
-                on_error=lambda e: spec.on_terminal(
-                    BgResult(ok=False, result=NO_RESULT, error=e), settle
+                on_error=lambda e: self._deliver_terminal(
+                    spec,
+                    settle,
+                    BgResult(ok=False, result=NO_RESULT, error=e),
                 ),
             )
         except Exception:
@@ -185,6 +192,19 @@ class OperationRunner:
             raise
 
         return token
+
+    def _deliver_terminal(
+        self,
+        spec: OperationSpec,
+        settle: SettleFn,
+        bg: BgResult,
+    ) -> None:
+        """Run the policy terminal callback without letting it escape Qt delivery."""
+        try:
+            spec.on_terminal(bg, settle)
+        except Exception as exc:
+            logger.exception("operation terminal callback failed")
+            settle(OperationOutcome("failed", str(exc)))
 
     def _make_settle(self, spec: OperationSpec, token: int) -> SettleFn:
         """Build the call-once settle closure for this operation.
@@ -205,9 +225,20 @@ class OperationRunner:
                 return  # call-once: duplicate calls are no-ops
             done = True
             if spec.wants_progress:
-                self._progress.discard_operation(token)
-            self._handles.settle(token, outcome)
+                try:
+                    self._progress.discard_operation(token)
+                except Exception:
+                    logger.exception(
+                        "operation progress discard failed: token=%d", token
+                    )
+            try:
+                self._handles.settle(token, outcome)
+            except Exception:
+                logger.exception("operation handle settle failed: token=%d", token)
             if spec.exclusion is not None:
-                self._gate.release(token)
+                try:
+                    self._gate.release(token)
+                except Exception:
+                    logger.exception("operation gate release failed: token=%d", token)
 
         return settle

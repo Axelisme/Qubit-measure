@@ -78,6 +78,27 @@ def test_attach_listener_fires_and_disposes():
     assert len(calls) == before  # no further notifications after dispose
 
 
+def test_listener_exception_is_logged_and_next_listener_still_runs(caplog):
+    svc = ProgressService(DirectProgressTransport())
+    calls: list[str] = []
+
+    def broken() -> None:
+        calls.append("broken")
+        raise RuntimeError("listener boom")
+
+    def healthy() -> None:
+        calls.append("healthy")
+
+    svc.attach_by_owner("owner", broken)
+    svc.attach_by_owner("owner", healthy)
+
+    with caplog.at_level("ERROR"):
+        svc.make_factory(1, owner_id="owner")
+
+    assert calls == ["broken", "healthy"]
+    assert "progress listener failed" in caplog.text
+
+
 def test_attach_before_any_operation_returns_empty():
     svc = ProgressService(DirectProgressTransport())
     svc.attach_by_owner("owner", lambda: None)

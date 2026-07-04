@@ -300,6 +300,51 @@ def test_linked_multi_shape_ref_uses_value_discriminator_not_allowed0():
     assert readout.value.fields["gain"] == DirectValue(0.4)
 
 
+def test_linked_multi_shape_ref_serializes_when_literal_leaf_omitted():
+    """Live form refresh can omit locked literal leaves; the shape is still
+    recoverable from the concrete field set."""
+    spec = CfgSectionSpec(fields={"readout": _multi_shape_module_spec()})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "readout": ModuleRefValue(
+                    chosen_key="missing_lib_readout",
+                    value=CfgSectionValue(fields={"gain": DirectValue(0.4)}),
+                )
+            }
+        ),
+    )
+
+    raw = schema_to_raw(schema)
+
+    readout_value = cast(dict, cast(dict, raw["readout"])["value"])
+    assert readout_value["type"] == {"__kind": "direct", "value": "readout/pulse"}
+    assert readout_value["gain"] == {"__kind": "direct", "value": 0.4}
+
+
+def test_linked_multi_shape_ref_restores_when_literal_leaf_omitted():
+    """A raw payload without the locked literal discriminator still restores when
+    its non-literal field set identifies exactly one allowed shape."""
+    spec = CfgSectionSpec(fields={"readout": _multi_shape_module_spec()})
+    raw: dict[str, object] = {
+        "readout": {
+            "__kind": "module_ref",
+            "chosen_key": "missing_lib_readout",
+            "is_overridden": False,
+            "value": {"gain": {"__kind": "direct", "value": 0.4}},
+        }
+    }
+
+    restored = raw_to_schema(_empty(spec), raw)
+
+    readout = restored.value.fields["readout"]
+    assert isinstance(readout, ModuleRefValue)
+    assert set(readout.value.fields) == {"type", "gain"}
+    assert readout.value.fields["type"] == DirectValue("readout/pulse")
+    assert readout.value.fields["gain"] == DirectValue(0.4)
+
+
 def test_linked_ref_unknown_discriminator_fails_fast():
     """A LINKED multi-shape ref whose discriminator matches no allowed shape
     fast-fails (it no longer silently mis-restores as ``allowed[0]``)."""

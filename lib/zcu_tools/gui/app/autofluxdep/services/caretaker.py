@@ -68,7 +68,18 @@ class PersistenceCaretaker:
 
     def flush(self) -> None:
         logger.info("autofluxdep persistence flush: %s", self._path)
-        self._write(self._originator.capture_persisted_state())
+        try:
+            state = self._originator.capture_persisted_state()
+            self._write(state)
+        except PersistenceError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "autofluxdep persistence capture/write failed: %s", self._path
+            )
+            raise PersistenceError(
+                f"Failed to save autofluxdep GUI state: {exc}"
+            ) from exc
 
     def _load(self) -> tuple[AppPersistedState, PersistenceError | None]:
         if not self._path.exists():
@@ -98,9 +109,9 @@ class PersistenceCaretaker:
         return state, None
 
     def _write(self, state: AppPersistedState) -> None:
-        payload = state.model_dump(mode="json")
         temp_path: Path | None = None
         try:
+            payload = state.model_dump(mode="json")
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with NamedTemporaryFile(
                 "w",

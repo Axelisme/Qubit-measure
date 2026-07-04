@@ -997,6 +997,23 @@ def test_predictor_dialog_columns_dash_when_not_loaded(qapp):
             assert item is not None and item.text() == "—"
 
 
+def test_predictor_dialog_value_column_runtime_error_is_logged(qapp, caplog):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    ctrl.predict_freq.side_effect = RuntimeError("compute failed")
+    ctrl.predict_matrix_element_curve.side_effect = RuntimeError("matrix failed")
+
+    with caplog.at_level("ERROR"):
+        dialog._update_value_columns()
+
+    for row in range(dialog._table.rowCount()):
+        for col in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
+            item = dialog._table.item(row, col)
+            assert item is not None and item.text() == "—"
+    assert "predictor value-column frequency update failed" in caplog.text
+    assert "predictor value-column matrix update failed" in caplog.text
+
+
 def test_predictor_dialog_canvas_follow_updates_spinbox_no_recompute(qapp):
     """on_follow must update the spinbox without triggering a full curve recompute."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")

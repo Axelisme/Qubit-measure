@@ -6,30 +6,22 @@ from collections.abc import Callable
 
 from qtpy.QtCore import QObject, QTimer  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.main.services.shutdown import (
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.services.shutdown import (
     DEFAULT_SHUTDOWN_TIMEOUT,
     ShutdownCoordinator,
     ShutdownState,
 )
-from zcu_tools.gui.session.operation_handles import OperationHandles
 
 logger = logging.getLogger(__name__)
 
 # How often the driver polls the coordinator while waiting for operations to
-# settle. The project's first *periodic* timer (all others are singleShot).
+# settle.
 _POLL_INTERVAL_MS = 50
 
 
 class QtShutdownDriver(QObject):
-    """Qt driving adapter for the Qt-free ShutdownCoordinator (ADR-0005).
-
-    Owns a periodic QTimer that pumps ``coordinator.tick`` until it reports a
-    terminal state, then stops the timer and invokes the supplied ``on_closed``
-    callback (the window's actual teardown). The coordinator decides *when* to
-    close; this adapter only supplies the clock and the timer. A blocked connect
-    that never settles dies with the process once the window closes, so
-    TIMED_OUT and SETTLED both just call ``on_closed``.
-    """
+    """Qt driving adapter for the Qt-free ShutdownCoordinator."""
 
     def __init__(
         self,
@@ -48,12 +40,7 @@ class QtShutdownDriver(QObject):
         self._on_closed: Callable[[], None] | None = None
 
     def begin(self, on_closed: Callable[[], None]) -> None:
-        """Cancel every live operation and begin polling for them to settle.
-
-        ``on_closed`` runs once on the main thread when the wait ends (settled
-        or timed out). Re-entrant begins are absorbed by the coordinator; the
-        first ``on_closed`` wins.
-        """
+        """Cancel every live operation and begin polling for them to settle."""
         if self._coordinator.is_active:
             return
         self._on_closed = on_closed

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-03 - predictor device facet
+**Last updated:** 2026-07-04 - shared operation shutdown
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -22,13 +22,13 @@ framework 只看 `ExpAdapterProtocol`。
   narrow `TabActions` port; `MainWindow` adapts those actions to top-level
   handlers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
-- `driven/`：Qt/liveplot/shutdown 等 driven adapters；與 `adapter/` 的 experiment
+- `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
 
 Shared layers:
 
 - `zcu_tools.gui.session`：context、SoC、device、startup、predictor、operation
-  handles、operation runner、notify channel、progress service、shared dialogs。
+  handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
 - `zcu_tools.gui.plotting`：matplotlib backend、figure routing、host/container/export
   substrate。
@@ -52,7 +52,8 @@ Key ownership rules:
 - `OperationHandles` owns async handles, cancellation hooks, and feedback/stop
   channel state.
 - `OperationRunner` owns the generic operation lifecycle; each operation supplies
-  an `OperationSpec` policy and narrow write ports.
+  an `OperationSpec` policy and narrow write ports. Terminal policy exceptions
+  are contained in the shared runner so handles settle and exclusion leases release.
 
 ## Run / Analyze Workflow
 
@@ -82,6 +83,11 @@ The GUI uses a two-tree model:
 against current `MetaDict` when a field is set or lowered. `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
+
+Linked `ModuleRef` / `WaveformRef` fields preserve their embedded value snapshot
+when the library key is missing. The field stays LINKED and invalid so re-adding
+the same key relinks it, while persistence can still serialize the snapshot
+without consulting `ModuleLibrary`.
 
 Adapter defaults are assembled in `experiment/v2_gui` with `CfgBuilder` and the
 role table. Locked literals are declared in `cfg_spec()`; adapter defaults do not
@@ -116,6 +122,8 @@ Progress is operation-scoped:
 - GUI widgets attach by owner id (`tab_id` or device name) through the relevant
   control facet; run tabs use `ProgressControlPort`, device panels use
   `DeviceControlPort`.
+- Owner listener exceptions are logged and isolated by `ProgressService`; a broken
+  progress view does not keep an operation pending.
 - Agent polling reads by operation id.
 
 Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib

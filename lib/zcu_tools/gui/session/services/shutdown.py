@@ -21,22 +21,7 @@ class ShutdownState(Enum):
 
 
 class ShutdownCoordinator:
-    """Qt-free coordinator for "cancel everything, wait for it to stop, then
-    close (forcing past a deadline)".
-
-    Pure logic so it is unit-testable without a Qt event loop: ``begin`` cancels
-    every live operation through OperationHandles and records their tokens + a
-    deadline; ``tick`` polls those tokens (non-blocking) and reports whether they
-    have all settled, the deadline passed, or we are still waiting. The periodic
-    driving
-    (a QTimer) and the actual window teardown live in the Qt layer; this object
-    only decides *when* it is time to close.
-
-    Cancellation is an async request — ``cancel`` sets each operation's
-    stop_event but does not wait. A run / device setup self-judges 'cancelled'
-    and settles; a connect (no stop point) never settles, so TIMED_OUT is its
-    only exit. Timing is injected (``now``) so tests need no real clock.
-    """
+    """Qt-free coordinator for "cancel everything, wait for it to stop, then close"."""
 
     def __init__(
         self,
@@ -57,8 +42,7 @@ class ShutdownCoordinator:
         return self._active
 
     def begin(self) -> None:
-        """Cancel every live operation and start the wait. Idempotent: a second
-        begin while already active is a no-op (a re-entrant close request)."""
+        """Cancel every live operation and start the wait."""
         if self._active:
             return
         self._active = True
@@ -69,12 +53,7 @@ class ShutdownCoordinator:
         )
 
     def tick(self) -> ShutdownState:
-        """Poll the cancelled operations once and report the wait state.
-
-        Must be called only while active (after ``begin``). Returns SETTLED once
-        every token reached a terminal outcome, TIMED_OUT once the deadline
-        passed with any still pending, else WAITING.
-        """
+        """Poll the cancelled operations once and report the wait state."""
         if not self._active or self._deadline is None:
             raise RuntimeError("ShutdownCoordinator.tick called before begin")
         pending = [t for t in self._tokens if self._handles.poll(t) is None]

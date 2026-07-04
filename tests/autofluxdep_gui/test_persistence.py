@@ -18,6 +18,7 @@ from zcu_tools.gui.app.autofluxdep.services import (
     PersistedUiPrefs,
     PersistedWorkflow,
     PersistenceCaretaker,
+    PersistenceError,
     RestoreReport,
 )
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
@@ -259,6 +260,35 @@ def test_autosave_debounce_writes_workflow_flux_and_ui_prefs(tmp_path: Path, qap
     assert payload["flux"]["stop_expr"] == "1.0"
     assert payload["flux"]["npts_expr"] == "5"
     assert payload["ui"]["auto_follow_tabs"] is False
+
+
+def test_caretaker_wraps_capture_failure(tmp_path: Path):
+    class BadOriginator:
+        def capture_persisted_state(self) -> AppPersistedState:
+            raise RuntimeError("bad capture")
+
+        def restore_persisted_state(self, state: AppPersistedState) -> object:
+            return state
+
+    caretaker = PersistenceCaretaker(BadOriginator(), cache_dir=tmp_path)
+
+    with pytest.raises(PersistenceError, match="Failed to save autofluxdep GUI state"):
+        caretaker.flush()
+
+    assert not caretaker.state_path.exists()
+
+
+def test_persist_all_swallows_persistence_error(tmp_path: Path, monkeypatch):
+    ctrl = build_core()
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    ctrl.attach_caretaker(caretaker)
+
+    def raise_persistence_error() -> None:
+        raise PersistenceError("bad persist")
+
+    monkeypatch.setattr(caretaker, "flush", raise_persistence_error)
+
+    ctrl.persist_all()
 
 
 def test_persist_all_flushes_immediately_and_cancels_pending_timer(

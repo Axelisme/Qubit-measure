@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -112,6 +112,7 @@ if TYPE_CHECKING:
         PersistenceCaretaker,
         RestoreOutcome,
     )
+    from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import ProgressTransport
@@ -225,6 +226,7 @@ class Controller(SessionControllerMixin):
         self._run_stop_event: threading.Event | None = None
         self._last_run_info: InfoStore | None = None
         self._caretaker: PersistenceCaretaker | None = None
+        self._shutdown_driver: QtShutdownDriver | None = None
         self._persist_timer = QTimer()
         self._persist_timer.setSingleShot(True)
         self._persist_timer.timeout.connect(self.persist_all)
@@ -1075,6 +1077,23 @@ class Controller(SessionControllerMixin):
     def active_operation_count(self) -> int:
         """How many shared operation handles are live right now."""
         return self._operation_handles.live_count()
+
+    def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
+        """Cancel live operations, wait for terminal outcomes, then close the view."""
+        if self._shutdown_driver is None:
+            from zcu_tools.gui.session.adapters.qt_shutdown_driver import (
+                QtShutdownDriver,
+            )
+
+            self._shutdown_driver = QtShutdownDriver(self._operation_handles)
+        self._shutdown_driver.begin(on_closed)
+
+    def quiesce_background(self, timeout_ms: int = 5000) -> bool:
+        """Drain background workers and queued terminal callbacks before teardown."""
+        drained = self._background_svc.quiesce(timeout_ms=timeout_ms)
+        if not drained:
+            logger.warning("autofluxdep background runner did not quiesce before close")
+        return drained
 
     def prepare_run_results(self) -> dict[str, Any]:
         """Allocate + store this run's Results in State (main thread, Run start).

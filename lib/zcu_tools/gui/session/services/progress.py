@@ -22,6 +22,7 @@ zero lifecycle coupling between the two.
 from __future__ import annotations
 
 import itertools
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
@@ -32,6 +33,8 @@ from zcu_tools.gui.session.ports import (
     ProgressEventKind,
     ProgressTransport,
 )
+
+logger = logging.getLogger(__name__)
 
 Listener = Callable[[], None]
 Disposer = Callable[[], None]
@@ -175,4 +178,7 @@ class ProgressService:
 
     def _notify_owner(self, owner_id: str) -> None:
         for listener in tuple(self._listeners.get(owner_id, ())):
-            listener()
+            try:
+                listener()
+            except Exception:
+                logger.exception("progress listener failed: owner_id=%r", owner_id)

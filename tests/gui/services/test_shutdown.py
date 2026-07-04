@@ -6,11 +6,11 @@ drives OperationHandles (cancel_all / poll), not the exclusion gate (ADR-0019)."
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main.services.shutdown import ShutdownCoordinator, ShutdownState
 from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )
+from zcu_tools.gui.session.services.shutdown import ShutdownCoordinator, ShutdownState
 
 
 class _FakeClock:

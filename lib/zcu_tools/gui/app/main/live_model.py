@@ -660,7 +660,7 @@ class ModuleRefLiveField(LiveField):
                         self._chosen_key,
                     )
                     self._missing_library_ref = True
-                    chosen_spec = None
+                    chosen_spec = self._spec_for_missing_ref_value(old_spec, hint)
                     lib_val = None
             else:
                 raise
@@ -684,6 +684,26 @@ class ModuleRefLiveField(LiveField):
             self.sub_field = None
 
         self._refresh_validity()
+
+    def _spec_for_missing_ref_value(
+        self,
+        old_spec: CfgNodeSpec | None,
+        value: CfgSectionValue | None,
+    ) -> CfgSectionSpec | None:
+        """Keep a dangling LINKED ref's embedded snapshot if its shape is known."""
+        if isinstance(old_spec, CfgSectionSpec):
+            for spec in self.spec.allowed:
+                if spec.label == old_spec.label:
+                    return old_spec
+        if isinstance(value, CfgSectionValue):
+            disc_field = value.fields.get("type") or value.fields.get("style")
+            disc = getattr(disc_field, "value", None)
+            if isinstance(disc, str):
+                for spec in self.spec.allowed:
+                    lit = spec.fields.get("type") or spec.fields.get("style")
+                    if getattr(lit, "value", None) == disc:
+                        return spec
+        return None
 
     def _custom_label_for_value(
         self,

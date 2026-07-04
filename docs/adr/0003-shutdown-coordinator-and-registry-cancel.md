@@ -27,8 +27,8 @@ GUI 關閉（user 點窗 close / agent `app.shutdown`）時，現況有兩個問
 
 **三、Qt-free `ShutdownCoordinator` + 週期 poll 輪詢取代屬性 flag。**
 
-- `ShutdownCoordinator`（純邏輯，**零 qtpy import**，可單測）：`begin()` = `gate.cancel_all()`（拿全部 token）；`tick() → WAITING/SETTLED/TIMED_OUT`（每 tick 對所有 token `gate.poll` + 比 deadline）。
-- **QTimer 包在 driven adapter** `QtShutdownDriver`（`adapters/qt_shutdown_driver.py`，非 services QObject——它是 driven adapter）：`timer.timeout → coordinator.tick()`，按回傳 state 觸發「真關」(`_perform_close`)。**超時不需顯式 force-kill**：window close 後 `app.exec()` 返回、`sys.exit` 退進程，阻塞的 connect QThread 隨進程死；故 SETTLED/TIMED_OUT 都只是調 `on_closed`。
+- `ShutdownCoordinator`（純邏輯，**零 qtpy import**，可單測）住在 shared `gui/session/services/shutdown.py`：`begin()` = `OperationHandles.cancel_all()`（拿全部 token）；`tick() → WAITING/SETTLED/TIMED_OUT`（每 tick 對所有 token `OperationHandles.poll` + 比 deadline）。
+- **QTimer 包在 driven adapter** `QtShutdownDriver`（`gui/session/adapters/qt_shutdown_driver.py`，非 app-local service QObject——它是 shared driven adapter）：`timer.timeout → coordinator.tick()`，按回傳 state 觸發「真關」(`_perform_close`)。**超時不需顯式 force-kill**：window close 後 `app.exec()` 返回、`sys.exit` 退進程，阻塞的 connect QThread 隨進程死；故 SETTLED/TIMED_OUT 都只是調 `on_closed`。
 - `Controller`（Qt-free façade）暴露 `begin_shutdown(on_closed)`（懶建 driver 後純委派）+ `active_operation_count()`；`MainWindow` closeEvent / request_shutdown 調它、傳 `_perform_close` 當 `on_closed`。**消除 `_shutdown_waiting_for_device_setup` + `DEVICE_SETUP_FINISHED` 訂閱**——「在等哪些 token」是 coordinator 自己的局部執行上下文，非跨對象共享 flag。user close 保留確認框（只 user 端；文案改「取消 N 個進行中的操作」涵蓋 run+device+connect）；`_perform_close` 的二次 closeEvent 由 window 自身的 `_closing` 局部 guard 放行。
 
 ## 考慮過的替代

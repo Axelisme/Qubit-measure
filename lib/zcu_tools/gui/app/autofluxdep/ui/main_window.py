@@ -180,6 +180,7 @@ class MainWindow(QMainWindow):
         self._progress_stack_step_perf: dict[str, PerfStats] = {}
         self._build_plot_perf = PerfStats("main.build_plots", logger, slow_ms=100.0)
         self._run_active = False
+        self._closing = False
         self._active_run_node_name: str | None = None
         self._live_predictor_flux_idx: int | None = None
         self._auto_follow_navigation = False
@@ -307,14 +308,41 @@ class MainWindow(QMainWindow):
         self._list.refresh_from_state()
         self._on_select(self._list.selected_index)
 
-    def closeEvent(self, a0: Any) -> None:
+    def _perform_close(self) -> None:
+        """Final teardown after the shutdown coordinator has drained operations."""
+        self._closing = True
         self._cleanup_bus_subscriptions()
         self._bridge.teardown()
         self._progress_unsub()
         self._list.teardown()
         self._detail.teardown()
         self._ctrl.persist_all()
-        super().closeEvent(a0)
+        self._ctrl.quiesce_background()
+        self.close()
+
+    def closeEvent(self, a0: Any) -> None:
+        if self._closing:
+            super().closeEvent(a0)
+            return
+
+        active = self._ctrl.active_operation_count()
+        if active > 0:
+            from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+            answer = QMessageBox.question(
+                self,
+                "Operations in progress",
+                f"Cancel {active} operation(s) in progress and close once they stop?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                if a0 is not None:
+                    a0.ignore()
+                return
+        if a0 is not None:
+            a0.ignore()
+        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         self._bus_subs.unsubscribe_all()
@@ -456,15 +484,38 @@ class MainWindow(QMainWindow):
     # --- run lifecycle ---
 
     def _start(self) -> None:
-        self._build_plots()
-        self._apply_flux_progress_snapshot(
-            (
-                max(1, len(self._ctrl.state.flux_values)),
-                "flux %v/%m",
-                0,
+        try:
+            self._build_plots()
+            self._apply_flux_progress_snapshot(
+                (
+                    max(1, len(self._ctrl.state.flux_values)),
+                    "flux %v/%m",
+                    0,
+                )
             )
-        )
-        self._ctrl.start_run(notify=self._bridge.notify)
+            self._ctrl.start_run(notify=self._bridge.notify)
+        except Exception as exc:
+            logger.exception("autofluxdep run failed to start")
+            self._clear_plots()
+            self._run_active = False
+            self._active_run_node_name = None
+            self._live_predictor_flux_idx = None
+            self._list.set_running(False)
+            self._detail.set_running(
+                False, switch_tab=self._ctrl.get_auto_follow_tabs()
+            )
+            self._refresh_toolbar_buttons()
+            self._sync_predictor_dialog_live_state()
+            from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+            QMessageBox.warning(self, "Run failed to start", str(exc))
+
+    def _clear_plots(self) -> None:
+        self._detail.show_run_canvas(None)
+        for canvas, _ in self._plots.values():
+            canvas.setParent(None)
+            canvas.deleteLater()
+        self._plots = {}
 
     def _build_plots(self) -> None:
         """Allocate Results + build each provider's Figure / Plotter / canvas.
@@ -479,11 +530,7 @@ class MainWindow(QMainWindow):
         profile_start = perf_now()
         # tear down any previous run's canvases (detach the shown one first, then
         # destroy every canvas — they are discarded, never drawn again)
-        self._detail.show_run_canvas(None)
-        for canvas, _ in self._plots.values():
-            canvas.setParent(None)
-            canvas.deleteLater()
-        self._plots = {}
+        self._clear_plots()
 
         results = self._ctrl.prepare_run_results()
         for node in self._ctrl.state.nodes:
@@ -587,7 +634,15 @@ class MainWindow(QMainWindow):
             result = self._ctrl.state.run_results.get(name)
             if result is not None and plotter is not None:
                 profile_start = perf_now()
-                plotter.update(result, idx)
+                try:
+                    plotter.update(result, idx)
+                except Exception:
+                    logger.exception(
+                        "autofluxdep plot update failed: node=%s idx=%d", name, idx
+                    )
+                    canvas, _plotter = entry
+                    self._plots[name] = (canvas, None)
+                    return
                 self._row_update_perf.record(
                     elapsed_ms(profile_start),
                     queue_ms=queue_ms,
