@@ -21,12 +21,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg
-from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from ._helpers import (
     ACQUIRE_READOUT,
     connect_mock,
+    high_snr_simparams,
     make_acquire_env,
+    mock_flux_predictor,
     node_schema,
 )
 
@@ -36,8 +37,12 @@ _PARAMS = {
     "qub_gain": 0.5,
     # start above zero: a const waveform length-sweep needs >= a few FPGA cycles
     "sweep_range": SweepValue(start=0.05, stop=2.0, expts=41),
-    "reps": 100,
-    "rounds": 1,
+    "sweep_range_mode": "fixed",
+    "drive_gain_mode": "fixed",
+    "relax_delay_mode": "fixed",
+    "earlystop_snr": None,
+    "reps": 1000,
+    "rounds": 3,
     "relax_delay": 100.0,
 }
 
@@ -258,15 +263,14 @@ def test_lenrabi_patch_keeps_feedback_but_skips_untrusted_drive_modules(
 
 def test_lenrabi_acquire_fits_finite_pi_length():
     ctrl = build_core()
-    connect_mock(ctrl)
+    sim_params = high_snr_simparams()
+    connect_mock(ctrl, sim_params=sim_params)
     ml = _ml(ctrl)
-    predictor = FluxoniumPredictor(
-        params=(4.0, 1.0, 1.0), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
+    predictor = mock_flux_predictor(sim_params)
 
     builder = LenRabiBuilder()
     schema = node_schema(builder, _PARAMS)
-    flux_values = [0.0, 0.06, 0.1]
+    flux_values = [0.0, 0.0015]
     pis: list[float] = []
     for idx, flux in enumerate(flux_values):
         result = builder.make_init_result(schema, np.asarray(flux_values))

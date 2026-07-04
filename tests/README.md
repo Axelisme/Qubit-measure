@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-04 — simulator optimization contracts
+**Last updated:** 2026-07-04 — pytest/pyright environment contracts
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -15,6 +15,10 @@
 ```bash
 .venv/bin/python -m pytest tests/ -n auto
 ```
+
+CI / agent 品質門檻使用 `uv run pytest -n auto`。`dev` dependency group 會同步安裝
+`zcu-tools[gui]`，因此 bare full-suite pytest 具備 GUI/client 測試需要的 optional dependency；
+若直接呼叫 `.venv/bin/python -m pytest`，先確認 venv 是透過 `uv` 的 dev group 同步。
 
 `-n auto` 啟動 pytest-xdist 多進程平行化。`tests/conftest.py` 在每個 worker 進程啟動時
 （偵測到 `PYTEST_XDIST_WORKER`）自動把 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS`
@@ -230,6 +234,11 @@ contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md
 ### Autofluxdep GUI tests
 
 `tests/autofluxdep_gui/test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
+
+Autofluxdep real-acquire smoke tests 依賴 flux-aware `MockSoc` 的物理模型；測試 fixture 要讓
+`connect_mock(..., sim_params=...)`、`mock_flux_predictor(sim_params)` 與 drive pulse calibration
+使用同一個 `SimParams`。π / π/2 drive pulse 優先用 helper 依 `pi_gain_len / gain` 校準；當測試目標是
+real acquire + fit 本身時，將 sweep/gain/relax 的 generation mode 固定，避免 feedback auto mode 覆寫測試輸入。
 
 ### GUI device service tests
 

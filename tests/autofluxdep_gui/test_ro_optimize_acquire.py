@@ -15,7 +15,14 @@ from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 
-from ._helpers import connect_mock, make_acquire_env, node_schema
+from ._helpers import (
+    calibrated_drive_pulse,
+    connect_mock,
+    high_snr_simparams,
+    make_acquire_env,
+    mock_flux_predictor,
+    node_schema,
+)
 
 # the swept readout pulse template (its freq/gain are swept by the node)
 _READOUT = {
@@ -24,38 +31,34 @@ _READOUT = {
         "ch": 0,
         "nqz": 2,
         "freq": 6000.0,
-        "gain": 0.5,
+        "gain": 0.3,
         "waveform": {"style": "const", "length": 1.0},
     },
     "ro_cfg": {"ro_ch": 0, "ro_length": 0.9, "trig_offset": 0.6},
 }
 
 _PARAMS = {
-    "reps": 100,
-    "rounds": 1,
+    "reps": 2000,
+    "rounds": 3,
     "freq_range": SweepValue(start=5995.0, stop=6005.0, expts=11),
     "gain_range": SweepValue(start=0.2, stop=0.8, expts=11),
+    "relax_delay_mode": "fixed",
+    "relax_delay": 60.0,
     "skew_penalty": 0.0,
 }
 
 
-def _pi_pulse(ml):
-    ml.register_waveform(ro_pi={"style": "const", "length": 1.0})
-    return {
-        "type": "pulse",
-        "waveform": ml.get_waveform("ro_pi", {"length": 0.1}),
-        "ch": 1,
-        "nqz": 1,
-        "gain": 0.3,
-        "freq": 600.0,
-    }
+def _pi_pulse(ml, sim_params):
+    freq = float(mock_flux_predictor(sim_params).predict_freq(0.0))
+    return calibrated_drive_pulse(ml, "ro_pi", freq, sim_params=sim_params)
 
 
 def test_ro_optimize_acquire_finds_best_point():
     ctrl = build_core()
-    connect_mock(ctrl)
+    sim_params = high_snr_simparams(20_000.0)
+    connect_mock(ctrl, sim_params=sim_params)
     ml = ctrl.state.exp_context.ml
-    pi_pulse = _pi_pulse(ml)
+    pi_pulse = _pi_pulse(ml, sim_params)
 
     builder = RoOptimizeBuilder()
     schema = node_schema(builder, _PARAMS)
@@ -90,9 +93,10 @@ def test_ro_optimize_acquire_finds_best_point():
 
 def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
     ctrl = build_core()
-    connect_mock(ctrl)
+    sim_params = high_snr_simparams()
+    connect_mock(ctrl, sim_params=sim_params)
     ml = ctrl.state.exp_context.ml
-    pi_pulse = _pi_pulse(ml)
+    pi_pulse = _pi_pulse(ml, sim_params)
 
     captured: dict[str, object] = {}
 

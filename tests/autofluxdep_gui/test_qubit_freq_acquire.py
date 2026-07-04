@@ -7,10 +7,10 @@ with flux. If the picked flux device never received the value (the name/label
 silent-miss), the SimEngine would stay pinned at one operating point and the fit
 freq would be constant -- so a constant fit fails this test.
 
-The GUI predictor is a FluxoniumPredictor matching DEFAULT_SIMPARAM, so the
-predicted drive centre tracks the SimEngine's actual f01 and the dip lands in the
-detune window. Flux device values are chosen sub-Nyquist (f01 < 3072 MHz) so the
-dip is recoverable.
+The GUI predictor is derived from the same SimParams as MockSoc, so the predicted
+drive centre tracks the SimEngine's actual f01 and the dip lands in the detune
+window. Flux device values are chosen inside the mock generator range and at
+distinct reduced-flux points, so the fitted line must move.
 """
 
 from __future__ import annotations
@@ -21,7 +21,12 @@ from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
-from ._helpers import connect_mock, run_controller_to_completion
+from ._helpers import (
+    connect_mock,
+    high_snr_simparams,
+    mock_flux_predictor,
+    run_controller_to_completion,
+)
 
 # A readout module near the dressed resonator (~6 GHz under DEFAULT_SIMPARAM).
 _READOUT = {
@@ -61,7 +66,8 @@ def _configure_context(ctrl) -> None:
 
 def test_qubit_freq_acquire_fit_varies_with_flux():
     ctrl = build_core()
-    connect_mock(ctrl)
+    sim_params = high_snr_simparams()
+    connect_mock(ctrl, sim_params=sim_params)
     _configure_context(ctrl)
     ctrl.set_flux_device(FAKE_FLUX_DEVICE_NAME)
 
@@ -110,7 +116,8 @@ def test_plotter_update_runs_after_a_real_produce():
     from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 
     ctrl = build_core()
-    connect_mock(ctrl)
+    sim_params = high_snr_simparams()
+    connect_mock(ctrl, sim_params=sim_params)
     _configure_context(ctrl)
     ctrl.set_flux_device(FAKE_FLUX_DEVICE_NAME)
 
@@ -159,7 +166,8 @@ def test_good_fit_calibrates_the_predictor():
     from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
 
     ctrl = build_core()
-    connect_mock(ctrl)
+    sim_params = high_snr_simparams()
+    connect_mock(ctrl, sim_params=sim_params)
     _configure_context(ctrl)
     ctrl.set_flux_device(FAKE_FLUX_DEVICE_NAME)
 
@@ -169,14 +177,18 @@ def test_good_fit_calibrates_the_predictor():
         "qub_nqz": 1,
         "qub_gain": 0.3,
         "qub_length": 1.0,
-        "reps": 100,
-        "rounds": 1,
+        "reps": 1000,
+        "rounds": 3,
+        "earlystop_snr": None,
+        "drive_gain_mode": "fixed",
         "relax_delay": 0.0,
         "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
     }
     schema = builder.make_default_schema().with_overrides(params)
     result = builder.make_init_result(schema, np.array([0.0]))
-    predictor = SimplePredictor(base=600.0, slope=50.0)
+    predictor = SimplePredictor(
+        base=float(mock_flux_predictor(sim_params).predict_freq(0.0)), slope=50.0
+    )
     before = predictor.predict_freq(0.0)
     ctx = ctrl.state.exp_context
     feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
@@ -194,7 +206,8 @@ def test_good_fit_calibrates_the_predictor():
     )
     patch = builder.build_node(env).produce(
         Snapshot(
-            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
+            {"predict_freq": before, "qfw_factor": None},
+            modules={"readout": _READOUT},
         )
     )
     values = patch.values()

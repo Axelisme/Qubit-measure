@@ -32,6 +32,7 @@ client = [
   "joblib",
   "threadpoolctl",
   "numba",
+  "psutil",
   "requests",
   "flask",
   "scikit-optimize",
@@ -60,6 +61,7 @@ development = ["zcu-tools[all]"]
 
 [dependency-groups]
 dev = [
+  "zcu-tools[gui]",
   "pytest",
   "pytest-cov",
   "pytest-xdist",

@@ -72,6 +72,8 @@ def calculate_n_oper_vs_flux(
                 param_vals=fluxs,
                 evals_count=return_dim,
             )
+    if spectrum_data is None:
+        raise RuntimeError("scqubits did not produce n_operator spectrum data")
     matrix_elements = spectrum_data.matrixelem_table
     if matrix_elements is None:
         raise RuntimeError("scqubits did not produce n_operator matrix elements")
@@ -122,6 +124,10 @@ def calculate_system_n_oper_vs_flux(
                 subsys_update_info={"params": [fluxonium]},
                 labeling_scheme="LX",
             )
+
+    if sweep is None:
+        raise RuntimeError("scqubits did not produce a system parameter sweep")
+    from scqubits.core.fluxonium import Fluxonium
 
     def get_n_oper(
         paramsweep: ParameterSweep, paramindex_tuple: tuple[int, int], **kwargs
@@ -214,6 +220,8 @@ def calculate_phi_oper_vs_flux(
                 param_vals=fluxs,
                 evals_count=return_dim,
             )
+    if spectrum_data is None:
+        raise RuntimeError("scqubits did not produce phi_operator spectrum data")
     matrix_elements = spectrum_data.matrixelem_table
     if matrix_elements is None:
         raise RuntimeError("scqubits did not produce phi_operator matrix elements")
@@ -279,6 +287,8 @@ def calculate_sin_phi_oper_vs_flux(
                 param_vals=fluxs,
                 evals_count=return_dim,
             )
+    if spectrum_data is None:
+        raise RuntimeError("scqubits did not produce sin_phi_operator spectrum data")
     matrix_elements = spectrum_data.matrixelem_table
     if matrix_elements is None:
         raise RuntimeError("scqubits did not produce sin_phi_operator matrix elements")

@@ -66,6 +66,42 @@ def high_snr_simparams(snr: float = 5000.0) -> Any:
     return DEFAULT_SIMPARAM.model_copy(update={"snr": snr})
 
 
+def mock_flux_predictor(sim_params: Any) -> Any:
+    """A FluxoniumPredictor aligned with a MockSoc SimParams instance."""
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+    return FluxoniumPredictor(
+        params=(sim_params.EJ, sim_params.EC, sim_params.EL),
+        flux_half=sim_params.flux_half,
+        flux_period=sim_params.flux_period,
+        flux_bias=sim_params.flux_bias,
+    )
+
+
+def calibrated_drive_pulse(
+    ml: Any,
+    name: str,
+    freq: float,
+    *,
+    sim_params: Any,
+    gain: float = 0.5,
+    angle: float = 1.0,
+) -> dict[str, Any]:
+    """Build a concrete const pulse whose gain × length matches mock calibration."""
+    if gain <= 0.0:
+        raise ValueError("calibrated_drive_pulse gain must be positive")
+    length = float(sim_params.pi_gain_len) * float(angle) / float(gain)
+    ml.register_waveform(**{name: {"style": "const", "length": length}})
+    return {
+        "type": "pulse",
+        "waveform": ml.get_waveform(name, {"length": length}),
+        "ch": 1,
+        "nqz": 1,
+        "gain": float(gain),
+        "freq": float(freq),
+    }
+
+
 def _default_test_simparams() -> Any:
     """DEFAULT_SIMPARAM with poll_latency=0.0 for all test connects.
 

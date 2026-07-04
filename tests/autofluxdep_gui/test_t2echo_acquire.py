@@ -13,56 +13,46 @@ from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
-from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from ._helpers import (
     ACQUIRE_READOUT,
+    calibrated_drive_pulse,
     connect_mock,
     high_snr_simparams,
     make_acquire_env,
+    mock_flux_predictor,
     node_schema,
 )
 
-# The stricter legacy feedback gate needs a clean mock echo decay; high_snr_simparams
-# keeps this as a real acquire/fit test without paying extra rounds.
 # sweep_range overrides the schema default's 121 pts → 61 pts for test speed;
 # the production default stays at 121 in the node schema.
 _PARAMS = {
     "reps": 2000,
     "rounds": 2,
+    "earlystop_snr": None,
+    "sweep_range_mode": "fixed",
+    "relax_delay_mode": "fixed",
+    "fit_method": "decay",
+    "relax_delay": 60.0,
     "detune_ratio": 0.0,
     "sweep_range": SweepValue(start=0.0, stop=25.0, expts=61),
 }
 
 
-def _pulses(ml, freq: float):
-    ml.register_waveform(echo_drive={"style": "const", "length": 1.0})
-    pi_pulse = {
-        "type": "pulse",
-        "waveform": ml.get_waveform("echo_drive", {"length": 0.1}),
-        "ch": 1,
-        "nqz": 1,
-        "gain": 0.5,
-        "freq": freq,
-    }
-    pi2_pulse = {
-        "type": "pulse",
-        "waveform": ml.get_waveform("echo_drive", {"length": 0.05}),
-        "ch": 1,
-        "nqz": 1,
-        "gain": 0.25,
-        "freq": freq,
-    }
+def _pulses(ml, freq: float, sim_params):
+    pi_pulse = calibrated_drive_pulse(ml, "echo_pi", freq, sim_params=sim_params)
+    pi2_pulse = calibrated_drive_pulse(
+        ml, "echo_pi2", freq, sim_params=sim_params, angle=0.5
+    )
     return pi_pulse, pi2_pulse
 
 
 def test_t2echo_acquire_fits_finite_positive_t2():
     ctrl = build_core()
-    connect_mock(ctrl, sim_params=high_snr_simparams())
+    sim_params = high_snr_simparams()
+    connect_mock(ctrl, sim_params=sim_params)
     ml = ctrl.state.exp_context.ml
-    predictor = FluxoniumPredictor(
-        params=(4.0, 1.0, 1.0), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
+    predictor = mock_flux_predictor(sim_params)
 
     builder = T2EchoBuilder()
     schema = node_schema(builder, _PARAMS)
@@ -74,7 +64,7 @@ def test_t2echo_acquire_fits_finite_positive_t2():
             ctrl, flux=flux, flux_idx=idx, schema=schema, ml=ml, result=result
         )
         f01 = float(predictor.predict_freq(flux))
-        pi_pulse, pi2_pulse = _pulses(ml, f01)
+        pi_pulse, pi2_pulse = _pulses(ml, f01, sim_params)
         snap = Snapshot(
             {"t1": 20.0, "t2e": 8.0},
             modules={
