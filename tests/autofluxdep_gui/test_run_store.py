@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult, Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
+from zcu_tools.gui.app.autofluxdep.services import run_store as run_store_module
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
 from zcu_tools.gui.app.autofluxdep.services.run_store import (
     RunStore,
@@ -47,6 +49,11 @@ def _node_and_result():
     return node, result
 
 
+def _sha256_json(payload: object) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     node, result = _node_and_result()
     store = RunStore.create(
@@ -73,9 +80,21 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     assert manifest["paths"]["metadata_root"] == str(store.run_dir)
     assert manifest["paths"]["data_root"] == str(store.data_dir)
     assert manifest["files"]["nodes"][0]["path"].startswith("nodes/000-probe")
+    workflow_node = manifest["workflow"]["nodes"][0]
+    assert workflow_node["cfg"] == node.schema.to_persisted_raw()
+    assert workflow_node["cfg_hash"] == f"sha256:{_sha256_json(workflow_node['cfg'])}"
+    assert manifest["workflow"]["workflow_hash"] == (
+        "sha256:"
+        + _sha256_json(
+            {
+                "nodes": manifest["workflow"]["nodes"],
+                "flux": manifest["workflow"]["flux"],
+            }
+        )
+    )
     assert manifest["reports"]["markdown"] == "report.md"
     report = (store.run_dir / "report.md").read_text(encoding="utf-8")
-    assert "- Run finalized events: 1" in report
+    assert "- Run finalized events: 0" in report
     assert "- Report markdown: report.md" in report
     assert f"- Data root: {store.data_dir}" in report
 
@@ -87,6 +106,11 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     ]
     assert events[0]["patch"] == {"fit": 3.0}
     assert events[-1]["terminal_status"] == "finished"
+    assert events[-1]["exports"] == manifest["exports"]
+    assert events[-1]["reports"] == manifest["reports"]
+    assert events[-1]["writer_errors"] == []
+    assert events[-1]["export_errors"] == []
+    assert events[-1]["report_errors"] == []
 
     assert not (store.run_dir / manifest["files"]["nodes"][0]["path"]).exists()
     assert (store.data_dir / manifest["files"]["nodes"][0]["path"]).is_file()
@@ -154,6 +178,98 @@ def test_run_store_rejects_non_json_safe_module_snapshot(tmp_path):
     assert load_journal_events(store.run_dir / "journal.jsonl") == []
 
 
+def test_run_store_finalize_records_report_failure_after_journal_event(
+    tmp_path, monkeypatch
+):
+    node, result = _node_and_result()
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[0.0],
+        flux_device_name=None,
+        nodes=[node],
+        results={"probe": result},
+    )
+
+    def fail_report(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError("report boom")
+
+    monkeypatch.setattr(run_store_module, "write_markdown_report", fail_report)
+
+    with pytest.raises(RuntimeError, match="report boom"):
+        store.finalize("finished")
+
+    manifest = load_manifest(store.manifest_path)
+    assert manifest["terminal"]["status"] == "finished"
+    assert "report boom" in manifest["terminal"]["error"]
+    assert manifest["reports"] == {}
+    events = load_journal_events(store.run_dir / "journal.jsonl")
+    assert events[-1]["type"] == "run_finalized"
+    assert events[-1]["reports"] == {}
+    assert events[-1]["report_errors"] == ["report boom"]
+
+
+def test_run_store_finalize_surfaces_writer_finalize_runtime_error(
+    tmp_path, monkeypatch
+):
+    node, result = _node_and_result()
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[0.0],
+        flux_device_name=None,
+        nodes=[node],
+        results={"probe": result},
+    )
+
+    def fail_finalize() -> None:
+        raise RuntimeError("flush failed")
+
+    monkeypatch.setattr(store._writers["probe"], "finalize", fail_finalize)
+
+    with pytest.raises(RuntimeError, match="flush failed"):
+        store.finalize("finished")
+
+    manifest = load_manifest(store.manifest_path)
+    assert manifest["terminal"]["status"] == "finished"
+    assert "flush failed" in manifest["terminal"]["error"]
+    events = load_journal_events(store.run_dir / "journal.jsonl")
+    assert events[-1]["type"] == "run_finalized"
+    assert events[-1]["writer_errors"] == ["probe: flush failed"]
+
+
+def test_run_store_close_writers_ignores_explicit_already_closed(tmp_path):
+    node, result = _node_and_result()
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[0.0],
+        flux_device_name=None,
+        nodes=[node],
+        results={"probe": result},
+    )
+
+    store.close_writers(finalize=True)
+    store.close_writers(finalize=True)
+
+
+def test_run_store_records_raw_row_with_nan_fit_as_completed_measurement(tmp_path):
+    node, result = _node_and_result()
+    result.fit_value[0] = np.nan
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[0.0],
+        flux_device_name=None,
+        nodes=[node],
+        results={"probe": result},
+    )
+
+    store.write_node_row("probe", 0, Patch(), InfoStore())
+
+    event = load_journal_events(store.run_dir / "journal.jsonl")[0]
+    assert event["measurement_status"] == "completed"
+    assert event["provide_status"] == "empty_patch"
+    assert "signal" in event["roles_written"]
+    assert event["row_summary"]["fit_value"] is None
+
+
 def test_run_store_rejects_nonfinite_patch_value_before_hdf5_write(tmp_path):
     node, result = _node_and_result()
     store = RunStore.create(
@@ -176,6 +292,19 @@ def test_run_store_rejects_nonfinite_patch_value_before_hdf5_write(tmp_path):
     assert isinstance(loaded, Sweep1DResult)
     assert np.isnan(loaded.signal[0]).all()
     assert load_journal_events(store.run_dir / "journal.jsonl") == []
+
+
+def test_run_store_create_rejects_unsupported_result_type(tmp_path):
+    node, _result = _node_and_result()
+
+    with pytest.raises(TypeError, match="unsupported autofluxdep Result type"):
+        RunStore.create(
+            project=_project(tmp_path),
+            flux_values=[0.0],
+            flux_device_name=None,
+            nodes=[node],
+            results={"probe": object()},
+        )
 
 
 def test_qubit_freq_export_excludes_memory_rows_without_journal_commit(tmp_path):

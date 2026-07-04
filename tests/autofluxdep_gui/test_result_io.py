@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import h5py
 import numpy as np
 import pytest
@@ -20,12 +22,16 @@ from zcu_tools.gui.app.autofluxdep.services.result_io import (
     ROLE_SNR,
     load_node_result,
     read_result_row,
+    result_progress_summary,
     result_role_specs,
+    result_row_role_names,
+    result_row_summary,
     write_result_row,
 )
 from zcu_tools.utils.datasaver import (
     Axis,
     LabberPayload,
+    StreamingGroupedLabberWriter,
     open_streaming_grouped_labber_data,
     save_grouped_labber_data,
 )
@@ -128,6 +134,34 @@ def test_sweep2d_result_row_roundtrip(tmp_path):
 def test_result_role_specs_unknown_result_fast_fails():
     with pytest.raises(TypeError, match="unsupported autofluxdep Result"):
         result_role_specs("bad", "bad", object())
+    with pytest.raises(TypeError, match="unsupported autofluxdep Result"):
+        result_row_role_names(object(), 0)
+    writer = cast(StreamingGroupedLabberWriter, object())
+    with pytest.raises(TypeError, match="unsupported autofluxdep Result"):
+        write_result_row(writer, "bad", "bad", object(), 0)
+
+
+def test_result_progress_summary_counts_raw_rows_separately_from_fits():
+    result = QubitFreqResult.allocate(
+        np.array([0.0, 0.5], dtype=float),
+        np.array([-5.0, 0.0, 5.0], dtype=float),
+    )
+    result.signal[0] = [1.0, np.nan, np.nan]
+
+    progress = result_progress_summary(result)
+
+    assert progress["kind"] == "qubit_freq"
+    assert progress["n_flux"] == 2
+    assert progress["n_measured"] == 1
+    assert progress["fit_summary"]["n_fitted"] == 0
+    assert progress["fit_summary"]["last_fit_freq"] is None
+    assert result_row_summary(result, 0)["fit_freq"] is None
+
+    result.fit_freq[0] = 5000.0
+    progress = result_progress_summary(result)
+    assert progress["n_measured"] == 1
+    assert progress["fit_summary"]["n_fitted"] == 1
+    assert progress["fit_summary"]["last_fit_freq"] == pytest.approx(5000.0)
 
 
 def test_load_node_result_rejects_mismatched_role_shape(tmp_path):

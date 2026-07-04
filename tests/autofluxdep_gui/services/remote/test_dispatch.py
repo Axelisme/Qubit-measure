@@ -315,28 +315,58 @@ def test_result_summary_reports_progress():
     assert entry["n_measured"] == 0
     assert entry["fit_summary"]["last_fit_freq"] is None
 
-    # Simulate the worker filling one flux row's fit in place (a consistent
-    # mid-run snapshot the main-thread handler reads): n_measured advances.
+    # Simulate the worker filling one flux row's raw signal in place without a
+    # valid fit. The row is measured, but not fitted.
     result = adapter.ctrl.state.run_results[node.name]
+    result.signal[0] = np.ones_like(result.signal[0])
+    summary = _call(adapter, "result.summary", {})["results"][0]
+    assert summary["n_measured"] == 1
+    assert summary["fit_summary"]["n_fitted"] == 0
+    assert summary["fit_summary"]["last_fit_freq"] is None
+
     result.fit_freq[0] = 5000.0
     summary = _call(adapter, "result.summary", {})["results"][0]
     assert summary["n_measured"] == 1
+    assert summary["fit_summary"]["n_fitted"] == 1
     assert summary["fit_summary"]["last_fit_freq"] == pytest.approx(5000.0)
 
 
-def test_result_summary_skips_nan_rows():
-    # n_measured counts only finite fit rows — an honest "not measured" for nan.
+def test_result_summary_counts_raw_rows_and_fit_rows_separately():
     adapter = _adapter()
     node = adapter.ctrl.add_node_by_type("t1")
     adapter.ctrl.set_flux_values([0.0, 0.1, 0.2, 0.3])
     adapter.ctrl.prepare_run_results()
     result = adapter.ctrl.state.run_results[node.name]
-    result.fit_value[1] = 12.0
-    result.fit_value[3] = 8.0
+    result.signal[1] = np.ones_like(result.signal[1])
+    result.signal[3] = np.full_like(result.signal[3], 3.0)
     entry = _call(adapter, "result.summary", {})["results"][0]
     assert entry["kind"] == "sweep1d"
     assert entry["n_measured"] == 2
+    assert entry["fit_summary"]["n_fitted"] == 0
+    assert entry["fit_summary"]["last_fit_value"] is None
+
+    result.fit_value[3] = 8.0
+    entry = _call(adapter, "result.summary", {})["results"][0]
+    assert entry["n_measured"] == 2
+    assert entry["fit_summary"]["n_fitted"] == 1
     assert entry["fit_summary"]["last_fit_value"] == pytest.approx(8.0)
+
+
+def test_result_summary_counts_mist_raw_rows_without_fit():
+    adapter = _adapter()
+    node = adapter.ctrl.add_node_by_type("mist")
+    adapter.ctrl.set_flux_values([0.0, 0.1, 0.2])
+    adapter.ctrl.prepare_run_results()
+    result = adapter.ctrl.state.run_results[node.name]
+    result.signal[0] = np.ones_like(result.signal[0])
+    result.signal[2] = np.full_like(result.signal[2], 2.0)
+
+    entry = _call(adapter, "result.summary", {})["results"][0]
+
+    assert entry["kind"] == "sweep1d"
+    assert entry["n_measured"] == 2
+    assert entry["fit_summary"]["n_fitted"] == 0
+    assert entry["fit_summary"]["last_fit_value"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -127,6 +127,7 @@ def test_disabled_node_is_omitted_from_run_results_and_artifact(tmp_path):
     run_dir = _latest_run_dir(tmp_path)
     manifest = load_manifest(run_dir / "manifest.json")
     assert [node["name"] for node in manifest["workflow"]["nodes"]] == ["enabled_probe"]
+    assert "cfg" in manifest["workflow"]["nodes"][0]
     assert [node["name"] for node in manifest["files"]["nodes"]] == ["enabled_probe"]
     events = load_journal_events(run_dir / "journal.jsonl")
     event_nodes = {event.get("node") for event in events if "node" in event}

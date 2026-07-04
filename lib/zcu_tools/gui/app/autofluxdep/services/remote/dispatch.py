@@ -25,18 +25,12 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
     # this module). String annotations keep pyright checking the call sites.
     from .service import RemoteControlAdapter
 
-from zcu_tools.gui.app.autofluxdep.nodes.result import (
-    QubitFreqResult,
-    Sweep1DResult,
-    Sweep2DResult,
-)
+from zcu_tools.gui.app.autofluxdep.services.result_io import result_progress_summary
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
 from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
@@ -140,65 +134,6 @@ def _h_node_cfg(
 # ---------------------------------------------------------------------------
 
 
-def _count_measured(per_flux: Any) -> int:
-    """Number of flux rows already measured = the non-nan entries of a (n_flux,) fit."""
-    return int(np.count_nonzero(~np.isnan(np.asarray(per_flux, dtype=np.float64))))
-
-
-def _last_finite(per_flux: Any) -> float | None:
-    """The last non-nan value of a (n_flux,) fit array, or None if none measured yet."""
-    arr = np.asarray(per_flux, dtype=np.float64)
-    finite = arr[~np.isnan(arr)]
-    return float(finite[-1]) if finite.size else None
-
-
-def _summarise_result(result: Any) -> dict[str, Any]:
-    """A tiny, JSON-friendly progress + fit summary for one node's Result.
-
-    Reports the result kind, n_flux, n_measured (rows whose primary fit is filled)
-    and a minimal ``fit_summary`` (a count + the latest fitted scalar) — never the
-    raw 2D signal arrays (those are large and the agent does not plot).
-    """
-    if isinstance(result, QubitFreqResult):
-        n_measured = _count_measured(result.fit_freq)
-        return {
-            "kind": "qubit_freq",
-            "n_flux": result.n_flux,
-            "n_measured": n_measured,
-            "fit_summary": {
-                "n_fitted": n_measured,
-                "last_fit_freq": _last_finite(result.fit_freq),
-            },
-        }
-    if isinstance(result, Sweep1DResult):
-        n_measured = _count_measured(result.fit_value)
-        return {
-            "kind": "sweep1d",
-            "n_flux": result.n_flux,
-            "n_measured": n_measured,
-            "fit_summary": {
-                "x_label": result.x_label,
-                "n_fitted": n_measured,
-                "last_fit_value": _last_finite(result.fit_value),
-            },
-        }
-    if isinstance(result, Sweep2DResult):
-        n_measured = _count_measured(result.best_freq)
-        return {
-            "kind": "sweep2d",
-            "n_flux": result.n_flux,
-            "n_measured": n_measured,
-            "fit_summary": {
-                "n_fitted": n_measured,
-                "last_best_freq": _last_finite(result.best_freq),
-                "last_best_gain": _last_finite(result.best_gain),
-            },
-        }
-    # The run only allocates the three Result dataclasses above; anything else is a
-    # contract breach (a new Result type added without teaching this summary).
-    raise TypeError(f"Unknown result type {type(result).__name__} in run_results")
-
-
 def _h_result_summary(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -206,7 +141,7 @@ def _h_result_summary(
     results = adapter.ctrl.state.run_results
     return {
         "results": [
-            {"name": name, **_summarise_result(result)}
+            {"name": name, **result_progress_summary(result)}
             for name, result in results.items()
         ]
     }

@@ -63,8 +63,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "result.summary": MethodSpec(
         5.0,
         "Summarise each node-with-a-result: {name, kind, n_flux, n_measured, "
-        "fit_summary} — how far the sweep has progressed and a tiny fit summary, "
-        "NOT the raw 2D signal data.",
+        "fit_summary} — n_measured counts primary raw-signal rows with finite data, "
+        "while fit_summary.n_fitted counts finite fit-scalar rows. This is a "
+        "progress summary, NOT the raw 2D signal data.",
     ),
     # Resource version table (optimistic-concurrency guard baseline). Full
     # snapshot the mcp layer reads to track last-seen versions; the version

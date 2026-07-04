@@ -26,6 +26,7 @@ from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
 from zcu_tools.gui.app.autofluxdep.services.result_io import (
     result_role_specs,
     result_row_role_names,
+    result_row_summary,
     write_result_row,
 )
 from zcu_tools.gui.app.autofluxdep.services.run_report import write_markdown_report
@@ -140,7 +141,7 @@ class RunStore:
         )
         provided_modules = _json_safe_modules(patch.modules())
         row_summary = _json_safe(
-            _row_summary(result, int(flux_idx)),
+            {} if result is None else result_row_summary(result, int(flux_idx)),
             subject="row summary",
             nonfinite_to_none=True,
         )
@@ -271,21 +272,45 @@ class RunStore:
         error: Exception | None = None,
     ) -> None:
         """Close writers, generate terminal sidecars, and finalize manifest."""
-        self.close_writers(finalize=True)
-        terminal = self._manifest["terminal"]
+        writer_errors: list[str] = []
+        export_errors: list[str] = []
+        report_errors: list[str] = []
+
+        terminal = dict(self._manifest["terminal"])
         terminal["status"] = status
         terminal["finalized_at"] = _utc_now()
         terminal["error"] = str(error) if error is not None else None
-        self._manifest["terminal"] = terminal
-        export_errors: list[str] = []
-        report_errors: list[str] = []
+
         try:
-            self._generate_exports()
+            self.close_writers(finalize=True)
+        except RuntimeError as exc:
+            writer_errors.append(str(exc))
+
+        exports: dict[str, str] = {}
+        try:
+            exports = self._generate_exports()
         except Exception as exc:
             export_errors.append(str(exc))
-        self._manifest["exports"] = dict(self._exports)
-        self._reports["markdown"] = "report.md"
-        self._manifest["reports"] = dict(self._reports)
+
+        terminal["error"] = _terminal_error_message(
+            error, (*writer_errors, *export_errors)
+        )
+        report_manifest = {
+            **self._manifest,
+            "updated_at": _utc_now(),
+            "exports": dict(exports),
+            "reports": {"markdown": "report.md"},
+            "terminal": dict(terminal),
+        }
+        reports: dict[str, str] = {}
+        try:
+            reports = self._generate_report(report_manifest)
+        except Exception as exc:
+            report_errors.append(str(exc))
+
+        terminal_errors = [*writer_errors, *export_errors, *report_errors]
+        self._terminal_errors.extend(terminal_errors)
+        terminal["error"] = _terminal_error_message(error, terminal_errors)
         self._append_event(
             "run_finalized",
             {
@@ -294,40 +319,39 @@ class RunStore:
                 "node_row_count": int(sum(self._row_counts.values())),
                 "skip_count": int(sum(self._skip_counts.values())),
                 "failure_count": int(sum(self._failure_counts.values())),
-                "exports": dict(self._exports),
-                "reports": dict(self._reports),
+                "exports": dict(exports),
+                "reports": dict(reports),
+                "writer_errors": writer_errors,
                 "export_errors": export_errors,
                 "report_errors": report_errors,
             },
         )
-        try:
-            self._generate_report()
-        except Exception as exc:
-            report_errors.append(str(exc))
-            self._reports.pop("markdown", None)
-        self._terminal_errors.extend(export_errors)
-        self._terminal_errors.extend(report_errors)
-        terminal_error = str(error) if error is not None else None
-        if self._terminal_errors:
-            suffix = "; ".join(self._terminal_errors)
-            terminal_error = f"{terminal_error}; {suffix}" if terminal_error else suffix
-        terminal["error"] = terminal_error
         self._manifest["updated_at"] = _utc_now()
-        self._manifest["exports"] = dict(self._exports)
-        self._manifest["reports"] = dict(self._reports)
+        self._manifest["exports"] = dict(exports)
+        self._manifest["reports"] = dict(reports)
         self._manifest["terminal"] = terminal
+        self._exports = dict(exports)
+        self._reports = dict(reports)
         self._write_manifest()
-        if export_errors or report_errors:
-            raise RuntimeError("; ".join(export_errors + report_errors))
+        if terminal_errors:
+            raise RuntimeError("; ".join(terminal_errors))
 
     def close_writers(self, *, finalize: bool = False) -> None:
-        for writer in self._writers.values():
+        errors: list[str] = []
+        for node_name, writer in self._writers.items():
             if finalize:
                 try:
                     writer.finalize()
-                except RuntimeError:
-                    pass
-            writer.close()
+                except RuntimeError as exc:
+                    if not _is_already_closed_writer_error(exc):
+                        errors.append(f"{node_name}: {exc}")
+            try:
+                writer.close()
+            except RuntimeError as exc:
+                if not _is_already_closed_writer_error(exc):
+                    errors.append(f"{node_name}: {exc}")
+        if errors:
+            raise RuntimeError("; ".join(errors))
 
     def iter_journal_events(self) -> list[dict[str, Any]]:
         return list(load_journal_events(self._journal_path))
@@ -367,7 +391,6 @@ class RunStore:
 
     def _initial_manifest(self, flux_device_name: str | None) -> dict[str, Any]:
         nodes = []
-        workflow_payload: list[dict[str, Any]] = []
         for index, node in enumerate(self._nodes):
             cfg_raw = _json_safe(node.schema.to_persisted_raw(), subject="node cfg")
             cfg_hash = _sha256_json(cfg_raw)
@@ -375,11 +398,16 @@ class RunStore:
                 "index": index,
                 "name": node.name,
                 "type": node.type_name,
+                "cfg": cfg_raw,
                 "cfg_hash": f"sha256:{cfg_hash}",
             }
             nodes.append(entry)
-            workflow_payload.append({**entry, "cfg": cfg_raw})
-        workflow_hash = _sha256_json(workflow_payload)
+        flux = {
+            "device_name": flux_device_name,
+            "values": list(self._flux_values),
+            "unit": "",
+        }
+        workflow_hash = _sha256_json({"nodes": nodes, "flux": flux})
         return {
             "format_version": MANIFEST_FORMAT_VERSION,
             "artifact_kind": ARTIFACT_KIND,
@@ -402,11 +430,7 @@ class RunStore:
                 "workflow_hash": f"sha256:{workflow_hash}",
                 "workflow_snapshot_version": 1,
                 "nodes": nodes,
-                "flux": {
-                    "device_name": flux_device_name,
-                    "values": list(self._flux_values),
-                    "unit": "",
-                },
+                "flux": flux,
             },
             "files": {"journal": "journal.jsonl", "nodes": []},
             "exports": {},
@@ -443,7 +467,8 @@ class RunStore:
         )
         os.replace(tmp_path, self._manifest_path)
 
-    def _generate_exports(self) -> None:
+    def _generate_exports(self) -> dict[str, str]:
+        exports: dict[str, str] = {}
         for node_name, result in self._results.items():
             if not isinstance(result, QubitFreqResult):
                 continue
@@ -456,17 +481,18 @@ class RunStore:
                 self.data_dir / relpath,
                 committed_mask=committed_mask,
             )
-            self._exports["fluxdep_spectrum"] = _relative(self.data_dir, Path(written))
+            exports["fluxdep_spectrum"] = _relative(self.data_dir, Path(written))
             break
+        return exports
 
-    def _generate_report(self) -> None:
+    def _generate_report(self, manifest: Mapping[str, Any]) -> dict[str, str]:
         relpath = "report.md"
         written = write_markdown_report(
             self.run_dir / relpath,
-            self._manifest,
+            manifest,
             self.iter_journal_events(),
         )
-        self._reports["markdown"] = _relative(self.run_dir, Path(written))
+        return {"markdown": _relative(self.run_dir, Path(written))}
 
     def _committed_node_row_mask(self, node_name: str, n_flux: int) -> np.ndarray:
         mask = np.zeros(int(n_flux), dtype=np.bool_)
@@ -507,26 +533,6 @@ def load_journal_events(path: str | Path) -> list[dict[str, Any]]:
             raise ValueError(f"unsupported autofluxdep journal event_version {version}")
         events.append(event)
     return events
-
-
-def _row_summary(result: object | None, flux_idx: int) -> dict[str, Any]:
-    if result is None:
-        return {}
-    summary: dict[str, Any] = {}
-    for attr in (
-        "fit_freq",
-        "predict_freq",
-        "snr",
-        "fit_value",
-        "best_freq",
-        "best_gain",
-    ):
-        values = getattr(result, attr, None)
-        if values is None:
-            continue
-        value = np.asarray(values).reshape(-1)[flux_idx]
-        summary[attr] = None if not np.isfinite(value) else float(value)
-    return summary
 
 
 def _json_safe_modules(modules: Mapping[str, Any]) -> dict[str, Any]:
@@ -592,6 +598,20 @@ def _to_json_tree(value: Any, *, nonfinite_to_none: bool) -> Any:
 def _sha256_json(payload: Any) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _terminal_error_message(
+    error: Exception | None, terminal_errors: Sequence[str]
+) -> str | None:
+    base = str(error) if error is not None else None
+    if not terminal_errors:
+        return base
+    suffix = "; ".join(terminal_errors)
+    return f"{base}; {suffix}" if base else suffix
+
+
+def _is_already_closed_writer_error(exc: RuntimeError) -> bool:
+    return str(exc) == "streaming Labber writer is closed"
 
 
 def _run_id() -> str:
