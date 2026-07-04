@@ -18,7 +18,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QObject  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
@@ -68,8 +68,14 @@ def app(qapp):
 
 def _list_labels(win: MainWindow) -> list[str]:
     lst = win._list._list
-    items = [lst.item(i) for i in range(lst.count())]
-    return [it.text() for it in items if it is not None]
+    labels: list[str] = []
+    for row in range(lst.count()):
+        item = lst.item(row)
+        assert item is not None
+        widget = lst.itemWidget(item)
+        assert widget is not None
+        labels.append(cast(Any, widget)._label.text())
+    return labels
 
 
 def _node_checkbox(win: MainWindow, row: int):
@@ -78,6 +84,24 @@ def _node_checkbox(win: MainWindow, row: int):
     widget = win._list._list.itemWidget(item)
     assert widget is not None
     return cast(Any, widget)._checkbox
+
+
+def test_node_list_item_text_is_owned_by_row_widget(app):
+    _ctrl, win = app
+    lst = win._list._list
+
+    for row, expected in enumerate(("qubit_freq", "probe")):
+        item = lst.item(row)
+        assert item is not None
+        widget = lst.itemWidget(item)
+        assert widget is not None
+
+        assert item.text() == ""
+        assert item.toolTip() == expected
+        assert item.data(Qt.ItemDataRole.UserRole) == expected  # type: ignore[attr-defined]
+        assert widget.toolTip() == expected
+        assert cast(Any, widget)._label.toolTip() == expected
+        assert cast(Any, widget)._label.text() == expected
 
 
 def _spin_until(condition, timeout: float = 1.0) -> bool:

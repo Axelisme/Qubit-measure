@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
@@ -276,7 +276,9 @@ class NodeListPane(QWidget):
         self._list.blockSignals(True)
         self._list.clear()
         for index, node in enumerate(self._ctrl.state.nodes):
-            item = QListWidgetItem(node.name)
+            item = QListWidgetItem()
+            item.setToolTip(node.name)
+            item.setData(Qt.ItemDataRole.UserRole, node.name)  # type: ignore[attr-defined]
             widget = _NodeRowWidget(
                 index=index,
                 name=node.name,
@@ -481,9 +483,11 @@ class _NodeRowWidget(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setToolTip(name)
         self._checkbox = QCheckBox()
         self._checkbox.setToolTip("Include this node in future runs")
         self._label = QLabel(name)
+        self._label.setToolTip(name)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 0, 2, 0)

@@ -29,8 +29,14 @@ from zcu_tools.gui.session.services.startup import (
 
 
 def _list_labels(win: MainWindow) -> list[str]:
-    items = [win._list._list.item(i) for i in range(win._list._list.count())]
-    return [item.text() for item in items if item is not None]
+    labels: list[str] = []
+    for row in range(win._list._list.count()):
+        item = win._list._list.item(row)
+        assert item is not None
+        widget = win._list._list.itemWidget(item)
+        assert widget is not None
+        labels.append(cast(Any, widget)._label.text())
+    return labels
 
 
 def _pump_for(qapp, seconds: float) -> None:
