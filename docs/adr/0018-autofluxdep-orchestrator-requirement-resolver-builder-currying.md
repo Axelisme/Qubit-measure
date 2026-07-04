@@ -20,14 +20,14 @@ grilling 中用戶指出兩個耦合 bug：
 
 ### 1. orchestrator 只解析「需求」，不解析「順序」
 
-執行順序 = 使用者在 workflow 列表的顯式排序，orchestrator 照跑（無拓撲排序、無 `path`）。orchestrator 唯一的事是**需求解析**：跑到一個 Provider 時，把它的 `requires` 對當前 info/module 狀態投影成 snapshot（latest-available + skip/fallback）。它**不懂** 畫圖、tools、acquire、fit、Result——這些在 orchestrator 之外的**執行層**（driver / UI）。
+執行順序 = 使用者在 workflow 列表的顯式排序，orchestrator 照跑（無拓撲排序、無 `path`）。orchestrator 的核心責任是**需求解析**：跑到一個 Provider 時，把它的 `requires` 對當前 info/module 狀態投影成 snapshot（latest-available + skip/fallback）。實作上 orchestrator 也擁有每點 `RunEnv` construction：它把 run-scoped ports（tools、ml/md、soc/soccfg、flux device、Result、round hook）柯里化進 Builder 生成的短命 Node。它仍不做 experiment domain policy：acquire、fit、Result 寫入與 feedback 決策由 node/service 自己在 `produce` 內處理。
 
 ### 2. 三介面（requires/provides/produce）+ Builder 柯里化
 
 orchestrator 只看三件事：`requires`、`provides`、`produce`。執行單元是一個 **Node**（帶 `produce(snapshot) -> Patch`）。Node 不是手寫的、也不是實驗類本身，而是由一個 **Builder**（每實驗一子類、無狀態）**每 flux 點生成**：
 
 - 執行層 Run 開始呼叫 Builder 的 sweep-lived 工廠（`make_init_result` / `make_plotter`）造好 Result / Plotter（活整個 sweep）。
-- 每 flux 點呼叫 `build_node(這點的 snapshot / soc / Result / round_hook / Plotter / tools)`，Builder 把這些**環境閉包進**回傳的 Node。
+- 每 flux 點呼叫 `build_node(RunEnv(...))`，Builder 把這些**環境閉包進**回傳的 Node。
 - Node 的 `produce` 因此只暴露「依賴 in / Patch out」——環境不洩漏進 orchestrator 看的介面。
 
 orchestrator 對所有 provider 一律 `node.produce(snapshot)`，**零 isinstance、不區分 Node/Service**。Service（predictor）也是一種 Builder，差別只在 `build_node` 閉包的環境少（無 soc/Result/round_hook，純算），生成的 Node 的 produce 純算 `predict_freq`/`cur_m`——**不偽裝成量測 Node、不 stub 不合身介面**。
@@ -45,6 +45,6 @@ orchestrator 對所有 provider 一律 `node.produce(snapshot)`，**零 isinstan
 
 ## 後果
 
-- orchestrator 變薄：只做需求解析（`project_snapshot` 那類）+ 對每個 provider 呼叫 `produce`，不持 tools/figure、不跑領域 seed/校正。執行（build_node/acquire/fit/填 Result/重畫）、tools、figure 全移到執行層。這是對現有偏胖 orchestrator 的**實質重構**，非新增。
+- orchestrator 保持在 resolver / `RunEnv` factory 邊界：它持有 run-scoped ports 以建立短命 Node，但只把 snapshot 交給 `produce`，不做領域 seed/校正、不解釋 fit 結果、不決定 feedback policy。執行細節（build_node/acquire/fit/填 Result/重畫）留在 node/service 與 controller/UI 兩側。
 - 新增實驗只要寫一個 Builder（宣告 provides/requires + 工廠 + build_node），orchestrator 不動。
 - 未來看到 Service 不是量測 Node 卻能被依賴解析、或 orchestrator 不懂 `predict_freq`，本 ADR 解釋為何如此切。

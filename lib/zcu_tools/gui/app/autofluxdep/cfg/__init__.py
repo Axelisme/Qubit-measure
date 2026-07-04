@@ -30,6 +30,13 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
 )
 
+from .override_plan import (
+    OverrideMode,
+    OverridePath,
+    OverridePlan,
+    override_plan_to_wire,
+    validate_override_plan_base_cfg,
+)
 from .schema import (
     NodeCfgSchema,
     NodeFieldDecl,
@@ -58,6 +65,9 @@ __all__ = [
     "NodeFieldSpec",
     "NodePathSpec",
     "NodeSectionSpec",
+    "OverrideMode",
+    "OverridePath",
+    "OverridePlan",
     "ScalarSpec",
     "SweepSpec",
     "SweepValue",
@@ -65,7 +75,9 @@ __all__ = [
     "node_field",
     "node_path",
     "node_section",
+    "override_plan_to_wire",
     "path_node_schema",
     "sectioned_node_schema",
     "str_choice_spec",
+    "validate_override_plan_base_cfg",
 ]

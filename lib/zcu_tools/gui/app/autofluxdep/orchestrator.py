@@ -537,13 +537,13 @@ class Orchestrator:
                     logger.debug("  smoothed: %s", smoothed)
             for svc in self.derivations:
                 run_info.point.update(svc.derive(run_info.point))
-            if provider_loop_completed and on_flux_committed is not None:
-                on_flux_committed(idx, flux, run_info)
             if provider_loop_completed:
+                if on_flux_committed is not None:
+                    on_flux_committed(idx, flux, run_info)
                 run_observer.on_flux_committed(idx, flux, run_info)
-            if on_point is not None:
-                on_point(idx, flux, run_info)
-            run_observer.on_point(idx, flux, run_info)
+                if on_point is not None:
+                    on_point(idx, flux, run_info)
+                run_observer.on_point(idx, flux, run_info)
         return run_info
 
     def _record_run_error(

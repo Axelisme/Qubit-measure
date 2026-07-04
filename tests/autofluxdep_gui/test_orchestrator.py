@@ -383,9 +383,9 @@ def test_should_stop_before_a_flux_point_exits_early():
 def test_should_stop_within_a_point_skips_remaining_providers():
     # should_stop flips True after the first provider of a point runs → the
     # second provider of that point must not run (orchestrator breaks the
-    # provider loop). on_point still fires for that partially-run point (the
-    # provider-loop break does not skip it), but the next flux point never
-    # starts (should_stop is re-checked at its top).
+    # provider loop). The partial point is not committed, so on_point does not
+    # fire; the next flux point never starts (should_stop is re-checked at its
+    # top).
     ran: list[str] = []
     flip = {"stop": False}
 
@@ -408,9 +408,9 @@ def test_should_stop_within_a_point_skips_remaining_providers():
     )
     # only the first provider of point 0 ran; "b" was skipped by the break
     assert ran == ["a"]
-    # the partially-run point 0 still completed (on_point fired); point 1 never
-    # started because should_stop is True at its top
-    assert points == [0]
+    # the partial point was not committed, so no completed point notification is
+    # emitted
+    assert points == []
 
 
 def test_on_flux_committed_does_not_fire_for_stopped_partial_point():
@@ -438,7 +438,7 @@ def test_on_flux_committed_does_not_fire_for_stopped_partial_point():
     )
 
     assert ran == ["a"]
-    assert points == [0]
+    assert points == []
     assert committed == []
 
 

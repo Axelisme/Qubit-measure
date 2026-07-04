@@ -98,7 +98,7 @@ def run_app(
             RemoteControlAdapter,
         )
 
-        adapter = RemoteControlAdapter(ctrl, control)
+        adapter = RemoteControlAdapter(ctrl, control, view=window)
         try:
             adapter.start()
         except RuntimeError as exc:

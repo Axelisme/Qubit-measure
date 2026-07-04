@@ -501,6 +501,93 @@ def test_main_window_close_waits_for_live_operation(app, monkeypatch):
     assert ctrl.active_operation_count() == 0
 
 
+def test_running_close_requests_terminal_stop_then_closes_after_run_done(
+    app, monkeypatch
+):
+    ctrl, win = app
+    stop_reasons: list[str] = []
+    perform_close = MagicMock()
+    token = ctrl._operation_handles.create(
+        cancel_hook=lambda: stop_reasons.append("cancelled")
+    )
+    ctrl._active_run_token = token
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *a, **k: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(win, "_perform_close", perform_close)
+
+    event = QCloseEvent()
+    win.closeEvent(event)
+
+    assert not event.isAccepted()
+    assert stop_reasons == ["cancelled"]
+    assert win._close_after_run_terminal is True
+    perform_close.assert_not_called()
+
+    win._on_run_done()
+    QApplication.processEvents()
+
+    assert win._close_after_run_terminal is False
+    perform_close.assert_called_once_with()
+    ctrl._active_run_token = None
+    ctrl._operation_handles.settle(token, OperationOutcome("cancelled"))
+    win._closing = True
+
+
+def test_paused_close_finalizes_stopped_then_closes(app, monkeypatch):
+    from zcu_tools.gui.app.autofluxdep.controller import Controller
+
+    ctrl, win = app
+    finalize = MagicMock()
+    perform_close = MagicMock()
+    monkeypatch.setattr(Controller, "is_paused", property(lambda _self: True))
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *a, **k: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(ctrl, "finalize_paused_run_as_stopped", finalize)
+    monkeypatch.setattr(win, "_perform_close", perform_close)
+
+    event = QCloseEvent()
+    win.closeEvent(event)
+
+    assert not event.isAccepted()
+    finalize.assert_called_once_with()
+    perform_close.assert_called_once_with()
+    win._closing = True
+
+
+def test_force_close_prompt_only_closes_when_force_button_clicked(app, monkeypatch):
+    ctrl, win = app
+    perform_close = MagicMock()
+    buttons: list[object] = []
+    token = ctrl._operation_handles.create(cancel_hook=lambda: None)
+    ctrl._active_run_token = token
+    win._close_after_run_terminal = True
+
+    def fake_add_button(self, *args):
+        del self, args
+        button = object()
+        buttons.append(button)
+        return button
+
+    monkeypatch.setattr(win, "_perform_close", perform_close)
+    monkeypatch.setattr(QMessageBox, "addButton", fake_add_button)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: None)
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: buttons[0])
+
+    win._show_force_close_prompt()
+
+    perform_close.assert_called_once_with()
+    assert win._force_close_prompt_open is False
+    ctrl._active_run_token = None
+    ctrl._operation_handles.settle(token, OperationOutcome("cancelled"))
+    win._closing = True
+
+
 def test_predictor_button_opens_shared_predictor_dialog(app):
     # the Predictor… button opens the shared session PredictorDialog (load a
     # FluxoniumPredictor into the context) — runtime port conformance check.

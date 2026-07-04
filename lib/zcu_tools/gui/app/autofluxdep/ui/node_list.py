@@ -133,6 +133,7 @@ class NodeListPane(QWidget):
     run_requested = Signal()
     pause_requested = Signal()
     continue_requested = Signal()
+    restart_requested = Signal()
     abort_requested = Signal()
     auto_follow_changed = Signal(bool)
 
@@ -203,8 +204,10 @@ class NodeListPane(QWidget):
         root.addWidget(self._auto_follow_tabs)
 
         self._run_btn = _btn("▶ Run", self._on_run_stop)
+        self._restart_btn = _btn("↻ Restart", self._on_restart)
         self._abort_btn = _btn("■ Abort", self._on_abort)
         root.addWidget(self._run_btn)
+        root.addWidget(self._restart_btn)
         root.addWidget(self._abort_btn)
 
         self.refresh_list()
@@ -380,6 +383,9 @@ class NodeListPane(QWidget):
     def _on_abort(self) -> None:
         self.abort_requested.emit()
 
+    def _on_restart(self) -> None:
+        self.restart_requested.emit()
+
     def _commit_flux(self) -> None:
         self._ctrl.commit_flux_sweep(
             self._flux_start.expression_text(),
@@ -431,6 +437,8 @@ class NodeListPane(QWidget):
         self._run_btn.setToolTip("" if self._run_btn.isEnabled() else (reason or ""))
         self._abort_btn.setVisible(self._run_state in {"running", "pausing", "paused"})
         self._abort_btn.setEnabled(self._run_state in {"running", "pausing", "paused"})
+        self._restart_btn.setVisible(self._run_state == "paused")
+        self._restart_btn.setEnabled(self._run_state == "paused")
 
     def _refresh_buttons(self) -> None:
         self.refresh_run_availability()

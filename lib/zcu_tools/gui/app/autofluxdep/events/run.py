@@ -98,12 +98,15 @@ class RunStoppedPayload(_RunPayload):
 
 @dataclass(frozen=True)
 class RunFailedPayload(_RunPayload):
-    """Payload for RUN_FAILED: a Node's ``produce`` raised mid-sweep.
+    """Payload for RUN_FAILED: terminal failure with optional run-location detail.
 
     Carries the human-readable error so the UI can surface it. A failed run is a
     terminal state distinct from a cooperative stop: the sweep aborted on an
-    unexpected error (e.g. an unconfigured Node Fast-Failing), not the user's
-    Stop. The run still unlocks the UI exactly like a stop/finish."""
+    unexpected error or artifact-finalize failure, not the user's Stop. The run
+    still unlocks the UI exactly like a stop/finish."""
 
     EVENT: ClassVar[RunEvent] = RunEvent.RUN_FAILED
     message: str
+    node: str | None = None
+    flux_idx: int | None = None
+    stage: str | None = None

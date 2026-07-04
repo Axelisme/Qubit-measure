@@ -103,7 +103,13 @@ def _ser_run_stopped(payload: BasePayload) -> WirePayload:
 
 def _ser_run_failed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, RunFailedPayload)
-    return {"message": payload.message, "requery": _RUN_REQUERY}
+    return {
+        "message": payload.message,
+        "node": payload.node,
+        "flux_idx": payload.flux_idx,
+        "stage": payload.stage,
+        "requery": _RUN_REQUERY,
+    }
 
 
 # ---------------------------------------------------------------------------

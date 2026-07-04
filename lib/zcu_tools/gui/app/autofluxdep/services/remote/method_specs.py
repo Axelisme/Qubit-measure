@@ -47,9 +47,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # One placed node's user knobs
     "node.cfg": MethodSpec(
         5.0,
-        "Read one placed node's user knobs by name: {name, type, knobs:{...}} — "
-        "the un-lowered values the user set (a scalar reads to its value, a sweep "
-        "to {start, stop, expts}). Errors if no node has that name.",
+        "Read one placed node's user knobs by name: "
+        "{name, type, knobs:{...}, override_plan:[...]}. knobs are the un-lowered "
+        "values the user set (a scalar reads to its value, a sweep to "
+        "{start, stop, expts}); override_plan lists Default cfg paths generated at "
+        "run time. Errors if no node has that name.",
         params=(
             ParamSpec(
                 "name",
@@ -66,6 +68,21 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "fit_summary} — n_measured counts primary raw-signal rows with finite data, "
         "while fit_summary.n_fitted counts finite fit-scalar rows. This is a "
         "progress summary, NOT the raw 2D signal data.",
+    ),
+    # Read-only screenshot. This is observational, not run control.
+    "ui.screenshot": MethodSpec(
+        5.0,
+        "Capture the main window to a PNG file under /tmp and return "
+        "{target, path, bytes}. The only supported target is 'window'.",
+        params=(
+            ParamSpec(
+                "target",
+                JsonType.STRING,
+                required=False,
+                default="window",
+                description="Screenshot target; only 'window' is supported.",
+            ),
+        ),
     ),
     # Resource version table (optimistic-concurrency guard baseline). Full
     # snapshot the mcp layer reads to track last-seen versions; the version

@@ -136,6 +136,16 @@ class RunSession(RunObserver):
         self._pause_event.set()
         return True
 
+    def prepare_segment(self, *, continuing: bool) -> None:
+        """Reset stale segment flags before the operation becomes cancellable."""
+        expected = RunSessionStatus.PAUSED if continuing else RunSessionStatus.READY
+        if self._status is not expected:
+            raise RuntimeError(
+                f"run session segment cannot start from {self._status.value}"
+            )
+        self._stop_event.clear()
+        self._pause_event.clear()
+
     def start_or_continue(self, progress_factory: Any) -> RunSegmentOutcome:
         if self._status not in {
             RunSessionStatus.READY,
@@ -153,7 +163,6 @@ class RunSession(RunObserver):
 
         was_pausing = self._status is RunSessionStatus.PAUSING
         self._status = RunSessionStatus.RUNNING
-        self._stop_event.clear()
         if not was_pausing:
             self._pause_event.clear()
         start_idx = self._next_flux_idx

@@ -36,8 +36,8 @@ from zcu_tools.gui.app.autofluxdep.services.remote.wire_version import (
 
 
 def test_versions_track_workflow_enabled_contract():
-    assert WIRE_VERSION == 4
-    assert GUI_VERSION == 4
+    assert WIRE_VERSION == 5
+    assert GUI_VERSION == 5
 
 
 def test_every_payload_type_has_a_serializer():
@@ -71,7 +71,12 @@ def test_serializers_emit_json_friendly_requery_hints():
         PointDonePayload(idx=1): "point_done",
         RunFinishedPayload(): "run_finished",
         RunStoppedPayload(): "run_stopped",
-        RunFailedPayload(message="boom"): "run_failed",
+        RunFailedPayload(
+            message="boom",
+            node="probe",
+            flux_idx=2,
+            stage="produce",
+        ): "run_failed",
     }
     for payload, wire_name in samples.items():
         serializer = EVENT_SERIALIZERS[type(payload)]
@@ -81,3 +86,8 @@ def test_serializers_emit_json_friendly_requery_hints():
         json.dumps(wire)
         assert "requery" in wire
         assert wire_event_name(type(payload)) == wire_name
+        if isinstance(payload, RunFailedPayload):
+            assert wire["message"] == "boom"
+            assert wire["node"] == "probe"
+            assert wire["flux_idx"] == 2
+            assert wire["stage"] == "produce"

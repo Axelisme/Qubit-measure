@@ -211,6 +211,8 @@ class MainWindow(QMainWindow):
         self._run_active = False
         self._run_paused = False
         self._closing = False
+        self._close_after_run_terminal = False
+        self._force_close_prompt_open = False
         self._active_run_node_name: str | None = None
         self._live_predictor_flux_idx: int | None = None
         self._auto_follow_navigation = False
@@ -301,6 +303,7 @@ class MainWindow(QMainWindow):
         self._list.run_requested.connect(self._start)
         self._list.pause_requested.connect(self._pause)
         self._list.continue_requested.connect(self._continue)
+        self._list.restart_requested.connect(self._restart)
         self._list.abort_requested.connect(self._stop)
         self._list.auto_follow_changed.connect(self._on_auto_follow_changed)
         self._detail.user_tab_changed.connect(self._on_user_detail_tab_changed)
@@ -361,6 +364,18 @@ class MainWindow(QMainWindow):
                 super().closeEvent(a0)
             return
 
+        if self._ctrl.is_running:
+            if a0 is not None:
+                a0.ignore()
+            self._confirm_running_close()
+            return
+
+        if self._ctrl.is_paused:
+            if a0 is not None:
+                a0.ignore()
+            self._confirm_paused_close()
+            return
+
         active = self._ctrl.active_operation_count()
         if active > 0:
             from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
@@ -379,6 +394,74 @@ class MainWindow(QMainWindow):
         if a0 is not None:
             a0.ignore()
         QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
+
+    def _confirm_running_close(self) -> None:
+        """Ask before turning a running close into a terminal stop-and-close."""
+        if self._close_after_run_terminal:
+            return
+        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+        answer = QMessageBox.question(
+            self,
+            "Run in progress",
+            "Stop the running autofluxdep sweep and close once it stops?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._close_after_run_terminal = True
+        if not self._ctrl.stop_run(reason="Window close requested terminal stop"):
+            self._perform_close()
+            return
+        QTimer.singleShot(30_000, self._show_force_close_prompt)
+
+    def _confirm_paused_close(self) -> None:
+        """Ask before discarding same-process continue state on close."""
+        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+        answer = QMessageBox.question(
+            self,
+            "Paused run",
+            "Finalize the paused run as stopped and close? Continue will no longer be available.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._ctrl.finalize_paused_run_as_stopped()
+        except Exception:
+            return
+        self._perform_close()
+
+    def _show_force_close_prompt(self) -> None:
+        """Offer an explicit force-close if cooperative terminal stop is too slow."""
+        if (
+            self._closing
+            or not self._close_after_run_terminal
+            or not self._ctrl.is_running
+            or self._force_close_prompt_open
+        ):
+            return
+        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+        self._force_close_prompt_open = True
+        box = QMessageBox(self)
+        box.setWindowTitle("Run still stopping")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            "The run has not stopped after 30 seconds. Force Close may leave the "
+            "artifact at the last flushed state."
+        )
+        force_button = box.addButton(
+            "Force Close", QMessageBox.ButtonRole.DestructiveRole
+        )
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        self._force_close_prompt_open = False
+        if box.clickedButton() is force_button:
+            self._perform_close()
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         self._bus_subs.unsubscribe_all()
@@ -617,6 +700,16 @@ class MainWindow(QMainWindow):
     def _continue(self) -> None:
         self._ctrl.continue_run()
 
+    def _restart(self) -> None:
+        try:
+            self._ctrl.finalize_paused_run_as_stopped()
+            self._start()
+        except Exception as exc:
+            logger.exception("autofluxdep run failed to restart")
+            from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+
+            QMessageBox.warning(self, "Restart failed", str(exc))
+
     def _on_run_started(self) -> None:
         self._enter_active_run_ui(start_idx=0)
 
@@ -815,6 +908,7 @@ class MainWindow(QMainWindow):
 
     def _on_run_done(self) -> None:
         self._reset_run_ui()
+        self._finish_close_after_run_terminal()
 
     def _reset_run_ui(self, *, switch_tab: bool | None = None) -> None:
         self._run_active = False
@@ -837,8 +931,28 @@ class MainWindow(QMainWindow):
         rather than the run silently ending."""
         from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
 
+        closing_after_terminal = self._close_after_run_terminal
         self._on_run_done()
+        if closing_after_terminal:
+            return
         QMessageBox.warning(self, "Run failed", message)
+
+    def _finish_close_after_run_terminal(self) -> None:
+        if not self._close_after_run_terminal or self._closing:
+            return
+        self._close_after_run_terminal = False
+        QTimer.singleShot(0, self._perform_close)
+
+    def take_window_screenshot(self) -> bytes:
+        """Grab the main window as PNG bytes for the read-only remote view."""
+        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
+
+        pixmap = self.grab()
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not pixmap.save(buf, "PNG"):
+            raise RuntimeError("Qt failed to encode the autofluxdep window as PNG")
+        return bytes(buf.data().data())  # type: ignore[arg-type]
 
     # --- session status / toolbar state ---
 

@@ -79,9 +79,12 @@ Read tools (all pure queries):
     database_path, params_path}.
   - autofluxdep_workflow_list → each placed node's {name, type, enabled,
     provides, provides_modules, requires, has_result}.
-  - autofluxdep_node_cfg(name) → {name, type, knobs:{...}} for one placed node.
+  - autofluxdep_node_cfg(name) → {name, type, knobs:{...}, override_plan:[...]}
+    for one placed node.
   - autofluxdep_result_summary → per node-with-result {name, kind, n_flux,
     n_measured, fit_summary} — how far the sweep has progressed, not the raw 2D data.
+  - autofluxdep_ui_screenshot(target='window') → {target, path, bytes}; captures
+    the main window to a PNG file under /tmp. This is read-only observation.
 
 A failed call always raises; the read tools are idempotent, so retrying is safe.
 """

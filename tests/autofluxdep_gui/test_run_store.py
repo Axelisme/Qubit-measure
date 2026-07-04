@@ -57,12 +57,24 @@ def _sha256_json(payload: object) -> str:
 
 def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     node, result = _node_and_result()
+    cfg_snapshot = {
+        "base_cfg": {"acquire": {"reps": 10}},
+        "override_plan": [
+            {
+                "path": "acquire.reps",
+                "mode": "all_points",
+                "source": "generation.test",
+                "reason": "test override",
+            }
+        ],
+    }
     store = RunStore.create(
         project=_project(tmp_path),
         flux_values=[0.0, 0.5],
         flux_device_name="fake_flux",
         nodes=[node],
         results={"probe": result},
+        cfg_snapshots={"probe": cfg_snapshot},
     )
     patch = Patch({"fit": 3.0})
 
@@ -84,6 +96,8 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     workflow_node = manifest["workflow"]["nodes"][0]
     assert workflow_node["cfg"] == node.schema.to_persisted_raw()
     assert workflow_node["cfg_hash"] == f"sha256:{_sha256_json(workflow_node['cfg'])}"
+    assert workflow_node["base_cfg"] == cfg_snapshot["base_cfg"]
+    assert workflow_node["override_plan"] == cfg_snapshot["override_plan"]
     assert manifest["workflow"]["workflow_hash"] == (
         "sha256:"
         + _sha256_json(

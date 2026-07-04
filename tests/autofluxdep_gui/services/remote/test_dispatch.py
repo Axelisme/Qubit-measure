@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.controller import Controller
+from zcu_tools.gui.app.autofluxdep.services.remote import dispatch as dispatch_module
 from zcu_tools.gui.app.autofluxdep.services.remote.dispatch import (
     _HANDLERS,
     METHOD_REGISTRY,
@@ -38,6 +39,11 @@ class _StubAdapter:
 
     def __init__(self, ctrl: Controller) -> None:
         self.ctrl = ctrl
+        self.screenshot_targets: list[str] = []
+
+    def take_screenshot(self, target: str) -> bytes:
+        self.screenshot_targets.append(target)
+        return b"\x89PNG\r\n\x1a\nstub"
 
 
 def _adapter(project: ProjectInfo | None = None) -> _StubAdapter:
@@ -88,6 +94,7 @@ def test_registry_is_read_only():
         "result.summary",
         "resources.versions",
         "state.check",
+        "ui.screenshot",
     }
 
 
@@ -278,6 +285,7 @@ def test_node_cfg_reports_knobs():
     assert knobs["reps"] == 512
     # a sweep knob serialises to {start, stop, expts}, not a SweepCfg
     assert set(knobs["detune_sweep"]) == {"start", "stop", "expts"}
+    assert cfg["override_plan"] == []
 
 
 def test_node_cfg_unknown_name_fast_fails():
@@ -291,6 +299,31 @@ def test_node_cfg_missing_name_rejected_by_param_validation():
     adapter = _adapter()
     with pytest.raises(RemoteError):
         _call(adapter, "node.cfg", {})
+
+
+# ---------------------------------------------------------------------------
+# ui.screenshot
+# ---------------------------------------------------------------------------
+
+
+def test_ui_screenshot_writes_window_png_to_tempdir(tmp_path, monkeypatch):
+    adapter = _adapter()
+    monkeypatch.setattr(dispatch_module, "gettempdir", lambda: str(tmp_path))
+
+    result = _call(adapter, "ui.screenshot", {})
+
+    assert adapter.screenshot_targets == ["window"]
+    assert result["target"] == "window"
+    assert result["bytes"] == 12
+    path = Path(result["path"])
+    assert path == tmp_path / "zcu_tools_autofluxdep_window_screenshot.png"
+    assert path.read_bytes() == b"\x89PNG\r\n\x1a\nstub"
+
+
+def test_ui_screenshot_rejects_non_window_target():
+    adapter = _adapter()
+    with pytest.raises(RemoteError, match="target must be 'window'"):
+        _call(adapter, "ui.screenshot", {"target": "dialog"})
 
 
 # ---------------------------------------------------------------------------

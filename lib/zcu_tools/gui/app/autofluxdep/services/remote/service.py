@@ -15,7 +15,7 @@ snapshot. No off-main handler is needed.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
@@ -32,6 +32,12 @@ from .events import EVENT_SERIALIZERS, wire_event_name
 from .wire_version import GUI_VERSION, WIRE_VERSION
 
 
+class ScreenshotView(Protocol):
+    """Narrow read-only view surface exposed to remote handlers."""
+
+    def take_window_screenshot(self) -> bytes: ...
+
+
 class RemoteControlAdapter(RemoteControlServiceBase):
     """Driving adapter: an NDJSON RPC face onto the autofluxdep ``Controller``.
 
@@ -44,7 +50,13 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
     ctrl: Controller
 
-    def __init__(self, controller: Controller, opts: ControlOptions) -> None:
+    def __init__(
+        self,
+        controller: Controller,
+        opts: ControlOptions,
+        *,
+        view: ScreenshotView | None = None,
+    ) -> None:
         super().__init__(
             controller,
             opts,
@@ -55,6 +67,14 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             event_serializers=EVENT_SERIALIZERS,
             wire_event_name=wire_event_name,
         )
+        self._view = view
+
+    def take_screenshot(self, target: str) -> bytes:
+        if target != "window":
+            raise ValueError(f"unsupported screenshot target {target!r}")
+        if self._view is None:
+            raise RuntimeError("remote screenshot requires a mounted MainWindow view")
+        return self._view.take_window_screenshot()
 
 
-__all__ = ["ControlOptions", "RemoteControlAdapter"]
+__all__ = ["ControlOptions", "RemoteControlAdapter", "ScreenshotView"]

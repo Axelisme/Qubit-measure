@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -31,14 +32,18 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     NodeFieldSpec,
     NodeSectionSpec,
+    OverridePath,
+    OverridePlan,
     SweepSpec,
     SweepValue,
     node_field,
     node_path,
     node_section,
+    override_plan_to_wire,
     path_node_schema,
     sectioned_node_schema,
     str_choice_spec,
+    validate_override_plan_base_cfg,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
@@ -1430,6 +1435,69 @@ def test_set_node_params_types_and_fast_fails():
     # an unknown key fast-fails (a real typo — the form only renders declared knobs)
     with pytest.raises(KeyError, match="Unknown node param"):
         ctrl.set_node_params(index, {"not_a_knob": 1})
+
+
+# --- 2e. run-time override plan contract ---------------------------------------
+
+
+def test_override_plan_serializes_and_validates_base_cfg_leaf_paths():
+    plan = OverridePlan(
+        (
+            OverridePath(
+                "modules.qub_pulse.gain",
+                "after_first_point",
+                "generation.feedback.drive_gain",
+                "adaptive qubit drive",
+            ),
+        )
+    )
+    base_cfg = {
+        "modules": {"qub_pulse": {"gain": 0.1, "waveform": {"length": 5.0}}},
+        "reps": 1000,
+    }
+
+    validate_override_plan_base_cfg(plan, base_cfg, node_name="qubit_freq")
+
+    assert override_plan_to_wire(plan) == [
+        {
+            "path": "modules.qub_pulse.gain",
+            "mode": "after_first_point",
+            "source": "generation.feedback.drive_gain",
+            "reason": "adaptive qubit drive",
+        }
+    ]
+
+
+def test_override_plan_rejects_ambiguous_or_absent_paths():
+    base_cfg = {"modules": {"qub_pulse": {"gain": 0.1}}, "reps": 1000}
+
+    with pytest.raises(ValueError, match="duplicate override paths"):
+        OverridePlan(
+            (
+                OverridePath("reps", "all_points", "generation.test", "first"),
+                OverridePath("reps", "all_points", "generation.test", "second"),
+            )
+        )
+    with pytest.raises(ValueError, match="must target Default cfg"):
+        OverridePath("generation.feedback.drive_gain", "all_points", "x", "y")
+    with pytest.raises(ValueError, match="empty segment"):
+        OverridePath("modules..gain", "all_points", "x", "y")
+    with pytest.raises(ValueError, match="unsupported override mode"):
+        OverridePath("reps", cast(Any, "sometimes"), "x", "y")
+    with pytest.raises(ValueError, match="source must be non-empty"):
+        OverridePath("reps", "all_points", "", "y")
+
+    missing = OverridePlan(
+        (OverridePath("modules.qub_pulse.freq", "all_points", "x", "y"),)
+    )
+    with pytest.raises(ValueError, match="absent from run-start base_cfg"):
+        validate_override_plan_base_cfg(missing, base_cfg, node_name="qubit_freq")
+
+    whole_module = OverridePlan(
+        (OverridePath("modules.qub_pulse", "all_points", "x", "y"),)
+    )
+    with pytest.raises(ValueError, match="absent from run-start base_cfg"):
+        validate_override_plan_base_cfg(whole_module, base_cfg, node_name="qubit_freq")
 
 
 # --- 3. seam invariant: only cfg/ imports gui.app.main from the package ---------

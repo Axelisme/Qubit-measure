@@ -23,16 +23,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from tempfile import gettempdir
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
     # this module). String annotations keep pyright checking the call sites.
     from .service import RemoteControlAdapter
 
+from zcu_tools.gui.app.autofluxdep.cfg import override_plan_to_wire
 from zcu_tools.gui.app.autofluxdep.services.result_io import result_progress_summary
 from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
 from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.readonly_handlers import h_resources_versions
 
@@ -125,6 +129,9 @@ def _h_node_cfg(
                 "name": node.name,
                 "type": node.type_name,
                 "knobs": node.schema.read_knobs(),
+                "override_plan": override_plan_to_wire(
+                    node.builder.override_plan(node.schema)
+                ),
             }
     raise KeyError(f"No placed node named {name!r}")
 
@@ -145,6 +152,34 @@ def _h_result_summary(
             for name, result in results.items()
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# UI read-only view
+# ---------------------------------------------------------------------------
+
+
+def _h_ui_screenshot(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    target = str(params.get("target") or "window")
+    if target != "window":
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"target must be 'window', got {target!r}",
+        )
+    try:
+        png = adapter.take_screenshot(target)
+    except (RuntimeError, ValueError) as exc:
+        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    if not isinstance(png, (bytes, bytearray)):
+        raise RemoteError(
+            ErrorCode.INTERNAL,
+            f"screenshot returned non-bytes {type(png).__name__}",
+        )
+    path = Path(gettempdir()) / "zcu_tools_autofluxdep_window_screenshot.png"
+    path.write_bytes(bytes(png))
+    return {"target": target, "path": str(path), "bytes": len(png)}
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +225,7 @@ _HANDLERS: dict[str, Handler] = {
     "result.summary": _h_result_summary,
     "resources.versions": h_resources_versions,
     "state.check": _h_state_check,
+    "ui.screenshot": _h_ui_screenshot,
 }
 
 METHOD_REGISTRY: dict[str, BoundMethod] = build_method_registry(_HANDLERS, METHOD_SPECS)

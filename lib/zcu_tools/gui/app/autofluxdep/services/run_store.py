@@ -56,6 +56,7 @@ class RunStore:
         flux_device_name: str | None,
         nodes: Sequence[PlacedNode],
         results: Mapping[str, object],
+        cfg_snapshots: Mapping[str, Mapping[str, object]] | None = None,
     ) -> None:
         # ``run_dir`` is the lightweight metadata root under result_dir.
         self.run_dir = run_dir
@@ -66,6 +67,10 @@ class RunStore:
         self._flux_values = [float(value) for value in flux_values]
         self._nodes = list(nodes)
         self._results = dict(results)
+        self._cfg_snapshots = {
+            str(name): dict(snapshot)
+            for name, snapshot in (cfg_snapshots or {}).items()
+        }
         self._writers: dict[str, StreamingGroupedLabberWriter] = {}
         self._node_file_by_name: dict[str, str] = {}
         self._node_type_by_name = {node.name: node.type_name for node in self._nodes}
@@ -90,6 +95,7 @@ class RunStore:
         flux_device_name: str | None,
         nodes: Sequence[PlacedNode],
         results: Mapping[str, object],
+        cfg_snapshots: Mapping[str, Mapping[str, object]] | None = None,
     ) -> RunStore:
         """Create the run directory, manifest, journal, and node writers."""
         if project is None:
@@ -112,6 +118,7 @@ class RunStore:
             flux_device_name=flux_device_name,
             nodes=nodes,
             results=results,
+            cfg_snapshots=cfg_snapshots,
         )
         try:
             store._journal_path.write_text("", encoding="utf-8")
@@ -426,12 +433,27 @@ class RunStore:
                 nonfinite_to_none=False,
             )
             cfg_hash = _sha256_json(cfg_raw)
+            cfg_snapshot = self._cfg_snapshots.get(node.name, {})
+            base_cfg_source = cfg_snapshot.get("base_cfg", cfg_raw)
+            override_plan_source = cfg_snapshot.get("override_plan", [])
+            base_cfg = _json_safe(
+                base_cfg_source,
+                subject=f"node base_cfg {node.name!r}",
+                nonfinite_to_none=False,
+            )
+            override_plan = _json_safe(
+                override_plan_source,
+                subject=f"node override_plan {node.name!r}",
+                nonfinite_to_none=False,
+            )
             entry = {
                 "index": index,
                 "name": node.name,
                 "type": node.type_name,
                 "cfg": cfg_raw,
+                "base_cfg": base_cfg,
                 "cfg_hash": f"sha256:{cfg_hash}",
+                "override_plan": override_plan,
             }
             nodes.append(entry)
         flux = _json_safe(

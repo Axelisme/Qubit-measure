@@ -31,6 +31,7 @@
 - [0011 — CfgSchema validate boundary](0011-cfgschema-validate-boundary.md)：成品邊界做靜態結構驗證。
 - [0012 — CfgBuilder value assembly](0012-cfgbuilder-value-layer-fluent-assembly.md)：adapter default value 透過 fluent builder 與 role table 組裝。
 - [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter 顯式宣告 capabilities，import-time validation 抓宣告與 hook 不一致。
+- [0043 — Autofluxdep runtime cfg override-plan foundation](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、remote/artifact exposure 與 cfg form decoration seam。
 
 ## Remote / Transport
 

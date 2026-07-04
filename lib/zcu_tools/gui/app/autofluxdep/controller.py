@@ -30,7 +30,11 @@ from qtpy.QtCore import (
     Signal,  # type: ignore[attr-defined]
 )
 
-from zcu_tools.gui.app.autofluxdep.cfg import CfgSectionValue
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    CfgSectionValue,
+    override_plan_to_wire,
+    validate_override_plan_base_cfg,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
@@ -861,20 +865,26 @@ class Controller(SessionControllerMixin):
             self._operation_handles.stop(token, reason=reason)
             return True
         if self.is_paused:
-            session = self._run_session
-            assert session is not None
-            try:
-                session.finalize("stopped")
-            except Exception as exc:
-                logger.exception("autofluxdep paused artifact finalize failed")
-                self._run_session = None
-                self._bus.emit(RunFailedPayload(message=str(exc)))
-                return True
-            self._run_session = None
-            self.persist_all()
-            self._bus.emit(RunStoppedPayload())
+            self.finalize_paused_run_as_stopped()
             return True
         return False
+
+    def finalize_paused_run_as_stopped(self) -> None:
+        """Finalize the paused in-memory session and drop its continue state."""
+        if not self.is_paused:
+            raise RuntimeError("autofluxdep run is not paused")
+        session = self._run_session
+        assert session is not None
+        try:
+            session.finalize("stopped")
+        except Exception as exc:
+            logger.exception("autofluxdep paused artifact finalize failed")
+            self._run_session = None
+            self._bus.emit(RunFailedPayload(message=str(exc), stage="paused_finalize"))
+            raise
+        self._run_session = None
+        self.persist_all()
+        self._bus.emit(RunStoppedPayload())
 
     def request_pause(self) -> bool:
         """Request a non-terminal pause at the next flux boundary."""
@@ -1005,12 +1015,14 @@ class Controller(SessionControllerMixin):
         tools = self._build_tools(providers)
         self._state.run_predictor = tools.predictor
         flux_device = self._state.flux_device_name
+        cfg_snapshots = self._build_run_cfg_snapshots(enabled_nodes)
         store = RunStore.create(
             project=project,
             flux_values=flux_values,
             flux_device_name=flux_device,
             nodes=enabled_nodes,
             results=results,
+            cfg_snapshots=cfg_snapshots,
         )
         return RunSession(
             providers=providers,
@@ -1030,9 +1042,29 @@ class Controller(SessionControllerMixin):
             progress_label=FLUX_PROGRESS_LABEL,
         )
 
+    def _build_run_cfg_snapshots(
+        self, enabled_nodes: list[PlacedNode]
+    ) -> dict[str, dict[str, object]]:
+        ctx = self._state.exp_context
+        snapshots: dict[str, dict[str, object]] = {}
+        for node in enabled_nodes:
+            base_cfg = node.schema.lower_raw(ctx.ml, ctx.md)
+            override_plan = node.builder.override_plan(node.schema)
+            validate_override_plan_base_cfg(
+                override_plan,
+                base_cfg,
+                node_name=node.name,
+            )
+            snapshots[node.name] = {
+                "base_cfg": base_cfg,
+                "override_plan": override_plan_to_wire(override_plan),
+            }
+        return snapshots
+
     def _begin_run_segment(self, session: RunSession, *, continuing: bool) -> int:
         if self._active_run_token is not None:
             raise RuntimeError("autofluxdep run is already active")
+        session.prepare_segment(continuing=continuing)
         self._run_session = session
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
@@ -1126,7 +1158,7 @@ class Controller(SessionControllerMixin):
         except Exception as exc:
             logger.exception("autofluxdep artifact finalize failed")
             settle(OperationOutcome("failed", str(exc)))
-            self._bus.emit(RunFailedPayload(message=str(exc)))
+            self._bus.emit(RunFailedPayload(message=str(exc), stage="finalize"))
             return
         settle(OperationOutcome("finished"))
         self._bus.emit(RunFinishedPayload())
@@ -1155,7 +1187,7 @@ class Controller(SessionControllerMixin):
         except Exception as exc:
             logger.exception("autofluxdep stopped artifact finalize failed")
             settle(OperationOutcome("failed", str(exc)))
-            self._bus.emit(RunFailedPayload(message=str(exc)))
+            self._bus.emit(RunFailedPayload(message=str(exc), stage="stop_finalize"))
             return
         settle(OperationOutcome("cancelled"))
         self._bus.emit(RunStoppedPayload())
@@ -1185,7 +1217,14 @@ class Controller(SessionControllerMixin):
             logger.exception("autofluxdep failed artifact finalize failed")
             error = RuntimeError(f"{error}; artifact finalize failed: {exc}")
         settle(OperationOutcome("failed", str(error)))
-        self._bus.emit(RunFailedPayload(message=str(error)))
+        self._bus.emit(
+            RunFailedPayload(
+                message=str(error),
+                node=node,
+                flux_idx=flux_idx,
+                stage=stage,
+            )
+        )
 
     def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
         """Testing/support entry: block until an operation settles or wakes."""

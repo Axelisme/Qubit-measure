@@ -10,7 +10,9 @@ independent of experiment physics, so a fake measurement Node (a deterministic
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -24,6 +26,7 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunFailedPayload,
     RunFinishedPayload,
     RunPausedPayload,
+    RunStartedPayload,
     RunStoppedPayload,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
@@ -100,6 +103,103 @@ def test_stop_run_mid_sweep_emits_run_stopped_not_finished(monkeypatch):
     assert not np.isnan(sweep_result.signal[1]).any()
     assert np.isnan(sweep_result.signal[2]).all()
     persist_all.assert_called_once_with()
+
+
+def test_stop_after_operation_token_before_worker_start_is_honored(monkeypatch):
+    ctrl = _build_ready_controller()
+    captured: dict[str, Any] = {}
+    produced: list[int] = []
+
+    def produce(env, snapshot):
+        del snapshot
+        produced.append(env.flux_idx)
+        return Patch()
+
+    ctrl.state.nodes = []
+    ctrl.add_node(make_builder("probe", produce_fn=produce))
+    ctrl.set_flux_values([0.0, 0.5])
+
+    def capture_submit(
+        work: Callable[[], Any],
+        *,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[Exception], None],
+        run_in_pool: bool = True,
+        enter: object = None,
+    ) -> None:
+        del run_in_pool, enter
+        captured["work"] = work
+        captured["on_done"] = on_done
+        captured["on_error"] = on_error
+
+    monkeypatch.setattr(ctrl._background_svc, "submit", capture_submit)
+
+    events: list[RunEvent] = []
+    ctrl.bus.subscribe(PointDonePayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunStartedPayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunFinishedPayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunFailedPayload, lambda p: events.append(p.EVENT))
+
+    token = ctrl.start_run()
+    assert ctrl.is_running
+    assert produced == []
+
+    assert ctrl.stop_run("cancel before worker starts")
+
+    work = cast(Callable[[], object], captured["work"])
+    on_done = cast(Callable[[object], None], captured["on_done"])
+    on_done(work())
+
+    assert produced == []
+    assert events == [RunEvent.RUN_STARTED, RunEvent.RUN_STOPPED]
+    result = ctrl.await_operation(token, timeout=0.0)
+    assert result is not None
+    assert result.outcome is not None
+    assert result.outcome.status == "cancelled"
+    assert result.feedback == "cancel before worker starts"
+
+    manifest = load_manifest(_latest_run_dir(ctrl) / "manifest.json")
+    assert manifest["terminal"]["status"] == "stopped"
+    assert manifest["lifecycle"] == {"status": "stopped", "next_flux_idx": 0}
+
+
+def test_stop_after_produce_before_commit_keeps_current_flux_cursor():
+    ctrl = _build_ready_controller()
+    produced: list[int] = []
+    events: list[RunEvent] = []
+
+    def produce(env, snapshot):
+        del snapshot
+        produced.append(env.flux_idx)
+        ctrl.stop_run("stop before row commit")
+        return Patch()
+
+    ctrl.state.nodes = []
+    ctrl.add_node(make_builder("probe", produce_fn=produce))
+    ctrl.set_flux_values([0.0, 0.5])
+    ctrl.bus.subscribe(PointDonePayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
+
+    token = ctrl.start_run()
+    pump_controller_until_idle(ctrl)
+
+    assert produced == [0]
+    assert events == [RunEvent.RUN_STOPPED]
+    result = ctrl.await_operation(token, timeout=0.0)
+    assert result is not None
+    assert result.outcome is not None
+    assert result.outcome.status == "cancelled"
+    assert result.feedback == "stop before row commit"
+
+    run_dir = _latest_run_dir(ctrl)
+    manifest = load_manifest(run_dir / "manifest.json")
+    assert manifest["terminal"]["status"] == "stopped"
+    assert manifest["lifecycle"] == {"status": "stopped", "next_flux_idx": 0}
+    event_types = [
+        event["type"] for event in load_journal_events(run_dir / "journal.jsonl")
+    ]
+    assert "flux_committed" not in event_types
 
 
 def test_full_run_without_stop_emits_run_finished(monkeypatch):

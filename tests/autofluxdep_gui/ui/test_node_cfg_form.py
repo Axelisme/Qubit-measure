@@ -36,7 +36,12 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     node_section,
     sectioned_node_schema,
 )
-from zcu_tools.gui.app.autofluxdep.cfg.form import SectionLiveField
+from zcu_tools.gui.app.autofluxdep.cfg.form import (
+    CfgFormWidget,
+    FieldDecorationPatch,
+    LiveModelEnv,
+    SectionLiveField,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
     Node,
@@ -139,6 +144,25 @@ def _generation_leaf(form: NodeCfgForm, key: str) -> Any:
     raise AssertionError(f"generation leaf {key!r} not found")
 
 
+class _DecorationProvider:
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def decoration_for(
+        self, path: str, spec: object, value: object
+    ) -> FieldDecorationPatch | None:
+        del spec, value
+        self.seen.append(path)
+        if path == "acquire.reps":
+            return FieldDecorationPatch(
+                enabled=False,
+                tone="warning",
+                badge="runtime",
+                tooltip="Generated at run time",
+            )
+        return None
+
+
 def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)
@@ -205,6 +229,36 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         }
     finally:
         form.teardown()
+
+
+def test_cfg_form_decoration_provider_collects_nested_paths(qapp):
+    ctrl = build_core()
+    schema = _SectionedBuilder().make_default_schema()
+    env = LiveModelEnv(ctrl=ctrl)
+    model = SectionLiveField(schema.schema.spec, env, schema.schema.value)
+    provider = _DecorationProvider()
+    form = CfgFormWidget(decoration_provider=provider)
+    try:
+        form.attach(model)
+
+        assert set(form.decoration_paths()) == {
+            "acquire",
+            "acquire.reps",
+            "drive",
+            "drive.gain",
+        }
+        decoration = form.decoration_for_path("acquire.reps")
+        assert decoration.enabled is False
+        assert decoration.tone == "warning"
+        assert decoration.badge == "runtime"
+        assert decoration.tooltip == "Generated at run time"
+        assert form.decoration_for_path("drive.gain").enabled is True
+        with pytest.raises(KeyError, match="Unknown cfg field path"):
+            form.decoration_for_path("missing")
+    finally:
+        form.detach()
+        model.teardown()
+        ctrl._background_svc.quiesce()
 
 
 def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
