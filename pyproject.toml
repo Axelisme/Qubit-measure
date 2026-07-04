@@ -56,6 +56,7 @@ design = [
 ]
 gui = ["zcu-tools[client]", "qtpy", "PyQt6"]
 all = ["zcu-tools[client,gdrive,design,gui]"]
+development = ["zcu-tools[all]"]
 
 [dependency-groups]
 dev = [

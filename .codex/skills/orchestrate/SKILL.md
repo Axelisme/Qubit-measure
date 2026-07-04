@@ -245,8 +245,8 @@ write scope 是協調 contract，不是自動 path lock。`workflow.py lane scop
 
 ### 驗證環境注意事項
 
-- 如果 task / lane worktree 需要建立自己的 `.venv`，必須用專案的 `development` extra 建立，例如 `uv sync --extra development`（或等價的 `.venv/bin/python -m pip install -e ".[development]"`）。只建立基礎 venv 會缺 `pytest` / `pytest-xdist`，導致收尾驗證無法跑 `pytest`。
-- 收尾驗證中的 `pyright` / `ruff` 一律在目標 workdir 用 `uv run` 執行，例如 `uv run pyright`、`uv run ruff check .`、`uv run ruff format .`，避免吃到系統或其它 worktree 的工具版本。
+- 如果 task / lane worktree 需要建立自己的 `.venv`，先用 `uv sync --extra development --group dev` 建立完整驗證環境。`development` extra 包含 `all` runtime extras，`dev` dependency group 提供 pytest / pyright / ruff；裸 `uv run pytest` 在新 worktree 會建立最小環境，常缺 `qick`、`qtpy`、`scipy`、`h5py` 等完整測試依賴。
+- 收尾驗證一律在目標 workdir 執行。worktree 已 sync 時用 `uv run pyright`、`uv run pytest -n auto`、`uv run ruff check --select I --fix`、`uv run ruff format`；尚未 sync 時用 `uv run --extra development --group dev pyright`、`uv run --extra development --group dev pytest -n auto`、`uv run --extra development --group dev ruff check --select I --fix`、`uv run --extra development --group dev ruff format`。不要使用系統或其它 worktree 的 `.venv`。
 
 ### 整合與線性收尾
 

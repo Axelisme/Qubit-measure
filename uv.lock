@@ -2490,6 +2490,38 @@ design = [
     { name = "ipywidgets" },
     { name = "quantum-metal", extra = ["ansys", "gui"], marker = "python_full_version < '3.13'" },
 ]
+development = [
+    { name = "flask" },
+    { name = "google-api-python-client" },
+    { name = "google-auth-httplib2" },
+    { name = "google-auth-oauthlib" },
+    { name = "h5py" },
+    { name = "ipykernel" },
+    { name = "ipympl" },
+    { name = "ipywidgets" },
+    { name = "joblib" },
+    { name = "kaleido" },
+    { name = "nbformat" },
+    { name = "numba" },
+    { name = "pandas" },
+    { name = "plotly" },
+    { name = "pyqt6" },
+    { name = "pyro4" },
+    { name = "python-dotenv" },
+    { name = "pyvisa" },
+    { name = "pywavelets" },
+    { name = "pyyaml" },
+    { name = "qick" },
+    { name = "qtpy" },
+    { name = "quantum-metal", extra = ["ansys", "gui"], marker = "python_full_version < '3.13'" },
+    { name = "requests" },
+    { name = "scikit-learn" },
+    { name = "scikit-optimize" },
+    { name = "scipy" },
+    { name = "scqubits", version = "4.1.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "scqubits", version = "4.3.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "threadpoolctl" },
+]
 gdrive = [
     { name = "google-api-python-client" },
     { name = "google-auth-httplib2" },
@@ -2575,10 +2607,11 @@ requires-dist = [
     { name = "threadpoolctl", marker = "extra == 'client'" },
     { name = "tqdm" },
     { name = "typing-extensions" },
+    { name = "zcu-tools", extras = ["all"], marker = "extra == 'development'" },
     { name = "zcu-tools", extras = ["client"], marker = "extra == 'gui'" },
     { name = "zcu-tools", extras = ["client", "gdrive", "design", "gui"], marker = "extra == 'all'" },
 ]
-provides-extras = ["client", "gdrive", "design", "gui", "all"]
+provides-extras = ["client", "gdrive", "design", "gui", "all", "development"]
 
 [package.metadata.requires-dev]
 dev = [
