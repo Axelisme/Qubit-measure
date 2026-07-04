@@ -241,7 +241,7 @@ def test_engine_cancel_during_detune_loop_raises(
                     t=0.01,
                     t1=None,
                     t2=None,
-                    thermal_pop=0.0,
+                    equilibrium_pop=0.0,
                 )
             ],
             readout=ReadoutPlan(f_ro_ghz=7.0, ro_length_us=1.0),
@@ -364,6 +364,29 @@ def test_engine_reuses_evolution_lowering_for_readout_only_sweep(
     assert lower_calls == sw.expts
 
 
+def test_engine_readout_only_positive_temp_uses_operating_frequency() -> None:
+    """White-box contract: engine boundary derives equilibrium population from Temp."""
+
+    sim = _SIM.model_copy(update={"Temp": 0.050})
+    _soc, soccfg = make_mock_soc(sim=sim)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=5, rounds=1),
+        modules=[_readout(_rf_g_mhz())],
+    )
+    prog.compile()
+    engine = SimEngine(prog, sim)
+
+    f_qubit_ghz, _rf_g, _rf_e = engine._operating_signal()
+    expected = sim.equilibrium_excited_population(f_qubit_ghz)
+    _s_g, _s_e, p_e, _signal_scale, _noise_scale, _gain_noise_scale = (
+        engine._ensure_signal()
+    )
+
+    assert expected > 0.0
+    np.testing.assert_allclose(p_e, np.full_like(p_e, expected), rtol=1e-12, atol=1e-12)
+
+
 def test_cooperative_yield_releases_gil(monkeypatch: pytest.MonkeyPatch) -> None:
     """The mocksim CPU-loop yield hook explicitly releases the process-wide GIL."""
 
@@ -472,7 +495,7 @@ def test_engine_uses_numba_for_large_unique_population_work(
         _pre_props: NDArray[np.float64],
         _relax_props: NDArray[np.float64],
         _weights: NDArray[np.float64],
-        _thermal_pop: float,
+        _equilibrium_pop: float,
         reps: int,
         nreads: int,
     ) -> NDArray[np.float64]:
@@ -539,13 +562,14 @@ def test_engine_batched_population_chain_matches_scalar_reference(
         lowered, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us
     )
     evolution = engine._point_evolution_props({}, f_qubit_ghz, lowered)
-    model = engine._point_model(readout, evolution)
+    equilibrium_pop = sim.equilibrium_excited_population(f_qubit_ghz)
+    model = engine._point_model(readout, evolution, equilibrium_pop)
 
     actual = engine._point_population_chain(model, reps=8, nreads=1)
     monkeypatch.setattr(engine_module, "_population_chain_numba", None)
     fallback = engine._point_population_chain(model, reps=8, nreads=1)
 
-    z0 = 2.0 * sim.thermal_pop - 1.0
+    z0 = 2.0 * model.equilibrium_pop - 1.0
     states = [
         np.array([0.0, 0.0, z0, 1.0], dtype=np.float64) for _ in model.pre_readout_props
     ]

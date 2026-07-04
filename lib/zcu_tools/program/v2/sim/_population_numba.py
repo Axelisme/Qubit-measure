@@ -12,13 +12,13 @@ def _population_chain_serial_kernel(
     pre_props: NDArray[np.float64],
     relax_props: NDArray[np.float64],
     weights: NDArray[np.float64],
-    thermal_pop: float,
+    equilibrium_pop: float,
     reps: int,
     nreads: int,
 ) -> NDArray[np.float64]:
     node_count = pre_props.shape[0]
     states = np.empty((node_count, 4), dtype=np.float64)
-    z0 = 2.0 * thermal_pop - 1.0
+    z0 = 2.0 * equilibrium_pop - 1.0
     for node_idx in range(node_count):
         states[node_idx, 0] = 0.0
         states[node_idx, 1] = 0.0
@@ -83,7 +83,7 @@ def population_chain_numba(
     pre_props: NDArray[np.float64],
     relax_props: NDArray[np.float64],
     weights: NDArray[np.float64],
-    thermal_pop: float,
+    equilibrium_pop: float,
     reps: int,
     nreads: int,
 ) -> NDArray[np.float64]:
@@ -93,5 +93,5 @@ def population_chain_numba(
     relax = np.ascontiguousarray(relax_props, dtype=np.float64)
     node_weights = np.ascontiguousarray(weights, dtype=np.float64)
     return _population_chain_serial_kernel(
-        pre, relax, node_weights, thermal_pop, reps, nreads
+        pre, relax, node_weights, equilibrium_pop, reps, nreads
     )

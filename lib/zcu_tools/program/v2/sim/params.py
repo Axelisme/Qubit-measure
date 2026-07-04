@@ -29,6 +29,8 @@ from pydantic import field_validator, model_validator
 
 from zcu_tools.cfg_model import ConfigBase
 
+_H_OVER_K_B_K_PER_GHZ = 0.04799243073366221
+
 
 class SimParams(ConfigBase):
     """Physical parameters for the TLS Bloch-equation mock simulator.
@@ -65,9 +67,11 @@ class SimParams(ConfigBase):
             by echo) adds an extra decay rate γ = ``1/T2_star − 1/T2``, so
             ``T2_star ≤ T2``.  When ``T2_star == T2`` the inhomogeneous rate γ = 0
             (pure homogeneous limit).
-        thermal_pop : float, optional
-            Thermal excited-state population at equilibrium, in [0, 1].
-            Defaults to 0.0 (zero temperature).
+        Temp : float, optional
+            Effective qubit temperature in Kelvin.  The equilibrium excited-state
+            population is derived from this temperature and the operating qubit
+            frequency via a Boltzmann distribution.  Defaults to 0.0 K
+            (zero-temperature ground-state equilibrium).
 
     Readout resonator:
         bare_rf : float
@@ -141,7 +145,7 @@ class SimParams(ConfigBase):
     T2: float
     # T2_star: Ramsey T2*; enforced T2_star <= T2 by _validate_coherence.
     T2_star: float
-    thermal_pop: float = 0.0
+    Temp: float = 0.0
 
     # --- readout resonator (GHz) ---
     bare_rf: float
@@ -222,6 +226,13 @@ class SimParams(ConfigBase):
             )
         return v
 
+    @field_validator("Temp")
+    @classmethod
+    def _validate_temp(cls, v: float) -> float:
+        if not math.isfinite(v) or v < 0.0:
+            raise ValueError(f"Temp must be finite and >= 0.0 K (got {v!r})")
+        return v
+
     @model_validator(mode="after")
     def _validate_qi_gt_ql(self) -> SimParams:
         # Qi > Ql is required so that 1/Qc = 1/Ql - 1/Qi > 0 (physical Qc).
@@ -258,6 +269,27 @@ class SimParams(ConfigBase):
         T2_star == T2 (pure homogeneous limit).
         """
         return 1.0 / self.T2_star - 1.0 / self.T2
+
+    def equilibrium_excited_population(self, f_qubit_ghz: float) -> float:
+        """Return the Boltzmann equilibrium excited-state population.
+
+        ``f_qubit_ghz`` is the operating qubit transition frequency in GHz.  The
+        helper is pure: it only combines the caller-supplied operating frequency
+        with this instance's temperature and never resolves flux or predictor
+        state.
+        """
+
+        f_qubit = float(f_qubit_ghz)
+        if not math.isfinite(f_qubit) or f_qubit < 0.0:
+            raise ValueError(
+                f"f_qubit_ghz must be finite and >= 0.0 (got {f_qubit_ghz!r})"
+            )
+        if self.Temp == 0.0:
+            return 0.0
+
+        exponent = _H_OVER_K_B_K_PER_GHZ * f_qubit / self.Temp
+        boltzmann_weight = math.exp(-exponent)
+        return boltzmann_weight / (1.0 + boltzmann_weight)
 
 
 # ---------------------------------------------------------------------------

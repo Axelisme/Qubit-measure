@@ -1,7 +1,7 @@
 """Property and cross-validation tests for the TLS Bloch propagator.
 
 Complements the analytic-limit gate in ``test_bloch_limits.py``: basic
-propagator properties (identity in the no-dynamics limit, thermal steady state)
+propagator properties (identity in the no-dynamics limit, equilibrium steady state)
 and a qutip Lindblad cross-validation against the hand-written affine
 propagator.
 """
@@ -36,33 +36,33 @@ def test_idle_fast_path_matches_matrix_exponential() -> None:
     duration = 0.8
     t1 = 3.0
     t2 = 1.2
-    thermal = 0.13
+    equilibrium = 0.13
 
     expected = np.asarray(
-        expm(bloch_generator(0.0, delta, phase, t1, t2, thermal) * duration),
+        expm(bloch_generator(0.0, delta, phase, t1, t2, equilibrium) * duration),
         dtype=np.float64,
     )
-    actual = segment_propagator(0.0, delta, phase, duration, t1, t2, thermal)
+    actual = segment_propagator(0.0, delta, phase, duration, t1, t2, equilibrium)
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_steady_state_is_preserved() -> None:
-    """The thermal steady state is a fixed point of free evolution."""
+    """The equilibrium steady state is a fixed point of free evolution."""
 
-    thermal = 0.15
-    v_eq = ground_state(thermal)
-    v = evolve(v_eq, [Segment(0.0, 0.0, 0.0, 5.0, 2.0, 1.0, thermal)])
+    equilibrium = 0.15
+    v_eq = ground_state(equilibrium)
+    v = evolve(v_eq, [Segment(0.0, 0.0, 0.0, 5.0, 2.0, 1.0, equilibrium)])
     assert np.allclose(v, v_eq, atol=1e-9)
 
 
-def test_free_evolution_converges_to_thermal() -> None:
-    """Long free evolution from ground relaxes toward z_eq = 2*thermal - 1."""
+def test_free_evolution_converges_to_equilibrium() -> None:
+    """Long free evolution from ground relaxes toward z_eq = 2*equilibrium - 1."""
 
-    thermal = 0.2
+    equilibrium = 0.2
     t1 = 0.5
     v0 = np.array([0.0, 0.0, -1.0])  # pure ground
-    v = evolve(v0, [Segment(0.0, 0.0, 0.0, 50.0 * t1, t1, t1, thermal)])
-    assert v == pytest.approx([0.0, 0.0, 2.0 * thermal - 1.0], abs=1e-9)
+    v = evolve(v0, [Segment(0.0, 0.0, 0.0, 50.0 * t1, t1, t1, equilibrium)])
+    assert v == pytest.approx([0.0, 0.0, 2.0 * equilibrium - 1.0], abs=1e-9)
 
 
 def test_excited_population_mapping() -> None:
@@ -96,7 +96,7 @@ def test_qutip_cross_validation() -> None:
 
     The qutip model encodes the same conventions: H = 0.5 (Delta Z + Om(cos X +
     sin Y)) with excited at z=+1 (Z = |e><e| - |g><g|), amplitude damping with
-    down/up rates set so z_eq = 2*thermal - 1, and pure dephasing tuned so that
+    down/up rates set so z_eq = 2*equilibrium - 1, and pure dephasing tuned so that
     1/T2 = 1/(2 T1) + gamma_phi.
     """
 
@@ -108,7 +108,7 @@ def test_qutip_cross_validation() -> None:
     t1 = 3.0
     t2 = 1.5
     duration = 0.8
-    thermal = 0.05
+    equilibrium = 0.05
 
     g = qt.basis(2, 0)
     e = qt.basis(2, 1)
@@ -122,8 +122,8 @@ def test_qutip_cross_validation() -> None:
 
     gamma1 = 1.0 / t1
     gamma2 = 1.0 / t2
-    c_down = np.sqrt(gamma1 * (1.0 - thermal)) * (g * e.dag())
-    c_up = np.sqrt(gamma1 * thermal) * (e * g.dag())
+    c_down = np.sqrt(gamma1 * (1.0 - equilibrium)) * (g * e.dag())
+    c_up = np.sqrt(gamma1 * equilibrium) * (e * g.dag())
     gamma_phi = gamma2 - gamma1 / 2.0
     assert gamma_phi > 0.0, "test parameters must give a physical T2 <= 2 T1"
     c_phi = np.sqrt(2.0 * gamma_phi) * 0.5 * big_z
@@ -138,7 +138,10 @@ def test_qutip_cross_validation() -> None:
     )
 
     v0 = np.array([0.0, 0.0, -1.0])  # pure ground, matching qutip rho0
-    v_bloch = evolve(v0, [Segment(omega, delta, phase, duration, t1, t2, thermal)])
+    v_bloch = evolve(
+        v0,
+        [Segment(omega, delta, phase, duration, t1, t2, equilibrium)],
+    )
 
     max_dev = float(np.max(np.abs(v_qutip - v_bloch)))
     assert max_dev < 1e-5, f"max Bloch deviation {max_dev} exceeds tolerance"

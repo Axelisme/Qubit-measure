@@ -4,11 +4,14 @@ Covers:
 - Construction with all required fields and defaults.
 - Pydantic validation: wrong types and out-of-contract values raise.
 - Coherence validators: T2 <= 2*T1 and T2_star <= T2, including boundary equality.
-- Derived helpers: inhomogeneous_rate formula and the gamma=0 boundary.
+- Derived helpers: inhomogeneous_rate formula, the gamma=0 boundary, and
+  Boltzmann equilibrium population from Temp and operating qubit frequency.
 - Round-trip from a params.json-shaped dict to SimParams (alignment check).
 """
 
 from __future__ import annotations
+
+import math
 
 import pytest
 from pydantic import ValidationError
@@ -57,7 +60,7 @@ class TestSimParamsConstruction:
     def test_optional_defaults(self) -> None:
         p = SimParams(**_VALID)
         assert p.flux_bias == 0.0
-        assert p.thermal_pop == 0.0
+        assert p.Temp == 0.0
         assert p.readout_photons_per_gain2 == 100.0
         assert p.seed is None
         # FLUX-AWARE-MOCK: flux_device defaults to None (fixed reduced flux = 1.0).
@@ -69,9 +72,9 @@ class TestSimParamsConstruction:
         assert p.flux_device == "flux"
 
     def test_optional_fields_explicit(self) -> None:
-        p = SimParams(**_VALID, flux_bias=0.0005, thermal_pop=0.01, seed=42)
+        p = SimParams(**_VALID, flux_bias=0.0005, Temp=0.035, seed=42)
         assert p.flux_bias == 0.0005
-        assert p.thermal_pop == 0.01
+        assert p.Temp == 0.035
         assert p.seed == 42
 
     def test_extra_fields_forbidden(self) -> None:
@@ -95,6 +98,11 @@ class TestSimParamsValidation:
         incomplete = {k: v for k, v in _VALID.items() if k != "EJ"}
         with pytest.raises(ValidationError):
             SimParams(**incomplete)
+
+    @pytest.mark.parametrize("temp", [-1.0, float("nan"), float("inf")])
+    def test_invalid_temp_raises(self, temp: float) -> None:
+        with pytest.raises(ValidationError, match="Temp must be finite and >= 0.0 K"):
+            SimParams(**{**_VALID, "Temp": temp})
 
     def test_qi_equal_to_ql_raises(self) -> None:
         # Qi == Ql implies Qc = infinity and 1/Qc = 0, which is unphysical
@@ -188,6 +196,31 @@ class TestSimParamsCoherenceHelpers:
         assert p.inhomogeneous_rate > 0.0
         # Upper bound: 1/T2_star (T2 -> infinity limit)
         assert p.inhomogeneous_rate < 1.0 / 29.0
+
+
+class TestSimParamsTemperatureHelpers:
+    """Tests for Temp -> equilibrium excited-state population."""
+
+    def test_zero_temp_returns_ground_equilibrium(self) -> None:
+        p = SimParams(**{**_VALID, "Temp": 0.0})
+        assert p.equilibrium_excited_population(5.0) == 0.0
+
+    def test_positive_temp_uses_boltzmann_distribution(self) -> None:
+        p = SimParams(**{**_VALID, "Temp": 0.050})
+        f_qubit_ghz = 4.2
+        h_over_k_b_k_per_ghz = 0.04799243073366221
+        expected_weight = math.exp(-h_over_k_b_k_per_ghz * f_qubit_ghz / p.Temp)
+        expected = expected_weight / (1.0 + expected_weight)
+        assert p.equilibrium_excited_population(f_qubit_ghz) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("f_qubit_ghz", [-1.0, float("nan"), float("inf")])
+    def test_invalid_frequency_raises(self, f_qubit_ghz: float) -> None:
+        p = SimParams(**{**_VALID, "Temp": 0.050})
+        with pytest.raises(
+            ValueError,
+            match="f_qubit_ghz must be finite and >= 0.0",
+        ):
+            p.equilibrium_excited_population(f_qubit_ghz)
 
 
 class TestSimParamsPollLatency:

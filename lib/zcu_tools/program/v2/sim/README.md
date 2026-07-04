@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-03 — LoadWord readout frequency support
+**Last updated:** 2026-07-04 — Temperature-derived equilibrium population
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -36,7 +36,8 @@ For each sweep point the engine drives this chain:
    list of piecewise-constant `bloch.Segment` plus a readout plan,
 2. **evolve** the Bloch vector through those segments (4x4 augmented affine
    propagator, with closed-form free-evolution segments) to an excited population
-   `P_e`; within a round the
+   `P_e`; the equilibrium population is derived from `SimParams.Temp` and the
+   operating `f_qubit`; within a round the
    engine carries each rep's post-readout state through `relax_delay` into the
    next rep,
 3. **read out** dispersively as two state-conditioned blobs — `s_g = S21(rf_g)`
@@ -132,13 +133,16 @@ every coupling point.
 ## Module map
 
 - `params.py` — `SimParams`: the physical parameter container (EJ/EC/EL, flux
-  alignment, T1/T2/T2_star/thermal_pop, bare_rf/g/Ql/Qi, base `snr`,
+  alignment, T1/T2/T2_star/Temp, bare_rf/g/Ql/Qi, base `snr`,
   `readout_gain_noise_per_gain`, pi_gain_len, explicit
   `readout_photons_per_gain2`, seed),
-  with the `0 < T2_star ≤ T2 ≤ 2·T1` validators and the derived
-  `inhomogeneous_rate` (Γ). Also carries `poll_latency` (seconds/element, default
+  with the `0 < T2_star ≤ T2 ≤ 2·T1` validators, the derived
+  `inhomogeneous_rate` (Γ), and a pure Boltzmann helper that converts `Temp` plus
+  caller-supplied operating `f_qubit` into equilibrium excited population. Also
+  carries `poll_latency` (seconds/element, default
   1e-7): synthetic pacing for `MockQickSoc.poll_data`, not physics — set to 0.0 to
-  skip the sleep entirely (e.g. in tests). Data + validation only, no physics logic.
+  skip the sleep entirely (e.g. in tests). Data + validation only; no flux,
+  predictor, sweep, or timeline logic.
 - `bloch.py` — leaf TLS optical-Bloch propagator: segment generator, segment
   propagator, `evolve`, ground/excited helpers. Undriven free-evolution segments
   use the same closed-form affine solution as the full matrix exponential. Imports
@@ -280,7 +284,8 @@ every coupling point.
   sweeps are still expected to prefer their upper bounds in this first-order
   model: resonator ring-up and trigger-alignment penalties are not modeled.
 - **`relax_delay` carries state within a round.** A round initializes the qubit
-  state once at thermal equilibrium.  Each rep evolves through the lowered
+  state once at the Boltzmann equilibrium population from `Temp` and the operating
+  qubit frequency.  Each rep evolves through the lowered
   pre-readout timeline, is read out without stochastic collapse in the density-only
   model, then passively evolves for `ProgramV2Cfg.relax_delay` before the next rep
   starts. Short `relax_delay` therefore makes repeated pulses a continuous-rep

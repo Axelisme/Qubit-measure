@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-04 — autofluxdep lenrabi feedback
+**Last updated:** 2026-07-04 — simulator Temp helper tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -200,6 +200,8 @@ result = _optimize_tree(root, [SomePass()], ctx)
 
 ### Program v2 simulator tests
 
+`tests/program/v2/sim/test_params.py` 擁有 `SimParams` validation、coherence helper 與
+`Temp` + operating qubit frequency 到 Boltzmann equilibrium population 的純 helper 測試。
 `tests/program/v2/sim/test_engine.py` 放 public simulator behavior：physics shape、spectroscopy/Rabi/T1/T2、single-shot blob、readout scaling、decimated trace 與 branch smoke。若測試需要 spy private `SimEngine` helper、numba routing、cooperative cancel 或 optimization call count，放在 `test_engine_optimization_contract.py`，並在 test name / docstring 說清楚它是白箱 optimization contract。
 
 ### Experiment v2 GUI adapter tests

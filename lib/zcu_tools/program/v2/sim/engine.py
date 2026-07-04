@@ -202,6 +202,7 @@ class _PointModel:
     signal_scale: float
     noise_std_scale: float
     gain_noise_std_scale: float
+    equilibrium_pop: float
     pre_readout_props: tuple[NDArray[np.float64], ...]
     inter_shot_props: tuple[NDArray[np.float64], ...]
 
@@ -302,7 +303,7 @@ def _sequence_propagator(segments: list[bloch.Segment]) -> NDArray[np.float64]:
             seg.t,
             seg.t1,
             seg.t2,
-            seg.thermal_pop,
+            seg.equilibrium_pop,
         )
         prop = step @ prop
     return prop
@@ -333,7 +334,6 @@ def _population_chain_cache_key(
     reps: int,
     nreads: int,
     weights: NDArray[np.float64],
-    thermal_pop: float,
 ) -> bytes:
     """Content key for a deterministic population chain within one signal grid."""
 
@@ -343,7 +343,7 @@ def _population_chain_cache_key(
         dtype=np.int64,
     )
     hasher.update(header.tobytes())
-    hasher.update(np.array([thermal_pop], dtype=np.float64).tobytes())
+    hasher.update(np.array([model.equilibrium_pop], dtype=np.float64).tobytes())
 
     def update_array(values: NDArray[np.float64]) -> None:
         contiguous = np.ascontiguousarray(values)
@@ -535,6 +535,7 @@ class SimEngine:
         loop_dims = self.program.loop_dims
         assert loop_dims is not None  # guaranteed by __init__; reasserted for typing
         reps = loop_dims[0]
+        equilibrium_pop = self.sim.equilibrium_excited_population(f_qubit_ghz)
 
         s_g_grid = np.empty((*sweep_dims, nreads), dtype=np.complex128)
         s_e_grid = np.empty((*sweep_dims, nreads), dtype=np.complex128)
@@ -579,7 +580,7 @@ class SimEngine:
             else:
                 evolution_cache_hits += 1
 
-            model = self._point_model(readout, evolution)
+            model = self._point_model(readout, evolution, equilibrium_pop)
             gil_yield()
             idx = (*multi_index, slice(None))
             s_g_grid[idx] = model.s_g
@@ -594,7 +595,6 @@ class SimEngine:
                 reps,
                 nreads,
                 self._detune_weights,
-                self.sim.thermal_pop,
             )
             population_items.append((p_idx, chain_key, model))
         point_model_ms = elapsed_ms(point_model_start)
@@ -771,7 +771,11 @@ class SimEngine:
         )
 
     @staticmethod
-    def _point_model(readout: _PointReadout, evolution: _EvolutionProps) -> _PointModel:
+    def _point_model(
+        readout: _PointReadout,
+        evolution: _EvolutionProps,
+        equilibrium_pop: float,
+    ) -> _PointModel:
         """Combine readout and evolution internals into one cache item."""
 
         return _PointModel(
@@ -780,6 +784,7 @@ class SimEngine:
             signal_scale=readout.signal_scale,
             noise_std_scale=readout.noise_std_scale,
             gain_noise_std_scale=readout.gain_noise_std_scale,
+            equilibrium_pop=equilibrium_pop,
             pre_readout_props=evolution.pre_readout_props,
             inter_shot_props=evolution.inter_shot_props,
         )
@@ -803,7 +808,7 @@ class SimEngine:
 
         profile_start = perf_now()
         p_e = np.empty((reps, nreads), dtype=np.float64)
-        z0 = 2.0 * self.sim.thermal_pop - 1.0
+        z0 = 2.0 * model.equilibrium_pop - 1.0
         actual_use_numba = False
 
         try:
@@ -833,7 +838,7 @@ class SimEngine:
                     pre_props,
                     relax_props,
                     self._detune_weights,
-                    self.sim.thermal_pop,
+                    model.equilibrium_pop,
                     reps,
                     nreads,
                 )
@@ -1177,9 +1182,8 @@ class SimEngine:
         point: dict[str, int] = {}
         lowered = self._lower(point, f_qubit_ghz, 0.0)
         self._raise_if_cancelled()
-        v_final = bloch.evolve(
-            bloch.ground_state(self.sim.thermal_pop), lowered.segments
-        )
+        equilibrium_pop = self.sim.equilibrium_excited_population(f_qubit_ghz)
+        v_final = bloch.evolve(bloch.ground_state(equilibrium_pop), lowered.segments)
         p_e = float(np.clip(bloch.excited_population(v_final), 0.0, 1.0))
 
         # Readout window geometry from the single readout module + compiled ro_chs.

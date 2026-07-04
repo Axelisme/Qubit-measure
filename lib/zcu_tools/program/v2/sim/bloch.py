@@ -23,7 +23,7 @@ Affine ODE ``v' = M v + b`` with::
     M = [[-gamma2,   -delta,      omega*sin(phase)],
          [  delta,   -gamma2,    -omega*cos(phase)],
          [-omega*sin(phase), omega*cos(phase), -gamma1]]
-    b = [0, 0, z_eq * gamma1],   z_eq = 2*thermal_pop - 1
+    b = [0, 0, z_eq * gamma1],   z_eq = 2*equilibrium_pop - 1
 
 The segment propagator is ``P = expm(G * t)`` where ``G`` is the 4x4 augmented
 generator ``[[M, b], [0, 0]]``; then ``[v_out, 1] = P @ [v_in, 1]``.
@@ -59,21 +59,21 @@ def bloch_generator(
     phase: float,
     t1: float | None,
     t2: float | None,
-    thermal_pop: float = 0.0,
+    equilibrium_pop: float = 0.0,
 ) -> NDArray[np.float64]:
     """Return the 4x4 augmented generator ``G = [[M, b], [0, 0]]``.
 
     ``omega`` is the Rabi rate, ``delta = omega_qubit - omega_drive`` the
     detuning, ``phase`` the drive phase. ``t1``/``t2`` are coherence times (None
-    or <=0 means no decay). ``thermal_pop`` is the equilibrium excited
-    population, so ``z_eq = 2*thermal_pop - 1``.
+    or <=0 means no decay). ``equilibrium_pop`` is the equilibrium excited
+    population, so ``z_eq = 2*equilibrium_pop - 1``.
     """
 
     gamma1 = _rate(t1)
     gamma2 = _rate(t2)
     sin_p = np.sin(phase)
     cos_p = np.cos(phase)
-    z_eq = 2.0 * thermal_pop - 1.0
+    z_eq = 2.0 * equilibrium_pop - 1.0
 
     gen = np.zeros((4, 4), dtype=np.float64)
     gen[0, 0] = -gamma2
@@ -94,7 +94,7 @@ def _idle_segment_propagator(
     t: float,
     t1: float | None,
     t2: float | None,
-    thermal_pop: float,
+    equilibrium_pop: float,
 ) -> NDArray[np.float64]:
     """Return the closed-form propagator for an undriven segment."""
 
@@ -106,7 +106,7 @@ def _idle_segment_propagator(
     z_decay = math.exp(-gamma1 * duration)
     cos_angle = math.cos(angle)
     sin_angle = math.sin(angle)
-    z_eq = 2.0 * thermal_pop - 1.0
+    z_eq = 2.0 * equilibrium_pop - 1.0
 
     prop = np.zeros((4, 4), dtype=np.float64)
     prop[0, 0] = xy_decay * cos_angle
@@ -126,7 +126,7 @@ def segment_propagator(
     t: float,
     t1: float | None,
     t2: float | None,
-    thermal_pop: float = 0.0,
+    equilibrium_pop: float = 0.0,
 ) -> NDArray[np.float64]:
     """Return the 4x4 affine propagator ``expm(G * t)`` for one segment.
 
@@ -136,9 +136,9 @@ def segment_propagator(
     """
 
     if omega == 0.0:
-        return _idle_segment_propagator(delta, t, t1, t2, thermal_pop)
+        return _idle_segment_propagator(delta, t, t1, t2, equilibrium_pop)
 
-    gen = bloch_generator(omega, delta, phase, t1, t2, thermal_pop)
+    gen = bloch_generator(omega, delta, phase, t1, t2, equilibrium_pop)
     # expm's stub returns a loose float union; coerce to the float64 we promise.
     return np.asarray(expm(gen * float(t)), dtype=np.float64)
 
@@ -152,7 +152,7 @@ class Segment(NamedTuple):
     t: float
     t1: float | None
     t2: float | None
-    thermal_pop: float = 0.0
+    equilibrium_pop: float = 0.0
 
 
 def evolve(
@@ -176,20 +176,26 @@ def evolve(
 
     for seg in segments:
         prop = segment_propagator(
-            seg.omega, seg.delta, seg.phase, seg.t, seg.t1, seg.t2, seg.thermal_pop
+            seg.omega,
+            seg.delta,
+            seg.phase,
+            seg.t,
+            seg.t1,
+            seg.t2,
+            seg.equilibrium_pop,
         )
         aug = prop @ aug
 
     return aug[:3].copy()
 
 
-def ground_state(thermal_pop: float = 0.0) -> NDArray[np.float64]:
+def ground_state(equilibrium_pop: float = 0.0) -> NDArray[np.float64]:
     """Return the thermal steady state ``(0, 0, z_eq)`` with ``z_eq = 2*p - 1``.
 
-    With ``thermal_pop = 0`` this is the pure ground state ``z = -1``.
+    With ``equilibrium_pop = 0`` this is the pure ground state ``z = -1``.
     """
 
-    return np.array([0.0, 0.0, 2.0 * thermal_pop - 1.0], dtype=np.float64)
+    return np.array([0.0, 0.0, 2.0 * equilibrium_pop - 1.0], dtype=np.float64)
 
 
 def excited_population(v: NDArray[np.float64]) -> float:

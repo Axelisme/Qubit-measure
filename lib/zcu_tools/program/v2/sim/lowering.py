@@ -340,6 +340,7 @@ def _drive_amp_segments(
 def _pulse_segments(
     cfg: PulseCfg,
     sim: SimParams,
+    equilibrium_pop: float,
     f_qubit_mhz: float,
     frame_detuning: float,
     detune_offset: float,
@@ -380,7 +381,7 @@ def _pulse_segments(
 
     segments: list[Segment] = []
     if pre_delay > 0.0:
-        segments.append(_idle_segment(sim, pre_delay, idle_detuning))
+        segments.append(_idle_segment(sim, equilibrium_pop, pre_delay, idle_detuning))
     for dur, amp in zip(durs, amps):
         segments.append(
             Segment(
@@ -390,15 +391,17 @@ def _pulse_segments(
                 t=dur,
                 t1=sim.T1,
                 t2=sim.T2,
-                thermal_pop=sim.thermal_pop,
+                equilibrium_pop=equilibrium_pop,
             )
         )
     if post_delay > 0.0:
-        segments.append(_idle_segment(sim, post_delay, idle_detuning))
+        segments.append(_idle_segment(sim, equilibrium_pop, post_delay, idle_detuning))
     return segments
 
 
-def _idle_segment(sim: SimParams, t: float, frame_detuning: float) -> Segment:
+def _idle_segment(
+    sim: SimParams, equilibrium_pop: float, t: float, frame_detuning: float
+) -> Segment:
     """A free-evolution (Omega = 0) segment of duration ``t`` µs.
 
     ``frame_detuning`` (rad/µs) is the single-frame precession rate
@@ -414,13 +417,14 @@ def _idle_segment(sim: SimParams, t: float, frame_detuning: float) -> Segment:
         t=t,
         t1=sim.T1,
         t2=sim.T2,
-        thermal_pop=sim.thermal_pop,
+        equilibrium_pop=equilibrium_pop,
     )
 
 
 def _reset_segments(
     module: Module,
     sim: SimParams,
+    equilibrium_pop: float,
     f_qubit_mhz: float,
     frame_detuning: float,
     detune_offset: float,
@@ -446,6 +450,7 @@ def _reset_segments(
         return _pulse_segments(
             module.cfg.pulse_cfg,
             sim,
+            equilibrium_pop,
             f_qubit_mhz,
             frame_detuning,
             detune_offset,
@@ -461,6 +466,7 @@ def _reset_segments(
         return _pulse_segments(
             module.cfg.pulse1_cfg,
             sim,
+            equilibrium_pop,
             f_qubit_mhz,
             frame_detuning,
             detune_offset,
@@ -469,6 +475,7 @@ def _reset_segments(
         ) + _pulse_segments(
             module.cfg.pulse2_cfg,
             sim,
+            equilibrium_pop,
             f_qubit_mhz,
             frame_detuning,
             detune_offset,
@@ -481,6 +488,7 @@ def _reset_segments(
             _pulse_segments(
                 module.cfg.cavity_tone_cfg,
                 sim,
+                equilibrium_pop,
                 f_qubit_mhz,
                 frame_detuning,
                 detune_offset,
@@ -490,6 +498,7 @@ def _reset_segments(
             + _pulse_segments(
                 module.cfg.qubit_tone_cfg,
                 sim,
+                equilibrium_pop,
                 f_qubit_mhz,
                 frame_detuning,
                 detune_offset,
@@ -499,6 +508,7 @@ def _reset_segments(
             + _pulse_segments(
                 module.cfg.pi2_cfg,
                 sim,
+                equilibrium_pop,
                 f_qubit_mhz,
                 frame_detuning,
                 detune_offset,
@@ -515,6 +525,7 @@ def _reset_segments(
 def _delay_segment(
     module: Delay | DelayAuto | SoftDelay,
     sim: SimParams,
+    equilibrium_pop: float,
     idle_detuning: float,
     loop_counts: dict[str, int],
     point: dict[str, int],
@@ -533,7 +544,13 @@ def _delay_segment(
 
     if isinstance(module, DelayAuto) and isinstance(module.t, str):
         return _dmem_delay_segment(
-            module, sim, idle_detuning, point, dmem_tables, cycles2us
+            module,
+            sim,
+            equilibrium_pop,
+            idle_detuning,
+            point,
+            dmem_tables,
+            cycles2us,
         )
 
     # DelayAuto stores its (non-register) duration in `.t`; Delay and SoftDelay
@@ -546,12 +563,13 @@ def _delay_segment(
     else:
         raw_t = module.delay
     t = _resolve_scalar(raw_t, loop_counts, point)
-    return _idle_segment(sim, t, idle_detuning)
+    return _idle_segment(sim, equilibrium_pop, t, idle_detuning)
 
 
 def _dmem_delay_segment(
     module: DelayAuto,
     sim: SimParams,
+    equilibrium_pop: float,
     idle_detuning: float,
     point: dict[str, int],
     dmem_tables: dict[str, _DmemTable],
@@ -587,7 +605,7 @@ def _dmem_delay_segment(
 
     cycles = _dmem_table_value(val_reg, table, point)
     t_us = float(cycles2us(int(cycles)))  # type: ignore[operator]
-    return _idle_segment(sim, t_us, idle_detuning)
+    return _idle_segment(sim, equilibrium_pop, t_us, idle_detuning)
 
 
 @dataclass(frozen=True)
@@ -911,7 +929,7 @@ def lower_point(
         The sweep axes as ``[(name, SweepCfg | count), ...]`` (outermost first),
         or None for an unswept program.
     sim
-        Physical parameters (T1/T2/thermal_pop/pi_gain_len are read here).
+        Physical parameters (T1/T2/Temp/pi_gain_len are read here).
     f_qubit_ghz
         The qubit 0->1 transition frequency in GHz at the current flux, computed
         by the engine.  Lowering never derives this itself.
@@ -943,6 +961,7 @@ def lower_point(
     sweep = sweep or []
     loop_counts = _loop_counts(sweep)
     f_qubit_mhz = f_qubit_ghz * _GHZ_TO_MHZ
+    equilibrium_pop = sim.equilibrium_excited_population(f_qubit_ghz)
 
     dmem_tables = _collect_dmem_values(modules)
     frame_detuning = _frame_detuning(modules, f_qubit_mhz, loop_counts, point)
@@ -972,6 +991,7 @@ def lower_point(
                 _lower_module(
                     sub,
                     sim,
+                    equilibrium_pop,
                     f_qubit_mhz,
                     frame_detuning,
                     detune_offset,
@@ -986,6 +1006,7 @@ def lower_point(
         _lower_module(
             module,
             sim,
+            equilibrium_pop,
             f_qubit_mhz,
             frame_detuning,
             detune_offset,
@@ -1029,13 +1050,15 @@ def inter_shot_relax_segment(
     sweep = sweep or []
     loop_counts = _loop_counts(sweep)
     f_qubit_mhz = f_qubit_ghz * _GHZ_TO_MHZ
+    equilibrium_pop = sim.equilibrium_excited_population(f_qubit_ghz)
     frame_detuning = _frame_detuning(modules, f_qubit_mhz, loop_counts, point)
-    return _idle_segment(sim, duration, frame_detuning + detune_offset)
+    return _idle_segment(sim, equilibrium_pop, duration, frame_detuning + detune_offset)
 
 
 def _lower_module(
     module: Module,
     sim: SimParams,
+    equilibrium_pop: float,
     f_qubit_mhz: float,
     frame_detuning: float,
     detune_offset: float,
@@ -1064,6 +1087,7 @@ def _lower_module(
             _reset_segments(
                 module,
                 sim,
+                equilibrium_pop,
                 f_qubit_mhz,
                 frame_detuning,
                 detune_offset,
@@ -1079,6 +1103,7 @@ def _lower_module(
             _pulse_segments(
                 module.cfg,
                 sim,
+                equilibrium_pop,
                 f_qubit_mhz,
                 frame_detuning,
                 detune_offset,
@@ -1092,6 +1117,7 @@ def _lower_module(
             _delay_segment(
                 module,
                 sim,
+                equilibrium_pop,
                 idle_detuning,
                 loop_counts,
                 point,

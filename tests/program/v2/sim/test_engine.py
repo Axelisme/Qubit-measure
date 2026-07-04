@@ -575,7 +575,7 @@ def test_engine_singleshot_two_blobs_centers():
     excited = _singleshot_raw(gain=1.0, length=_SIM.pi_gain_len)
     excited_med = np.median(excited.real) + 1j * np.median(excited.imag)
 
-    # No pulse: P_e ~ thermal_pop ~ 0 => the |g> blob.
+    # No pulse: zero-temperature equilibrium keeps the |g> blob.
     ground = _singleshot_raw(gain=0.0, length=0.0)
     ground_med = np.median(ground.real) + 1j * np.median(ground.imag)
 
@@ -713,7 +713,7 @@ def _normalized_ground_raw_direct(
 ) -> tuple[NDArray[np.complex128], int]:
     """Run a ground-state DirectReadout and return raw samples divided by length."""
 
-    sim = _SIM.model_copy(update={"snr": 25.0, "thermal_pop": 0.0})
+    sim = _SIM.model_copy(update={"snr": 25.0})
     soc, soccfg = make_mock_soc(sim=sim)
     ro_freq = _rf_g_mhz()
     readout = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq).build(
@@ -861,7 +861,6 @@ def test_engine_pulse_readout_gain_scales_raw_blob_centers():
     sim = _SIM.model_copy(
         update={
             "snr": 1.0e9,
-            "thermal_pop": 0.0,
             "readout_photons_per_gain2": 1.0,
         }
     )
@@ -884,7 +883,6 @@ def test_engine_readout_gain_noise_scales_with_pulse_readout_gain() -> None:
     sim = _SIM.model_copy(
         update={
             "snr": 1.0e9,
-            "thermal_pop": 0.0,
             "readout_gain_noise_per_gain": 0.03,
         }
     )
