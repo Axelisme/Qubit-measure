@@ -6,6 +6,8 @@ Public simulator physics and shape behavior stays in ``test_engine.py``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -35,6 +37,31 @@ from .test_engine import (
     _readout,
     _rf_g_mhz,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_segment_propagator_lru() -> Iterator[None]:
+    engine_module._cached_segment_propagator.cache_clear()
+    yield
+    engine_module._cached_segment_propagator.cache_clear()
+
+
+def _segment(
+    *,
+    delta: float = 0.0,
+    equilibrium_pop: float = 0.0,
+    omega: float = 0.0,
+    duration: float = 0.2,
+) -> Segment:
+    return Segment(
+        omega=omega,
+        delta=delta,
+        phase=0.1,
+        t=duration,
+        t1=20.0,
+        t2=10.0,
+        equilibrium_pop=equilibrium_pop,
+    )
 
 
 def test_engine_compute_round_supports_multiple_read_triggers() -> None:
@@ -158,6 +185,108 @@ def test_acquire_stop_checker_is_checked_only_after_mock_round(
         "acquire-level stop checker should stop after the first completed round, "
         f"not before mock round compute; got rounds {calls}"
     )
+
+
+def test_segment_propagator_lru_reuses_identical_resolved_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Segment propagator LRU keys by resolved Segment content."""
+
+    calls = 0
+
+    def fake_segment_propagator(
+        omega: float,
+        delta: float,
+        phase: float,
+        t: float,
+        t1: float | None,
+        t2: float | None,
+        equilibrium_pop: float = 0.0,
+    ) -> NDArray[np.float64]:
+        del omega, delta, phase, t, t1, t2, equilibrium_pop
+        nonlocal calls
+        calls += 1
+        return np.eye(4, dtype=np.float64)
+
+    monkeypatch.setattr(
+        engine_module.bloch, "segment_propagator", fake_segment_propagator
+    )
+
+    segment = _segment(delta=0.25, equilibrium_pop=0.1)
+    first = engine_module._cached_segment_propagator(segment)
+    second = engine_module._cached_segment_propagator(segment)
+
+    assert calls == 1
+    assert first is second
+
+
+def test_segment_propagator_lru_key_includes_shifted_delta_and_equilibrium_pop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shifted detune and thermal equilibrium remain part of the LRU key."""
+
+    calls = 0
+
+    def fake_segment_propagator(
+        omega: float,
+        delta: float,
+        phase: float,
+        t: float,
+        t1: float | None,
+        t2: float | None,
+        equilibrium_pop: float = 0.0,
+    ) -> NDArray[np.float64]:
+        del omega, delta, phase, t, t1, t2, equilibrium_pop
+        nonlocal calls
+        calls += 1
+        return np.full((4, 4), calls, dtype=np.float64)
+
+    monkeypatch.setattr(
+        engine_module.bloch, "segment_propagator", fake_segment_propagator
+    )
+
+    base = _segment(delta=0.25, equilibrium_pop=0.1)
+    same = _segment(delta=0.25, equilibrium_pop=0.1)
+    shifted_delta = _segment(delta=0.30, equilibrium_pop=0.1)
+    shifted_equilibrium = _segment(delta=0.25, equilibrium_pop=0.2)
+
+    engine_module._cached_segment_propagator(base)
+    engine_module._cached_segment_propagator(same)
+    engine_module._cached_segment_propagator(shifted_delta)
+    engine_module._cached_segment_propagator(shifted_equilibrium)
+
+    assert calls == 3
+    assert engine_module._cached_segment_propagator.cache_info().currsize == 3
+
+
+def test_segment_propagator_lru_returns_readonly_value() -> None:
+    """Cached propagators are immutable to prevent cache corruption."""
+
+    prop = engine_module._cached_segment_propagator(_segment(delta=0.1))
+
+    assert prop.flags.writeable is False
+    with pytest.raises(ValueError):
+        prop[0, 0] = 2.0
+
+
+def test_sequence_prefix_cache_reuses_common_prefix() -> None:
+    """Per-grid sequence cache shares cumulative propagators by prefix."""
+
+    a = _segment(delta=0.0, duration=0.1)
+    b = _segment(delta=0.1, duration=0.2)
+    c = _segment(delta=0.2, duration=0.3)
+    d = _segment(delta=0.3, duration=0.4)
+    cache = engine_module._SequencePropagatorCache()
+
+    abc = cache.propagator((a, b, c))
+    assert cache.size == 4
+    abd = cache.propagator((a, b, d))
+
+    assert cache.size == 5
+    assert abc.flags.writeable is False
+    assert abd.flags.writeable is False
+    np.testing.assert_allclose(abc, engine_module._sequence_propagator((a, b, c)))
+    np.testing.assert_allclose(abd, engine_module._sequence_propagator((a, b, d)))
 
 
 def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(
@@ -408,6 +537,117 @@ def test_engine_scalar_population_chain_applies_readout_damping_before_relax() -
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
 
+def test_population_chain_q_post_one_skips_amplitude_damping_scalar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exact q_post identity still records pre-readout P_e before relaxing state."""
+
+    identity = np.eye(4, dtype=np.float64)
+    relax_to_ground = np.eye(4, dtype=np.float64)
+    relax_to_ground[2, 2] = 0.0
+    relax_to_ground[2, 3] = -1.0
+    model = _PointModel(
+        s_g=np.array([0.0 + 0.0j], dtype=np.complex128),
+        s_e=np.array([1.0 + 0.0j], dtype=np.complex128),
+        signal_scale=1.0,
+        noise_std_scale=1.0,
+        gain_noise_std_scale=0.0,
+        readout_q_post=1.0,
+        equilibrium_pop=1.0,
+        pre_readout_props=(identity,),
+        inter_shot_props=(relax_to_ground,),
+    )
+    engine = object.__new__(SimEngine)
+    engine._stop_checkers = ()
+    engine._detune_weights = np.ones(1, dtype=np.float64)
+
+    def fail_damping(_state: object, _q_post: object) -> NDArray[np.float64]:
+        raise AssertionError("exact q_post=1.0 should not call damping helper")
+
+    monkeypatch.setattr(
+        engine_module.bloch, "apply_amplitude_damping_augmented", fail_damping
+    )
+
+    actual = engine._point_population_chain(model, reps=3, nreads=1, use_numba=False)
+
+    expected = np.array([[1.0], [0.0], [0.0]], dtype=np.float64)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_population_chain_q_post_one_skips_amplitude_damping_batched_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The batched Python fallback treats exact q_post=1.0 as identity."""
+
+    identity = np.eye(4, dtype=np.float64)
+    model = _PointModel(
+        s_g=np.array([0.0 + 0.0j], dtype=np.complex128),
+        s_e=np.array([1.0 + 0.0j], dtype=np.complex128),
+        signal_scale=1.0,
+        noise_std_scale=1.0,
+        gain_noise_std_scale=0.0,
+        readout_q_post=1.0,
+        equilibrium_pop=1.0,
+        pre_readout_props=(identity, identity),
+        inter_shot_props=(identity, identity),
+    )
+    engine = object.__new__(SimEngine)
+    engine._stop_checkers = ()
+    engine._detune_weights = np.array([0.25, 0.75], dtype=np.float64)
+
+    def fail_damping(_state: object, _q_post: object) -> NDArray[np.float64]:
+        raise AssertionError("exact q_post=1.0 should not call damping helper")
+
+    monkeypatch.setattr(
+        engine_module.bloch, "apply_amplitude_damping_augmented", fail_damping
+    )
+
+    actual = engine._point_population_chain(model, reps=4, nreads=2, use_numba=False)
+
+    np.testing.assert_allclose(actual, np.ones((4, 2)), rtol=1e-12, atol=1e-12)
+
+
+def test_population_chain_q_post_near_one_still_uses_damping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Near-one q_post remains physical damping, not the identity fast path."""
+
+    calls = 0
+    real_damping = engine_module.bloch.apply_amplitude_damping_augmented
+
+    def spy_damping(
+        state: NDArray[np.float64],
+        q_post: float,
+    ) -> NDArray[np.float64]:
+        nonlocal calls
+        calls += 1
+        return real_damping(state, q_post)
+
+    monkeypatch.setattr(
+        engine_module.bloch, "apply_amplitude_damping_augmented", spy_damping
+    )
+
+    identity = np.eye(4, dtype=np.float64)
+    model = _PointModel(
+        s_g=np.array([0.0 + 0.0j], dtype=np.complex128),
+        s_e=np.array([1.0 + 0.0j], dtype=np.complex128),
+        signal_scale=1.0,
+        noise_std_scale=1.0,
+        gain_noise_std_scale=0.0,
+        readout_q_post=float(np.nextafter(1.0, 0.0)),
+        equilibrium_pop=1.0,
+        pre_readout_props=(identity,),
+        inter_shot_props=(identity,),
+    )
+    engine = object.__new__(SimEngine)
+    engine._stop_checkers = ()
+    engine._detune_weights = np.ones(1, dtype=np.float64)
+
+    engine._point_population_chain(model, reps=3, nreads=1, use_numba=False)
+
+    assert calls == 3
+
+
 def test_engine_reuses_evolution_lowering_for_readout_only_sweep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -576,6 +816,33 @@ def test_engine_skips_numba_when_population_work_is_small(
     engine._ensure_signal()
 
 
+def test_engine_skips_numba_for_small_single_node_population_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single-node work still falls back when below the dedicated threshold."""
+
+    def fail_numba(*_args: object, **_kwargs: object) -> NDArray[np.float64]:
+        raise AssertionError("small single-node work should not use numba")
+
+    monkeypatch.setattr(engine_module, "_NUMBA_MIN_SINGLE_NODE_WORK_UNITS", 10_000)
+    monkeypatch.setattr(engine_module, "_population_chain_numba", fail_numba)
+
+    _soc, soccfg = make_mock_soc(sim=_SIM)
+    sw = SweepCfg(start=_rf_g_mhz() - 2.0, stop=_rf_g_mhz() + 2.0, expts=3, step=2.0)
+    ro_param = sweep2param("ro_freq", sw)
+    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=4, rounds=1),
+        modules=[readout],
+        sweep=[("ro_freq", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, _SIM)
+    engine._ensure_signal()
+
+
 def test_engine_uses_numba_for_large_unique_population_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -624,6 +891,90 @@ def test_engine_uses_numba_for_large_unique_population_work(
     engine._ensure_signal()
 
     assert calls == sw.expts
+
+
+def test_engine_uses_numba_for_large_single_node_unique_population_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Large single-node unique qubit chains are routed through numba."""
+
+    calls = 0
+
+    def fake_numba(
+        _pre_props: NDArray[np.float64],
+        _relax_props: NDArray[np.float64],
+        _weights: NDArray[np.float64],
+        _equilibrium_pop: float,
+        _readout_q_post: float,
+        reps: int,
+        nreads: int,
+    ) -> NDArray[np.float64]:
+        nonlocal calls
+        calls += 1
+        return np.zeros((reps, nreads), dtype=np.float64)
+
+    monkeypatch.setattr(engine_module, "_NUMBA_MIN_SINGLE_NODE_WORK_UNITS", 1)
+    monkeypatch.setattr(engine_module, "_population_chain_numba", fake_numba)
+
+    _soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+    sw = SweepCfg(start=0.1, stop=0.3, expts=3, step=0.1)
+    gain_param = sweep2param("gain", sw)
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=gain_param,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.5),
+    ).build("qub")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=4, rounds=1),
+        modules=[pulse, _readout(_rf_g_mhz())],
+        sweep=[("gain", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, _SIM)
+    engine._ensure_signal()
+
+    assert calls == sw.expts
+
+
+def test_engine_skips_numba_when_stop_checkers_are_registered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct/internal stop checkers keep the Python-loop cancellation boundary."""
+
+    def fail_numba(*_args: object, **_kwargs: object) -> NDArray[np.float64]:
+        raise AssertionError("stop-checker signal grids should not use numba")
+
+    monkeypatch.setattr(engine_module, "_NUMBA_MIN_SINGLE_NODE_WORK_UNITS", 1)
+    monkeypatch.setattr(engine_module, "_population_chain_numba", fail_numba)
+
+    _soc, soccfg = make_mock_soc(sim=_SIM)
+    f_qubit = _f_qubit_mhz()
+    sw = SweepCfg(start=0.1, stop=0.3, expts=3, step=0.1)
+    gain_param = sweep2param("gain", sw)
+    pulse = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=gain_param,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.5),
+    ).build("qub")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=4, rounds=1),
+        modules=[pulse, _readout(_rf_g_mhz())],
+        sweep=[("gain", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, _SIM, stop_checkers=[lambda: False])
+    engine._ensure_signal()
 
 
 def test_engine_batched_population_chain_matches_scalar_reference(

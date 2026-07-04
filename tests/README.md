@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-04 — simulator readout backaction tests
+**Last updated:** 2026-07-04 — simulator optimization contracts
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -210,7 +210,8 @@ spectroscopy/Rabi/T1/T2、single-shot blob、readout scaling、readout-induced b
 decimated trace 與 branch smoke。若測試需要 spy private `SimEngine` helper、numba
 routing、cooperative cancel、population cache key 或 optimization call count，放在
 `test_engine_optimization_contract.py`，並在 test name / docstring 說清楚它是白箱
-optimization contract。
+optimization contract。Segment propagator LRU、單次 signal-grid prefix sequence cache
+與 numba routing threshold 這類 private optimization contract 也放在同一檔。
 
 ### Experiment v2 GUI adapter tests
 

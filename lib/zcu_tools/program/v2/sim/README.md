@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-04 — Mock default temperature and readout backaction
+**Last updated:** 2026-07-04 — Population cache lifecycle
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -73,14 +73,17 @@ because the flux is fixed *for that acquire*; a per-point operating flux would h
 to move that call back into the loop.
 
 **Simulation caches stay internal to `SimEngine`.** Within one signal-grid build,
-the engine separates per-point readout blobs/scales from qubit-state evolution:
-sweep points that change only readout centers reuse the same pre-readout/inter-shot
-Bloch propagators and, when `q_post` is unchanged, the same rep-resolved `P_e`
-chain. PulseReadout gain or duration sweeps that change readout-induced
-post-state damping get distinct population chains, while qubit-drive sweeps still
-compute distinct chains because their propagators differ. These
-readout/evolution/population caches are private `SimEngine` implementation
-details, not seams exposed to callers or sibling modules.
+the engine separates per-point readout blobs/scales from qubit-state evolution.
+Resolved Bloch `Segment` propagators live in a bounded process-local hot cache,
+while cumulative sequence prefixes are cached only for the current signal-grid
+build. Sweep points that change only readout centers reuse the same
+pre-readout/inter-shot evolution and, when `q_post` is unchanged, the same
+rep-resolved `P_e` chain. PulseReadout gain or duration sweeps that change
+readout-induced post-state damping get distinct population chains because the
+population cache includes `q_post`; qubit-drive sweeps also compute distinct
+chains because their propagators differ. These readout/evolution/population
+caches are private `SimEngine` implementation details, not seams exposed to
+callers or sibling modules.
 
 **Mocksim CPU loops yield the process GIL cooperatively.** Autofluxdep RUN work is
 submitted to a dedicated `QThread`, but a Python/C-extension-heavy mock simulator
@@ -90,13 +93,15 @@ redraw events can run while the worker continues computing. This is only a
 responsiveness boundary; it does not make the mocksim path Qt-dependent or change
 the generated data.
 
-**Numba is an optional large-work kernel, not a mandatory dependency.** For
-multi-node detune ensembles with many distinct qubit state chains, `SimEngine`
-uses a sim-local numba kernel when the optional `client` dependency is installed;
-otherwise it falls back to the numpy/scalar path. No-dephasing and readout-only
-cached sweeps skip numba to avoid JIT/cache-load overhead. Python-level
-ThreadPool/joblib and numba `prange` parallel paths are not enabled because
-measured scheduling/pickle overhead exceeds the current kernel savings.
+**Numba is an optional large-work kernel, not a mandatory dependency.** For large
+sets of distinct qubit state chains, including both detune ensembles and
+single-node no-dephasing runs, `SimEngine` uses a sim-local numba kernel when the
+optional `client` dependency is installed; otherwise it falls back to the
+numpy/scalar path. Small work, cache-collapsed readout-only sweeps, and
+direct/internal runs with active stop checkers stay on the Python path to avoid
+JIT/cache-load overhead and preserve cooperative cancellation boundaries.
+Python-level ThreadPool/joblib and numba `prange` parallel paths are not enabled
+because measured scheduling/pickle overhead exceeds the current kernel savings.
 
 **Cooperative stop boundary.** Acquire-level `stop_checkers` stay owned by the
 real round loop's `finish_round()` path, matching hardware semantics: Stop and
@@ -196,9 +201,9 @@ every coupling point.
   exactly — a mathematical identity, not a per-experiment split (R-1 intact).
   The deterministic state chain reinitializes at each round boundary; inside a
   round, `relax_delay` passively evolves every detune node from one rep to the next.
-  Single-node chains use a scalar fast path; multi-node detune ensembles use a
-  batched numpy fallback or, for large unique-chain work, the optional numba
-  recurrence kernel.
+  Population-chain work uses a scalar or batched numpy fallback for small work and
+  direct/internal cancellation paths, and may use the optional numba recurrence
+  kernel for large unique-chain work.
 
 ## Design boundaries and known limits
 

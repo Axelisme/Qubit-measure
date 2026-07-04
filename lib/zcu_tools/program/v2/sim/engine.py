@@ -110,6 +110,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover - depends on optional ext
     _population_chain_numba = None
 
 _NUMBA_MIN_WORK_UNITS = 1_000_000
+_NUMBA_MIN_SINGLE_NODE_WORK_UNITS = 100_000
+_SEGMENT_PROPAGATOR_CACHE_SIZE = 4096
 
 # Default operating flux: reduced flux Phi/Phi0 = 1.0 (R-3).  This is the operating
 # point when no device is bound; the FLUX-AWARE-MOCK path (SimParams.flux_device,
@@ -291,22 +293,70 @@ def _evolution_axis_names(modules: Sequence[Any]) -> set[str]:
     return axes
 
 
-def _sequence_propagator(segments: list[bloch.Segment]) -> NDArray[np.float64]:
+@lru_cache(maxsize=_SEGMENT_PROPAGATOR_CACHE_SIZE)
+def _cached_segment_propagator(segment: bloch.Segment) -> NDArray[np.float64]:
+    """Return a read-only propagator for one resolved Bloch segment."""
+
+    prop = bloch.segment_propagator(
+        segment.omega,
+        segment.delta,
+        segment.phase,
+        segment.t,
+        segment.t1,
+        segment.t2,
+        segment.equilibrium_pop,
+    )
+    prop.setflags(write=False)
+    return prop
+
+
+class _SequencePropagatorCache:
+    """Per-signal-grid cumulative cache for shared sequence prefixes."""
+
+    def __init__(self) -> None:
+        identity = np.eye(4, dtype=np.float64)
+        identity.setflags(write=False)
+        self._cache: dict[tuple[bloch.Segment, ...], NDArray[np.float64]] = {
+            (): identity
+        }
+
+    @property
+    def size(self) -> int:
+        return len(self._cache)
+
+    def propagator(self, segments: Sequence[bloch.Segment]) -> NDArray[np.float64]:
+        prefix: tuple[bloch.Segment, ...] = ()
+        prop = self._cache[prefix]
+        for segment in segments:
+            next_prefix = prefix + (segment,)
+            cached = self._cache.get(next_prefix)
+            if cached is None:
+                cached = _cached_segment_propagator(segment) @ prop
+                cached.setflags(write=False)
+                self._cache[next_prefix] = cached
+            prefix = next_prefix
+            prop = cached
+        return prop
+
+
+def _sequence_propagator(segments: Sequence[bloch.Segment]) -> NDArray[np.float64]:
     """Return the affine propagator for a sequence of Bloch segments."""
 
     prop = np.eye(4, dtype=np.float64)
     for seg in segments:
-        step = bloch.segment_propagator(
-            seg.omega,
-            seg.delta,
-            seg.phase,
-            seg.t,
-            seg.t1,
-            seg.t2,
-            seg.equilibrium_pop,
-        )
+        step = _cached_segment_propagator(seg)
         prop = step @ prop
     return prop
+
+
+def _numba_min_work_units(node_count: int) -> int:
+    """Return the conservative numba routing threshold for a node count."""
+
+    if node_count <= 0:
+        raise ValueError(f"node_count must be positive, got {node_count}")
+    if node_count == 1:
+        return _NUMBA_MIN_SINGLE_NODE_WORK_UNITS
+    return _NUMBA_MIN_WORK_UNITS
 
 
 def _shift_segment_detuning(
@@ -554,6 +604,7 @@ class SimEngine:
         ]
         evolution_cache: dict[tuple[int, ...], _EvolutionProps] = {}
         evolution_cache_hits = 0
+        sequence_cache = _SequencePropagatorCache()
         gil_yield = _CooperativeYield()
 
         index_ranges = [range(count) for _, count in axes]
@@ -579,6 +630,7 @@ class SimEngine:
                     f_qubit_ghz,
                     zero_lowered,
                     yield_hook=gil_yield,
+                    sequence_cache=sequence_cache,
                 )
                 evolution_cache[evolution_key] = evolution
             else:
@@ -604,13 +656,12 @@ class SimEngine:
         point_model_ms = elapsed_ms(point_model_start)
 
         unique_population_keys = {chain_key for _, chain_key, _ in population_items}
-        numba_work_units = (
-            len(unique_population_keys) * reps * int(self._detune_weights.size)
-        )
+        node_count = int(self._detune_weights.size)
+        numba_work_units = len(unique_population_keys) * reps * node_count
         use_numba = (
             _population_chain_numba is not None
-            and self._detune_weights.size > 1
-            and numba_work_units >= _NUMBA_MIN_WORK_UNITS
+            and not self._stop_checkers
+            and numba_work_units >= _numba_min_work_units(node_count)
         )
 
         population_cache: dict[bytes, NDArray[np.float64]] = {}
@@ -632,7 +683,9 @@ class SimEngine:
                 f"evolution_axes={evolution_axis_order} "
                 f"evolution_cache_size={len(evolution_cache)} "
                 f"evolution_cache_hits={evolution_cache_hits} "
-                f"detune_nodes={self._detune_weights.size} use_numba={use_numba} "
+                f"prefix_cache_size={sequence_cache.size} "
+                f"detune_nodes={node_count} use_numba={use_numba} "
+                f"numba_work_units={numba_work_units} "
                 f"point_model_ms={point_model_ms:.1f} "
                 f"population_ms={population_ms:.1f} "
                 f"gil_yields={gil_yield.count}"
@@ -739,6 +792,7 @@ class SimEngine:
         lowered: LoweredPoint,
         *,
         yield_hook: Callable[[], None] | None = None,
+        sequence_cache: _SequencePropagatorCache | None = None,
     ) -> _EvolutionProps:
         """Return cached qubit-state propagators for one sweep point.
 
@@ -762,18 +816,29 @@ class SimEngine:
         for delta in self._detune_nodes:
             self._raise_if_cancelled()
             detune_offset = float(delta)
-            pre_readout_props.append(
-                _sequence_propagator(
-                    _shift_segments_detuning(lowered.segments, detune_offset)
-                )
+            shifted_segments = _shift_segments_detuning(lowered.segments, detune_offset)
+            pre_prop = (
+                sequence_cache.propagator(shifted_segments)
+                if sequence_cache is not None
+                else _sequence_propagator(shifted_segments)
             )
-            inter_shot_props.append(
-                np.eye(4, dtype=np.float64)
-                if relax_segment is None
-                else _sequence_propagator(
-                    [_shift_segment_detuning(relax_segment, detune_offset)]
+            pre_readout_props.append(pre_prop)
+            if relax_segment is None:
+                relax_prop = (
+                    sequence_cache.propagator(())
+                    if sequence_cache is not None
+                    else np.eye(4, dtype=np.float64)
                 )
-            )
+            else:
+                shifted_relax_segment = _shift_segment_detuning(
+                    relax_segment, detune_offset
+                )
+                relax_prop = (
+                    sequence_cache.propagator((shifted_relax_segment,))
+                    if sequence_cache is not None
+                    else _sequence_propagator((shifted_relax_segment,))
+                )
+            inter_shot_props.append(relax_prop)
             if yield_hook is not None:
                 yield_hook()
 
@@ -825,6 +890,20 @@ class SimEngine:
         actual_use_numba = False
 
         try:
+            if use_numba and _population_chain_numba is not None:
+                pre_props = np.stack(model.pre_readout_props, axis=0)
+                relax_props = np.stack(model.inter_shot_props, axis=0)
+                actual_use_numba = True
+                return _population_chain_numba(
+                    pre_props,
+                    relax_props,
+                    self._detune_weights,
+                    model.equilibrium_pop,
+                    model.readout_q_post,
+                    reps,
+                    nreads,
+                )
+
             if node_count == 1:
                 state = np.array([0.0, 0.0, z0, 1.0], dtype=np.float64)
                 pre_prop = model.pre_readout_props[0]
@@ -839,8 +918,12 @@ class SimEngine:
                     elif node_p > 1.0:
                         node_p = 1.0
                     p_e[rep_idx, :] = node_p
-                    after_readout = bloch.apply_amplitude_damping_augmented(
-                        at_readout, model.readout_q_post
+                    after_readout = (
+                        at_readout
+                        if model.readout_q_post == 1.0
+                        else bloch.apply_amplitude_damping_augmented(
+                            at_readout, model.readout_q_post
+                        )
                     )
                     state = relax_prop @ after_readout
 
@@ -848,18 +931,6 @@ class SimEngine:
 
             pre_props = np.stack(model.pre_readout_props, axis=0)
             relax_props = np.stack(model.inter_shot_props, axis=0)
-            if use_numba and _population_chain_numba is not None:
-                actual_use_numba = True
-                return _population_chain_numba(
-                    pre_props,
-                    relax_props,
-                    self._detune_weights,
-                    model.equilibrium_pop,
-                    model.readout_q_post,
-                    reps,
-                    nreads,
-                )
-
             states = np.empty((node_count, 4), dtype=np.float64)
             states[:, 0] = 0.0
             states[:, 1] = 0.0
@@ -873,8 +944,12 @@ class SimEngine:
                 np.clip(node_p, 0.0, 1.0, out=node_p)
                 p_mean = float(np.dot(self._detune_weights, node_p))
                 p_e[rep_idx, :] = p_mean
-                after_readout = bloch.apply_amplitude_damping_augmented(
-                    at_readout, model.readout_q_post
+                after_readout = (
+                    at_readout
+                    if model.readout_q_post == 1.0
+                    else bloch.apply_amplitude_damping_augmented(
+                        at_readout, model.readout_q_post
+                    )
                 )
                 states = np.einsum(
                     "nij,nj->ni", relax_props, after_readout, optimize=False

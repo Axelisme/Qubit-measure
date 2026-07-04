@@ -26,7 +26,8 @@ def _population_chain_serial_kernel(
         states[node_idx, 2] = z0
         states[node_idx, 3] = 1.0
 
-    sqrt_q_post = np.sqrt(readout_q_post)
+    identity_q_post = readout_q_post == 1.0
+    sqrt_q_post = 1.0 if identity_q_post else np.sqrt(readout_q_post)
     p_e = np.empty((reps, nreads), dtype=np.float64)
     for rep_idx in range(reps):
         p_mean = 0.0
@@ -49,10 +50,16 @@ def _population_chain_serial_kernel(
                 node_p = 1.0
             p_mean += weights[node_idx] * node_p
 
-            d0 = sqrt_q_post * r0
-            d1 = sqrt_q_post * r1
-            d2 = readout_q_post * r2 + (readout_q_post - 1.0) * r3
-            d3 = r3
+            if identity_q_post:
+                d0 = r0
+                d1 = r1
+                d2 = r2
+                d3 = r3
+            else:
+                d0 = sqrt_q_post * r0
+                d1 = sqrt_q_post * r1
+                d2 = readout_q_post * r2 + (readout_q_post - 1.0) * r3
+                d3 = r3
 
             relax = relax_props[node_idx]
             states[node_idx, 0] = (
@@ -95,7 +102,7 @@ def population_chain_numba(
     reps: int,
     nreads: int,
 ) -> NDArray[np.float64]:
-    """Run the JIT population-chain recurrence for a multi-node detune ensemble."""
+    """Run the JIT population-chain recurrence for a detune ensemble."""
 
     pre = np.ascontiguousarray(pre_props, dtype=np.float64)
     relax = np.ascontiguousarray(relax_props, dtype=np.float64)
