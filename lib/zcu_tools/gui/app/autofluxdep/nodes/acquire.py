@@ -35,6 +35,8 @@ from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)
 _ROUND_HOOK_PERF = PerfStats("worker.round_hook", logger, slow_ms=20.0)
+_DECAY_SCALAR_RESIDUAL_RATIO = 0.1
+_DECAY_SCALAR_MAX_SWEEP_FACTOR = 2.0
 
 
 def is_good_fit(
@@ -55,6 +57,34 @@ def is_good_fit(
         return False
     residual = float(np.mean(np.abs(np.asarray(real, dtype=np.float64) - fit)))
     return residual < threshold * span
+
+
+def is_trusted_decay_scalar_fit(
+    real: NDArray[np.float64],
+    fit_curve: NDArray[np.float64],
+    fit_scalar: float,
+    sweep_axis: NDArray[np.float64],
+) -> bool:
+    """Whether a T1/T2 scalar fit may be fed back downstream.
+
+    The legacy autofluxdep runner used a stricter success gate for scalar decay
+    feedback than qubit-frequency fits: residual below 10% of the fit span and a
+    fitted time no larger than twice the measured sweep window.
+    """
+    scalar = float(fit_scalar)
+    if not np.isfinite(scalar) or scalar <= 0.0:
+        return False
+
+    axis = np.asarray(sweep_axis, dtype=np.float64)
+    if axis.size == 0 or not np.all(np.isfinite(axis)):
+        return False
+    upper = float(np.max(axis))
+    if not np.isfinite(upper) or upper <= 0.0:
+        return False
+    if scalar > _DECAY_SCALAR_MAX_SWEEP_FACTOR * upper:
+        return False
+
+    return is_good_fit(real, fit_curve, threshold=_DECAY_SCALAR_RESIDUAL_RATIO)
 
 
 def axis_to_sweep(axis: NDArray[np.float64]) -> SweepCfg:
@@ -251,6 +281,7 @@ def fill_decay_fit_or_skip(
     result: Any,
     idx: int,
     real: NDArray[np.float64],
+    sweep_axis: NDArray[np.float64],
     fit_scalar: float,
     fit_curve: NDArray[np.float64],
     round_hook: Callable[[int], None] | None,
@@ -259,17 +290,14 @@ def fill_decay_fit_or_skip(
 ) -> bool:
     """Gate a single-scalar 1-D fit and fill (or skip) its Result row.
 
-    Shared by the single-key decay nodes (t1, lenrabi): an SNR-trough flux point
-    fits poorly (``is_good_fit`` False) — log it, fire the round_hook so the raw
-    row stays shown with nan fit fields, and return False so the caller returns a
-    partial ``Patch()`` (no downstream contamination). On a good fit, record the
+    Shared by the scalar decay nodes (t1/t2ramsey/t2echo): an SNR-trough or
+    unbounded flux point is rejected, the raw row stays shown with nan fit fields,
+    and the caller returns a partial ``Patch()``. On a trusted fit, record the
     scalar + curve and fire the round_hook, returning True so the caller builds its
     Patch. The node-specific success log (and any extra Patch keys/modules) stays
     in the caller; only the gate + row-fill bookkeeping is shared here."""
-    if not is_good_fit(real, fit_curve):
-        logger.debug(
-            "%s fit @flux%d: poor fit (SNR-trough?) — discarded", node_name, idx
-        )
+    if not is_trusted_decay_scalar_fit(real, fit_curve, fit_scalar, sweep_axis):
+        logger.debug("%s fit @flux%d: untrusted scalar fit — discarded", node_name, idx)
         if round_hook is not None:
             round_hook(idx)  # raw row already shown; fit fields stay nan
         return False

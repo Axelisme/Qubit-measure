@@ -12,7 +12,7 @@ translates the notebook's ``cfg_maker`` lambda + ``ctx.env`` walrus chain into:
   the predicted qubit freq, runs a real ``TwoToneProgram.acquire`` (against the
   flux-aware MockSoc offline or real hardware), fits it with ``fit_qubit_freq``,
   fills the Result's flux-idx row in place, notifies via the round_hook, and
-  returns the raw qubit_freq / fit_detune / fit_kappa / qfw_factor Patch.
+  returns the trusted raw Patch keys.
 
 Mirrors the lower-layer ground truth ``experiment/v2/autofluxdep/qubit_freq.py``:
 predict-centred drive freq, detune
@@ -22,10 +22,11 @@ predictor calibration closed loop.
 
 - ``predict_freq`` — required; provided by the predictor Service (a Builder
   whose Node computes it), resolved latest-available like any dependency.
-- ``fit_kappa`` — raw fit FWHM reported for diagnostics / downstream consumers.
-- ``qfw_factor`` — adaptive drive feedback, reported as ``fit_kappa / gain`` and
-  read back smoothed with the notebook's step-weighted rule to choose the next
-  drive gain.
+- ``fit_kappa`` — raw fit FWHM reported only when the stricter linewidth gate
+  trusts it for downstream consumers.
+- ``qfw_factor`` — adaptive drive feedback, conditionally reported as
+  ``fit_kappa / gain`` and read back smoothed with the notebook's step-weighted
+  rule to choose the next drive gain.
 - ``readout`` — optional module, Node-produced (ro_optimize) → ml preset →
   default.
 """
@@ -77,6 +78,8 @@ _DEFAULT_DETUNE_SWEEP = SweepValue(start=-20.0, stop=50.0, expts=141)
 _QFW_TARGET_KAPPA = 6.5
 _DEFAULT_QFW_SEED_GAIN = 0.05
 _DEFAULT_MAX_DRIVE_GAIN = 1.0
+_FREQ_FIT_RESIDUAL_RATIO = 0.2
+_LINEWIDTH_FIT_RESIDUAL_RATIO = 0.1
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
 
@@ -182,6 +185,32 @@ def detune_axis_to_sweep(detune: NDArray[np.float64]) -> SweepCfg:
     return SweepCfg(start=start, stop=stop, expts=expts, step=step)
 
 
+def _is_trusted_frequency_fit(
+    real: NDArray[np.float64], fit_curve: NDArray[np.float64]
+) -> bool:
+    return is_good_fit(real, fit_curve, threshold=_FREQ_FIT_RESIDUAL_RATIO)
+
+
+def _is_trusted_linewidth_fit(
+    fwhm: float,
+    detunes: NDArray[np.float64],
+    real: NDArray[np.float64],
+    fit_curve: NDArray[np.float64],
+) -> bool:
+    width = float(fwhm)
+    if not np.isfinite(width) or width <= 0.0:
+        return False
+
+    axis = np.asarray(detunes, dtype=np.float64)
+    if axis.size < 2 or not np.all(np.isfinite(axis)):
+        return False
+    span = float(np.ptp(axis))
+    if not np.isfinite(span) or span <= 0.0 or width > span:
+        return False
+
+    return is_good_fit(real, fit_curve, threshold=_LINEWIDTH_FIT_RESIDUAL_RATIO)
+
+
 class QubitFreqNode(Node):
     """One flux point's qubit_freq execution, environment curried in by build_node.
 
@@ -267,7 +296,7 @@ class QubitFreqNode(Node):
         # discarded — it does NOT enter the Result, does NOT feed the predictor,
         # and is omitted from the Patch so downstream falls back to the latest
         # good value (and the next point predicts from the last good calibration).
-        if not is_good_fit(real, fit_curve):
+        if not _is_trusted_frequency_fit(real, fit_curve):
             logger.debug(
                 "qubit_freq fit @flux%d: poor fit (SNR-trough?) — "
                 "discarded, no calibrate, no qubit_freq produced",
@@ -302,6 +331,15 @@ class QubitFreqNode(Node):
         patch = Patch()
         patch.set("qubit_freq", float(freq))
         patch.set("fit_detune", float(freq) - pred_qf)
+        if not _is_trusted_linewidth_fit(float(fwhm), detunes, real, fit_curve):
+            logger.debug(
+                "qubit_freq fit @flux%d: linewidth feedback rejected "
+                "(kappa=%.3f); frequency fit kept",
+                idx,
+                float(fwhm),
+            )
+            return patch
+
         patch.set("fit_kappa", float(fwhm))
         drive_gain = float(cfg.modules.qub_pulse.gain)
         if drive_gain <= 0.0:
@@ -372,9 +410,10 @@ class QubitFreqPlotter:
 class QubitFreqBuilder(Builder):
     """The qubit_freq provider — stateless; builds Result / Plotter / Nodes.
 
-    Reports RAW fit results (qubit_freq, fit_detune, fit_kappa) plus qfw_factor
-    feedback, and reads the readout MODULE. The provider never smooths its own
-    output; the orchestrator projects the smoothed qfw_factor into the next point.
+    Reports trusted raw fit results. Frequency keys (qubit_freq, fit_detune) use
+    the basic fit gate; linewidth feedback keys (fit_kappa, qfw_factor) use a
+    stricter gate. The provider never smooths its own output; the orchestrator
+    projects the smoothed qfw_factor into the next point.
     """
 
     name = "qubit_freq"

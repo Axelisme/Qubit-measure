@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 from collections.abc import MutableMapping
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -96,6 +97,16 @@ _RO_PROGRAM_BUILD_PERF = PerfStats(
     "worker.ro_optimize.program_build", logger, slow_ms=50.0
 )
 _RO_ACQUIRE_PERF = PerfStats("worker.ro_optimize.acquire", logger, slow_ms=50.0)
+_RO_MIN_LANDSCAPE_SPAN = 1e-12
+_RO_MIN_LOCAL_PROMINENCE_FRACTION = 1e-3
+
+
+@dataclass(frozen=True)
+class _RoOptimum:
+    freq_index: int
+    gain_index: int
+    freq: float
+    gain: float
 
 
 def _ro_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -126,6 +137,69 @@ def _ro_landscape(
         detail=f"shape={shape} snr_ms={snr_ms:.1f} smooth_ms={smooth_ms:.1f}",
     )
     return landscape
+
+
+def _accepted_ro_optimum(
+    landscape: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    gains: NDArray[np.float64],
+) -> _RoOptimum | None:
+    """Return a trustworthy interior readout optimum, or None for fallback.
+
+    The SNR map is already smoothed before it reaches this helper. A feedback point
+    is accepted only when the smoothed landscape has finite structure, a unique
+    interior maximum, and that maximum rises above its local neighbourhood.
+    """
+    snr = np.asarray(landscape, dtype=np.float64)
+    freq_axis = np.asarray(freqs, dtype=np.float64)
+    gain_axis = np.asarray(gains, dtype=np.float64)
+    if snr.shape != (freq_axis.size, gain_axis.size):
+        raise ValueError(
+            "ro_optimize landscape shape does not match axes: "
+            f"{snr.shape} vs ({freq_axis.size}, {gain_axis.size})"
+        )
+    if not np.all(np.isfinite(freq_axis)) or not np.all(np.isfinite(gain_axis)):
+        return None
+    if freq_axis.size < 3 or gain_axis.size < 3:
+        return None
+
+    finite = np.isfinite(snr)
+    if not np.any(finite):
+        return None
+    finite_values = snr[finite]
+    span = float(np.max(finite_values) - np.min(finite_values))
+    if not np.isfinite(span) or span <= _RO_MIN_LANDSCAPE_SPAN:
+        return None
+
+    masked = np.where(finite, snr, -np.inf)
+    best_value = float(np.max(masked))
+    best_locations = np.argwhere(masked == best_value)
+    if best_locations.shape[0] != 1:
+        return None
+    best_fi = int(best_locations[0, 0])
+    best_gi = int(best_locations[0, 1])
+    if best_fi in (0, freq_axis.size - 1) or best_gi in (0, gain_axis.size - 1):
+        return None
+
+    local = masked[best_fi - 1 : best_fi + 2, best_gi - 1 : best_gi + 2].copy()
+    local[1, 1] = -np.inf
+    local_neighbors = local[np.isfinite(local)]
+    if local_neighbors.size == 0:
+        return None
+    local_prominence = best_value - float(np.max(local_neighbors))
+    min_prominence = max(
+        _RO_MIN_LANDSCAPE_SPAN,
+        _RO_MIN_LOCAL_PROMINENCE_FRACTION * span,
+    )
+    if local_prominence < min_prominence:
+        return None
+
+    return _RoOptimum(
+        freq_index=best_fi,
+        gain_index=best_gi,
+        freq=float(freq_axis[best_fi]),
+        gain=float(gain_axis[best_gi]),
+    )
 
 
 # Default axis specs: (start, stop, npts). The readout-frequency fallback follows
@@ -387,11 +461,18 @@ class RoOptimizeNode(Node):
         )
         np.copyto(result.signal[idx], landscape)
 
-        # argmax: project onto each axis and take the index of the max
-        best_fi = int(np.argmax(landscape.max(axis=1)))
-        best_gi = int(np.argmax(landscape.max(axis=0)))
-        best_freq = float(freqs[best_fi])
-        best_gain = float(gains[best_gi])
+        optimum = _accepted_ro_optimum(landscape, freqs, gains)
+        if optimum is None:
+            logger.debug(
+                "ro_optimize @flux%d: untrusted SNR landscape — feedback omitted",
+                idx,
+            )
+            if env.round_hook is not None:
+                env.round_hook(idx)
+            return Patch()
+
+        best_freq = optimum.freq
+        best_gain = optimum.gain
 
         result.best_freq[idx] = best_freq
         result.best_gain[idx] = best_gain

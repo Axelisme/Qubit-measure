@@ -193,3 +193,130 @@ def test_good_fit_calibrates_the_predictor():
     # the predictor was calibrated at flux 0 toward the measured frequency
     assert predictor.predict_freq(0.0) != before
     assert abs(predictor.predict_freq(0.0) - values["qubit_freq"]) < 1e-6
+
+
+def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
+    from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq as qf_mod
+    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
+    from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
+
+    ctrl = build_core()
+    connect_mock(ctrl)
+    _configure_context(ctrl)
+
+    builder = QubitFreqBuilder()
+    schema = builder.make_default_schema().with_overrides(
+        {
+            "qub_ch": 1,
+            "qub_nqz": 1,
+            "qub_gain": 0.25,
+            "qub_length": 1.0,
+            "reps": 1,
+            "rounds": 1,
+            "relax_delay": 0.0,
+            "detune_sweep": SweepValue(start=-5.0, stop=5.0, expts=11),
+        }
+    )
+    result = builder.make_init_result(schema, np.array([0.0]))
+
+    class _DummyTwoToneProgram:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def acquire(self, *args, **kwargs):
+            del args, kwargs
+            return [[np.zeros((result.n_detune, 2), dtype=np.float64)]]
+
+    monkeypatch.setattr(qf_mod, "TwoToneProgram", _DummyTwoToneProgram)
+    monkeypatch.setattr(qf_mod, "setup_devices", lambda *args, **kwargs: None)
+    monkeypatch.setattr(qf_mod, "set_flux_by_name", lambda *args, **kwargs: None)
+    monkeypatch.setattr(qf_mod, "_signal2real", lambda _signals: real)
+    monkeypatch.setattr(qf_mod, "fit_qubit_freq", lambda _freqs, _real: fit_return)
+
+    predictor = SimplePredictor(base=600.0, slope=0.0)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        soc=ctrl.state.exp_context.soc,
+        soccfg=ctrl.state.exp_context.soccfg,
+        ml=ctrl.state.exp_context.ml,
+        flux_device=FAKE_FLUX_DEVICE_NAME,
+        result=result,
+        tools=Tools(predictor=predictor),
+    )
+    return builder, env, result, predictor
+
+
+def test_medium_fit_calibrates_predictor_without_linewidth_feedback(monkeypatch):
+    # A fit between the frequency and linewidth gates is still useful for centring
+    # the predictor, but its FWHM must not drive qfw_factor/gain feedback.
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+
+    fit_curve = np.linspace(0.0, 1.0, 11)
+    real = fit_curve + 0.15  # residual passes 0.2 gate, fails 0.1 gate.
+    builder, env, result, predictor = _mocked_qubit_freq_produce_env(
+        monkeypatch,
+        real,
+        (605.0, 0.0, 4.0, 0.0, fit_curve, None),
+    )
+    before = predictor.predict_freq(0.0)
+    patch = builder.build_node(env).produce(
+        Snapshot(
+            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
+        )
+    )
+
+    values = patch.values()
+    assert values["qubit_freq"] == 605.0
+    assert values["fit_detune"] == 5.0
+    assert "fit_kappa" not in values
+    assert "qfw_factor" not in values
+    assert result.fit_freq[0] == 605.0
+    assert predictor.predict_freq(0.0) != before
+    assert abs(predictor.predict_freq(0.0) - 605.0) < 1e-6
+
+
+def test_poor_fit_skips_patch_and_predictor_calibration(monkeypatch):
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+
+    fit_curve = np.linspace(0.0, 1.0, 11)
+    real = fit_curve + 0.25  # residual fails the 0.2 frequency gate.
+    builder, env, result, predictor = _mocked_qubit_freq_produce_env(
+        monkeypatch,
+        real,
+        (605.0, 0.0, 4.0, 0.0, fit_curve, None),
+    )
+    before = predictor.predict_freq(0.0)
+
+    patch = builder.build_node(env).produce(
+        Snapshot(
+            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
+        )
+    )
+
+    assert patch.values() == {}
+    assert np.isnan(result.fit_freq[0])
+    assert predictor.predict_freq(0.0) == before
+
+
+def test_linewidth_gate_rejects_invalid_width_and_window_bounds():
+    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import _is_trusted_linewidth_fit
+
+    detunes = np.linspace(-5.0, 5.0, 11)
+    fit_curve = np.linspace(0.0, 1.0, detunes.size)
+    real = fit_curve
+
+    assert _is_trusted_linewidth_fit(4.0, detunes, real, fit_curve)
+    assert not _is_trusted_linewidth_fit(0.0, detunes, real, fit_curve)
+    assert not _is_trusted_linewidth_fit(-1.0, detunes, real, fit_curve)
+    assert not _is_trusted_linewidth_fit(float("nan"), detunes, real, fit_curve)
+    assert not _is_trusted_linewidth_fit(11.0, detunes, real, fit_curve)
+
+    nonfinite_detunes = detunes.copy()
+    nonfinite_detunes[0] = np.nan
+    assert not _is_trusted_linewidth_fit(4.0, nonfinite_detunes, real, fit_curve)
+    assert not _is_trusted_linewidth_fit(
+        4.0, np.array([0.0], dtype=np.float64), real[:1], fit_curve[:1]
+    )

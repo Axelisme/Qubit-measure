@@ -136,11 +136,17 @@ class InfoStore:
         """Snapshot the just-finished point into ``prev`` then clear for next."""
         if self.point:
             self.prev = dict(self.point)
-            self.prev_smoothed = dict(self.point_smoothed)
+            if self.point_smoothed:
+                self.prev_smoothed = dict(self.point_smoothed)
             self.module_prev = dict(self.module_point)
         self.point = {}
         self.point_smoothed = {}
         self.module_point = {}
+
+    def record_smoothed(self, smoothed: Mapping[str, Any]) -> None:
+        """Project this point's smoothed values with last-good carry-forward."""
+        self.point_smoothed = dict(self.prev_smoothed)
+        self.point_smoothed.update(smoothed)
 
     def latest(self, key: str, *, smoothed: bool) -> Any:
         """Latest available value for ``key``, or the sentinel ``_MISSING``.
@@ -149,8 +155,8 @@ class InfoStore:
         previous point — a smoothed value is necessarily the previous point's
         estimate, because the SmoothingService derives this point's smoothed
         value only AFTER every Node has run (it needs all raw outputs). So while
-        Nodes execute, ``point_smoothed`` is still empty; a smoothing consumer
-        inherently reads the carried-over estimate.
+        Nodes execute, smoothing consumers read the latest trusted carried-over
+        estimate.
         """
         if smoothed:
             return self.prev_smoothed.get(key, _MISSING)
@@ -468,7 +474,7 @@ class Orchestrator:
                 )
             if self._smoothing is not None:
                 smoothed = self._smoothing.derive(info.point)
-                info.point_smoothed.update(smoothed)
+                info.record_smoothed(smoothed)
                 if smoothed:
                     logger.debug("  smoothed: %s", smoothed)
             for svc in self.derivations:

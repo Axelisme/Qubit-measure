@@ -60,7 +60,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
-    is_good_fit,
+    fill_decay_fit_or_skip,
     make_on_round,
     require_flux_device,
     round_progress,
@@ -268,18 +268,18 @@ class T2RamseyNode(Node):
         t2f, _, detune, _, fit_curve, _ = fit_decay_fringe(times, real)
         detune = detune - activate_detune  # back out the applied activate-detune
 
-        if not is_good_fit(real, fit_curve):
-            logger.debug(
-                "t2ramsey fit @flux%d: poor fit (SNR-trough?) — discarded", idx
-            )
-            if env.round_hook is not None:
-                env.round_hook(idx)  # raw row already shown; fit fields stay nan
+        if not fill_decay_fit_or_skip(
+            result,
+            idx,
+            real,
+            times,
+            float(t2f),
+            fit_curve,
+            env.round_hook,
+            logger,
+            "t2ramsey",
+        ):
             return Patch()  # partial: omit t2r/t2r_detune → downstream fallback
-
-        result.fit_value[idx] = float(t2f)
-        np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
-        if env.round_hook is not None:
-            env.round_hook(idx)
 
         logger.debug(
             "t2ramsey fit @flux%d: t2r=%.3f us detune=%.4f",

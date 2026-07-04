@@ -105,6 +105,35 @@ def test_smoothed_and_raw_consumers_coexist_under_same_key():
     assert info.point_smoothed["t1"] == 10.0  # 0.5*15 + 0.5*5 at point2
 
 
+def test_smoothed_projection_carries_last_good_across_absent_raw_point():
+    raw = {0: 10.0, 2: 30.0}
+    smoothed_seen: list = []
+
+    def produce_t1(env, _snap):
+        if env.flux_idx not in raw:
+            return Patch()
+        return Patch({"t1": raw[env.flux_idx]})
+
+    def read_smoothed(_env, snap):
+        smoothed_seen.append(snap.get("t1"))
+        return Patch()
+
+    producer = place(make_builder("t1node", provides=("t1",), produce_fn=produce_t1))
+    consumer = place(
+        make_builder(
+            "consumer",
+            optional=(Dependency("t1", smooth="ewma", default=lambda: None),),
+            produce_fn=read_smoothed,
+        )
+    )
+
+    info = Orchestrator([producer, consumer]).run([0.0, 1.0, 2.0])
+
+    assert smoothed_seen == [None, 10.0, 10.0]
+    assert info.prev_smoothed["t1"] == 10.0
+    assert info.point_smoothed["t1"] == 20.0
+
+
 def test_orchestrator_raises_on_conflicting_declarations():
     a = place(
         make_builder(

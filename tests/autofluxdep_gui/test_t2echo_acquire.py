@@ -1,9 +1,9 @@
 """RB-2: t2echo end-to-end real acquire against the flux-aware MockSoc.
 
 Runs the t2echo Node's real acquire path (set flux device -> setup_devices ->
-ModularProgramV2(Reset, pi/2, Delay, pi, Delay, detuned pi/2, Readout) over the
-total-delay sweep -> fit_decay_fringe) and asserts a finite, positive T2Echo comes
-back -- i.e. the real Hahn-echo acquire produced a fittable decaying fringe.
+ModularProgramV2(Reset, pi/2, Delay, pi, Delay, pi/2, Readout) over the
+total-delay sweep -> fit_decay) and asserts a finite, positive T2Echo comes back
+from a fit that clears the legacy feedback-success gate.
 """
 
 from __future__ import annotations
@@ -18,18 +18,19 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from ._helpers import (
     ACQUIRE_READOUT,
     connect_mock,
+    high_snr_simparams,
     make_acquire_env,
     node_schema,
 )
 
-# reps=2000 x rounds=2 averages the mock per-shot noise enough that the echo
-# fringe clears the fit-quality gate (the echo contrast is lower than T1's).
+# The stricter legacy feedback gate needs a clean mock echo decay; high_snr_simparams
+# keeps this as a real acquire/fit test without paying extra rounds.
 # sweep_range overrides the schema default's 121 pts → 61 pts for test speed;
 # the production default stays at 121 in the node schema.
 _PARAMS = {
     "reps": 2000,
     "rounds": 2,
-    "detune_ratio": 0.2,
+    "detune_ratio": 0.0,
     "sweep_range": SweepValue(start=0.0, stop=25.0, expts=61),
 }
 
@@ -57,7 +58,7 @@ def _pulses(ml, freq: float):
 
 def test_t2echo_acquire_fits_finite_positive_t2():
     ctrl = build_core()
-    connect_mock(ctrl)
+    connect_mock(ctrl, sim_params=high_snr_simparams())
     ml = ctrl.state.exp_context.ml
     predictor = FluxoniumPredictor(
         params=(4.0, 1.0, 1.0), flux_half=0.0, flux_period=1.0, flux_bias=0.0

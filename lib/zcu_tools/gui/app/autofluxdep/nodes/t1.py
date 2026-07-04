@@ -295,7 +295,7 @@ class T1Node(Node):
         t1, _t1err, fit_curve, _ = fit_decay(times, real)
 
         if not fill_decay_fit_or_skip(
-            result, idx, real, float(t1), fit_curve, env.round_hook, logger, "t1"
+            result, idx, real, times, float(t1), fit_curve, env.round_hook, logger, "t1"
         ):
             return Patch()  # partial: omit t1 → downstream fallback
 
