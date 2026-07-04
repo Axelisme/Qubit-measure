@@ -392,7 +392,11 @@ class RunStore:
     def _initial_manifest(self, flux_device_name: str | None) -> dict[str, Any]:
         nodes = []
         for index, node in enumerate(self._nodes):
-            cfg_raw = _json_safe(node.schema.to_persisted_raw(), subject="node cfg")
+            cfg_raw = _json_safe(
+                node.schema.to_persisted_raw(),
+                subject=f"node cfg {node.name!r}",
+                nonfinite_to_none=False,
+            )
             cfg_hash = _sha256_json(cfg_raw)
             entry = {
                 "index": index,
@@ -402,11 +406,15 @@ class RunStore:
                 "cfg_hash": f"sha256:{cfg_hash}",
             }
             nodes.append(entry)
-        flux = {
-            "device_name": flux_device_name,
-            "values": list(self._flux_values),
-            "unit": "",
-        }
+        flux = _json_safe(
+            {
+                "device_name": flux_device_name,
+                "values": list(self._flux_values),
+                "unit": "",
+            },
+            subject="workflow flux",
+            nonfinite_to_none=False,
+        )
         workflow_hash = _sha256_json({"nodes": nodes, "flux": flux})
         return {
             "format_version": MANIFEST_FORMAT_VERSION,
@@ -462,7 +470,8 @@ class RunStore:
     def _write_manifest(self) -> None:
         tmp_path = self._manifest_path.with_suffix(".json.tmp")
         tmp_path.write_text(
-            json.dumps(self._manifest, indent=2, sort_keys=True) + "\n",
+            json.dumps(self._manifest, allow_nan=False, indent=2, sort_keys=True)
+            + "\n",
             encoding="utf-8",
         )
         os.replace(tmp_path, self._manifest_path)
@@ -596,7 +605,12 @@ def _to_json_tree(value: Any, *, nonfinite_to_none: bool) -> Any:
 
 
 def _sha256_json(payload: Any) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 

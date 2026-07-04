@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.gui.app.autofluxdep.cfg import ScalarSpec
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult, Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
@@ -120,6 +121,36 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     assert isinstance(loaded, Sweep1DResult)
     np.testing.assert_allclose(loaded.signal[0], [1.0, 2.0])
     assert (store.run_dir / "report.md").is_file()
+
+
+def test_run_store_rejects_nonfinite_flux_values_before_manifest(tmp_path):
+    with pytest.raises(TypeError, match="workflow flux is not strict JSON-safe"):
+        RunStore.create(
+            project=_project(tmp_path),
+            flux_values=[np.nan],
+            flux_device_name="fake_flux",
+            nodes=[],
+            results={},
+        )
+
+
+def test_run_store_rejects_nonfinite_manifest_cfg(tmp_path):
+    node = place(
+        make_builder(
+            "probe",
+            schema_fields=(("gain", ScalarSpec(label="gain", type=float), 0.1),),
+        ),
+        gain=np.nan,
+    )
+
+    with pytest.raises(TypeError, match="node cfg 'probe' is not strict JSON-safe"):
+        RunStore.create(
+            project=_project(tmp_path),
+            flux_values=[0.0],
+            flux_device_name="fake_flux",
+            nodes=[node],
+            results={},
+        )
 
 
 def test_run_store_records_skip_failure_and_run_failed(tmp_path):
