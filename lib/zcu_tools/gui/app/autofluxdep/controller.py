@@ -15,6 +15,7 @@ dependency model.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 from collections.abc import Callable, Mapping
@@ -84,6 +85,7 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.events import PredictorChangedPayload
+from zcu_tools.gui.session.expression import coerce_eval_result, evaluate_numeric_expr
 from zcu_tools.gui.session.operation_handles import (
     AwaitResult,
     OperationHandles,
@@ -129,7 +131,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 RUN_PROGRESS_OWNER_ID = "autofluxdep-run"
-_RUN_OWNER_ID = RUN_PROGRESS_OWNER_ID
+FLUX_PROGRESS_LABEL = "flux sweep"
 _PERSIST_DEBOUNCE_MS = 500
 
 
@@ -327,7 +329,7 @@ class Controller(SessionControllerMixin):
 
     @property
     def last_run_info(self) -> InfoStore | None:
-        """The latest terminal sweep InfoStore, if the worker produced one."""
+        """Testing/support entry: latest terminal sweep InfoStore, if produced."""
         return self._last_run_info
 
     # ------------------------------------------------------------------
@@ -444,7 +446,7 @@ class Controller(SessionControllerMixin):
         self._state.run_predictor = None
 
     def clear_run_products(self) -> None:
-        """Clear run-lived products after a synchronous start failure."""
+        """UI start-failure recovery entry: clear run-lived products."""
         self._clear_run_products()
 
     # -- setup dialog: project / startup --
@@ -535,6 +537,7 @@ class Controller(SessionControllerMixin):
         return f"{base}_{i}"
 
     def add_node(self, builder: Builder, **params: Any) -> PlacedNode:
+        """Testing/support entry: add an ad-hoc Builder placement."""
         name = self._unique_name(builder.name)
         node = PlacedNode(
             builder=builder,
@@ -631,7 +634,7 @@ class Controller(SessionControllerMixin):
         self._schedule_persist_all()
 
     def set_node_params(self, index: int, params: Mapping[str, Any]) -> None:
-        """Write one-or-more knob leaves of the Node at ``index`` into its schema SSOT.
+        """Testing/support entry: write Node knob leaves into its schema SSOT.
 
         Each incoming key writes directly into the placement's own
         ``NodeCfgSchema`` (the per-placement value tree, the SSOT). A scalar value
@@ -698,6 +701,35 @@ class Controller(SessionControllerMixin):
             self._state.flux_npts_expr,
         )
 
+    def commit_flux_sweep(
+        self, start_expr: str, stop_expr: str, npts_expr: str
+    ) -> list[float]:
+        """Resolve editable flux sweep expressions and commit explicit points."""
+        start = self._resolve_flux_expr("start", start_expr, float)
+        stop = self._resolve_flux_expr("stop", stop_expr, float)
+        npts = self._resolve_flux_expr("points", npts_expr, int)
+        if not isinstance(npts, int):
+            raise RuntimeError("Flux sweep points must be an integer")
+        if npts < 1:
+            raise RuntimeError("Flux sweep points must be at least 1")
+
+        values = np.linspace(float(start), float(stop), npts).tolist()
+        self._state.flux_start_expr = start_expr
+        self._state.flux_stop_expr = stop_expr
+        self._state.flux_npts_expr = npts_expr
+        self._state.flux_values = values
+        self._clear_run_products()
+        self._state.version.bump(FLUX_VERSION_KEY)
+        logger.debug(
+            "commit_flux_sweep: n=%d range=[%g, %g]",
+            len(values),
+            values[0],
+            values[-1],
+        )
+        self._bus.emit(FluxChangedPayload(count=len(values)))
+        self._schedule_persist_all()
+        return values
+
     def set_auto_follow_tabs(self, enabled: bool) -> None:
         """Persist the UI preference for run-time selection/tab auto-follow."""
         enabled = bool(enabled)
@@ -722,6 +754,55 @@ class Controller(SessionControllerMixin):
     def get_flux_device(self) -> str | None:
         return self._state.flux_device_name
 
+    def run_readiness(self) -> str | None:
+        """UI readiness reason for the Run button; None means Run may be clicked."""
+        if not self._state.has_setup:
+            return "Setup required"
+        if not self._state.nodes:
+            return "Add at least one node"
+        if not self._enabled_nodes():
+            return "Enable at least one node"
+        if self._state.project is None:
+            return "Project required"
+        return None
+
+    def _resolve_flux_expr(self, label: str, expr: str, type_: type) -> int | float:
+        try:
+            resolved = coerce_eval_result(
+                evaluate_numeric_expr(expr.strip(), self.get_current_md()),
+                type_,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Flux sweep {label} expression {expr!r}: {exc}"
+            ) from exc
+        if not math.isfinite(float(resolved)):
+            raise RuntimeError(f"Flux sweep {label} value must be finite")
+        return resolved
+
+    def _current_flux_values_for_run(self) -> list[float]:
+        values = list(self._state.flux_values)
+        if not values:
+            raise RuntimeError("autofluxdep run requires at least one flux point")
+        for idx, value in enumerate(values):
+            if not math.isfinite(float(value)):
+                raise RuntimeError(
+                    f"autofluxdep run flux point at index {idx} must be finite"
+                )
+        return values
+
+    def _require_start_run_ready(
+        self,
+    ) -> tuple[list[PlacedNode], list[float], ProjectInfo]:
+        enabled_nodes = self._enabled_nodes()
+        if not enabled_nodes:
+            raise RuntimeError("autofluxdep run requires at least one enabled node")
+        flux_values = self._current_flux_values_for_run()
+        project = self._state.project
+        if project is None:
+            raise RuntimeError("autofluxdep run requires a configured project")
+        return enabled_nodes, flux_values, project
+
     # --- run control (cancellable) ---
 
     def stop_run(self, reason: str = "Autofluxdep run stop requested") -> bool:
@@ -729,9 +810,6 @@ class Controller(SessionControllerMixin):
         logger.info("stop_run requested (at flux idx %d)", self._cur_idx)
         token = self._active_run_token
         if token is None:
-            event = self._run_stop_event
-            if event is not None:
-                event.set()
             return False
         self._operation_handles.stop(token, reason=reason)
         return True
@@ -813,14 +891,16 @@ class Controller(SessionControllerMixin):
 
         self._cur_idx = 0
         self._last_run_info = None
-        enabled_nodes = self._enabled_nodes()
-        if not enabled_nodes:
-            raise RuntimeError("autofluxdep run requires at least one enabled node")
+        try:
+            enabled_nodes, flux_values, project = self._require_start_run_ready()
+        except Exception:
+            self._clear_run_products()
+            raise
         logger.info(
             "run start: %d enabled user Node(s) %s over %d flux point(s)",
             len(enabled_nodes),
             [node.name for node in enabled_nodes],
-            len(self._state.flux_values),
+            len(flux_values),
         )
 
         ctx = self._state.exp_context
@@ -842,13 +922,8 @@ class Controller(SessionControllerMixin):
                 self._clear_run_products()
                 raise
         results = self._state.run_results
-        flux_values = list(self._state.flux_values)
         providers = self._build_providers()
         flux_device = self._state.flux_device_name
-        project = self._state.project
-        if project is None:
-            self._clear_run_products()
-            raise RuntimeError("autofluxdep run requires a configured project")
         try:
             store = RunStore.create(
                 project=project,
@@ -919,7 +994,7 @@ class Controller(SessionControllerMixin):
             with progress_ambient(factory):
                 pbar = make_pbar(
                     total=len(flux_values),
-                    desc="flux sweep",
+                    desc=FLUX_PROGRESS_LABEL,
                     leave=True,
                 )
 
@@ -1059,9 +1134,9 @@ class Controller(SessionControllerMixin):
         spec = OperationSpec(
             exclusion=ExclusionRequest(
                 kind=OperationKind.RUN,
-                owner_id=_RUN_OWNER_ID,
+                owner_id=RUN_PROGRESS_OWNER_ID,
             ),
-            owner_id=_RUN_OWNER_ID,
+            owner_id=RUN_PROGRESS_OWNER_ID,
             wants_progress=True,
             cancel_hook=stop_event.set,
             work=work,
@@ -1090,11 +1165,11 @@ class Controller(SessionControllerMixin):
         return token
 
     def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
-        """Block until an async operation settles or a wakeup condition fires."""
+        """Testing/support entry: block until an operation settles or wakes."""
         return self._operation_handles.await_outcome(operation_id, timeout)
 
     def get_operation_progress(self, operation_id: int) -> tuple:
-        """Live progress bars for one operation by id."""
+        """Testing/support entry: live progress bars for one operation id."""
         return self._progress_svc.bars_for_operation(operation_id)
 
     def active_operation_count(self) -> int:
@@ -1124,7 +1199,7 @@ class Controller(SessionControllerMixin):
         The UI calls this before starting the worker so the Plotters bind to the
         same Result objects the worker fills. Returns the name→Result map.
         """
-        flux = np.asarray(self._state.flux_values or [0.0], dtype=np.float64)
+        flux = np.asarray(self._current_flux_values_for_run(), dtype=np.float64)
         self._state.run_results = self._allocate_results(flux)
         return self._state.run_results
 
@@ -1136,7 +1211,9 @@ class Controller(SessionControllerMixin):
         ml: ModuleSource | None = None,
         derivations: list[DerivationService] | None = None,
     ) -> InfoStore:
-        """Exercise the dependency model headless: the same orchestrator over the
+        """Testing/support entry: exercise the dependency model headless.
+
+        Runs the same orchestrator over the
         same providers (predictor Service prepended), but with no Results and no
         notify (nothing to draw). ``tools`` defaults to a fresh ``Tools`` (a
         SimplePredictor if none bound); ``ml`` is the module-library fallback;
@@ -1150,4 +1227,4 @@ class Controller(SessionControllerMixin):
             ml=ml,
             derivations=derivations or [],
         )
-        return orch.run(self._state.flux_values)
+        return orch.run(self._current_flux_values_for_run())

@@ -121,15 +121,12 @@ def run_app(
     # user can configure the project (chip/qub names, connection) immediately.
     # Non-modal keeps the Qt event loop pumping (required for the run worker and
     # any background operations) while the dialog is visible (ADR mirrors main/app.py).
-    _show_startup_dialog(ctrl, parent=window)
+    _show_startup_dialog(parent=window)
 
     sys.exit(app.exec())
 
 
-def _show_startup_dialog(
-    ctrl: Controller,
-    parent: MainWindow,
-) -> None:
+def _show_startup_dialog(parent: MainWindow) -> None:
     """Open the setup dialog non-modally on first launch.
 
     Mirrors ``zcu_tools.gui.app.main.app._show_startup_dialog``.  Non-modal is
@@ -137,5 +134,4 @@ def _show_startup_dialog(
     this lets background session operations (mock-soc connect, device setup)
     complete without deadlocking.
     """
-    del ctrl
     parent.open_setup_dialog(startup_mode=True)

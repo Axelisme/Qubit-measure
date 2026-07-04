@@ -444,6 +444,84 @@ def test_operation_begin_failure_finalizes_created_artifact(tmp_path, monkeypatc
     assert [event["type"] for event in events] == ["run_failed", "run_finalized"]
 
 
+def test_start_run_empty_flux_fast_fails_before_artifact(tmp_path):
+    from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor
+
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(make_measurement_builder("probe"))
+    ctrl.set_flux_values([])
+    ctrl.state.run_results = {"stale": object()}
+    ctrl.state.run_predictor = SimplePredictor()
+
+    with pytest.raises(RuntimeError, match="at least one flux point"):
+        ctrl.start_run()
+
+    assert not ctrl.is_running
+    assert ctrl.state.run_results == {}
+    assert ctrl.state.run_predictor is None
+    artifact_root = tmp_path / "autofluxdep_runs"
+    assert not artifact_root.exists() or not list(artifact_root.iterdir())
+
+
+def test_prepare_run_results_empty_flux_fast_fails_without_fallback_row():
+    ctrl = build_core()
+    ctrl.add_node(make_measurement_builder("probe"))
+    ctrl.set_flux_values([])
+
+    with pytest.raises(RuntimeError, match="at least one flux point"):
+        ctrl.prepare_run_results()
+
+    assert ctrl.state.run_results == {}
+
+
+def test_commit_flux_sweep_resolves_expressions_against_active_md():
+    ctrl = build_core()
+    md = ctrl.get_current_md()
+    md.span = 0.004
+    md.count = 2
+
+    values = ctrl.commit_flux_sweep("span / 2", "-span / 2", "2 * count + 1")
+
+    assert values == pytest.approx([0.002, 0.001, 0.0, -0.001, -0.002])
+    assert ctrl.state.flux_values == pytest.approx(values)
+    assert ctrl.get_flux_sweep_expressions() == (
+        "span / 2",
+        "-span / 2",
+        "2 * count + 1",
+    )
+
+
+@pytest.mark.parametrize(
+    ("npts_expr", "message"),
+    [
+        ("2.5", "not an integer"),
+        ("0", "at least 1"),
+    ],
+)
+def test_commit_flux_sweep_failure_preserves_existing_values(
+    npts_expr: str, message: str
+):
+    ctrl = build_core()
+    ctrl.commit_flux_sweep("0.0", "1.0", "2")
+    before_values = list(ctrl.state.flux_values)
+    before_exprs = ctrl.get_flux_sweep_expressions()
+
+    with pytest.raises(RuntimeError, match=message):
+        ctrl.commit_flux_sweep("0.0", "1.0", npts_expr)
+
+    assert ctrl.state.flux_values == before_values
+    assert ctrl.get_flux_sweep_expressions() == before_exprs
+
+
+def test_run_readiness_allows_bare_number_flux_sweep(qapp):
+    ctrl = build_core()
+    ctrl.add_node(make_measurement_builder("probe"))
+    connect_mock(ctrl)
+
+    assert ctrl.get_flux_device() is None
+    assert ctrl.run_readiness() is None
+
+
 def test_ml_module_source_returns_none_on_absent():
     # the orchestrator's ModuleSource contract is "None if absent", but
     # ModuleLibrary.get_module raises — the adapter start_run threads in must

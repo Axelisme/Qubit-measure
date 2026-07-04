@@ -31,7 +31,7 @@ def test_show_startup_dialog_opens_setup_dialog(app):
     The dialog must be opened via ``dlg.open()`` (non-modal), not ``dlg.exec()``
     (modal), so the Qt event loop keeps pumping during the dialog's lifetime.
     """
-    ctrl, win = app
+    _ctrl, win = app
 
     opened_dialogs: list[object] = []
 
@@ -68,7 +68,7 @@ def test_show_startup_dialog_opens_setup_dialog(app):
         "zcu_tools.gui.session.ui.setup_dialog.SetupDialog",
         new=_TrackedSetupDialog,
     ):
-        _show_startup_dialog(ctrl, parent=win)
+        _show_startup_dialog(parent=win)
 
     assert len(opened_dialogs) == 1, "Expected exactly one SetupDialog to be created"
     dlg = opened_dialogs[0]

@@ -27,7 +27,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from qtpy.QtCore import QObject, Qt, QTimer, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDialog,
@@ -41,7 +41,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.autofluxdep.controller import RUN_PROGRESS_OWNER_ID, Controller
+from zcu_tools.gui.app.autofluxdep.controller import (
+    FLUX_PROGRESS_LABEL,
+    RUN_PROGRESS_OWNER_ID,
+    Controller,
+)
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
@@ -377,10 +381,7 @@ class MainWindow(QMainWindow):
     def open_setup_dialog(self, *, startup_mode: bool = False) -> None:
         from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
-        existing = self._setup_dialog
-        if existing is not None:
-            existing.raise_()
-            existing.activateWindow()
+        if self._raise_existing_dialog("setup") is not None:
             return
 
         # Non-blocking open() keeps the Qt event loop (and the control socket)
@@ -390,9 +391,7 @@ class MainWindow(QMainWindow):
 
         def _on_finished(_status: int) -> None:
             self._setup_dialog = None
-            self._refresh_session_status()
-            self._list._refresh_buttons()
-            self._list.refresh_flux_sources()
+            self._refresh_session_dependents()
 
         self._setup_dialog = dlg
         self._dialog_refs.open_named("setup", dlg, on_finished=_on_finished)
@@ -400,10 +399,7 @@ class MainWindow(QMainWindow):
     def _on_devices_clicked(self) -> None:
         from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
-        existing = self._devices_dialog
-        if existing is not None:
-            existing.raise_()
-            existing.activateWindow()
+        if self._raise_existing_dialog("devices") is not None:
             return
 
         # The shared device dialog manages instruments through the narrow device
@@ -413,26 +409,19 @@ class MainWindow(QMainWindow):
             md_provider=self._ctrl.context_control.get_current_md,
             parent=self,
         )
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(
-            lambda _r: (
-                setattr(self, "_devices_dialog", None),
-                self._refresh_session_status(),
-                self._list._refresh_buttons(),
-                self._list.refresh_flux_sources(),
-            )
-        )
+
+        def _on_finished(_status: int) -> None:
+            self._devices_dialog = None
+            self._refresh_session_dependents()
+
         self._devices_dialog = dlg
-        dlg.open()
+        self._dialog_refs.open_named("devices", dlg, on_finished=_on_finished)
 
     def _on_predictor_clicked(self) -> None:
         from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
-        existing = self._predictor_dialog
-        if existing is not None:
+        if self._raise_existing_dialog("predictor") is not None:
             self._sync_predictor_dialog_live_state()
-            existing.raise_()
-            existing.activateWindow()
             return
 
         # The shared predictor dialog loads a FluxoniumPredictor into the active
@@ -442,16 +431,14 @@ class MainWindow(QMainWindow):
             self,
             device=self._ctrl.device_control,
         )
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.finished.connect(
-            lambda _r: (
-                setattr(self, "_predictor_dialog", None),
-                self._refresh_session_status(),
-            )
-        )
+
+        def _on_finished(_status: int) -> None:
+            self._predictor_dialog = None
+            self._refresh_session_status()
+
         self._predictor_dialog = dlg
         self._sync_predictor_dialog_live_state()
-        dlg.open()
+        self._dialog_refs.open_named("predictor", dlg, on_finished=_on_finished)
 
     def _on_inspect(self) -> None:
         """Open the shared context inspector, or raise it if already open.
@@ -463,12 +450,7 @@ class MainWindow(QMainWindow):
         A single instance is kept alive (non-modal, WA_DeleteOnClose); a second
         request just raises the existing one.
         """
-        existing = self._inspect_dialog
-        if existing is not None:
-            existing.raise_()
-            existing.activateWindow()
-            if not existing.isVisible():
-                existing.show()
+        if self._raise_existing_dialog("inspect") is not None:
             return
 
         from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
@@ -476,12 +458,22 @@ class MainWindow(QMainWindow):
         dlg = InspectDialogBase(
             self._ctrl.context_control, self._ctrl.get_bus(), parent=self
         )
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        # ``finished`` fires for both accept and reject; drop the reference so the
-        # next request rebuilds a fresh dialog (the C++ object is deleted on close).
-        dlg.finished.connect(lambda _status: setattr(self, "_inspect_dialog", None))
+
+        def _on_finished(_status: int) -> None:
+            self._inspect_dialog = None
+
         self._inspect_dialog = dlg
-        dlg.open()
+        self._dialog_refs.open_named("inspect", dlg, on_finished=_on_finished)
+
+    def _raise_existing_dialog(self, key: str) -> QDialog | None:
+        dialog = self._dialog_refs.get(key)
+        if dialog is None:
+            return None
+        if not dialog.isVisible():
+            dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
 
     # --- run lifecycle ---
 
@@ -500,15 +492,7 @@ class MainWindow(QMainWindow):
             logger.exception("autofluxdep run failed to start")
             self._clear_plots()
             self._ctrl.clear_run_products()
-            self._run_active = False
-            self._active_run_node_name = None
-            self._live_predictor_flux_idx = None
-            self._list.set_running(False)
-            self._detail.set_running(
-                False, switch_tab=self._ctrl.get_auto_follow_tabs()
-            )
-            self._refresh_toolbar_buttons()
-            self._sync_predictor_dialog_live_state()
+            self._reset_run_ui()
             from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
 
             QMessageBox.warning(self, "Run failed to start", str(exc))
@@ -657,13 +641,6 @@ class MainWindow(QMainWindow):
     def _on_point_done(self, idx: int) -> None:
         self._live_predictor_flux_idx = idx
         self._sync_predictor_dialog_live_value()
-        self._apply_flux_progress_snapshot(
-            (
-                self._progress.maximum(),
-                self._progress.format(),
-                idx + 1,
-            )
-        )
 
     def _on_run_progress_changed(self) -> None:
         profile_start = perf_now()
@@ -679,7 +656,7 @@ class MainWindow(QMainWindow):
             detail=f"bars={len(models)}",
         )
         flux_model = next(
-            (model for model in models if model.label == "flux sweep"), None
+            (model for model in models if model.label == FLUX_PROGRESS_LABEL), None
         )
         if flux_model is not None:
             flux_start = perf_now()
@@ -692,7 +669,9 @@ class MainWindow(QMainWindow):
                 detail=f"value={value} maximum={maximum}",
             )
 
-        round_models = tuple(model for model in models if model.label != "flux sweep")
+        round_models = tuple(
+            model for model in models if model.label != FLUX_PROGRESS_LABEL
+        )
         stack_start = perf_now()
         self._round_progress.render_models(round_models)
         self._progress_stack_perf.record(
@@ -727,11 +706,16 @@ class MainWindow(QMainWindow):
         self._flux_progress_snapshot = snapshot
 
     def _on_run_done(self) -> None:
+        self._reset_run_ui()
+
+    def _reset_run_ui(self, *, switch_tab: bool | None = None) -> None:
         self._run_active = False
         self._active_run_node_name = None
         self._live_predictor_flux_idx = None
         self._list.set_running(False)
-        self._detail.set_running(False, switch_tab=self._ctrl.get_auto_follow_tabs())
+        if switch_tab is None:
+            switch_tab = self._ctrl.get_auto_follow_tabs()
+        self._detail.set_running(False, switch_tab=switch_tab)
         self._refresh_toolbar_buttons()
         self._sync_predictor_dialog_live_state()
 
@@ -749,12 +733,10 @@ class MainWindow(QMainWindow):
     # --- session status / toolbar state ---
 
     def _on_soc_changed(self, _payload: SocChangedPayload) -> None:
-        self._refresh_session_status()
-        self._list._refresh_buttons()
-        self._list.refresh_flux_sources()
+        self._refresh_session_dependents()
 
     def _on_device_changed(self, _payload: DeviceChangedPayload) -> None:
-        self._list.refresh_flux_sources()
+        self._refresh_session_dependents()
         self._refresh_cfg_editor_from_session(_payload)
 
     def _on_predictor_changed(self, _payload: PredictorChangedPayload) -> None:
@@ -788,7 +770,7 @@ class MainWindow(QMainWindow):
         dlg.set_live_device_value(value)
 
     def _on_context_switched(self, _payload: ContextSwitchedPayload) -> None:
-        self._refresh_session_status()
+        self._refresh_session_dependents()
         self._refresh_cfg_editor_from_session(_payload)
 
     def _on_md_changed(self, _payload: MdChangedPayload) -> None:
@@ -820,3 +802,8 @@ class MainWindow(QMainWindow):
         self._ctx_label.setText(ctx_text)
         self._setup_label.setText("connected" if ctx.has_soc() else "no SoC")
         self._predictor_label.setText("active" if ctx.predictor is not None else "none")
+
+    def _refresh_session_dependents(self) -> None:
+        self._refresh_session_status()
+        self._list.refresh_run_availability()
+        self._list.refresh_flux_sources()

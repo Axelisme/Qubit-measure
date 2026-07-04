@@ -35,7 +35,6 @@ from zcu_tools.gui.app.autofluxdep.cfg.form import (
 )
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.registry import available_node_types
-from zcu_tools.gui.session.expression import coerce_eval_result, evaluate_numeric_expr
 
 
 class _FluxScalarEditor(QWidget):
@@ -69,69 +68,20 @@ class _FluxScalarEditor(QWidget):
         self._widget = ScalarWidget(self._field, self)
         layout.addWidget(self._widget)
 
-    def text(self) -> str:
-        return self.expression_text()
-
     def setText(self, text: str) -> None:  # noqa: N802 - Qt-style test helper
         self._field.set_value(_flux_value_from_text(text, self._type))
-
-    def is_expression_mode(self) -> bool:
-        return isinstance(self._field.get_value(), EvalValue)
-
-    def resolved_preview_text(self) -> str | None:
-        value = self._field.get_value()
-        if not isinstance(value, EvalValue):
-            return None
-        if value.resolved is None:
-            return "= ?"
-        if self._type is float and isinstance(value.resolved, (int, float)):
-            raw = f"{value.resolved:.6f}"
-            if "." in raw:
-                raw = raw.rstrip("0")
-                if raw.endswith("."):
-                    raw += "0"
-            return f"= {raw}"
-        return f"= {value.resolved}"
 
     def expression_text(self) -> str:
         value = self._field.get_value()
         if isinstance(value, EvalValue):
             return value.expr
+        if value is None:
+            return ""
+        if not isinstance(value, DirectValue):
+            raise RuntimeError(f"Unexpected flux field value {type(value).__name__}")
         if value.value is None:
             return ""
         return str(value.value)
-
-    def resolved_value(self) -> int | float:
-        value = self._field.get_value()
-        if isinstance(value, EvalValue):
-            expr = value.expr.strip()
-            try:
-                return coerce_eval_result(
-                    evaluate_numeric_expr(expr, self._ctrl.get_current_md()),
-                    self._type,
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Flux sweep {self._label} expression {expr!r}: {exc}"
-                ) from exc
-
-        if value.value is None:
-            raise RuntimeError(f"Flux sweep {self._label} value is empty")
-        try:
-            if self._type is int:
-                if isinstance(value.value, bool):
-                    raise TypeError("bool is not an integer point count")
-                return int(value.value)
-            if self._type is float:
-                resolved = float(value.value)
-                if not math.isfinite(resolved):
-                    raise TypeError("value must be finite")
-                return resolved
-        except (TypeError, ValueError) as exc:
-            raise RuntimeError(
-                f"Flux sweep {self._label} value {value.value!r}: {exc}"
-            ) from exc
-        raise RuntimeError(f"Unsupported flux field type {self._type!r}")
 
     def teardown(self) -> None:
         if self._torn_down:
@@ -251,7 +201,7 @@ class NodeListPane(QWidget):
         root.addWidget(self._run_btn)
 
         self.refresh_list()
-        self._refresh_buttons()
+        self.refresh_run_availability()
         self.refresh_flux_sources()
 
     # --- list / selection ---
@@ -294,7 +244,7 @@ class NodeListPane(QWidget):
             self._list.setCurrentRow(0)
         self._list.blockSignals(False)
         self._on_row_changed(self._list.currentRow())
-        self._refresh_buttons()
+        self.refresh_run_availability()
 
     def select_index(self, index: int) -> None:
         if 0 <= index < self._list.count():
@@ -309,7 +259,7 @@ class NodeListPane(QWidget):
 
     def _on_node_enabled_toggled(self, index: int, enabled: bool) -> None:
         self._ctrl.set_node_enabled(index, enabled)
-        self._refresh_buttons()
+        self.refresh_run_availability()
 
     def refresh_flux_fields(self) -> None:
         start_expr, stop_expr, npts_expr = self._ctrl.get_flux_sweep_expressions()
@@ -334,9 +284,9 @@ class NodeListPane(QWidget):
 
     def _sync_flux_expressions(self) -> None:
         self._ctrl.set_flux_sweep_expressions(
-            self._flux_start.text(),
-            self._flux_stop.text(),
-            self._flux_npts.text(),
+            self._flux_start.expression_text(),
+            self._flux_stop.expression_text(),
+            self._flux_npts.expression_text(),
         )
 
     # --- workflow editing ---
@@ -402,7 +352,7 @@ class NodeListPane(QWidget):
         self._ctrl.set_flux_device(name)
         unit = self._ctrl.get_device_unit(name) if name else ""
         self._flux_unit.setText(f"[{unit}]" if unit and unit != "none" else "")
-        self._refresh_buttons()
+        self.refresh_run_availability()
 
     # --- run / stop ---
 
@@ -418,21 +368,18 @@ class NodeListPane(QWidget):
             self.run_requested.emit()
 
     def _commit_flux(self) -> None:
-        import numpy as np
-
-        start = float(self._flux_start.resolved_value())
-        stop = float(self._flux_stop.resolved_value())
-        npts = int(self._flux_npts.resolved_value())
-        if npts < 1:
-            raise RuntimeError("Flux sweep points must be at least 1")
-        self._ctrl.set_flux_values(np.linspace(start, stop, npts).tolist())
+        self._ctrl.commit_flux_sweep(
+            self._flux_start.expression_text(),
+            self._flux_stop.expression_text(),
+            self._flux_npts.expression_text(),
+        )
 
     def set_running(self, running: bool) -> None:
         self._running = running
         self._run_btn.setText("■ Stop" if running else "▶ Run")
-        self._refresh_buttons()
+        self.refresh_run_availability()
 
-    def _refresh_buttons(self) -> None:
+    def refresh_run_availability(self) -> None:
         editing = not self._running
         for b in (
             self._add_btn,
@@ -458,16 +405,11 @@ class NodeListPane(QWidget):
         self._run_btn.setEnabled(self._running or reason is None)
         self._run_btn.setToolTip("" if self._running or reason is None else reason)
 
+    def _refresh_buttons(self) -> None:
+        self.refresh_run_availability()
+
     def _run_disabled_reason(self) -> str | None:
-        if not self._ctrl.state.has_setup:
-            return "Setup required"
-        if not self._ctrl.state.nodes:
-            return "Add at least one node"
-        if not any(node.enabled for node in self._ctrl.state.nodes):
-            return "Enable at least one node"
-        if self._ctrl.get_flux_device() is None:
-            return "Select a flux source"
-        return None
+        return self._ctrl.run_readiness()
 
 
 class _NodeRowWidget(QWidget):

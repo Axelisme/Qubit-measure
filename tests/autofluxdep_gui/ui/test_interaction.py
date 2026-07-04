@@ -27,6 +27,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, EvalValue
+from zcu_tools.gui.app.autofluxdep.controller import FLUX_PROGRESS_LABEL
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
@@ -300,7 +302,7 @@ def test_run_progress_updates_flux_bar_and_round_stack(app, monkeypatch):
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     ctrl, win = app
-    flux = ProgressBarModel("flux sweep", 10, time.monotonic() - 10.0)
+    flux = ProgressBarModel(FLUX_PROGRESS_LABEL, 10, time.monotonic() - 10.0)
     flux.set_n(2)
     rounds = ProgressBarModel("t1 flux 1 rounds", 100, 0.0)
     captured: list[tuple[ProgressBarModel, ...]] = []
@@ -316,7 +318,7 @@ def test_run_progress_updates_flux_bar_and_round_stack(app, monkeypatch):
 
     assert win._progress.maximum() == flux.qt_maximum()
     assert win._progress.value() == flux.qt_value()
-    assert "flux sweep" in win._progress.format()
+    assert FLUX_PROGRESS_LABEL in win._progress.format()
     assert "%v/%m" in win._progress.format()
     assert "[" in win._progress.format()
     assert "<" in win._progress.format()
@@ -346,8 +348,10 @@ def test_flux_sweep_fields_accept_numeric_expressions(app):
     win._list._flux_stop.setText("-span / 2")
     win._list._flux_npts.setText("2 * count + 1")
 
-    assert win._list._flux_start.is_expression_mode()
-    assert win._list._flux_start.resolved_preview_text() == "= 0.002"
+    assert isinstance(win._list._flux_start._field.get_value(), EvalValue)
+    ghost = win._list._flux_start._widget._ghost
+    assert ghost is not None
+    assert ghost.text() == "= 0.002"
 
     win._list._commit_flux()
 
@@ -380,8 +384,10 @@ def test_flux_sweep_direct_fallback_from_invalid_or_empty_expression_is_not_empt
 ):
     ctrl, win = app
     win._list._flux_start.setText(expr)
-    assert win._list._flux_start.is_expression_mode()
-    assert win._list._flux_start.resolved_preview_text() == "= ?"
+    assert isinstance(win._list._flux_start._field.get_value(), EvalValue)
+    ghost = win._list._flux_start._widget._ghost
+    assert ghost is not None
+    assert ghost.text() == "= ?"
 
     # Mirrors ScalarWidget's unresolved EvalValue -> direct-mode branch.
     win._list._flux_start._field.set_value(None)
@@ -389,7 +395,7 @@ def test_flux_sweep_direct_fallback_from_invalid_or_empty_expression_is_not_empt
     win._list._flux_npts.setText("2")
     win._list._commit_flux()
 
-    assert not win._list._flux_start.is_expression_mode()
+    assert isinstance(win._list._flux_start._field.get_value(), DirectValue)
     assert ctrl.state.flux_values == pytest.approx([0.0, 1.0])
 
 
@@ -581,33 +587,21 @@ def test_session_events_refresh_current_cfg_editor(app, monkeypatch):
 
 
 def test_run_disabled_until_setup(app):
-    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
-
     ctrl, win = app
     assert not win._list._run_btn.isEnabled()  # no setup yet
     connect_mock(ctrl)
     win._list.refresh_flux_sources()
-    assert not win._list._run_btn.isEnabled()  # setup but no flux source pick
-
-    idx = win._list._flux_source.findData(FAKE_FLUX_DEVICE_NAME)
-    assert idx >= 0
-    win._list._flux_source.setCurrentIndex(idx)
-
+    # A bare-number flux sweep is legal; Run click commits the editable fields.
     assert win._list._run_btn.isEnabled()
     win._refresh_session_status()
     assert win._setup_label.text() == "connected"
 
 
 def test_run_disabled_without_nodes(qapp):
-    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
-
     ctrl = build_core()
     win = MainWindow(ctrl)
     connect_mock(ctrl)
     win._list.refresh_flux_sources()
-    idx = win._list._flux_source.findData(FAKE_FLUX_DEVICE_NAME)
-    assert idx >= 0
-    win._list._flux_source.setCurrentIndex(idx)
 
     assert not win._list._run_btn.isEnabled()
     assert win._list._run_btn.toolTip() == "Add at least one node"
@@ -617,17 +611,12 @@ def test_run_disabled_without_nodes(qapp):
 
 
 def test_run_disabled_when_all_nodes_disabled(app):
-    from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
-
     ctrl, win = app
     ctrl.set_node_enabled(0, False)
     ctrl.set_node_enabled(1, False)
     win._list.refresh_list()
     connect_mock(ctrl)
     win._list.refresh_flux_sources()
-    idx = win._list._flux_source.findData(FAKE_FLUX_DEVICE_NAME)
-    assert idx >= 0
-    win._list._flux_source.setCurrentIndex(idx)
 
     assert not win._list._run_btn.isEnabled()
     assert win._list._run_btn.toolTip() == "Enable at least one node"
@@ -660,7 +649,7 @@ def _run_to_completion(ctrl, win):
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 1.0, 2.0])
     connect_mock(ctrl)
-    win._list._refresh_buttons()
+    win._list.refresh_run_availability()
     win._start()
     _pump_until_done(ctrl, win)
 
@@ -719,7 +708,7 @@ def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp, monke
 
     ctrl.set_flux_values([0.0, 1.0])
     connect_mock(ctrl)
-    win._list._refresh_buttons()
+    win._list.refresh_run_availability()
     win._start()
     _pump_until_done(ctrl, win)
 
@@ -744,6 +733,7 @@ def test_run_start_exception_does_not_escape_qt_slot(app, monkeypatch):
     def boom(*_args, **_kwargs):
         raise RuntimeError("store failed")
 
+    ctrl.set_flux_values([0.0])
     monkeypatch.setattr(ctrl, "start_run", boom)
 
     win._start()
@@ -751,6 +741,28 @@ def test_run_start_exception_does_not_escape_qt_slot(app, monkeypatch):
     assert not ctrl.is_running
     assert win._list._run_btn.text() == "▶ Run"
     assert any("store failed" in message for message in shown)
+    assert ctrl.state.run_results == {}
+    assert ctrl.state.run_predictor is None
+
+
+def test_empty_flux_start_failure_warns_and_does_not_create_products(app, monkeypatch):
+    from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor
+
+    ctrl, win = app
+    ctrl.set_flux_values([])
+    ctrl.state.run_results = {"stale": object()}
+    ctrl.state.run_predictor = SimplePredictor()
+    shown: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
+    )
+
+    win._start()
+
+    assert any("at least one flux point" in message for message in shown)
+    assert not ctrl.is_running
+    assert win._list._run_btn.text() == "▶ Run"
+    assert win._list._add_btn.isEnabled()
     assert ctrl.state.run_results == {}
     assert ctrl.state.run_predictor is None
 
@@ -763,6 +775,7 @@ def test_run_build_plot_exception_clears_stale_products(app, monkeypatch):
     monkeypatch.setattr(
         QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
     )
+    ctrl.set_flux_values([0.0])
 
     def fail_after_publish() -> None:
         ctrl.prepare_run_results()
@@ -1053,7 +1066,7 @@ def test_multiple_real_experiments_each_get_a_liveplot(qapp):
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5, 1.0])
     connect_mock(ctrl)
-    win._list._refresh_buttons()
+    win._list.refresh_run_availability()
     win._start()
     patch_counter()  # wrap after _build_plots created the plotter
     _pump_until_done(ctrl, win)
@@ -1088,7 +1101,7 @@ def test_run_auto_follows_each_entered_node(qapp):
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
     connect_mock(ctrl)
-    win._list._refresh_buttons()
+    win._list.refresh_run_availability()
     win._start()
     _pump_until_done(ctrl, win)
 
@@ -1136,7 +1149,7 @@ def test_rename_updates_list_and_keeps_canvas_key(qapp):
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
     connect_mock(ctrl)
-    win._list._refresh_buttons()
+    win._list.refresh_run_availability()
     win._start()
     _pump_until_done(ctrl, win)
 
@@ -1161,7 +1174,7 @@ def test_no_canvas_is_ever_a_toplevel_window(qapp):
     _zero_delays(ctrl)
     ctrl.set_flux_values([0.0, 0.5])
     connect_mock(ctrl)
-    win._list._refresh_buttons()
+    win._list.refresh_run_availability()
     win._start()
     _pump_until_done(ctrl, win)
 

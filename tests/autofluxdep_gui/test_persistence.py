@@ -238,9 +238,9 @@ def test_window_restore_workflow_view_updates_list_and_flux_fields(qapp):  # noq
         win.restore_workflow_view()
 
         assert _list_labels(win) == ["freq_scan"]
-        assert win._list._flux_start.text() == "phi0 - span"
-        assert win._list._flux_stop.text() == "phi0 + span"
-        assert win._list._flux_npts.text() == "n_flux"
+        assert win._list._flux_start.expression_text() == "phi0 - span"
+        assert win._list._flux_stop.expression_text() == "phi0 + span"
+        assert win._list._flux_npts.expression_text() == "n_flux"
         assert not win._list._auto_follow_tabs.isChecked()
         item = win._list._list.item(0)
         assert item is not None
