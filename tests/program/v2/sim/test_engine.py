@@ -575,7 +575,7 @@ def test_engine_singleshot_two_blobs_centers():
     excited = _singleshot_raw(gain=1.0, length=_SIM.pi_gain_len)
     excited_med = np.median(excited.real) + 1j * np.median(excited.imag)
 
-    # No pulse: zero-temperature equilibrium keeps the |g> blob.
+    # No pulse: low-temperature equilibrium keeps the median on the |g> blob.
     ground = _singleshot_raw(gain=0.0, length=0.0)
     ground_med = np.median(ground.real) + 1j * np.median(ground.imag)
 
@@ -713,7 +713,7 @@ def _normalized_ground_raw_direct(
 ) -> tuple[NDArray[np.complex128], int]:
     """Run a ground-state DirectReadout and return raw samples divided by length."""
 
-    sim = _SIM.model_copy(update={"snr": 25.0})
+    sim = _SIM.model_copy(update={"snr": 25.0, "Temp": 0.0})
     soc, soccfg = make_mock_soc(sim=sim)
     ro_freq = _rf_g_mhz()
     readout = DirectReadoutCfg(ro_ch=0, ro_length=ro_length, ro_freq=ro_freq).build(
@@ -878,11 +878,12 @@ def test_engine_pulse_readout_gain_scales_raw_blob_centers():
 
 
 def test_engine_readout_gain_noise_scales_with_pulse_readout_gain() -> None:
-    """The second Gaussian source is proportional to compressed readout drive."""
+    """The second Gaussian source is proportional to linear readout gain."""
 
     sim = _SIM.model_copy(
         update={
             "snr": 1.0e9,
+            "Temp": 0.0,
             "readout_gain_noise_per_gain": 0.03,
         }
     )
@@ -898,30 +899,101 @@ def test_engine_readout_gain_noise_scales_with_pulse_readout_gain() -> None:
     assert high > 2.5 * low
 
 
-def _pulse_readout_blob_gap(gain: float) -> float:
-    _soc, soccfg = make_mock_soc(sim=_SIM)
+def _pulse_readout_blob_gap(gain: float, *, sim: SimParams = _SIM) -> float:
+    _soc, soccfg = make_mock_soc(sim=sim)
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=1, rounds=1),
         modules=[_pulse_readout(_rf_g_mhz(), ro_length=1.0, gain=gain)],
     )
     prog.compile()
-    engine = SimEngine(prog, _SIM)
+    engine = SimEngine(prog, sim)
     s_g, s_e, _p_e, signal_scale, _noise_scale, _gain_noise_scale = (
         engine._ensure_signal()
     )
     return float(abs(signal_scale[0] * (s_e[0] - s_g[0])))
 
 
-def test_engine_high_readout_gain_reduces_blob_contrast() -> None:
-    """Above the dispersive guardrail, more gain no longer improves contrast."""
+def test_engine_readout_backaction_reduces_excited_blob_contrast() -> None:
+    """Explicit readout-induced decay can make high gain reduce blob contrast."""
 
-    low = _pulse_readout_blob_gap(0.02)
-    mid = _pulse_readout_blob_gap(0.08)
-    high = _pulse_readout_blob_gap(0.40)
+    sim = _SIM.model_copy(
+        update={
+            "readout_decay_rate_per_us": 2.0,
+            "readout_decay_threshold_ratio": 0.0,
+            "readout_decay_exponent": 1.0,
+        }
+    )
+    low = _pulse_readout_blob_gap(0.02, sim=sim)
+    mid = _pulse_readout_blob_gap(0.08, sim=sim)
+    high = _pulse_readout_blob_gap(0.40, sim=sim)
 
     assert mid > low
     assert high < mid
+
+
+def test_engine_readout_backaction_preserves_raw_mixture_sampling() -> None:
+    """Raw singleshot remains state-sample-then-noise, not weighted-center Gaussian."""
+
+    sim = _SIM.model_copy(
+        update={
+            "snr": 1.0e9,
+            "readout_decay_rate_per_us": 2.0,
+            "readout_decay_threshold_ratio": 0.0,
+            "readout_decay_exponent": 1.0,
+        }
+    )
+    soc, soccfg = make_mock_soc(sim=sim)
+    f_qubit = _f_qubit_mhz()
+    ro_freq = _rf_g_mhz()
+    init = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=f_qubit,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=_SIM.pi_gain_len / 2.0),
+    ).build("init")
+    readout = _pulse_readout(ro_freq, ro_length=1.0, gain=0.08)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=4000, rounds=1, relax_delay=_RESET_RELAX_DELAY),
+        modules=[init, readout],
+    )
+    prog.compile()
+    engine = SimEngine(prog, sim)
+    s_g, s_e, _p_e, signal_scale, _noise_scale, _gain_noise_scale = (
+        engine._ensure_signal()
+    )
+    g_center = _FULL_SCALE * signal_scale[0] * complex(s_g[0])
+    e_center = _FULL_SCALE * signal_scale[0] * complex(s_e[0])
+
+    prog.acquire(soc, progress=False)
+    raw = prog.get_raw()
+    assert raw is not None
+    signals = raw[0][:, 0, 0] + 1j * raw[0][:, 0, 1]
+
+    blob_dist = abs(e_center - g_center)
+    assert blob_dist > 0.0
+    d_g = np.abs(signals - g_center)
+    d_e = np.abs(signals - e_center)
+    excited_mask = d_e < d_g
+    frac_excited = float(np.mean(excited_mask))
+    assert 0.35 < frac_excited < 0.65
+
+    ground_cluster = signals[~excited_mask]
+    excited_cluster = signals[excited_mask]
+    assert ground_cluster.size > 0
+    assert excited_cluster.size > 0
+    ground_median = np.median(ground_cluster.real) + 1j * np.median(ground_cluster.imag)
+    excited_median = np.median(excited_cluster.real) + 1j * np.median(
+        excited_cluster.imag
+    )
+    assert abs(ground_median - g_center) < 0.02 * blob_dist
+    assert abs(excited_median - e_center) < 0.02 * blob_dist
+
+    weighted_center = 0.5 * (g_center + e_center)
+    assert np.percentile(np.abs(signals - weighted_center), 10) > 0.25 * blob_dist
 
 
 def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
@@ -991,7 +1063,7 @@ def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
     assert early == pytest.approx(0.0, abs=1e-12)
 
 
-def test_engine_direct_readout_skips_nonlinear_photon_guardrail() -> None:
+def test_engine_direct_readout_skips_photon_backaction() -> None:
     """DirectReadout has no generator gain, so critical-photon checks do not apply."""
 
     f_qubit_ghz = _f_qubit_mhz() * 1e-3

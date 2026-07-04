@@ -13,6 +13,7 @@ def _population_chain_serial_kernel(
     relax_props: NDArray[np.float64],
     weights: NDArray[np.float64],
     equilibrium_pop: float,
+    readout_q_post: float,
     reps: int,
     nreads: int,
 ) -> NDArray[np.float64]:
@@ -25,6 +26,7 @@ def _population_chain_serial_kernel(
         states[node_idx, 2] = z0
         states[node_idx, 3] = 1.0
 
+    sqrt_q_post = np.sqrt(readout_q_post)
     p_e = np.empty((reps, nreads), dtype=np.float64)
     for rep_idx in range(reps):
         p_mean = 0.0
@@ -47,30 +49,35 @@ def _population_chain_serial_kernel(
                 node_p = 1.0
             p_mean += weights[node_idx] * node_p
 
+            d0 = sqrt_q_post * r0
+            d1 = sqrt_q_post * r1
+            d2 = readout_q_post * r2 + (readout_q_post - 1.0) * r3
+            d3 = r3
+
             relax = relax_props[node_idx]
             states[node_idx, 0] = (
-                relax[0, 0] * r0
-                + relax[0, 1] * r1
-                + relax[0, 2] * r2
-                + relax[0, 3] * r3
+                relax[0, 0] * d0
+                + relax[0, 1] * d1
+                + relax[0, 2] * d2
+                + relax[0, 3] * d3
             )
             states[node_idx, 1] = (
-                relax[1, 0] * r0
-                + relax[1, 1] * r1
-                + relax[1, 2] * r2
-                + relax[1, 3] * r3
+                relax[1, 0] * d0
+                + relax[1, 1] * d1
+                + relax[1, 2] * d2
+                + relax[1, 3] * d3
             )
             states[node_idx, 2] = (
-                relax[2, 0] * r0
-                + relax[2, 1] * r1
-                + relax[2, 2] * r2
-                + relax[2, 3] * r3
+                relax[2, 0] * d0
+                + relax[2, 1] * d1
+                + relax[2, 2] * d2
+                + relax[2, 3] * d3
             )
             states[node_idx, 3] = (
-                relax[3, 0] * r0
-                + relax[3, 1] * r1
-                + relax[3, 2] * r2
-                + relax[3, 3] * r3
+                relax[3, 0] * d0
+                + relax[3, 1] * d1
+                + relax[3, 2] * d2
+                + relax[3, 3] * d3
             )
 
         for read_idx in range(nreads):
@@ -84,6 +91,7 @@ def population_chain_numba(
     relax_props: NDArray[np.float64],
     weights: NDArray[np.float64],
     equilibrium_pop: float,
+    readout_q_post: float,
     reps: int,
     nreads: int,
 ) -> NDArray[np.float64]:
@@ -93,5 +101,5 @@ def population_chain_numba(
     relax = np.ascontiguousarray(relax_props, dtype=np.float64)
     node_weights = np.ascontiguousarray(weights, dtype=np.float64)
     return _population_chain_serial_kernel(
-        pre, relax, node_weights, equilibrium_pop, reps, nreads
+        pre, relax, node_weights, equilibrium_pop, readout_q_post, reps, nreads
     )

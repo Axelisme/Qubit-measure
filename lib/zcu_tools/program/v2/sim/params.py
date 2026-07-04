@@ -70,8 +70,7 @@ class SimParams(ConfigBase):
         Temp : float, optional
             Effective qubit temperature in Kelvin.  The equilibrium excited-state
             population is derived from this temperature and the operating qubit
-            frequency via a Boltzmann distribution.  Defaults to 0.0 K
-            (zero-temperature ground-state equilibrium).
+            frequency via a Boltzmann distribution.  Defaults to 0.060 K.
 
     Readout resonator:
         bare_rf : float
@@ -93,8 +92,8 @@ class SimParams(ConfigBase):
             gain-proportional noise term below.
         readout_gain_noise_per_gain : float, optional
             Per-sample Gaussian readout noise added in quadrature with the base
-            noise, proportional to the compressed PulseReadout drive amplitude.
-            Defaults to 0.0.
+            noise, proportional to the linear PulseReadout gain/envelope.
+            Defaults to 0.03.
         timeFly : float, optional
             Time of flight in µs: the readout-signal propagation delay.  The
             readout pulse program plays from program ``t = 0``, but the signal is
@@ -114,6 +113,13 @@ class SimParams(ConfigBase):
             Calibration from PulseReadout gain² to mean intracavity photon
             number.  Defaults to 100.0; ``None`` is rejected so the readout
             power calibration is explicit.
+        readout_decay_rate_per_us : float, optional
+            Readout-induced e->g decay-rate scale in 1/µs.  Defaults to 2.0.
+        readout_decay_threshold_ratio : float, optional
+            Photon-ratio threshold before readout-induced decay turns on.
+            Defaults to 0.1.
+        readout_decay_exponent : float, optional
+            Exponent applied to the excess photon ratio.  Defaults to 1.0.
         seed : int or None, optional
             RNG seed for reproducible noise.  None means non-deterministic.
             Defaults to None.
@@ -145,7 +151,7 @@ class SimParams(ConfigBase):
     T2: float
     # T2_star: Ramsey T2*; enforced T2_star <= T2 by _validate_coherence.
     T2_star: float
-    Temp: float = 0.0
+    Temp: float = 0.060
 
     # --- readout resonator (GHz) ---
     bare_rf: float
@@ -177,14 +183,17 @@ class SimParams(ConfigBase):
     # readout_gain_noise_per_gain: per-sample Gaussian noise coefficient for the
     # readout-drive-proportional noise source.  It is combined in quadrature with
     # the snr-derived base noise inside SimEngine.
-    readout_gain_noise_per_gain: float = 0.0
+    readout_gain_noise_per_gain: float = 0.03
     # pi_gain_len: the gain×length invariant shared by amp_rabi (sweeps gain)
     # and len_rabi (sweeps length).  SimEngine uses Ω = π/pi_gain_len · gain.
     pi_gain_len: float
-    # readout_photons_per_gain2: gain->photon calibration for nonlinear readout.
+    # readout_photons_per_gain2: gain->photon calibration for step-photon readout.
     # None is intentionally not accepted; the default mock calibration is
     # 100 photons / gain^2.
     readout_photons_per_gain2: float = 100.0
+    readout_decay_rate_per_us: float = 2.0
+    readout_decay_threshold_ratio: float = 0.1
+    readout_decay_exponent: float = 1.0
     # timeFly: readout time-of-flight (µs). The decimated/lookback trace places
     # the readout envelope at program-time == timeFly (the trace is ~0 before it),
     # giving the simulated lookback a physical rising edge to recover as trig_offset.
@@ -223,6 +232,33 @@ class SimParams(ConfigBase):
         if not math.isfinite(v) or v <= 0.0:
             raise ValueError(
                 f"readout_photons_per_gain2 must be finite and > 0.0 (got {v!r})"
+            )
+        return v
+
+    @field_validator("readout_decay_rate_per_us")
+    @classmethod
+    def _validate_readout_decay_rate_per_us(cls, v: float) -> float:
+        if not math.isfinite(v) or v < 0.0:
+            raise ValueError(
+                f"readout_decay_rate_per_us must be finite and >= 0.0 (got {v!r})"
+            )
+        return v
+
+    @field_validator("readout_decay_threshold_ratio")
+    @classmethod
+    def _validate_readout_decay_threshold_ratio(cls, v: float) -> float:
+        if not math.isfinite(v) or v < 0.0:
+            raise ValueError(
+                f"readout_decay_threshold_ratio must be finite and >= 0.0 (got {v!r})"
+            )
+        return v
+
+    @field_validator("readout_decay_exponent")
+    @classmethod
+    def _validate_readout_decay_exponent(cls, v: float) -> float:
+        if not math.isfinite(v) or v <= 0.0:
+            raise ValueError(
+                f"readout_decay_exponent must be finite and > 0.0 (got {v!r})"
             )
         return v
 

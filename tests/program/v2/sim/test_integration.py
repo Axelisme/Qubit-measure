@@ -100,10 +100,8 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWavefor
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.program.v2.sim.engine import _FULL_SCALE
 from zcu_tools.program.v2.sim.readout import (
-    apply_readout_visibility,
     critical_photon_number,
-    readout_drive_amplitude,
-    readout_state_visibility,
+    readout_backaction,
     resonator_freqs,
     s21,
 )
@@ -662,24 +660,22 @@ def _expected_ge_centers() -> tuple[complex, complex]:
     overlap_scale = max(0.0, overlap_stop - overlap_start) / ro_length
 
     n_crit = critical_photon_number(_f_qubit_mhz() * 1e-3, _SIM.bare_rf, _SIM.g)
-    drive = readout_drive_amplitude(
-        readout_gain,
-        n_crit=n_crit,
-        photons_per_gain2=_SIM.readout_photons_per_gain2,
-    )
-    visibility = readout_state_visibility(
+    backaction = readout_backaction(
         readout_gain,
         n_crit,
         _SIM.readout_photons_per_gain2,
+        pulse_length_us=pulse_length,
+        ro_length_us=ro_length,
+        decay_rate_per_us=_SIM.readout_decay_rate_per_us,
+        decay_threshold_ratio=_SIM.readout_decay_threshold_ratio,
+        decay_exponent=_SIM.readout_decay_exponent,
     )
-    s_g, s_e = apply_readout_visibility(
-        s21(_SIM, freqs, rf_g),
-        s21(_SIM, freqs, rf_e),
-        visibility,
-    )
+    s_g = s21(_SIM, freqs, rf_g)
+    s_e = s21(_SIM, freqs, rf_e)
+    s_e_initial = s_g + backaction.q_signal_avg * (s_e - s_g)
 
-    g = _FULL_SCALE * overlap_scale * drive * complex(s_g[0])
-    e = _FULL_SCALE * overlap_scale * drive * complex(s_e[0])
+    g = _FULL_SCALE * overlap_scale * readout_gain * complex(s_g[0])
+    e = _FULL_SCALE * overlap_scale * readout_gain * complex(s_e_initial[0])
     return g, e
 
 

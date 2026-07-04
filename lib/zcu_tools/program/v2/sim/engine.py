@@ -35,8 +35,8 @@ Noise model
 -----------
 ``SimParams.snr`` is the base per-sample Gaussian readout scale before
 integration.  A second per-sample term,
-``SimParams.readout_gain_noise_per_gain``, is proportional to the compressed
-PulseReadout drive amplitude.  The two independent sources are added in
+``SimParams.readout_gain_noise_per_gain``, is proportional to the linear
+PulseReadout gain/envelope.  The two independent sources are added in
 quadrature after their own integration scales are applied.  Averaging over the
 ``reps`` axis (and, across rounds, over ``rounds``) then improves the effective
 SNR by ``sqrt(reps * rounds)`` — exactly as on hardware, because the round loop
@@ -81,15 +81,13 @@ from .lowering import (
 )
 from .params import SimParams
 from .readout import (
-    apply_readout_visibility,
     critical_photon_number,
     decimated_trace,
     effective_noise_samples,
     effective_signal_samples,
     noise_std_sample_scale,
-    readout_drive_amplitude,
+    readout_backaction,
     readout_envelope_samples,
-    readout_state_visibility,
     resonator_freqs,
     s21,
 )
@@ -183,6 +181,7 @@ class _PointReadout:
     signal_scale: float
     noise_std_scale: float
     gain_noise_std_scale: float
+    readout_q_post: float
 
 
 @dataclass(frozen=True)
@@ -202,6 +201,7 @@ class _PointModel:
     signal_scale: float
     noise_std_scale: float
     gain_noise_std_scale: float
+    readout_q_post: float
     equilibrium_pop: float
     pre_readout_props: tuple[NDArray[np.float64], ...]
     inter_shot_props: tuple[NDArray[np.float64], ...]
@@ -343,7 +343,11 @@ def _population_chain_cache_key(
         dtype=np.int64,
     )
     hasher.update(header.tobytes())
-    hasher.update(np.array([model.equilibrium_pop], dtype=np.float64).tobytes())
+    hasher.update(
+        np.array(
+            [model.equilibrium_pop, model.readout_q_post], dtype=np.float64
+        ).tobytes()
+    )
 
     def update_array(values: NDArray[np.float64]) -> None:
         contiguous = np.ascontiguousarray(values)
@@ -667,31 +671,38 @@ class SimEngine:
         s_g = s21(self.sim, freqs, rf_g)
         s_e = s21(self.sim, freqs, rf_e)
 
-        # Nonlinear high-power readout stays a readout-layer effect: the dispersive
-        # critical photon number sets the scale, unitless gain is mapped through the
-        # SimParams calibration, and DirectReadout (no explicit generator gain) keeps
-        # the linear path.
         readout_gain = (
             lowered.readout.readout_gain
             if lowered.readout.pulse_cfg is not None
             else None
         )
         if readout_gain is None:
-            visibility = 1.0
             drive_amplitude = 1.0
             gain_noise_drive_amplitude = 0.0
+            readout_q_signal_avg = 1.0
+            readout_q_post = 1.0
         else:
+            pulse_length_us = lowered.readout.pulse_length_us
+            if pulse_length_us is None:
+                raise RuntimeError(
+                    "PulseReadout lowering did not resolve pulse_length_us"
+                )
             n_crit = critical_photon_number(f_qubit_ghz, self.sim.bare_rf, self.sim.g)
-            visibility = readout_state_visibility(
-                readout_gain, n_crit, self.sim.readout_photons_per_gain2
-            )
-            drive_amplitude = readout_drive_amplitude(
+            backaction = readout_backaction(
                 readout_gain,
-                n_crit=n_crit,
-                photons_per_gain2=self.sim.readout_photons_per_gain2,
+                n_crit,
+                self.sim.readout_photons_per_gain2,
+                pulse_length_us=pulse_length_us,
+                ro_length_us=lowered.readout.ro_length_us,
+                decay_rate_per_us=self.sim.readout_decay_rate_per_us,
+                decay_threshold_ratio=self.sim.readout_decay_threshold_ratio,
+                decay_exponent=self.sim.readout_decay_exponent,
             )
-            gain_noise_drive_amplitude = abs(drive_amplitude)
-        s_g, s_e = apply_readout_visibility(s_g, s_e, visibility)
+            drive_amplitude = readout_gain
+            gain_noise_drive_amplitude = abs(readout_gain)
+            readout_q_signal_avg = backaction.q_signal_avg
+            readout_q_post = backaction.q_post
+        s_e_initial = s_g + readout_q_signal_avg * (s_e - s_g)
         signal_sample_times = sample_times_us
         if lowered.readout.pulse_cfg is not None:
             signal_sample_times = (
@@ -714,10 +725,11 @@ class SimEngine:
 
         return _PointReadout(
             s_g=s_g,
-            s_e=s_e,
+            s_e=s_e_initial,
             signal_scale=signal_scale,
             noise_std_scale=noise_std_scale,
             gain_noise_std_scale=gain_noise_std_scale,
+            readout_q_post=readout_q_post,
         )
 
     def _point_evolution_props(
@@ -784,6 +796,7 @@ class SimEngine:
             signal_scale=readout.signal_scale,
             noise_std_scale=readout.noise_std_scale,
             gain_noise_std_scale=readout.gain_noise_std_scale,
+            readout_q_post=readout.readout_q_post,
             equilibrium_pop=equilibrium_pop,
             pre_readout_props=evolution.pre_readout_props,
             inter_shot_props=evolution.inter_shot_props,
@@ -826,7 +839,10 @@ class SimEngine:
                     elif node_p > 1.0:
                         node_p = 1.0
                     p_e[rep_idx, :] = node_p
-                    state = relax_prop @ at_readout
+                    after_readout = bloch.apply_amplitude_damping_augmented(
+                        at_readout, model.readout_q_post
+                    )
+                    state = relax_prop @ after_readout
 
                 return p_e
 
@@ -839,6 +855,7 @@ class SimEngine:
                     relax_props,
                     self._detune_weights,
                     model.equilibrium_pop,
+                    model.readout_q_post,
                     reps,
                     nreads,
                 )
@@ -856,8 +873,11 @@ class SimEngine:
                 np.clip(node_p, 0.0, 1.0, out=node_p)
                 p_mean = float(np.dot(self._detune_weights, node_p))
                 p_e[rep_idx, :] = p_mean
+                after_readout = bloch.apply_amplitude_damping_augmented(
+                    at_readout, model.readout_q_post
+                )
                 states = np.einsum(
-                    "nij,nj->ni", relax_props, at_readout, optimize=False
+                    "nij,nj->ni", relax_props, after_readout, optimize=False
                 )
 
             return p_e
@@ -1205,8 +1225,15 @@ class SimEngine:
         pulse_length = _resolve_scalar(ro_pulse_cfg.waveform.length, {}, point)
         trig_offset = _resolve_scalar(ro_cfg.trig_offset, {}, point)
         n_crit = critical_photon_number(f_qubit_ghz, self.sim.bare_rf, self.sim.g)
-        visibility = readout_state_visibility(
-            lowered.readout.readout_gain, n_crit, self.sim.readout_photons_per_gain2
+        backaction = readout_backaction(
+            lowered.readout.readout_gain,
+            n_crit,
+            self.sim.readout_photons_per_gain2,
+            pulse_length_us=pulse_length,
+            ro_length_us=lowered.readout.ro_length_us,
+            decay_rate_per_us=self.sim.readout_decay_rate_per_us,
+            decay_threshold_ratio=self.sim.readout_decay_threshold_ratio,
+            decay_exponent=self.sim.readout_decay_exponent,
         )
 
         # Program-time axis: cycles2us(get_time_axis) + trig_offset.  The decimated
@@ -1231,13 +1258,9 @@ class SimEngine:
             rf_e,
             p_e,
             pulse_pre_delay_us=lowered.readout.pulse_pre_delay_us,
-            state_visibility=visibility,
+            readout_q_signal_avg=backaction.q_signal_avg,
         )
-        drive_amplitude = readout_drive_amplitude(
-            lowered.readout.readout_gain,
-            n_crit=n_crit,
-            photons_per_gain2=self.sim.readout_photons_per_gain2,
-        )
+        drive_amplitude = lowered.readout.readout_gain
         trace = drive_amplitude * trace
 
         det = _FULL_SCALE * np.stack([trace.real, trace.imag], axis=-1)  # (n, 2)

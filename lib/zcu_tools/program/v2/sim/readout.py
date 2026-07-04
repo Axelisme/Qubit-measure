@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from dataclasses import dataclass
 from functools import lru_cache
 
 import numpy as np
@@ -60,11 +61,6 @@ from .waveforms import envelope_at
 _DEFAULT_PHI: float = 0.0
 _DEFAULT_A0: complex = 1.0 + 0.0j
 _DEFAULT_EDELAY: float = 0.0
-
-# Conservative cQED dispersive operating region.  Literature commonly treats
-# nbar/ncrit ~ 0.1 as the small-parameter guardrail; below it the mock keeps the
-# existing linear readout response.
-_DISPERSIVE_SAFE_PHOTON_RATIO: float = 0.1
 
 
 def value_to_flux(sim: SimParams, device_value: float) -> float:
@@ -204,15 +200,18 @@ def readout_photon_ratio(
 ) -> float:
     """Return ``n_bar / n_crit`` for a PulseReadout gain.
 
-    ``DirectReadout`` has no explicit drive gain (``gain is None``), so it stays
-    on the safe linear path and contributes no nonlinear readout penalty.  A
-    PulseReadout must pass an explicit gain² -> photon calibration.
+    ``DirectReadout`` has no explicit drive gain (``gain is None``), so it
+    contributes no generator photons.  A PulseReadout must pass an explicit
+    gain² -> photon calibration.
     """
 
     if gain is None:
         return 0.0
 
-    amplitude = readout_drive_amplitude(gain)
+    amplitude = float(gain)
+    if not math.isfinite(amplitude):
+        raise ValueError(f"readout gain must be finite, got {gain!r}")
+
     critical = float(n_crit)
     if not math.isfinite(critical) or critical <= 0.0:
         raise ValueError(f"n_crit must be finite and > 0.0, got {n_crit!r}")
@@ -228,60 +227,73 @@ def readout_photon_ratio(
     return (photon_scale * amplitude * amplitude) / critical
 
 
-def readout_drive_amplitude(
+@dataclass(frozen=True)
+class ReadoutBackaction:
+    """Step-photon readout-induced e->g survival factors."""
+
+    photon_ratio: float
+    gamma_ro: float
+    q_post: float
+    q_signal_avg: float
+
+
+def _validate_non_negative_finite(name: str, value: float) -> float:
+    x = float(value)
+    if not math.isfinite(x) or x < 0.0:
+        raise ValueError(f"{name} must be finite and >= 0.0 (got {value!r})")
+    return x
+
+
+def readout_backaction(
     gain: float | None,
+    n_crit: float,
+    photons_per_gain2: float,
     *,
-    n_crit: float | None = None,
-    photons_per_gain2: float = 100.0,
-) -> float:
-    """Return the readout drive amplitude after dispersive-limit compression."""
+    pulse_length_us: float,
+    ro_length_us: float,
+    decay_rate_per_us: float,
+    decay_threshold_ratio: float,
+    decay_exponent: float,
+) -> ReadoutBackaction:
+    """Return step-photon e->g backaction for one readout point.
 
-    if gain is None:
-        return 1.0
-    amplitude = float(gain)
-    if not math.isfinite(amplitude):
-        raise ValueError(f"readout gain must be finite, got {gain!r}")
-    if n_crit is None:
-        return amplitude
+    The generator pulse length sets the post-readout qubit survival.  The ADC
+    readout length sets the signal averaging horizon; decay only accumulates
+    while the generator pulse is on, so any ADC tail after the pulse holds the
+    survival fixed at ``q_post``.
+    """
 
-    ratio = _readout_nonlinear_ratio(gain, n_crit, photons_per_gain2)
-    return amplitude / math.sqrt(1.0 + ratio)
+    pulse_length = _validate_non_negative_finite("pulse_length_us", pulse_length_us)
+    ro_length = _validate_non_negative_finite("ro_length_us", ro_length_us)
+    decay_rate = _validate_non_negative_finite("decay_rate_per_us", decay_rate_per_us)
+    threshold = _validate_non_negative_finite(
+        "decay_threshold_ratio", decay_threshold_ratio
+    )
+    exponent = float(decay_exponent)
+    if not math.isfinite(exponent) or exponent <= 0.0:
+        raise ValueError(
+            f"decay_exponent must be finite and > 0.0 (got {decay_exponent!r})"
+        )
 
+    photon_ratio = readout_photon_ratio(gain, n_crit, photons_per_gain2)
+    gamma_ro = decay_rate * max(0.0, photon_ratio - threshold) ** exponent
+    q_post = math.exp(-gamma_ro * pulse_length)
 
-def readout_state_visibility(
-    gain: float | None,
-    n_crit: float,
-    photons_per_gain2: float,
-) -> float:
-    """Return the remaining |g>/|e> readout contrast under high photon number."""
+    if gamma_ro == 0.0 or ro_length == 0.0:
+        q_signal_avg = 1.0
+    elif ro_length <= pulse_length:
+        q_signal_avg = (1.0 - math.exp(-gamma_ro * ro_length)) / (gamma_ro * ro_length)
+    else:
+        decayed_area = (1.0 - math.exp(-gamma_ro * pulse_length)) / gamma_ro
+        tail_area = (ro_length - pulse_length) * q_post
+        q_signal_avg = (decayed_area + tail_area) / ro_length
 
-    ratio = _readout_nonlinear_ratio(gain, n_crit, photons_per_gain2)
-    return 1.0 / (1.0 + ratio)
-
-
-def _readout_nonlinear_ratio(
-    gain: float | None,
-    n_crit: float,
-    photons_per_gain2: float,
-) -> float:
-    """Return the excess photon ratio above the conservative dispersive guardrail."""
-
-    ratio = readout_photon_ratio(gain, n_crit, photons_per_gain2)
-    return max(0.0, ratio - _DISPERSIVE_SAFE_PHOTON_RATIO)
-
-
-def apply_readout_visibility(
-    s_g: NDArray[np.complex128],
-    s_e: NDArray[np.complex128],
-    visibility: float,
-) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
-    """Compress state-conditioned blob separation around its midpoint."""
-
-    vis = float(visibility)
-    if not math.isfinite(vis) or not 0.0 <= vis <= 1.0:
-        raise ValueError(f"visibility must be finite and in [0, 1], got {visibility!r}")
-    center = 0.5 * (s_g + s_e)
-    return center + vis * (s_g - center), center + vis * (s_e - center)
+    return ReadoutBackaction(
+        photon_ratio=photon_ratio,
+        gamma_ro=gamma_ro,
+        q_post=q_post,
+        q_signal_avg=q_signal_avg,
+    )
 
 
 def blend_state_responses(
@@ -423,7 +435,7 @@ def decimated_trace(
     p_e: float,
     *,
     pulse_pre_delay_us: float = 0.0,
-    state_visibility: float = 1.0,
+    readout_q_signal_avg: float = 1.0,
 ) -> NDArray[np.complex128]:
     """Time-domain down-converted readout trace (model A) at ADC samples ``ts``.
 
@@ -474,9 +486,9 @@ def decimated_trace(
     pulse_pre_delay_us
         Resolved generator pulse pre-delay in µs.  Defaults to 0 for legacy tests
         and readout configs that do not delay the generator pulse.
-    state_visibility
-        Remaining |g>/|e> readout contrast after nonlinear readout backaction.
-        Defaults to 1.0 for the linear model.
+    readout_q_signal_avg
+        Average excited-state survival across the ADC readout window.  Defaults
+        to 1.0 for DirectReadout and zero-decay PulseReadout.
 
     Returns
     -------
@@ -492,13 +504,19 @@ def decimated_trace(
     if ts.ndim != 1:
         raise ValueError(f"ts must be a 1-D array, got shape {ts.shape}")
 
-    # Steady-state mixed S21 at the single probe frequency.  Apply the same
-    # high-photon visibility compression as accumulated readout before mixing.
+    # Steady-state mixed S21 at the single probe frequency.  The excited-initial
+    # center moves toward the ground response when readout induces e->g decay.
     freqs = np.array([f_ro_ghz], dtype=np.float64)
     s_g = s21(sim, freqs, rf_g)
     s_e = s21(sim, freqs, rf_e)
-    s_g, s_e = apply_readout_visibility(s_g, s_e, state_visibility)
-    steady = blend_state_responses(s_g, s_e, p_e)[0]
+    q_signal_avg = float(readout_q_signal_avg)
+    if not math.isfinite(q_signal_avg) or not 0.0 <= q_signal_avg <= 1.0:
+        raise ValueError(
+            "readout_q_signal_avg must be finite and in [0, 1], "
+            f"got {readout_q_signal_avg!r}"
+        )
+    s_e_initial = s_g + q_signal_avg * (s_e - s_g)
+    steady = blend_state_responses(s_g, s_e_initial, p_e)[0]
 
     pulse_pre_delay = float(pulse_pre_delay_us)
     if not math.isfinite(pulse_pre_delay) or pulse_pre_delay < 0.0:

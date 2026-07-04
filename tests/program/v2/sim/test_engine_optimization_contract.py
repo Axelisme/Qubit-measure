@@ -13,10 +13,10 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import engine as engine_module
-from zcu_tools.program.v2.sim.bloch import Segment
+from zcu_tools.program.v2.sim.bloch import Segment, apply_amplitude_damping_augmented
 from zcu_tools.program.v2.sim.engine import (
     SimCancelledError,
     SimEngine,
@@ -188,6 +188,7 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(
             signal_scale=1.0,
             noise_std_scale=1.0,
             gain_noise_std_scale=0.0,
+            readout_q_post=1.0,
         )
 
     monkeypatch.setattr(SimEngine, "_operating_signal", fake_operating_signal)
@@ -270,7 +271,7 @@ def test_engine_cancel_during_detune_loop_raises(
 def test_engine_caches_population_chain_for_readout_only_sweep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sweeping only readout parameters reuses the identical qubit state chain."""
+    """DirectReadout-only sweeps reuse the identical qubit state chain."""
 
     calls = 0
     real_population_chain = SimEngine._point_population_chain
@@ -314,6 +315,97 @@ def test_engine_caches_population_chain_for_readout_only_sweep(
     engine._ensure_signal()
 
     assert calls == 1
+
+
+def test_engine_population_cache_key_includes_readout_q_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PulseReadout gain sweeps cannot reuse population chains when q_post changes."""
+
+    calls = 0
+    real_population_chain = SimEngine._point_population_chain
+
+    def spy_population_chain(
+        self: SimEngine,
+        model: _PointModel,
+        reps: int,
+        nreads: int,
+        *,
+        use_numba: bool = True,
+    ) -> NDArray[np.float64]:
+        nonlocal calls
+        calls += 1
+        return real_population_chain(self, model, reps, nreads, use_numba=use_numba)
+
+    monkeypatch.setattr(SimEngine, "_point_population_chain", spy_population_chain)
+
+    sim = _SIM.model_copy(
+        update={
+            "readout_decay_rate_per_us": 1.0,
+            "readout_decay_threshold_ratio": 0.0,
+            "readout_decay_exponent": 1.0,
+        }
+    )
+    _soc, soccfg = make_mock_soc(sim=sim)
+    sw = SweepCfg(start=0.02, stop=0.08, expts=4, step=0.02)
+    gain_param = sweep2param("ro_gain", sw)
+    readout = PulseReadoutCfg(
+        pulse_cfg=PulseCfg(
+            ch=0,
+            nqz=1,
+            gain=gain_param,
+            freq=_rf_g_mhz(),
+            phase=0.0,
+            waveform=ConstWaveformCfg(length=1.0),
+        ),
+        ro_cfg=DirectReadoutCfg(
+            ro_ch=0,
+            ro_length=1.0,
+            ro_freq=_rf_g_mhz(),
+        ),
+    ).build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=7, rounds=1),
+        modules=[readout],
+        sweep=[("ro_gain", sw)],
+    )
+    prog.compile()
+
+    engine = SimEngine(prog, sim)
+    engine._ensure_signal()
+
+    assert calls == sw.expts
+
+
+def test_engine_scalar_population_chain_applies_readout_damping_before_relax() -> None:
+    """Single-node fast path records pre-readout P_e, then damps carry state."""
+
+    q_post = 0.4
+    reps = 5
+    identity = np.eye(4, dtype=np.float64)
+    model = _PointModel(
+        s_g=np.array([0.0 + 0.0j], dtype=np.complex128),
+        s_e=np.array([1.0 + 0.0j], dtype=np.complex128),
+        signal_scale=1.0,
+        noise_std_scale=1.0,
+        gain_noise_std_scale=0.0,
+        readout_q_post=q_post,
+        equilibrium_pop=1.0,
+        pre_readout_props=(identity,),
+        inter_shot_props=(identity,),
+    )
+    engine = object.__new__(SimEngine)
+    engine._stop_checkers = ()
+    engine._detune_weights = np.ones(1, dtype=np.float64)
+
+    actual = engine._point_population_chain(model, reps=reps, nreads=1, use_numba=False)
+
+    # With identity pre/relax and p0=1, amplitude damping maps p -> q_post * p.
+    expected = np.array(
+        [[q_post**rep_idx] for rep_idx in range(reps)], dtype=np.float64
+    )
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_engine_reuses_evolution_lowering_for_readout_only_sweep(
@@ -496,6 +588,7 @@ def test_engine_uses_numba_for_large_unique_population_work(
         _relax_props: NDArray[np.float64],
         _weights: NDArray[np.float64],
         _equilibrium_pop: float,
+        _readout_q_post: float,
         reps: int,
         nreads: int,
     ) -> NDArray[np.float64]:
@@ -538,7 +631,15 @@ def test_engine_batched_population_chain_matches_scalar_reference(
 ) -> None:
     """The optimized detune-node recurrence preserves the scalar physics."""
 
-    sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
+    sim = _SIM.model_copy(
+        update={
+            "T2": 10.0,
+            "T2_star": 5.0,
+            "readout_decay_rate_per_us": 1.0,
+            "readout_decay_threshold_ratio": 0.0,
+            "readout_decay_exponent": 1.0,
+        }
+    )
     _soc, soccfg = make_mock_soc(sim=sim)
     pulse = PulseCfg(
         ch=0,
@@ -548,10 +649,21 @@ def test_engine_batched_population_chain_matches_scalar_reference(
         phase=0.0,
         waveform=ConstWaveformCfg(length=0.7),
     ).build("qub")
+    readout = PulseReadoutCfg(
+        pulse_cfg=PulseCfg(
+            ch=0,
+            nqz=1,
+            gain=0.08,
+            freq=_rf_g_mhz(),
+            phase=0.0,
+            waveform=ConstWaveformCfg(length=1.0),
+        ),
+        ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=_rf_g_mhz()),
+    ).build("ro")
     prog = ModularProgramV2(
         soccfg,
         ProgramV2Cfg(reps=8, rounds=1, relax_delay=0.1),
-        modules=[pulse, _readout(_rf_g_mhz())],
+        modules=[pulse, readout],
     )
     prog.compile()
     engine = SimEngine(prog, sim)
@@ -586,7 +698,10 @@ def test_engine_batched_population_chain_matches_scalar_reference(
             at_readout = pre_prop @ state
             node_p = 0.5 * (1.0 + float(at_readout[2]))
             p_mean += float(weight) * min(max(node_p, 0.0), 1.0)
-            next_states.append(relax_prop @ at_readout)
+            after_readout = apply_amplitude_damping_augmented(
+                at_readout, model.readout_q_post
+            )
+            next_states.append(relax_prop @ after_readout)
         expected[rep_idx, :] = p_mean
         states = next_states
 

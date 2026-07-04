@@ -54,14 +54,17 @@ class TestSimParamsConstruction:
         assert p.Ql == 5000.0
         assert p.Qi == 50000.0
         assert p.snr == 10.0
-        assert p.readout_gain_noise_per_gain == 0.0
+        assert p.readout_gain_noise_per_gain == 0.03
         assert p.pi_gain_len == 0.4
 
     def test_optional_defaults(self) -> None:
         p = SimParams(**_VALID)
         assert p.flux_bias == 0.0
-        assert p.Temp == 0.0
+        assert p.Temp == 0.060
         assert p.readout_photons_per_gain2 == 100.0
+        assert p.readout_decay_rate_per_us == 2.0
+        assert p.readout_decay_threshold_ratio == 0.1
+        assert p.readout_decay_exponent == 1.0
         assert p.seed is None
         # FLUX-AWARE-MOCK: flux_device defaults to None (fixed reduced flux = 1.0).
         assert p.flux_device is None
@@ -174,6 +177,54 @@ class TestSimParamsValidation:
         bad = {**_VALID, "readout_photons_per_gain2": readout_photons_per_gain2}
         with pytest.raises(ValidationError):
             SimParams(**bad)
+
+    @pytest.mark.parametrize(
+        "readout_decay_rate_per_us",
+        [-1.0, float("nan"), float("inf")],
+    )
+    def test_invalid_readout_decay_rate_per_us_raises(
+        self, readout_decay_rate_per_us: float
+    ) -> None:
+        with pytest.raises(
+            ValidationError,
+            match="readout_decay_rate_per_us must be finite and >= 0.0",
+        ):
+            SimParams(
+                **_VALID,
+                readout_decay_rate_per_us=readout_decay_rate_per_us,
+            )
+
+    @pytest.mark.parametrize(
+        "readout_decay_threshold_ratio",
+        [-1.0, float("nan"), float("inf")],
+    )
+    def test_invalid_readout_decay_threshold_ratio_raises(
+        self, readout_decay_threshold_ratio: float
+    ) -> None:
+        with pytest.raises(
+            ValidationError,
+            match="readout_decay_threshold_ratio must be finite and >= 0.0",
+        ):
+            SimParams(
+                **_VALID,
+                readout_decay_threshold_ratio=readout_decay_threshold_ratio,
+            )
+
+    @pytest.mark.parametrize(
+        "readout_decay_exponent",
+        [0.0, -1.0, float("nan"), float("inf")],
+    )
+    def test_invalid_readout_decay_exponent_raises(
+        self, readout_decay_exponent: float
+    ) -> None:
+        with pytest.raises(
+            ValidationError,
+            match="readout_decay_exponent must be finite and > 0.0",
+        ):
+            SimParams(
+                **_VALID,
+                readout_decay_exponent=readout_decay_exponent,
+            )
 
 
 class TestSimParamsCoherenceHelpers:

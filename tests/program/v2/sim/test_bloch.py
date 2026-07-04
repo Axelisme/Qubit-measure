@@ -13,6 +13,7 @@ import pytest
 from scipy.linalg import expm
 from zcu_tools.program.v2.sim.bloch import (
     Segment,
+    apply_amplitude_damping_augmented,
     bloch_generator,
     evolve,
     excited_population,
@@ -78,6 +79,61 @@ def test_evolve_rejects_wrong_shape() -> None:
 
     with pytest.raises(ValueError):
         evolve(np.zeros(4), [])
+
+
+def test_amplitude_damping_q_one_is_identity() -> None:
+    state = np.array([0.2, -0.4, 0.6, 1.0], dtype=np.float64)
+
+    actual = apply_amplitude_damping_augmented(state, 1.0)
+
+    np.testing.assert_allclose(actual, state)
+
+
+def test_amplitude_damping_q_zero_maps_to_ground() -> None:
+    state = np.array([0.2, -0.4, 0.6, 1.0], dtype=np.float64)
+
+    actual = apply_amplitude_damping_augmented(state, 0.0)
+
+    np.testing.assert_allclose(actual, [0.0, 0.0, -1.0, 1.0])
+
+
+def test_amplitude_damping_partial_survival() -> None:
+    state = np.array([0.2, -0.4, 0.6, 1.0], dtype=np.float64)
+
+    actual = apply_amplitude_damping_augmented(state, 0.25)
+
+    np.testing.assert_allclose(actual, [0.1, -0.2, -0.6, 1.0])
+
+
+def test_amplitude_damping_supports_batched_augmented_states() -> None:
+    states = np.array(
+        [
+            [0.2, -0.4, 0.6, 1.0],
+            [0.0, 0.8, -0.2, 1.0],
+        ],
+        dtype=np.float64,
+    )
+
+    actual = apply_amplitude_damping_augmented(states, 0.25)
+
+    np.testing.assert_allclose(
+        actual,
+        [
+            [0.1, -0.2, -0.6, 1.0],
+            [0.0, 0.4, -0.8, 1.0],
+        ],
+    )
+
+
+@pytest.mark.parametrize("q_post", [-0.1, 1.1, float("nan")])
+def test_amplitude_damping_rejects_invalid_q_post(q_post: float) -> None:
+    with pytest.raises(ValueError, match="q_post"):
+        apply_amplitude_damping_augmented(np.array([0.0, 0.0, -1.0, 1.0]), q_post)
+
+
+def test_amplitude_damping_rejects_wrong_shape() -> None:
+    with pytest.raises(ValueError, match="last dimension of size 4"):
+        apply_amplitude_damping_augmented(np.zeros(3), 1.0)
 
 
 def test_infinite_coherence_has_no_decay_terms() -> None:

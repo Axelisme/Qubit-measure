@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-04 — Temperature-derived equilibrium population
+**Last updated:** 2026-07-04 — Mock default temperature and readout backaction
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -37,9 +37,9 @@ For each sweep point the engine drives this chain:
 2. **evolve** the Bloch vector through those segments (4x4 augmented affine
    propagator, with closed-form free-evolution segments) to an excited population
    `P_e`; the equilibrium population is derived from `SimParams.Temp` and the
-   operating `f_qubit`; within a round the
-   engine carries each rep's post-readout state through `relax_delay` into the
-   next rep,
+   operating `f_qubit`; within a round the engine applies step-photon
+   readout-induced `e -> g` amplitude damping, then carries each rep's
+   post-readout state through `relax_delay` into the next rep,
 3. **read out** dispersively as two state-conditioned blobs — `s_g = S21(rf_g)`
    (qubit in |g>) and `s_e = S21(rf_e)` (qubit in |e>) — where `rf_g` / `rf_e`
    are the dressed resonator frequencies at the operating flux; the reps axis
@@ -74,11 +74,13 @@ to move that call back into the loop.
 
 **Simulation caches stay internal to `SimEngine`.** Within one signal-grid build,
 the engine separates per-point readout blobs/scales from qubit-state evolution:
-sweep points that change only readout parameters reuse the same
-pre-readout/inter-shot Bloch propagators and the same rep-resolved `P_e` chain,
-while qubit-drive sweeps still compute distinct chains because their propagators
-differ. These readout/evolution/population caches are private `SimEngine`
-implementation details, not seams exposed to callers or sibling modules.
+sweep points that change only readout centers reuse the same pre-readout/inter-shot
+Bloch propagators and, when `q_post` is unchanged, the same rep-resolved `P_e`
+chain. PulseReadout gain or duration sweeps that change readout-induced
+post-state damping get distinct population chains, while qubit-drive sweeps still
+compute distinct chains because their propagators differ. These
+readout/evolution/population caches are private `SimEngine` implementation
+details, not seams exposed to callers or sibling modules.
 
 **Mocksim CPU loops yield the process GIL cooperatively.** Autofluxdep RUN work is
 submitted to a dedicated `QThread`, but a Python/C-extension-heavy mock simulator
@@ -165,10 +167,10 @@ every coupling point.
   `s_g` / `s_e` blobs), and `mixed_signal` is the population-weighted blend (the
   accumulated reps-mean) — both *take* `rf_g` / `rf_e` (so the engine computes the
   dressed freqs once). Also owns pure readout helpers: dispersive critical photon
-  number, explicit unitless-gain photon-ratio calibration, safe-zone drive
-  compression, state-visibility compression, envelope-weighted effective signal
-  samples, envelope-RMS readout noise scaling, and integrated Gaussian noise
-  sample scaling. Also `value_to_flux`. No sweeps /
+  number, explicit unitless-gain photon-ratio calibration, step-photon
+  readout-induced `e -> g` survival factors, envelope-weighted effective signal
+  samples, envelope-RMS readout noise scaling, and integrated Gaussian noise sample
+  scaling. Also `value_to_flux`. No sweeps /
   timelines / acc_buf / random noise / the per-shot Bernoulli draw (the engine owns
   that).
 - `engine.py` — `SimEngine`: glue. Pins the operating point at reduced flux
@@ -179,7 +181,7 @@ every coupling point.
   reuse deterministic propagators, caches the deterministic `(s_g, s_e)` blob
   grids plus readout integration scales and a rep-resolved `p_e` grid, then per
   round draws a per-shot `Bernoulli(p_e)` to
-  select a blob, multiplies the deterministic signal by the compressed readout gain
+  select a blob, multiplies the deterministic signal by the linear readout gain
   and effective signal samples, and adds quadrature-combined base plus
   gain-proportional Gaussian integrated noise into the QICK
   `(*loop_dims, nreads, 2)` int64 buffer (noise parameters / reps / rounds / seed;
@@ -255,14 +257,21 @@ every coupling point.
   shift" (`rf_g = rf_e = bare_rf`) and warns, rather than crashing — a real
   measurement never raises at that physics edge.
 - **Readout integration model.** Accumulated and singleshot raw `acc_buf` entries
-  are integrated ADC sums. The deterministic raw center is linear in readout gain
-  and in the effective signal samples while `nbar/ncrit <= 0.1`; above that
-  dispersive guardrail the readout drive is softly compressed and the |g>/|e> blob
-  separation is compressed around its midpoint. `readout_photons_per_gain2` is the
-  explicit mock calibration from PulseReadout gain² to intracavity photons; its
-  default is `100.0`, and `None` is rejected so the power calibration cannot
-  silently depend on the current critical photon number. DirectReadout has no
-  explicit generator gain and stays on the linear path.
+  are integrated ADC sums. The deterministic ground-state raw center is linear in
+  readout gain and in the effective signal samples. PulseReadout maps gain² to
+  `nbar/ncrit` through `readout_photons_per_gain2`, then applies a step-photon
+  readout-induced `e -> g` model: post-readout state survival uses the generator
+  `pulse_length_us`, while the excited-initial readout center uses the average
+  survival over the ADC `ro_length_us` horizon and holds survival fixed after the
+  generator pulse ends. DirectReadout has no explicit generator gain, so it has
+  no photon backaction and stays on the linear path.
+  `readout_photons_per_gain2` is the explicit mock calibration from PulseReadout
+  gain² to intracavity photons; its default is `100.0`, and `None` is rejected so
+  the power calibration cannot silently depend on the current critical photon
+  number. `Temp` defaults to `0.060` K, `readout_gain_noise_per_gain` defaults to
+  `0.03`, and `readout_decay_rate_per_us` defaults to `2.0` so the dev mock shows
+  finite thermal population, gain-proportional noise, and high-power readout
+  backaction without extra GUI setup.
   For accumulated `PulseReadout`, effective signal samples are the overlap between
   the compiled ADC sample axis and the generator envelope after applying
   `trig_offset - timeFly - pulse_pre_delay`; a readout window that starts before
@@ -270,15 +279,15 @@ every coupling point.
   The base Gaussian raw-noise standard deviation scales as
   `sqrt(compiled_readout_samples)`. The optional gain-proportional Gaussian source
   uses the same readout envelope sampled on the ADC axis and scales with the
-  compressed PulseReadout drive amplitude; independent sources are combined in
+  linear PulseReadout gain; independent sources are combined in
   quadrature.
   The real QICK/tracker normalization still divides by compiled `ro["length"]`,
   so a full-window const readout has roughly length-independent normalized mean
   and normalized Gaussian noise that decreases as `1/sqrt(length)`.
 - **Q1 — noise model.** `snr` is only the base per-sample Gaussian readout scale,
   not a fixed final SNR. PulseReadout may add a second Gaussian source through
-  `readout_gain_noise_per_gain`; this term is proportional to the compressed
-  readout drive amplitude and is combined with the base source in quadrature.
+  `readout_gain_noise_per_gain`; this term is proportional to the linear readout
+  gain/envelope and is combined with the base source in quadrature.
   Fresh Gaussian noise is drawn each round so averaging over reps*rounds improves
   the effective SNR by `sqrt(reps*rounds)`, as on hardware. Full-window length
   sweeps are still expected to prefer their upper bounds in this first-order
@@ -333,11 +342,12 @@ every coupling point.
 - `test_engine.py` — engine assembly + acquire dispatch (feature *shape*: D1
   regression, peak/dip, oscillation, decay, fringes, round hook, decimated trace),
   the singleshot per-shot blobs (get_raw clusters on the |g>/|e> centres, pi/2 puts
-  ~half on the excited blob, reps-mean == accumulated readout), the Lorentzian
-  dephasing gates (quadrature reproduces the analytic FID, echo refocuses to T2,
-  Ramsey decays faster, Γ=0 no-inhomogeneous-broadening), and a deterministic
-  Branch smoke. The coherence-envelope helpers run at `reps=2000` to average the
-  per-shot shot noise.
+  ~half on the excited blob, reps-mean == accumulated readout), explicit
+  readout-induced backaction gates (excited blob center shift, raw mixture sampling,
+  `q_post` population-cache behavior), the Lorentzian dephasing gates (quadrature
+  reproduces the analytic FID, echo refocuses to T2, Ramsey decays faster, Γ=0
+  no-inhomogeneous-broadening), and a deterministic Branch smoke. The
+  coherence-envelope helpers run at `reps=2000` to average the per-shot shot noise.
 - `test_integration.py` — cross-experiment inject -> recover: real experiment
   `run` + `analyze` recover the injected f_qubit / pi gain / gain scaling / T1 /
   T2 + detuning, the dephasing proof (echo -> T2 and Γ-insensitive, Ramsey -> T2\*,

@@ -189,6 +189,31 @@ def evolve(
     return aug[:3].copy()
 
 
+def apply_amplitude_damping_augmented(
+    state: NDArray[np.float64],
+    q_post: float,
+) -> NDArray[np.float64]:
+    """Apply an e->g amplitude-damping map to augmented Bloch state(s)."""
+
+    q = float(q_post)
+    if not math.isfinite(q) or not 0.0 <= q <= 1.0:
+        raise ValueError(f"q_post must be finite and in [0, 1], got {q_post!r}")
+
+    arr = np.asarray(state, dtype=np.float64)
+    if arr.shape[-1:] != (4,):
+        raise ValueError(
+            f"state must have last dimension of size 4, got shape {arr.shape}"
+        )
+
+    out = arr.copy()
+    sqrt_q = math.sqrt(q)
+    out[..., 0] = sqrt_q * arr[..., 0]
+    out[..., 1] = sqrt_q * arr[..., 1]
+    out[..., 2] = q * arr[..., 2] + (q - 1.0) * arr[..., 3]
+    out[..., 3] = arr[..., 3]
+    return out
+
+
 def ground_state(equilibrium_pop: float = 0.0) -> NDArray[np.float64]:
     """Return the thermal steady state ``(0, 0, z_eq)`` with ``z_eq = 2*p - 1``.
 

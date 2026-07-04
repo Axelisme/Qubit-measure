@@ -27,17 +27,15 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.sim import readout
 from zcu_tools.program.v2.sim.readout import (
-    apply_readout_visibility,
     critical_photon_number,
     decimated_trace,
     effective_noise_samples,
     effective_signal_samples,
     mixed_signal,
     noise_std_sample_scale,
-    readout_drive_amplitude,
+    readout_backaction,
     readout_envelope_samples,
     readout_photon_ratio,
-    readout_state_visibility,
     resonator_freqs,
     s21,
 )
@@ -249,17 +247,8 @@ class TestIntegrationHelpers:
         with pytest.raises(ValueError):
             critical_photon_number(f_qubit, resonator, g)
 
-    def test_readout_drive_amplitude_defaults_direct_readout_to_unity(self) -> None:
-        assert readout_drive_amplitude(None) == pytest.approx(1.0)
-
-    @pytest.mark.parametrize("gain", [0.0, 0.05, 0.5, -0.25])
-    def test_readout_drive_amplitude_returns_finite_gain(self, gain: float) -> None:
-        assert readout_drive_amplitude(gain) == pytest.approx(gain)
-
-    @pytest.mark.parametrize("gain", [float("nan"), float("inf"), -float("inf")])
-    def test_readout_drive_amplitude_rejects_nonfinite_gain(self, gain: float) -> None:
-        with pytest.raises(ValueError, match="readout gain must be finite"):
-            readout_drive_amplitude(gain)
+    def test_readout_photon_ratio_defaults_direct_readout_to_zero(self) -> None:
+        assert readout_photon_ratio(None, n_crit=20.0, photons_per_gain2=20.0) == 0.0
 
     def test_readout_photon_ratio_uses_explicit_gain_calibration(self) -> None:
         assert readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=20.0) == (
@@ -268,29 +257,146 @@ class TestIntegrationHelpers:
         assert readout_photon_ratio(1.0, n_crit=20.0, photons_per_gain2=20.0) == (
             pytest.approx(1.0)
         )
+        assert readout_photon_ratio(-0.5, n_crit=20.0, photons_per_gain2=20.0) == (
+            pytest.approx(0.25)
+        )
+
+    @pytest.mark.parametrize("gain", [float("nan"), float("inf"), -float("inf")])
+    def test_readout_photon_ratio_rejects_nonfinite_gain(self, gain: float) -> None:
+        with pytest.raises(ValueError, match="readout gain must be finite"):
+            readout_photon_ratio(gain, n_crit=20.0, photons_per_gain2=20.0)
 
     def test_readout_photon_ratio_rejects_missing_pulse_calibration(self) -> None:
         with pytest.raises(ValueError, match="photons_per_gain2 must be provided"):
             readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=None)  # type: ignore[arg-type]
 
-    def test_readout_drive_amplitude_soft_saturates_at_ncrit(self) -> None:
-        assert readout_drive_amplitude(
-            0.01, n_crit=10.0, photons_per_gain2=10.0
-        ) == pytest.approx(0.01, rel=1e-4)
-        assert readout_drive_amplitude(
-            1.0, n_crit=10.0, photons_per_gain2=10.0
-        ) == pytest.approx(1.0 / np.sqrt(1.9))
+    @pytest.mark.parametrize("n_crit", [0.0, -1.0, float("nan")])
+    def test_readout_photon_ratio_rejects_bad_ncrit(self, n_crit: float) -> None:
+        with pytest.raises(ValueError, match="n_crit must be finite and > 0.0"):
+            readout_photon_ratio(0.5, n_crit=n_crit, photons_per_gain2=20.0)
 
-    def test_readout_state_visibility_compresses_blob_separation(self) -> None:
-        s_g = np.array([1.0 + 0.0j], dtype=np.complex128)
-        s_e = np.array([-1.0 + 0.0j], dtype=np.complex128)
-        visibility = readout_state_visibility(1.0, n_crit=10.0, photons_per_gain2=10.0)
+    @pytest.mark.parametrize("photons_per_gain2", [0.0, -1.0, float("nan")])
+    def test_readout_photon_ratio_rejects_bad_calibration(
+        self, photons_per_gain2: float
+    ) -> None:
+        with pytest.raises(ValueError, match="photons_per_gain2 must be finite"):
+            readout_photon_ratio(0.5, n_crit=20.0, photons_per_gain2=photons_per_gain2)
 
-        s_g_eff, s_e_eff = apply_readout_visibility(s_g, s_e, visibility)
+    def test_readout_backaction_below_threshold_is_identity(self) -> None:
+        backaction = readout_backaction(
+            0.1,
+            100.0,
+            1.0,
+            pulse_length_us=2.0,
+            ro_length_us=3.0,
+            decay_rate_per_us=10.0,
+            decay_threshold_ratio=0.1,
+            decay_exponent=1.0,
+        )
 
-        assert visibility == pytest.approx(1.0 / 1.9)
-        assert (0.5 * (s_g_eff + s_e_eff))[0] == pytest.approx(0.0 + 0.0j)
-        assert abs(s_g_eff[0] - s_e_eff[0]) == pytest.approx(visibility * 2.0)
+        assert backaction.photon_ratio == pytest.approx(0.0001)
+        assert backaction.gamma_ro == 0.0
+        assert backaction.q_post == 1.0
+        assert backaction.q_signal_avg == 1.0
+
+    def test_readout_backaction_uses_pulse_and_readout_lengths(self) -> None:
+        gamma_ro = 0.2 * (2.0 - 0.5) ** 2
+        pulse_length = 2.0
+        ro_length = 3.0
+
+        backaction = readout_backaction(
+            2.0,
+            2.0,
+            1.0,
+            pulse_length_us=pulse_length,
+            ro_length_us=ro_length,
+            decay_rate_per_us=0.2,
+            decay_threshold_ratio=0.5,
+            decay_exponent=2.0,
+        )
+
+        q_post = np.exp(-gamma_ro * pulse_length)
+        expected_q_avg = (
+            (1.0 - np.exp(-gamma_ro * pulse_length)) / gamma_ro
+            + (ro_length - pulse_length) * q_post
+        ) / ro_length
+        assert backaction.photon_ratio == pytest.approx(2.0)
+        assert backaction.gamma_ro == pytest.approx(gamma_ro)
+        assert backaction.q_post == pytest.approx(q_post)
+        assert backaction.q_signal_avg == pytest.approx(expected_q_avg)
+
+    def test_readout_backaction_short_readout_window_uses_closed_form(self) -> None:
+        gamma_ro = 0.5
+        ro_length = 0.25
+
+        backaction = readout_backaction(
+            1.0,
+            1.0,
+            1.0,
+            pulse_length_us=1.0,
+            ro_length_us=ro_length,
+            decay_rate_per_us=gamma_ro,
+            decay_threshold_ratio=0.0,
+            decay_exponent=1.0,
+        )
+
+        assert backaction.q_signal_avg == pytest.approx(
+            (1.0 - np.exp(-gamma_ro * ro_length)) / (gamma_ro * ro_length)
+        )
+
+    @pytest.mark.parametrize(
+        ("decay_rate_per_us", "ro_length_us"),
+        [(0.0, 2.0), (1.0, 0.0)],
+    )
+    def test_readout_backaction_zero_rate_or_zero_readout_avg_is_one(
+        self, decay_rate_per_us: float, ro_length_us: float
+    ) -> None:
+        backaction = readout_backaction(
+            1.0,
+            1.0,
+            1.0,
+            pulse_length_us=1.0,
+            ro_length_us=ro_length_us,
+            decay_rate_per_us=decay_rate_per_us,
+            decay_threshold_ratio=0.0,
+            decay_exponent=1.0,
+        )
+
+        assert backaction.q_signal_avg == 1.0
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"pulse_length_us": -1.0},
+            {"ro_length_us": -1.0},
+            {"decay_rate_per_us": -1.0},
+            {"decay_threshold_ratio": -1.0},
+            {"decay_exponent": 0.0},
+            {"decay_exponent": float("nan")},
+        ],
+    )
+    def test_readout_backaction_rejects_invalid_inputs(
+        self, kwargs: dict[str, float]
+    ) -> None:
+        base = {
+            "pulse_length_us": 1.0,
+            "ro_length_us": 1.0,
+            "decay_rate_per_us": 1.0,
+            "decay_threshold_ratio": 0.0,
+            "decay_exponent": 1.0,
+        }
+        params = {**base, **kwargs}
+        with pytest.raises(ValueError):
+            readout_backaction(
+                1.0,
+                1.0,
+                1.0,
+                pulse_length_us=params["pulse_length_us"],
+                ro_length_us=params["ro_length_us"],
+                decay_rate_per_us=params["decay_rate_per_us"],
+                decay_threshold_ratio=params["decay_threshold_ratio"],
+                decay_exponent=params["decay_exponent"],
+            )
 
     def test_effective_signal_samples_direct_readout_counts_window(self) -> None:
         ts = np.linspace(0.0, 1.0, 11, endpoint=False, dtype=np.float64)
@@ -569,6 +675,62 @@ class TestDecimatedTrace:
         np.testing.assert_allclose(tr_g, s_g)
         np.testing.assert_allclose(tr_e, s_e)
         np.testing.assert_allclose(tr_h, 0.5 * (s_g + s_e))
+
+    def test_readout_q_signal_avg_moves_excited_initial_center(self) -> None:
+        rf_g, rf_e = self._rf()
+        f_ro = rf_g
+        tof = _SIM.timeFly
+        ro_len = 1.0
+        cfg = _const_readout_cfg(length=ro_len)
+        ts = np.linspace(tof, tof + ro_len, 50, endpoint=False, dtype=np.float64)
+        s_g = s21(_SIM, np.array([f_ro]), rf_g)[0]
+        s_e = s21(_SIM, np.array([f_ro]), rf_e)[0]
+
+        tr_zero = decimated_trace(
+            _SIM,
+            ts,
+            cfg,
+            ro_len,
+            f_ro,
+            rf_g,
+            rf_e,
+            p_e=1.0,
+            readout_q_signal_avg=0.0,
+        )
+        tr_quarter = decimated_trace(
+            _SIM,
+            ts,
+            cfg,
+            ro_len,
+            f_ro,
+            rf_g,
+            rf_e,
+            p_e=1.0,
+            readout_q_signal_avg=0.25,
+        )
+
+        np.testing.assert_allclose(tr_zero, s_g)
+        np.testing.assert_allclose(tr_quarter, s_g + 0.25 * (s_e - s_g))
+
+    @pytest.mark.parametrize("readout_q_signal_avg", [-0.1, 1.1, float("nan")])
+    def test_readout_q_signal_avg_rejects_invalid_values(
+        self, readout_q_signal_avg: float
+    ) -> None:
+        rf_g, rf_e = self._rf()
+        cfg = _const_readout_cfg(length=1.0)
+        ts = np.array([_SIM.timeFly], dtype=np.float64)
+        with pytest.raises(ValueError, match="readout_q_signal_avg"):
+            decimated_trace(
+                _SIM,
+                ts,
+                cfg,
+                1.0,
+                rf_g,
+                rf_g,
+                rf_e,
+                p_e=1.0,
+                readout_q_signal_avg=readout_q_signal_avg,
+            )
 
     def test_length_matches_ts(self) -> None:
         rf_g, rf_e = self._rf()
