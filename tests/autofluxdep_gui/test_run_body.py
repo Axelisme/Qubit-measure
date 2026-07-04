@@ -20,6 +20,7 @@ import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
+from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
 from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_journal_events,
@@ -170,6 +171,25 @@ def test_enabled_consumer_skips_when_required_provider_is_disabled(tmp_path):
         event["type"] == "node_skipped"
         and event["node"] == "consumer"
         and event["reason"]["missing_info_keys"] == ["x"]
+        for event in events
+    )
+
+
+def test_real_t1_node_skips_when_pi_pulse_module_is_missing(tmp_path):
+    ctrl = build_core(project=_project(tmp_path))
+    ctrl.add_node(T1Builder())
+    ctrl.set_flux_values([0.0])
+
+    run_controller_to_completion(ctrl)
+
+    run_dir = _latest_run_dir(tmp_path)
+    manifest = load_manifest(run_dir / "manifest.json")
+    assert manifest["terminal"]["status"] == "finished"
+    events = load_journal_events(run_dir / "journal.jsonl")
+    assert any(
+        event["type"] == "node_skipped"
+        and event["node"] == "t1"
+        and event["reason"]["missing_modules"] == ["pi_pulse"]
         for event in events
     )
 

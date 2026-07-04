@@ -5,9 +5,9 @@ an ordering / topological resolver: execution order is whatever sequence it is
 handed (the user's GUI list, with the predictor Service prepended), and it just
 runs it. Per flux point, for each provider in order it:
 
-1. projects the provider's declared ``requires`` / ``optional`` / module deps
+1. resolves the provider's declared ``requires`` / ``optional`` / module deps
    against the current info/module state into a read-only ``Snapshot``
-   (latest-available, with skip/fallback) — ``project_snapshot``;
+   (latest-available, with skip/fallback) — ``resolve_provider_snapshot``;
 2. builds the provider's Node for this point via ``builder.build_node(env)``,
    currying in the execution environment (flux, soc, tools, this provider's
    Result, the round_hook) so ``produce`` exposes only "requirements in, Patch
@@ -68,7 +68,7 @@ class ModuleSource(Protocol):
 
 
 class DepDeclaring(Protocol):
-    """The declaration surface ``project_snapshot`` reads off a provider.
+    """The declaration surface ``resolve_provider_snapshot`` reads off a provider.
 
     A ``PlacedNode`` satisfies this (it delegates to its Builder). Kept as a
     Protocol so the resolver depends only on the declarations, not on the
@@ -194,21 +194,6 @@ def _resolve_module(
             if preset is not None:
                 return preset
     return _MISSING
-
-
-def project_snapshot(
-    provider: DepDeclaring, info: InfoStore, ml: ModuleSource | None = None
-) -> Snapshot | None:
-    """Project the master container into a Snapshot for ``provider``, or None to skip.
-
-    Info values: each declared key resolved latest-available (this point, else
-    previous; a ``smooth`` dep reads the smoothed projection under the same key),
-    defaults filled. Modules: each declared module resolved module_point →
-    module_prev → ml preset → declared default. A required info key or module
-    that resolves to nothing anywhere (and has no default) → None (skip the
-    provider this point).
-    """
-    return resolve_provider_snapshot(provider, info, ml).snapshot
 
 
 def resolve_provider_snapshot(

@@ -39,7 +39,7 @@ state 應位於 run-lived service/capability。
 
 4. **generic feedback 只提供抽象 scalar mechanics。** Estimator strategy 是
    `idw` / `last_good`；controller strategy 是 `log_step`。generic layer 回傳
-   `FeedbackSample(value, confidence, age_points)`，只做 finite/positive 等自身
+   `FeedbackSample(value, confidence, age_queries)`，只做 finite/positive 等自身
    數學前置檢查與 age-based confidence decay，不處理 bounds、clamp、saturation、
    max-step、stop/fail、fit-quality gate、fallback target 或 acceptance policy。
 
@@ -53,8 +53,9 @@ state 應位於 run-lived service/capability。
 
 7. **node 擁有 domain composition。** feedback capability 不知道被控制/預測的
    domain 值。`qubit_freq` 決定 `base predictor prediction + correction` 如何組成
-   drive center、`fit_detune` 與 result role；`lenrabi` 決定 pi-length normalized
-   error 如何轉成 gain proposal 並在何處 clamp。
+   drive center、`fit_detune` 與 result role；fixed-bias mode 保持 base predictor
+   不變，hard-bias mode 才要求 predictor backend 校準。`lenrabi` 決定 pi-length
+   normalized error 如何轉成 gain proposal 並在何處 clamp。
 
 8. **predictor 不隱藏 residual correction。** `Tools.Predictor` 只提供 physical/base
    prediction 與 backend-supported calibration。`qubit_freq` 的 residual

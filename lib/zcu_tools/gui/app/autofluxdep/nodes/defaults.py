@@ -220,18 +220,6 @@ def move_module(raw_cfg: dict[str, Any], old: str, new: str) -> None:
     modules[new] = modules.pop(old)
 
 
-def sweep_range(raw_cfg: dict[str, Any], key: str) -> tuple[float, float]:
-    sweep = raw_cfg.get("sweep")
-    if not isinstance(sweep, dict):
-        raise RuntimeError("adapter raw cfg has no sweep section")
-    axis = sweep.get(key)
-    start = getattr(axis, "start", None)
-    stop = getattr(axis, "stop", None)
-    if start is None or stop is None:
-        raise RuntimeError(f"adapter raw cfg sweep {key!r} is missing start/stop")
-    return (float(start), float(stop))
-
-
 def _ensure_context(ctx: Any | None) -> ExpContext:
     if isinstance(ctx, ExpContext):
         return ctx

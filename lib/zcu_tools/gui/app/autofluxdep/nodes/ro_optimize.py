@@ -1,4 +1,4 @@
-"""ro_optimize — 2D readout-optimisation Builder: argmax over freq × gain.
+"""ro_optimize — 2D readout optimisation by SNR landscape argmax.
 
 Sets this flux point's value on the picked flux device, runs a real readout
 acquire over a freq × gain grid (against the flux-aware MockSoc offline or real
@@ -8,7 +8,8 @@ result), fills its Sweep2DResult row in place, and returns a Patch with
 from them.
 
 - requires the ``pi_pulse`` module (a pi-pulse is needed to prepare the excited
-  state before measuring readout fidelity); placeholder default for the prototype.
+  state before measuring readout fidelity); the resolver skips until a concrete
+  pulse is produced or available in ModuleLibrary.
 - reads optional ``best_ro_freq`` and ``best_ro_gain`` (raw prev-point values —
   no smoothing flag: the tracking loop deliberately follows the actual last best
   to plant the Gaussian centre so the optimum tracks across flux points), with
@@ -294,11 +295,6 @@ def _center_of(sweep: Any) -> float:
     return 0.5 * (float(sweep.start) + float(sweep.stop))
 
 
-def _placeholder_pi_pulse() -> Any:
-    # prototype placeholder — lenrabi produces the real module
-    return {"type": "pi", "length": 0.1}
-
-
 def _default_readout() -> Any | None:
     return None
 
@@ -362,9 +358,6 @@ class RoOptimizeNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-
-        _ = snapshot.module("pi_pulse")  # required — ge-branch excitation
-        _ = snapshot.module("readout")  # required — the swept readout pulse
 
         result: Sweep2DResult = env.result
         idx = env.flux_idx
@@ -518,11 +511,7 @@ class RoOptimizeBuilder(Builder):
         Dependency("best_ro_freq", default=_default_best_freq),
         Dependency("best_ro_gain", default=_default_best_gain),
     )
-    requires_modules = (
-        ModuleDep(
-            "pi_pulse", default=_placeholder_pi_pulse, aliases=PI_PULSE_LIBRARY_ALIASES
-        ),
-    )
+    requires_modules = (ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),)
     optional_modules = (
         ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
     )

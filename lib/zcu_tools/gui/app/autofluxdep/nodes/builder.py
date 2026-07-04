@@ -1,4 +1,4 @@
-"""Builder / Node / Provider — the execution abstraction (see CONTEXT.md).
+"""Builder / Node / placement — the execution abstraction (see CONTEXT.md).
 
 The orchestrator sees only three things on a provider: ``provides``,
 ``requires``, and (per flux point) a ``Node`` with ``produce``. It is a pure
@@ -28,7 +28,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
 from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, sectioned_node_schema
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
@@ -89,23 +89,6 @@ class Node(ABC):
         downstream then reads the latest-available value.
         """
         ...
-
-
-class Provider(Protocol):
-    """What the orchestrator sees: a name + declared deps + a per-point factory.
-
-    Both a measurement Builder and a Service implement this; the orchestrator
-    never touches their other capabilities.
-    """
-
-    name: str
-    provides: tuple[str, ...]
-    provides_modules: tuple[str, ...]
-
-    def all_dependencies(self) -> tuple[Dependency, ...]: ...
-    def all_module_deps(self) -> tuple[ModuleDep, ...]: ...
-    def smooth_specs(self) -> tuple[tuple[str, Any], ...]: ...
-    def build_node(self, env: RunEnv) -> Node: ...
 
 
 class Builder(ABC):
@@ -213,7 +196,7 @@ class PlacedNode:
     providers, results, and artifacts.
 
     The declaration helpers delegate to the Builder so a PlacedNode satisfies the
-    orchestrator's ``Provider`` view directly.
+    orchestrator's provider view directly.
     """
 
     builder: Builder

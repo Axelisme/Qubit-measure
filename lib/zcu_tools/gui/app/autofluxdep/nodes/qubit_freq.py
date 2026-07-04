@@ -1,24 +1,8 @@
-"""qubit_freq — the worked Builder: acquire → fit → fill Result → liveplot.
+"""qubit_freq — two-tone acquire around a predicted drive center.
 
-The first end-to-end real-acquire measurement provider in the Builder model. It
-translates the notebook's ``cfg_maker`` lambda + ``ctx.env`` walrus chain into:
-
-- a stateless ``QubitFreqBuilder`` declaring provides/requires + the sweep-lived
-  factories (``make_init_result`` allocates the (n_flux, n_detune) Result;
-  ``make_plotter`` builds the accumulating colormap Plotter);
-- a short-lived ``QubitFreqNode`` (built per flux point by ``build_node``, with
-  the flux point + soc + Result + round_hook curried in) whose ``produce``
-  sets this point's flux on the picked flux device, recenters the detune sweep on
-  the predicted qubit freq, runs a real ``TwoToneProgram.acquire`` (against the
-  flux-aware MockSoc offline or real hardware), fits it with ``fit_qubit_freq``,
-  fills the Result's flux-idx row in place, notifies via the round_hook, and
-  returns the trusted raw Patch keys.
-
-Mirrors the lower-layer ground truth ``experiment/v2/autofluxdep/qubit_freq.py``:
-predict-centred drive freq, detune
-sweep via ``sweep2param``, ``setup_devices`` to push the flux, ``.acquire`` with
-``round_hook`` + ``stop_checkers`` (cooperative stop + SNR early-stop), and the
-predictor calibration closed loop.
+The Builder owns cfg lowering and feedback policy; the short-lived Node performs
+one flux point's real acquire, fit, Result fill, and Patch emission. See
+``CONTEXT.md`` for the Builder/Node/orchestrator boundary.
 
 - ``predict_freq`` — required; provided by the predictor Service (a Builder
   whose Node computes it), resolved latest-available like any dependency.
@@ -52,6 +36,7 @@ from zcu_tools.gui.app.autofluxdep.feedback import (
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_to_complex,
+    axis_to_sweep,
     build_stop_checkers,
     is_good_fit,
     make_on_round,
@@ -71,7 +56,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_A
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import title_with_snr
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
@@ -86,6 +71,8 @@ _FREQ_FIT_RESIDUAL_RATIO = 0.2
 _LINEWIDTH_FIT_RESIDUAL_RATIO = 0.1
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
+_BIAS_UPDATE_MODE_FIXED = "fixed"
+_BIAS_UPDATE_MODE_HARD = "hard"
 _PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
     key="predict_freq_correction",
     kind="estimator",
@@ -205,21 +192,6 @@ def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return real
 
 
-def detune_axis_to_sweep(detune: NDArray[np.float64]) -> SweepCfg:
-    """Turn the Result's detune axis into the ``SweepCfg`` ``sweep2param`` needs.
-
-    The Result stores the detune axis as an explicit array (from the lowered
-    ``detune_sweep`` SweepCfg via ``sweepcfg_to_axis``); the program-side sweep is
-    a ``SweepCfg`` (start/stop/expts/step). Reconstructs it from the axis endpoints
-    + length so the FPGA sweep matches the Result's columns exactly."""
-    det = np.asarray(detune, dtype=np.float64)
-    expts = int(det.shape[0])
-    start = float(det[0])
-    stop = float(det[-1])
-    step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
-    return SweepCfg(start=start, stop=stop, expts=expts, step=step)
-
-
 def _is_trusted_frequency_fit(
     real: NDArray[np.float64], fit_curve: NDArray[np.float64]
 ) -> bool:
@@ -291,7 +263,7 @@ class QubitFreqNode(Node):
         # Recenter the detune sweep on the predicted freq (mirrors the lower layer:
         # qub_pulse.freq + detune_param), so the FPGA sweeps freq across the detune
         # window around the drive centre.
-        detune_sweep = detune_axis_to_sweep(detunes)
+        detune_sweep = axis_to_sweep(detunes)
         detune_param = sweep2param("detune", detune_sweep)
         cfg.modules.qub_pulse.set_param(
             "freq", cfg.modules.qub_pulse.freq + detune_param
@@ -329,9 +301,9 @@ class QubitFreqNode(Node):
         freq, _, fwhm, _, fit_curve, _ = fit_qubit_freq(freqs, real)
 
         # fit-quality gate (the runner module's mean_err vs ptp): a poor fit is
-        # discarded — it does NOT enter the Result, does NOT feed the predictor,
-        # and is omitted from the Patch so downstream falls back to the latest
-        # good value (and the next point predicts from the last good calibration).
+        # discarded — it does NOT enter the Result, does NOT update predictor or
+        # feedback state, and is omitted from the Patch so downstream falls back
+        # to the latest good value.
         if not _is_trusted_frequency_fit(real, fit_curve):
             logger.debug(
                 "qubit_freq fit @flux%d: poor fit (SNR-trough?) — "
@@ -342,20 +314,26 @@ class QubitFreqNode(Node):
                 env.round_hook(idx)  # raw row already shown; fit fields stay nan
             return Patch()  # partial: omit qubit_freq → downstream latest-available
 
-        # good fit: fill the Result's fit fields + feed the closed-loop feedback
+        # good fit: fill the Result's fit fields + update the configured bias path
         result.fit_freq[idx] = float(freq)
         np.copyto(result.fit_curve[idx], np.asarray(fit_curve, dtype=np.float64))
         if env.round_hook is not None:
             env.round_hook(idx)
 
-        # CLOSED-LOOP FEEDBACK: hand the measured frequency to the base predictor
-        # for backend-supported physical calibration, then observe the remaining
-        # residual in qubit_freq's generic correction estimator.
-        base_after_calibration = base_pred_qf
-        if env.tools is not None and env.tools.predictor is not None:
-            env.tools.predictor.calibrate(env.flux, float(freq))
-            base_after_calibration = float(env.tools.predictor.predict_freq(env.flux))
-        _observe_predict_freq_residual(env, float(freq), base_after_calibration)
+        # Bias policy is explicit: fixed mode keeps the physical/base predictor
+        # unchanged and lets the generic residual estimator carry run-local bias.
+        knobs = env.schema.lower(env.ml, md=env.md)
+        bias_update_mode = str(knobs["bias_update_mode"])
+        base_for_residual = base_pred_qf
+        if bias_update_mode == _BIAS_UPDATE_MODE_HARD:
+            if env.tools is not None and env.tools.predictor is not None:
+                env.tools.predictor.calibrate(env.flux, float(freq))
+                base_for_residual = float(env.tools.predictor.predict_freq(env.flux))
+        elif bias_update_mode != _BIAS_UPDATE_MODE_FIXED:
+            raise RuntimeError(
+                f"unsupported qubit_freq bias_update_mode: {bias_update_mode!r}"
+            )
+        _observe_predict_freq_residual(env, float(freq), base_for_residual)
 
         logger.debug(
             "qubit_freq fit @flux%d: freq=%.3f (predict=%.3f, detune=%+.3f) kappa=%.3f"
@@ -497,6 +475,19 @@ class QubitFreqBuilder(Builder):
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
                     group="safety",
+                ),
+                generation_field(
+                    "bias_update_mode",
+                    "bias_update_mode",
+                    str_choice_spec(
+                        "bias_update_mode",
+                        (
+                            _BIAS_UPDATE_MODE_FIXED,
+                            _BIAS_UPDATE_MODE_HARD,
+                        ),
+                    ),
+                    _BIAS_UPDATE_MODE_FIXED,
+                    group="feedback",
                 ),
                 generation_field(
                     "drive_gain_mode",

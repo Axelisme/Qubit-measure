@@ -3,8 +3,8 @@
 This is the *declaration vocabulary* shared by every provider (a measurement
 ``Builder`` or a ``Service`` — see ``nodes/builder.py``). It replaces the
 runner-based ``autofluxdep`` module's ``cfg_maker`` lambda + ``ctx.env["info"]``
-walrus chains with an explicit, declarative dependency model. See
-``.agent_state/plans/tool_gui/autofluxdep_gui_assessment.md`` §3 for the analysis.
+walrus chains with an explicit, declarative dependency model. See ``CONTEXT.md``
+and ADR-0018 for the active boundary.
 
 A provider declares:
 
@@ -46,7 +46,7 @@ logic); the GUI user only tunes the provider's params and wiring.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -107,8 +107,3 @@ class ModuleDep:
     @property
     def is_optional(self) -> bool:
         return self.default is not None
-
-
-# A resolved dependency bundle: key -> value, with optional-and-absent keys
-# already filled by their default. Handed to a Node as part of its Snapshot.
-Deps = Mapping[str, Any]

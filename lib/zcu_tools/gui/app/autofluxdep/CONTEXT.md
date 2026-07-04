@@ -14,18 +14,20 @@ a **Builder** (one subclass per experiment) that, per flux point, produces a
 short-lived **Node** with a narrow `produce` interface; the orchestrator drives
 those uniformly.
 
-The **orchestrator** sees only three things: `requires`, `provides`, and
-`produce`. It is a pure **requirement resolver** — NOT an ordering /
+The **orchestrator** sees only declarations plus `produce`: `requires`,
+`requires_modules`, `provides`, `provides_modules`, and the Node entrypoint. It
+is a pure **requirement resolver** — NOT an ordering /
 topological resolver. Execution order is the user's explicit list order; the
 orchestrator just runs it. Per flux point, for each provider in order: it
 projects `requires` against the current info/module state into a snapshot
 (latest-available, with skip/fallback), calls `produce(snapshot) -> Patch`, and
-merges the Patch by `provides`. It knows nothing of drawing, tools, acquire,
-fit, Result, soc, or round_hook — all that environment is **curried into the
-Node by its Builder** (see Builder), so `produce` exposes only "requirements in,
-Patch out". This is what keeps the orchestrator's three-interface surface narrow
-and lets it call `produce` uniformly on every provider — zero `isinstance`, no
-distinguishing a Node from a Service.
+merges the Patch by the declared output contract. Execution resources (soc,
+Result, tools, round_hook, plot-side notifications, etc.) are opaque values in
+`RunEnv`: the orchestrator constructs and passes that environment through, but
+domain decisions about drawing, acquire, fit, calibration, and feedback remain
+inside the Builder/Node. This keeps the resolver surface narrow and lets it call
+`produce` uniformly on every provider — zero `isinstance`, no distinguishing a
+Node from a Service.
 
 **Run path (real acquire).** The app composes the shared session services
 (`gui/session`: connection / context / device / startup) and uses the shared
@@ -38,8 +40,9 @@ stores a device name, e.g. the auto-provisioned `fake_flux`; the lower layer's
 `flux_dev` label is a different dimension), pushes it with `setup_devices`, then
 runs the experiment program's `.acquire` (TwoToneProgram / ModularProgramV2 /
 …) with a running-average `round_hook` + `stop_checkers` (cooperative cancel +
-SNR early-stop), and fits — `qubit_freq` then feeds `predictor.calibrate`
-(closed loop), `ro_optimize` takes an argmax, `mist` reads the variance, both
+SNR early-stop), and fits — `qubit_freq` defaults to fixed-bias residual
+feedback and only hard-bias mode feeds `predictor.calibrate`; `ro_optimize`
+takes an argmax, `mist` reads the variance, both
 without a fit. There is **no synthetic fallback**: `make_cfg` Fast Fails
 (`RuntimeError`) when the context is unconfigured, and the orchestrator turns a
 `produce` exception into a terminal `RunFailedPayload` (the run worker QThread is
@@ -155,19 +158,20 @@ The **predictor service** has two faces. *Query* (general): `predict_freq(flux)`
 and `predict_matrix_element(flux)` — the predictor predicts both, used by the
 predictor Node to produce base `predict_freq` / `cur_m`. *Calibration* (a service
 method triggered by a Node, NOT by the orchestrator): `calibrate(flux,
-measured_freq)` — qubit_freq, after fitting, hands its measured freq to the
-service to adjust the physical/base prediction when the backend supports it. The
-predictor does **not** hide residual IDW correction; qubit_freq owns composition
-of `base predict_freq + correction`, and the correction estimator is a generic
-feedback slot in `Tools.feedback`. The orchestrator never calibrates and never
-updates feedback slots itself.
+measured_freq)` — qubit_freq uses it only when its `bias_update_mode` is `hard`,
+handing a trusted measured freq to the service to adjust the physical/base
+prediction when the backend supports it. Fixed-bias mode leaves the raw predictor
+unchanged. The predictor does **not** hide residual IDW correction; qubit_freq
+owns composition of `base predict_freq + correction`, and the correction
+estimator is a generic feedback slot in `Tools.feedback`. The orchestrator never
+calibrates and never updates feedback slots itself.
 
 **Feedback capability**:
 A run-lived, placement-scoped map of generic scalar estimators/controllers,
 built from Builder-declared slots and the placed node's Generation overrides.
 It is exposed to a Node as `RunEnv.feedback`. The generic layer provides only
 mechanics: `idw` / `last_good` estimators and a `log_step` controller. Estimates
-and proposals are `FeedbackSample(value, confidence, age_points)` objects; the
+and proposals are `FeedbackSample(value, confidence, age_queries)` objects; the
 generic layer decays confidence as a function of query age since the last
 trusted observation/proposal, but it never invents a domain fallback. It does
 not know what the scalar means, does not emit Patch keys, and does not apply
@@ -203,6 +207,11 @@ scalars for the dependency system (e.g. `qubit_freq=5001.5`). Result = for
 saving and drawing (self); Patch = for downstream Nodes (others). A measurement
 Node's `produce` fits once per flux point, then fills both — they cannot
 disagree because they come from the same computation.
+
+Patch modules follow the same public-contract rule: produced modules must be
+concrete ModuleLibrary-lowerable dictionaries. Required module dependencies do
+not get placeholder defaults; if neither an upstream Node nor ML alias provides
+the module, the resolver skips the Node with a missing-module reason.
 
 A Patch may be **partial**: when the fit is poor, `produce` simply omits that
 provides key (does NOT write nan). A downstream Node then reads the *latest

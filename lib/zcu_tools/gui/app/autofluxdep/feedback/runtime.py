@@ -49,17 +49,17 @@ class FeedbackSample:
 
     value: float
     confidence: float
-    age_points: int
+    age_queries: int
 
     def __post_init__(self) -> None:
         value = _finite("sample value", self.value)
         confidence = _finite("confidence", self.confidence)
         if not 0.0 <= confidence <= 1.0:
             raise RuntimeError("feedback confidence must be between 0 and 1")
-        if not isinstance(self.age_points, int) or isinstance(self.age_points, bool):
-            raise RuntimeError("feedback age_points must be a non-negative integer")
-        if self.age_points < 0:
-            raise RuntimeError("feedback age_points must be a non-negative integer")
+        if not isinstance(self.age_queries, int) or isinstance(self.age_queries, bool):
+            raise RuntimeError("feedback age_queries must be a non-negative integer")
+        if self.age_queries < 0:
+            raise RuntimeError("feedback age_queries must be a non-negative integer")
         object.__setattr__(self, "value", value)
         object.__setattr__(self, "confidence", confidence)
 
@@ -201,18 +201,18 @@ def _positive_int(name: str, value: Any) -> int:
     return value
 
 
-def _confidence(age_points: int, decay_points: float) -> float:
-    if age_points < 0:
-        raise RuntimeError("feedback age_points must be a non-negative integer")
+def _confidence(age_queries: int, decay_points: float) -> float:
+    if age_queries < 0:
+        raise RuntimeError("feedback age_queries must be a non-negative integer")
     decay = _positive_finite("decay_points", decay_points)
-    return math.exp(-float(age_points) / decay)
+    return math.exp(-float(age_queries) / decay)
 
 
-def _sample(value: float, age_points: int, decay_points: float) -> FeedbackSample:
+def _sample(value: float, age_queries: int, decay_points: float) -> FeedbackSample:
     return FeedbackSample(
         value=_finite("sample value", value),
-        confidence=_confidence(age_points, decay_points),
-        age_points=age_points,
+        confidence=_confidence(age_queries, decay_points),
+        age_queries=age_queries,
     )
 
 
@@ -235,8 +235,8 @@ class LastGoodEstimator:
         del flux
         if self._value is None:
             return None
-        age_points = max(0, self._query_count - self._last_update_query)
-        sample = _sample(self._value, age_points, self.decay_points)
+        age_queries = max(0, self._query_count - self._last_update_query)
+        sample = _sample(self._value, age_queries, self.decay_points)
         self._query_count += 1
         return sample
 
@@ -265,10 +265,10 @@ class IdwEstimator:
     def estimate(self, flux: float) -> FeedbackSample | None:
         if self._observations == 0:
             return None
-        age_points = max(0, self._query_count - self._last_update_query)
+        age_queries = max(0, self._query_count - self._last_update_query)
         sample = _sample(
             float(self._idw.predict(_finite("flux", flux))),
-            age_points,
+            age_queries,
             self.decay_points,
         )
         self._query_count += 1
@@ -277,7 +277,7 @@ class IdwEstimator:
 
 @dataclass
 class LogStepController:
-    """Stateless log-domain scalar actuator controller with run-lived latest value."""
+    """Run-lived log-domain actuator controller with query-aged latest proposal."""
 
     step_gain: float = 1.0
     decay_points: float = 3.0
@@ -292,8 +292,8 @@ class LogStepController:
     def latest(self) -> FeedbackSample | None:
         if self._latest is None:
             return None
-        age_points = max(0, self._query_count - self._last_update_query)
-        sample = _sample(self._latest, age_points, self.decay_points)
+        age_queries = max(0, self._query_count - self._last_update_query)
+        sample = _sample(self._latest, age_queries, self.decay_points)
         self._query_count += 1
         return sample
 

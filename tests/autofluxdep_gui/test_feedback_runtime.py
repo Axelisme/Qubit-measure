@@ -28,11 +28,11 @@ def test_last_good_estimator_returns_latest_observation_for_any_flux():
     first = estimator.estimate(-10.0)
     second = estimator.estimate(10.0)
 
-    assert first == FeedbackSample(value=2.5, confidence=1.0, age_points=0)
+    assert first == FeedbackSample(value=2.5, confidence=1.0, age_queries=0)
     assert second is not None
     assert second.value == pytest.approx(2.5)
     assert second.confidence == pytest.approx(math.exp(-1.0 / 3.0))
-    assert second.age_points == 1
+    assert second.age_queries == 1
 
 
 def test_idw_estimator_returns_none_without_observations_and_interpolates():
@@ -56,7 +56,7 @@ def test_idw_estimator_returns_none_without_observations_and_interpolates():
     assert stale is not None
     assert stale.value == pytest.approx(2.0)
     assert stale.confidence == pytest.approx(math.exp(-1.0 / 4.0))
-    assert stale.age_points == 1
+    assert stale.age_queries == 1
 
     with pytest.raises(RuntimeError, match="idw_k"):
         IdwEstimator(k=1.5)  # type: ignore[arg-type]

@@ -15,6 +15,8 @@ distinct reduced-flux points, so the fitted line must move.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
@@ -43,17 +45,35 @@ _READOUT = {
 
 
 class _Provider:
-    def __init__(self, name, builder, schema):
+    def __init__(self, name, builder, schema) -> None:
         self.name = name
         self.builder = builder
         self.schema = schema
+
+
+class _TrackingPredictor:
+    def __init__(self, base: float = 600.0) -> None:
+        self.base = float(base)
+        self.calibrations: list[tuple[float, float]] = []
+
+    def predict_freq(self, flux: float) -> float:
+        del flux
+        return self.base
+
+    def predict_matrix_element(self, flux: float) -> float:
+        del flux
+        return 1.0
+
+    def calibrate(self, flux: float, measured_freq: float) -> None:
+        self.calibrations.append((float(flux), float(measured_freq)))
+        self.base = float(measured_freq)
 
 
 def _configure_context(ctrl) -> None:
     """Populate the active context's ml so qubit_freq's make_cfg has a readout +
     drive waveform.
 
-    The predicted-centre predictor is NOT built here: connect_mock has already run
+    The predicted-centre predictor is not built here: connect_mock has already run
     the MockFluxProvisioner, which installs a FluxoniumPredictor derived from the
     mock soc's SimParams (matching the SimEngine's f01). Relying on that provisioned
     predictor exercises the real mock-connect path rather than a hand-built copy."""
@@ -157,9 +177,9 @@ def test_plotter_update_runs_after_a_real_produce():
     plotter.update(result, 0)  # must not raise
 
 
-def test_good_fit_calibrates_the_predictor():
-    # the closed-loop trigger: a good real-acquire fit feeds predictor.calibrate, so
-    # the predictor's prediction at the measured flux moves toward the measurement.
+def test_good_fit_observes_prediction_residual_by_default():
+    # Fixed-bias default: a good real-acquire fit leaves the raw predictor alone
+    # and records the run-local residual correction in the generic estimator.
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
     from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
@@ -231,7 +251,14 @@ def test_good_fit_calibrates_the_predictor():
     )
 
 
-def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
+def _mocked_qubit_freq_produce_env(
+    monkeypatch,
+    real,
+    fit_return,
+    *,
+    predictor: Any | None = None,
+    schema_overrides: dict[str, Any] | None = None,
+):
     from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq as qf_mod
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
@@ -242,18 +269,19 @@ def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
     _configure_context(ctrl)
 
     builder = QubitFreqBuilder()
-    schema = builder.make_default_schema().with_overrides(
-        {
-            "qub_ch": 1,
-            "qub_nqz": 1,
-            "qub_gain": 0.25,
-            "qub_length": 1.0,
-            "reps": 1,
-            "rounds": 1,
-            "relax_delay": 0.0,
-            "detune_sweep": SweepValue(start=-5.0, stop=5.0, expts=11),
-        }
-    )
+    overrides: dict[str, Any] = {
+        "qub_ch": 1,
+        "qub_nqz": 1,
+        "qub_gain": 0.25,
+        "qub_length": 1.0,
+        "reps": 1,
+        "rounds": 1,
+        "relax_delay": 0.0,
+        "detune_sweep": SweepValue(start=-5.0, stop=5.0, expts=11),
+    }
+    if schema_overrides is not None:
+        overrides.update(schema_overrides)
+    schema = builder.make_default_schema().with_overrides(overrides)
     result = builder.make_init_result(schema, np.array([0.0]))
 
     class _DummyTwoToneProgram:
@@ -270,7 +298,8 @@ def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
     monkeypatch.setattr(qf_mod, "_signal2real", lambda _signals: real)
     monkeypatch.setattr(qf_mod, "fit_qubit_freq", lambda _freqs, _real: fit_return)
 
-    predictor = SimplePredictor(base=600.0, slope=0.0)
+    if predictor is None:
+        predictor = SimplePredictor(base=600.0, slope=0.0)
     feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
     env = RunEnv(
         flux=0.0,
@@ -287,17 +316,20 @@ def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
     return builder, env, result, predictor
 
 
-def test_medium_fit_calibrates_predictor_without_linewidth_feedback(monkeypatch):
+def test_medium_fit_observes_residual_without_hard_calibration(monkeypatch):
     # A fit between the frequency and linewidth gates is still useful for centring
-    # the predictor, but its FWHM must not drive qfw_factor/gain feedback.
+    # the run-local residual estimator, but default fixed-bias mode must not
+    # calibrate the raw predictor and its FWHM must not drive qfw_factor feedback.
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 
     fit_curve = np.linspace(0.0, 1.0, 11)
     real = fit_curve + 0.15  # residual passes 0.2 gate, fails 0.1 gate.
+    predictor = _TrackingPredictor(base=600.0)
     builder, env, result, predictor = _mocked_qubit_freq_produce_env(
         monkeypatch,
         real,
         (605.0, 0.0, 4.0, 0.0, fit_curve, None),
+        predictor=predictor,
     )
     before = predictor.predict_freq(0.0)
     patch = builder.build_node(env).produce(
@@ -313,6 +345,7 @@ def test_medium_fit_calibrates_predictor_without_linewidth_feedback(monkeypatch)
     assert "qfw_factor" not in values
     assert result.fit_freq[0] == 605.0
     assert predictor.predict_freq(0.0) == before
+    assert predictor.calibrations == []
     correction = env.feedback.estimator("predict_freq_correction")
     assert correction is not None
     estimate = correction.estimate(0.0)
@@ -321,6 +354,36 @@ def test_medium_fit_calibrates_predictor_without_linewidth_feedback(monkeypatch)
         abs(predictor.predict_freq(0.0) + estimate.confidence * estimate.value - 605.0)
         < 1e-6
     )
+
+
+def test_hard_bias_update_mode_calibrates_predictor_before_residual(monkeypatch):
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+
+    fit_curve = np.linspace(0.0, 1.0, 11)
+    real = fit_curve + 0.15
+    predictor = _TrackingPredictor(base=600.0)
+    builder, env, _result, predictor = _mocked_qubit_freq_produce_env(
+        monkeypatch,
+        real,
+        (605.0, 0.0, 4.0, 0.0, fit_curve, None),
+        predictor=predictor,
+        schema_overrides={"bias_update_mode": "hard"},
+    )
+
+    patch = builder.build_node(env).produce(
+        Snapshot(
+            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
+        )
+    )
+
+    assert patch.values()["qubit_freq"] == 605.0
+    assert predictor.calibrations == [(0.0, 605.0)]
+    assert predictor.predict_freq(0.0) == 605.0
+    correction = env.feedback.estimator("predict_freq_correction")
+    assert correction is not None
+    estimate = correction.estimate(0.0)
+    assert estimate is not None
+    assert estimate.value == 0.0
 
 
 def test_poor_fit_skips_patch_and_predictor_calibration(monkeypatch):

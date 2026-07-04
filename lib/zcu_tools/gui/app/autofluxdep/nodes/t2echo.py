@@ -1,10 +1,8 @@
-"""t2echo — Hahn-echo Builder: acquire decay/fringe trace → fit → t2e.
+"""t2echo — Hahn-echo decay/fringe acquire and fit.
 
-Translates the notebook's T2EchoTask cfg_maker. Sets this flux point's value on
-the picked flux device, sets up devices, acquires a decaying cosine fringe vs
-delay time with ``ModularProgramV2`` (a Hahn-echo sequence), fits it with either
-``fit_decay_fringe`` or ``fit_decay`` according to the generation fit method, fills
-its sweep Result row in place, and returns the raw t2e.
+The Builder lowers resolved pi/pi2/readout modules plus timing knobs into the
+run cfg. The short-lived Node applies flux, sweeps echo delay, dispatches the
+configured fit, fills the Result row, and emits trusted raw ``t2e``.
 
 Unlike t2ramsey, the echo sequence refocuses static dephasing and typically
 yields a longer coherence time; the difference is purely in the pulse sequence.
@@ -12,8 +10,8 @@ The default ``auto_by_detune`` fit method uses a pure decay fit when
 ``detune_ratio == 0`` and a fringe fit otherwise.
 
 - needs the ``pi_pulse`` and ``pi2_pulse`` modules (lenrabi produces both) — the
-  Hahn echo needs both a pi refocusing pulse and two pi/2 pulses. Both carry
-  placeholder defaults, so they never actually skip when lenrabi is absent.
+  Hahn echo needs both a pi refocusing pulse and two pi/2 pulses. The resolver
+  skips the node until concrete drive modules are available.
 - reads ``t1`` (smooth="ewma") and ``t2e`` (smooth="ewma") as optional deps:
   ``t2e`` seeds the planted t2 so the sweep tracks a plausible echo time;
   ``t1`` is available for cfg sanity checks (not used directly in the prototype).
@@ -127,16 +125,6 @@ def _snapshot_float(snapshot: Snapshot, key: str, fallback: float) -> float:
     return float(value)
 
 
-def _placeholder_pi_pulse() -> Any:
-    # prototype placeholder — lenrabi produces the real (placeholder) module
-    return {"type": "pi", "length": 0.1}
-
-
-def _placeholder_pi2_pulse() -> Any:
-    # prototype placeholder — lenrabi produces the real (placeholder) module
-    return {"type": "pi2", "length": 0.05}
-
-
 def _default_readout() -> Any | None:
     return None
 
@@ -172,11 +160,9 @@ def _is_lowerable_pulse(module: Any) -> bool:
     """Whether a resolved drive module is a concrete, lowerable ``PulseCfg``.
 
     A real lenrabi drive pulse is a ``PulseCfg`` (or its raw dict, ``type ==
-    "pulse"``) and lowers into the run cfg. The prototype's placeholder
-    ``{"type": "pi"/"pi2", "length": ...}`` is NOT a PulseCfg (it never
-    validates), so this returns False there — the guard then rejects the
-    placeholder so ``make_cfg`` Fast Fails for an unconfigured context. Mirrors
-    qubit_freq's guard naturally returning None in that context.
+    "pulse"``) and lowers into the run cfg. The resolver no longer injects domain
+    placeholders, but this guard still rejects stale persisted placeholder-shaped
+    dictionaries if one reaches ``make_cfg``.
     """
     if isinstance(module, PulseCfg):
         return True
@@ -243,9 +229,6 @@ class T2EchoNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot.module("pi_pulse")  # required — refocusing pulse
-        _ = snapshot.module("pi2_pulse")  # required — the two pi/2 pulses
-        _ = snapshot.module("opt_readout")  # required — readout
 
         result: Sweep1DResult = env.result
         idx = env.flux_idx
@@ -350,12 +333,9 @@ class T2EchoBuilder(Builder):
         Dependency("t2e", smooth="ewma", default=_default_t2e),
     )
     requires_modules = (
-        ModuleDep(
-            "pi_pulse", default=_placeholder_pi_pulse, aliases=PI_PULSE_LIBRARY_ALIASES
-        ),
+        ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),
         ModuleDep(
             "pi2_pulse",
-            default=_placeholder_pi2_pulse,
             aliases=PI2_PULSE_LIBRARY_ALIASES,
         ),
     )

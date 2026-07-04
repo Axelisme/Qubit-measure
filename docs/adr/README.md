@@ -68,7 +68,7 @@
 
 - [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：autofluxdep node/service 共用 requires/provides/produce 介面。
 - [0041 — Autofluxdep feedback framework](0041-autofluxdep-feedback-framework.md)：generic scalar estimator/controller 由 run-lived feedback capability 提供，node 擁有 composition/gates/clamp。
-- [0042 — Autofluxdep feedback confidence reversion](0042-autofluxdep-feedback-confidence-reversion.md)：feedback sample 帶 confidence/age，node 依 domain prior 平滑退回 base prediction 或 open-loop gain。
+- [0042 — Autofluxdep feedback confidence reversion](0042-autofluxdep-feedback-confidence-reversion.md)：feedback sample 帶 confidence/query age，node 依 domain prior 平滑退回 base prediction 或 open-loop gain。
 - [0022 — Worktree coordination](0022-agent-coordination-worktree.md)：多 agent / 長線 orchestration 使用 `.agent_state/` worktree protocol，主 checkout merge 由 merge queue 序列化。
 - [0023 — Cooperative interrupt feedback](0023-cooperative-interrupt-feedback-wakeup.md)：由 [[0025]] 取代；保留為被取代設計的定位點。
 - [0024 — Agent launch UI retirement](0024-embedded-agent-session-architecture.md)：measure-gui 不內建 Agent launch UI；agent 啟動由外部 CLI/MCP workflow 負責。

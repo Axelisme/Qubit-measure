@@ -1,4 +1,4 @@
-"""mist — 1D gain-sweep Builder: variance curve readout (no fit).
+"""mist — 1D gain sweep with variance readout.
 
 Sets this flux point's value on the picked flux device, sets up devices, acquires
 a state-disturbance curve over a gain axis with ``ModularProgramV2`` (Reset →
@@ -9,8 +9,8 @@ remain nan (allocated as nan by ``Sweep1DResult.allocate``); the
 as traces (no fit marker).
 
 - needs the ``pi_pulse`` module (pi-pulse prepares the excited state whose
-  disturbance the variance measures). It carries a placeholder default, so it
-  never actually skips when lenrabi is absent.
+  disturbance the variance measures). The resolver skips until a concrete pulse
+  is produced or available in ModuleLibrary.
 - the ``opt_readout`` module is optional (ro_optimize produces it); used by the
   cfg builder as the run cfg's ``readout``.
 
@@ -123,12 +123,6 @@ class MistCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     modules: MistModuleCfg
 
 
-# --- placeholder external bindings (Phase B: inject from project/metadata) ---
-def _placeholder_pi_pulse() -> Any:
-    # prototype placeholder — lenrabi produces the real module
-    return {"type": "pi", "length": 0.1}
-
-
 def _default_opt_readout() -> Any | None:
     # last-resort readout if neither a Node produced one nor ml has a preset.
     return None
@@ -153,9 +147,6 @@ class MistNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-
-        _ = snapshot.module("pi_pulse")  # required — excited-state preparation
-        _ = snapshot.module("opt_readout")  # required — readout
 
         result: Sweep1DResult = env.result
         gains = result.x
@@ -240,11 +231,7 @@ class MistBuilder(Builder):
     name = "mist"
     provides = ("success",)
     provides_modules: tuple[str, ...] = ()
-    requires_modules = (
-        ModuleDep(
-            "pi_pulse", default=_placeholder_pi_pulse, aliases=PI_PULSE_LIBRARY_ALIASES
-        ),
-    )
+    requires_modules = (ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),)
     optional_modules = (
         ModuleDep(
             "opt_readout",

@@ -184,6 +184,7 @@ _EXPECTED_KEYS = {
         "max_drive_gain",
         "qf_width_seed",
         "qfw_seed_gain",
+        "bias_update_mode",
         "pred_freq_correction_enabled",
         "pred_freq_correction_strategy",
         "pred_freq_correction_idw_k",
@@ -334,6 +335,7 @@ _EXPECTED_PATHS = {
         "max_drive_gain": "generation.feedback.max_drive_gain",
         "qf_width_seed": "generation.feedback.qf_width_seed",
         "qfw_seed_gain": "generation.feedback.qfw_seed_gain",
+        "bias_update_mode": "generation.feedback.bias_update_mode",
         "pred_freq_correction_enabled": (
             "generation.feedback.pred_freq_correction_enabled"
         ),
@@ -652,11 +654,15 @@ def test_generation_groups_keep_logical_knobs_flat():
     assert isinstance(feedback_value, CfgSectionValue)
     assert "drive_gain_mode" in feedback_spec.fields
     assert "drive_gain_mode" in feedback_value.fields
+    assert "bias_update_mode" in feedback_spec.fields
+    assert "bias_update_mode" in feedback_value.fields
     assert schema.path_for("drive_gain_mode") == "generation.feedback.drive_gain_mode"
+    assert schema.path_for("bias_update_mode") == "generation.feedback.bias_update_mode"
 
     knobs = schema.read_knobs()
 
     assert "drive_gain_mode" in knobs
+    assert "bias_update_mode" in knobs
     assert "feedback" not in knobs
     assert "safety" not in knobs
     assert schema.read_value_tree()["generation"]["feedback"]["drive_gain_mode"] == (
@@ -667,6 +673,7 @@ def test_generation_groups_keep_logical_knobs_flat():
 def test_generation_persistence_uses_flat_logical_keys():
     schema = QubitFreqBuilder().make_default_schema()
     schema.set_field("drive_gain_mode", "fixed")
+    schema.set_field("bias_update_mode", "hard")
     schema.set_field("earlystop_snr", 12.5)
 
     raw = schema.to_persisted_raw()
@@ -676,6 +683,7 @@ def test_generation_persistence_uses_flat_logical_keys():
     assert "feedback" not in generation
     assert "safety" not in generation
     assert generation["drive_gain_mode"] == {"__kind": "direct", "value": "fixed"}
+    assert generation["bias_update_mode"] == {"__kind": "direct", "value": "hard"}
     assert generation["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
 
     restored = QubitFreqBuilder().make_default_schema()
@@ -683,6 +691,7 @@ def test_generation_persistence_uses_flat_logical_keys():
 
     knobs = restored.read_knobs()
     assert knobs["drive_gain_mode"] == "fixed"
+    assert knobs["bias_update_mode"] == "hard"
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
     assert restored.read_value_tree()["generation"]["feedback"]["drive_gain_mode"] == (
         "fixed"
@@ -897,6 +906,7 @@ def test_qubit_freq_default_knobs():
     assert knobs["qub_gain"] == 0.1
     assert knobs["qub_length"] == 5.0
     assert knobs["drive_gain_mode"] == "adaptive"
+    assert knobs["bias_update_mode"] == "fixed"
     assert knobs["target_kappa"] == 6.5
     assert knobs["max_drive_gain"] == 1.0
     assert knobs["qfw_seed_gain"] == 0.05

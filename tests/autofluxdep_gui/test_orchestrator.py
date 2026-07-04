@@ -10,11 +10,15 @@ builds each provider's Node and calls ``produce``, never an injected callback.
 from __future__ import annotations
 
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
+from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
+from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
+from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
+from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     Orchestrator,
-    project_snapshot,
     resolve_provider_snapshot,
 )
 
@@ -29,12 +33,23 @@ class _ModuleSource:
         return self._modules.get(name)
 
 
-# --- latest-available resolution (project_snapshot reads a placed provider) ---
+# --- latest-available resolution (resolve_provider_snapshot reads a placed provider) ---
+
+
+def _resolved_values(
+    provider,
+    info: InfoStore,
+    ml: _ModuleSource | None = None,
+) -> dict[str, object] | None:
+    snapshot = resolve_provider_snapshot(provider, info, ml).snapshot
+    if snapshot is None:
+        return None
+    return dict(snapshot.items())
 
 
 def test_resolve_required_missing_no_default_returns_none():
     p = place(make_builder("n", requires=(Dependency("x"),)))
-    assert project_snapshot(p, InfoStore()) is None
+    assert resolve_provider_snapshot(p, InfoStore()).snapshot is None
 
 
 def test_resolve_provider_snapshot_returns_structured_skip_reason():
@@ -52,39 +67,74 @@ def test_resolve_provider_snapshot_returns_structured_skip_reason():
     assert resolution.skip_reason.missing_modules == ("readout",)
 
 
+def test_real_builders_skip_missing_required_pulse_modules():
+    t1 = resolve_provider_snapshot(place(T1Builder()), InfoStore(), _ModuleSource({}))
+    assert t1.snapshot is None
+    assert t1.skip_reason is not None
+    assert t1.skip_reason.missing_modules == ("pi_pulse",)
+
+    ramsey = resolve_provider_snapshot(
+        place(T2RamseyBuilder()), InfoStore(), _ModuleSource({})
+    )
+    assert ramsey.snapshot is None
+    assert ramsey.skip_reason is not None
+    assert ramsey.skip_reason.missing_modules == ("pi2_pulse",)
+
+    t2echo = resolve_provider_snapshot(
+        place(T2EchoBuilder()), InfoStore(), _ModuleSource({})
+    )
+    assert t2echo.snapshot is None
+    assert t2echo.skip_reason is not None
+    assert t2echo.skip_reason.missing_modules == ("pi_pulse", "pi2_pulse")
+
+    ro = resolve_provider_snapshot(
+        place(RoOptimizeBuilder()), InfoStore(), _ModuleSource({})
+    )
+    assert ro.snapshot is None
+    assert ro.skip_reason is not None
+    assert ro.skip_reason.missing_modules == ("pi_pulse",)
+
+    mist = resolve_provider_snapshot(
+        place(MistBuilder()), InfoStore(), _ModuleSource({})
+    )
+    assert mist.snapshot is None
+    assert mist.skip_reason is not None
+    assert mist.skip_reason.missing_modules == ("pi_pulse",)
+
+
 def test_resolve_required_missing_with_default_keeps_node():
     p = place(make_builder("n", requires=(Dependency("x", default=lambda: 9),)))
-    assert project_snapshot(p, InfoStore()) == {"x": 9}
+    assert _resolved_values(p, InfoStore()) == {"x": 9}
 
 
 def test_resolve_prefers_this_point_over_prev():
     p = place(make_builder("n", requires=(Dependency("x"),)))
     info = InfoStore(point={"x": "now"}, prev={"x": "before"})
-    assert project_snapshot(p, info) == {"x": "now"}
+    assert _resolved_values(p, info) == {"x": "now"}
 
 
 def test_resolve_falls_back_to_prev_point():
     p = place(make_builder("n", requires=(Dependency("x"),)))
     info = InfoStore(prev={"x": "before"})  # not in this point
-    assert project_snapshot(p, info) == {"x": "before"}
+    assert _resolved_values(p, info) == {"x": "before"}
 
 
 def test_resolve_optional_uses_default_when_absent_everywhere():
     p = place(make_builder("n", optional=(Dependency("k", default=lambda: 42),)))
-    assert project_snapshot(p, InfoStore()) == {"k": 42}
+    assert _resolved_values(p, InfoStore()) == {"k": 42}
 
 
 def test_resolve_optional_prefers_value_over_default():
     p = place(make_builder("n", optional=(Dependency("k", default=lambda: 42),)))
     info = InfoStore(prev={"k": 7})
-    assert project_snapshot(p, info) == {"k": 7}
+    assert _resolved_values(p, info) == {"k": 7}
 
 
 def test_resolve_stored_none_is_a_value_not_missing():
     # a producer that wrote None should not trigger the default
     p = place(make_builder("n", optional=(Dependency("k", default=lambda: 42),)))
     info = InfoStore(point={"k": None})
-    assert project_snapshot(p, info) == {"k": None}
+    assert _resolved_values(p, info) == {"k": None}
 
 
 def test_module_dep_uses_library_alias_order():
@@ -103,11 +153,11 @@ def test_module_dep_uses_library_alias_order():
         )
     )
 
-    snap = project_snapshot(
+    snap = resolve_provider_snapshot(
         p,
         InfoStore(),
         ml=_ModuleSource({"readout": stale_readout, "readout_rf": readout}),
-    )
+    ).snapshot
 
     assert snap is not None
     assert snap.module("readout") is readout
@@ -129,11 +179,11 @@ def test_module_dep_prefers_produced_module_over_library_alias():
         )
     )
 
-    snap = project_snapshot(
+    snap = resolve_provider_snapshot(
         p,
         InfoStore(module_point={"readout": produced}),
         ml=_ModuleSource({"readout_rf": library}),
-    )
+    ).snapshot
 
     assert snap is not None
     assert snap.module("readout") is produced

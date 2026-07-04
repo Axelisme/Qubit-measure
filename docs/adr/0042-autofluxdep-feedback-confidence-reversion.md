@@ -23,11 +23,11 @@ feedback sample 有多新」，但不能決定 `qubit_freq` 要退回 base predi
 
 1. **generic feedback 回傳 sample，不只回傳 scalar。** Estimator `estimate()`、
    controller `latest()` 與 `propose()` 回傳 `FeedbackSample(value, confidence,
-   age_points)`；`value` 是 strategy 的 raw scalar output，`confidence` 是 0..1
-   的抽象新鮮度，`age_points` 是從最近一次可信 observation/proposal 後被查詢的點數。
+   age_queries)`；`value` 是 strategy 的 raw scalar output，`confidence` 是 0..1
+   的抽象新鮮度，`age_queries` 是從最近一次可信 observation/proposal 後被查詢的次數。
 
 2. **confidence 依 query age 平滑衰減。** Slot schema 暴露
-   `<prefix>_decay_points`，generic runtime 以 `exp(-age_points / decay_points)`
+   `<prefix>_decay_points`，generic runtime 以 `exp(-age_queries / decay_points)`
    產生 confidence。`decay_points` 只描述 service sample 的新鮮度半徑，不是 domain
    bound、clamp 或 fit gate。
 
@@ -35,11 +35,12 @@ feedback sample 有多新」，但不能決定 `qubit_freq` 要退回 base predi
    `None`；disabled slot 也回傳 `None`。generic layer 不用 confidence=0 的 sample
    假裝存在 seed/default，避免把 use-site fallback 藏進 service。
 
-4. **node 擁有退回目標與組合方式。** `qubit_freq` 把 correction 用
-   `confidence * correction` 加到 base predictor prediction 上，使 long-stale
-   correction 平滑退回 0。`lenrabi` 把 controller proposal 與 open-loop
-   `pi_product` gain 在 log-domain 依 confidence 混合，使 long-stale proposal 平滑
-   退回 open-loop gain。bounds 與 max gain clamp 仍在 node use site。
+4. **node 擁有退回目標與組合方式。** `qubit_freq` 預設 fixed-bias mode，把
+   correction 用 `confidence * correction` 加到 base predictor prediction 上，使
+   long-stale correction 平滑退回 0；hard-bias mode 才先校準 raw predictor，再以
+   校準後 base prediction 計 residual。`lenrabi` 把 controller proposal 與
+   open-loop `pi_product` gain 在 log-domain 依 confidence 混合，使 long-stale
+   proposal 平滑退回 open-loop gain。bounds 與 max gain clamp 仍在 node use site。
 
 5. **Builder 擁有每個 slot 的預設超參數。** 不同被預測/被控制的值用不同 Builder
    slot declaration 設定 `default_decay_points`，GUI 仍透過 placed-node 的

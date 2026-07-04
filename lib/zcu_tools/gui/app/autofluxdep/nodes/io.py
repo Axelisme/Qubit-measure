@@ -66,19 +66,11 @@ class Snapshot(Mapping[str, Any]):
         """The resolved module ``name`` (raises ``KeyError`` if undeclared)."""
         return self._modules[name]
 
-    def has_module(self, name: str) -> bool:
-        return name in self._modules
-
-    def module_names(self) -> tuple[str, ...]:
-        return tuple(self._modules)
-
     __hash__ = None  # mutable contents → unhashable
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Snapshot):
             return self._data == other._data and self._modules == other._modules
-        if isinstance(other, Mapping):
-            return not self._modules and self._data == dict(other)
         return NotImplemented
 
     def __repr__(self) -> str:

@@ -1,10 +1,8 @@
-"""lenrabi — length-Rabi Builder: acquire Rabi oscillation → fit_rabi → pi/pi2 lengths.
+"""lenrabi — length-Rabi acquire and pi/pi2 pulse production.
 
-Translates the notebook's LenRabiTask cfg_maker. Sets this flux point's value on
-the picked flux device, sets up devices, acquires a Rabi oscillation vs pulse
-length with ``ModularProgramV2`` (Reset → rabi_pulse → Readout), fits it with the
-real ``fit_rabi``, fills its sweep Result row in place, and returns the raw pi
-and pi2 lengths plus the Rabi frequency.
+The Builder lowers a qubit-frequency snapshot and readout module into the run
+cfg. The short-lived Node applies flux, sweeps pulse length, fits the Rabi
+trace, fills the Result row, and emits trusted scalar/module feedback.
 
 - requires ``qubit_freq`` (a hard require via Dependency): the Rabi experiment
   drives the qubit on resonance, so no qubit frequency → no sensible cfg.
@@ -453,8 +451,6 @@ class LenRabiNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot["qubit_freq"]  # required — the on-resonance drive frequency
-        _ = snapshot.module("opt_readout")  # optional — readout for the cfg path
 
         result: Sweep1DResult = env.result
         idx = env.flux_idx

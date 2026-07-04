@@ -1,14 +1,11 @@
-"""t1 — the simplest 1D Builder: acquire exp decay → fit_decay → t1.
+"""t1 — exponential decay acquire and fit.
 
-Translates the notebook's T1Task cfg_maker. Sets this flux point's value on the
-picked flux device, sets up devices, acquires an exponential decay vs relax time
-with ``ModularProgramV2`` (Reset → pi_pulse → variable Delay → Readout), fits it
-with the real ``fit_decay``, fills its sweep Result row in place, and returns the
-raw ``t1`` Patch.
+The Builder lowers the active context plus resolved modules into a T1 run cfg.
+The short-lived Node applies flux, sweeps relax time, fills the Result row, and
+emits trusted raw ``t1``. See ``CONTEXT.md`` for the Builder/Node boundary.
 
-- needs the ``pi_pulse`` module (lenrabi produces it) — without a pi-pulse there
-  is no excited state to relax. It carries a placeholder default, so it never
-  actually skips when lenrabi is absent.
+- needs the ``pi_pulse`` module (lenrabi or ModuleLibrary produces it) — without
+  a concrete pi-pulse there is no excited state to relax, so the resolver skips.
 - reads ``t1`` declared ``smooth="ewma"`` (the notebook's smooth_t1) for the
   relax_delay guess + the planted decay constant; reports raw ``t1`` back.
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
@@ -159,11 +156,6 @@ def _snapshot_t1(snapshot: Snapshot, knobs: dict[str, Any]) -> float:
     return float(value)
 
 
-def _placeholder_pi_pulse() -> Any:
-    # prototype placeholder — lenrabi produces the real (placeholder) module
-    return {"type": "pi", "length": 0.1}
-
-
 def _default_readout() -> Any | None:
     return None
 
@@ -312,11 +304,7 @@ class T1Builder(Builder):
     name = "t1"
     provides = ("t1",)
     optional = (Dependency("t1", smooth="ewma", default=_default_t1),)
-    requires_modules = (
-        ModuleDep(
-            "pi_pulse", default=_placeholder_pi_pulse, aliases=PI_PULSE_LIBRARY_ALIASES
-        ),
-    )
+    requires_modules = (ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),)
     optional_modules = (
         ModuleDep(
             "opt_readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES

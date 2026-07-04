@@ -1,15 +1,11 @@
-"""t2ramsey — Ramsey-fringe Builder: acquire decay cosine → fit_decay_fringe → t2r.
+"""t2ramsey — Ramsey fringe acquire and fit.
 
-Translates the notebook's T2RamseyTask cfg_maker. Sets this flux point's value on
-the picked flux device, sets up devices, acquires a decaying cosine fringe vs
-delay time with ``ModularProgramV2`` (two pi/2 pulses bracketing a swept delay,
-the second carrying an activate-detune phase ramp), fits it with the real
-``fit_decay_fringe``, fills its sweep Result row in place, and returns the raw t2r
-and the measured detune.
+The Builder lowers resolved pi/2/readout modules plus timing knobs into the run
+cfg. The short-lived Node applies flux, sweeps delay time, fits the fringe, and
+emits trusted raw ``t2r`` / detune values.
 
-- requires the ``pi2_pulse`` module (lenrabi produces it) — the Ramsey sequence
-  needs a pi/2 pulse; it is a required module dep with a placeholder default for
-  the prototype.
+- requires the ``pi2_pulse`` module (lenrabi or ModuleLibrary produces it); the
+  resolver skips the node until a concrete pi/2 pulse is available.
 - reads ``t1`` (smooth="ewma") and ``t2r`` (smooth="ewma") as optional deps:
   ``t2r`` seeds the planted t2 so the sweep tracks a plausible decoherence time;
   ``t1`` is available for cfg sanity checks (not used directly in the prototype).
@@ -97,7 +93,6 @@ logger = logging.getLogger(__name__)
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2R = 5.0  # us — smoothed t2r fallback
 _SWEEP_T2R_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2r)
-_DEFAULT_DETUNE_RATIO = 0.05  # notebook default activate-detune fraction
 _DEFAULT_EARLYSTOP_SNR = 20.0
 _DEFAULT_RELAX_FACTOR = 3.0
 _DEFAULT_RELAX_MIN = 1.0
@@ -147,11 +142,6 @@ def _snapshot_float(snapshot: Snapshot, key: str, fallback: float) -> float:
     return float(value)
 
 
-def _placeholder_pi2_pulse() -> Any:
-    # prototype placeholder — lenrabi produces the real (placeholder) module
-    return {"type": "pi2", "length": 0.05}
-
-
 def _default_readout() -> Any | None:
     return None
 
@@ -199,8 +189,6 @@ class T2RamseyNode(Node):
 
     def produce(self, snapshot: Snapshot) -> Patch:
         env = self._env
-        _ = snapshot.module("pi2_pulse")  # required module — lowered into the cfg
-        _ = snapshot.module("opt_readout")  # required — lowered into the cfg
 
         result: Sweep1DResult = env.result
         times = result.x
@@ -308,7 +296,6 @@ class T2RamseyBuilder(Builder):
     requires_modules = (
         ModuleDep(
             "pi2_pulse",
-            default=_placeholder_pi2_pulse,
             aliases=PI2_PULSE_LIBRARY_ALIASES,
         ),
     )

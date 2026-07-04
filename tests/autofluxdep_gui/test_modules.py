@@ -13,7 +13,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     Orchestrator,
-    project_snapshot,
+    resolve_provider_snapshot,
 )
 
 from ._helpers import make_builder, place
@@ -29,14 +29,14 @@ class _FakeML:
         return self._presets.get(name)
 
 
-# --- project_snapshot module resolution order ---
+# --- resolve_provider_snapshot module resolution order ---
 
 
 def test_module_resolves_node_produced_over_ml_preset():
     p = place(make_builder("n", optional_modules=(ModuleDep("readout"),)))
     info = InfoStore(module_point={"readout": "tuned"})
     ml = _FakeML({"readout": "preset"})
-    snap = project_snapshot(p, info, ml)
+    snap = resolve_provider_snapshot(p, info, ml).snapshot
     assert snap is not None
     assert snap.module("readout") == "tuned"  # Node-produced wins
 
@@ -45,7 +45,7 @@ def test_module_falls_back_to_ml_preset():
     p = place(make_builder("n", optional_modules=(ModuleDep("readout"),)))
     info = InfoStore()  # no Node produced it
     ml = _FakeML({"readout": "preset"})
-    snap = project_snapshot(p, info, ml)
+    snap = resolve_provider_snapshot(p, info, ml).snapshot
     assert snap is not None
     assert snap.module("readout") == "preset"
 
@@ -56,7 +56,7 @@ def test_module_falls_back_to_declared_default():
             "n", optional_modules=(ModuleDep("readout", default=lambda: "fallback"),)
         )
     )
-    snap = project_snapshot(p, InfoStore(), _FakeML({}))
+    snap = resolve_provider_snapshot(p, InfoStore(), _FakeML({})).snapshot
     assert snap is not None
     assert snap.module("readout") == "fallback"
 
@@ -64,13 +64,13 @@ def test_module_falls_back_to_declared_default():
 def test_required_module_missing_everywhere_skips_node():
     p = place(make_builder("n", requires_modules=(ModuleDep("readout"),)))
     # no Node, no ml preset, no default → skip
-    assert project_snapshot(p, InfoStore(), _FakeML({})) is None
+    assert resolve_provider_snapshot(p, InfoStore(), _FakeML({})).snapshot is None
 
 
 def test_module_prev_point_when_not_produced_this_point():
     p = place(make_builder("n", optional_modules=(ModuleDep("readout"),)))
     info = InfoStore(module_prev={"readout": "from_prev"})
-    snap = project_snapshot(p, info, _FakeML({}))
+    snap = resolve_provider_snapshot(p, info, _FakeML({})).snapshot
     assert snap is not None
     assert snap.module("readout") == "from_prev"
 

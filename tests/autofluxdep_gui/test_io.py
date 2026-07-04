@@ -43,10 +43,10 @@ def test_snapshot_is_immutable():
         s["a"] = 2  # type: ignore[index]
 
 
-def test_snapshot_equals_mapping_by_value():
-    assert Snapshot({"a": 1}) == {"a": 1}
+def test_snapshot_equals_snapshot_by_value():
     assert Snapshot({"a": 1}) == Snapshot({"a": 1})
-    assert Snapshot({"a": 1}) != {"a": 2}
+    assert Snapshot({"a": 1}) != Snapshot({"a": 2})
+    assert Snapshot({"a": 1}) != {"a": 1}
 
 
 # --- Patch: produced container + provides contract ---
@@ -86,8 +86,6 @@ def test_validate_patch_rejects_undeclared_module():
 def test_snapshot_module_reads_declared_undeclared_raises():
     s = Snapshot({"v": 1}, modules={"readout": "RO"})
     assert s.module("readout") == "RO"
-    assert s.has_module("readout")
-    assert not s.has_module("nope")
     with pytest.raises(KeyError):
         s.module("nope")
 
