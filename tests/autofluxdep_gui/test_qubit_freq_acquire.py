@@ -208,7 +208,14 @@ def test_good_fit_calibrates_the_predictor():
     assert correction is not None
     estimate = correction.estimate(0.0)
     assert estimate is not None
-    assert abs(predictor.predict_freq(0.0) + estimate - values["qubit_freq"]) < 1e-6
+    assert (
+        abs(
+            predictor.predict_freq(0.0)
+            + estimate.confidence * estimate.value
+            - values["qubit_freq"]
+        )
+        < 1e-6
+    )
 
 
 def _mocked_qubit_freq_produce_env(monkeypatch, real, fit_return):
@@ -297,7 +304,10 @@ def test_medium_fit_calibrates_predictor_without_linewidth_feedback(monkeypatch)
     assert correction is not None
     estimate = correction.estimate(0.0)
     assert estimate is not None
-    assert abs(predictor.predict_freq(0.0) + estimate - 605.0) < 1e-6
+    assert (
+        abs(predictor.predict_freq(0.0) + estimate.confidence * estimate.value - 605.0)
+        < 1e-6
+    )
 
 
 def test_poor_fit_skips_patch_and_predictor_calibration(monkeypatch):

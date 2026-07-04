@@ -7,39 +7,61 @@ from typing import Any
 import pytest
 from zcu_tools.gui.app.autofluxdep.feedback import (
     FeedbackRuntime,
+    FeedbackSample,
     IdwEstimator,
     LastGoodEstimator,
     LogStepController,
     build_feedback_runtime,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 
 
 def test_last_good_estimator_returns_latest_observation_for_any_flux():
-    estimator = LastGoodEstimator()
+    estimator = LastGoodEstimator(decay_points=3.0)
 
     assert estimator.estimate(0.0) is None
 
     estimator.observe(0.0, 1.5)
     estimator.observe(0.1, 2.5)
 
-    assert estimator.estimate(-10.0) == pytest.approx(2.5)
-    assert estimator.estimate(10.0) == pytest.approx(2.5)
+    first = estimator.estimate(-10.0)
+    second = estimator.estimate(10.0)
+
+    assert first == FeedbackSample(value=2.5, confidence=1.0, age_points=0)
+    assert second is not None
+    assert second.value == pytest.approx(2.5)
+    assert second.confidence == pytest.approx(math.exp(-1.0 / 3.0))
+    assert second.age_points == 1
 
 
 def test_idw_estimator_returns_none_without_observations_and_interpolates():
-    estimator = IdwEstimator(k=4, epsilon=1e-6)
+    estimator = IdwEstimator(k=4, epsilon=1e-6, decay_points=4.0)
 
     assert estimator.estimate(0.0) is None
 
     estimator.observe(0.0, 1.0)
-    assert estimator.estimate(0.5) == pytest.approx(1.0)
+    first = estimator.estimate(0.5)
+    assert first is not None
+    assert first.value == pytest.approx(1.0)
+    assert first.confidence == pytest.approx(1.0)
 
     estimator.observe(1.0, 3.0)
-    assert estimator.estimate(0.5) == pytest.approx(2.0)
+    second = estimator.estimate(0.5)
+    assert second is not None
+    assert second.value == pytest.approx(2.0)
+    assert second.confidence == pytest.approx(1.0)
+
+    stale = estimator.estimate(0.5)
+    assert stale is not None
+    assert stale.value == pytest.approx(2.0)
+    assert stale.confidence == pytest.approx(math.exp(-1.0 / 4.0))
+    assert stale.age_points == 1
 
     with pytest.raises(RuntimeError, match="idw_k"):
         IdwEstimator(k=1.5)  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="decay_points"):
+        IdwEstimator(decay_points=0.0)
 
 
 def test_log_step_controller_proposes_in_log_domain_and_fast_fails_invalid_input():
@@ -47,8 +69,17 @@ def test_log_step_controller_proposes_in_log_domain_and_fast_fails_invalid_input
 
     proposal = controller.propose(0.2, math.log(2.0))
 
-    assert proposal == pytest.approx(0.4)
-    assert controller.latest() == pytest.approx(0.4)
+    assert proposal.value == pytest.approx(0.4)
+    assert proposal.confidence == pytest.approx(1.0)
+    latest = controller.latest()
+    assert latest is not None
+    assert latest.value == pytest.approx(0.4)
+    assert latest.confidence == pytest.approx(1.0)
+
+    stale = controller.latest()
+    assert stale is not None
+    assert stale.value == pytest.approx(0.4)
+    assert stale.confidence == pytest.approx(math.exp(-1.0 / controller.decay_points))
 
     with pytest.raises(RuntimeError, match="current actuator"):
         controller.propose(0.0, 0.1)
@@ -58,6 +89,8 @@ def test_log_step_controller_proposes_in_log_domain_and_fast_fails_invalid_input
         controller.propose(0.2, 1000.0)
     with pytest.raises(RuntimeError, match="step_gain"):
         LogStepController(step_gain=0.0)
+    with pytest.raises(RuntimeError, match="decay_points"):
+        LogStepController(decay_points=0.0)
 
 
 @dataclass
@@ -86,7 +119,9 @@ def test_same_builder_type_placements_get_independent_feedback_state():
     builder = QubitFreqBuilder()
     schema_a = builder.make_default_schema()
     schema_b = builder.make_default_schema()
+    schema_a.set_field("pred_freq_correction_decay_points", 2.0)
     schema_b.set_field("pred_freq_correction_strategy", "last_good")
+    schema_b.set_field("pred_freq_correction_decay_points", 8.0)
     runtime = build_feedback_runtime(
         [_Provider("qf_a", builder, schema_a), _Provider("qf_b", builder, schema_b)]
     )
@@ -101,8 +136,19 @@ def test_same_builder_type_placements_get_independent_feedback_state():
     estimator_b.observe(0.0, 10.0)
     estimator_b.observe(1.0, 20.0)
 
-    assert estimator_a.estimate(1.0) == pytest.approx(1.0)
-    assert estimator_b.estimate(1.0) == pytest.approx(20.0)
+    estimate_a = estimator_a.estimate(1.0)
+    estimate_b = estimator_b.estimate(1.0)
+    assert estimate_a is not None
+    assert estimate_b is not None
+    assert estimate_a.value == pytest.approx(1.0)
+    assert estimate_b.value == pytest.approx(20.0)
+
+    stale_a = estimator_a.estimate(1.0)
+    stale_b = estimator_b.estimate(1.0)
+    assert stale_a is not None
+    assert stale_b is not None
+    assert stale_a.confidence == pytest.approx(math.exp(-1.0 / 2.0))
+    assert stale_b.confidence == pytest.approx(math.exp(-1.0 / 8.0))
 
 
 def test_feedback_policy_strategy_and_full_values_persist_flat():
@@ -110,6 +156,7 @@ def test_feedback_policy_strategy_and_full_values_persist_flat():
     schema.set_field("pred_freq_correction_strategy", "last_good")
     schema.set_field("pred_freq_correction_idw_k", 7)
     schema.set_field("pred_freq_correction_idw_epsilon", 1e-4)
+    schema.set_field("pred_freq_correction_decay_points", 2.5)
 
     raw = schema.to_persisted_raw()
 
@@ -128,6 +175,10 @@ def test_feedback_policy_strategy_and_full_values_persist_flat():
         "__kind": "direct",
         "value": 1e-4,
     }
+    assert generation["pred_freq_correction_decay_points"] == {
+        "__kind": "direct",
+        "value": 2.5,
+    }
 
     restored = QubitFreqBuilder().make_default_schema()
     restored.restore_persisted_raw(raw)
@@ -136,7 +187,41 @@ def test_feedback_policy_strategy_and_full_values_persist_flat():
     assert knobs["pred_freq_correction_strategy"] == "last_good"
     assert knobs["pred_freq_correction_idw_k"] == 7
     assert knobs["pred_freq_correction_idw_epsilon"] == pytest.approx(1e-4)
+    assert knobs["pred_freq_correction_decay_points"] == pytest.approx(2.5)
 
     restored.set_field("pred_freq_correction_strategy", "not_a_strategy")
     with pytest.raises(RuntimeError, match="allowed choices"):
         restored.lower(None)
+
+
+def test_controller_feedback_policy_values_persist_flat():
+    schema = LenRabiBuilder().make_default_schema()
+    schema.set_field("pi_gain_feedback_enabled", False)
+    schema.set_field("pi_gain_feedback_step_gain", 0.25)
+    schema.set_field("pi_gain_feedback_decay_points", 6.0)
+
+    raw = schema.to_persisted_raw()
+
+    generation = raw["generation"]
+    assert isinstance(generation, dict)
+    assert "feedback" not in generation
+    assert generation["pi_gain_feedback_enabled"] == {
+        "__kind": "direct",
+        "value": False,
+    }
+    assert generation["pi_gain_feedback_step_gain"] == {
+        "__kind": "direct",
+        "value": 0.25,
+    }
+    assert generation["pi_gain_feedback_decay_points"] == {
+        "__kind": "direct",
+        "value": 6.0,
+    }
+
+    restored = LenRabiBuilder().make_default_schema()
+    restored.restore_persisted_raw(raw)
+
+    knobs = restored.lower(None)
+    assert knobs["pi_gain_feedback_enabled"] is False
+    assert knobs["pi_gain_feedback_step_gain"] == pytest.approx(0.25)
+    assert knobs["pi_gain_feedback_decay_points"] == pytest.approx(6.0)

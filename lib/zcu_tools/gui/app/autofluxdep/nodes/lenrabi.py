@@ -93,7 +93,7 @@ _DEFAULT_SWEEP_STOP_FACTOR = 5.0
 _DEFAULT_SWEEP_STOP_MIN = 0.5
 _DEFAULT_RELAX_FACTOR = 3.0
 _DEFAULT_RELAX_MIN = 0.0
-_DEFAULT_PI_PRODUCT_FACTOR = 1.5
+_DEFAULT_PI_PRODUCT_FACTOR = 1.2
 _DEFAULT_MAX_DRIVE_GAIN = 1.0
 _MIN_TRUSTED_PI_LENGTH = 0.03
 _MAX_PI_SWEEP_FRACTION = 0.9
@@ -109,7 +109,8 @@ _DRIVE_GAIN_SLOT = FeedbackSlotDecl(
     kind="controller",
     prefix="pi_gain_feedback",
     default_enabled=True,
-    default_step_gain=1.0,
+    default_step_gain=0.5,
+    default_decay_points=3.0,
 )
 
 
@@ -266,6 +267,15 @@ def _clamp_drive_gain(value: float, knobs: dict[str, Any]) -> float:
     gain = _require_positive_finite("drive_gain", value)
     max_gain = _require_positive_finite("max_drive_gain", knobs["max_drive_gain"])
     return min(max_gain, gain)
+
+
+def _blend_positive(prior: float, feedback: float, confidence: float) -> float:
+    prior_value = _require_positive_finite("prior drive_gain", prior)
+    feedback_value = _require_positive_finite("feedback drive_gain", feedback)
+    weight = float(confidence)
+    if not np.isfinite(weight) or not 0.0 <= weight <= 1.0:
+        raise RuntimeError("lenrabi feedback confidence must be between 0 and 1")
+    return prior_value * math.exp(weight * math.log(feedback_value / prior_value))
 
 
 def _drive_pulse_with_length(base: PulseCfg, length: float) -> dict[str, Any]:
@@ -759,7 +769,12 @@ class LenRabiBuilder(Builder):
             if controller is not None:
                 latest = controller.latest()
                 if latest is not None:
-                    drive_gain = _clamp_drive_gain(latest, knobs)
+                    drive_gain = _blend_positive(
+                        drive_gain,
+                        latest.value,
+                        latest.confidence,
+                    )
+                    drive_gain = _clamp_drive_gain(drive_gain, knobs)
         raw_cfg["modules"]["rabi_pulse"]["gain"] = drive_gain
         raw_cfg["modules"]["rabi_pulse"]["freq"] = qubit_freq
         raw_cfg["modules"]["readout"] = readout

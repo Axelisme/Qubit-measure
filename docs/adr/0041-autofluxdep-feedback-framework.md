@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0041 — autofluxdep feedback framework
 
-關聯 [[0018]]（autofluxdep resolver-builder boundary）、[[0029]]（Fluxonium prediction engine）。
+關聯 [[0018]]（autofluxdep resolver-builder boundary）、[[0029]]（Fluxonium prediction engine）、[[0042]]（feedback confidence reversion）。
 
 ## 脈絡
 
@@ -37,10 +37,11 @@ state 應位於 run-lived service/capability。
    同一 Builder 可被放置多次，runtime key 使用 placed-node name，因此每個
    placement 有獨立 hyperparameters 與 state。
 
-4. **generic feedback 只提供抽象 scalar mechanics。** 第一版 estimator strategy
-   是 `idw` / `last_good`；controller strategy 是 `log_step`。generic layer 只做
-   finite/positive 等自身數學前置檢查，不處理 bounds、clamp、saturation、
-   max-step、stop/fail、fit-quality gate 或 acceptance policy。
+4. **generic feedback 只提供抽象 scalar mechanics。** Estimator strategy 是
+   `idw` / `last_good`；controller strategy 是 `log_step`。generic layer 回傳
+   `FeedbackSample(value, confidence, age_points)`，只做 finite/positive 等自身
+   數學前置檢查與 age-based confidence decay，不處理 bounds、clamp、saturation、
+   max-step、stop/fail、fit-quality gate、fallback target 或 acceptance policy。
 
 5. **disabled 與 undeclared 語意明確。** 已宣告但 disabled 的 slot lookup 回傳
    `None`，由 use site 決定 fallback；未宣告 slot lookup fast-fail，表示 node

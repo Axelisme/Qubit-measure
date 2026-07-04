@@ -166,7 +166,10 @@ updates feedback slots itself.
 A run-lived, placement-scoped map of generic scalar estimators/controllers,
 built from Builder-declared slots and the placed node's Generation overrides.
 It is exposed to a Node as `RunEnv.feedback`. The generic layer provides only
-mechanics: `idw` / `last_good` estimators and a `log_step` controller. It does
+mechanics: `idw` / `last_good` estimators and a `log_step` controller. Estimates
+and proposals are `FeedbackSample(value, confidence, age_points)` objects; the
+generic layer decays confidence as a function of query age since the last
+trusted observation/proposal, but it never invents a domain fallback. It does
 not know what the scalar means, does not emit Patch keys, and does not apply
 fit gates, clamps, bounds, stop/fail policy, or fallback defaults. A disabled
 declared slot returns `None`; an undeclared slot lookup fast-fails.

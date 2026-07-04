@@ -6,6 +6,7 @@ Experiment nodes still own domain composition, gates, bounds, and Patch output.
 
 from .runtime import (
     FeedbackRuntime,
+    FeedbackSample,
     FeedbackSlotDecl,
     FeedbackView,
     IdwEstimator,
@@ -19,6 +20,7 @@ from .runtime import (
 
 __all__ = [
     "FeedbackRuntime",
+    "FeedbackSample",
     "FeedbackSlotDecl",
     "FeedbackView",
     "IdwEstimator",

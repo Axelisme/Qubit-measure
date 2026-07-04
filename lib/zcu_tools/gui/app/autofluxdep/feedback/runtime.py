@@ -32,15 +32,36 @@ class ScalarEstimator(Protocol):
     """A scalar flux-indexed estimator."""
 
     def observe(self, flux: float, value: float) -> None: ...
-    def estimate(self, flux: float) -> float | None: ...
+    def estimate(self, flux: float) -> FeedbackSample | None: ...
 
 
 @runtime_checkable
 class ScalarController(Protocol):
     """A scalar actuator controller."""
 
-    def latest(self) -> float | None: ...
-    def propose(self, current: float, normalized_error: float) -> float: ...
+    def latest(self) -> FeedbackSample | None: ...
+    def propose(self, current: float, normalized_error: float) -> FeedbackSample: ...
+
+
+@dataclass(frozen=True)
+class FeedbackSample:
+    """A scalar feedback value with smooth stale-confidence metadata."""
+
+    value: float
+    confidence: float
+    age_points: int
+
+    def __post_init__(self) -> None:
+        value = _finite("sample value", self.value)
+        confidence = _finite("confidence", self.confidence)
+        if not 0.0 <= confidence <= 1.0:
+            raise RuntimeError("feedback confidence must be between 0 and 1")
+        if not isinstance(self.age_points, int) or isinstance(self.age_points, bool):
+            raise RuntimeError("feedback age_points must be a non-negative integer")
+        if self.age_points < 0:
+            raise RuntimeError("feedback age_points must be a non-negative integer")
+        object.__setattr__(self, "value", value)
+        object.__setattr__(self, "confidence", confidence)
 
 
 @dataclass(frozen=True)
@@ -55,6 +76,7 @@ class FeedbackSlotDecl:
     default_idw_k: int = 4
     default_idw_epsilon: float = 1e-6
     default_step_gain: float = 1.0
+    default_decay_points: float = 3.0
 
     def __post_init__(self) -> None:
         if not self.key:
@@ -119,6 +141,13 @@ def feedback_generation_fields(slot: FeedbackSlotDecl) -> tuple[GenerationField,
                     slot.default_idw_epsilon,
                     group="feedback",
                 ),
+                generation_field(
+                    slot.field_name("decay_points"),
+                    slot.field_name("decay_points"),
+                    FloatSpec(label=slot.field_name("decay_points")),
+                    slot.default_decay_points,
+                    group="feedback",
+                ),
             )
         )
     else:
@@ -136,6 +165,13 @@ def feedback_generation_fields(slot: FeedbackSlotDecl) -> tuple[GenerationField,
                     slot.field_name("step_gain"),
                     FloatSpec(label=slot.field_name("step_gain")),
                     slot.default_step_gain,
+                    group="feedback",
+                ),
+                generation_field(
+                    slot.field_name("decay_points"),
+                    slot.field_name("decay_points"),
+                    FloatSpec(label=slot.field_name("decay_points")),
+                    slot.default_decay_points,
                     group="feedback",
                 ),
             )
@@ -165,39 +201,78 @@ def _positive_int(name: str, value: Any) -> int:
     return value
 
 
+def _confidence(age_points: int, decay_points: float) -> float:
+    if age_points < 0:
+        raise RuntimeError("feedback age_points must be a non-negative integer")
+    decay = _positive_finite("decay_points", decay_points)
+    return math.exp(-float(age_points) / decay)
+
+
+def _sample(value: float, age_points: int, decay_points: float) -> FeedbackSample:
+    return FeedbackSample(
+        value=_finite("sample value", value),
+        confidence=_confidence(age_points, decay_points),
+        age_points=age_points,
+    )
+
+
 @dataclass
 class LastGoodEstimator:
+    decay_points: float = 3.0
     _value: float | None = None
+    _query_count: int = 0
+    _last_update_query: int = 0
+
+    def __post_init__(self) -> None:
+        self.decay_points = _positive_finite("decay_points", self.decay_points)
 
     def observe(self, flux: float, value: float) -> None:
         del flux
         self._value = _finite("observation", value)
+        self._last_update_query = self._query_count
 
-    def estimate(self, flux: float) -> float | None:
+    def estimate(self, flux: float) -> FeedbackSample | None:
         del flux
-        return self._value
+        if self._value is None:
+            return None
+        age_points = max(0, self._query_count - self._last_update_query)
+        sample = _sample(self._value, age_points, self.decay_points)
+        self._query_count += 1
+        return sample
 
 
 @dataclass
 class IdwEstimator:
     k: int = 4
     epsilon: float = 1e-6
+    decay_points: float = 3.0
     _idw: IDWInterpolation = field(init=False)
     _observations: int = 0
+    _query_count: int = 0
+    _last_update_query: int = 0
 
     def __post_init__(self) -> None:
         self.k = _positive_int("idw_k", self.k)
         self.epsilon = _positive_finite("idw_epsilon", self.epsilon)
+        self.decay_points = _positive_finite("decay_points", self.decay_points)
         self._idw = IDWInterpolation(k=self.k, epsilon=self.epsilon)
 
     def observe(self, flux: float, value: float) -> None:
         self._idw.update(_finite("flux", flux), _finite("observation", value))
         self._observations += 1
+        self._last_update_query = self._query_count
 
-    def estimate(self, flux: float) -> float | None:
+    def estimate(self, flux: float) -> FeedbackSample | None:
         if self._observations == 0:
             return None
-        return float(self._idw.predict(_finite("flux", flux)))
+        age_points = max(0, self._query_count - self._last_update_query)
+        sample = _sample(
+            float(self._idw.predict(_finite("flux", flux))),
+            age_points,
+            self.decay_points,
+        )
+        self._query_count += 1
+        return sample
 
 
 @dataclass
@@ -205,15 +280,24 @@ class LogStepController:
     """Stateless log-domain scalar actuator controller with run-lived latest value."""
 
     step_gain: float = 1.0
+    decay_points: float = 3.0
     _latest: float | None = None
+    _query_count: int = 0
+    _last_update_query: int = 0
 
     def __post_init__(self) -> None:
         self.step_gain = _positive_finite("step_gain", self.step_gain)
+        self.decay_points = _positive_finite("decay_points", self.decay_points)
 
-    def latest(self) -> float | None:
-        return self._latest
+    def latest(self) -> FeedbackSample | None:
+        if self._latest is None:
+            return None
+        age_points = max(0, self._query_count - self._last_update_query)
+        sample = _sample(self._latest, age_points, self.decay_points)
+        self._query_count += 1
+        return sample
 
-    def propose(self, current: float, normalized_error: float) -> float:
+    def propose(self, current: float, normalized_error: float) -> FeedbackSample:
         current_value = _positive_finite("current actuator", current)
         error = _finite("normalized_error", normalized_error)
         try:
@@ -227,7 +311,8 @@ class LogStepController:
                 "feedback controller proposal must be positive and finite"
             )
         self._latest = float(proposal)
-        return self._latest
+        self._last_update_query = self._query_count
+        return _sample(self._latest, 0, self.decay_points)
 
 
 FeedbackCapability = ScalarEstimator | ScalarController
@@ -300,7 +385,12 @@ def _build_capability(
     strategy = str(knobs[slot.field_name("strategy")])
     if slot.kind == "estimator":
         if strategy == "last_good":
-            return LastGoodEstimator()
+            return LastGoodEstimator(
+                decay_points=_positive_finite(
+                    slot.field_name("decay_points"),
+                    knobs[slot.field_name("decay_points")],
+                )
+            )
         if strategy == "idw":
             return IdwEstimator(
                 k=_positive_int(
@@ -310,12 +400,20 @@ def _build_capability(
                     slot.field_name("idw_epsilon"),
                     knobs[slot.field_name("idw_epsilon")],
                 ),
+                decay_points=_positive_finite(
+                    slot.field_name("decay_points"),
+                    knobs[slot.field_name("decay_points")],
+                ),
             )
         raise RuntimeError(f"unsupported estimator feedback strategy: {strategy!r}")
     if strategy == "log_step":
         return LogStepController(
             step_gain=_positive_finite(
                 slot.field_name("step_gain"), knobs[slot.field_name("step_gain")]
-            )
+            ),
+            decay_points=_positive_finite(
+                slot.field_name("decay_points"),
+                knobs[slot.field_name("decay_points")],
+            ),
         )
     raise RuntimeError(f"unsupported controller feedback strategy: {strategy!r}")

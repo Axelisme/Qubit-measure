@@ -36,7 +36,7 @@ def test_idw_feedback_estimator_interpolates_prediction_residuals():
     estimator.observe(0.6, 5042.0 - base.predict_freq(0.6))  # +12 residual
     correction = estimator.estimate(0.5)
     assert correction is not None
-    mid = base.predict_freq(0.5) + correction
+    mid = base.predict_freq(0.5) + correction.confidence * correction.value
     assert mid != 5025.0
     assert 5025.0 < mid < 5040.0
 

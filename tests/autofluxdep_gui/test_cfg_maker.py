@@ -111,6 +111,30 @@ def test_qubit_freq_make_cfg_composes_prediction_correction():
     assert float(cfg.modules.qub_pulse.freq) == pytest.approx(5142.5)
 
 
+def test_qubit_freq_prediction_correction_smoothly_reverts_to_base():
+    builder = QubitFreqBuilder()
+    schema = builder.make_default_schema()
+    feedback = build_feedback_runtime([_Provider("qf", builder, schema)])
+    view = feedback.view_for("qf")
+    estimator = view.estimator("predict_freq_correction")
+    assert estimator is not None
+    estimator.observe(0.0, 8.0)
+    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=_ml(), feedback=view)
+    snap = Snapshot(
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
+    )
+
+    cfgs = [builder.make_cfg(env, snap) for _ in range(10)]
+
+    assert float(cfgs[0].modules.qub_pulse.freq) == pytest.approx(5143.0)
+    assert float(cfgs[1].modules.qub_pulse.freq) == pytest.approx(
+        5135.0 + 8.0 * math.exp(-1.0 / 4.0)
+    )
+    assert float(cfgs[-1].modules.qub_pulse.freq) == pytest.approx(
+        5135.0 + 8.0 * math.exp(-9.0 / 4.0)
+    )
+
+
 def test_qubit_freq_make_cfg_uses_qfw_factor_feedback():
     snap = Snapshot(
         {"predict_freq": 5135.0, "qfw_factor": 32.5}, modules={"readout": _READOUT}
@@ -205,7 +229,7 @@ def test_lenrabi_make_cfg_lowers_context():
     assert int(cfg.modules.rabi_pulse.ch) == 4
     # drive gain uses expected_pi_length as the control setpoint, not the
     # previous measured pi_length.
-    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.8)
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(1.0)
     assert cfg.reps == 1000 and cfg.rounds == 10
     # sweep_range still tracks the latest measured pi_length by default.
     assert cfg.sweep_range == (0.05, 2.5)
@@ -224,6 +248,7 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
             "qub_nqz": 2,
             "expected_pi_length": 0.25,
             "max_drive_gain": 0.5,
+            "pi_gain_feedback_step_gain": 1.0,
             "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         },
     )
@@ -231,13 +256,54 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
     view = feedback.view_for("rabi")
     controller = view.controller("drive_gain")
     assert controller is not None
-    assert controller.propose(0.3, math.log(2.0)) == pytest.approx(0.6)
+    proposal = controller.propose(0.3, math.log(2.0))
+    assert proposal.value == pytest.approx(0.6)
     env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml, feedback=view)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
     cfg = builder.make_cfg(env, snap)
 
     assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.5)
+
+
+def test_lenrabi_controller_proposal_smoothly_reverts_to_open_loop_gain():
+    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+
+    ml = _ml()
+    builder = LenRabiBuilder()
+    schema = _schema(
+        builder,
+        {
+            "qub_ch": 4,
+            "qub_nqz": 2,
+            "expected_pi_length": 0.25,
+            "pi_product_seed": 0.3,
+            "pi_product_factor": 1.2,
+            "max_drive_gain": 2.0,
+            "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
+        },
+    )
+    feedback = build_feedback_runtime([_Provider("rabi", builder, schema)])
+    view = feedback.view_for("rabi")
+    controller = view.controller("drive_gain")
+    assert controller is not None
+    controller.propose(0.3, math.log(4.0))
+
+    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml, feedback=view)
+    snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
+    cfgs = [builder.make_cfg(env, snap) for _ in range(10)]
+
+    open_loop_gain = 0.3 / (1.2 * 0.25)
+    proposal = 0.3 * math.exp(0.5 * math.log(4.0))
+    assert float(cfgs[0].modules.rabi_pulse.gain) == pytest.approx(proposal)
+    expected_second = open_loop_gain * math.exp(
+        math.exp(-1.0 / 3.0) * math.log(proposal / open_loop_gain)
+    )
+    assert float(cfgs[1].modules.rabi_pulse.gain) == pytest.approx(expected_second)
+    expected_long_gap = open_loop_gain * math.exp(
+        math.exp(-9.0 / 3.0) * math.log(proposal / open_loop_gain)
+    )
+    assert float(cfgs[-1].modules.rabi_pulse.gain) == pytest.approx(expected_long_gap)
 
 
 def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
@@ -266,7 +332,7 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
 
     cfg = builder.make_cfg(env, snap)
 
-    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.4)
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.5)
     assert cfg.sweep_range == (0.05, 1.2)
 
 
@@ -294,7 +360,7 @@ def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
 
     cfg = builder.make_cfg(env, snap)
 
-    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.8)
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(1.0)
     assert cfg.sweep_range == (0.05, 1.5)
 
 

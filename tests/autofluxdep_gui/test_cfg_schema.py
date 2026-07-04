@@ -188,6 +188,7 @@ _EXPECTED_KEYS = {
         "pred_freq_correction_strategy",
         "pred_freq_correction_idw_k",
         "pred_freq_correction_idw_epsilon",
+        "pred_freq_correction_decay_points",
     },
     "lenrabi": {
         "sweep_range",
@@ -217,6 +218,7 @@ _EXPECTED_KEYS = {
         "pi_gain_feedback_enabled",
         "pi_gain_feedback_strategy",
         "pi_gain_feedback_step_gain",
+        "pi_gain_feedback_decay_points",
     },
     "ro_optimize": {
         "freq_range",
@@ -344,6 +346,9 @@ _EXPECTED_PATHS = {
         "pred_freq_correction_idw_epsilon": (
             "generation.feedback.pred_freq_correction_idw_epsilon"
         ),
+        "pred_freq_correction_decay_points": (
+            "generation.feedback.pred_freq_correction_decay_points"
+        ),
     },
     "lenrabi": {
         "sweep_range": "sweep.length",
@@ -374,6 +379,9 @@ _EXPECTED_PATHS = {
         "pi_gain_feedback_strategy": "generation.feedback.pi_gain_feedback_strategy",
         "pi_gain_feedback_step_gain": (
             "generation.feedback.pi_gain_feedback_step_gain"
+        ),
+        "pi_gain_feedback_decay_points": (
+            "generation.feedback.pi_gain_feedback_decay_points"
         ),
     },
     "ro_optimize": {
@@ -892,6 +900,7 @@ def test_qubit_freq_default_knobs():
     assert knobs["target_kappa"] == 6.5
     assert knobs["max_drive_gain"] == 1.0
     assert knobs["qfw_seed_gain"] == 0.05
+    assert knobs["pred_freq_correction_decay_points"] == 4.0
     # clearing optional defaults still omits them; channel/nqz remain required raw
     # cfg fields because PulseCfg cannot run without concrete hardware routing.
     schema = QubitFreqBuilder().make_default_schema()
@@ -932,8 +941,10 @@ def test_lenrabi_default_knobs():
     assert knobs["sweep_stop_min_us"] == 0.5
     assert knobs["drive_gain_mode"] == "auto_pi_product"
     assert knobs["pi_product_seed"] == 1.0
-    assert knobs["pi_product_factor"] == 1.5
+    assert knobs["pi_product_factor"] == 1.2
     assert knobs["max_drive_gain"] == 1.0
+    assert knobs["pi_gain_feedback_step_gain"] == 0.5
+    assert knobs["pi_gain_feedback_decay_points"] == 3.0
     assert knobs["qub_ch"] == 0
     assert knobs["qub_nqz"] == 2
     assert knobs["qub_gain"] == 0.3

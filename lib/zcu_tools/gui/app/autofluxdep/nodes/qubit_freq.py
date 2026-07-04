@@ -92,6 +92,7 @@ _PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
     prefix="pred_freq_correction",
     default_enabled=True,
     default_strategy="idw",
+    default_decay_points=4.0,
 )
 
 
@@ -160,7 +161,7 @@ def _predict_freq_correction(env: RunEnv) -> float:
     estimate = estimator.estimate(env.flux)
     if estimate is None:
         return 0.0
-    return float(estimate)
+    return float(estimate.confidence * estimate.value)
 
 
 def _observe_predict_freq_residual(
