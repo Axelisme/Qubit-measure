@@ -11,6 +11,7 @@ the right pane follows.
 from __future__ import annotations
 
 import math
+from typing import Literal
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -35,6 +36,8 @@ from zcu_tools.gui.app.autofluxdep.cfg.form import (
 )
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.registry import available_node_types
+
+RunUiState = Literal["idle", "running", "pausing", "paused"]
 
 
 class _FluxScalarEditor(QWidget):
@@ -128,13 +131,15 @@ class NodeListPane(QWidget):
 
     selection_changed = Signal(int)  # selected node index, or -1
     run_requested = Signal()
-    stop_requested = Signal()
+    pause_requested = Signal()
+    continue_requested = Signal()
+    abort_requested = Signal()
     auto_follow_changed = Signal(bool)
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._running = False
+        self._run_state: RunUiState = "idle"
         self._torn_down = False
 
         root = QVBoxLayout(self)
@@ -198,7 +203,9 @@ class NodeListPane(QWidget):
         root.addWidget(self._auto_follow_tabs)
 
         self._run_btn = _btn("▶ Run", self._on_run_stop)
+        self._abort_btn = _btn("■ Abort", self._on_abort)
         root.addWidget(self._run_btn)
+        root.addWidget(self._abort_btn)
 
         self.refresh_list()
         self.refresh_run_availability()
@@ -312,7 +319,7 @@ class NodeListPane(QWidget):
         self.select_index(new_idx)
 
     def _on_rename(self) -> None:
-        if self._running:
+        if self._run_state != "idle":
             return  # names are locked while a run is in progress
         idx = self._list.currentRow()
         if not (0 <= idx < len(self._ctrl.state.nodes)):
@@ -349,7 +356,8 @@ class NodeListPane(QWidget):
     def _sync_flux_device(self) -> None:
         """Push the selected flux source into State + label the axis with its unit."""
         name = self._flux_source.currentData()
-        self._ctrl.set_flux_device(name)
+        if self._run_state == "idle":
+            self._ctrl.set_flux_device(name)
         unit = self._ctrl.get_device_unit(name) if name else ""
         self._flux_unit.setText(f"[{unit}]" if unit and unit != "none" else "")
         self.refresh_run_availability()
@@ -357,15 +365,20 @@ class NodeListPane(QWidget):
     # --- run / stop ---
 
     def _on_run_stop(self) -> None:
-        if self._running:
-            self.stop_requested.emit()
-        else:
+        if self._run_state == "running":
+            self.pause_requested.emit()
+        elif self._run_state == "paused":
+            self.continue_requested.emit()
+        elif self._run_state == "idle":
             try:
                 self._commit_flux()
             except Exception as exc:
                 QMessageBox.warning(self, "Invalid flux sweep", str(exc))
                 return
             self.run_requested.emit()
+
+    def _on_abort(self) -> None:
+        self.abort_requested.emit()
 
     def _commit_flux(self) -> None:
         self._ctrl.commit_flux_sweep(
@@ -375,12 +388,22 @@ class NodeListPane(QWidget):
         )
 
     def set_running(self, running: bool) -> None:
-        self._running = running
-        self._run_btn.setText("■ Stop" if running else "▶ Run")
+        self.set_run_state("running" if running else "idle")
+
+    def set_run_state(self, state: RunUiState) -> None:
+        self._run_state = state
+        self._run_btn.setText(
+            {
+                "idle": "▶ Run",
+                "running": "⏸ Pause",
+                "pausing": "Pausing...",
+                "paused": "▶ Continue",
+            }[state]
+        )
         self.refresh_run_availability()
 
     def refresh_run_availability(self) -> None:
-        editing = not self._running
+        editing = self._run_state == "idle"
         for b in (
             self._add_btn,
             self._del_btn,
@@ -401,9 +424,13 @@ class NodeListPane(QWidget):
             if isinstance(widget, _NodeRowWidget):
                 widget.set_editing(editing)
         reason = self._run_disabled_reason()
-        # Run needs a complete setup; Stop always remains enabled while running.
-        self._run_btn.setEnabled(self._running or reason is None)
-        self._run_btn.setToolTip("" if self._running or reason is None else reason)
+        self._run_btn.setEnabled(
+            (self._run_state == "idle" and reason is None)
+            or self._run_state in {"running", "paused"}
+        )
+        self._run_btn.setToolTip("" if self._run_btn.isEnabled() else (reason or ""))
+        self._abort_btn.setVisible(self._run_state in {"running", "pausing", "paused"})
+        self._abort_btn.setEnabled(self._run_state in {"running", "pausing", "paused"})
 
     def _refresh_buttons(self) -> None:
         self.refresh_run_availability()

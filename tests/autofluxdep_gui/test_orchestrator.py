@@ -252,6 +252,36 @@ def test_prev_snapshot_carries_across_points():
     assert seen == [0, 1, 2]
 
 
+def test_run_start_idx_preserves_original_rows_and_info_state():
+    seen: list[tuple[int, object]] = []
+
+    def produce_x(env, _snap):
+        return Patch({"x": env.flux_idx})
+
+    def read_x(env, snap):
+        seen.append((env.flux_idx, snap.get("x")))
+        return Patch()
+
+    producer = place(make_builder("prod", provides=("x",), produce_fn=produce_x))
+    consumer = place(
+        make_builder(
+            "cons",
+            optional=(Dependency("x", default=lambda: None),),
+            produce_fn=read_x,
+        )
+    )
+    info = Orchestrator([producer, consumer]).run([0.0, 1.0, 2.0], start_idx=0)
+
+    resumed = Orchestrator([consumer]).run(
+        [0.0, 1.0, 2.0, 3.0],
+        start_idx=3,
+        info=info,
+    )
+
+    assert seen == [(0, 0), (1, 1), (2, 2), (3, 2)]
+    assert resumed.point["flux_idx"] == 3
+
+
 def test_skipped_provider_does_not_run():
     # a required dep missing everywhere → the provider is skipped (Node not built)
     ran = []

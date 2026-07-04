@@ -18,8 +18,11 @@ from collections.abc import Callable, Mapping
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
+    RunContinuedPayload,
     RunFailedPayload,
     RunFinishedPayload,
+    RunPausedPayload,
+    RunPauseRequestedPayload,
     RunStartedPayload,
     RunStoppedPayload,
 )
@@ -60,6 +63,22 @@ def _ser_run_started(payload: BasePayload) -> WirePayload:
     return {"requery": _RUN_REQUERY}
 
 
+def _ser_run_pause_requested(payload: BasePayload) -> WirePayload:
+    assert isinstance(payload, RunPauseRequestedPayload)
+    del payload
+    return {"requery": ["state.check"]}
+
+
+def _ser_run_paused(payload: BasePayload) -> WirePayload:
+    assert isinstance(payload, RunPausedPayload)
+    return {"next_flux_idx": payload.next_flux_idx, "requery": _RUN_REQUERY}
+
+
+def _ser_run_continued(payload: BasePayload) -> WirePayload:
+    assert isinstance(payload, RunContinuedPayload)
+    return {"next_flux_idx": payload.next_flux_idx, "requery": _RUN_REQUERY}
+
+
 def _ser_node_entered(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, NodeEnteredPayload)
     return {"name": payload.name, "idx": payload.idx, "requery": ["result.summary"]}
@@ -96,6 +115,9 @@ EVENT_SERIALIZERS: dict[type[BasePayload], Serializer] = {
     WorkflowChangedPayload: _ser_workflow_changed,
     FluxChangedPayload: _ser_flux_changed,
     RunStartedPayload: _ser_run_started,
+    RunPauseRequestedPayload: _ser_run_pause_requested,
+    RunPausedPayload: _ser_run_paused,
+    RunContinuedPayload: _ser_run_continued,
     NodeEnteredPayload: _ser_node_entered,
     PointDonePayload: _ser_point_done,
     RunFinishedPayload: _ser_run_finished,

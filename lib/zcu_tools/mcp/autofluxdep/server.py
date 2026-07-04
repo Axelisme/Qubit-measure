@@ -60,7 +60,7 @@ Observe a live autofluxdep-gui (automated flux-dependence workflow) over a TCP s
 
 This bridge is READ-ONLY: the USER drives the workflow in the GUI (set up the
 project + SoC, assemble the node list, set the flux sweep + flux device, Run /
-Stop the sweep). The agent's job is to watch and report current state — there are
+Pause/Continue/Abort the sweep). The agent's job is to watch and report current state — there are
 no setup / edit-node / set-flux / run / stop tools, because building the workflow
 and judging the live fits need the user's eye on the GUI.
 
@@ -73,8 +73,8 @@ Getting started:
 
 Read tools (all pure queries):
   - autofluxdep_state_check → {has_project, has_soc, node_count, flux_count,
-    has_flux_device, is_running, has_results, has_loaded_predictor,
-    has_run_predictor}.
+    has_flux_device, is_running, is_paused, next_flux_idx, run_status,
+    has_results, has_loaded_predictor, has_run_predictor}.
   - autofluxdep_project_info → {chip_name, qub_name, result_dir,
     database_path, params_path}.
   - autofluxdep_workflow_list → each placed node's {name, type, enabled,

@@ -95,6 +95,42 @@ OnFluxCommitted = Callable[[int, float, "InfoStore"], None]
 
 
 @dataclass(frozen=True)
+class RunError:
+    """Structured terminal run error captured by the orchestrator."""
+
+    error: Exception
+    node: str | None
+    flux_idx: int | None
+    stage: str | None
+
+
+class RunObserver:
+    """Observer port for sweep lifecycle side effects.
+
+    The orchestrator stays a requirement resolver; persistence, UI events, and
+    progress all hang off this port.
+    """
+
+    def on_point(self, idx: int, flux: float, info: "InfoStore") -> None:
+        del idx, flux, info
+
+    def on_node(self, name: str, idx: int) -> None:
+        del name, idx
+
+    def on_skip(self, name: str, idx: int, reason: "SkipReason") -> None:
+        del name, idx, reason
+
+    def on_node_row(self, name: str, idx: int, patch: Any, info: "InfoStore") -> None:
+        del name, idx, patch, info
+
+    def on_node_failed(self, name: str, idx: int, exc: Exception, stage: str) -> None:
+        del name, idx, exc, stage
+
+    def on_flux_committed(self, idx: int, flux: float, info: "InfoStore") -> None:
+        del idx, flux, info
+
+
+@dataclass(frozen=True)
 class SkipReason:
     """Structured resolver skip reason for run artifact journal events."""
 
@@ -283,13 +319,14 @@ class Orchestrator:
     results: Mapping[str, Any] = field(default_factory=dict)
     notify: Notify | None = None
     derivations: list[DerivationService] = field(default_factory=list)
+    smoothing: SmoothingService | None = None
 
     def __post_init__(self) -> None:
         # auto-collect consumer-declared smoothing into one service
-        specs = [s for p in self.providers for s in p.smooth_specs()]
-        self._smoothing: SmoothingService | None = (
-            SmoothingService.from_specs(specs) if specs else None
-        )
+        self._smoothing = self.smoothing
+        if self._smoothing is None:
+            specs = [s for p in self.providers for s in p.smooth_specs()]
+            self._smoothing = SmoothingService.from_specs(specs) if specs else None
         # The run's cooperative cancel poll, set at the start of ``run`` so
         # ``_make_env`` can curry it into each RunEnv (a real acquire threads it
         # into ``stop_checkers``). None until ``run`` is entered.
@@ -298,10 +335,19 @@ class Orchestrator:
         # catches it (a real acquire can Fast-Fail on an unconfigured Node), stops
         # the sweep, and exposes it here so the caller turns it into a terminal
         # RUN_FAILED instead of letting it abort the run worker's QThread.
-        self.run_error: Exception | None = None
-        self.run_error_node: str | None = None
-        self.run_error_flux_idx: int | None = None
-        self.run_error_stage: str | None = None
+        self.run_error: RunError | None = None
+
+    @property
+    def run_error_node(self) -> str | None:
+        return None if self.run_error is None else self.run_error.node
+
+    @property
+    def run_error_flux_idx(self) -> int | None:
+        return None if self.run_error is None else self.run_error.flux_idx
+
+    @property
+    def run_error_stage(self) -> str | None:
+        return None if self.run_error is None else self.run_error.stage
 
     def _make_env(self, provider: PlacedNode, idx: int, flux: float) -> RunEnv:
         """Curry this point's execution environment for ``provider`` into a RunEnv.
@@ -340,6 +386,10 @@ class Orchestrator:
     def run(
         self,
         flux_values: list[float],
+        *,
+        start_idx: int = 0,
+        info: InfoStore | None = None,
+        observer: RunObserver | None = None,
         on_point: OnPoint | None = None,
         on_node: OnNode | None = None,
         on_skip: OnSkip | None = None,
@@ -347,6 +397,7 @@ class Orchestrator:
         on_node_failed: OnNodeFailed | None = None,
         on_flux_committed: OnFluxCommitted | None = None,
         should_stop: Callable[[], bool] | None = None,
+        pause_requested: Callable[[], bool] | None = None,
     ) -> InfoStore:
         """Sweep flux × providers in order.
 
@@ -357,31 +408,43 @@ class Orchestrator:
         ``point_smoothed``, then any extra ``derivations`` run, then ``on_point``
         (the place to react to a finished point).
 
+        ``start_idx`` is always an index into the original full ``flux_values``.
+        A caller resuming a run passes the preserved ``InfoStore`` from the prior
+        segment so latest-available values, modules, and smoothed state survive.
+
         ``should_stop`` is polled before each flux point (and before each
-        provider) for cooperative cancellation; when it returns True the sweep
-        stops and returns the InfoStore as-is.
+        provider) for terminal cooperative cancellation; when it returns True
+        the sweep stops and returns the InfoStore as-is. ``pause_requested`` is
+        only honored at a flux boundary before ``begin_point()``.
         """
+        if start_idx < 0 or start_idx > len(flux_values):
+            raise ValueError(
+                f"start_idx must be in [0, {len(flux_values)}], got {start_idx}"
+            )
         logger.info(
-            "sweep: %d provider(s) %s over %d flux point(s)",
+            "sweep: %d provider(s) %s over %d flux point(s) from idx %d",
             len(self.providers),
             [p.name for p in self.providers],
             len(flux_values),
+            start_idx,
         )
         # Stash for ``_make_env`` to curry into each RunEnv (a real acquire threads
         # it into ``stop_checkers``).
         self._should_stop = should_stop
         self.run_error = None
-        self.run_error_node = None
-        self.run_error_flux_idx = None
-        self.run_error_stage = None
-        info = InfoStore()
-        for idx, flux in enumerate(flux_values):
+        run_info = info if info is not None else InfoStore()
+        run_observer = observer if observer is not None else RunObserver()
+        for idx in range(start_idx, len(flux_values)):
+            flux = flux_values[idx]
+            if pause_requested is not None and pause_requested():
+                logger.info("sweep paused before flux idx %d", idx)
+                break
             if should_stop is not None and should_stop():
                 logger.info("sweep stopped before flux idx %d", idx)
                 break
-            info.begin_point()
-            info.point["flux_value"] = flux
-            info.point["flux_idx"] = idx
+            run_info.begin_point()
+            run_info.point["flux_value"] = flux
+            run_info.point["flux_idx"] = idx
             logger.debug("flux point %d: value=%g", idx, flux)
             provider_loop_completed = True
             for provider in self.providers:
@@ -389,14 +452,17 @@ class Orchestrator:
                     logger.info("sweep stopped within flux idx %d", idx)
                     provider_loop_completed = False
                     break
-                resolution = resolve_provider_snapshot(provider, info, self.ml)
+                resolution = resolve_provider_snapshot(provider, run_info, self.ml)
                 if resolution.snapshot is None:
                     if on_skip is not None and resolution.skip_reason is not None:
                         on_skip(provider.name, idx, resolution.skip_reason)
+                    if resolution.skip_reason is not None:
+                        run_observer.on_skip(provider.name, idx, resolution.skip_reason)
                     continue  # skipped this point (a required dep/module missing)
                 snapshot = resolution.snapshot
                 if on_node is not None:
                     on_node(provider.name, idx)
+                run_observer.on_node(provider.name, idx)
                 node = provider.builder.build_node(self._make_env(provider, idx, flux))
                 profile_start = perf_now()
                 try:
@@ -415,7 +481,8 @@ class Orchestrator:
                     self._record_run_error(provider.name, idx, "produce", exc)
                     if on_node_failed is not None:
                         on_node_failed(provider.name, idx, exc, "produce")
-                    return info
+                    run_observer.on_node_failed(provider.name, idx, exc, "produce")
+                    return run_info
                 _PRODUCE_PERF.record(
                     elapsed_ms(profile_start),
                     detail=f"node={provider.name} idx={idx}",
@@ -439,19 +506,24 @@ class Orchestrator:
                         on_node_failed(provider.name, idx, exc, "validate_patch")
                     else:
                         raise
-                    return info
+                    run_observer.on_node_failed(
+                        provider.name, idx, exc, "validate_patch"
+                    )
+                    return run_info
                 try:
                     if on_node_row is not None:
-                        on_node_row(provider.name, idx, patch, info)
+                        on_node_row(provider.name, idx, patch, run_info)
+                    run_observer.on_node_row(provider.name, idx, patch, run_info)
                 except Exception as exc:
                     self._record_run_error(provider.name, idx, "row_write", exc)
                     if on_node_failed is not None:
                         on_node_failed(provider.name, idx, exc, "row_write")
                     else:
                         raise
-                    return info
-                info.point.update(patch.values())
-                info.module_point.update(patch.modules())
+                    run_observer.on_node_failed(provider.name, idx, exc, "row_write")
+                    return run_info
+                run_info.point.update(patch.values())
+                run_info.module_point.update(patch.modules())
                 logger.debug(
                     "  %s produced: %s%s",
                     provider.name,
@@ -459,22 +531,27 @@ class Orchestrator:
                     f" modules={list(patch.modules())}" if patch.modules() else "",
                 )
             if self._smoothing is not None:
-                smoothed = self._smoothing.derive(info.point)
-                info.record_smoothed(smoothed)
+                smoothed = self._smoothing.derive(run_info.point)
+                run_info.record_smoothed(smoothed)
                 if smoothed:
                     logger.debug("  smoothed: %s", smoothed)
             for svc in self.derivations:
-                info.point.update(svc.derive(info.point))
+                run_info.point.update(svc.derive(run_info.point))
             if provider_loop_completed and on_flux_committed is not None:
-                on_flux_committed(idx, flux, info)
+                on_flux_committed(idx, flux, run_info)
+            if provider_loop_completed:
+                run_observer.on_flux_committed(idx, flux, run_info)
             if on_point is not None:
-                on_point(idx, flux, info)
-        return info
+                on_point(idx, flux, run_info)
+            run_observer.on_point(idx, flux, run_info)
+        return run_info
 
     def _record_run_error(
         self, provider_name: str, flux_idx: int, stage: str, exc: Exception
     ) -> None:
-        self.run_error = exc
-        self.run_error_node = provider_name
-        self.run_error_flux_idx = flux_idx
-        self.run_error_stage = stage
+        self.run_error = RunError(
+            error=exc,
+            node=provider_name,
+            flux_idx=flux_idx,
+            stage=stage,
+        )

@@ -49,8 +49,11 @@ from zcu_tools.gui.app.autofluxdep.controller import (
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
+    RunContinuedPayload,
     RunFailedPayload,
     RunFinishedPayload,
+    RunPausedPayload,
+    RunPauseRequestedPayload,
     RunStartedPayload,
     RunStoppedPayload,
 )
@@ -89,6 +92,9 @@ class _RunBridge(QObject):
     """
 
     run_started = Signal()
+    run_pause_requested = Signal()
+    run_paused = Signal(int)
+    run_continued = Signal(int)
     node_entered = Signal(str, int)
     point_done = Signal(int)
     run_finished = Signal()
@@ -104,6 +110,13 @@ class _RunBridge(QObject):
         self._bus_subs = EventSubscriptions()
         bus = ctrl.bus
         self._bus_subs.subscribe(bus, RunStartedPayload, self._on_run_started_payload)
+        self._bus_subs.subscribe(
+            bus, RunPauseRequestedPayload, self._on_run_pause_requested_payload
+        )
+        self._bus_subs.subscribe(bus, RunPausedPayload, self._on_run_paused_payload)
+        self._bus_subs.subscribe(
+            bus, RunContinuedPayload, self._on_run_continued_payload
+        )
         self._bus_subs.subscribe(bus, NodeEnteredPayload, self._on_node_entered)
         self._bus_subs.subscribe(bus, PointDonePayload, self._on_point_done_payload)
         self._bus_subs.subscribe(bus, RunFinishedPayload, self._on_run_finished_payload)
@@ -116,6 +129,17 @@ class _RunBridge(QObject):
 
     def _on_run_started_payload(self, _payload: RunStartedPayload) -> None:
         self.run_started.emit()
+
+    def _on_run_pause_requested_payload(
+        self, _payload: RunPauseRequestedPayload
+    ) -> None:
+        self.run_pause_requested.emit()
+
+    def _on_run_paused_payload(self, payload: RunPausedPayload) -> None:
+        self.run_paused.emit(payload.next_flux_idx)
+
+    def _on_run_continued_payload(self, payload: RunContinuedPayload) -> None:
+        self.run_continued.emit(payload.next_flux_idx)
 
     def _on_node_entered(self, p: NodeEnteredPayload) -> None:
         self.node_entered.emit(p.name, p.idx)
@@ -185,6 +209,7 @@ class MainWindow(QMainWindow):
         self._progress_stack_step_perf: dict[str, PerfStats] = {}
         self._build_plot_perf = PerfStats("main.build_plots", logger, slow_ms=100.0)
         self._run_active = False
+        self._run_paused = False
         self._closing = False
         self._active_run_node_name: str | None = None
         self._live_predictor_flux_idx: int | None = None
@@ -274,13 +299,18 @@ class MainWindow(QMainWindow):
         # selection → right pane follows
         self._list.selection_changed.connect(self._on_select)
         self._list.run_requested.connect(self._start)
-        self._list.stop_requested.connect(self._stop)
+        self._list.pause_requested.connect(self._pause)
+        self._list.continue_requested.connect(self._continue)
+        self._list.abort_requested.connect(self._stop)
         self._list.auto_follow_changed.connect(self._on_auto_follow_changed)
         self._detail.user_tab_changed.connect(self._on_user_detail_tab_changed)
 
         # run bridge (worker thread → main thread)
         self._bridge = _RunBridge(ctrl)
         self._bridge.run_started.connect(self._on_run_started)
+        self._bridge.run_pause_requested.connect(self._on_run_pause_requested)
+        self._bridge.run_paused.connect(self._on_run_paused)
+        self._bridge.run_continued.connect(self._on_run_continued)
         self._bridge.node_entered.connect(self._on_node_entered)
         self._bridge.point_done.connect(self._on_point_done)
         self._bridge.row_updated.connect(self._on_row_updated)
@@ -451,11 +481,48 @@ class MainWindow(QMainWindow):
         request just raises the existing one.
         """
         if self._raise_existing_dialog("inspect") is not None:
+            self._sync_inspect_dialog_read_only()
             return
 
         from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 
-        dlg = InspectDialogBase(
+        class _ReadOnlyAwareInspectDialog(InspectDialogBase):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self._autofluxdep_read_only = False
+                super().__init__(*args, **kwargs)
+
+            def set_read_only(self, read_only: bool) -> None:
+                self._autofluxdep_read_only = bool(read_only)
+                self._apply_read_only_state()
+
+            def _on_edit_key_changed(self, text: str) -> None:
+                super()._on_edit_key_changed(text)
+                self._apply_read_only_state()
+
+            def _on_ml_item_changed(self, current: Any, previous: Any) -> None:
+                super()._on_ml_item_changed(current, previous)
+                self._apply_read_only_state()
+
+            def _apply_read_only_state(self) -> None:
+                if not hasattr(self, "_set_btn"):
+                    return
+                read_only = self._autofluxdep_read_only
+                self._edit_key.setEnabled(not read_only)
+                self._edit_value.setEnabled(not read_only)
+                if read_only:
+                    self._set_btn.setEnabled(False)
+                    self._delete_btn.setEnabled(False)
+                    self._rename_ml_btn.setEnabled(False)
+                    self._del_ml_btn.setEnabled(False)
+                    return
+                has_key = bool(self._edit_key.text().strip())
+                self._set_btn.setEnabled(has_key)
+                self._delete_btn.setEnabled(has_key)
+                has_ml_selection = self._current_ml_item_data() is not None
+                self._rename_ml_btn.setEnabled(has_ml_selection)
+                self._del_ml_btn.setEnabled(has_ml_selection)
+
+        dlg = _ReadOnlyAwareInspectDialog(
             self._ctrl.context_control, self._ctrl.get_bus(), parent=self
         )
 
@@ -463,6 +530,7 @@ class MainWindow(QMainWindow):
             self._inspect_dialog = None
 
         self._inspect_dialog = dlg
+        self._sync_inspect_dialog_read_only()
         self._dialog_refs.open_named("inspect", dlg, on_finished=_on_finished)
 
     def _raise_existing_dialog(self, key: str) -> QDialog | None:
@@ -543,15 +611,55 @@ class MainWindow(QMainWindow):
     def _stop(self) -> None:
         self._ctrl.stop_run()
 
+    def _pause(self) -> None:
+        self._ctrl.request_pause()
+
+    def _continue(self) -> None:
+        self._ctrl.continue_run()
+
     def _on_run_started(self) -> None:
+        self._enter_active_run_ui(start_idx=0)
+
+    def _on_run_continued(self, next_flux_idx: int) -> None:
+        self._enter_active_run_ui(start_idx=next_flux_idx)
+
+    def _enter_active_run_ui(self, *, start_idx: int) -> None:
+        self._close_mutation_dialogs()
         self._run_active = True
+        self._run_paused = False
         self._active_run_node_name = None
-        self._live_predictor_flux_idx = 0 if self._ctrl.state.flux_values else None
-        self._list.set_running(True)
+        self._live_predictor_flux_idx = (
+            start_idx if self._ctrl.state.flux_values else None
+        )
+        self._list.set_run_state("running")
         auto_follow = self._ctrl.get_auto_follow_tabs()
         self._detail.set_running(True, switch_tab=auto_follow)
         self._refresh_toolbar_buttons()
         self._sync_predictor_dialog_live_state()
+        self._sync_inspect_dialog_read_only()
+
+    def _on_run_pause_requested(self) -> None:
+        self._close_mutation_dialogs()
+        self._list.set_run_state("pausing")
+        self._sync_inspect_dialog_read_only()
+
+    def _on_run_paused(self, next_flux_idx: int) -> None:
+        self._close_mutation_dialogs()
+        self._run_active = True
+        self._run_paused = True
+        self._active_run_node_name = None
+        self._live_predictor_flux_idx = next_flux_idx
+        self._list.set_run_state("paused")
+        self._detail.set_running(True, switch_tab=False)
+        self._refresh_toolbar_buttons()
+        self._sync_predictor_dialog_live_state()
+        self._sync_inspect_dialog_read_only()
+
+    def _close_mutation_dialogs(self) -> None:
+        for key in ("setup", "devices"):
+            dialog = self._dialog_refs.get(key)
+            if dialog is not None:
+                dialog.close()
 
     def _on_node_entered(self, name: str, idx: int) -> None:
         """Auto-follow: a provider started → select it + show its run tab/plot.
@@ -710,14 +818,16 @@ class MainWindow(QMainWindow):
 
     def _reset_run_ui(self, *, switch_tab: bool | None = None) -> None:
         self._run_active = False
+        self._run_paused = False
         self._active_run_node_name = None
         self._live_predictor_flux_idx = None
-        self._list.set_running(False)
+        self._list.set_run_state("idle")
         if switch_tab is None:
             switch_tab = self._ctrl.get_auto_follow_tabs()
         self._detail.set_running(False, switch_tab=switch_tab)
         self._refresh_toolbar_buttons()
         self._sync_predictor_dialog_live_state()
+        self._sync_inspect_dialog_read_only()
 
     def _on_run_failed(self, message: str) -> None:
         """A Node's produce raised mid-sweep → unlock the UI + surface the error.
@@ -769,6 +879,15 @@ class MainWindow(QMainWindow):
             return
         dlg.set_live_device_value(value)
 
+    def _sync_inspect_dialog_read_only(self) -> None:
+        dlg = self._inspect_dialog
+        if dlg is None:
+            return
+        set_read_only = getattr(dlg, "set_read_only", None)
+        if not callable(set_read_only):
+            return
+        set_read_only(self._run_active or self._ctrl.is_running or self._ctrl.is_paused)
+
     def _on_context_switched(self, _payload: ContextSwitchedPayload) -> None:
         self._refresh_session_dependents()
         self._refresh_cfg_editor_from_session(_payload)
@@ -783,10 +902,12 @@ class MainWindow(QMainWindow):
         self._detail.refresh_cfg_editor(payload.EVENT)
 
     def _refresh_toolbar_buttons(self) -> None:
-        editing = not self._ctrl.is_running
+        editing = not (
+            self._ctrl.is_running or self._ctrl.is_paused or self._run_paused
+        )
         self._setup_btn.setEnabled(editing)
         self._devices_btn.setEnabled(editing)
-        self._predictor_btn.setEnabled(True)
+        self._predictor_btn.setEnabled(editing or self._ctrl.is_running)
         # Inspect stays enabled during a run: the inspector reflects the live
         # context and is non-modal, so it never blocks the event loop.
         self._inspect_btn.setEnabled(True)

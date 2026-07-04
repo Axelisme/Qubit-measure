@@ -13,8 +13,11 @@ import json
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
+    RunContinuedPayload,
     RunFailedPayload,
     RunFinishedPayload,
+    RunPausedPayload,
+    RunPauseRequestedPayload,
     RunStartedPayload,
     RunStoppedPayload,
 )
@@ -33,8 +36,8 @@ from zcu_tools.gui.app.autofluxdep.services.remote.wire_version import (
 
 
 def test_versions_track_workflow_enabled_contract():
-    assert WIRE_VERSION == 3
-    assert GUI_VERSION == 3
+    assert WIRE_VERSION == 4
+    assert GUI_VERSION == 4
 
 
 def test_every_payload_type_has_a_serializer():
@@ -44,6 +47,9 @@ def test_every_payload_type_has_a_serializer():
         WorkflowChangedPayload,
         FluxChangedPayload,
         RunStartedPayload,
+        RunPauseRequestedPayload,
+        RunPausedPayload,
+        RunContinuedPayload,
         NodeEnteredPayload,
         PointDonePayload,
         RunFinishedPayload,
@@ -58,6 +64,9 @@ def test_serializers_emit_json_friendly_requery_hints():
         WorkflowChangedPayload(name="qubit_freq"): "workflow_changed",
         FluxChangedPayload(count=3): "flux_changed",
         RunStartedPayload(): "run_started",
+        RunPauseRequestedPayload(): "run_pause_requested",
+        RunPausedPayload(next_flux_idx=2): "run_paused",
+        RunContinuedPayload(next_flux_idx=2): "run_continued",
         NodeEnteredPayload(name="t1", idx=0): "node_entered",
         PointDonePayload(idx=1): "point_done",
         RunFinishedPayload(): "run_finished",

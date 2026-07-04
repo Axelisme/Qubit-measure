@@ -123,6 +123,36 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     assert (store.run_dir / "report.md").is_file()
 
 
+def test_run_store_mark_paused_flushes_without_finalizing(tmp_path):
+    node, result = _node_and_result()
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[0.0, 0.5],
+        flux_device_name="fake_flux",
+        nodes=[node],
+        results={"probe": result},
+    )
+    store.write_node_row("probe", 0, Patch({"fit": 3.0}), InfoStore())
+    store.commit_flux(0, 0.0, InfoStore(point={"flux_idx": 0, "fit": 3.0}))
+
+    store.mark_paused(1)
+
+    manifest = load_manifest(store.manifest_path)
+    assert manifest["terminal"]["status"] == "running"
+    assert manifest["lifecycle"] == {"status": "paused", "next_flux_idx": 1}
+    assert manifest["reports"] == {}
+    assert not (store.run_dir / "report.md").exists()
+    events = load_journal_events(store.run_dir / "journal.jsonl")
+    assert [event["type"] for event in events] == [
+        "node_row_written",
+        "flux_committed",
+        "run_paused",
+    ]
+    assert events[-1]["next_flux_idx"] == 1
+
+    store.finalize("stopped", next_flux_idx=1)
+
+
 def test_run_store_rejects_nonfinite_flux_values_before_manifest(tmp_path):
     with pytest.raises(TypeError, match="workflow flux is not strict JSON-safe"):
         RunStore.create(

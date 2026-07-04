@@ -246,6 +246,27 @@ class RunStore:
             },
         )
 
+    def mark_paused(self, next_flux_idx: int) -> None:
+        """Persist a non-terminal pause boundary without closing writers."""
+        next_idx = self._validate_next_flux_idx(next_flux_idx)
+        self._set_lifecycle("paused", next_idx)
+        self._append_event("run_paused", {"next_flux_idx": next_idx})
+        self.flush_live()
+
+    def mark_running(self, next_flux_idx: int) -> None:
+        """Persist continuation of an existing run session."""
+        next_idx = self._validate_next_flux_idx(next_flux_idx)
+        self._set_lifecycle("running", next_idx)
+        self._append_event("run_continued", {"next_flux_idx": next_idx})
+        self.flush_live()
+
+    def flush_live(self) -> None:
+        """Flush live journal/HDF5/manifest state without terminal finalization."""
+        for writer in self._writers.values():
+            writer.flush()
+        self._manifest["updated_at"] = _utc_now()
+        self._write_manifest()
+
     def record_run_failed(
         self,
         exc: Exception,
@@ -270,6 +291,7 @@ class RunStore:
         status: str,
         *,
         error: Exception | None = None,
+        next_flux_idx: int | None = None,
     ) -> None:
         """Close writers, generate terminal sidecars, and finalize manifest."""
         writer_errors: list[str] = []
@@ -280,6 +302,10 @@ class RunStore:
         terminal["status"] = status
         terminal["finalized_at"] = _utc_now()
         terminal["error"] = str(error) if error is not None else None
+        lifecycle = dict(self._manifest["lifecycle"])
+        lifecycle["status"] = status
+        if next_flux_idx is not None:
+            lifecycle["next_flux_idx"] = self._validate_next_flux_idx(next_flux_idx)
 
         try:
             self.close_writers(finalize=True)
@@ -301,6 +327,7 @@ class RunStore:
             "exports": dict(exports),
             "reports": {"markdown": "report.md"},
             "terminal": dict(terminal),
+            "lifecycle": dict(lifecycle),
         }
         reports: dict[str, str] = {}
         try:
@@ -330,6 +357,7 @@ class RunStore:
         self._manifest["exports"] = dict(exports)
         self._manifest["reports"] = dict(reports)
         self._manifest["terminal"] = terminal
+        self._manifest["lifecycle"] = lifecycle
         self._exports = dict(exports)
         self._reports = dict(reports)
         self._write_manifest()
@@ -448,6 +476,25 @@ class RunStore:
                 "finalized_at": None,
                 "error": None,
             },
+            "lifecycle": {
+                "status": "running",
+                "next_flux_idx": 0,
+            },
+        }
+
+    def _validate_next_flux_idx(self, next_flux_idx: int) -> int:
+        next_idx = int(next_flux_idx)
+        if next_idx < 0 or next_idx > len(self._flux_values):
+            raise ValueError(
+                f"next_flux_idx must be in [0, {len(self._flux_values)}], "
+                f"got {next_flux_idx}"
+            )
+        return next_idx
+
+    def _set_lifecycle(self, status: str, next_flux_idx: int) -> None:
+        self._manifest["lifecycle"] = {
+            "status": status,
+            "next_flux_idx": next_flux_idx,
         }
 
     def _append_event(self, event_type: str, payload: Mapping[str, Any]) -> None:

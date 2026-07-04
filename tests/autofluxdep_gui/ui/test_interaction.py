@@ -549,6 +549,66 @@ def test_inspect_button_stays_enabled_during_run(app):
     win._list.set_running(False)
 
 
+def test_inspect_dialog_is_read_only_while_run_is_active(app):
+    ctrl, win = app
+
+    win._inspect_btn.click()
+    dlg = win._inspect_dialog
+    assert dlg is not None
+
+    dlg._edit_key.setText("r_f")
+    assert dlg._edit_key.isEnabled()
+    assert dlg._edit_value.isEnabled()
+    assert dlg._set_btn.isEnabled()
+    assert dlg._delete_btn.isEnabled()
+
+    win._on_run_started()
+
+    assert not dlg._edit_key.isEnabled()
+    assert not dlg._edit_value.isEnabled()
+    assert not dlg._set_btn.isEnabled()
+    assert not dlg._delete_btn.isEnabled()
+
+    win._on_run_done()
+
+    assert dlg._edit_key.isEnabled()
+    assert dlg._edit_value.isEnabled()
+    dlg.reject()
+
+
+def test_inspect_dialog_is_read_only_while_run_is_paused(app):
+    _ctrl, win = app
+
+    win._inspect_btn.click()
+    dlg = win._inspect_dialog
+    assert dlg is not None
+    dlg._edit_key.setText("r_f")
+
+    win._on_run_paused(1)
+
+    assert not dlg._set_btn.isEnabled()
+    assert not dlg._delete_btn.isEnabled()
+
+    win._on_run_done()
+    assert dlg._set_btn.isEnabled()
+    dlg.reject()
+
+
+def test_run_start_closes_open_setup_and_device_dialogs(app):
+    _ctrl, win = app
+
+    win.open_setup_dialog(startup_mode=False)
+    win._on_devices_clicked()
+    assert win._setup_dialog is not None
+    assert win._devices_dialog is not None
+
+    win._on_run_started()
+    QApplication.processEvents()
+
+    assert win._setup_dialog is None
+    assert win._devices_dialog is None
+
+
 # --- selection drives the right pane ---
 
 
@@ -847,9 +907,9 @@ def test_run_switches_detail_to_run_tab(app):
 
     win._bridge.run_started.connect(on_started)
     _run_to_completion(ctrl, win)
-    # the run_started slot (main thread) switched to the run sub-tab + showed Stop
+    # the run_started slot (main thread) switched to the run sub-tab + showed Pause
     assert captured.get("tab") == 1
-    assert captured.get("btn") == "■ Stop"
+    assert captured.get("btn") == "⏸ Pause"
     assert captured.get("setup_enabled") is False
     assert captured.get("devices_enabled") is False
     assert captured.get("predictor_enabled") is True
@@ -880,6 +940,39 @@ def test_predictor_dialog_can_open_as_live_view_during_run(app):
     assert dlg._apply_btn.isEnabled()
 
 
+def test_pause_continue_ui_states_lock_workflow_controls(app):
+    _ctrl, win = app
+
+    win._on_run_started()
+    assert win._list._run_btn.text() == "⏸ Pause"
+    assert not win._list._abort_btn.isHidden()
+    assert not win._list._add_btn.isEnabled()
+
+    win._on_run_pause_requested()
+    assert win._list._run_btn.text() == "Pausing..."
+    assert not win._list._run_btn.isEnabled()
+    assert win._list._abort_btn.isEnabled()
+
+    win._on_run_paused(1)
+    assert win._list._run_btn.text() == "▶ Continue"
+    assert win._list._run_btn.isEnabled()
+    assert win._list._abort_btn.isEnabled()
+    assert not win._list._add_btn.isEnabled()
+    assert not win._list._flux_source.isEnabled()
+    assert not win._setup_btn.isEnabled()
+    assert not win._devices_btn.isEnabled()
+    assert not win._predictor_btn.isEnabled()
+    assert win._inspect_btn.isEnabled()
+
+    win._on_run_continued(1)
+    assert win._list._run_btn.text() == "⏸ Pause"
+
+    win._on_run_done()
+    assert win._list._run_btn.text() == "▶ Run"
+    assert win._list._abort_btn.isHidden()
+    assert win._list._add_btn.isEnabled()
+
+
 def test_auto_follow_checkbox_disables_tab_switch_and_navigation(app):
     ctrl, win = app
     win._list.select_index(0)
@@ -890,7 +983,7 @@ def test_auto_follow_checkbox_disables_tab_switch_and_navigation(app):
     assert ctrl.get_auto_follow_tabs() is False
     win._on_run_started()
     assert win._detail.current_tab == 0
-    assert win._list._run_btn.text() == "■ Stop"
+    assert win._list._run_btn.text() == "⏸ Pause"
 
     win._on_node_entered("probe", 0)
 

@@ -137,6 +137,9 @@ def test_state_check_empty():
         "flux_count": 0,
         "has_flux_device": False,
         "is_running": False,
+        "is_paused": False,
+        "next_flux_idx": None,
+        "run_status": "idle",
         "has_results": False,
         "has_loaded_predictor": False,
         "has_run_predictor": False,
@@ -163,6 +166,9 @@ def test_state_check_reflects_workflow_and_project():
     assert check["flux_count"] == 3
     assert check["has_flux_device"] is True
     assert check["is_running"] is False
+    assert check["is_paused"] is False
+    assert check["next_flux_idx"] is None
+    assert check["run_status"] == "idle"
     assert check["has_results"] is False
 
 

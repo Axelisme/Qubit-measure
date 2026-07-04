@@ -20,6 +20,9 @@ class RunEvent(str, Enum):
     RUN_STARTED = "run_started"
     NODE_ENTERED = "node_entered"
     POINT_DONE = "point_done"
+    RUN_PAUSE_REQUESTED = "run_pause_requested"
+    RUN_PAUSED = "run_paused"
+    RUN_CONTINUED = "run_continued"
     RUN_FINISHED = "run_finished"
     RUN_STOPPED = "run_stopped"
     RUN_FAILED = "run_failed"
@@ -54,6 +57,29 @@ class PointDonePayload(_RunPayload):
 
     EVENT: ClassVar[RunEvent] = RunEvent.POINT_DONE
     idx: int
+
+
+@dataclass(frozen=True)
+class RunPauseRequestedPayload(_RunPayload):
+    """Payload for RUN_PAUSE_REQUESTED."""
+
+    EVENT: ClassVar[RunEvent] = RunEvent.RUN_PAUSE_REQUESTED
+
+
+@dataclass(frozen=True)
+class RunPausedPayload(_RunPayload):
+    """Payload for RUN_PAUSED: boundary pause after a committed flux point."""
+
+    EVENT: ClassVar[RunEvent] = RunEvent.RUN_PAUSED
+    next_flux_idx: int
+
+
+@dataclass(frozen=True)
+class RunContinuedPayload(_RunPayload):
+    """Payload for RUN_CONTINUED: a paused session started a new segment."""
+
+    EVENT: ClassVar[RunEvent] = RunEvent.RUN_CONTINUED
+    next_flux_idx: int
 
 
 @dataclass(frozen=True)

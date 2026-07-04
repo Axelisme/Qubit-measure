@@ -75,7 +75,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "state.check": MethodSpec(
         5.0,
         "Read readiness flags at once: {has_project, has_soc, node_count, "
-        "flux_count, has_flux_device, is_running, has_results, "
-        "has_loaded_predictor, has_run_predictor}.",
+        "flux_count, has_flux_device, is_running, is_paused, next_flux_idx, "
+        "run_status, has_results, has_loaded_predictor, has_run_predictor}.",
     ),
 }

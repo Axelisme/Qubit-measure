@@ -166,6 +166,9 @@ def _h_state_check(
         "flux_count": len(state.flux_values),
         "has_flux_device": state.flux_device_name is not None,
         "is_running": adapter.ctrl.is_running,
+        "is_paused": adapter.ctrl.is_paused,
+        "next_flux_idx": adapter.ctrl.next_flux_idx,
+        "run_status": adapter.ctrl.run_status,
         "has_results": bool(state.run_results),
         # Predictor flags (D4): only presence, no calibration curves. The loaded
         # raw FluxoniumPredictor lives in exp_context; the adaptive per-run
