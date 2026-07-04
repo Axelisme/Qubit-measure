@@ -2,7 +2,7 @@
 
 This is the load-bearing Phase RB test. It runs the qubit_freq Node's *real*
 acquire path (set flux device -> setup_devices -> TwoToneProgram.acquire -> fit ->
-calibrate) at several flux points and asserts the fitted qubit frequency CHANGES
+feedback) at several flux points and asserts the fitted qubit frequency CHANGES
 with flux. If the picked flux device never received the value (the name/label
 silent-miss), the SimEngine would stay pinned at one operating point and the fit
 freq would be constant -- so a constant fit fails this test.
@@ -258,7 +258,7 @@ def _mocked_qubit_freq_produce_env(
     *,
     predictor: Any | None = None,
     schema_overrides: dict[str, Any] | None = None,
-):
+) -> tuple[Any, Any, Any, Any]:
     from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq as qf_mod
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
@@ -325,7 +325,7 @@ def test_medium_fit_observes_residual_without_hard_calibration(monkeypatch):
     fit_curve = np.linspace(0.0, 1.0, 11)
     real = fit_curve + 0.15  # residual passes 0.2 gate, fails 0.1 gate.
     predictor = _TrackingPredictor(base=600.0)
-    builder, env, result, predictor = _mocked_qubit_freq_produce_env(
+    builder, env, result, _returned_predictor = _mocked_qubit_freq_produce_env(
         monkeypatch,
         real,
         (605.0, 0.0, 4.0, 0.0, fit_curve, None),
@@ -362,7 +362,7 @@ def test_hard_bias_update_mode_calibrates_predictor_before_residual(monkeypatch)
     fit_curve = np.linspace(0.0, 1.0, 11)
     real = fit_curve + 0.15
     predictor = _TrackingPredictor(base=600.0)
-    builder, env, _result, predictor = _mocked_qubit_freq_produce_env(
+    builder, env, _result, _returned_predictor = _mocked_qubit_freq_produce_env(
         monkeypatch,
         real,
         (605.0, 0.0, 4.0, 0.0, fit_curve, None),
