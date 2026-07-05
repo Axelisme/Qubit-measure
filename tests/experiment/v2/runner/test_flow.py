@@ -15,6 +15,8 @@ from zcu_tools.experiment.v2.runner import (
     schedule_stop_scope,
 )
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
+from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
+from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
 
 class FlowCfg(ProgramV2Cfg, ExpCfgModel):
@@ -81,6 +83,77 @@ class RootUpdateRecordingBuffer:
         flush: bool = False,
     ) -> None:
         self.calls.append((step, flush))
+
+
+class RecordingProgressBar(BaseProgressBar):
+    def __init__(
+        self,
+        *,
+        total: ProgressTotal = None,
+        desc: str = "",
+        leave: bool = True,
+        disabled: bool = False,
+    ) -> None:
+        self._total = total
+        self._desc = desc
+        self.leave = leave
+        self.disabled = disabled
+        self.closed = False
+        self.reset_count = 0
+        self._n: ProgressValue = 0
+
+    def set_description(self, description: str) -> None:
+        self._desc = description
+
+    def update(self, value: ProgressValue = 1) -> None:
+        self._n += value
+
+    def set_progress(self, value: ProgressValue) -> None:
+        self._n = value
+
+    def reset(self) -> None:
+        self.reset_count += 1
+        self._n = 0
+
+    def refresh(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+    @property
+    def total(self) -> ProgressTotal:
+        return self._total
+
+    @total.setter
+    def total(self, value: ProgressTotal) -> None:
+        self._total = value
+
+    @property
+    def n(self) -> ProgressValue:
+        return self._n
+
+    @property
+    def desc(self) -> str:
+        return self._desc
+
+
+def _recording_pbar_factory(
+    records: list[RecordingProgressBar],
+) -> Callable[..., RecordingProgressBar]:
+    def factory(*args: Any, **kwargs: Any) -> RecordingProgressBar:
+        desc = kwargs.get("desc", args[1] if len(args) > 1 else "")
+        total = kwargs.get("total", args[2] if len(args) > 2 else None)
+        bar = RecordingProgressBar(
+            total=total,
+            desc=str(desc) if desc else "",
+            leave=bool(kwargs.get("leave", True)),
+            disabled=bool(kwargs.get("disable", False)),
+        )
+        records.append(bar)
+        return bar
+
+    return factory
 
 
 class FakeProgram:
@@ -506,6 +579,32 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
     assert instance.rounds == 2
     assert instance.acquire_kwargs == {"tag": "x"}
     assert instance.stop_checker_count == 2
+
+
+def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
+    progress_bars: list[RecordingProgressBar] = []
+
+    def run_root_acquire(progress_leave: bool | None = None) -> None:
+        kwargs: dict[str, object] = {}
+        if progress_leave is not None:
+            kwargs["progress_leave"] = progress_leave
+        with Schedule(_cfg(rounds=2), SignalBuffer((1,), dtype=np.float64)) as sched:
+            sched.prog_builder(
+                "soc",
+                "soccfg",
+                program_cls=FakeProgram,
+                marker="kw",
+            ).add(FakeModule("readout")).build_and_acquire(
+                raw2signal_fn=_identity_array,
+                **kwargs,
+            )
+
+    with use_pbar_factory(_recording_pbar_factory(progress_bars)):
+        run_root_acquire()
+        run_root_acquire(progress_leave=False)
+
+    assert [bar.leave for bar in progress_bars] == [True, False]
+    assert all(bar.closed for bar in progress_bars)
 
 
 def test_build_and_acquire_rebuilds_program_on_retry():

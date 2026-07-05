@@ -858,6 +858,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         retry: int = 0,
         progress: bool = False,
         progress_label: str = "rounds",
+        progress_leave: bool | None = None,
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -869,6 +870,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             retry=retry,
             progress=progress,
             progress_label=progress_label,
+            progress_leave=progress_leave,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -880,6 +882,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         retry: int = 0,
         progress: bool = False,
         progress_label: str = "rounds",
+        progress_leave: bool | None = None,
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -891,6 +894,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             retry=retry,
             progress=progress,
             progress_label=progress_label,
+            progress_leave=progress_leave,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -903,6 +907,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         retry: int = 0,
         progress: bool = False,
         progress_label: str = "rounds",
+        progress_leave: bool | None = None,
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -914,6 +919,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             retry=retry,
             progress=progress,
             progress_label=progress_label,
+            progress_leave=progress_leave,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -926,6 +932,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         retry: int = 0,
         progress: bool = False,
         progress_label: str = "rounds",
+        progress_leave: bool | None = None,
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -937,6 +944,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             retry=retry,
             progress=progress,
             progress_label=progress_label,
+            progress_leave=progress_leave,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -949,6 +957,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         retry: int,
         progress: bool,
         progress_label: str,
+        progress_leave: bool | None,
         stop_checkers: Sequence[Callable[[], bool]] | None,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
@@ -978,6 +987,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                 retry=0,
                 progress=progress,
                 progress_label=progress_label,
+                progress_leave=progress_leave,
                 stop_checkers=stop_checkers,
                 **acquire_kwargs,
             )
@@ -997,6 +1007,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         retry: int,
         progress: bool,
         progress_label: str,
+        progress_leave: bool | None,
         stop_checkers: Sequence[Callable[[], bool]] | None,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
@@ -1011,7 +1022,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             total=rounds,
             smoothing=0,
             desc=progress_label,
-            leave=not isinstance(self._owner, ScheduleStep),
+            leave=self._resolve_progress_leave(progress_leave),
             disable=rounds == 1,
         )
         try:
@@ -1113,6 +1124,11 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         if rounds < 1:
             raise ValueError("Program cfg.rounds must be positive")
         return rounds
+
+    def _resolve_progress_leave(self, progress_leave: bool | None) -> bool:
+        if progress_leave is not None:
+            return progress_leave
+        return not isinstance(self._owner, ScheduleStep)
 
     def _default_slot(self) -> SignalSlot:
         return self._schedule._default_slot(self._owner)

@@ -118,6 +118,7 @@ def run_schedule_acquire(
             retry=acquire_retry(env),
             progress=False,
             progress_label=label,
+            progress_leave=False,
             stop_checkers=stop_checkers,
             **acquire_kwargs,
         )

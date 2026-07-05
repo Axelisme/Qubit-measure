@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -9,6 +10,8 @@ from zcu_tools.gui.app.autofluxdep.nodes import acquire as acquire_mod
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
+from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
+from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
 
 class FakeModule(Module):
@@ -20,6 +23,75 @@ class FakeModule(Module):
 
     def run(self, prog: Any, t: Any = 0.0) -> Any:
         return t
+
+
+class RecordingProgressBar(BaseProgressBar):
+    def __init__(
+        self,
+        *,
+        total: ProgressTotal = None,
+        desc: str = "",
+        leave: bool = True,
+        disabled: bool = False,
+    ) -> None:
+        self._total = total
+        self._desc = desc
+        self.leave = leave
+        self.disabled = disabled
+        self.closed = False
+        self._n: ProgressValue = 0
+
+    def set_description(self, description: str) -> None:
+        self._desc = description
+
+    def update(self, value: ProgressValue = 1) -> None:
+        self._n += value
+
+    def set_progress(self, value: ProgressValue) -> None:
+        self._n = value
+
+    def reset(self) -> None:
+        self._n = 0
+
+    def refresh(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+    @property
+    def total(self) -> ProgressTotal:
+        return self._total
+
+    @total.setter
+    def total(self, value: ProgressTotal) -> None:
+        self._total = value
+
+    @property
+    def n(self) -> ProgressValue:
+        return self._n
+
+    @property
+    def desc(self) -> str:
+        return self._desc
+
+
+def _recording_pbar_factory(
+    records: list[RecordingProgressBar],
+) -> Callable[..., RecordingProgressBar]:
+    def factory(*args: Any, **kwargs: Any) -> RecordingProgressBar:
+        desc = kwargs.get("desc", args[1] if len(args) > 1 else "")
+        total = kwargs.get("total", args[2] if len(args) > 2 else None)
+        bar = RecordingProgressBar(
+            total=total,
+            desc=str(desc) if desc else "",
+            leave=bool(kwargs.get("leave", True)),
+            disabled=bool(kwargs.get("disable", False)),
+        )
+        records.append(bar)
+        return bar
+
+    return factory
 
 
 def test_snr_stop_checker_waits_until_probe_has_value(monkeypatch: Any):
@@ -93,6 +165,7 @@ def test_acquire_retry_reads_default_and_validates_non_negative():
 
 def test_run_schedule_acquire_completed_updates_signal():
     updates: list[np.ndarray] = []
+    progress_bars: list[RecordingProgressBar] = []
 
     class SuccessfulProgram:
         def __init__(
@@ -134,22 +207,25 @@ def test_run_schedule_acquire_completed_updates_signal():
         knobs_snapshot={"acquire_retry": 0},
     )
 
-    acquired = acquire_mod.run_schedule_acquire(
-        env=env,
-        cfg=ProgramV2Cfg(rounds=1),
-        signal_shape=(1,),
-        dtype=np.float64,
-        configure_builder=lambda builder: builder.add(FakeModule("readout")),
-        raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
-        on_update=lambda data: updates.append(data.copy()),
-        program_cls=SuccessfulProgram,
-    )
+    with use_pbar_factory(_recording_pbar_factory(progress_bars)):
+        acquired = acquire_mod.run_schedule_acquire(
+            env=env,
+            cfg=ProgramV2Cfg(rounds=2),
+            signal_shape=(1,),
+            dtype=np.float64,
+            configure_builder=lambda builder: builder.add(FakeModule("readout")),
+            raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
+            on_update=lambda data: updates.append(data.copy()),
+            program_cls=SuccessfulProgram,
+        )
 
     assert acquired.stopped is False
     assert acquired.signal is not None
     np.testing.assert_allclose(acquired.signal, np.array([2.0]))
     np.testing.assert_allclose(updates[0], np.array([1.0]))
     np.testing.assert_allclose(updates[-1], np.array([2.0]))
+    assert [bar.leave for bar in progress_bars] == [False]
+    assert progress_bars[0].closed is True
 
 
 def test_run_schedule_acquire_failed_raises_after_retry_exhaustion():

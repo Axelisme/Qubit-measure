@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-05 — stop-before-retry guard
+**Last updated:** 2026-07-05 — acquire progress leave override
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -122,8 +122,9 @@ with Schedule(cfg, signals_buffer) as sched:
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
-- `progress_label=` 可覆寫 acquire rounds progress bar label；GUI node helpers 用它顯示
-  node/flux row scoped rounds 進度。
+- `progress_label=` 可覆寫 acquire rounds progress bar label；`progress_leave=` 可覆寫
+  root-vs-step 預設 close/retain policy。GUI node helpers 用 label 顯示 node/flux row
+  scoped rounds 進度，並以 non-leaving bar 避免跨 row 累積。
 
 ---
 
