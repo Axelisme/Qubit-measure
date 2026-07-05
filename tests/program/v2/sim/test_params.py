@@ -384,6 +384,10 @@ class TestDefaultSimParamFluxPeriod:
         # exact value so an accidental reversion is caught.
         assert DEFAULT_SIMPARAM.flux_period == pytest.approx(5e-3)
 
+    def test_readout_contrast_defaults_are_moderate(self) -> None:
+        assert DEFAULT_SIMPARAM.g == pytest.approx(0.06)
+        assert DEFAULT_SIMPARAM.snr == pytest.approx(5.0)
+
     def test_guide_sweep_covers_at_least_one_period(self) -> None:
         # value_to_flux(v) = (v + flux_bias - flux_half) / flux_period + 0.5
         # With flux_half=0, flux_bias=0, flux_period=5e-3 the guide sweep
