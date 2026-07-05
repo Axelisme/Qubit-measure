@@ -31,6 +31,7 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStoppedPayload,
 )
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
+from zcu_tools.gui.app.autofluxdep.nodes import acquire as acquire_mod
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
@@ -41,6 +42,7 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 )
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from ._helpers import (
     ensure_test_project,
@@ -364,6 +366,75 @@ def test_stop_after_produce_before_commit_keeps_current_flux_cursor():
         event["type"] for event in load_journal_events(run_dir / "journal.jsonl")
     ]
     assert "flux_committed" not in event_types
+
+
+def test_schedule_acquire_failure_inside_run_session_does_not_emit_run_stopped():
+    ctrl = _build_ready_controller()
+    events: list[RunEvent] = []
+    attempts: list[int] = []
+
+    class FakeModule(Module):
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def init(self, prog: Any) -> None:
+            pass
+
+        def run(self, prog: Any, t: Any = 0.0) -> Any:
+            return t
+
+    class FailingProgram:
+        def __init__(
+            self,
+            soccfg: Any,
+            cfg: ProgramV2Cfg,
+            *,
+            modules: list[Module],
+            sweep: list[tuple[str, Any]] | None,
+        ) -> None:
+            del soccfg, modules, sweep
+            self.cfg_model = cfg
+
+        def acquire(self, *_args: Any, round_hook: Any, **_kwargs: Any) -> np.ndarray:
+            attempts.append(1)
+            round_hook(1, np.array([float(len(attempts))]))
+            raise RuntimeError("schedule acquire failed")
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    def produce(env, snapshot):
+        del snapshot
+        acquire_mod.run_schedule_acquire(
+            env=env,
+            cfg=ProgramV2Cfg(rounds=1),
+            signal_shape=(1,),
+            dtype=np.float64,
+            configure_builder=lambda builder: builder.add(FakeModule("readout")),
+            raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
+            program_cls=FailingProgram,
+        )
+        raise AssertionError("run_schedule_acquire should raise on failed outcome")
+
+    ctrl.state.nodes = []
+    ctrl.add_node(make_builder("probe", produce_fn=produce))
+    ctrl.set_flux_values([0.0, 0.5])
+    ctrl.bus.subscribe(RunFailedPayload, lambda p: events.append(p.EVENT))
+    ctrl.bus.subscribe(RunStoppedPayload, lambda p: events.append(p.EVENT))
+
+    token = ctrl.start_run()
+    pump_controller_until_idle(ctrl)
+
+    result = ctrl.await_operation(token, timeout=0.0)
+    assert result is not None
+    assert result.outcome is not None
+    assert result.outcome.status == "failed"
+    assert events == [RunEvent.RUN_FAILED]
+    assert attempts == [1, 1, 1, 1]
+
+    manifest = load_manifest(_latest_run_dir(ctrl) / "manifest.json")
+    assert manifest["terminal"]["status"] == "failed"
+    assert manifest["lifecycle"]["status"] == "failed"
 
 
 def test_full_run_without_stop_emits_run_finished(monkeypatch):

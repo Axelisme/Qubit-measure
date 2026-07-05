@@ -101,13 +101,20 @@ def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeProgram:
-        def __init__(self, *args, **kwargs):
-            del args, kwargs
+        def __init__(self, _soccfg, cfg, *, modules, sweep):
+            del modules, sweep
+            self.cfg_model = cfg
 
         def acquire(self, *args, **kwargs):
             del args
             captured["stop_checkers"] = kwargs.get("stop_checkers")
-            return None
+            captured["trackers"] = kwargs.get("trackers")
+            kwargs["round_hook"](1, object())
+            return object()
+
+        def acquire_decimated(self, *args, **kwargs):
+            del args, kwargs
+            raise NotImplementedError
 
     def fake_landscape(_tracker, shape, *, skew_penalty):
         del _tracker, skew_penalty
@@ -143,4 +150,10 @@ def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
 
     builder.build_node(env).produce(snap)
 
-    assert captured["stop_checkers"] == [should_stop]
+    stop_checkers = captured["stop_checkers"]
+    assert isinstance(stop_checkers, list)
+    assert should_stop in stop_checkers
+    assert len(stop_checkers) >= 2
+    trackers = captured["trackers"]
+    assert isinstance(trackers, list)
+    assert trackers

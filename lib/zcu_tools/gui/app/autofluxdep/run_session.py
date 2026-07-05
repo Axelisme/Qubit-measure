@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
+from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.derivation import SmoothingService
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
@@ -98,7 +99,8 @@ class RunSession(RunObserver):
         self._progress_label = progress_label
         self._user_node_names = {node.name for node in user_nodes}
         self._user_node_types = {node.name: node.type_name for node in user_nodes}
-        self._stop_event = threading.Event()
+        self._user_stop_event = threading.Event()
+        self._schedule_stop_event = threading.Event()
         self._pause_event = threading.Event()
         self._info = InfoStore()
         specs = [
@@ -123,14 +125,15 @@ class RunSession(RunObserver):
 
     @property
     def stop_requested(self) -> bool:
-        return self._stop_event.is_set()
+        return self._user_stop_event.is_set()
 
     @property
     def pause_requested(self) -> bool:
         return self._pause_event.is_set()
 
     def request_stop(self) -> None:
-        self._stop_event.set()
+        self._user_stop_event.set()
+        self._schedule_stop_event.set()
 
     def request_pause(self) -> bool:
         if self._status not in {RunSessionStatus.READY, RunSessionStatus.RUNNING}:
@@ -146,7 +149,8 @@ class RunSession(RunObserver):
             raise RuntimeError(
                 f"run session segment cannot start from {self._status.value}"
             )
-        self._stop_event.clear()
+        self._user_stop_event.clear()
+        self._schedule_stop_event.clear()
         self._pause_event.clear()
 
     def start_or_continue(self, progress_factory: Any) -> RunSegmentOutcome:
@@ -170,7 +174,10 @@ class RunSession(RunObserver):
             self._pause_event.clear()
         start_idx = self._next_flux_idx
 
-        with progress_ambient(progress_factory):
+        with (
+            progress_ambient(progress_factory),
+            schedule_stop_scope(StopSignal(self._schedule_stop_event)),
+        ):
             pbar = make_pbar(
                 total=len(self.flux_values),
                 desc=self._progress_label,
@@ -199,20 +206,20 @@ class RunSession(RunObserver):
                     start_idx=start_idx,
                     info=self._info,
                     observer=self,
-                    should_stop=self._stop_event.is_set,
+                    should_stop=self._schedule_stop_event.is_set,
                     pause_requested=self._pause_event.is_set,
                 )
                 pbar.refresh()
                 paused = (
                     self._pause_event.is_set()
-                    and not self._stop_event.is_set()
+                    and not self._user_stop_event.is_set()
                     and orch.run_error is None
                     and self._next_flux_idx < len(self.flux_values)
                 )
                 return RunSegmentOutcome(
                     info=self._info,
                     run_error=orch.run_error,
-                    stopped=self._stop_event.is_set(),
+                    stopped=self._user_stop_event.is_set(),
                     paused=paused,
                     next_flux_idx=self._next_flux_idx,
                 )

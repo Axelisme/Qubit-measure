@@ -4,11 +4,22 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.utils import estimate_snr
+from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.autofluxdep.nodes import acquire as acquire_mod
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+from zcu_tools.program.v2 import Module, ProgramV2Cfg
+
+
+class FakeModule(Module):
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def init(self, prog: Any) -> None:
+        pass
+
+    def run(self, prog: Any, t: Any = 0.0) -> Any:
+        return t
 
 
 def test_snr_stop_checker_waits_until_probe_has_value(monkeypatch: Any):
@@ -48,31 +59,189 @@ def test_snr_stop_checker_waits_until_probe_has_value(monkeypatch: Any):
     assert calls["count"] == 1
 
 
-def test_make_on_round_records_current_snr():
-    result = Sweep1DResult.allocate(
-        np.array([0.0]),
-        np.arange(8, dtype=np.float64),
-        x_label="x",
+def test_acquire_retry_reads_default_and_validates_non_negative():
+    schema = QubitFreqBuilder().make_default_schema()
+    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, knobs_snapshot={})
+    assert acquire_mod.acquire_retry(env) == acquire_mod.DEFAULT_ACQUIRE_RETRY
+
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        knobs_snapshot={"acquire_retry": 0},
     )
-    probe = acquire_mod.SnrProbe()
-    notified: list[int] = []
-    rounds: list[int] = []
-    real = np.array([0.0, 0.2, 0.7, 1.0, 0.8, 0.3, 0.1, 0.0], dtype=np.float64)
-    avg_d = [[np.column_stack([real, np.zeros_like(real)])]]
+    assert acquire_mod.acquire_retry(env) == 0
 
-    on_round = acquire_mod.make_on_round(
-        result,
-        0,
-        lambda signals: np.asarray(signals, dtype=np.complex128).real,
-        notified.append,
-        probe=probe,
-        round_progress_hook=rounds.append,
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        knobs_snapshot={"acquire_retry": 2},
+    )
+    assert acquire_mod.acquire_retry(env) == 2
+
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        node_name="qubit_freq",
+        knobs_snapshot={"acquire_retry": -1},
+    )
+    with pytest.raises(RuntimeError, match="acquire_retry must be non-negative"):
+        acquire_mod.acquire_retry(env)
+
+
+def test_run_schedule_acquire_completed_updates_signal():
+    updates: list[np.ndarray] = []
+
+    class SuccessfulProgram:
+        def __init__(
+            self,
+            soccfg: Any,
+            cfg: ProgramV2Cfg,
+            *,
+            modules: list[Module],
+            sweep: list[tuple[str, Any]] | None,
+        ) -> None:
+            self.cfg_model = cfg
+            self.modules = modules
+            self.sweep = sweep
+
+        def acquire(
+            self,
+            soc: Any,
+            *,
+            progress: bool,
+            round_hook: Any,
+            stop_checkers: list[Any],
+            **_kwargs: Any,
+        ) -> np.ndarray:
+            assert soc == "soc"
+            assert progress is False
+            assert all(not checker() for checker in stop_checkers)
+            round_hook(1, np.array([1.0]))
+            return np.array([2.0])
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=QubitFreqBuilder().make_default_schema(),
+        soc="soc",
+        soccfg="soccfg",
+        knobs_snapshot={"acquire_retry": 0},
     )
 
-    on_round(3, avg_d)
+    acquired = acquire_mod.run_schedule_acquire(
+        env=env,
+        cfg=ProgramV2Cfg(rounds=1),
+        signal_shape=(1,),
+        dtype=np.float64,
+        configure_builder=lambda builder: builder.add(FakeModule("readout")),
+        raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
+        on_update=lambda data: updates.append(data.copy()),
+        program_cls=SuccessfulProgram,
+    )
 
-    np.testing.assert_allclose(result.signal[0], real)
-    assert result.snr[0] == pytest.approx(estimate_snr(real))
-    assert probe.snr == pytest.approx(result.snr[0])
-    assert notified == [0]
-    assert rounds == [3]
+    assert acquired.stopped is False
+    assert acquired.signal is not None
+    np.testing.assert_allclose(acquired.signal, np.array([2.0]))
+    np.testing.assert_allclose(updates[0], np.array([1.0]))
+    np.testing.assert_allclose(updates[-1], np.array([2.0]))
+
+
+def test_run_schedule_acquire_failed_raises_after_retry_exhaustion():
+    attempts: list[int] = []
+
+    class FailingProgram:
+        def __init__(
+            self,
+            soccfg: Any,
+            cfg: ProgramV2Cfg,
+            *,
+            modules: list[Module],
+            sweep: list[tuple[str, Any]] | None,
+        ) -> None:
+            self.cfg_model = cfg
+            self.modules = modules
+            self.sweep = sweep
+
+        def acquire(self, *_args: Any, round_hook: Any, **_kwargs: Any) -> np.ndarray:
+            attempts.append(1)
+            round_hook(1, np.array([float(len(attempts))]))
+            raise RuntimeError("acquire failed")
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=QubitFreqBuilder().make_default_schema(),
+        soc="soc",
+        soccfg="soccfg",
+        knobs_snapshot={"acquire_retry": 1},
+    )
+
+    with pytest.raises(RuntimeError, match="RuntimeError: acquire failed"):
+        acquire_mod.run_schedule_acquire(
+            env=env,
+            cfg=ProgramV2Cfg(rounds=1),
+            signal_shape=(1,),
+            dtype=np.float64,
+            configure_builder=lambda builder: builder.add(FakeModule("readout")),
+            raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
+            program_cls=FailingProgram,
+        )
+
+    assert attempts == [1, 1]
+
+
+def test_run_schedule_acquire_stopped_returns_sentinel_without_failure():
+    stop = StopSignal()
+
+    class StoppingProgram:
+        def __init__(
+            self,
+            soccfg: Any,
+            cfg: ProgramV2Cfg,
+            *,
+            modules: list[Module],
+            sweep: list[tuple[str, Any]] | None,
+        ) -> None:
+            self.cfg_model = cfg
+            self.modules = modules
+            self.sweep = sweep
+
+        def acquire(self, *_args: Any, round_hook: Any, **_kwargs: Any) -> np.ndarray:
+            round_hook(1, np.array([1.0]))
+            stop.set_stop()
+            return np.array([2.0])
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=QubitFreqBuilder().make_default_schema(),
+        soc="soc",
+        soccfg="soccfg",
+        knobs_snapshot={"acquire_retry": 3},
+    )
+
+    with schedule_stop_scope(stop):
+        acquired = acquire_mod.run_schedule_acquire(
+            env=env,
+            cfg=ProgramV2Cfg(rounds=1),
+            signal_shape=(1,),
+            dtype=np.float64,
+            configure_builder=lambda builder: builder.add(FakeModule("readout")),
+            raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
+            program_cls=StoppingProgram,
+        )
+
+    assert acquired.stopped is True
+    assert acquired.signal is None

@@ -206,6 +206,7 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert set(_generation(form).fields.keys()) == {"feedback", "safety"}
         assert set(_generation_group(form, "safety").fields.keys()) == {
             "earlystop_snr",
+            "acquire_retry",
         }
         assert set(_generation_group(form, "feedback").fields.keys()) == {
             "drive_gain_mode",
@@ -231,6 +232,7 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "rounds",
             "relax_delay",
             "earlystop_snr",
+            "acquire_retry",
             "reset",
             "qub_pulse",
             "readout",

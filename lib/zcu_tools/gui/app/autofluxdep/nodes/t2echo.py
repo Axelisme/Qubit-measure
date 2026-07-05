@@ -52,13 +52,14 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
+    acquire_retry_generation_field,
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
     fill_decay_fit_or_skip,
-    make_on_round,
+    make_signal_update,
     require_flux_device,
-    round_progress,
+    run_schedule_acquire,
     set_flux_by_name,
     signal2real_flip,
 )
@@ -251,19 +252,13 @@ class T2EchoNode(Node):
 
         probe = SnrProbe()
         stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
-        with round_progress(cfg.rounds, "t2echo", idx) as update_round_progress:
-            on_round = make_on_round(
-                result,
-                idx,
-                signal2real_flip,
-                env.round_hook,
-                probe=probe,
-                round_progress_hook=update_round_progress,
-            )
-            raw = ModularProgramV2(
-                env.soccfg,
-                cfg,
-                modules=[
+        acquired = run_schedule_acquire(
+            env=env,
+            cfg=cfg,
+            signal_shape=result.signal[idx].shape,
+            dtype=np.complex128,
+            configure_builder=lambda builder: builder.add(
+                [
                     Reset("reset", cfg.modules.reset),
                     Pulse("pi2_pulse1", pi2_pulse),
                     Delay("t2e_delay1", delay=0.5 * length_param),
@@ -276,15 +271,24 @@ class T2EchoNode(Node):
                         ),
                     ),
                     Readout("readout", cfg.modules.readout),
-                ],
-                sweep=[("length", length_sweep)],
-            ).acquire(
-                env.soc,
-                progress=False,
-                round_hook=on_round,
-                stop_checkers=stop_checkers,
-            )
-        real = signal2real_flip(acquire_to_complex(raw))
+                ]
+            ).declare_sweep("length", length_sweep),
+            raw2signal_fn=acquire_to_complex,
+            on_update=make_signal_update(
+                result,
+                idx,
+                signal2real_flip,
+                env.round_hook,
+                probe=probe,
+            ),
+            program_cls=ModularProgramV2,
+            stop_checkers=stop_checkers,
+        )
+        if acquired.stopped:
+            return Patch()
+        if acquired.signal is None:
+            raise RuntimeError("t2echo Schedule acquire completed without signal")
+        real = signal2real_flip(np.asarray(acquired.signal, dtype=np.complex128))
 
         fit_method = str(knobs["fit_method"])
         t2f, fit_curve = _fit_t2echo(
@@ -361,6 +365,7 @@ class T2EchoBuilder(Builder):
                     _DEFAULT_EARLYSTOP_SNR,
                     group="safety",
                 ),
+                acquire_retry_generation_field(),
                 logical_generation_field(
                     "sweep_range_mode",
                     str_choice_spec(

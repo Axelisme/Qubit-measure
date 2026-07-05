@@ -857,6 +857,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         raw2signal_fn: Callable[[Any], SignalArray] | None = None,
         retry: int = 0,
         progress: bool = False,
+        progress_label: str = "rounds",
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -867,6 +868,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             raw2signal_fn=raw2signal_fn,
             retry=retry,
             progress=progress,
+            progress_label=progress_label,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -877,6 +879,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         raw2signal_fn: Callable[[Any], SignalArray] | None = None,
         retry: int = 0,
         progress: bool = False,
+        progress_label: str = "rounds",
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -887,6 +890,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             raw2signal_fn=raw2signal_fn,
             retry=retry,
             progress=progress,
+            progress_label=progress_label,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -898,6 +902,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
         retry: int = 0,
         progress: bool = False,
+        progress_label: str = "rounds",
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -908,6 +913,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             default_raw2signal_fn=default_raw2signal_fn,
             retry=retry,
             progress=progress,
+            progress_label=progress_label,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -919,6 +925,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
         retry: int = 0,
         progress: bool = False,
+        progress_label: str = "rounds",
         stop_checkers: Sequence[Callable[[], bool]] | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
@@ -929,6 +936,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             default_raw2signal_fn=default_decimated_raw2signal_fn,
             retry=retry,
             progress=progress,
+            progress_label=progress_label,
             stop_checkers=stop_checkers,
             acquire_kwargs=acquire_kwargs,
         )
@@ -940,6 +948,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         raw2signal_fn: Callable[[Any], SignalArray] | None,
         retry: int,
         progress: bool,
+        progress_label: str,
         stop_checkers: Sequence[Callable[[], bool]] | None,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
@@ -948,12 +957,16 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
 
         slot = self._default_slot()
         for attempt in range(retry + 1):
+            if self._schedule._check_stop_requested():
+                return slot.view
             try:
                 program = self._build_program(self._isolated_cfg())
             except KeyboardInterrupt as exc:
                 self._schedule._mark_interrupted(exc)
                 return slot.view
             except Exception as exc:
+                if self._schedule._check_stop_requested():
+                    return slot.view
                 if attempt == retry:
                     self._schedule._mark_failed(exc)
                     return slot.view
@@ -964,6 +977,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                 raw2signal_fn=raw2signal_fn,
                 retry=0,
                 progress=progress,
+                progress_label=progress_label,
                 stop_checkers=stop_checkers,
                 **acquire_kwargs,
             )
@@ -982,6 +996,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         default_raw2signal_fn: Callable[[Any], SignalArray],
         retry: int,
         progress: bool,
+        progress_label: str,
         stop_checkers: Sequence[Callable[[], bool]] | None,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
@@ -995,12 +1010,14 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         pbar = make_pbar(
             total=rounds,
             smoothing=0,
-            desc="rounds",
+            desc=progress_label,
             leave=not isinstance(self._owner, ScheduleStep),
             disable=rounds == 1,
         )
         try:
             for attempt in range(retry + 1):
+                if self._schedule._check_stop_requested():
+                    break
                 pbar.reset()
                 try:
                     raw = self._acquire_once(
@@ -1016,6 +1033,8 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                     self._schedule._mark_interrupted(exc)
                     break
                 except Exception as exc:
+                    if self._schedule._check_stop_requested():
+                        break
                     if attempt == retry:
                         self._schedule._mark_failed(exc)
                         break

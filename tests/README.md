@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-05 — default expected value policy
+**Last updated:** 2026-07-05 — autofluxdep Schedule acquire retry
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -188,7 +188,7 @@ result = _optimize_tree(root, [SomePass()], ctx)
 
 ### Experiment v2 Schedule runtime tests
 
-`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
+`tests/experiment/v2/runner/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
 `tests/experiment/v2/onetone/` 放 onetone domain-level pure behavior tests；例如 `freq`
 的 homophasal helper 測端點保留與 resonator-circle phase 等距，不碰 GUI 或硬體。
@@ -233,7 +233,7 @@ contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md
 
 ### Autofluxdep GUI tests
 
-`tests/autofluxdep_gui/test_cfg_schema.py` 覆蓋 typed node cfg schema、OverridePlan serialization/validation、strict declared-patch application、pulse-readout shape restriction 與 seam invariants。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
+`tests/autofluxdep_gui/test_cfg_schema.py` 覆蓋 typed node cfg schema、OverridePlan serialization/validation、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
 
 Autofluxdep real-acquire smoke tests 依賴 flux-aware `MockSoc` 的物理模型；測試 fixture 要讓
 `connect_mock(..., sim_params=...)`、`mock_flux_predictor(sim_params)` 與 drive pulse calibration

@@ -16,27 +16,124 @@ each Node.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator, MutableMapping
-from contextlib import contextmanager
+from collections.abc import Callable, MutableMapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 
+from zcu_tools.experiment.v2.runner import ProgramBuilder, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import estimate_snr, snr_checker
+from zcu_tools.gui.app.autofluxdep.cfg import IntSpec
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    GenerationField,
+    logical_generation_field,
+)
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
-from zcu_tools.progress_bar import BaseProgressBar, make_pbar
+from zcu_tools.program.v2 import ModularProgramV2, SweepCfg
+from zcu_tools.utils.process import rotate2real
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema
-from zcu_tools.program.v2 import SweepCfg
-from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)
 _ROUND_HOOK_PERF = PerfStats("worker.round_hook", logger, slow_ms=20.0)
 _DECAY_SCALAR_RESIDUAL_RATIO = 0.1
 _DECAY_SCALAR_MAX_SWEEP_FACTOR = 2.0
+DEFAULT_ACQUIRE_RETRY = 3
+
+
+@dataclass(frozen=True)
+class ScheduleAcquireResult:
+    """Node-facing result of a Schedule-backed program acquire."""
+
+    signal: NDArray[Any] | None
+    stopped: bool = False
+
+
+def acquire_retry_generation_field() -> GenerationField:
+    """Return the common node-level acquire retry generation knob."""
+    return logical_generation_field(
+        "acquire_retry",
+        IntSpec(label="acquire_retry"),
+        DEFAULT_ACQUIRE_RETRY,
+        group="safety",
+    )
+
+
+def acquire_retry(env: RunEnv) -> int:
+    """Return this node's acquire retry budget, Fast Failing invalid values."""
+    value = env.knobs().get("acquire_retry", DEFAULT_ACQUIRE_RETRY)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(
+            f"{env.node_name or 'node'} acquire_retry must be an integer, got {value!r}"
+        )
+    if value < 0:
+        raise RuntimeError(
+            f"{env.node_name or 'node'} acquire_retry must be non-negative, got {value}"
+        )
+    return value
+
+
+def run_schedule_acquire(
+    *,
+    env: RunEnv,
+    cfg: object,
+    signal_shape: int | tuple[int, ...],
+    dtype: DTypeLike,
+    configure_builder: Callable[[ProgramBuilder[Any]], object],
+    raw2signal_fn: Callable[[Any], NDArray[Any]],
+    on_update: Callable[[NDArray[Any]], None] | None = None,
+    program_cls: Callable[..., Any] = ModularProgramV2,
+    stop_checkers: list[Callable[[], bool]] | None = None,
+    progress_label: str | None = None,
+    **acquire_kwargs: object,
+) -> ScheduleAcquireResult:
+    """Acquire one node row through ``Schedule`` / ``ProgramBuilder``.
+
+    Device setup and cfg lowering intentionally stay outside this helper. Only
+    program build/acquire is retried, matching the node-level safety knob.
+    """
+    signal_buffer = SignalBuffer(
+        signal_shape,
+        dtype=dtype,
+        on_update=on_update,
+        update_interval=None,
+    )
+    label = progress_label or (
+        f"{env.node_name or 'node'} flux {env.flux_idx + 1} rounds"
+    )
+    with Schedule(cfg, signal_buffer) as sched:
+        builder = sched.prog_builder(
+            env.soc,
+            env.soccfg,
+            cfg=cfg,
+            program_cls=program_cls,
+        )
+        configure_builder(builder)
+        signal = builder.build_and_acquire(
+            raw2signal_fn=raw2signal_fn,
+            retry=acquire_retry(env),
+            progress=False,
+            progress_label=label,
+            stop_checkers=stop_checkers,
+            **acquire_kwargs,
+        )
+        outcome = sched.outcome
+
+    if outcome.status == "completed":
+        return ScheduleAcquireResult(signal=np.asarray(signal))
+    if outcome.status == "stopped":
+        return ScheduleAcquireResult(signal=None, stopped=True)
+    if outcome.status == "failed":
+        reason = outcome.reason or "Schedule acquire failed"
+        raise RuntimeError(reason) from outcome.exception
+    if outcome.status == "interrupted":
+        reason = outcome.reason or "Schedule acquire interrupted"
+        raise RuntimeError(reason) from outcome.exception
+    raise RuntimeError(f"unsupported Schedule outcome: {outcome.status!r}")
 
 
 def is_good_fit(
@@ -213,50 +310,18 @@ def build_stop_checkers(
     return checkers
 
 
-@contextmanager
-def round_progress(
-    total: int | None,
-    node_name: str,
-    flux_idx: int,
-) -> Iterator[Callable[[int], None]]:
-    """Progress bar matching the notebook acquire rounds for one flux row."""
-    pbar: BaseProgressBar = make_pbar(
-        total=total,
-        smoothing=0,
-        desc=f"{node_name} flux {flux_idx + 1} rounds",
-        leave=False,
-        disable=total == 1,
-    )
-
-    def update(round_count: int) -> None:
-        pbar.set_progress(round_count)
-
-    try:
-        yield update
-    finally:
-        pbar.close()
-
-
-def make_on_round(
+def make_signal_update(
     result: Any,
     idx: int,
-    signal2real_fn: Callable[[np.ndarray], np.ndarray],
+    signal2real_fn: Callable[[NDArray[np.complex128]], NDArray[np.float64]],
     round_hook: Callable[[int], None] | None,
     probe: SnrProbe | None = None,
-    round_progress_hook: Callable[[int], None] | None = None,
-) -> Callable[[int, Any], None]:
-    """Build the per-round ``round_hook`` shared by the 1-D measurement nodes.
+) -> Callable[[NDArray[Any]], None]:
+    """Build the ``SignalBuffer`` update hook for Schedule-backed 1-D nodes."""
 
-    Each round collapses the running average to a complex trace, rotates it to the
-    real, normalised curve, writes it into this flux point's Result row, and fires
-    the run's ``round_hook`` so the main thread redraws. When a ``probe`` is given
-    its ``value`` is updated each round so the SNR early-stop sees the latest
-    average and records the current SNR in the Result row (the measurement nodes);
-    mist passes ``probe=None`` (no early-stop on a single-round scatter)."""
-
-    def on_round(_round_count: int, avg_d: Any) -> None:
+    def on_update(signal_value: NDArray[Any]) -> None:
         profile_start = perf_now()
-        signal = acquire_to_complex(avg_d)
+        signal = np.asarray(signal_value, dtype=np.complex128)
         real = signal2real_fn(signal)
         if probe is not None:
             probe.value = signal
@@ -265,16 +330,14 @@ def make_on_round(
             if snr is not None:
                 snr[idx] = probe.snr
         np.copyto(result.signal[idx], real)
-        if round_progress_hook is not None:
-            round_progress_hook(_round_count)
         if round_hook is not None:
             round_hook(idx)
         _ROUND_HOOK_PERF.record(
             elapsed_ms(profile_start),
-            detail=f"idx={idx} round={_round_count}",
+            detail=f"idx={idx}",
         )
 
-    return on_round
+    return on_update
 
 
 def fill_decay_fit_or_skip(

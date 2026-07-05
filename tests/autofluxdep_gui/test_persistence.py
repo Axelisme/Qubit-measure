@@ -60,6 +60,7 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
             "physical_recovery_min_points": "12",
             "physical_recovery_max_rms_mhz": "40.0",
             "earlystop_snr": "12.5",
+            "acquire_retry": "2",
         },
     )
     ctrl.add_node_by_type("lenrabi")
@@ -92,6 +93,7 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
         "value": 40.0,
     }
     assert generation_raw["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
+    assert generation_raw["acquire_retry"] == {"__kind": "direct", "value": 2}
     assert "feedback" not in generation_raw
     assert "safety" not in generation_raw
 
@@ -114,6 +116,7 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     assert knobs["physical_recovery_min_points"] == 12
     assert knobs["physical_recovery_max_rms_mhz"] == pytest.approx(40.0)
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
+    assert knobs["acquire_retry"] == 2
     assert restored.get_flux_sweep_expressions() == (
         "span / 2",
         "-span / 2",

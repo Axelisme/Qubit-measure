@@ -19,8 +19,9 @@ from them.
 - the ``readout`` module is optional (a base readout template); it is the readout
   the cfg sweeps over (its freq/gain are swept), mirroring the real experiment.
 
-No fit step: the 2D landscape is computed in one shot (one effective "round"), so
-``round_hook`` is called exactly once after filling the row.
+No fit step: Schedule acquire updates the SNR landscape row as tracker data arrives;
+after acquire, ``produce`` refreshes the row with the final landscape and then emits
+the optimum or fallback fields.
 
 ``produce`` lowers the active context + this point's snapshot into a runnable
 ``RoOptimizeCfgTemplate`` via the Builder's ``make_cfg`` (Fast Fail if the context
@@ -60,9 +61,10 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    acquire_retry_generation_field,
     axis_to_sweep,
     require_flux_device,
-    round_progress,
+    run_schedule_acquire,
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -113,9 +115,6 @@ from zcu_tools.utils.process import smooth_signal_nd
 
 logger = logging.getLogger(__name__)
 _RO_LANDSCAPE_PERF = PerfStats("worker.ro_optimize.landscape", logger, slow_ms=20.0)
-_RO_PROGRAM_BUILD_PERF = PerfStats(
-    "worker.ro_optimize.program_build", logger, slow_ms=50.0
-)
 _RO_ACQUIRE_PERF = PerfStats("worker.ro_optimize.acquire", logger, slow_ms=50.0)
 _RO_MIN_LANDSCAPE_SPAN = 1e-12
 _RO_MIN_LOCAL_PROMINENCE_FRACTION = 1e-3
@@ -387,66 +386,62 @@ class RoOptimizeNode(Node):
 
         tracker = MomentTracker()
 
-        with round_progress(cfg.rounds, "ro_optimize", idx) as update_round_progress:
+        def tracker_signal(_raw: Any) -> NDArray[np.float64]:
+            return _ro_landscape(
+                tracker,
+                result.signal[idx].shape,
+                skew_penalty=cfg.skew_penalty,
+            )
 
-            def on_round(round_count: int, _avg_d: Any) -> None:
-                update_round_progress(round_count)
-                # the SNR landscape (n_freq, n_gain) accumulated so far → overwrite row
-                landscape = _ro_landscape(
-                    tracker,
-                    result.signal[idx].shape,
-                    skew_penalty=cfg.skew_penalty,
+        def on_update(landscape_value: NDArray[Any]) -> None:
+            np.copyto(
+                result.signal[idx],
+                np.asarray(landscape_value, dtype=np.float64),
+            )
+            if env.round_hook is not None:
+                env.round_hook(idx)
+
+        stop_checkers: list[Any] = []
+        if env.should_stop is not None:
+            stop_checkers.append(env.should_stop)
+
+        acquire_start = perf_now()
+        acquired = run_schedule_acquire(
+            env=env,
+            cfg=cfg,
+            signal_shape=result.signal[idx].shape,
+            dtype=np.float64,
+            configure_builder=lambda builder: (
+                builder.add(
+                    [
+                        Reset("reset", cfg.modules.reset),
+                        Branch("ge", [], Pulse("pi_pulse", cfg.modules.pi_pulse)),
+                        PulseReadout("readout", cfg.modules.readout),
+                    ]
                 )
-                np.copyto(result.signal[idx], landscape)
-                if env.round_hook is not None:
-                    env.round_hook(idx)
-
-            program_start = perf_now()
-            program = ModularProgramV2(
-                env.soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", cfg.modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", cfg.modules.pi_pulse)),
-                    PulseReadout("readout", cfg.modules.readout),
-                ],
-                sweep=[
-                    ("ge", 2),
-                    ("freq", freq_sweep),
-                    ("gain", gain_sweep),
-                ],
-            )
-            _RO_PROGRAM_BUILD_PERF.record(
-                elapsed_ms(program_start),
-                detail=(
-                    f"idx={idx} reps={cfg.reps} rounds={cfg.rounds} "
-                    f"freq_points={result.n_freq} gain_points={result.n_gain}"
-                ),
-            )
-
-            acquire_start = perf_now()
-            program.acquire(
-                env.soc,
-                progress=False,
-                round_hook=on_round,
-                trackers=[tracker],
-                stop_checkers=[env.should_stop]
-                if env.should_stop is not None
-                else None,
-            )
-            _RO_ACQUIRE_PERF.record(
-                elapsed_ms(acquire_start),
-                detail=(
-                    f"idx={idx} reps={cfg.reps} rounds={cfg.rounds} "
-                    f"freq_points={result.n_freq} gain_points={result.n_gain}"
-                ),
-            )
-
-        landscape = _ro_landscape(
-            tracker,
-            result.signal[idx].shape,
-            skew_penalty=cfg.skew_penalty,
+                .declare_sweep("ge", 2)
+                .declare_sweep("freq", freq_sweep)
+                .declare_sweep("gain", gain_sweep)
+            ),
+            raw2signal_fn=tracker_signal,
+            on_update=on_update,
+            program_cls=ModularProgramV2,
+            stop_checkers=stop_checkers,
+            trackers=[tracker],
         )
+        _RO_ACQUIRE_PERF.record(
+            elapsed_ms(acquire_start),
+            detail=(
+                f"idx={idx} reps={cfg.reps} rounds={cfg.rounds} "
+                f"freq_points={result.n_freq} gain_points={result.n_gain}"
+            ),
+        )
+        if acquired.stopped:
+            return Patch()
+        if acquired.signal is None:
+            raise RuntimeError("ro_optimize Schedule acquire completed without signal")
+
+        landscape = np.asarray(acquired.signal, dtype=np.float64)
         np.copyto(result.signal[idx], landscape)
 
         optimum = _accepted_ro_optimum(landscape, freqs, gains)
@@ -533,6 +528,7 @@ class RoOptimizeBuilder(Builder):
                 "gain_range": "sweep.gain",
             },
             generation_fields=(
+                acquire_retry_generation_field(),
                 logical_generation_field(
                     "freq_range_mode",
                     str_choice_spec(

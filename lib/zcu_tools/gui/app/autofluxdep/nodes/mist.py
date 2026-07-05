@@ -47,11 +47,11 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    acquire_retry_generation_field,
     acquire_to_complex,
     axis_to_sweep,
-    make_on_round,
     require_flux_device,
-    round_progress,
+    run_schedule_acquire,
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -184,31 +184,34 @@ class MistNode(Node):
         if env.should_stop is not None:
             stop_checkers.append(env.should_stop)
 
-        with round_progress(cfg.rounds, "mist", idx) as update_round_progress:
-            on_round = make_on_round(
-                result,
-                idx,
-                _mist_signal2real,
-                env.round_hook,
-                round_progress_hook=update_round_progress,
-            )
-            raw = ModularProgramV2(
-                env.soccfg,
-                cfg,
-                modules=[
+        def on_update(curve_value: NDArray[Any]) -> None:
+            np.copyto(result.signal[idx], np.asarray(curve_value, dtype=np.float64))
+            if env.round_hook is not None:
+                env.round_hook(idx)
+
+        acquired = run_schedule_acquire(
+            env=env,
+            cfg=cfg,
+            signal_shape=result.signal[idx].shape,
+            dtype=np.float64,
+            configure_builder=lambda builder: builder.add(
+                [
                     Reset("reset", cfg.modules.reset),
                     Pulse("pi_pulse", cfg.modules.pi_pulse),
                     Pulse("mist_pulse", cfg.modules.mist_pulse),
                     Readout("readout", cfg.modules.readout),
-                ],
-                sweep=[("gain", gain_sweep)],
-            ).acquire(
-                env.soc,
-                progress=False,
-                round_hook=on_round,
-                stop_checkers=stop_checkers,
-            )
-        curve = _mist_signal2real(acquire_to_complex(raw))
+                ]
+            ).declare_sweep("gain", gain_sweep),
+            raw2signal_fn=lambda raw: _mist_signal2real(acquire_to_complex(raw)),
+            on_update=on_update,
+            program_cls=ModularProgramV2,
+            stop_checkers=stop_checkers,
+        )
+        if acquired.stopped:
+            return Patch()
+        if acquired.signal is None:
+            raise RuntimeError("mist Schedule acquire completed without signal")
+        curve = np.asarray(acquired.signal, dtype=np.float64)
         np.copyto(result.signal[idx], curve)
 
         logger.debug(
@@ -266,6 +269,7 @@ class MistBuilder(Builder):
                 "rounds": "rounds",
                 "gain_sweep": "sweep.gain",
             },
+            generation_fields=(acquire_retry_generation_field(),),
             duplicate_paths={"modules.probe_pulse": "modules.pi_pulse"},
             path_renames={"modules.probe_pulse": "modules.mist_pulse"},
             drop_paths=("modules.init_pulse",),

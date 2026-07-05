@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-03 — retry and stop scope
+**Last updated:** 2026-07-05 — stop-before-retry guard
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -122,6 +122,8 @@ with Schedule(cfg, signals_buffer) as sched:
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
+- `progress_label=` 可覆寫 acquire rounds progress bar label；GUI node helpers 用它顯示
+  node/flux row scoped rounds 進度。
 
 ---
 
@@ -176,6 +178,8 @@ executor leaf contract 由 `runner/task.py` 擁有：
 - `ProgramBuilder.build_and_acquire(..., retry=N)` /
   `run_program(..., retry=N)` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。
+- Program build/acquire 在每次 attempt 前與 failed attempt retry 前都重新檢查
+  `StopSignal`；stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。
 - `autofluxdep` / `overnight` executor 的外層 retry 由
   `MultiMeasurementExecutor._run_measurement_with_retries(...)` 提供；retry 預算是
   per-measurement、per-flux/time-step；retry 耗盡後 executor 回傳 partial result 並

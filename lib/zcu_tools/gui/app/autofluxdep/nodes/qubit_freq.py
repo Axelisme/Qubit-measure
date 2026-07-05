@@ -42,13 +42,14 @@ from zcu_tools.gui.app.autofluxdep.feedback import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
+    acquire_retry_generation_field,
     acquire_to_complex,
     axis_to_sweep,
     build_stop_checkers,
     is_good_fit,
-    make_on_round,
+    make_signal_update,
     require_flux_device,
-    round_progress,
+    run_schedule_acquire,
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
@@ -81,7 +82,14 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    Pulse,
+    Readout,
+    Reset,
+    TwoToneCfg,
+    sweep2param,
+)
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
@@ -244,8 +252,9 @@ class QubitFreqNode(Node):
     """One flux point's qubit_freq execution, environment curried in by build_node.
 
     Sets this point's flux on the picked flux device, recenters the detune sweep
-    on the snapshot's ``predict_freq``, runs a real ``TwoToneProgram.acquire``
-    against the connected board (the flux-aware MockSoc offline, or real hardware),
+    on the snapshot's ``predict_freq``, runs a real Schedule-backed
+    ``ModularProgramV2`` acquire against the connected board (the flux-aware MockSoc
+    offline, or real hardware),
     fits the dip with ``fit_qubit_freq``, fills the sweep Result's ``flux_idx`` row
     in place, fires the ``round_hook`` so the main thread redraws, and returns the
     raw fit Patch.
@@ -300,24 +309,35 @@ class QubitFreqNode(Node):
         # into stop_checkers (early-stop on good SNR; cooperative cancel).
         probe = SnrProbe()
         stop_checkers = build_stop_checkers(env, probe, _signal2real)
-        with round_progress(cfg.rounds, "qubit_freq", idx) as update_round_progress:
-            on_round = make_on_round(
+        acquired = run_schedule_acquire(
+            env=env,
+            cfg=cfg,
+            signal_shape=result.signal[idx].shape,
+            dtype=np.complex128,
+            configure_builder=lambda builder: builder.add(
+                [
+                    Reset("reset", cfg.modules.reset),
+                    Pulse("init_pulse", cfg.modules.init_pulse, tag="init_pulse"),
+                    Pulse("qubit_pulse", cfg.modules.qub_pulse, tag="qub_pulse"),
+                    Readout("readout", cfg.modules.readout),
+                ]
+            ).declare_sweep("detune", detune_sweep),
+            raw2signal_fn=acquire_to_complex,
+            on_update=make_signal_update(
                 result,
                 idx,
                 _signal2real,
                 env.round_hook,
                 probe=probe,
-                round_progress_hook=update_round_progress,
-            )
-            raw = TwoToneProgram(
-                env.soccfg, cfg, sweep=[("detune", detune_sweep)]
-            ).acquire(
-                env.soc,
-                progress=False,
-                round_hook=on_round,
-                stop_checkers=stop_checkers,
-            )
-        real = _signal2real(acquire_to_complex(raw))
+            ),
+            program_cls=ModularProgramV2,
+            stop_checkers=stop_checkers,
+        )
+        if acquired.stopped:
+            return Patch()
+        if acquired.signal is None:
+            raise RuntimeError("qubit_freq Schedule acquire completed without signal")
+        real = _signal2real(np.asarray(acquired.signal, dtype=np.complex128))
 
         # fit the fully-averaged signal
         freq, _, fwhm, _, fit_curve, _ = fit_qubit_freq(freqs, real)
@@ -512,6 +532,7 @@ class QubitFreqBuilder(Builder):
                     _DEFAULT_EARLYSTOP_SNR,
                     group="safety",
                 ),
+                acquire_retry_generation_field(),
                 logical_generation_field(
                     "bias_update_mode",
                     str_choice_spec(

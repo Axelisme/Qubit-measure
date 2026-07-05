@@ -569,6 +569,94 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
     assert AlwaysFailingProgram.instances[1].acquire_count == 1
 
 
+def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
+    stop = StopSignal()
+    attempts: list[int] = []
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+
+    class StopAfterFailedAcquireProgram:
+        def __init__(
+            self,
+            soccfg: Any,
+            cfg: FlowCfg,
+            *,
+            modules: list[Module],
+            sweep: list[tuple[str, Any]] | None,
+        ) -> None:
+            self.cfg_model = cfg
+            self.modules = modules
+            self.sweep = sweep
+
+        def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+            attempts.append(1)
+            raw = np.array([float(len(attempts))])
+            round_hook(1, raw)
+            stop.set_stop()
+            raise RuntimeError("failure with stop")
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=stop) as sched:
+        result = (
+            sched.prog_builder(
+                "soc",
+                "soccfg",
+                program_cls=StopAfterFailedAcquireProgram,
+            )
+            .add(FakeModule("readout"))
+            .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
+        )
+        assert sched.outcome.status == "stopped"
+        assert sched.outcome.reason == "stop requested"
+
+    assert attempts == [1]
+    np.testing.assert_allclose(result, np.array([1.0]))
+    np.testing.assert_allclose(signals_buffer.array, np.array([1.0]))
+
+
+def test_build_program_failure_does_not_retry_when_stop_requested():
+    stop = StopSignal()
+    attempts: list[int] = []
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+
+    class StopAfterBuildFailureProgram:
+        def __init__(
+            self,
+            soccfg: Any,
+            cfg: FlowCfg,
+            *,
+            modules: list[Module],
+            sweep: list[tuple[str, Any]] | None,
+        ) -> None:
+            attempts.append(1)
+            stop.set_stop()
+            raise RuntimeError("build failure with stop")
+
+        def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
+            raise NotImplementedError
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    with Schedule(_cfg(rounds=1), signals_buffer, stop=stop) as sched:
+        result = (
+            sched.prog_builder(
+                "soc",
+                "soccfg",
+                program_cls=StopAfterBuildFailureProgram,
+            )
+            .add(FakeModule("readout"))
+            .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
+        )
+        assert sched.outcome.status == "stopped"
+        assert sched.outcome.reason == "stop requested"
+
+    assert attempts == [1]
+    np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
+    np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
+
+
 def test_scan_returns_partial_when_program_build_fails():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 

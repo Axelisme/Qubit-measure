@@ -1,7 +1,7 @@
 """RB-1: qubit_freq end-to-end real acquire against the flux-aware MockSoc.
 
 This is the load-bearing Phase RB test. It runs the qubit_freq Node's *real*
-acquire path (set flux device -> setup_devices -> TwoToneProgram.acquire -> fit ->
+acquire path (set flux device -> setup_devices -> Schedule-backed acquire -> fit ->
 feedback) at several flux points and asserts the fitted qubit frequency CHANGES
 with flux. If the picked flux device never received the value (the name/label
 silent-miss), the SimEngine would stay pinned at one operating point and the fit
@@ -342,15 +342,22 @@ def _mocked_qubit_freq_produce_env(
     schema = builder.make_default_schema().with_overrides(overrides)
     result = builder.make_init_result(schema, np.array([0.0]))
 
-    class _DummyTwoToneProgram:
-        def __init__(self, *args, **kwargs):
-            del args, kwargs
+    class _DummyModularProgram:
+        def __init__(self, _soccfg, cfg, *, modules, sweep):
+            del modules, sweep
+            self.cfg_model = cfg
 
         def acquire(self, *args, **kwargs):
-            del args, kwargs
-            return [[np.zeros((result.n_detune, 2), dtype=np.float64)]]
+            del args
+            raw = [[np.zeros((result.n_detune, 2), dtype=np.float64)]]
+            kwargs["round_hook"](1, raw)
+            return raw
 
-    monkeypatch.setattr(qf_mod, "TwoToneProgram", _DummyTwoToneProgram)
+        def acquire_decimated(self, *args, **kwargs):
+            del args, kwargs
+            raise NotImplementedError
+
+    monkeypatch.setattr(qf_mod, "ModularProgramV2", _DummyModularProgram)
     monkeypatch.setattr(qf_mod, "setup_devices", lambda *args, **kwargs: None)
     monkeypatch.setattr(qf_mod, "set_flux_by_name", lambda *args, **kwargs: None)
     monkeypatch.setattr(qf_mod, "_signal2real", lambda _signals: real)

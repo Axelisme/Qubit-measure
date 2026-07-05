@@ -194,6 +194,7 @@ _EXPECTED_KEYS = {
         "rounds",
         "relax_delay",
         "earlystop_snr",
+        "acquire_retry",
         "reset",
         "qub_pulse",
         "readout",
@@ -224,6 +225,7 @@ _EXPECTED_KEYS = {
         "rounds",
         "relax_delay",
         "earlystop_snr",
+        "acquire_retry",
         "reset",
         "rabi_pulse",
         "readout",
@@ -256,6 +258,7 @@ _EXPECTED_KEYS = {
         "readout",
         "reps",
         "rounds",
+        "acquire_retry",
         "freq_range_mode",
         "gain_range_mode",
         "relax_delay_mode",
@@ -276,6 +279,7 @@ _EXPECTED_KEYS = {
         "reps",
         "rounds",
         "earlystop_snr",
+        "acquire_retry",
         "sweep_range_mode",
         "relax_delay_mode",
         "relax_delay",
@@ -295,6 +299,7 @@ _EXPECTED_KEYS = {
         "reps",
         "rounds",
         "earlystop_snr",
+        "acquire_retry",
         "sweep_range_mode",
         "relax_delay_mode",
         "relax_delay",
@@ -315,6 +320,7 @@ _EXPECTED_KEYS = {
         "reps",
         "rounds",
         "earlystop_snr",
+        "acquire_retry",
         "sweep_range_mode",
         "relax_delay_mode",
         "relax_delay",
@@ -335,6 +341,7 @@ _EXPECTED_KEYS = {
         "reps",
         "rounds",
         "relax_delay",
+        "acquire_retry",
         "mist_ch",
         "mist_nqz",
         "mist_freq",
@@ -350,6 +357,7 @@ _EXPECTED_PATHS = {
         "rounds": "rounds",
         "relax_delay": "relax_delay",
         "earlystop_snr": "generation.safety.earlystop_snr",
+        "acquire_retry": "generation.safety.acquire_retry",
         "reset": "modules.reset",
         "qub_pulse": "modules.qub_pulse",
         "readout": "modules.readout",
@@ -398,6 +406,7 @@ _EXPECTED_PATHS = {
         "rounds": "rounds",
         "relax_delay": "relax_delay",
         "earlystop_snr": "generation.safety.earlystop_snr",
+        "acquire_retry": "generation.safety.acquire_retry",
         "reset": "modules.reset",
         "rabi_pulse": "modules.rabi_pulse",
         "readout": "modules.readout",
@@ -435,6 +444,7 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
+        "acquire_retry": "generation.safety.acquire_retry",
         "freq_range_mode": "generation.sweep.freq_range_mode",
         "gain_range_mode": "generation.sweep.gain_range_mode",
         "relax_delay_mode": "generation.timing.relax_delay_mode",
@@ -454,6 +464,7 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "earlystop_snr": "generation.safety.earlystop_snr",
+        "acquire_retry": "generation.safety.acquire_retry",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
         "relax_delay_mode": "generation.timing.relax_delay_mode",
         "relax_delay": "relax_delay",
@@ -473,6 +484,7 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "earlystop_snr": "generation.safety.earlystop_snr",
+        "acquire_retry": "generation.safety.acquire_retry",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
         "relax_delay_mode": "generation.timing.relax_delay_mode",
         "relax_delay": "relax_delay",
@@ -493,6 +505,7 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "earlystop_snr": "generation.safety.earlystop_snr",
+        "acquire_retry": "generation.safety.acquire_retry",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
         "relax_delay_mode": "generation.timing.relax_delay_mode",
         "relax_delay": "relax_delay",
@@ -513,6 +526,7 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
+        "acquire_retry": "generation.safety.acquire_retry",
         "mist_ch": "modules.mist_pulse.ch",
         "mist_nqz": "modules.mist_pulse.nqz",
         "mist_freq": "modules.mist_pulse.freq",
@@ -690,6 +704,12 @@ def test_generation_groups_keep_logical_knobs_flat():
     feedback_value = generation_value.fields["feedback"]
     assert isinstance(feedback_spec, CfgSectionSpec)
     assert isinstance(feedback_value, CfgSectionValue)
+    safety_spec = generation_spec.fields["safety"]
+    safety_value = generation_value.fields["safety"]
+    assert isinstance(safety_spec, CfgSectionSpec)
+    assert isinstance(safety_value, CfgSectionValue)
+    assert set(safety_spec.fields) == {"earlystop_snr", "acquire_retry"}
+    assert set(safety_value.fields) == {"earlystop_snr", "acquire_retry"}
     assert "drive_gain_mode" in feedback_spec.fields
     assert "drive_gain_mode" in feedback_value.fields
     assert "bias_update_mode" in feedback_spec.fields
@@ -713,6 +733,7 @@ def test_generation_groups_keep_logical_knobs_flat():
     assert "drive_gain_mode" in knobs
     assert "bias_update_mode" in knobs
     assert "physical_recovery_mode" in knobs
+    assert knobs["acquire_retry"] == 3
     assert "feedback" not in knobs
     assert "safety" not in knobs
     assert read_value_tree(schema)["generation"]["feedback"]["drive_gain_mode"] == (
@@ -727,6 +748,7 @@ def test_generation_persistence_uses_flat_logical_keys():
     schema.set_field("physical_recovery_mode", "fail_triggered_fit")
     schema.set_field("physical_recovery_max_center_shift_mhz", 120.0)
     schema.set_field("earlystop_snr", 12.5)
+    schema.set_field("acquire_retry", 2)
 
     raw = schema.to_persisted_raw()
 
@@ -745,6 +767,7 @@ def test_generation_persistence_uses_flat_logical_keys():
         "value": 120.0,
     }
     assert generation["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
+    assert generation["acquire_retry"] == {"__kind": "direct", "value": 2}
 
     restored = QubitFreqBuilder().make_default_schema()
     restored.restore_persisted_raw(raw)
@@ -755,6 +778,7 @@ def test_generation_persistence_uses_flat_logical_keys():
     assert knobs["physical_recovery_mode"] == "fail_triggered_fit"
     assert knobs["physical_recovery_max_center_shift_mhz"] == pytest.approx(120.0)
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
+    assert knobs["acquire_retry"] == 2
     assert read_value_tree(restored)["generation"]["feedback"]["drive_gain_mode"] == (
         "fixed"
     )
