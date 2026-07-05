@@ -293,6 +293,8 @@ git branch -d agent/<task-id>
 
 用 Agent tool 委派；獨立工作項在同一則訊息一次發多個以並行。
 
+Codex sub-agent 收尾規則：sub-agent 回傳 final / completed 狀態後，orchestrator 先保存 final message 與 report path，確認沒有仍需追問的內容，接著用可用的 Codex sub-agent close / archive 工具釋放該 agent。已完成的 sub-agent 不保持開啟；需要後續追問時再建立新的具體委派，避免完成的 sub-agent 佔住 agent 數量上限。若當前 runtime 暫時沒有 close / archive tool，記錄已完成 agent id 與狀態並停止對該 agent wait / poll；工具可用時立即關閉。
+
 | 工作性質 | 委派對象 |
 |---|---|
 | 廣泛搜尋、定位檔案/符號/命名慣例（要結論不要檔案 dump） | `Explore` |
