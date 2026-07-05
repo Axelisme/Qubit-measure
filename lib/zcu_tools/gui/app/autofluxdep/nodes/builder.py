@@ -34,7 +34,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePlan,
     apply_override_patches,
-    sectioned_node_schema,
+    empty_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -170,7 +170,7 @@ class Builder(ABC):
         defaults; the resulting schema remains the per-placement SSOT.
         """
         del ctx
-        return sectioned_node_schema(())
+        return empty_node_schema()
 
     def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
         """Declare Default cfg paths this builder may patch across flux points."""

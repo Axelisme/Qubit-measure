@@ -9,6 +9,8 @@ builds each provider's Node and calls ``produce``, never an injected callback.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
@@ -26,6 +28,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     Orchestrator,
+    RunObserver,
+    SkipReason,
     resolve_provider_snapshot,
 )
 
@@ -38,6 +42,37 @@ class _ModuleSource:
 
     def get_module(self, name: str) -> object | None:
         return self._modules.get(name)
+
+
+class _CollectingObserver(RunObserver):
+    def __init__(self) -> None:
+        self.nodes: list[tuple[str, int]] = []
+        self.skips: list[tuple[str, int, SkipReason]] = []
+        self.rows: list[tuple[str, int, Any, dict[str, Any]]] = []
+        self.failed: list[tuple[str, int, str]] = []
+        self.committed: list[int] = []
+        self.points: list[int] = []
+
+    def on_point(self, idx: int, flux: float, info: InfoStore) -> None:
+        del flux, info
+        self.points.append(idx)
+
+    def on_node(self, name: str, idx: int) -> None:
+        self.nodes.append((name, idx))
+
+    def on_skip(self, name: str, idx: int, reason: SkipReason) -> None:
+        self.skips.append((name, idx, reason))
+
+    def on_node_row(self, name: str, idx: int, patch: Any, info: InfoStore) -> None:
+        self.rows.append((name, idx, patch, dict(info.point)))
+
+    def on_node_failed(self, name: str, idx: int, exc: Exception, stage: str) -> None:
+        del exc
+        self.failed.append((name, idx, stage))
+
+    def on_flux_committed(self, idx: int, flux: float, info: InfoStore) -> None:
+        del flux, info
+        self.committed.append(idx)
 
 
 # --- latest-available resolution (resolve_provider_snapshot reads a placed provider) ---
@@ -339,66 +374,65 @@ def test_skipped_provider_does_not_run():
     assert ran == []  # never built / produced
 
 
-# --- on_node (auto-follow) fires per resolved provider, skips skipped ones ---
+# --- observer notifications fire per resolved provider, skips skipped ones ---
 
 
-def test_on_node_fires_for_each_resolved_provider_in_order():
-    seen: list = []
+def test_observer_on_node_fires_for_each_resolved_provider_in_order():
+    observer = _CollectingObserver()
     a = place(make_builder("a"))
     b = place(make_builder("b"))
-    Orchestrator([a, b]).run([0.0, 1.0], on_node=lambda n, i: seen.append((n, i)))
+    Orchestrator([a, b]).run([0.0, 1.0], observer=observer)
     # both providers, both flux points, in list order
-    assert seen == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
+    assert observer.nodes == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
 
 
-def test_on_node_does_not_fire_for_a_skipped_provider():
-    seen: list = []
+def test_observer_on_node_does_not_fire_for_a_skipped_provider():
+    observer = _CollectingObserver()
     runnable = place(make_builder("ok"))
     skipped = place(make_builder("skip", requires=(Dependency("missing"),)))
-    Orchestrator([runnable, skipped]).run([0.0], on_node=lambda n, i: seen.append(n))
+    Orchestrator([runnable, skipped]).run([0.0], observer=observer)
     # the skipped provider (required dep missing) never fires on_node
-    assert seen == ["ok"]
+    assert observer.nodes == [("ok", 0)]
 
 
-def test_on_skip_fires_with_reason_for_skipped_provider():
-    seen: list = []
+def test_observer_on_skip_fires_with_reason_for_skipped_provider():
+    observer = _CollectingObserver()
     skipped = place(make_builder("skip", requires=(Dependency("missing"),)))
-    Orchestrator([skipped]).run(
-        [0.0],
-        on_skip=lambda n, i, reason: seen.append((n, i, reason.missing_info_keys)),
-    )
-    assert seen == [("skip", 0, ("missing",))]
+    Orchestrator([skipped]).run([0.0], observer=observer)
+    assert [
+        (name, idx, reason.missing_info_keys) for name, idx, reason in observer.skips
+    ] == [("skip", 0, ("missing",))]
 
 
-def test_on_node_row_fires_after_validate_before_merge():
-    seen: list = []
+def test_observer_on_node_row_fires_after_validate_before_merge():
+    observer = _CollectingObserver()
 
     def produce_x(_env, _snap):
         return Patch({"x": 1})
 
     provider = place(make_builder("prod", provides=("x",), produce_fn=produce_x))
 
-    def on_node_row(name, idx, patch, info):
-        seen.append((name, idx, patch.values(), "x" in info.point))
+    info = Orchestrator([provider]).run([0.0], observer=observer)
 
-    info = Orchestrator([provider]).run([0.0], on_node_row=on_node_row)
-
-    assert seen == [("prod", 0, {"x": 1}, False)]
+    assert [
+        (name, idx, patch.values(), "x" in point)
+        for name, idx, patch, point in observer.rows
+    ] == [("prod", 0, {"x": 1}, False)]
     assert info.point["x"] == 1
 
 
-def test_on_node_failed_fires_for_validate_patch_error():
+def test_observer_on_node_failed_fires_for_validate_patch_error():
     def bad_patch(_env, _snap):
         return Patch({"undeclared": 1})
 
     provider = place(make_builder("bad", provides=("x",), produce_fn=bad_patch))
-    seen: list = []
+    observer = _CollectingObserver()
     orch = Orchestrator([provider])
-    orch.run([0.0], on_node_failed=lambda n, i, exc, stage: seen.append((n, i, stage)))
+    orch.run([0.0], observer=observer)
 
-    assert seen == [("bad", 0, "validate_patch")]
+    assert observer.failed == [("bad", 0, "validate_patch")]
     assert orch.run_error is not None
-    assert orch.run_error_stage == "validate_patch"
+    assert orch.run_error.stage == "validate_patch"
 
 
 # --- cooperative cancellation (should_stop) ---
@@ -407,19 +441,15 @@ def test_on_node_failed_fires_for_validate_patch_error():
 def test_should_stop_before_a_flux_point_exits_early():
     # should_stop returns True once two points have completed → the sweep must
     # break before flux idx 2 and never start it.
-    done_points: list[int] = []
-
-    def on_point(idx, _flux, _info):
-        done_points.append(idx)
-
+    observer = _CollectingObserver()
     p = place(make_builder("n"))
     info = Orchestrator([p]).run(
         [0.0, 1.0, 2.0, 3.0],
-        on_point=on_point,
-        should_stop=lambda: len(done_points) >= 2,
+        observer=observer,
+        should_stop=lambda: len(observer.points) >= 2,
     )
     # only points 0 and 1 ran; the sweep stopped before point 2
-    assert done_points == [0, 1]
+    assert observer.points == [0, 1]
     # the returned InfoStore reflects the last completed point, not point 2/3
     assert info.point["flux_idx"] == 1
 
@@ -444,17 +474,17 @@ def test_should_stop_within_a_point_skips_remaining_providers():
 
     a = place(make_builder("a", produce_fn=first))
     b = place(make_builder("b", produce_fn=second))
-    points: list[int] = []
+    observer = _CollectingObserver()
     Orchestrator([a, b]).run(
         [0.0, 1.0],
-        on_point=lambda idx, _f, _i: points.append(idx),
+        observer=observer,
         should_stop=lambda: flip["stop"],
     )
     # only the first provider of point 0 ran; "b" was skipped by the break
     assert ran == ["a"]
     # the partial point was not committed, so no completed point notification is
     # emitted
-    assert points == []
+    assert observer.points == []
 
 
 def test_on_flux_committed_does_not_fire_for_stopped_partial_point():
@@ -472,18 +502,16 @@ def test_on_flux_committed_does_not_fire_for_stopped_partial_point():
 
     a = place(make_builder("a", produce_fn=first))
     b = place(make_builder("b", produce_fn=second))
-    committed: list[int] = []
-    points: list[int] = []
+    observer = _CollectingObserver()
     Orchestrator([a, b]).run(
         [0.0, 1.0],
-        on_point=lambda idx, _f, _i: points.append(idx),
-        on_flux_committed=lambda idx, _f, _i: committed.append(idx),
+        observer=observer,
         should_stop=lambda: flip["stop"],
     )
 
     assert ran == ["a"]
-    assert points == []
-    assert committed == []
+    assert observer.points == []
+    assert observer.committed == []
 
 
 def test_stop_set_inside_last_provider_produce_does_not_commit_row_or_flux():
@@ -494,16 +522,14 @@ def test_stop_set_inside_last_provider_produce_does_not_commit_row_or_flux():
         return Patch({"x": 1})
 
     provider = place(make_builder("last", provides=("x",), produce_fn=last))
-    rows: list[tuple[str, int]] = []
-    committed: list[int] = []
+    observer = _CollectingObserver()
 
     info = Orchestrator([provider]).run(
         [0.0],
-        on_node_row=lambda name, idx, _patch, _info: rows.append((name, idx)),
-        on_flux_committed=lambda idx, _f, _i: committed.append(idx),
+        observer=observer,
         should_stop=lambda: flip["stop"],
     )
 
-    assert rows == []
-    assert committed == []
+    assert observer.rows == []
+    assert observer.committed == []
     assert "x" not in info.point

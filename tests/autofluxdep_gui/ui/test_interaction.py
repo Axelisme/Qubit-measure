@@ -608,10 +608,10 @@ def test_inspect_button_opens_single_non_modal_inspector(app):
 
     ctrl, win = app
     assert hasattr(win, "_inspect_btn")
-    assert win._inspect_dialog is None
+    assert win._dialog_refs.get("inspect") is None
 
     win._inspect_btn.click()  # the toolbar button's slot
-    dlg = win._inspect_dialog
+    dlg = win._dialog_refs.get("inspect")
     assert dlg is not None
     assert isinstance(dlg, InspectDialogBase)
     # Opened via ``open()`` (non-blocking, so the run worker's event loop keeps
@@ -620,10 +620,10 @@ def test_inspect_button_opens_single_non_modal_inspector(app):
 
     # A second request raises the same instance, never a second dialog.
     win._inspect_btn.click()
-    assert win._inspect_dialog is dlg
+    assert win._dialog_refs.get("inspect") is dlg
 
     dlg.reject()  # closing drops the reference so the next request rebuilds
-    assert win._inspect_dialog is None
+    assert win._dialog_refs.get("inspect") is None
 
 
 def test_inspect_button_stays_enabled_during_run(app):
@@ -640,7 +640,7 @@ def test_inspect_dialog_is_read_only_while_run_is_active(app):
     ctrl, win = app
 
     win._inspect_btn.click()
-    dlg = win._inspect_dialog
+    dlg = cast(Any, win._dialog_refs.get("inspect"))
     assert dlg is not None
 
     dlg._edit_key.setText("r_f")
@@ -667,7 +667,7 @@ def test_inspect_dialog_is_read_only_while_run_is_paused(app):
     _ctrl, win = app
 
     win._inspect_btn.click()
-    dlg = win._inspect_dialog
+    dlg = cast(Any, win._dialog_refs.get("inspect"))
     assert dlg is not None
     dlg._edit_key.setText("r_f")
 
@@ -686,14 +686,14 @@ def test_run_start_closes_open_setup_and_device_dialogs(app):
 
     win.open_setup_dialog(startup_mode=False)
     win._on_devices_clicked()
-    assert win._setup_dialog is not None
-    assert win._devices_dialog is not None
+    assert win._dialog_refs.get("setup") is not None
+    assert win._dialog_refs.get("devices") is not None
 
     win._on_run_started()
     QApplication.processEvents()
 
-    assert win._setup_dialog is None
-    assert win._devices_dialog is None
+    assert win._dialog_refs.get("setup") is None
+    assert win._dialog_refs.get("devices") is None
 
 
 # --- selection drives the right pane ---

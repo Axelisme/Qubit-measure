@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import cast
 
+import numpy as np
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 
@@ -142,5 +145,7 @@ class MyProgramV2(  # type: ignore[reportIncompatibleMethodOverride]
                 "per-acquire RNG seed derivation"
             )
 
-        rng_seed = next_seed()
+        rng_seed = cast(
+            "Callable[[], int | np.random.SeedSequence | None]", next_seed
+        )()
         soc.set_sim_engine(SimEngine(self, sim, rng_seed=rng_seed))

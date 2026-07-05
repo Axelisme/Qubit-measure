@@ -57,6 +57,6 @@ def test_smoother_peek_none_before_first_update():
 
 def test_tools_default_has_no_predictor():
     # Tools holds only the predictor (Phase B binds a real one). Smoothing is a
-    # DerivationService, not a tool — so Tools has no smoother.
+    # post-node service, not a tool — so Tools has no smoother.
     assert Tools().predictor is None
     assert not hasattr(Tools(), "smoother")

@@ -16,18 +16,18 @@ those uniformly.
 
 The **orchestrator** sees only declarations plus `produce`: `requires`,
 `requires_modules`, `provides`, `provides_modules`, and the Node entrypoint. It
-is a pure **requirement resolver** — NOT an ordering /
+is a **requirement resolver + RunEnv factory** — NOT an ordering /
 topological resolver. Execution order is the user's explicit list order; the
 orchestrator just runs it. Per flux point, for each provider in order: it
 projects `requires` against the current info/module state into a snapshot
-(latest-available, with skip/fallback), calls `produce(snapshot) -> Patch`, and
-merges the Patch by the declared output contract. Execution resources (soc,
-Result, tools, round_hook, plot-side notifications, etc.) are opaque values in
-`RunEnv`: the orchestrator constructs and passes that environment through, but
-domain decisions about drawing, acquire, fit, calibration, and feedback remain
-inside the Builder/Node. This keeps the resolver surface narrow and lets it call
-`produce` uniformly on every provider — zero `isinstance`, no distinguishing a
-Node from a Service.
+(latest-available, with skip/fallback), constructs the opaque `RunEnv`, calls
+`produce(snapshot) -> Patch`, and merges the Patch by the declared output
+contract. Execution resources (soc, Result, tools, round_hook, plot-side
+notifications, etc.) are values in `RunEnv`: the orchestrator passes that
+environment through, but domain decisions about drawing, acquire, fit,
+calibration, and feedback remain inside the Builder/Node. This keeps the
+resolver surface narrow and lets it call `produce` uniformly on every provider —
+zero `isinstance`, no distinguishing a Node from a Service.
 
 **Run path (real acquire).** The app composes the shared session services
 (`gui/session`: connection / context / device / startup) and uses the shared

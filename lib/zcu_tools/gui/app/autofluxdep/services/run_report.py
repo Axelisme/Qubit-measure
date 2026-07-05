@@ -61,7 +61,7 @@ def render_markdown_report(
         "",
         f"- Metadata root: {paths.get('metadata_root', '')}",
         f"- Data root: {paths.get('data_root', '')}",
-        f"- Manifest: manifest.json",
+        "- Manifest: manifest.json",
         f"- Journal: {files.get('journal', 'journal.jsonl')}",
     ]
     for node_file in files.get("nodes", ()):

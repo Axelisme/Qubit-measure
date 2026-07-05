@@ -440,9 +440,6 @@ class NodeListPane(QWidget):
         self._restart_btn.setVisible(self._run_state == "paused")
         self._restart_btn.setEnabled(self._run_state == "paused")
 
-    def _refresh_buttons(self) -> None:
-        self.refresh_run_availability()
-
     def _run_disabled_reason(self) -> str | None:
         return self._ctrl.run_readiness()
 

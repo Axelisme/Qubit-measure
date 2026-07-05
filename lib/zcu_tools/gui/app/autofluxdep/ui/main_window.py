@@ -217,12 +217,8 @@ class MainWindow(QMainWindow):
         self._live_predictor_flux_idx: int | None = None
         self._auto_follow_navigation = False
         self._flux_progress_snapshot: _ProgressSnapshot | None = None
-        # The single live (non-modal) context inspector, or None when closed. The
-        # base auto-refreshes off the shared session event bus, so the open dialog
-        # tracks md/ml edits live without this window pushing to it.
-        self._inspect_dialog: QDialog | None = None
-        self._setup_dialog: QDialog | None = None
-        self._devices_dialog: QDialog | None = None
+        # Predictor needs a typed handle for live-mode calls; setup/devices/inspect
+        # lifetimes are owned by DialogRefStore.
         self._predictor_dialog: PredictorDialog | None = None
         self.setWindowTitle("autofluxdep-gui")
         self.resize(1100, 800)
@@ -503,10 +499,8 @@ class MainWindow(QMainWindow):
         dlg = SetupDialog(self._ctrl.setup_control, self, startup_mode=startup_mode)
 
         def _on_finished(_status: int) -> None:
-            self._setup_dialog = None
             self._refresh_session_dependents()
 
-        self._setup_dialog = dlg
         self._dialog_refs.open_named("setup", dlg, on_finished=_on_finished)
 
     def _on_devices_clicked(self) -> None:
@@ -524,10 +518,8 @@ class MainWindow(QMainWindow):
         )
 
         def _on_finished(_status: int) -> None:
-            self._devices_dialog = None
             self._refresh_session_dependents()
 
-        self._devices_dialog = dlg
         self._dialog_refs.open_named("devices", dlg, on_finished=_on_finished)
 
     def _on_predictor_clicked(self) -> None:
@@ -609,12 +601,8 @@ class MainWindow(QMainWindow):
             self._ctrl.context_control, self._ctrl.get_bus(), parent=self
         )
 
-        def _on_finished(_status: int) -> None:
-            self._inspect_dialog = None
-
-        self._inspect_dialog = dlg
         self._sync_inspect_dialog_read_only()
-        self._dialog_refs.open_named("inspect", dlg, on_finished=_on_finished)
+        self._dialog_refs.open_named("inspect", dlg)
 
     def _raise_existing_dialog(self, key: str) -> QDialog | None:
         dialog = self._dialog_refs.get(key)
@@ -994,7 +982,7 @@ class MainWindow(QMainWindow):
         dlg.set_live_device_value(value)
 
     def _sync_inspect_dialog_read_only(self) -> None:
-        dlg = self._inspect_dialog
+        dlg = self._dialog_refs.get("inspect")
         if dlg is None:
             return
         set_read_only = getattr(dlg, "set_read_only", None)

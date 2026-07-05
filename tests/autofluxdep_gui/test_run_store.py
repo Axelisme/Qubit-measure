@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.autofluxdep.cfg import ScalarSpec
+from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan, ScalarSpec
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult, Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
@@ -23,7 +24,7 @@ from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 
-from ._helpers import make_builder, place
+from ._helpers import make_builder, place, run_controller_to_completion
 
 
 def _project(tmp_path: Path) -> ProjectInfo:
@@ -135,6 +136,48 @@ def test_run_store_writes_manifest_node_row_journal_and_finalize(tmp_path):
     assert isinstance(loaded, Sweep1DResult)
     np.testing.assert_allclose(loaded.signal[0], [1.0, 2.0])
     assert (store.run_dir / "report.md").is_file()
+
+
+def test_manifest_workflow_round_trips_from_persisted_raw_cfg_and_hash(tmp_path):
+    plan = OverridePlan(
+        (OverridePath("freq", "all_points", "generation.test", "runtime freq"),)
+    )
+    builder = make_builder(
+        "cfg_node",
+        schema_fields=(("freq", ScalarSpec(label="Frequency", type=float), 1.0),),
+        override_plan=plan,
+    )
+    ctrl = build_core(project=_project(tmp_path))
+    node = ctrl.add_node(builder)
+    ctrl.set_node_params(0, {"freq": 7.25})
+    ctrl.set_flux_values([0.0, 0.5])
+
+    run_controller_to_completion(ctrl)
+
+    runs = sorted((tmp_path / "autofluxdep_runs").glob("*"))
+    assert runs
+    manifest = load_manifest(runs[-1] / "manifest.json")
+    workflow_node = manifest["workflow"]["nodes"][0]
+
+    restored = place(builder)
+    restored.schema.restore_persisted_raw(workflow_node["cfg"])
+
+    assert workflow_node["cfg"] == node.schema.to_persisted_raw()
+    assert restored.schema.to_persisted_raw() == workflow_node["cfg"]
+    assert workflow_node["cfg_hash"] == f"sha256:{_sha256_json(workflow_node['cfg'])}"
+    assert (
+        restored.schema.lower_raw(None) == workflow_node["base_cfg"] == {"freq": 7.25}
+    )
+    assert workflow_node["override_plan"] == plan.to_wire()
+    assert manifest["workflow"]["workflow_hash"] == (
+        "sha256:"
+        + _sha256_json(
+            {
+                "nodes": manifest["workflow"]["nodes"],
+                "flux": manifest["workflow"]["flux"],
+            }
+        )
+    )
 
 
 def test_run_store_mark_paused_flushes_without_finalizing(tmp_path):

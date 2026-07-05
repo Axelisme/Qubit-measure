@@ -22,6 +22,7 @@ from zcu_tools.gui.app.autofluxdep.services.result_io import (
     ROLE_SNR,
     load_node_result,
     read_result_row,
+    result_declaration,
     result_progress_summary,
     result_role_specs,
     result_row_role_names,
@@ -35,6 +36,44 @@ from zcu_tools.utils.datasaver import (
     open_streaming_grouped_labber_data,
     save_grouped_labber_data,
 )
+
+
+def _filled_qubit_freq_result() -> QubitFreqResult:
+    result = QubitFreqResult.allocate(
+        np.array([0.0, 0.5], dtype=float),
+        np.array([-5.0, 0.0, 5.0], dtype=float),
+    )
+    result.signal[1] = [1.0, 2.0, 3.0]
+    result.fit_curve[1] = [1.5, 2.5, 3.5]
+    result.fit_freq[1] = 5001.0
+    result.predict_freq[1] = 5000.0
+    result.snr[1] = 42.0
+    return result
+
+
+def _filled_sweep1d_result() -> Sweep1DResult:
+    result = Sweep1DResult.allocate(
+        np.array([0.0, 1.0], dtype=float),
+        np.array([10.0, 20.0], dtype=float),
+        x_label="delay time (us)",
+    )
+    result.signal[1] = [0.1, 0.2]
+    result.fit_curve[1] = [0.3, 0.4]
+    result.fit_value[1] = 12.0
+    result.snr[1] = 5.0
+    return result
+
+
+def _filled_sweep2d_result() -> Sweep2DResult:
+    result = Sweep2DResult.allocate(
+        np.array([0.0, 1.0], dtype=float),
+        np.array([6000.0, 6001.0], dtype=float),
+        np.array([0.1, 0.2, 0.3], dtype=float),
+    )
+    result.signal[1] = np.arange(6, dtype=float).reshape(2, 3)
+    result.best_freq[1] = 6001.0
+    result.best_gain[1] = 0.2
+    return result
 
 
 def test_qubit_freq_result_role_specs_and_row_roundtrip(tmp_path):
@@ -129,6 +168,50 @@ def test_sweep2d_result_row_roundtrip(tmp_path):
     loaded = load_node_result(path, "ro_optimize")
     assert isinstance(loaded, Sweep2DResult)
     np.testing.assert_allclose(loaded.gain, result.gain)
+
+
+@pytest.mark.parametrize(
+    ("node_type", "result_factory", "expected_type"),
+    (
+        ("qubit_freq", _filled_qubit_freq_result, QubitFreqResult),
+        ("t1", _filled_sweep1d_result, Sweep1DResult),
+        ("ro_optimize", _filled_sweep2d_result, Sweep2DResult),
+    ),
+)
+def test_result_declaration_contract_converges_all_public_paths(
+    tmp_path, node_type, result_factory, expected_type
+):
+    result = result_factory()
+    declaration = result_declaration(result)
+    row_idx = 1
+
+    specs = result_role_specs("node", node_type, result)
+    declared_roles = {str(role) for role in declaration.roles}
+
+    assert {str(spec.role) for spec in specs} == declared_roles
+    assert set(result_row_role_names(result, row_idx)) == declared_roles
+    assert set(result_row_summary(result, row_idx)) == set(
+        declaration.summary_scalar_attrs
+    )
+
+    progress = result_progress_summary(result)
+    assert progress["kind"] == declaration.kind
+    assert {output_key for output_key, _attr in declaration.last_fit_fields}.issubset(
+        progress["fit_summary"]
+    )
+
+    path = str(tmp_path / f"{node_type}_contract")
+    with open_streaming_grouped_labber_data(path, specs) as writer:
+        roles = write_result_row(writer, "node", node_type, result, row_idx)
+        writer.flush()
+
+    assert set(roles) == declared_roles
+    loaded = load_node_result(path, node_type)
+    assert isinstance(loaded, expected_type)
+    assert result_declaration(loaded).result_type is declaration.result_type
+    assert {str(role) for role in read_result_row(path, node_type, row_idx)} == (
+        declared_roles
+    )
 
 
 def test_result_role_specs_unknown_result_fast_fails():

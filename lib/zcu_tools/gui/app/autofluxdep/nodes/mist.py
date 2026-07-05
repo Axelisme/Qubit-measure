@@ -44,8 +44,6 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import MistPower
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
-    module_leaf_patches,
-    module_override_paths,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -58,10 +56,15 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    PULSE_MODULE_LEAF_PATHS,
     PULSE_READOUT_REF_LABELS,
-    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
+    pulse_module_override_paths,
+    pulse_module_patches,
+    readout_module_override_paths,
+    readout_module_patches,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+    missing_module_value,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
@@ -129,11 +132,6 @@ class MistCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     """
 
     modules: MistModuleCfg
-
-
-def _default_opt_readout() -> Any | None:
-    # last-resort readout if neither a Node produced one nor ml has a preset.
-    return None
 
 
 class MistNode(Node):
@@ -243,7 +241,7 @@ class MistBuilder(Builder):
     optional_modules = (
         ModuleDep(
             "opt_readout",
-            default=_default_opt_readout,
+            default=missing_module_value,
             aliases=READOUT_LIBRARY_ALIASES,
         ),
     )
@@ -293,17 +291,14 @@ class MistBuilder(Builder):
     def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
         paths: list[OverridePath] = []
         paths.extend(
-            module_override_paths(
-                prefix="modules.pi_pulse",
-                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+            pulse_module_override_paths(
+                "pi_pulse",
                 source="pi_pulse module dependency",
                 reason="pi pulse is resolved from workflow/module-library dependency",
             )
         )
         paths.extend(
-            module_override_paths(
-                prefix="modules.readout",
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            readout_module_override_paths(
                 source="opt_readout module dependency",
                 reason="readout module is resolved from workflow/module-library dependency",
             )
@@ -345,20 +340,8 @@ class MistBuilder(Builder):
                 "mist.make_cfg needs a readout module (none produced or preset)"
             )
         patches: dict[str, object] = {}
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.pi_pulse",
-                module=pi_pulse,
-                leaf_paths=PULSE_MODULE_LEAF_PATHS,
-            )
-        )
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.readout",
-                module=readout,
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
-            )
-        )
+        patches.update(pulse_module_patches("pi_pulse", pi_pulse))
+        patches.update(readout_module_patches(readout))
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
         return ml.make_cfg(raw_cfg, MistCfgTemplate)

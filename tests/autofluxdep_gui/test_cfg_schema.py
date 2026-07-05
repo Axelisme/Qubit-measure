@@ -31,19 +31,12 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     IntSpec,
     ModuleRefSpec,
     NodeCfgSchema,
-    NodeFieldSpec,
-    NodeSectionSpec,
     OverridePath,
     OverridePlan,
     SweepSpec,
     SweepValue,
     apply_override_patches,
-    node_field,
-    node_path,
-    node_section,
     override_plan_to_wire,
-    path_node_schema,
-    sectioned_node_schema,
     str_choice_spec,
     validate_override_plan_base_cfg,
 )
@@ -60,6 +53,17 @@ from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+from ._helpers import (
+    NodeFieldSpec,
+    NodeSectionSpec,
+    node_field,
+    node_path,
+    node_section,
+    path_node_schema,
+    read_value_tree,
+    sectioned_node_schema,
+)
 
 _READOUT = {
     "type": "readout/pulse",
@@ -527,9 +531,7 @@ def test_schema_keys_match_declared_knobs(builder: Builder):
 @pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
 def test_schema_paths_match_section_layouts(builder: Builder):
     schema = builder.make_default_schema()
-    assert {
-        logical_key: schema.path_for(logical_key) for logical_key in schema.keys
-    } == _EXPECTED_PATHS[builder.name], builder.name
+    assert dict(schema.logical_paths) == _EXPECTED_PATHS[builder.name], builder.name
 
 
 @pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
@@ -542,8 +544,8 @@ def test_sectioned_schema_lower_projects_logical_keys():
     schema = _sectioned_test_schema()
 
     assert schema.keys == ("detune_sweep", "reps", "earlystop_snr", "qub_gain")
-    assert schema.path_for("detune_sweep") == "sweep.detune"
-    assert schema.path_for("qub_gain") == "drive.gain"
+    assert schema.logical_paths["detune_sweep"] == "sweep.detune"
+    assert schema.logical_paths["qub_gain"] == "drive.gain"
 
     knobs = schema.lower(None)
 
@@ -625,7 +627,7 @@ def test_path_schema_renders_raw_cfg_tree_while_lowering_logical_keys():
         },
     )
 
-    value_tree = schema.read_value_tree()
+    value_tree = read_value_tree(schema)
 
     assert value_tree == {
         "modules": {
@@ -638,7 +640,7 @@ def test_path_schema_renders_raw_cfg_tree_while_lowering_logical_keys():
             "drive_gain_mode": "adaptive",
         },
     }
-    assert schema.path_for("qub_gain") == "modules.qub_pulse.gain"
+    assert schema.logical_paths["qub_gain"] == "modules.qub_pulse.gain"
     assert schema.lower(None) == {
         "qub_gain": 0.05,
         "reps": 1000,
@@ -663,8 +665,13 @@ def test_generation_groups_keep_logical_knobs_flat():
     assert "drive_gain_mode" in feedback_value.fields
     assert "bias_update_mode" in feedback_spec.fields
     assert "bias_update_mode" in feedback_value.fields
-    assert schema.path_for("drive_gain_mode") == "generation.feedback.drive_gain_mode"
-    assert schema.path_for("bias_update_mode") == "generation.feedback.bias_update_mode"
+    assert (
+        schema.logical_paths["drive_gain_mode"] == "generation.feedback.drive_gain_mode"
+    )
+    assert (
+        schema.logical_paths["bias_update_mode"]
+        == "generation.feedback.bias_update_mode"
+    )
 
     knobs = schema.read_knobs()
 
@@ -672,7 +679,7 @@ def test_generation_groups_keep_logical_knobs_flat():
     assert "bias_update_mode" in knobs
     assert "feedback" not in knobs
     assert "safety" not in knobs
-    assert schema.read_value_tree()["generation"]["feedback"]["drive_gain_mode"] == (
+    assert read_value_tree(schema)["generation"]["feedback"]["drive_gain_mode"] == (
         "adaptive"
     )
 
@@ -700,7 +707,7 @@ def test_generation_persistence_uses_flat_logical_keys():
     assert knobs["drive_gain_mode"] == "fixed"
     assert knobs["bias_update_mode"] == "hard"
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
-    assert restored.read_value_tree()["generation"]["feedback"]["drive_gain_mode"] == (
+    assert read_value_tree(restored)["generation"]["feedback"]["drive_gain_mode"] == (
         "fixed"
     )
 
@@ -754,7 +761,7 @@ def test_path_schema_scalar_default_preserves_eval_value():
     )
 
     assert schema.read_knobs()["qub_gain"] == {"__kind": "eval", "expr": "gain"}
-    assert schema.read_value_tree()["modules"]["qub_pulse"]["gain"] == {
+    assert read_value_tree(schema)["modules"]["qub_pulse"]["gain"] == {
         "__kind": "eval",
         "expr": "gain",
     }
@@ -804,7 +811,7 @@ def test_sectioned_schema_read_value_tree_is_nested_json_friendly():
         ),
     )
 
-    knobs = schema.read_value_tree()
+    knobs = read_value_tree(schema)
 
     assert set(knobs) == {"sweep", "acquire", "drive"}
     assert knobs["sweep"]["detune"]["start"] == {
@@ -824,8 +831,6 @@ def test_sectioned_schema_read_value_tree_is_nested_json_friendly():
 def test_sectioned_schema_unknown_logical_key_fast_fails():
     schema = _sectioned_test_schema()
 
-    with pytest.raises(KeyError, match="Unknown node param"):
-        schema.path_for("not_a_knob")
     with pytest.raises(KeyError, match="Unknown node param"):
         schema.set_field("not_a_knob", 1)
     with pytest.raises(KeyError, match="Unknown node param"):
@@ -1358,7 +1363,7 @@ def test_scalar_eval_value_lowers_against_md():
         "__kind": "eval",
         "expr": "gain",
     }
-    assert schema.read_value_tree()["modules"]["qub_pulse"]["value"]["gain"] == {
+    assert read_value_tree(schema)["modules"]["qub_pulse"]["value"]["gain"] == {
         "__kind": "eval",
         "expr": "gain",
     }
@@ -1388,7 +1393,7 @@ def test_sweep_eval_edges_lower_against_md():
         "__kind": "eval",
         "expr": "center - 2",
     }
-    assert schema.read_value_tree()["sweep"]["freq"]["start"] == {
+    assert read_value_tree(schema)["sweep"]["freq"]["start"] == {
         "__kind": "eval",
         "expr": "center - 2",
     }

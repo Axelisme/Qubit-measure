@@ -75,8 +75,8 @@ def test_show_startup_dialog_opens_setup_dialog(app):
     assert isinstance(dlg, _TrackedSetupDialog)
     assert dlg._startup_mode is True, "Dialog must be opened with startup_mode=True"
     assert dlg._opened is True, "Dialog must be opened non-modally via open()"
-    assert win._setup_dialog is dlg
+    assert win._dialog_refs.get("setup") is dlg
 
     dlg.finished.emit(0)
 
-    assert win._setup_dialog is None
+    assert win._dialog_refs.get("setup") is None

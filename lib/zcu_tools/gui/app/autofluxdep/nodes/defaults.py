@@ -20,9 +20,12 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     DirectValue,
     ModuleRefSpec,
     NodeCfgSchema,
+    OverridePath,
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    module_leaf_patches,
+    module_override_paths,
 )
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -87,6 +90,62 @@ def generation_field(
         default=default,
         group_key=group,
         group_label=group_label or GENERATION_GROUP_LABELS.get(group, group),
+    )
+
+
+def logical_generation_field(
+    key: str,
+    spec: ScalarSpec | SweepSpec,
+    default: Any,
+    *,
+    group: str,
+    group_label: str | None = None,
+) -> GenerationField:
+    return generation_field(
+        key,
+        key,
+        spec,
+        default,
+        group=group,
+        group_label=group_label,
+    )
+
+
+def pulse_module_override_paths(
+    module_name: str, *, source: str, reason: str
+) -> tuple[OverridePath, ...]:
+    return module_override_paths(
+        prefix=f"modules.{module_name}",
+        leaf_paths=PULSE_MODULE_LEAF_PATHS,
+        source=source,
+        reason=reason,
+    )
+
+
+def readout_module_override_paths(
+    *, source: str, reason: str
+) -> tuple[OverridePath, ...]:
+    return module_override_paths(
+        prefix="modules.readout",
+        leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+        source=source,
+        reason=reason,
+    )
+
+
+def pulse_module_patches(module_name: str, module: object) -> dict[str, object]:
+    return module_leaf_patches(
+        prefix=f"modules.{module_name}",
+        module=module,
+        leaf_paths=PULSE_MODULE_LEAF_PATHS,
+    )
+
+
+def readout_module_patches(readout: object) -> dict[str, object]:
+    return module_leaf_patches(
+        prefix="modules.readout",
+        module=readout,
+        leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
     )
 
 

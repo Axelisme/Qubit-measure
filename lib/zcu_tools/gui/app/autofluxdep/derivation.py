@@ -1,10 +1,8 @@
-"""Derivation services — non-Node information producers.
+"""Smoothing service — post-node smoothed information projection.
 
 A Node honestly reports what it *measured* this flux point (raw t1, raw kappa).
-Anything *derived* across points — smoothing, ratios, running estimates — is the
-job of a **DerivationService**, the symmetric counterpart of a Node: a Node
-produces keys from hardware, a DerivationService produces keys from other
-producers' output.
+Smoothing is derived across flux points after Nodes finish a point, keeping the
+orchestrator's Node-facing dependency resolver free of experiment policy.
 
 Smoothing is consumer-driven: a Node that wants the smoothed estimate of a
 quantity declares it on the dependency itself — ``Dependency("t1",
@@ -20,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
 from zcu_tools.gui.app.autofluxdep.nodes.spec import SmoothMode
 from zcu_tools.gui.app.autofluxdep.tools import Smoother
@@ -36,14 +34,6 @@ class SmoothRule:
 
     key: str
     mode: SmoothMode
-
-
-class DerivationService(Protocol):
-    """A non-Node producer. Given this point's raw info, returns the keys it
-    derives. Implementations hold their own cross-point state."""
-
-    def provides(self) -> tuple[str, ...]: ...
-    def derive(self, point: Mapping[str, Any]) -> dict[str, Any]: ...
 
 
 @dataclass

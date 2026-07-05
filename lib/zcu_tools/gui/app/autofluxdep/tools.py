@@ -20,8 +20,8 @@ a ``SimplePredictor`` fallback or a real ``FluxoniumPredictor`` adapter.
 ``Smoother`` (pure smoothing mechanism) also lives here, but it is NOT curried
 into Nodes — Nodes report raw values and never smooth. Smoothing is a
 ``SmoothingService`` (see ``autofluxdep.derivation``) that owns a ``Smoother``
-and runs *after* the Nodes; ``Smoother`` is exported from here as the shared
-mechanism it builds on.
+and runs *after* the Nodes through the orchestrator/run-session path;
+``Smoother`` is exported from here as the shared mechanism it builds on.
 """
 
 from __future__ import annotations
@@ -159,8 +159,8 @@ class Tools:
     The controller builds this once per sweep (from the Setup resources) and the
     orchestrator curries it into every Node via ``RunEnv.tools``. ``predictor``
     is optional (SimplePredictor fallback or real FluxoniumPredictor adapter).
-    Smoothing is deliberately NOT here — it is a
-    DerivationService that runs after Nodes, not a tool Nodes call.
+    Smoothing is deliberately NOT here: it runs after Nodes and is not a tool
+    Nodes call.
     """
 
     predictor: Predictor | None = None

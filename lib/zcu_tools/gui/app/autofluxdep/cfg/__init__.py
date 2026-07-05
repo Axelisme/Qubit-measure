@@ -9,9 +9,9 @@ keeps the app-to-app coupling at one seam: a future lift of the spec/value model
 into a shared layer (``gui/session/cfg`` etc.) only has to retarget this file's
 imports, not every node.
 
-The node-facing helpers build either legacy flat schemas or sectioned schemas
-with stable logical-key projection. Node cfg still uses scalar/sweep leaves only:
-waveforms stay by-name string scalars, and workflow modules stay outside node cfg.
+The node-facing helpers build explicit path-mounted schemas with stable
+logical-key projection. Node cfg still lowers through the shared spec/value
+model while autofluxdep builders keep stable logical knob names.
 """
 
 from __future__ import annotations
@@ -44,16 +44,7 @@ from .override_plan import (
 )
 from .schema import (
     NodeCfgSchema,
-    NodeFieldDecl,
-    NodeFieldSpec,
-    NodePathSpec,
-    NodeSectionSpec,
-    flat_node_schema,
-    node_field,
-    node_path,
-    node_section,
-    path_node_schema,
-    sectioned_node_schema,
+    empty_node_schema,
     str_choice_spec,
 )
 
@@ -67,10 +58,6 @@ __all__ = [
     "IntSpec",
     "ModuleRefSpec",
     "NodeCfgSchema",
-    "NodeFieldDecl",
-    "NodeFieldSpec",
-    "NodePathSpec",
-    "NodeSectionSpec",
     "OverrideMode",
     "OverridePath",
     "OverridePlan",
@@ -79,15 +66,10 @@ __all__ = [
     "SweepSpec",
     "SweepValue",
     "apply_override_patches",
-    "flat_node_schema",
+    "empty_node_schema",
     "module_leaf_patches",
     "module_override_paths",
-    "node_field",
-    "node_path",
-    "node_section",
     "override_plan_to_wire",
-    "path_node_schema",
-    "sectioned_node_schema",
     "str_choice_spec",
     "validate_override_plan_base_cfg",
 ]

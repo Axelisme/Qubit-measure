@@ -12,15 +12,23 @@ from __future__ import annotations
 import tempfile
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
     NodeCfgSchema,
     OverridePlan,
-    flat_node_schema,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
 )
-from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeField
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
     Node,
@@ -30,12 +38,349 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import (
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
+from zcu_tools.gui.app.main.adapter import (
+    CfgNodeSpec,
+    ModuleRefValue,
+    WaveformRefValue,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
     from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, Notify
 
 ProduceFn = Callable[[RunEnv, Snapshot], Patch]
+NodeField = tuple[str, CfgNodeSpec, Any]
+
+
+@dataclass(frozen=True)
+class NodeFieldSpec:
+    """One logical test knob mounted as a leaf inside a UI section."""
+
+    logical_key: str
+    section_key: str
+    field_key: str
+    spec: CfgNodeSpec
+    default: Any
+
+    @property
+    def path(self) -> str:
+        return f"{self.section_key}.{self.field_key}"
+
+
+@dataclass(frozen=True)
+class NodeFieldDecl:
+    """One logical test knob before it is mounted into a UI section."""
+
+    logical_key: str
+    field_key: str
+    spec: CfgNodeSpec
+    default: Any
+
+
+@dataclass(frozen=True)
+class NodeSectionSpec:
+    """A test-only UI section grouping one-or-more logical knobs."""
+
+    key: str
+    label: str
+    fields: tuple[NodeFieldSpec, ...]
+
+
+@dataclass(frozen=True)
+class NodePathSpec:
+    """One logical test knob mounted at an explicit cfg value-tree path."""
+
+    logical_key: str
+    path: str
+    spec: CfgNodeSpec
+    default: Any
+
+
+def node_field(
+    logical_key: str, field_key: str, spec: CfgNodeSpec, default: Any
+) -> NodeFieldDecl:
+    """Declare one ad-hoc test knob without repeating its section key."""
+    return NodeFieldDecl(
+        logical_key=logical_key,
+        field_key=field_key,
+        spec=spec,
+        default=default,
+    )
+
+
+def node_path(
+    logical_key: str, path: str, spec: CfgNodeSpec, default: Any
+) -> NodePathSpec:
+    """Declare one test knob at an explicit dotted value-tree path."""
+    return NodePathSpec(
+        logical_key=logical_key,
+        path=path,
+        spec=spec,
+        default=default,
+    )
+
+
+def node_section(key: str, label: str, *fields: NodeFieldDecl) -> NodeSectionSpec:
+    """Mount pending ad-hoc test knob declarations under one section key."""
+    return NodeSectionSpec(
+        key=key,
+        label=label,
+        fields=tuple(
+            NodeFieldSpec(
+                logical_key=field.logical_key,
+                section_key=key,
+                field_key=field.field_key,
+                spec=field.spec,
+                default=field.default,
+            )
+            for field in fields
+        ),
+    )
+
+
+def flat_node_schema(fields: tuple[NodeField, ...]) -> CfgSchema:
+    """Build a test-only flat cfg schema from ``(key, spec, default)`` tuples."""
+    _ensure_unique("node field key", (key for key, _, _ in fields))
+    return CfgSchema(
+        spec=CfgSectionSpec(fields={key: node_spec for key, node_spec, _ in fields}),
+        value=CfgSectionValue(
+            fields={
+                key: _default_value_for(node_spec, default)
+                for key, node_spec, default in fields
+            }
+        ),
+    )
+
+
+def path_node_schema(
+    fields: tuple[NodePathSpec, ...],
+    *,
+    section_labels: dict[str, str] | None = None,
+) -> NodeCfgSchema:
+    """Build a test-only node schema from explicit logical-to-cfg paths."""
+    _ensure_unique("node logical key", (field.logical_key for field in fields))
+    root_spec = CfgSectionSpec(fields={})
+    root_value = CfgSectionValue(fields={})
+    logical_paths: dict[str, str] = {}
+    labels = section_labels or {}
+
+    for field_spec in fields:
+        _validate_node_path_spec(field_spec)
+        _insert_path_field(root_spec, root_value, field_spec, labels)
+        logical_paths[field_spec.logical_key] = field_spec.path
+
+    return NodeCfgSchema(
+        CfgSchema(spec=root_spec, value=root_value),
+        logical_paths=logical_paths,
+    )
+
+
+def sectioned_node_schema(sections: tuple[NodeSectionSpec, ...]) -> NodeCfgSchema:
+    """Build a test-only sectioned node schema with logical-key projection."""
+    _ensure_unique("node section key", (section.key for section in sections))
+
+    root_spec_fields: dict[str, CfgNodeSpec] = {}
+    root_value_fields: dict[str, Any] = {}
+    logical_paths: dict[str, str] = {}
+
+    for section in sections:
+        _validate_path_part("section key", section.key)
+        _ensure_unique(
+            f"field key in section {section.key!r}",
+            (field_spec.field_key for field_spec in section.fields),
+        )
+        section_spec_fields: dict[str, CfgNodeSpec] = {}
+        section_value_fields: dict[str, Any] = {}
+
+        for field_spec in section.fields:
+            _validate_node_field_spec(section.key, field_spec)
+            if field_spec.logical_key in logical_paths:
+                raise ValueError(
+                    f"Duplicate node logical key {field_spec.logical_key!r}"
+                )
+            section_spec_fields[field_spec.field_key] = field_spec.spec
+            section_value_fields[field_spec.field_key] = _default_value_for(
+                field_spec.spec, field_spec.default
+            )
+            logical_paths[field_spec.logical_key] = field_spec.path
+
+        root_spec_fields[section.key] = CfgSectionSpec(
+            label=section.label,
+            fields=section_spec_fields,
+        )
+        root_value_fields[section.key] = CfgSectionValue(fields=section_value_fields)
+
+    return NodeCfgSchema(
+        CfgSchema(
+            spec=CfgSectionSpec(fields=root_spec_fields),
+            value=CfgSectionValue(fields=root_value_fields),
+        ),
+        logical_paths=logical_paths,
+    )
+
+
+def read_value_tree(schema: NodeCfgSchema) -> dict[str, Any]:
+    """Return a JSON-friendly value tree for white-box test assertions."""
+    return _jsonify_value_tree(schema.schema.value)
+
+
+def _default_value_for(spec: CfgNodeSpec, default: Any) -> Any:
+    if isinstance(spec, SweepSpec):
+        if not isinstance(default, SweepValue):
+            raise TypeError(
+                f"SweepSpec default must be a SweepValue, got {type(default).__name__}"
+            )
+        return default
+    if isinstance(spec, ScalarSpec):
+        if isinstance(default, (DirectValue, EvalValue)):
+            return default
+        return DirectValue(default)
+    raise TypeError(f"Unsupported node field spec: {type(spec).__name__}")
+
+
+def _validate_node_field_spec(section_key: str, field_spec: NodeFieldSpec) -> None:
+    _validate_path_part("logical key", field_spec.logical_key)
+    _validate_path_part("field key", field_spec.field_key)
+    if field_spec.section_key != section_key:
+        raise ValueError(
+            f"Node field {field_spec.logical_key!r} declares section "
+            f"{field_spec.section_key!r}, but is mounted under {section_key!r}"
+        )
+    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec)):
+        raise TypeError(
+            f"Unsupported node field spec for {field_spec.logical_key!r}: "
+            f"{type(field_spec.spec).__name__}; only ScalarSpec and SweepSpec "
+            "are supported"
+        )
+
+
+def _validate_node_path_spec(field_spec: NodePathSpec) -> None:
+    _validate_path_part("logical key", field_spec.logical_key)
+    for part in field_spec.path.split("."):
+        _validate_path_part("path part", part)
+    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec)):
+        raise TypeError(
+            f"Unsupported node field spec for {field_spec.logical_key!r}: "
+            f"{type(field_spec.spec).__name__}; only ScalarSpec and SweepSpec "
+            "are supported"
+        )
+
+
+def _insert_path_field(
+    root_spec: CfgSectionSpec,
+    root_value: CfgSectionValue,
+    field_spec: NodePathSpec,
+    labels: dict[str, str],
+) -> None:
+    spec_section = root_spec
+    value_section = root_value
+    parts = field_spec.path.split(".")
+    prefix_parts: list[str] = []
+    for part in parts[:-1]:
+        prefix_parts.append(part)
+        prefix = ".".join(prefix_parts)
+        existing_spec = spec_section.fields.get(part)
+        if existing_spec is None:
+            existing_spec = CfgSectionSpec(label=labels.get(prefix, part), fields={})
+            spec_section.fields[part] = existing_spec
+        if not isinstance(existing_spec, CfgSectionSpec):
+            raise ValueError(
+                f"Node cfg path {field_spec.path!r} crosses non-section {prefix!r}"
+            )
+        existing_value = value_section.fields.get(part)
+        if existing_value is None:
+            existing_value = CfgSectionValue(fields={})
+            value_section.fields[part] = existing_value
+        if not isinstance(existing_value, CfgSectionValue):
+            raise ValueError(
+                f"Node cfg path {field_spec.path!r} crosses non-section value "
+                f"{prefix!r}"
+            )
+        spec_section = existing_spec
+        value_section = existing_value
+    leaf = parts[-1]
+    if leaf in spec_section.fields:
+        raise ValueError(f"Duplicate node cfg path: {field_spec.path!r}")
+    spec_section.fields[leaf] = field_spec.spec
+    value_section.fields[leaf] = _default_value_for(field_spec.spec, field_spec.default)
+
+
+def _validate_path_part(kind: str, value: str) -> None:
+    if not value:
+        raise ValueError(f"Node {kind} must not be empty")
+    if "." in value:
+        raise ValueError(f"Node {kind} must not contain '.': {value!r}")
+
+
+def _ensure_unique(kind: str, values: Any) -> None:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    if duplicates:
+        raise ValueError(f"Duplicate {kind}: {', '.join(sorted(duplicates))}")
+
+
+def _jsonify_value_node(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, CfgSectionValue):
+        return _jsonify_value_tree(value)
+    if isinstance(value, ModuleRefValue):
+        return {
+            "__kind": "module_ref",
+            "chosen_key": value.chosen_key,
+            "is_overridden": bool(value.is_overridden),
+            "value": _jsonify_value_tree(value.value),
+        }
+    if isinstance(value, WaveformRefValue):
+        return {
+            "__kind": "waveform_ref",
+            "chosen_key": value.chosen_key,
+            "is_overridden": bool(value.is_overridden),
+            "value": _jsonify_value_tree(value.value),
+        }
+    if isinstance(value, SweepValue):
+        return {
+            "start": _knob_scalar_value(value.start),
+            "stop": _knob_scalar_value(value.stop),
+            "expts": int(value.expts),
+        }
+    if isinstance(value, DirectValue):
+        return _knob_scalar_value(value.value)
+    if isinstance(value, EvalValue):
+        return _knob_eval_value(value)
+    raise TypeError(
+        f"Unexpected node cfg value-tree leaf {type(value).__name__}; "
+        "expected CfgSectionValue, DirectValue, EvalValue, or SweepValue"
+    )
+
+
+def _jsonify_value_tree(value: CfgSectionValue) -> dict[str, Any]:
+    return {
+        key: _jsonify_value_node(child)
+        for key, child in value.fields.items()
+        if child is not None
+    }
+
+
+def _knob_scalar_value(value: object) -> object:
+    if isinstance(value, EvalValue):
+        return _knob_eval_value(value)
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _knob_eval_value(value: EvalValue) -> dict[str, object]:
+    data: dict[str, object] = {"__kind": "eval", "expr": value.expr}
+    if value.resolved is not None:
+        data["resolved"] = value.resolved
+    if value.error is not None:
+        data["error"] = value.error
+    return data
 
 
 def ensure_test_project(ctrl: Controller) -> ProjectInfo:

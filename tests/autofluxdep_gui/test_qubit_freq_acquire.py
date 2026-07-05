@@ -158,7 +158,6 @@ def test_plotter_update_runs_after_a_real_produce():
     figure = Figure()
     plotter = builder.make_plotter(figure)
     ctx = ctrl.state.exp_context
-    feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
     env = RunEnv(
         flux=0.0,
         flux_idx=0,

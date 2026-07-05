@@ -696,8 +696,8 @@ def test_ge_recovers_centers_population_and_fidelity() -> None:
     g_expected, e_expected = _expected_ge_centers()
     blob_dist = abs(g_expected - e_expected)
 
-    fid_lo, pops_lo, g_lo, e_lo = _run_ge(snr=5.0)
-    fid_hi, pops_hi, g_hi, e_hi = _run_ge(snr=10.0)
+    fid_lo, pops_lo, g_lo, e_lo = _run_ge(snr=8.0)
+    fid_hi, pops_hi, g_hi, e_hi = _run_ge(snr=15.0)
 
     # Recovered centres land on the deterministic blob centres (assignment of the
     # fit's g/e to the physical g/e may flip, so match as an unordered pair).

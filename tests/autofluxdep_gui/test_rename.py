@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec
 from zcu_tools.gui.app.autofluxdep.events.run import NodeEnteredPayload
 from zcu_tools.gui.app.autofluxdep.events.workflow import WorkflowChangedPayload
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
@@ -86,6 +87,35 @@ def test_rename_emits_workflow_changed():
     ctrl.bus.subscribe(WorkflowChangedPayload, lambda p: seen.append(p.name))
     ctrl.rename_node(0, "g_mist")
     assert "g_mist" in seen
+
+
+def test_cfg_edits_emit_workflow_changed_for_edited_node():
+    ctrl = build_core()
+    node = ctrl.add_node(
+        make_builder(
+            "cfg_node",
+            schema_fields=(("gain", FloatSpec("Gain"), 1.0),),
+        )
+    )
+    seen = []
+    ctrl.bus.subscribe(WorkflowChangedPayload, lambda p: seen.append(p.name))
+
+    ctrl.set_node_params(0, {"gain": 2.0})
+    ctrl.set_node_cfg_value(0, node.schema.schema.value)
+
+    assert seen == ["cfg_node", "cfg_node"]
+
+
+def test_reorder_emits_whole_workflow_changed():
+    ctrl = build_core()
+    ctrl.add_node(make_builder("first"))
+    ctrl.add_node(make_builder("second"))
+    seen = []
+    ctrl.bus.subscribe(WorkflowChangedPayload, lambda p: seen.append(p.name))
+
+    ctrl.reorder(0, 1)
+
+    assert seen == [None]
 
 
 def test_two_mist_instances_get_independent_results():

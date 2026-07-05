@@ -32,8 +32,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
     SweepValue,
-    module_leaf_patches,
-    module_override_paths,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -55,10 +53,14 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     PULSE_READOUT_REF_LABELS,
-    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
-    generation_field,
+    logical_generation_field,
+    readout_module_override_paths,
+    readout_module_patches,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+    missing_module_value,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
@@ -185,11 +187,6 @@ def _qfw_factor_seed(knobs: dict[str, Any]) -> float | None:
     if seed_gain <= 0.0:
         raise RuntimeError("qubit_freq qfw_seed_gain must be positive")
     return float(width) / seed_gain
-
-
-def _default_readout() -> Any | None:
-    # last-resort readout if neither a Node produced one nor ml has a preset.
-    return None
 
 
 def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -457,7 +454,9 @@ class QubitFreqBuilder(Builder):
     )
     # the readout module: Node-produced → calibrated ml preset → default.
     optional_modules = (
-        ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
+        ModuleDep(
+            "readout", default=missing_module_value, aliases=READOUT_LIBRARY_ALIASES
+        ),
     )
     feedback_slots = (_PREDICT_FREQ_CORRECTION_SLOT,)
 
@@ -480,15 +479,13 @@ class QubitFreqBuilder(Builder):
                 "detune_sweep": "sweep.freq",
             },
             generation_fields=(
-                generation_field(
-                    "earlystop_snr",
+                logical_generation_field(
                     "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
                     group="safety",
                 ),
-                generation_field(
-                    "bias_update_mode",
+                logical_generation_field(
                     "bias_update_mode",
                     str_choice_spec(
                         "bias_update_mode",
@@ -500,8 +497,7 @@ class QubitFreqBuilder(Builder):
                     _BIAS_UPDATE_MODE_FIXED,
                     group="feedback",
                 ),
-                generation_field(
-                    "drive_gain_mode",
+                logical_generation_field(
                     "drive_gain_mode",
                     str_choice_spec(
                         "drive_gain_mode",
@@ -513,29 +509,25 @@ class QubitFreqBuilder(Builder):
                     _DRIVE_GAIN_MODE_ADAPTIVE,
                     group="feedback",
                 ),
-                generation_field(
-                    "target_kappa",
+                logical_generation_field(
                     "target_kappa",
                     FloatSpec(label="target_kappa"),
                     _QFW_TARGET_KAPPA,
                     group="feedback",
                 ),
-                generation_field(
-                    "max_drive_gain",
+                logical_generation_field(
                     "max_drive_gain",
                     FloatSpec(label="max_drive_gain"),
                     _DEFAULT_MAX_DRIVE_GAIN,
                     group="feedback",
                 ),
-                generation_field(
-                    "qf_width_seed",
+                logical_generation_field(
                     "qf_width_seed",
                     FloatSpec(label="qf_width_seed", optional=True),
                     _qf_width_seed(ctx),
                     group="feedback",
                 ),
-                generation_field(
-                    "qfw_seed_gain",
+                logical_generation_field(
                     "qfw_seed_gain",
                     FloatSpec(label="qfw_seed_gain"),
                     _DEFAULT_QFW_SEED_GAIN,
@@ -580,9 +572,7 @@ class QubitFreqBuilder(Builder):
                 )
             )
         paths.extend(
-            module_override_paths(
-                prefix="modules.readout",
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            readout_module_override_paths(
                 source="readout module dependency",
                 reason="readout module is resolved from workflow/module-library dependency",
             )
@@ -628,13 +618,7 @@ class QubitFreqBuilder(Builder):
         }
         if str(knobs["drive_gain_mode"]) == _DRIVE_GAIN_MODE_ADAPTIVE:
             patches["modules.qub_pulse.gain"] = drive_gain
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.readout",
-                module=readout,
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
-            )
-        )
+        patches.update(readout_module_patches(readout))
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
         return ml.make_cfg(raw_cfg, QubitFreqCfgTemplate)

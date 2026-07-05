@@ -47,8 +47,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
     SweepValue,
-    module_leaf_patches,
-    module_override_paths,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -66,13 +64,19 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    PULSE_MODULE_LEAF_PATHS,
     PULSE_READOUT_REF_LABELS,
-    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
-    ctx_md_float,
-    generation_field,
+    logical_generation_field,
     pop_sweep_range,
+    pulse_module_override_paths,
+    pulse_module_patches,
+    readout_module_override_paths,
+    readout_module_patches,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+    is_lowerable_pulse_module,
+    missing_info_value,
+    missing_module_value,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
@@ -83,6 +87,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+    auto_relax_delay_from_t1,
+    auto_stop_sweep_range,
+    fixed_sweep_range,
+    seed_md_float,
+    snapshot_float,
+)
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
@@ -100,7 +111,6 @@ logger = logging.getLogger(__name__)
 _DEFAULT_T1 = 10.0  # us — smoothed t1 fallback
 _DEFAULT_T2E = 5.0  # us — smoothed t2e fallback
 _T2E_WINDOW_FACTOR = 2.5  # notebook: sweep_range = (0, 2.5 * prev_t2e)
-_DEFAULT_DETUNE_RATIO = 0.05  # notebook default activate-detune fraction
 _DEFAULT_EARLYSTOP_SNR = 20.0
 _DEFAULT_RELAX_FACTOR = 3.0
 _DEFAULT_RELAX_MIN = 1.0
@@ -114,47 +124,26 @@ _FIT_METHOD_FRINGE = "fringe"
 _FIT_METHOD_DECAY = "decay"
 
 
-def _default_t1() -> None:
-    return None
-
-
-def _default_t2e() -> None:
-    return None
-
-
 def _seed_t1(ctx: Any | None) -> float:
-    return ctx_md_float(ctx, "t1") or _DEFAULT_T1
+    return seed_md_float(ctx, "t1", _DEFAULT_T1)
 
 
 def _seed_t2e(ctx: Any | None) -> float:
-    return ctx_md_float(ctx, "t2e") or _DEFAULT_T2E
-
-
-def _snapshot_float(snapshot: Snapshot, key: str, fallback: float) -> float:
-    value = snapshot.get(key)
-    if value is None:
-        return fallback
-    return float(value)
-
-
-def _default_readout() -> Any | None:
-    return None
-
-
-def _fixed_sweep_range(sweep: Any) -> tuple[float, float]:
-    return (float(sweep.start), float(sweep.stop))
+    return seed_md_float(ctx, "t2e", _DEFAULT_T2E)
 
 
 def _resolve_cfg_sweep_range(
     mode: str, *, t2e: float, fixed: Any, knobs: dict[str, Any]
 ) -> tuple[float, float]:
     if mode == _SWEEP_RANGE_MODE_AUTO_T2E:
-        return (
-            float(knobs["sweep_start_us"]),
-            float(knobs["sweep_stop_factor"]) * float(t2e),
+        return auto_stop_sweep_range(
+            t2e,
+            start=float(knobs["sweep_start_us"]),
+            stop_factor=float(knobs["sweep_stop_factor"]),
+            stop_min=None,
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
-        return _fixed_sweep_range(fixed)
+        return fixed_sweep_range(fixed)
     raise RuntimeError(f"unsupported t2echo sweep_range_mode: {mode!r}")
 
 
@@ -162,25 +151,14 @@ def _resolve_cfg_relax_delay(
     mode: str, *, t1: float, fixed: float, knobs: dict[str, Any]
 ) -> float:
     if mode == _RELAX_DELAY_MODE_AUTO_T1:
-        return max(float(knobs["relax_min_us"]), float(knobs["relax_factor"]) * t1)
+        return auto_relax_delay_from_t1(
+            t1,
+            factor=float(knobs["relax_factor"]),
+            minimum=float(knobs["relax_min_us"]),
+        )
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported t2echo relax_delay_mode: {mode!r}")
-
-
-def _is_lowerable_pulse(module: Any) -> bool:
-    """Whether a resolved drive module is a concrete, lowerable ``PulseCfg``.
-
-    A real lenrabi drive pulse is a ``PulseCfg`` (or its raw dict, ``type ==
-    "pulse"``) and lowers into the run cfg. The resolver no longer injects domain
-    placeholders, but this guard still rejects stale persisted placeholder-shaped
-    dictionaries if one reaches ``make_cfg``.
-    """
-    if isinstance(module, PulseCfg):
-        return True
-    if isinstance(module, dict):
-        return module.get("type") == "pulse"
-    return False
 
 
 def _fit_t2echo(
@@ -342,8 +320,8 @@ class T2EchoBuilder(Builder):
     name = "t2echo"
     provides = ("t2e",)
     optional = (
-        Dependency("t1", smooth="ewma", default=_default_t1),
-        Dependency("t2e", smooth="ewma", default=_default_t2e),
+        Dependency("t1", smooth="ewma", default=missing_info_value),
+        Dependency("t2e", smooth="ewma", default=missing_info_value),
     )
     requires_modules = (
         ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),
@@ -354,7 +332,7 @@ class T2EchoBuilder(Builder):
     )
     optional_modules = (
         ModuleDep(
-            "opt_readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES
+            "opt_readout", default=missing_module_value, aliases=READOUT_LIBRARY_ALIASES
         ),
     )
 
@@ -377,15 +355,13 @@ class T2EchoBuilder(Builder):
                 "sweep_range": "sweep.length",
             },
             generation_fields=(
-                generation_field(
-                    "earlystop_snr",
+                logical_generation_field(
                     "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
                     group="safety",
                 ),
-                generation_field(
-                    "sweep_range_mode",
+                logical_generation_field(
                     "sweep_range_mode",
                     str_choice_spec(
                         "sweep_range_mode",
@@ -394,8 +370,7 @@ class T2EchoBuilder(Builder):
                     _SWEEP_RANGE_MODE_AUTO_T2E,
                     group="sweep",
                 ),
-                generation_field(
-                    "relax_delay_mode",
+                logical_generation_field(
                     "relax_delay_mode",
                     str_choice_spec(
                         "relax_delay_mode",
@@ -404,50 +379,43 @@ class T2EchoBuilder(Builder):
                     _RELAX_DELAY_MODE_AUTO_T1,
                     group="timing",
                 ),
-                generation_field(
-                    "t1_seed_us",
+                logical_generation_field(
                     "t1_seed_us",
                     FloatSpec(label="t1_seed_us"),
                     t1_seed,
                     group="timing",
                 ),
-                generation_field(
-                    "t2e_seed_us",
+                logical_generation_field(
                     "t2e_seed_us",
                     FloatSpec(label="t2e_seed_us"),
                     t2e_seed,
                     group="timing",
                 ),
-                generation_field(
-                    "relax_factor",
+                logical_generation_field(
                     "relax_factor",
                     FloatSpec(label="relax_factor"),
                     _DEFAULT_RELAX_FACTOR,
                     group="timing",
                 ),
-                generation_field(
-                    "relax_min_us",
+                logical_generation_field(
                     "relax_min_us",
                     FloatSpec(label="relax_min_us"),
                     _DEFAULT_RELAX_MIN,
                     group="timing",
                 ),
-                generation_field(
-                    "sweep_start_us",
+                logical_generation_field(
                     "sweep_start_us",
                     FloatSpec(label="sweep_start_us"),
                     _DEFAULT_SWEEP_START,
                     group="sweep",
                 ),
-                generation_field(
-                    "sweep_stop_factor",
+                logical_generation_field(
                     "sweep_stop_factor",
                     FloatSpec(label="sweep_stop_factor"),
                     _T2E_WINDOW_FACTOR,
                     group="sweep",
                 ),
-                generation_field(
-                    "fit_method",
+                logical_generation_field(
                     "fit_method",
                     str_choice_spec(
                         "fit_method",
@@ -458,12 +426,20 @@ class T2EchoBuilder(Builder):
                 ),
             ),
             default_overrides={
-                "detune_ratio": _DEFAULT_DETUNE_RATIO,
+                "detune_ratio": 0.05,
                 "rounds": 10,
-                "relax_delay": max(_DEFAULT_RELAX_MIN, _DEFAULT_RELAX_FACTOR * t1_seed),
+                "relax_delay": auto_relax_delay_from_t1(
+                    t1_seed,
+                    factor=_DEFAULT_RELAX_FACTOR,
+                    minimum=_DEFAULT_RELAX_MIN,
+                ),
                 "sweep_range": SweepValue(
-                    _DEFAULT_SWEEP_START,
-                    _T2E_WINDOW_FACTOR * t2e_seed,
+                    *auto_stop_sweep_range(
+                        t2e_seed,
+                        start=_DEFAULT_SWEEP_START,
+                        stop_factor=_T2E_WINDOW_FACTOR,
+                        stop_min=None,
+                    ),
                     expts=101,
                 ),
             },
@@ -508,17 +484,14 @@ class T2EchoBuilder(Builder):
             ),
         ):
             paths.extend(
-                module_override_paths(
-                    prefix=f"modules.{module_name}",
-                    leaf_paths=PULSE_MODULE_LEAF_PATHS,
+                pulse_module_override_paths(
+                    module_name,
                     source=source,
                     reason=reason,
                 )
             )
         paths.extend(
-            module_override_paths(
-                prefix="modules.readout",
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            readout_module_override_paths(
                 source="opt_readout module dependency",
                 reason="readout module is resolved from workflow/module-library dependency",
             )
@@ -563,7 +536,9 @@ class T2EchoBuilder(Builder):
         pi_pulse = snapshot.module("pi_pulse")
         pi2_pulse = snapshot.module("pi2_pulse")
         readout = snapshot.module("opt_readout")
-        if not _is_lowerable_pulse(pi_pulse) or not _is_lowerable_pulse(pi2_pulse):
+        if not is_lowerable_pulse_module(pi_pulse) or not is_lowerable_pulse_module(
+            pi2_pulse
+        ):
             raise RuntimeError(
                 "t2echo.make_cfg needs concrete pi_pulse / pi2_pulse drive modules "
                 "(lenrabi output)"
@@ -573,8 +548,8 @@ class T2EchoBuilder(Builder):
                 "t2echo.make_cfg needs a readout module (none produced or preset)"
             )
         knobs = env.knobs()
-        cur_t1 = _snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
-        prev_t2e = _snapshot_float(snapshot, "t2e", float(knobs["t2e_seed_us"]))
+        cur_t1 = snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
+        prev_t2e = snapshot_float(snapshot, "t2e", float(knobs["t2e_seed_us"]))
         relax_delay = _resolve_cfg_relax_delay(
             str(knobs["relax_delay_mode"]),
             t1=cur_t1,
@@ -588,27 +563,9 @@ class T2EchoBuilder(Builder):
             knobs=knobs,
         )
         patches: dict[str, object] = {}
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.pi_pulse",
-                module=pi_pulse,
-                leaf_paths=PULSE_MODULE_LEAF_PATHS,
-            )
-        )
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.pi2_pulse",
-                module=pi2_pulse,
-                leaf_paths=PULSE_MODULE_LEAF_PATHS,
-            )
-        )
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.readout",
-                module=readout,
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
-            )
-        )
+        patches.update(pulse_module_patches("pi_pulse", pi_pulse))
+        patches.update(pulse_module_patches("pi2_pulse", pi2_pulse))
+        patches.update(readout_module_patches(readout))
         if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
             patches["relax_delay"] = relax_delay
         if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_T2E:

@@ -42,10 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
-from zcu_tools.gui.app.autofluxdep.derivation import (
-    DerivationService,
-    SmoothingService,
-)
+from zcu_tools.gui.app.autofluxdep.derivation import SmoothingService
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import (
     Snapshot,
@@ -84,15 +81,6 @@ class DepDeclaring(Protocol):
 # fires — the main thread redraws that provider's Plotter. Pure data (a name +
 # an index), no figure crosses the thread (ADR-0017).
 Notify = Callable[[str, int], None]
-OnPoint = Callable[[int, float, "InfoStore"], None]
-# on_node(provider_name, flux_idx): fired when a provider is about to run (after
-# it resolved — a skipped provider does not fire). The UI uses it to auto-follow
-# (select the running Node + show its run tab). Pure data, like Notify.
-OnNode = Callable[[str, int], None]
-OnSkip = Callable[[str, int, "SkipReason"], None]
-OnNodeRow = Callable[[str, int, Any, "InfoStore"], None]
-OnNodeFailed = Callable[[str, int, Exception, str], None]
-OnFluxCommitted = Callable[[int, float, "InfoStore"], None]
 
 
 @dataclass(frozen=True)
@@ -112,22 +100,22 @@ class RunObserver:
     progress all hang off this port.
     """
 
-    def on_point(self, idx: int, flux: float, info: "InfoStore") -> None:
+    def on_point(self, idx: int, flux: float, info: InfoStore) -> None:
         del idx, flux, info
 
     def on_node(self, name: str, idx: int) -> None:
         del name, idx
 
-    def on_skip(self, name: str, idx: int, reason: "SkipReason") -> None:
+    def on_skip(self, name: str, idx: int, reason: SkipReason) -> None:
         del name, idx, reason
 
-    def on_node_row(self, name: str, idx: int, patch: Any, info: "InfoStore") -> None:
+    def on_node_row(self, name: str, idx: int, patch: Any, info: InfoStore) -> None:
         del name, idx, patch, info
 
     def on_node_failed(self, name: str, idx: int, exc: Exception, stage: str) -> None:
         del name, idx, exc, stage
 
-    def on_flux_committed(self, idx: int, flux: float, info: "InfoStore") -> None:
+    def on_flux_committed(self, idx: int, flux: float, info: InfoStore) -> None:
         del idx, flux, info
 
 
@@ -303,8 +291,7 @@ class Orchestrator:
 
     Smoothing is collected automatically: every dependency that sets ``smooth``
     is gathered across all providers, deduped by key, and turned into one
-    SmoothingService run after the Nodes each point. ``derivations`` are any
-    extra non-Node producers to run after that.
+    SmoothingService run after the Nodes each point.
     """
 
     providers: list[PlacedNode]
@@ -320,7 +307,6 @@ class Orchestrator:
     results: Mapping[str, Any] = field(default_factory=dict)
     cfg_snapshots: Mapping[str, RunCfgSnapshot] = field(default_factory=dict)
     notify: Notify | None = None
-    derivations: list[DerivationService] = field(default_factory=list)
     smoothing: SmoothingService | None = None
 
     def __post_init__(self) -> None:
@@ -349,18 +335,6 @@ class Orchestrator:
         # the sweep, and exposes it here so the caller turns it into a terminal
         # RUN_FAILED instead of letting it abort the run worker's QThread.
         self.run_error: RunError | None = None
-
-    @property
-    def run_error_node(self) -> str | None:
-        return None if self.run_error is None else self.run_error.node
-
-    @property
-    def run_error_flux_idx(self) -> int | None:
-        return None if self.run_error is None else self.run_error.flux_idx
-
-    @property
-    def run_error_stage(self) -> str | None:
-        return None if self.run_error is None else self.run_error.stage
 
     def _make_env(self, provider: PlacedNode, idx: int, flux: float) -> RunEnv:
         """Curry this point's execution environment for ``provider`` into a RunEnv.
@@ -412,23 +386,16 @@ class Orchestrator:
         start_idx: int = 0,
         info: InfoStore | None = None,
         observer: RunObserver | None = None,
-        on_point: OnPoint | None = None,
-        on_node: OnNode | None = None,
-        on_skip: OnSkip | None = None,
-        on_node_row: OnNodeRow | None = None,
-        on_node_failed: OnNodeFailed | None = None,
-        on_flux_committed: OnFluxCommitted | None = None,
         should_stop: Callable[[], bool] | None = None,
         pause_requested: Callable[[], bool] | None = None,
     ) -> InfoStore:
         """Sweep flux × providers in order.
 
         Per flux point, each provider is projected → built → produced → merged.
-        ``on_node`` fires just before a *resolved* provider runs (a skipped one
-        does not fire) — the UI auto-follows to that Node's run tab. After all
-        providers, the auto-built SmoothingService derives smoothed values into
-        ``point_smoothed``, then any extra ``derivations`` run, then ``on_point``
-        (the place to react to a finished point).
+        ``observer.on_node`` fires just before a *resolved* provider runs (a
+        skipped one does not fire) — the UI auto-follows to that Node's run tab.
+        After all providers, the auto-built SmoothingService derives smoothed
+        values into ``point_smoothed``, then ``observer.on_point`` fires.
 
         ``start_idx`` is always an index into the original full ``flux_values``.
         A caller resuming a run passes the preserved ``InfoStore`` from the prior
@@ -455,6 +422,7 @@ class Orchestrator:
         self._should_stop = should_stop
         self.run_error = None
         run_info = info if info is not None else InfoStore()
+        observer_provided = observer is not None
         run_observer = observer if observer is not None else RunObserver()
         for idx in range(start_idx, len(flux_values)):
             flux = flux_values[idx]
@@ -476,14 +444,10 @@ class Orchestrator:
                     break
                 resolution = resolve_provider_snapshot(provider, run_info, self.ml)
                 if resolution.snapshot is None:
-                    if on_skip is not None and resolution.skip_reason is not None:
-                        on_skip(provider.name, idx, resolution.skip_reason)
                     if resolution.skip_reason is not None:
                         run_observer.on_skip(provider.name, idx, resolution.skip_reason)
                     continue  # skipped this point (a required dep/module missing)
                 snapshot = resolution.snapshot
-                if on_node is not None:
-                    on_node(provider.name, idx)
                 run_observer.on_node(provider.name, idx)
                 node = provider.builder.build_node(self._make_env(provider, idx, flux))
                 profile_start = perf_now()
@@ -501,8 +465,6 @@ class Orchestrator:
                         detail=f"node={provider.name} idx={idx} failed=1",
                     )
                     self._record_run_error(provider.name, idx, "produce", exc)
-                    if on_node_failed is not None:
-                        on_node_failed(provider.name, idx, exc, "produce")
                     run_observer.on_node_failed(provider.name, idx, exc, "produce")
                     return run_info
                 _PRODUCE_PERF.record(
@@ -524,24 +486,16 @@ class Orchestrator:
                     )  # provides / provides_modules = the output contract
                 except Exception as exc:
                     self._record_run_error(provider.name, idx, "validate_patch", exc)
-                    if on_node_failed is not None:
-                        on_node_failed(provider.name, idx, exc, "validate_patch")
-                    else:
+                    if not observer_provided:
                         raise
                     run_observer.on_node_failed(
                         provider.name, idx, exc, "validate_patch"
                     )
                     return run_info
                 try:
-                    if on_node_row is not None:
-                        on_node_row(provider.name, idx, patch, run_info)
                     run_observer.on_node_row(provider.name, idx, patch, run_info)
                 except Exception as exc:
                     self._record_run_error(provider.name, idx, "row_write", exc)
-                    if on_node_failed is not None:
-                        on_node_failed(provider.name, idx, exc, "row_write")
-                    else:
-                        raise
                     run_observer.on_node_failed(provider.name, idx, exc, "row_write")
                     return run_info
                 run_info.point.update(patch.values())
@@ -557,14 +511,8 @@ class Orchestrator:
                 run_info.record_smoothed(smoothed)
                 if smoothed:
                     logger.debug("  smoothed: %s", smoothed)
-            for svc in self.derivations:
-                run_info.point.update(svc.derive(run_info.point))
             if provider_loop_completed:
-                if on_flux_committed is not None:
-                    on_flux_committed(idx, flux, run_info)
                 run_observer.on_flux_committed(idx, flux, run_info)
-                if on_point is not None:
-                    on_point(idx, flux, run_info)
                 run_observer.on_point(idx, flux, run_info)
         return run_info
 

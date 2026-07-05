@@ -56,8 +56,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
     SweepValue,
-    module_leaf_patches,
-    module_override_paths,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
@@ -69,15 +67,17 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    PULSE_MODULE_LEAF_PATHS,
-    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
-    ctx_md_float,
-    ctx_module,
-    generation_field,
+    logical_generation_field,
     pop_sweep_ranges,
-    readout_pulse_freq,
-    readout_pulse_gain,
+    pulse_module_override_paths,
+    pulse_module_patches,
+    readout_module_override_paths,
+    readout_module_patches,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+    missing_info_value,
+    missing_module_value,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
@@ -85,8 +85,17 @@ from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
     READOUT_LIBRARY_ALIASES,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
+from zcu_tools.gui.app.autofluxdep.nodes.readout_defaults import (
+    seed_readout_freq,
+    seed_readout_gain,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+    auto_relax_delay_from_t1,
+    seed_md_float,
+    snapshot_float,
+)
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.program.v2 import (
     Branch,
@@ -265,10 +274,6 @@ class RoOptimizeCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
-def _default_t1() -> None:
-    return None
-
-
 def _default_best_freq() -> None:
     return None
 
@@ -278,35 +283,11 @@ def _default_best_gain() -> None:
 
 
 def _seed_t1(ctx: Any | None) -> float:
-    return ctx_md_float(ctx, "t1") or _DEFAULT_T1
-
-
-def _seed_readout_freq(ctx: Any | None) -> float:
-    md_value = ctx_md_float(ctx, "r_f")
-    if md_value is not None:
-        return md_value
-    module = ctx_module(ctx, "readout_dpm", "readout_rf", "readout", "res_readout")
-    return readout_pulse_freq(module) or _DEFAULT_CENTER_FREQ
-
-
-def _seed_readout_gain(ctx: Any | None) -> float:
-    module = ctx_module(ctx, "readout_dpm", "readout_rf", "readout", "res_readout")
-    return readout_pulse_gain(module) or _DEFAULT_CENTER_GAIN
-
-
-def _snapshot_float(snapshot: Snapshot, key: str, fallback: float) -> float:
-    value = snapshot.get(key)
-    if value is None:
-        return fallback
-    return float(value)
+    return seed_md_float(ctx, "t1", _DEFAULT_T1)
 
 
 def _center_of(sweep: Any) -> float:
     return 0.5 * (float(sweep.start) + float(sweep.stop))
-
-
-def _default_readout() -> Any | None:
-    return None
 
 
 def _resolve_range(
@@ -346,7 +327,11 @@ def _resolve_relax_delay(
     mode: str, *, t1: float, fixed: float, relax_factor: float
 ) -> float:
     if mode == _RELAX_DELAY_MODE_AUTO_T1:
-        return float(relax_factor) * float(t1)
+        return auto_relax_delay_from_t1(
+            t1,
+            factor=float(relax_factor),
+            minimum=None,
+        )
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported ro_optimize relax_delay_mode: {mode!r}")
@@ -517,20 +502,22 @@ class RoOptimizeBuilder(Builder):
     provides = ("best_ro_freq", "best_ro_gain")
     provides_modules = ("opt_readout",)
     optional = (
-        Dependency("t1", smooth="ewma", default=_default_t1),
+        Dependency("t1", smooth="ewma", default=missing_info_value),
         Dependency("best_ro_freq", default=_default_best_freq),
         Dependency("best_ro_gain", default=_default_best_gain),
     )
     requires_modules = (ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),)
     optional_modules = (
-        ModuleDep("readout", default=_default_readout, aliases=READOUT_LIBRARY_ALIASES),
+        ModuleDep(
+            "readout", default=missing_module_value, aliases=READOUT_LIBRARY_ALIASES
+        ),
     )
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
         t1_seed = _seed_t1(ctx)
-        freq_seed = _seed_readout_freq(ctx)
-        gain_seed = _seed_readout_gain(ctx)
+        freq_seed = seed_readout_freq(ctx, _DEFAULT_CENTER_FREQ)
+        gain_seed = seed_readout_gain(ctx, _DEFAULT_CENTER_GAIN)
         return adapter_node_schema(
             RoOptFreqGainAdapter,
             ctx,
@@ -546,8 +533,7 @@ class RoOptimizeBuilder(Builder):
                 "gain_range": "sweep.gain",
             },
             generation_fields=(
-                generation_field(
-                    "freq_range_mode",
+                logical_generation_field(
                     "freq_range_mode",
                     str_choice_spec(
                         "freq_range_mode",
@@ -556,8 +542,7 @@ class RoOptimizeBuilder(Builder):
                     _RANGE_MODE_PREVIOUS_BEST,
                     group="sweep",
                 ),
-                generation_field(
-                    "gain_range_mode",
+                logical_generation_field(
                     "gain_range_mode",
                     str_choice_spec(
                         "gain_range_mode",
@@ -566,8 +551,7 @@ class RoOptimizeBuilder(Builder):
                     _RANGE_MODE_PREVIOUS_BEST,
                     group="sweep",
                 ),
-                generation_field(
-                    "relax_delay_mode",
+                logical_generation_field(
                     "relax_delay_mode",
                     str_choice_spec(
                         "relax_delay_mode",
@@ -576,22 +560,19 @@ class RoOptimizeBuilder(Builder):
                     _RELAX_DELAY_MODE_AUTO_T1,
                     group="timing",
                 ),
-                generation_field(
-                    "t1_seed_us",
+                logical_generation_field(
                     "t1_seed_us",
                     FloatSpec(label="t1_seed_us"),
                     t1_seed,
                     group="timing",
                 ),
-                generation_field(
-                    "relax_factor",
+                logical_generation_field(
                     "relax_factor",
                     FloatSpec(label="relax_factor"),
                     _DEFAULT_RELAX_FACTOR,
                     group="timing",
                 ),
-                generation_field(
-                    "freq_window_mode",
+                logical_generation_field(
                     "freq_window_mode",
                     str_choice_spec(
                         "freq_window_mode",
@@ -600,15 +581,13 @@ class RoOptimizeBuilder(Builder):
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
                     group="feedback",
                 ),
-                generation_field(
-                    "freq_half_width_mhz",
+                logical_generation_field(
                     "freq_half_width_mhz",
                     FloatSpec(label="freq_half_width_mhz"),
                     _DEFAULT_FREQ_HALF_WIDTH,
                     group="feedback",
                 ),
-                generation_field(
-                    "gain_window_mode",
+                logical_generation_field(
                     "gain_window_mode",
                     str_choice_spec(
                         "gain_window_mode",
@@ -617,8 +596,7 @@ class RoOptimizeBuilder(Builder):
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
                     group="feedback",
                 ),
-                generation_field(
-                    "gain_half_width",
+                logical_generation_field(
                     "gain_half_width",
                     FloatSpec(label="gain_half_width"),
                     _DEFAULT_GAIN_HALF_WIDTH,
@@ -628,7 +606,11 @@ class RoOptimizeBuilder(Builder):
             default_overrides={
                 "reps": 1000,
                 "rounds": 10,
-                "relax_delay": _DEFAULT_RELAX_FACTOR * t1_seed,
+                "relax_delay": auto_relax_delay_from_t1(
+                    t1_seed,
+                    factor=_DEFAULT_RELAX_FACTOR,
+                    minimum=None,
+                ),
                 "freq_range": SweepValue(
                     freq_seed - _DEFAULT_FREQ_HALF_WIDTH,
                     freq_seed + _DEFAULT_FREQ_HALF_WIDTH,
@@ -686,17 +668,14 @@ class RoOptimizeBuilder(Builder):
         knobs = schema.read_knobs()
         paths: list[OverridePath] = []
         paths.extend(
-            module_override_paths(
-                prefix="modules.pi_pulse",
-                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+            pulse_module_override_paths(
+                "pi_pulse",
                 source="pi_pulse module dependency",
                 reason="pi pulse is resolved from workflow/module-library dependency",
             )
         )
         paths.extend(
-            module_override_paths(
-                prefix="modules.readout",
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            readout_module_override_paths(
                 source="readout module dependency",
                 reason="readout module is resolved from workflow/module-library dependency",
             )
@@ -761,7 +740,7 @@ class RoOptimizeBuilder(Builder):
         gain_range_knob = knobs["gain_range"]
         freq_range = _resolve_range(
             str(knobs["freq_range_mode"]),
-            previous=_snapshot_float(
+            previous=snapshot_float(
                 snapshot, "best_ro_freq", _center_of(freq_range_knob)
             ),
             fixed=freq_range_knob,
@@ -771,7 +750,7 @@ class RoOptimizeBuilder(Builder):
         )
         gain_range = _resolve_range(
             str(knobs["gain_range_mode"]),
-            previous=_snapshot_float(
+            previous=snapshot_float(
                 snapshot, "best_ro_gain", _center_of(gain_range_knob)
             ),
             fixed=gain_range_knob,
@@ -779,7 +758,7 @@ class RoOptimizeBuilder(Builder):
             window_mode=str(knobs["gain_window_mode"]),
             half_width=float(knobs["gain_half_width"]),
         )
-        t1 = _snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
+        t1 = snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
         relax_delay = _resolve_relax_delay(
             str(knobs["relax_delay_mode"]),
             t1=t1,
@@ -787,20 +766,8 @@ class RoOptimizeBuilder(Builder):
             relax_factor=float(knobs["relax_factor"]),
         )
         patches: dict[str, object] = {}
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.pi_pulse",
-                module=pi_pulse,
-                leaf_paths=PULSE_MODULE_LEAF_PATHS,
-            )
-        )
-        patches.update(
-            module_leaf_patches(
-                prefix="modules.readout",
-                module=readout,
-                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
-            )
-        )
+        patches.update(pulse_module_patches("pi_pulse", pi_pulse))
+        patches.update(readout_module_patches(readout))
         if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
             patches["relax_delay"] = relax_delay
         if str(knobs["freq_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST:

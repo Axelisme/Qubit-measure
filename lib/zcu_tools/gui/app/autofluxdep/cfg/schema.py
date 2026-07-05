@@ -1,16 +1,11 @@
 """Node-knob schema — typed value tree with logical-key projection.
 
 ``NodeCfgSchema`` is the per-placement SSOT for an autofluxdep node's
-user-editable knobs. The visible value tree may be flat, sectioned, or mounted
-at explicit raw-cfg paths that mirror the notebook ``ml.make_cfg({...})`` shape,
-while the write/lower contract stays keyed by stable logical names (``reps``,
-``detune_sweep``, ``qub_gain``). That lets the UI show cfg-like nested sections
-without forcing every Builder to read nested dicts.
-
-``flat_node_schema`` keeps the legacy flat Builder contract. Older grouped
-schemas can use ``sectioned_node_schema``; adapter-backed autofluxdep nodes pass
-the measure-gui adapter's native value tree plus ``logical_paths`` directly into
-``NodeCfgSchema`` so the UI stays cfg-shaped while builder code keeps stable keys.
+user-editable knobs. The visible value tree is cfg-shaped, while the write/lower
+contract stays keyed by stable logical names (``reps``, ``detune_sweep``,
+``qub_gain``). Adapter-backed autofluxdep nodes pass the measure-gui adapter's
+native value tree plus ``logical_paths`` directly into ``NodeCfgSchema`` so the
+UI stays cfg-shaped while builder code keeps stable keys.
 """
 
 from __future__ import annotations
@@ -95,272 +90,18 @@ def str_choice_spec(label: str, choices: tuple[str, ...]) -> ScalarSpec:
     return ScalarSpec(label=label, type=str, choices=list(choices))
 
 
-# One field declaration: its spec + its default value. Kept for flat/sectioned
-# helper tests and tiny synthetic builders; real nodes use adapter-backed schemas.
-NodeField = tuple[str, CfgNodeSpec, Any]
-
-
 class NodeCfgPersistenceError(RuntimeError):
     """Invalid persisted node cfg payload."""
 
 
-@dataclass(frozen=True)
-class NodeFieldSpec:
-    """One logical node knob mounted as a leaf inside a UI section."""
-
-    logical_key: str
-    section_key: str
-    field_key: str
-    spec: CfgNodeSpec
-    default: Any
-
-    @property
-    def path(self) -> str:
-        return f"{self.section_key}.{self.field_key}"
-
-
-@dataclass(frozen=True)
-class NodeFieldDecl:
-    """One logical node knob before it is mounted into a UI section."""
-
-    logical_key: str
-    field_key: str
-    spec: CfgNodeSpec
-    default: Any
-
-
-@dataclass(frozen=True)
-class NodePathSpec:
-    """One logical node knob mounted at an explicit cfg value-tree path."""
-
-    logical_key: str
-    path: str
-    spec: CfgNodeSpec
-    default: Any
-
-
-@dataclass(frozen=True)
-class NodeSectionSpec:
-    """A UI section grouping one-or-more logical node knobs."""
-
-    key: str
-    label: str
-    fields: tuple[NodeFieldSpec, ...]
-
-
-def node_field(
-    logical_key: str, field_key: str, spec: CfgNodeSpec, default: Any
-) -> NodeFieldDecl:
-    """Declare one node knob without repeating its eventual section key."""
-    return NodeFieldDecl(
-        logical_key=logical_key,
-        field_key=field_key,
-        spec=spec,
-        default=default,
-    )
-
-
-def node_path(
-    logical_key: str, path: str, spec: CfgNodeSpec, default: Any
-) -> NodePathSpec:
-    """Declare one node knob at an explicit dotted UI cfg path."""
-    return NodePathSpec(
-        logical_key=logical_key,
-        path=path,
-        spec=spec,
-        default=default,
-    )
-
-
-def node_section(key: str, label: str, *fields: NodeFieldDecl) -> NodeSectionSpec:
-    """Mount pending node knob declarations under one UI section key."""
-    return NodeSectionSpec(
-        key=key,
-        label=label,
-        fields=tuple(
-            NodeFieldSpec(
-                logical_key=field.logical_key,
-                section_key=key,
-                field_key=field.field_key,
-                spec=field.spec,
-                default=field.default,
-            )
-            for field in fields
-        ),
-    )
-
-
-def _default_value_for(spec: CfgNodeSpec, default: Any) -> Any:
-    """Build the value-tree leaf for ``spec`` from its declared ``default``."""
-    if isinstance(spec, SweepSpec):
-        if not isinstance(default, SweepValue):
-            raise TypeError(
-                f"SweepSpec default must be a SweepValue, got {type(default).__name__}"
-            )
-        return default
-    if isinstance(spec, ScalarSpec):
-        if isinstance(default, (DirectValue, EvalValue)):
-            return default
-        return DirectValue(default)
-    raise TypeError(f"Unsupported node field spec: {type(spec).__name__}")
-
-
-def flat_node_schema(fields: tuple[NodeField, ...]) -> CfgSchema:
-    """A ``CfgSchema`` for a flat list of ``(key, spec, default)`` node knobs."""
-    _ensure_unique("node field key", (key for key, _, _ in fields))
-    spec = CfgSectionSpec(fields={key: node_spec for key, node_spec, _ in fields})
-    value = CfgSectionValue(
-        fields={
-            key: _default_value_for(node_spec, default)
-            for key, node_spec, default in fields
-        }
-    )
-    return CfgSchema(spec=spec, value=value)
-
-
-def path_node_schema(
-    fields: tuple[NodePathSpec, ...],
-    *,
-    section_labels: Mapping[str, str] | None = None,
-) -> NodeCfgSchema:
-    """Build a schema from logical knobs mounted at raw ``make_cfg`` paths.
-
-    The produced value tree is what the cfg editor renders. For example a field
-    declared at ``modules.qub_pulse.gain`` appears under ``modules`` →
-    ``qub_pulse`` in the "Default cfg" block, while ``NodeCfgSchema.lower()``
-    still returns the flat logical key ``qub_gain`` for Builder code.
-    """
-    labels = dict(section_labels or {})
-    _ensure_unique("node logical key", (field.logical_key for field in fields))
-    _ensure_unique("node logical path", (field.path for field in fields))
-
-    root_spec = CfgSectionSpec(fields={})
-    root_value = CfgSectionValue(fields={})
-    logical_paths: dict[str, str] = {}
-
-    for field_spec in fields:
-        _validate_node_path_spec(field_spec)
-        _insert_path_field(root_spec, root_value, field_spec, labels)
-        logical_paths[field_spec.logical_key] = field_spec.path
-
+def empty_node_schema() -> NodeCfgSchema:
+    """Build an empty node cfg schema for services with no editable knobs."""
     return NodeCfgSchema(
         CfgSchema(
-            spec=root_spec,
-            value=root_value,
-        ),
-        logical_paths=logical_paths,
+            spec=CfgSectionSpec(fields={}),
+            value=CfgSectionValue(fields={}),
+        )
     )
-
-
-def sectioned_node_schema(sections: tuple[NodeSectionSpec, ...]) -> NodeCfgSchema:
-    """Build a sectioned node schema with an explicit logical-key projection."""
-    _ensure_unique("node section key", (section.key for section in sections))
-
-    root_spec_fields: dict[str, CfgNodeSpec] = {}
-    root_value_fields: dict[str, Any] = {}
-    logical_paths: dict[str, str] = {}
-
-    for section in sections:
-        _validate_path_part("section key", section.key)
-        _ensure_unique(
-            f"field key in section {section.key!r}",
-            (field_spec.field_key for field_spec in section.fields),
-        )
-        section_spec_fields: dict[str, CfgNodeSpec] = {}
-        section_value_fields: dict[str, Any] = {}
-
-        for field_spec in section.fields:
-            _validate_node_field_spec(section.key, field_spec)
-            if field_spec.logical_key in logical_paths:
-                raise ValueError(
-                    f"Duplicate node logical key {field_spec.logical_key!r}"
-                )
-            section_spec_fields[field_spec.field_key] = field_spec.spec
-            section_value_fields[field_spec.field_key] = _default_value_for(
-                field_spec.spec, field_spec.default
-            )
-            logical_paths[field_spec.logical_key] = field_spec.path
-
-        root_spec_fields[section.key] = CfgSectionSpec(
-            label=section.label,
-            fields=section_spec_fields,
-        )
-        root_value_fields[section.key] = CfgSectionValue(fields=section_value_fields)
-
-    return NodeCfgSchema(
-        CfgSchema(
-            spec=CfgSectionSpec(fields=root_spec_fields),
-            value=CfgSectionValue(fields=root_value_fields),
-        ),
-        logical_paths=logical_paths,
-    )
-
-
-def _validate_node_path_spec(field_spec: NodePathSpec) -> None:
-    _validate_path_part("logical key", field_spec.logical_key)
-    for part in _split_path(field_spec.path):
-        _validate_path_part("field path segment", part)
-    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec)):
-        raise TypeError(
-            f"Unsupported node field spec for {field_spec.logical_key!r}: "
-            f"{type(field_spec.spec).__name__}; only ScalarSpec and SweepSpec "
-            "are supported"
-        )
-
-
-def _insert_path_field(
-    root_spec: CfgSectionSpec,
-    root_value: CfgSectionValue,
-    field_spec: NodePathSpec,
-    section_labels: Mapping[str, str],
-) -> None:
-    spec_section = root_spec
-    value_section = root_value
-    parts = _split_path(field_spec.path)
-
-    for idx, part in enumerate(parts[:-1]):
-        section_path = ".".join(parts[: idx + 1])
-        child_spec = spec_section.fields.get(part)
-        child_value = value_section.fields.get(part)
-        if child_spec is None and child_value is None:
-            child_spec = CfgSectionSpec(
-                fields={},
-                label=section_labels.get(section_path, part),
-            )
-            child_value = CfgSectionValue(fields={})
-            spec_section.fields[part] = child_spec
-            value_section.fields[part] = child_value
-        if not isinstance(child_spec, CfgSectionSpec) or not isinstance(
-            child_value, CfgSectionValue
-        ):
-            raise ValueError(
-                f"Node field path {field_spec.path!r} cannot descend through "
-                f"non-section segment {section_path!r}"
-            )
-        spec_section = child_spec
-        value_section = child_value
-
-    leaf = parts[-1]
-    if leaf in spec_section.fields or leaf in value_section.fields:
-        raise ValueError(f"Duplicate node field path: {field_spec.path}")
-    spec_section.fields[leaf] = field_spec.spec
-    value_section.fields[leaf] = _default_value_for(field_spec.spec, field_spec.default)
-
-
-def _validate_node_field_spec(section_key: str, field_spec: NodeFieldSpec) -> None:
-    _validate_path_part("logical key", field_spec.logical_key)
-    _validate_path_part("field key", field_spec.field_key)
-    if field_spec.section_key != section_key:
-        raise ValueError(
-            f"Node field {field_spec.logical_key!r} declares section "
-            f"{field_spec.section_key!r}, but is mounted under {section_key!r}"
-        )
-    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec)):
-        raise TypeError(
-            f"Unsupported node field spec for {field_spec.logical_key!r}: "
-            f"{type(field_spec.spec).__name__}; only ScalarSpec and SweepSpec "
-            "are supported"
-        )
 
 
 def _validate_path_part(kind: str, value: str) -> None:
@@ -406,10 +147,6 @@ class NodeCfgSchema:
     def keys(self) -> tuple[str, ...]:
         """The declared knob keys (the node's typed user knobs)."""
         return tuple(self.logical_paths)
-
-    def path_for(self, logical_key: str) -> str:
-        """Return the dotted value-tree path for a stable logical knob key."""
-        return self._require_logical_path(logical_key)
 
     def set_field(self, key: str, value: Any) -> None:
         """Write one knob leaf into the value tree, fast-failing an unknown key.
@@ -531,10 +268,6 @@ class NodeCfgSchema:
                 _get_value_at_path(self.schema.value, path)
             )
         return knobs
-
-    def read_value_tree(self) -> dict[str, Any]:
-        """The sectioned value tree, JSON-friendly, for UI/debug assertions."""
-        return _jsonify_value_tree(self.schema.value)
 
     def to_persisted_raw(self) -> dict[str, object]:
         """Encode the value tree using stable logical generation keys.

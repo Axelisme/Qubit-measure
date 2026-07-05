@@ -34,9 +34,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     ScalarSpec,
     SweepValue,
-    node_field,
-    node_section,
-    sectioned_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.form import (
     CfgFormWidget,
@@ -57,6 +54,8 @@ from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import (
 )
 from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
 from zcu_tools.gui.session.events import SessionEvent
+
+from .._helpers import node_field, node_section, sectioned_node_schema
 
 
 class _NoopNode(Node):

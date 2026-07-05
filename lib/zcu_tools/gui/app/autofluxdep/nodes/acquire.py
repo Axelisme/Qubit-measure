@@ -16,9 +16,9 @@ each Node.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray

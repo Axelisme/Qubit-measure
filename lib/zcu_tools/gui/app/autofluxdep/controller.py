@@ -18,6 +18,7 @@ import logging
 import math
 import os
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,7 +37,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     validate_override_plan_base_cfg,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
-from zcu_tools.gui.app.autofluxdep.derivation import DerivationService
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
     PointDonePayload,
@@ -98,6 +98,7 @@ from zcu_tools.gui.app.autofluxdep.tools import (
 )
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import BasePayload
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.events import PredictorChangedPayload
@@ -152,14 +153,14 @@ _PERSIST_DEBOUNCE_MS = 500
 class _MlModuleSource:
     """Transparent ``ModuleLibrary`` proxy honouring the ``ModuleSource`` contract.
 
-    Two consumers share the ml threaded into the run env: ``project_snapshot``
-    wants the orchestrator's ``ModuleSource`` contract — ``get_module(name)``
-    returns None if absent (the snapshot then falls back to a Node-produced
-    module / the dependency default) — whereas a node's cfg builder wants the full
-    ``ModuleLibrary`` surface (``get_waveform`` / ``make_cfg``, which *should*
-    raise on a missing reference). This proxy serves both: it overrides only
-    ``get_module``'s raise-on-absent (``ModuleLibrary`` raises ``ValueError``) into
-    None-on-absent, and forwards every other attribute to the wrapped library.
+    The run resolver wants the orchestrator's ``ModuleSource`` contract:
+    ``get_module(name)`` returns None if absent, so the dependency resolver can
+    fall back to a Node-produced module or dependency default. A node cfg builder
+    still wants the full ``ModuleLibrary`` surface (``get_waveform`` /
+    ``make_cfg``), which should raise on a missing reference. This proxy serves
+    both: it overrides only ``get_module``'s raise-on-absent behavior
+    (``ModuleLibrary`` raises ``ValueError``) into None-on-absent, and forwards
+    every other attribute to the wrapped library.
     """
 
     def __init__(self, ml: ModuleLibrary) -> None:
@@ -174,6 +175,14 @@ class _MlModuleSource:
         # forward get_waveform / make_cfg / etc. to the real library (called only
         # for attributes not defined on this proxy; _ml is a real attribute).
         return getattr(self._ml, attr)
+
+
+@dataclass(frozen=True)
+class _RunReadiness:
+    reason: str | None
+    enabled_nodes: list[PlacedNode]
+    flux_values: list[float] | None
+    project: ProjectInfo | None
 
 
 class _RunEventEmitter(QObject):
@@ -429,10 +438,8 @@ class Controller(SessionControllerMixin):
         self._state.flux_npts_expr = state.flux.npts_expr
         self._state.flux_values = [float(v) for v in state.flux.values]
         self._state.auto_follow_tabs = state.ui.auto_follow_tabs
-        self._state.run_results = {}
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
+        self._commit_workflow_edit(changed_name=None)
         self._state.version.bump(FLUX_VERSION_KEY)
-        self._bus.emit(WorkflowChangedPayload(name=None))
         self._bus.emit(FluxChangedPayload(count=len(self._state.flux_values)))
         return RestoreReport(
             restored_nodes=len(self._state.nodes),
@@ -472,6 +479,12 @@ class Controller(SessionControllerMixin):
         self._state.run_results = {}
         self._state.run_predictor = None
 
+    def _commit_workflow_edit(self, changed_name: str | None) -> None:
+        self._clear_run_products()
+        self._state.version.bump(WORKFLOW_VERSION_KEY)
+        self._bus.emit(WorkflowChangedPayload(name=changed_name))
+        self._schedule_persist_all()
+
     def clear_run_products(self) -> None:
         """UI start-failure recovery entry: clear run-lived products."""
         self._clear_run_products()
@@ -499,7 +512,7 @@ class Controller(SessionControllerMixin):
         self._on_startup_project_applied(resolved)
         return True
 
-    def _on_startup_project_applied(self, project: "ResolvedStartupProject") -> None:
+    def _on_startup_project_applied(self, project: ResolvedStartupProject) -> None:
         self._state.project = ProjectInfo(
             chip_name=project.chip_name,
             qub_name=project.qub_name,
@@ -510,7 +523,7 @@ class Controller(SessionControllerMixin):
         self._try_auto_load_predictor_from_params(project)
 
     def _try_auto_load_predictor_from_params(
-        self, project: "ResolvedStartupProject"
+        self, project: ResolvedStartupProject
     ) -> None:
         params_path = Path(project.params_path)
         if not params_path.is_file():
@@ -587,11 +600,8 @@ class Controller(SessionControllerMixin):
             default_context=self._state.exp_context,
         )
         self._state.nodes.append(node)
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
-        self._bus.emit(WorkflowChangedPayload(name=node.name))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=node.name)
         return node
 
     def add_node_by_type(self, type_name: str) -> PlacedNode:
@@ -604,11 +614,8 @@ class Controller(SessionControllerMixin):
         node = create_placement(type_name, ctx=self._state.exp_context)
         node.name = self._unique_name(node.name)
         self._state.nodes.append(node)
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
-        self._bus.emit(WorkflowChangedPayload(name=node.name))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=node.name)
         return node
 
     def rename_node(self, index: int, new_name: str) -> str:
@@ -631,11 +638,8 @@ class Controller(SessionControllerMixin):
         node.name = self._unique_name(cleaned, exclude=node)
         if node.name == old:
             return node.name
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("rename_node[%d]: %r -> %r", index, old, node.name)
-        self._bus.emit(WorkflowChangedPayload(name=node.name))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=node.name)
         return node.name
 
     def remove_node(self, name: str) -> None:
@@ -644,11 +648,8 @@ class Controller(SessionControllerMixin):
         self._state.nodes = [n for n in self._state.nodes if n.name != name]
         if len(self._state.nodes) == before:
             return
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("remove_node: %r (%d -> %d)", name, before, len(self._state.nodes))
-        self._bus.emit(WorkflowChangedPayload(name=name))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=name)
 
     def reorder(self, index: int, delta: int) -> int:
         """Move the Node at ``index`` by ``delta`` (±1). Returns the new index."""
@@ -658,11 +659,8 @@ class Controller(SessionControllerMixin):
         if not (0 <= index < len(nodes) and 0 <= new_index < len(nodes)):
             return index  # out of range → no-op
         nodes[index], nodes[new_index] = nodes[new_index], nodes[index]
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("reorder: %d <-> %d", index, new_index)
-        self._bus.emit(WorkflowChangedPayload(name=None))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=None)
         return new_index
 
     def set_node_enabled(self, index: int, enabled: bool) -> None:
@@ -673,11 +671,8 @@ class Controller(SessionControllerMixin):
         if node.enabled == enabled:
             return
         node.enabled = enabled
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("set_node_enabled[%d] (%r): %s", index, node.name, enabled)
-        self._bus.emit(WorkflowChangedPayload(name=node.name))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=node.name)
 
     def set_node_params(self, index: int, params: Mapping[str, Any]) -> None:
         """Testing/support entry: write Node knob leaves into its schema SSOT.
@@ -696,24 +691,18 @@ class Controller(SessionControllerMixin):
         node = self._state.nodes[index]
         for key, value in params.items():
             node.schema.set_field(key, value)  # fast-fails unknown key / wrong type
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug(
             "set_node_params[%d] (%r): keys=%s", index, node.name, list(params)
         )
-        self._bus.emit(WorkflowChangedPayload(name=None))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=node.name)
 
     def set_node_cfg_value(self, index: int, value: CfgSectionValue) -> None:
         """Replace one Node's complete cfg value tree from the typed form draft."""
         self._require_workflow_editable()
         node = self._state.nodes[index]
         node.schema.replace_value_tree(value)
-        self._clear_run_products()
-        self._state.version.bump(WORKFLOW_VERSION_KEY)
         logger.debug("set_node_cfg_value[%d] (%r)", index, node.name)
-        self._bus.emit(WorkflowChangedPayload(name=None))
-        self._schedule_persist_all()
+        self._commit_workflow_edit(changed_name=node.name)
 
     def set_flux_values(self, values: list[float]) -> None:
         self._require_workflow_editable()
@@ -808,15 +797,54 @@ class Controller(SessionControllerMixin):
 
     def run_readiness(self) -> str | None:
         """UI readiness reason for the Run button; None means Run may be clicked."""
-        if not self._state.has_setup:
-            return "Setup required"
-        if not self._state.nodes:
-            return "Add at least one node"
-        if not self._enabled_nodes():
-            return "Enable at least one node"
-        if self._state.project is None:
-            return "Project required"
-        return None
+        return self._evaluate_run_readiness(
+            require_setup=True,
+            require_flux=False,
+            start_messages=False,
+        ).reason
+
+    def _evaluate_run_readiness(
+        self,
+        *,
+        require_setup: bool,
+        require_flux: bool,
+        start_messages: bool,
+    ) -> _RunReadiness:
+        enabled_nodes = self._enabled_nodes()
+        project = self._state.project
+        flux_values: list[float] | None = None
+        if require_setup and not self._state.has_setup:
+            return _RunReadiness("Setup required", enabled_nodes, None, project)
+        if start_messages:
+            if not enabled_nodes:
+                return _RunReadiness(
+                    "autofluxdep run requires at least one enabled node",
+                    enabled_nodes,
+                    None,
+                    project,
+                )
+        else:
+            if not self._state.nodes:
+                return _RunReadiness(
+                    "Add at least one node", enabled_nodes, None, project
+                )
+            if not enabled_nodes:
+                return _RunReadiness(
+                    "Enable at least one node", enabled_nodes, None, project
+                )
+        if require_flux:
+            try:
+                flux_values = self._current_flux_values_for_run()
+            except RuntimeError as exc:
+                return _RunReadiness(str(exc), enabled_nodes, None, project)
+        if project is None:
+            reason = (
+                "autofluxdep run requires a configured project"
+                if start_messages
+                else "Project required"
+            )
+            return _RunReadiness(reason, enabled_nodes, flux_values, project)
+        return _RunReadiness(None, enabled_nodes, flux_values, project)
 
     def _resolve_flux_expr(self, label: str, expr: str, type_: type) -> int | float:
         try:
@@ -846,14 +874,16 @@ class Controller(SessionControllerMixin):
     def _require_start_run_ready(
         self,
     ) -> tuple[list[PlacedNode], list[float], ProjectInfo]:
-        enabled_nodes = self._enabled_nodes()
-        if not enabled_nodes:
-            raise RuntimeError("autofluxdep run requires at least one enabled node")
-        flux_values = self._current_flux_values_for_run()
-        project = self._state.project
-        if project is None:
-            raise RuntimeError("autofluxdep run requires a configured project")
-        return enabled_nodes, flux_values, project
+        readiness = self._evaluate_run_readiness(
+            require_setup=False,
+            require_flux=True,
+            start_messages=True,
+        )
+        if readiness.reason is not None:
+            raise RuntimeError(readiness.reason)
+        if readiness.flux_values is None or readiness.project is None:
+            raise RuntimeError("autofluxdep run readiness evaluation is incomplete")
+        return readiness.enabled_nodes, readiness.flux_values, readiness.project
 
     # --- run control (cancellable) ---
 
@@ -1117,6 +1147,43 @@ class Controller(SessionControllerMixin):
         if release_session:
             self._run_session = None
 
+    def _prepare_run_segment_terminal(self, *, release_session: bool) -> None:
+        self._clear_active_run(release_session=release_session)
+        self.persist_all()
+
+    def _settle_run_segment(
+        self, settle: SettleFn, outcome: OperationOutcome, payload: BasePayload
+    ) -> None:
+        settle(outcome)
+        self._bus.emit(payload)
+
+    def _finalize_terminal_session(
+        self,
+        session: RunSession,
+        status: str,
+        *,
+        error: Exception | None = None,
+        node: str | None = None,
+        flux_idx: int | None = None,
+        stage: str | None = None,
+    ) -> Exception | None:
+        try:
+            if status == "failed":
+                if error is None:
+                    raise RuntimeError("failed run finalization requires an error")
+                session.store.record_run_failed(
+                    error,
+                    flux_idx=flux_idx,
+                    node=node,
+                    stage=stage,
+                )
+                session.finalize("failed", error=error)
+                return None
+            session.finalize(status)
+            return None
+        except Exception as exc:
+            return exc
+
     def _on_run_segment_terminal(
         self, session: RunSession, bg: BgResult, settle: SettleFn
     ) -> None:
@@ -1156,46 +1223,56 @@ class Controller(SessionControllerMixin):
 
     def _on_run_finished(self, session: RunSession, settle: SettleFn) -> None:
         logger.info("run finished: %d flux point(s)", len(session.flux_values))
-        self._clear_active_run(release_session=True)
-        self.persist_all()
-        try:
-            session.finalize("finished")
-        except Exception as exc:
-            logger.exception("autofluxdep artifact finalize failed")
-            settle(OperationOutcome("failed", str(exc)))
-            self._bus.emit(RunFailedPayload(message=str(exc), stage="finalize"))
+        self._prepare_run_segment_terminal(release_session=True)
+        if (exc := self._finalize_terminal_session(session, "finished")) is not None:
+            logger.error(
+                "autofluxdep artifact finalize failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            self._settle_run_segment(
+                settle,
+                OperationOutcome("failed", str(exc)),
+                RunFailedPayload(message=str(exc), stage="finalize"),
+            )
             return
-        settle(OperationOutcome("finished"))
-        self._bus.emit(RunFinishedPayload())
+        self._settle_run_segment(
+            settle, OperationOutcome("finished"), RunFinishedPayload()
+        )
 
     def _on_run_paused(
         self, session: RunSession, next_flux_idx: int, settle: SettleFn
     ) -> None:
         logger.info("run paused before flux idx %d", next_flux_idx)
-        self._clear_active_run(release_session=False)
-        self.persist_all()
+        self._prepare_run_segment_terminal(release_session=False)
         try:
             session.mark_paused()
         except Exception as exc:
             logger.exception("autofluxdep paused artifact flush failed")
             self._on_run_failed(session, exc, settle, stage="pause_flush")
             return
-        settle(OperationOutcome("cancelled"))
-        self._bus.emit(RunPausedPayload(next_flux_idx=next_flux_idx))
+        self._settle_run_segment(
+            settle,
+            OperationOutcome("cancelled"),
+            RunPausedPayload(next_flux_idx=next_flux_idx),
+        )
 
     def _on_run_stopped(self, session: RunSession, settle: SettleFn) -> None:
         logger.info("run stopped at flux idx %d", self._cur_idx)
-        self._clear_active_run(release_session=True)
-        self.persist_all()
-        try:
-            session.finalize("stopped")
-        except Exception as exc:
-            logger.exception("autofluxdep stopped artifact finalize failed")
-            settle(OperationOutcome("failed", str(exc)))
-            self._bus.emit(RunFailedPayload(message=str(exc), stage="stop_finalize"))
+        self._prepare_run_segment_terminal(release_session=True)
+        if (exc := self._finalize_terminal_session(session, "stopped")) is not None:
+            logger.error(
+                "autofluxdep stopped artifact finalize failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            self._settle_run_segment(
+                settle,
+                OperationOutcome("failed", str(exc)),
+                RunFailedPayload(message=str(exc), stage="stop_finalize"),
+            )
             return
-        settle(OperationOutcome("cancelled"))
-        self._bus.emit(RunStoppedPayload())
+        self._settle_run_segment(
+            settle, OperationOutcome("cancelled"), RunStoppedPayload()
+        )
 
     def _on_run_failed(
         self,
@@ -1208,27 +1285,31 @@ class Controller(SessionControllerMixin):
         stage: str | None = None,
     ) -> None:
         logger.error("run failed at flux idx %d: %s", self._cur_idx, error)
-        self._clear_active_run(release_session=True)
-        self.persist_all()
-        try:
-            session.store.record_run_failed(
-                error,
-                flux_idx=flux_idx,
+        self._prepare_run_segment_terminal(release_session=True)
+        if (
+            exc := self._finalize_terminal_session(
+                session,
+                "failed",
+                error=error,
                 node=node,
+                flux_idx=flux_idx,
                 stage=stage,
             )
-            session.finalize("failed", error=error)
-        except Exception as exc:
-            logger.exception("autofluxdep failed artifact finalize failed")
+        ) is not None:
+            logger.error(
+                "autofluxdep failed artifact finalize failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
             error = RuntimeError(f"{error}; artifact finalize failed: {exc}")
-        settle(OperationOutcome("failed", str(error)))
-        self._bus.emit(
+        self._settle_run_segment(
+            settle,
+            OperationOutcome("failed", str(error)),
             RunFailedPayload(
                 message=str(error),
                 node=node,
                 flux_idx=flux_idx,
                 stage=stage,
-            )
+            ),
         )
 
     def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
@@ -1276,7 +1357,6 @@ class Controller(SessionControllerMixin):
         self,
         tools: Tools | None = None,
         ml: ModuleSource | None = None,
-        derivations: list[DerivationService] | None = None,
     ) -> InfoStore:
         """Testing/support entry: exercise the dependency model headless.
 
@@ -1284,9 +1364,8 @@ class Controller(SessionControllerMixin):
         same providers (predictor Service prepended), but with no Results and no
         notify (nothing to draw). ``tools`` defaults to a fresh ``Tools`` (a
         SimplePredictor if none bound); ``ml`` is the module-library fallback;
-        smoothing is auto-built from declarations, ``derivations`` are extra
-        producers. Returns the final InfoStore. Providers run in list order (no
-        topo sort)."""
+        smoothing is auto-built from declarations. Returns the final InfoStore.
+        Providers run in list order (no topo sort)."""
         enabled_nodes = self._enabled_nodes()
         providers = self._build_providers()
         ctx = self._state.exp_context
@@ -1300,6 +1379,5 @@ class Controller(SessionControllerMixin):
             ml=run_ml,
             md=ctx.md,
             cfg_snapshots=cfg_snapshots,
-            derivations=derivations or [],
         )
         return orch.run(self._current_flux_values_for_run())

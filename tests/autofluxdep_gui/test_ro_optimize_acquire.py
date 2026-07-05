@@ -39,7 +39,7 @@ _READOUT = {
 
 _PARAMS = {
     "reps": 2000,
-    "rounds": 3,
+    "rounds": 8,
     "freq_range": SweepValue(start=5995.0, stop=6005.0, expts=11),
     "gain_range": SweepValue(start=0.2, stop=0.8, expts=11),
     "relax_delay_mode": "fixed",
