@@ -88,6 +88,8 @@ _PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
     prefix="pred_freq_correction",
     default_enabled=True,
     default_strategy="idw",
+    default_idw_k=10,
+    default_idw_epsilon=1e-4,
     default_decay_points=4.0,
 )
 

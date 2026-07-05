@@ -917,6 +917,8 @@ def test_qubit_freq_default_knobs():
     assert knobs["target_kappa"] == 6.5
     assert knobs["max_drive_gain"] == 1.0
     assert knobs["qfw_seed_gain"] == 0.05
+    assert knobs["pred_freq_correction_idw_k"] == 10
+    assert knobs["pred_freq_correction_idw_epsilon"] == pytest.approx(1e-4)
     assert knobs["pred_freq_correction_decay_points"] == 4.0
     # clearing optional defaults still omits them; channel/nqz remain required raw
     # cfg fields because PulseCfg cannot run without concrete hardware routing.
