@@ -15,7 +15,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, flat_node_schema
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    NodeCfgSchema,
+    OverridePlan,
+    flat_node_schema,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeField
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
@@ -225,6 +229,7 @@ def make_builder(
     optional_modules: tuple[ModuleDep, ...] = (),
     provides_modules: tuple[str, ...] = (),
     schema_fields: tuple[NodeField, ...] = (),
+    override_plan: OverridePlan | None = None,
     produce_fn: ProduceFn | None = None,
     result_factory: ResultFactory | None = None,
     plotter_factory: Callable[[Any], Any] | None = None,
@@ -245,6 +250,10 @@ def make_builder(
         def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
             del ctx
             return NodeCfgSchema(flat_node_schema(schema_fields))
+
+        def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
+            del schema
+            return override_plan or OverridePlan()
 
         def build_node(self, env: RunEnv) -> Node:
             return _FnNode(env, produce_fn)

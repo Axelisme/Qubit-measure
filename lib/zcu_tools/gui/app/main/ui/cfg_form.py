@@ -7,7 +7,8 @@ lib/zcu_tools/gui/ui/fields/.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -16,7 +17,18 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.main.adapter import EvalValue
+from zcu_tools.gui.app.main.adapter import (
+    CfgNodeSpec,
+    CfgNodeValue,
+    CfgSectionSpec,
+    DeviceRefSpec,
+    EvalValue,
+    LiteralSpec,
+    ModuleRefSpec,
+    ScalarSpec,
+    SweepSpec,
+    WaveformRefSpec,
+)
 
 from ..live_model import (
     LiveField,
@@ -31,6 +43,60 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue
 
 logger = logging.getLogger(__name__)
+
+Tone = Literal["normal", "muted", "info", "warning", "error"]
+
+
+@dataclass(frozen=True)
+class FieldDecoration:
+    """Presentation contract for one rendered cfg field path."""
+
+    hidden: bool = False
+    enabled: bool = True
+    tone: Tone = "normal"
+    badge: str = ""
+    tooltip: str = ""
+    label_suffix: str = ""
+
+    def merge(self, patch: FieldDecorationPatch | None) -> FieldDecoration:
+        if patch is None:
+            return self
+        updates = {
+            name: value
+            for name, value in {
+                "hidden": patch.hidden,
+                "enabled": patch.enabled,
+                "tone": patch.tone,
+                "badge": patch.badge,
+                "tooltip": patch.tooltip,
+                "label_suffix": patch.label_suffix,
+            }.items()
+            if value is not None
+        }
+        return replace(self, **updates)
+
+
+@dataclass(frozen=True)
+class FieldDecorationPatch:
+    """Sparse app-specific patch over a field's default decoration."""
+
+    hidden: bool | None = None
+    enabled: bool | None = None
+    tone: Tone | None = None
+    badge: str | None = None
+    tooltip: str | None = None
+    label_suffix: str | None = None
+
+
+class FieldDecorationProvider(Protocol):
+    """App-specific decoration lookup keyed by full value-tree path."""
+
+    def decoration_for(
+        self,
+        path: str,
+        spec: CfgNodeSpec,
+        value: CfgNodeValue | None,
+    ) -> FieldDecorationPatch | None: ...
 
 
 class CfgFormWidget(QWidget):
@@ -58,11 +124,14 @@ class CfgFormWidget(QWidget):
         parent: QWidget | None = None,
         *,
         field_label_max_width: int | None = None,
+        decoration_provider: FieldDecorationProvider | None = None,
     ) -> None:
         super().__init__(parent)
         self._model: SectionLiveField | None = None
         self._root_widget: SectionWidget | None = None
         self._field_label_max_width = field_label_max_width
+        self._decoration_provider = decoration_provider
+        self._field_decorations: dict[str, FieldDecoration] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -88,6 +157,7 @@ class CfgFormWidget(QWidget):
         self.detach()
 
         self._model = model
+        self._field_decorations = {}
         model.on_validity_changed.connect(self.validity_changed.emit)
         model.on_change.connect(self._emit_schema_changed)
 
@@ -95,6 +165,7 @@ class CfgFormWidget(QWidget):
             model,
             top_level=True,
             field_label_max_width=self._field_label_max_width,
+            decoration_for_path=self._resolve_decoration,
         )
         self._inner_layout.insertWidget(
             self._inner_layout.count() - 1, self._root_widget
@@ -119,6 +190,22 @@ class CfgFormWidget(QWidget):
             self._inner_layout.removeWidget(self._root_widget)
             self._root_widget.deleteLater()
             self._root_widget = None
+        self._field_decorations = {}
+
+    def set_decoration_provider(self, provider: FieldDecorationProvider | None) -> None:
+        self._decoration_provider = provider
+        model = self._model
+        if model is not None:
+            self.attach(model)
+
+    def decoration_for_path(self, path: str) -> FieldDecoration:
+        try:
+            return self._field_decorations[path]
+        except KeyError as exc:
+            raise KeyError(f"Unknown cfg field path {path!r}") from exc
+
+    def decoration_paths(self) -> tuple[str, ...]:
+        return tuple(self._field_decorations)
 
     def read_values(self) -> CfgSectionValue:
         """Return a new CfgSectionValue from current model state."""
@@ -161,6 +248,15 @@ class CfgFormWidget(QWidget):
         if self._model is None:
             return
         self.schema_changed.emit(self.read_schema())
+
+    def _resolve_decoration(self, path: str, field: LiveField) -> FieldDecoration:
+        spec = cast(CfgNodeSpec, field.spec)
+        value = cast(CfgNodeValue | None, field.get_value())
+        provider = self._decoration_provider
+        patch = None if provider is None else provider.decoration_for(path, spec, value)
+        decoration = default_decoration_for_spec(spec).merge(patch)
+        self._field_decorations[path] = decoration
+        return decoration
 
     def _find_first_invalid(self, field: LiveField, *, path: str) -> str | None:
         if isinstance(field, ScalarLiveField):
@@ -211,3 +307,26 @@ class CfgFormWidget(QWidget):
         if not field.is_valid():
             return f"{path or type(field.spec).__name__}: invalid field"
         return None
+
+
+def default_decoration_for_spec(spec: CfgNodeSpec) -> FieldDecoration:
+    """Return the generic decoration implied by a pure cfg spec."""
+    if isinstance(spec, LiteralSpec):
+        return FieldDecoration(hidden=True, enabled=False)
+    if isinstance(spec, (ScalarSpec, SweepSpec)):
+        return FieldDecoration(enabled=bool(spec.editable))
+    if isinstance(
+        spec, (ModuleRefSpec, WaveformRefSpec, DeviceRefSpec, CfgSectionSpec)
+    ):
+        return FieldDecoration(enabled=True)
+    raise TypeError(f"Unsupported cfg spec type {type(spec).__name__}")
+
+
+__all__ = [
+    "CfgFormWidget",
+    "FieldDecoration",
+    "FieldDecorationPatch",
+    "FieldDecorationProvider",
+    "Tone",
+    "default_decoration_for_spec",
+]

@@ -41,6 +41,11 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import MistPowerAdapter
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    OverridePath,
+    OverridePlan,
+    module_leaf_patches,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_to_complex,
@@ -52,8 +57,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    PULSE_MODULE_LEAF_PATHS,
+    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
-    move_module,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
@@ -247,19 +253,22 @@ class MistBuilder(Builder):
             ctx,
             logical_paths={
                 "reset": "modules.reset",
-                "pi_pulse": "modules.init_pulse",
-                "mist_pulse": "modules.probe_pulse",
-                "mist_ch": "modules.probe_pulse.ch",
-                "mist_nqz": "modules.probe_pulse.nqz",
-                "mist_freq": "modules.probe_pulse.freq",
-                "mist_gain": "modules.probe_pulse.gain",
-                "mist_length": "modules.probe_pulse.waveform.length",
+                "pi_pulse": "modules.pi_pulse",
+                "mist_pulse": "modules.mist_pulse",
+                "mist_ch": "modules.mist_pulse.ch",
+                "mist_nqz": "modules.mist_pulse.nqz",
+                "mist_freq": "modules.mist_pulse.freq",
+                "mist_gain": "modules.mist_pulse.gain",
+                "mist_length": "modules.mist_pulse.waveform.length",
                 "readout": "modules.readout",
                 "relax_delay": "relax_delay",
                 "reps": "reps",
                 "rounds": "rounds",
                 "gain_sweep": "sweep.gain",
             },
+            duplicate_paths={"modules.probe_pulse": "modules.pi_pulse"},
+            path_renames={"modules.probe_pulse": "modules.mist_pulse"},
+            drop_paths=("modules.init_pulse",),
             default_overrides={"rounds": 10},
         )
 
@@ -277,6 +286,28 @@ class MistBuilder(Builder):
 
     def build_node(self, env: RunEnv) -> MistNode:
         return MistNode(env, self)
+
+    def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
+        paths: list[OverridePath] = []
+        paths.extend(
+            OverridePath(
+                f"modules.pi_pulse.{leaf}",
+                "all_points",
+                "pi_pulse module dependency",
+                "pi pulse is resolved from workflow/module-library dependency",
+            )
+            for leaf in PULSE_MODULE_LEAF_PATHS
+        )
+        paths.extend(
+            OverridePath(
+                f"modules.readout.{leaf}",
+                "all_points",
+                "opt_readout module dependency",
+                "readout module is resolved from workflow/module-library dependency",
+            )
+            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
+        )
+        return OverridePlan(tuple(paths))
 
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> MistCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
@@ -312,12 +343,21 @@ class MistBuilder(Builder):
             raise RuntimeError(
                 "mist.make_cfg needs a readout module (none produced or preset)"
             )
-        raw_cfg = env.schema.lower_raw(ml, md=env.md)
-        modules = raw_cfg["modules"]
-        if isinstance(modules, dict):
-            modules.pop("init_pulse", None)
-        move_module(raw_cfg, "probe_pulse", "mist_pulse")
-        raw_cfg["modules"]["pi_pulse"] = pi_pulse
-        raw_cfg["modules"]["readout"] = readout
+        patches: dict[str, object] = {}
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.pi_pulse",
+                module=pi_pulse,
+                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.readout",
+                module=readout,
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
         return ml.make_cfg(raw_cfg, MistCfgTemplate)

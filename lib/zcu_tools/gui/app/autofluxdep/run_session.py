@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
+from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.derivation import SmoothingService
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
@@ -67,6 +68,7 @@ class RunSession(RunObserver):
         flux_values: list[float],
         flux_device: str | None,
         results: dict[str, Any],
+        cfg_snapshots: dict[str, RunCfgSnapshot],
         store: RunStore,
         tools: Tools,
         ml: ModuleSource,
@@ -83,6 +85,7 @@ class RunSession(RunObserver):
         self.flux_values = [float(value) for value in flux_values]
         self.flux_device = flux_device
         self.results = results
+        self.cfg_snapshots = dict(cfg_snapshots)
         self.store = store
         self.tools = tools
         self.ml = ml
@@ -187,6 +190,7 @@ class RunSession(RunObserver):
                     md=self.md,
                     flux_device=self.flux_device,
                     results=self.results,
+                    cfg_snapshots=self.cfg_snapshots,
                     notify=self.notify,
                     smoothing=self._smoothing,
                 )

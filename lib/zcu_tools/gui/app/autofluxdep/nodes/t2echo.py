@@ -42,7 +42,14 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t2echo import (
     T2EchoAdapter,
 )
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    OverridePath,
+    OverridePlan,
+    SweepValue,
+    module_leaf_patches,
+    str_choice_spec,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
@@ -58,6 +65,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    PULSE_MODULE_LEAF_PATHS,
+    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
     generation_field,
@@ -156,6 +165,20 @@ def _resolve_cfg_relax_delay(
     raise RuntimeError(f"unsupported t2echo relax_delay_mode: {mode!r}")
 
 
+def _raw_range_tuple(value: Any) -> tuple[float, float]:
+    if hasattr(value, "start") and hasattr(value, "stop"):
+        return (float(value.start), float(value.stop))
+    lo, hi = value
+    return (float(lo), float(hi))
+
+
+def _pop_sweep_range(raw_cfg: dict[str, Any], key: str) -> tuple[float, float]:
+    sweep = raw_cfg.pop("sweep", None)
+    if not isinstance(sweep, dict) or key not in sweep:
+        raise RuntimeError(f"t2echo raw cfg has no sweep.{key}")
+    return _raw_range_tuple(sweep[key])
+
+
 def _is_lowerable_pulse(module: Any) -> bool:
     """Whether a resolved drive module is a concrete, lowerable ``PulseCfg``.
 
@@ -252,7 +275,8 @@ class T2EchoNode(Node):
         # activate_detune = detune_ratio / len_sweep.step).
         length_sweep = axis_to_sweep(times)
         length_param = sweep2param("length", length_sweep)
-        detune_ratio = self._builder.detune_ratio(env.schema, md=env.md)
+        knobs = env.knobs()
+        detune_ratio = float(knobs["detune_ratio"])
         activate_detune = detune_ratio / length_sweep.step
         pi2_pulse = cfg.modules.pi2_pulse
 
@@ -295,7 +319,7 @@ class T2EchoNode(Node):
             )
         real = signal2real_flip(acquire_to_complex(raw))
 
-        fit_method = self._builder.fit_method(env.schema, md=env.md)
+        fit_method = str(knobs["fit_method"])
         t2f, fit_curve = _fit_t2echo(
             fit_method, detune_ratio=detune_ratio, times=times, real=real
         )
@@ -478,6 +502,59 @@ class T2EchoBuilder(Builder):
     def build_node(self, env: RunEnv) -> T2EchoNode:
         return T2EchoNode(env, self)
 
+    def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
+        knobs = schema.read_knobs()
+        paths: list[OverridePath] = []
+        for module_name, source, reason in (
+            (
+                "pi_pulse",
+                "pi_pulse module dependency",
+                "pi pulse is resolved from workflow/module-library dependency",
+            ),
+            (
+                "pi2_pulse",
+                "pi2_pulse module dependency",
+                "pi/2 pulse is resolved from workflow/module-library dependency",
+            ),
+        ):
+            paths.extend(
+                OverridePath(
+                    f"modules.{module_name}.{leaf}",
+                    "all_points",
+                    source,
+                    reason,
+                )
+                for leaf in PULSE_MODULE_LEAF_PATHS
+            )
+        paths.extend(
+            OverridePath(
+                f"modules.readout.{leaf}",
+                "all_points",
+                "opt_readout module dependency",
+                "readout module is resolved from workflow/module-library dependency",
+            )
+            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
+        )
+        if knobs.get("relax_delay_mode") == _RELAX_DELAY_MODE_AUTO_T1:
+            paths.append(
+                OverridePath(
+                    "relax_delay",
+                    "all_points",
+                    "generation.timing.relax_delay_mode",
+                    "relax delay is generated from T1 feedback",
+                )
+            )
+        if knobs.get("sweep_range_mode") == _SWEEP_RANGE_MODE_AUTO_T2E:
+            paths.append(
+                OverridePath(
+                    "sweep.length",
+                    "all_points",
+                    "generation.sweep.sweep_range_mode",
+                    "T2Echo sweep range is generated from T2Echo feedback",
+                )
+            )
+        return OverridePlan(tuple(paths))
+
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> T2EchoCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
 
@@ -507,8 +584,7 @@ class T2EchoBuilder(Builder):
             raise RuntimeError(
                 "t2echo.make_cfg needs a readout module (none produced or preset)"
             )
-        raw_cfg = env.schema.lower_raw(ml, md=env.md)
-        knobs = env.schema.lower(ml, md=env.md)
+        knobs = env.knobs()
         cur_t1 = _snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
         prev_t2e = _snapshot_float(snapshot, "t2e", float(knobs["t2e_seed_us"]))
         relax_delay = _resolve_cfg_relax_delay(
@@ -523,11 +599,33 @@ class T2EchoBuilder(Builder):
             fixed=knobs["sweep_range"],
             knobs=knobs,
         )
-        raw_cfg["modules"]["pi_pulse"] = pi_pulse
-        raw_cfg["modules"]["pi2_pulse"] = pi2_pulse
-        raw_cfg["modules"]["readout"] = readout
-        raw_cfg.pop("sweep", None)
+        patches: dict[str, object] = {}
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.pi_pulse",
+                module=pi_pulse,
+                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.pi2_pulse",
+                module=pi2_pulse,
+                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.readout",
+                module=readout,
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
+            patches["relax_delay"] = relax_delay
+        if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_T2E:
+            patches["sweep.length"] = sweep_range
+        raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("detune_ratio", None)
-        raw_cfg["relax_delay"] = relax_delay
-        raw_cfg["sweep_range"] = sweep_range
+        raw_cfg["sweep_range"] = _pop_sweep_range(raw_cfg, "length")
         return ml.make_cfg(raw_cfg, T2EchoCfgTemplate)

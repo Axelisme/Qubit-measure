@@ -41,6 +41,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.derivation import (
     DerivationService,
     SmoothingService,
@@ -317,11 +318,23 @@ class Orchestrator:
     # writes ``flux`` into ``cfg.dev[flux_device]``. None when no source is picked.
     flux_device: str | None = None
     results: Mapping[str, Any] = field(default_factory=dict)
+    cfg_snapshots: Mapping[str, RunCfgSnapshot] = field(default_factory=dict)
     notify: Notify | None = None
     derivations: list[DerivationService] = field(default_factory=list)
     smoothing: SmoothingService | None = None
 
     def __post_init__(self) -> None:
+        missing_cfg_snapshots = [
+            provider.name
+            for provider in self.providers
+            if provider.name not in self.cfg_snapshots
+            and provider.builder.override_plan(provider.schema).paths
+        ]
+        if missing_cfg_snapshots:
+            raise RuntimeError(
+                "providers with Default cfg overrides require run-start cfg "
+                "snapshots: " + ", ".join(missing_cfg_snapshots)
+            )
         # auto-collect consumer-declared smoothing into one service
         self._smoothing = self.smoothing
         if self._smoothing is None:
@@ -356,6 +369,7 @@ class Orchestrator:
         ``round_hook=None`` — nothing to fill or notify; the Node ignores them.
         """
         result = self.results.get(provider.name)
+        cfg_snapshot = self.cfg_snapshots.get(provider.name)
         round_hook: Callable[[Any], None] | None = None
         if result is not None and self.notify is not None:
             name = provider.name
@@ -371,10 +385,18 @@ class Orchestrator:
             flux=flux,
             flux_idx=idx,
             schema=provider.schema,
+            node_name=provider.name,
             soc=self.soc,
             soccfg=self.soccfg,
             ml=self.ml,
             md=self.md,
+            base_cfg=None if cfg_snapshot is None else cfg_snapshot.base_cfg,
+            override_plan=(
+                provider.builder.override_plan(provider.schema)
+                if cfg_snapshot is None
+                else cfg_snapshot.override_plan
+            ),
+            knobs_snapshot=None if cfg_snapshot is None else cfg_snapshot.knobs,
             tools=self.tools,
             feedback=self.tools.feedback.view_for(provider.name),
             flux_device=self.flux_device,

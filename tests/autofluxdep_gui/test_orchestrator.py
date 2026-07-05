@@ -9,6 +9,13 @@ builds each provider's Node and calls ``produce``, never an injected callback.
 
 from __future__ import annotations
 
+import pytest
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    OverridePath,
+    OverridePlan,
+    RunCfgSnapshot,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
@@ -205,6 +212,43 @@ def test_nodes_run_in_given_order():
     providers = [place(make_builder(n, produce_fn=record(n))) for n in ("c", "a", "b")]
     Orchestrator(providers).run([0.0])
     assert seen == ["c", "a", "b"]  # exactly the declared order
+
+
+def test_override_plan_provider_requires_run_cfg_snapshot():
+    plan = OverridePlan(
+        (OverridePath("freq", "all_points", "synthetic", "runtime patch"),)
+    )
+    seen: list[float] = []
+
+    def record(env, _snap):
+        cfg = env.point_cfg({"freq": 2.0 + env.flux})
+        seen.append(float(cfg["freq"]))
+        return Patch()
+
+    provider = place(
+        make_builder(
+            "cfg_node",
+            schema_fields=(("freq", FloatSpec("Frequency"), 1.0),),
+            override_plan=plan,
+            produce_fn=record,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="require run-start cfg snapshots"):
+        Orchestrator([provider])
+
+    Orchestrator(
+        [provider],
+        cfg_snapshots={
+            provider.name: RunCfgSnapshot(
+                base_cfg={"freq": 1.0},
+                override_plan=plan,
+                knobs={"freq": 1.0},
+            )
+        },
+    ).run([0.0, 1.0])
+
+    assert seen == [2.0, 3.0]
 
 
 def test_consumer_before_producer_reads_prev_point():

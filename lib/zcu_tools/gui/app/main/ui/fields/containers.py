@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any, cast
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,13 @@ from ...live_model import (
 )
 from .common import BaseLiveWidget, ElidedLabel
 from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
+
+_TONE_STYLES = {
+    "muted": "color: #6b7280;",
+    "info": "color: #2563eb;",
+    "warning": "color: #8a5a00;",
+    "error": "color: #b00020;",
+}
 
 
 class _CollapsibleSection(QWidget):
@@ -110,10 +118,14 @@ class SectionWidget(BaseLiveWidget):
         top_level: bool = False,
         no_header: bool = False,
         field_label_max_width: int | None = None,
+        path: str = "",
+        decoration_for_path: Callable[[str, Any], Any] | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(field, parent)
         self._field_label_max_width = field_label_max_width
+        self._path = path
+        self._decoration_for_path = decoration_for_path
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -137,20 +149,35 @@ class SectionWidget(BaseLiveWidget):
         # collapsed sub-header (e.g. "Advanced"), AFTER the ungrouped fields.
         # This is presentation-only: the value tree is unchanged — a grouped
         # field is still a flat leaf of this section (it lowers at top level).
-        grouped: dict[str, list[tuple[str, FieldWidgetProtocol]]] = {}
+        grouped: dict[str, list[tuple[str, str, FieldWidgetProtocol, Any | None]]] = {}
         for key, child_field in field.fields.items():
+            child_path = f"{self._path}.{key}" if self._path else key
             spec = child_field.spec
+            decoration = (
+                None
+                if self._decoration_for_path is None
+                else self._decoration_for_path(child_path, child_field)
+            )
             # LiteralSpec is a fixed value with no editing degree of freedom, so
             # it has no widget — the GUI decides not to render it (the spec does
             # not carry any "visible" flag). This covers discriminators
             # (type/style) and adapter lock_literal'd fields uniformly.
-            if isinstance(spec, LiteralSpec):
+            if isinstance(spec, LiteralSpec) and getattr(decoration, "hidden", True):
                 continue
 
             widget_cls = get_widget_cls(child_field)
             if widget_cls is SectionWidget:
                 w = SectionWidget(
                     cast(SectionLiveField, child_field),
+                    field_label_max_width=self._field_label_max_width,
+                    path=child_path,
+                    decoration_for_path=self._decoration_for_path,
+                )
+            elif widget_cls is ModuleRefWidget:
+                w = ModuleRefWidget(
+                    cast(ModuleRefLiveField, child_field),
+                    path=child_path,
+                    decoration_for_path=self._decoration_for_path,
                     field_label_max_width=self._field_label_max_width,
                 )
             else:
@@ -159,38 +186,62 @@ class SectionWidget(BaseLiveWidget):
 
             group = getattr(spec, "group", "") or ""
             if group:
-                grouped.setdefault(group, []).append((key, w))
+                grouped.setdefault(group, []).append((key, child_path, w, decoration))
                 continue
-            self._add_field_row(self._container.form, key, w, child_field)
+            self._add_field_row(
+                self._container.form,
+                key,
+                child_path,
+                w,
+                child_field,
+                decoration=decoration,
+            )
 
         for group_label, entries in grouped.items():
             section = _CollapsibleSection(group_label, collapsible=True, collapsed=True)
-            for key, w in entries:
-                self._add_field_row(section.form, key, w, field.fields[key])
+            for key, child_path, w, decoration in entries:
+                self._add_field_row(
+                    section.form,
+                    key,
+                    child_path,
+                    w,
+                    field.fields[key],
+                    decoration=decoration,
+                )
             self._container.body_layout.addWidget(section)
 
     def _add_field_row(
         self,
         form: QFormLayout,
         key: str,
+        path: str,
         w: FieldWidgetProtocol,
         child_field: Any,
+        *,
+        decoration: Any | None = None,
     ) -> None:
-        label = child_field.spec.label or key
+        if decoration is None and self._decoration_for_path is not None:
+            decoration = self._decoration_for_path(path, child_field)
+        if getattr(decoration, "hidden", False):
+            return
+        label = _decorated_label_text(child_field.spec.label or key, decoration)
+        widget = cast(QWidget, w)
         if isinstance(child_field, SweepLiveField):
             # Sweep widgets get their own full-width row; label goes on the line above
-            form.addRow(
-                ElidedLabel(
-                    f"{label}:",
-                    max_width=self._field_label_max_width,
-                )
+            label_widget = ElidedLabel(
+                f"{label}:",
+                max_width=self._field_label_max_width,
             )
-            form.addRow(cast(QWidget, w))
+            _apply_decoration(label_widget, widget, decoration)
+            form.addRow(label_widget)
+            form.addRow(widget)
         else:
-            form.addRow(
-                ElidedLabel(f"{label}:", max_width=self._field_label_max_width),
-                cast(QWidget, w),
+            label_widget = ElidedLabel(
+                f"{label}:",
+                max_width=self._field_label_max_width,
             )
+            _apply_decoration(label_widget, widget, decoration)
+            form.addRow(label_widget, widget)
 
     def teardown(self) -> None:
         field = cast(SectionLiveField, self._field)
@@ -204,8 +255,18 @@ class SectionWidget(BaseLiveWidget):
 
 @register_widget(ModuleRefLiveField)
 class ModuleRefWidget(BaseLiveWidget):
-    def __init__(self, field: ModuleRefLiveField, parent: QWidget | None = None):
+    def __init__(
+        self,
+        field: ModuleRefLiveField,
+        path: str = "",
+        decoration_for_path: Callable[[str, Any], Any] | None = None,
+        field_label_max_width: int | None = None,
+        parent: QWidget | None = None,
+    ):
         super().__init__(field, parent)
+        self._path = path
+        self._decoration_for_path = decoration_for_path
+        self._field_label_max_width = field_label_max_width
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -419,7 +480,13 @@ class ModuleRefWidget(BaseLiveWidget):
         if sub_field:
             widget_cls = get_widget_cls(sub_field)
             if widget_cls == SectionWidget:
-                w = SectionWidget(sub_field, no_header=True)
+                w = SectionWidget(
+                    sub_field,
+                    no_header=True,
+                    field_label_max_width=self._field_label_max_width,
+                    path=self._path,
+                    decoration_for_path=self._decoration_for_path,
+                )
             else:
                 w = widget_cls(sub_field)  # type: ignore
             self._sub_widget = w
@@ -449,6 +516,37 @@ class ModuleRefWidget(BaseLiveWidget):
         self._combo.setStyleSheet(style)
         self._expand_btn.setStyleSheet("" if valid else "color: red;")
         self._refresh_missing_ref_hint()
+
+
+def _decorated_label_text(label: str, decoration: Any | None) -> str:
+    if decoration is None:
+        return label
+    label_suffix = getattr(decoration, "label_suffix", "")
+    badge = getattr(decoration, "badge", "")
+    text = f"{label}{label_suffix}"
+    if badge:
+        text = f"{text} [{badge}]"
+    return text
+
+
+def _apply_decoration(
+    label_widget: QLabel,
+    value_widget: QWidget,
+    decoration: Any | None,
+) -> None:
+    if decoration is None:
+        return
+    enabled = bool(getattr(decoration, "enabled", True))
+    label_widget.setEnabled(enabled)
+    value_widget.setEnabled(enabled)
+    tooltip = str(getattr(decoration, "tooltip", "") or "")
+    if tooltip:
+        label_widget.setToolTip(tooltip)
+        value_widget.setToolTip(tooltip)
+    tone = str(getattr(decoration, "tone", "normal") or "normal")
+    style = _TONE_STYLES.get(tone, "")
+    if style:
+        label_widget.setStyleSheet(style)
 
 
 @register_widget(DeviceRefLiveField)

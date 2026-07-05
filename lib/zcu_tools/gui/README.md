@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-03 (project scope picker)
+**Last updated:** 2026-07-05 (cfg form decoration)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -42,6 +42,17 @@ Non-modal dialogs opened with `open()` use the shared dialog lifecycle helper,
 or an equivalent named registry when remote screenshot/list semantics require
 stable names. Either path keeps a Python reference until `finished` / `destroyed`
 cleanup runs.
+
+## Cfg Form Decoration
+
+`CfgFormWidget` accepts an optional field decoration provider keyed by full dotted
+cfg path. The shared renderer applies `hidden`, `enabled`, `tone`, `badge`, and
+`tooltip` metadata without changing the live value model. App-specific semantics
+stay outside the shared layer: for example, autofluxdep uses the same hook to
+mark generated Default cfg fields from its `OverridePlan`.
+
+Normal `LiteralSpec` rows remain hidden, but a decoration may explicitly unhide a
+literal when an app needs to show a generated read-only value in the form.
 
 ## EventBus Lifecycle
 

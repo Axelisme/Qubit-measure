@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 OverrideMode: TypeAlias = Literal["after_first_point", "all_points"]
 _VALID_MODES: frozenset[str] = frozenset({"after_first_point", "all_points"})
@@ -61,6 +62,21 @@ class OverridePlan:
         return [entry.to_wire() for entry in self.paths]
 
 
+@dataclass(frozen=True)
+class RunCfgSnapshot:
+    """Run-start cfg truth for one enabled node."""
+
+    base_cfg: Mapping[str, object]
+    override_plan: OverridePlan
+    knobs: Mapping[str, Any]
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "base_cfg": deepcopy(dict(self.base_cfg)),
+            "override_plan": override_plan_to_wire(self.override_plan),
+        }
+
+
 def override_plan_to_wire(plan: OverridePlan) -> list[dict[str, str]]:
     """Return the JSON-safe wire/artifact representation of an override plan."""
     return plan.to_wire()
@@ -74,11 +90,74 @@ def validate_override_plan_base_cfg(
 ) -> None:
     """Fast-fail a run whose declared override path is absent from base cfg."""
     for entry in plan.paths:
+        if _is_module_root_path(entry.path):
+            raise ValueError(
+                f"override path {entry.path!r} for node {node_name!r} targets a "
+                "module root; whole-module replacement is not allowed"
+            )
         if not _path_exists(base_cfg, entry.path):
             raise ValueError(
                 f"override path {entry.path!r} for node {node_name!r} "
                 "is absent from run-start base_cfg"
             )
+
+
+def apply_override_patches(
+    base_cfg: Mapping[str, object],
+    plan: OverridePlan,
+    patches: Mapping[str, object],
+    *,
+    flux_idx: int,
+    node_name: str,
+) -> dict[str, object]:
+    """Return this point's cfg by applying declared generation patches.
+
+    The input base cfg is never mutated. Every patch path must be declared by the
+    builder's run-start OverridePlan, must exist in the run-start base cfg, and
+    must be legal for this flux index. Whole-module replacement is rejected, but
+    a declared nested object such as ``modules.readout.pulse_cfg.waveform`` may
+    be replaced atomically.
+    """
+
+    by_path = {entry.path: entry for entry in plan.paths}
+    unknown = set(patches) - set(by_path)
+    if unknown:
+        raise ValueError(
+            f"node {node_name!r} generated undeclared override path(s): "
+            + ", ".join(sorted(unknown))
+        )
+
+    point_cfg = deepcopy(dict(base_cfg))
+    for path, value in patches.items():
+        entry = by_path[path]
+        if entry.mode == "after_first_point" and flux_idx == 0:
+            raise ValueError(
+                f"node {node_name!r} generated initial-only path {path!r} "
+                "at flux index 0"
+            )
+        _set_leaf(point_cfg, path, deepcopy(value), node_name=node_name)
+    return point_cfg
+
+
+def module_leaf_patches(
+    *,
+    prefix: str,
+    module: object,
+    leaf_paths: tuple[str, ...],
+) -> dict[str, object]:
+    """Extract declared patches from a module-shaped object.
+
+    Missing paths are skipped so raw dict fixtures and pydantic module objects can
+    share one path list; present values are patched exactly at ``prefix.path``.
+    """
+
+    source = _module_to_mapping(module)
+    patches: dict[str, object] = {}
+    for leaf_path in leaf_paths:
+        found, value = _try_get_path(source, leaf_path)
+        if found:
+            patches[f"{prefix}.{leaf_path}"] = value
+    return patches
 
 
 def _validate_path(path: str) -> None:
@@ -103,15 +182,92 @@ def _path_exists(tree: Mapping[str, object], path: str) -> bool:
         if part not in node:
             return False
         node = node[part]
-    if isinstance(node, Mapping):
+    if isinstance(node, Mapping) and _is_module_root_path(path):
         return False
     return True
+
+
+def _set_leaf(
+    tree: dict[str, object],
+    path: str,
+    value: object,
+    *,
+    node_name: str,
+) -> None:
+    parts = path.split(".")
+    node: object = tree
+    for part in parts[:-1]:
+        if not isinstance(node, dict):
+            raise ValueError(
+                f"override path {path!r} for node {node_name!r} cannot descend "
+                f"through {type(node).__name__}"
+            )
+        if part not in node:
+            raise ValueError(
+                f"override path {path!r} for node {node_name!r} is absent "
+                "from run-start base_cfg"
+            )
+        node = node[part]
+    if not isinstance(node, dict):
+        raise ValueError(
+            f"override path {path!r} for node {node_name!r} cannot assign "
+            f"inside {type(node).__name__}"
+        )
+    leaf = parts[-1]
+    if leaf not in node:
+        raise ValueError(
+            f"override path {path!r} for node {node_name!r} is absent "
+            "from run-start base_cfg"
+        )
+    if isinstance(node[leaf], Mapping) and _is_module_root_path(path):
+        raise ValueError(
+            f"override path {path!r} for node {node_name!r} targets a mapping; "
+            "whole-module replacement is not allowed"
+        )
+    node[leaf] = value
+
+
+def _module_to_mapping(module: object) -> Mapping[str, object]:
+    if isinstance(module, Mapping):
+        return cast(Mapping[str, object], module)
+    to_dict = getattr(module, "to_dict", None)
+    if callable(to_dict):
+        value = to_dict()
+        if isinstance(value, Mapping):
+            return cast(Mapping[str, object], value)
+    model_dump = getattr(module, "model_dump", None)
+    if callable(model_dump):
+        value = model_dump(mode="python")
+        if isinstance(value, Mapping):
+            return cast(Mapping[str, object], value)
+    raise TypeError(
+        f"generated module must be mapping-like, got {type(module).__name__}"
+    )
+
+
+def _try_get_path(tree: Mapping[str, object], path: str) -> tuple[bool, object]:
+    node: object = tree
+    for part in path.split("."):
+        if not isinstance(node, Mapping):
+            return False, None
+        if part not in node:
+            return False, None
+        node = node[part]
+    return True, node
+
+
+def _is_module_root_path(path: str) -> bool:
+    parts = path.split(".")
+    return path == "modules" or (len(parts) == 2 and parts[0] == "modules")
 
 
 __all__ = [
     "OverrideMode",
     "OverridePath",
     "OverridePlan",
+    "RunCfgSnapshot",
+    "apply_override_patches",
+    "module_leaf_patches",
     "override_plan_to_wire",
     "validate_override_plan_base_cfg",
 ]

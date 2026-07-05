@@ -30,9 +30,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.autofluxdep.cfg import CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    OverridePlan,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.form import (
     CfgFormWidget,
+    FieldDecorationPatch,
     LiveModelEnv,
     SectionLiveField,
 )
@@ -88,10 +93,11 @@ class NodeCfgForm(QWidget):
         self._default_group = QGroupBox("Default cfg")
         default_layout = QVBoxLayout(self._default_group)
         self._default_form = CfgFormWidget(
-            field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH
+            field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH,
+            decoration_provider=self._default_decoration_provider(),
         )
         self._default_form.attach(self._default_model)
-        self._default_form.schema_changed.connect(self._on_schema_changed)
+        self._default_form.schema_changed.connect(self._on_default_schema_changed)
         default_layout.addWidget(self._default_form)
         root.addWidget(self._default_group, 1)
 
@@ -104,12 +110,14 @@ class NodeCfgForm(QWidget):
                 field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH
             )
             self._generation_form.attach(self._generation_model)
-            self._generation_form.schema_changed.connect(self._on_schema_changed)
+            self._generation_form.schema_changed.connect(
+                self._on_generation_schema_changed
+            )
             generation_layout.addWidget(self._generation_form)
             self._generation_group = generation_group
             root.addWidget(generation_group, 1)
 
-    def _on_schema_changed(self, schema: object) -> None:
+    def _on_default_schema_changed(self, schema: object) -> None:
         """Commit the form draft into the placement schema SSOT.
 
         ``schema`` is a fresh ``CfgSchema`` snapshot of the LiveModel; its value
@@ -118,6 +126,16 @@ class NodeCfgForm(QWidget):
         """
         del schema
         self._ctrl.set_node_cfg_value(self._index, self._combined_value())
+
+    def _on_generation_schema_changed(self, schema: object) -> None:
+        del schema
+        self._ctrl.set_node_cfg_value(self._index, self._combined_value())
+        self._default_form.set_decoration_provider(self._default_decoration_provider())
+
+    def _default_decoration_provider(self) -> _OverridePlanDecorationProvider:
+        return _OverridePlanDecorationProvider(
+            self._node.builder.override_plan(self._node.schema)
+        )
 
     def _combined_value(self) -> CfgSectionValue:
         """Merge the split UI drafts back into the schema's full root value tree."""
@@ -140,11 +158,13 @@ class NodeCfgForm(QWidget):
 
     def teardown(self) -> None:
         """Detach the CfgFormWidget + drop the LiveModel draft."""
-        self._default_form.schema_changed.disconnect(self._on_schema_changed)
+        self._default_form.schema_changed.disconnect(self._on_default_schema_changed)
         self._default_form.detach()
         self._default_model.teardown()
         if self._generation_form is not None:
-            self._generation_form.schema_changed.disconnect(self._on_schema_changed)
+            self._generation_form.schema_changed.disconnect(
+                self._on_generation_schema_changed
+            )
             self._generation_form.detach()
         if self._generation_model is not None:
             self._generation_model.teardown()
@@ -192,3 +212,40 @@ def _split_generation_section(
         generation_spec,
         cast(CfgSectionValue | None, generation_value),
     )
+
+
+class _OverridePlanDecorationProvider:
+    def __init__(self, plan: OverridePlan) -> None:
+        self._entries = {entry.path: entry for entry in plan.paths}
+
+    def decoration_for(
+        self,
+        path: str,
+        spec: object,
+        value: object,
+    ) -> FieldDecorationPatch | None:
+        del spec, value
+        entry = self._entries.get(path)
+        if entry is None:
+            return None
+        if entry.mode == "after_first_point":
+            return FieldDecorationPatch(
+                hidden=False,
+                enabled=True,
+                tone="warning",
+                badge="initial",
+                tooltip=(
+                    "Initial value is used at flux point 0; later points use a "
+                    f"generated value. Source: {entry.source}. {entry.reason}"
+                ),
+            )
+        return FieldDecorationPatch(
+            hidden=False,
+            enabled=False,
+            tone="muted",
+            badge="generated",
+            tooltip=(
+                "Template value is stored for review; each flux point uses a "
+                f"generated value. Source: {entry.source}. {entry.reason}"
+            ),
+        )

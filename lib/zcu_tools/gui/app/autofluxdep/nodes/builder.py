@@ -33,6 +33,7 @@ from typing import Any
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePlan,
+    apply_override_patches,
     sectioned_node_schema,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
@@ -69,16 +70,48 @@ class RunEnv:
     flux: float
     flux_idx: int
     schema: NodeCfgSchema
+    node_name: str = ""
     soc: Any = None
     soccfg: Any = None
     ml: Any = None
     md: Any = None
+    base_cfg: Mapping[str, object] | None = None
+    override_plan: OverridePlan = field(default_factory=OverridePlan)
+    knobs_snapshot: Mapping[str, Any] | None = None
     tools: Any = None
     feedback: Any = None
     flux_device: str | None = None
     result: Any = None
     round_hook: RoundHook | None = None
     should_stop: Callable[[], bool] | None = None
+
+    def __post_init__(self) -> None:
+        if self.knobs_snapshot is None:
+            self.knobs_snapshot = self.schema.lower(self.ml, md=self.md)
+        if self.base_cfg is None and self.ml is not None:
+            self.base_cfg = self.schema.lower_raw(self.ml, md=self.md)
+
+    def knobs(self) -> dict[str, Any]:
+        """Return the run-start lowered knob snapshot for this point's node."""
+        if self.knobs_snapshot is None:
+            raise RuntimeError(
+                f"RunEnv for {self.node_name or '<unnamed>'!r} has no knob snapshot"
+            )
+        return dict(self.knobs_snapshot)
+
+    def point_cfg(self, patches: Mapping[str, object]) -> dict[str, object]:
+        """Build this flux point's raw cfg from the run-start base snapshot."""
+        if self.base_cfg is None:
+            raise RuntimeError(
+                f"RunEnv for {self.node_name or '<unnamed>'!r} has no run-start base_cfg"
+            )
+        return apply_override_patches(
+            self.base_cfg,
+            self.override_plan,
+            patches,
+            flux_idx=self.flux_idx,
+            node_name=self.node_name or "<unnamed>",
+        )
 
 
 class Node(ABC):
@@ -143,6 +176,24 @@ class Builder(ABC):
         """Declare Default cfg paths this builder may patch across flux points."""
         del schema
         return OverridePlan()
+
+    def point_cfg(
+        self, env: RunEnv, patches: Mapping[str, object]
+    ) -> dict[str, object]:
+        """Build this flux point's raw cfg through this builder's override plan."""
+        if env.override_plan.paths:
+            return env.point_cfg(patches)
+        if env.base_cfg is None:
+            raise RuntimeError(
+                f"RunEnv for {env.node_name or self.name!r} has no run-start base_cfg"
+            )
+        return apply_override_patches(
+            env.base_cfg,
+            self.override_plan(env.schema),
+            patches,
+            flux_idx=env.flux_idx,
+            node_name=env.node_name or self.name,
+        )
 
     # --- sweep-lived factories (Run start; no-op for pure-compute Services) ---
 

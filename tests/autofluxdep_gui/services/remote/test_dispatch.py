@@ -285,7 +285,9 @@ def test_node_cfg_reports_knobs():
     assert knobs["reps"] == 512
     # a sweep knob serialises to {start, stop, expts}, not a SweepCfg
     assert set(knobs["detune_sweep"]) == {"start", "stop", "expts"}
-    assert cfg["override_plan"] == []
+    override_paths = {entry["path"] for entry in cfg["override_plan"]}
+    assert "modules.qub_pulse.freq" in override_paths
+    assert "modules.readout.pulse_cfg.freq" in override_paths
 
 
 def test_node_cfg_unknown_name_fast_fails():

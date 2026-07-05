@@ -35,7 +35,14 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import LenRabiAdapter
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    OverridePath,
+    OverridePlan,
+    SweepValue,
+    module_leaf_patches,
+    str_choice_spec,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.feedback import (
     FeedbackSlotDecl,
@@ -55,11 +62,11 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
     ctx_module,
     generation_field,
-    move_module,
     pulse_length,
     pulse_product,
 )
@@ -267,6 +274,20 @@ def _clamp_drive_gain(value: float, knobs: dict[str, Any]) -> float:
     return min(max_gain, gain)
 
 
+def _raw_range_tuple(value: Any) -> tuple[float, float]:
+    if hasattr(value, "start") and hasattr(value, "stop"):
+        return (float(value.start), float(value.stop))
+    lo, hi = value
+    return (float(lo), float(hi))
+
+
+def _pop_sweep_range(raw_cfg: dict[str, Any], key: str) -> tuple[float, float]:
+    sweep = raw_cfg.pop("sweep", None)
+    if not isinstance(sweep, dict) or key not in sweep:
+        raise RuntimeError(f"lenrabi raw cfg has no sweep.{key}")
+    return _raw_range_tuple(sweep[key])
+
+
 def _blend_positive(prior: float, feedback: float, confidence: float) -> float:
     prior_value = _require_positive_finite("prior drive_gain", prior)
     feedback_value = _require_positive_finite("feedback drive_gain", feedback)
@@ -423,7 +444,7 @@ def _update_drive_gain_feedback(
 ) -> None:
     if env.feedback is None:
         return
-    knobs = env.schema.lower(env.ml, md=env.md)
+    knobs = env.knobs()
     if str(knobs["drive_gain_mode"]) != _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
         return
     controller = env.feedback.controller(_DRIVE_GAIN_SLOT.key)
@@ -560,10 +581,10 @@ class LenRabiBuilder(Builder):
             ctx,
             logical_paths={
                 "reset": "modules.reset",
-                "rabi_pulse": "modules.qub_pulse",
-                "qub_ch": "modules.qub_pulse.ch",
-                "qub_nqz": "modules.qub_pulse.nqz",
-                "qub_gain": "modules.qub_pulse.gain",
+                "rabi_pulse": "modules.rabi_pulse",
+                "qub_ch": "modules.rabi_pulse.ch",
+                "qub_nqz": "modules.rabi_pulse.nqz",
+                "qub_gain": "modules.rabi_pulse.gain",
                 "readout": "modules.readout",
                 "relax_delay": "relax_delay",
                 "reps": "reps",
@@ -697,6 +718,7 @@ class LenRabiBuilder(Builder):
                     expts=101,
                 ),
             },
+            path_renames={"modules.qub_pulse": "modules.rabi_pulse"},
         )
 
     def make_init_result(
@@ -717,6 +739,54 @@ class LenRabiBuilder(Builder):
 
     def build_node(self, env: RunEnv) -> LenRabiNode:
         return LenRabiNode(env, self)
+
+    def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
+        knobs = schema.read_knobs()
+        paths: list[OverridePath] = [
+            OverridePath(
+                "modules.rabi_pulse.freq",
+                "all_points",
+                "qubit_freq",
+                "rabi pulse frequency is generated from qubit_freq dependency",
+            )
+        ]
+        if knobs.get("drive_gain_mode") == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
+            paths.append(
+                OverridePath(
+                    "modules.rabi_pulse.gain",
+                    "all_points",
+                    "generation.feedback.drive_gain_mode",
+                    "rabi drive gain is generated from pi-length feedback",
+                )
+            )
+        if knobs.get("relax_delay_mode") == _RELAX_DELAY_MODE_AUTO_T1:
+            paths.append(
+                OverridePath(
+                    "relax_delay",
+                    "all_points",
+                    "generation.timing.relax_delay_mode",
+                    "relax delay is generated from T1 feedback",
+                )
+            )
+        if knobs.get("sweep_range_mode") == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
+            paths.append(
+                OverridePath(
+                    "sweep.length",
+                    "all_points",
+                    "generation.sweep.sweep_range_mode",
+                    "Rabi sweep range is generated from pi-length feedback",
+                )
+            )
+        paths.extend(
+            OverridePath(
+                f"modules.readout.{leaf}",
+                "all_points",
+                "opt_readout module dependency",
+                "readout module is resolved from workflow/module-library dependency",
+            )
+            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
+        )
+        return OverridePlan(tuple(paths))
 
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> LenRabiCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
@@ -742,19 +812,17 @@ class LenRabiBuilder(Builder):
             raise RuntimeError(
                 "lenrabi.make_cfg needs a readout module (none produced or preset)"
             )
-        raw_cfg = env.schema.lower_raw(ml, md=env.md)
-        knobs = env.schema.lower(ml, md=env.md)
+        knobs = env.knobs()
         qubit_freq = float(snapshot["qubit_freq"])
         t1 = _float_or_none(snapshot.get("t1")) or float(knobs["t1_seed_us"])
         feedback = _resolve_feedback_inputs(snapshot, knobs)
 
-        move_module(raw_cfg, "qub_pulse", "rabi_pulse")
         drive_gain_mode = str(knobs["drive_gain_mode"])
         drive_gain = _resolve_drive_gain(
             drive_gain_mode,
             pi_product=feedback.feedback_pi_product,
             target_pi_length=feedback.target_pi_length,
-            fixed=float(raw_cfg["modules"]["rabi_pulse"]["gain"]),
+            fixed=float(knobs["qub_gain"]),
             knobs=knobs,
         )
         if (
@@ -771,20 +839,34 @@ class LenRabiBuilder(Builder):
                         latest.confidence,
                     )
                     drive_gain = _clamp_drive_gain(drive_gain, knobs)
-        raw_cfg["modules"]["rabi_pulse"]["gain"] = drive_gain
-        raw_cfg["modules"]["rabi_pulse"]["freq"] = qubit_freq
-        raw_cfg["modules"]["readout"] = readout
-        raw_cfg.pop("sweep", None)
-        raw_cfg["relax_delay"] = _resolve_cfg_relax_delay(
+        patches: dict[str, object] = {
+            "modules.rabi_pulse.freq": qubit_freq,
+        }
+        if drive_gain_mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
+            patches["modules.rabi_pulse.gain"] = drive_gain
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.readout",
+                module=readout,
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        relax_delay = _resolve_cfg_relax_delay(
             str(knobs["relax_delay_mode"]),
             t1=t1,
             fixed=float(knobs["relax_delay"]),
             knobs=knobs,
         )
-        raw_cfg["sweep_range"] = _resolve_cfg_sweep_range(
+        if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
+            patches["relax_delay"] = relax_delay
+        sweep_range = _resolve_cfg_sweep_range(
             str(knobs["sweep_range_mode"]),
             pi_length=feedback.range_pi_length,
             fixed=knobs["sweep_range"],
             knobs=knobs,
         )
+        if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
+            patches["sweep.length"] = sweep_range
+        raw_cfg = self.point_cfg(env, patches)
+        raw_cfg["sweep_range"] = _pop_sweep_range(raw_cfg, "length")
         return ml.make_cfg(raw_cfg, LenRabiCfgTemplate)

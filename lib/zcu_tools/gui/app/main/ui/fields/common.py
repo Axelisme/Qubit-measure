@@ -241,7 +241,7 @@ class LiteralWidget(QLabel):
     def __init__(self, field: LiteralLiveField, parent: QWidget | None = None):
         super().__init__(parent)
         self._field = field
-        self.setVisible(False)
+        self.setText(str(field.spec.value))
 
     @property
     def field(self) -> LiveField:

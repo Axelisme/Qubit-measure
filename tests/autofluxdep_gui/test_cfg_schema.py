@@ -36,6 +36,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepSpec,
     SweepValue,
+    apply_override_patches,
     node_field,
     node_path,
     node_section,
@@ -364,11 +365,11 @@ _EXPECTED_PATHS = {
         "relax_delay": "relax_delay",
         "earlystop_snr": "generation.safety.earlystop_snr",
         "reset": "modules.reset",
-        "rabi_pulse": "modules.qub_pulse",
+        "rabi_pulse": "modules.rabi_pulse",
         "readout": "modules.readout",
-        "qub_ch": "modules.qub_pulse.ch",
-        "qub_nqz": "modules.qub_pulse.nqz",
-        "qub_gain": "modules.qub_pulse.gain",
+        "qub_ch": "modules.rabi_pulse.ch",
+        "qub_nqz": "modules.rabi_pulse.nqz",
+        "qub_gain": "modules.rabi_pulse.gain",
         "relax_delay_mode": "generation.timing.relax_delay_mode",
         "t1_seed_us": "generation.timing.t1_seed_us",
         "relax_factor": "generation.timing.relax_factor",
@@ -395,7 +396,7 @@ _EXPECTED_PATHS = {
         "freq_range": "sweep.freq",
         "gain_range": "sweep.gain",
         "reset": "modules.reset",
-        "pi_pulse": "modules.qub_pulse",
+        "pi_pulse": "modules.pi_pulse",
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
@@ -472,17 +473,17 @@ _EXPECTED_PATHS = {
     "mist": {
         "gain_sweep": "sweep.gain",
         "reset": "modules.reset",
-        "pi_pulse": "modules.init_pulse",
-        "mist_pulse": "modules.probe_pulse",
+        "pi_pulse": "modules.pi_pulse",
+        "mist_pulse": "modules.mist_pulse",
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "mist_ch": "modules.probe_pulse.ch",
-        "mist_nqz": "modules.probe_pulse.nqz",
-        "mist_freq": "modules.probe_pulse.freq",
-        "mist_gain": "modules.probe_pulse.gain",
-        "mist_length": "modules.probe_pulse.waveform.length",
+        "mist_ch": "modules.mist_pulse.ch",
+        "mist_nqz": "modules.mist_pulse.nqz",
+        "mist_freq": "modules.mist_pulse.freq",
+        "mist_gain": "modules.mist_pulse.gain",
+        "mist_length": "modules.mist_pulse.waveform.length",
     },
 }
 
@@ -983,7 +984,7 @@ def test_mist_default_knobs():
 
     schema = MistBuilder().make_default_schema()
     schema.set_field("mist_nqz", 0)
-    with pytest.raises(RuntimeError, match="modules\\.probe_pulse\\.nqz.*choices"):
+    with pytest.raises(RuntimeError, match="modules\\.mist_pulse\\.nqz.*choices"):
         schema.lower(None)
 
 
@@ -1496,8 +1497,139 @@ def test_override_plan_rejects_ambiguous_or_absent_paths():
     whole_module = OverridePlan(
         (OverridePath("modules.qub_pulse", "all_points", "x", "y"),)
     )
-    with pytest.raises(ValueError, match="absent from run-start base_cfg"):
+    with pytest.raises(ValueError, match="whole-module replacement is not allowed"):
         validate_override_plan_base_cfg(whole_module, base_cfg, node_name="qubit_freq")
+
+    modules_root = OverridePlan((OverridePath("modules", "all_points", "x", "y"),))
+    with pytest.raises(ValueError, match="whole-module replacement is not allowed"):
+        validate_override_plan_base_cfg(modules_root, base_cfg, node_name="qubit_freq")
+
+
+def test_apply_override_patches_copies_base_and_enforces_plan_modes():
+    plan = OverridePlan(
+        (
+            OverridePath("modules.qub_pulse.freq", "all_points", "predict_freq", "qf"),
+            OverridePath(
+                "modules.qub_pulse.gain",
+                "after_first_point",
+                "drive_gain",
+                "adaptive gain",
+            ),
+        )
+    )
+    base_cfg = {
+        "modules": {
+            "qub_pulse": {
+                "freq": 5000.0,
+                "gain": 0.1,
+                "waveform": {"style": "const", "length": 5.0},
+            }
+        },
+        "reps": 1000,
+    }
+
+    first = apply_override_patches(
+        base_cfg,
+        plan,
+        {"modules.qub_pulse.freq": 5135.0},
+        flux_idx=0,
+        node_name="qubit_freq",
+    )
+    first_modules = cast(dict[str, Any], first["modules"])
+    first_qub_pulse = cast(dict[str, Any], first_modules["qub_pulse"])
+    assert first_qub_pulse["freq"] == 5135.0
+    assert base_cfg["modules"]["qub_pulse"]["freq"] == 5000.0
+
+    second = apply_override_patches(
+        base_cfg,
+        plan,
+        {"modules.qub_pulse.freq": 5140.0, "modules.qub_pulse.gain": 0.2},
+        flux_idx=1,
+        node_name="qubit_freq",
+    )
+    second_modules = cast(dict[str, Any], second["modules"])
+    second_qub_pulse = cast(dict[str, Any], second_modules["qub_pulse"])
+    assert second_qub_pulse["gain"] == 0.2
+
+    with pytest.raises(ValueError, match="undeclared override path"):
+        apply_override_patches(
+            base_cfg,
+            plan,
+            {"modules.qub_pulse.phase": 90.0},
+            flux_idx=1,
+            node_name="qubit_freq",
+        )
+    with pytest.raises(ValueError, match="initial-only path"):
+        apply_override_patches(
+            base_cfg,
+            plan,
+            {"modules.qub_pulse.gain": 0.2},
+            flux_idx=0,
+            node_name="qubit_freq",
+        )
+
+
+def test_apply_override_patches_rejects_whole_module_replacement():
+    plan = OverridePlan(
+        (
+            OverridePath(
+                "modules.qub_pulse",
+                "all_points",
+                "bad_source",
+                "whole module should not be generated",
+            ),
+        )
+    )
+    base_cfg = {
+        "modules": {
+            "qub_pulse": {
+                "freq": 5000.0,
+                "gain": 0.1,
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="whole-module replacement is not allowed"):
+        apply_override_patches(
+            base_cfg,
+            plan,
+            {"modules.qub_pulse": {"freq": 5135.0, "gain": 0.2}},
+            flux_idx=1,
+            node_name="qubit_freq",
+        )
+
+    root_plan = OverridePlan(
+        (
+            OverridePath(
+                "modules",
+                "all_points",
+                "bad_source",
+                "whole modules section should not be generated",
+            ),
+        )
+    )
+    with pytest.raises(ValueError, match="whole-module replacement is not allowed"):
+        apply_override_patches(
+            base_cfg,
+            root_plan,
+            {"modules": {"qub_pulse": {"freq": 5135.0, "gain": 0.2}}},
+            flux_idx=1,
+            node_name="qubit_freq",
+        )
+
+
+def test_real_builders_declare_nonempty_valid_override_plans():
+    for builder in _BUILDERS:
+        schema = builder.make_default_schema()
+        base_cfg = schema.lower_raw(ModuleLibrary(), md=MetaDict())
+        plan = builder.override_plan(schema)
+
+        assert plan.paths, builder.name
+        validate_override_plan_base_cfg(plan, base_cfg, node_name=builder.name)
+
+    mist_schema = MistBuilder().make_default_schema()
+    mist_base = mist_schema.lower_raw(ModuleLibrary(), md=MetaDict())
+    assert set(mist_base["modules"]) == {"readout", "pi_pulse", "mist_pulse"}
 
 
 # --- 3. seam invariant: only cfg/ imports gui.app.main from the package ---------

@@ -32,7 +32,7 @@ from qtpy.QtCore import (
 
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CfgSectionValue,
-    override_plan_to_wire,
+    RunCfgSnapshot,
     validate_override_plan_base_cfg,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
@@ -1022,7 +1022,9 @@ class Controller(SessionControllerMixin):
             flux_device_name=flux_device,
             nodes=enabled_nodes,
             results=results,
-            cfg_snapshots=cfg_snapshots,
+            cfg_snapshots={
+                name: snapshot.to_wire() for name, snapshot in cfg_snapshots.items()
+            },
         )
         return RunSession(
             providers=providers,
@@ -1030,6 +1032,7 @@ class Controller(SessionControllerMixin):
             flux_values=flux_values,
             flux_device=flux_device,
             results=results,
+            cfg_snapshots=cfg_snapshots,
             store=store,
             tools=tools,
             ml=ml,
@@ -1044,21 +1047,23 @@ class Controller(SessionControllerMixin):
 
     def _build_run_cfg_snapshots(
         self, enabled_nodes: list[PlacedNode]
-    ) -> dict[str, dict[str, object]]:
+    ) -> dict[str, RunCfgSnapshot]:
         ctx = self._state.exp_context
-        snapshots: dict[str, dict[str, object]] = {}
+        snapshots: dict[str, RunCfgSnapshot] = {}
         for node in enabled_nodes:
             base_cfg = node.schema.lower_raw(ctx.ml, ctx.md)
             override_plan = node.builder.override_plan(node.schema)
+            knobs = node.schema.lower(ctx.ml, ctx.md)
             validate_override_plan_base_cfg(
                 override_plan,
                 base_cfg,
                 node_name=node.name,
             )
-            snapshots[node.name] = {
-                "base_cfg": base_cfg,
-                "override_plan": override_plan_to_wire(override_plan),
-            }
+            snapshots[node.name] = RunCfgSnapshot(
+                base_cfg=base_cfg,
+                override_plan=override_plan,
+                knobs=knobs,
+            )
         return snapshots
 
     def _begin_run_segment(self, session: RunSession, *, continuing: bool) -> int:
@@ -1282,11 +1287,19 @@ class Controller(SessionControllerMixin):
         smoothing is auto-built from declarations, ``derivations`` are extra
         producers. Returns the final InfoStore. Providers run in list order (no
         topo sort)."""
+        enabled_nodes = self._enabled_nodes()
         providers = self._build_providers()
+        ctx = self._state.exp_context
+        run_ml = ml
+        if run_ml is None and ctx.ml is not None:
+            run_ml = _MlModuleSource(ctx.ml)
+        cfg_snapshots = self._build_run_cfg_snapshots(enabled_nodes)
         orch = Orchestrator(
             providers=providers,
             tools=tools or self._build_tools(providers),
-            ml=ml,
+            ml=run_ml,
+            md=ctx.md,
+            cfg_snapshots=cfg_snapshots,
             derivations=derivations or [],
         )
         return orch.run(self._current_flux_values_for_run())

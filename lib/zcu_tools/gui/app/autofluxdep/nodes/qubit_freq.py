@@ -27,7 +27,14 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    OverridePath,
+    OverridePlan,
+    SweepValue,
+    module_leaf_patches,
+    str_choice_spec,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.feedback import (
     FeedbackSlotDecl,
@@ -46,10 +53,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
     generation_field,
-    module_dict,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
@@ -322,7 +329,7 @@ class QubitFreqNode(Node):
 
         # Bias policy is explicit: fixed mode keeps the physical/base predictor
         # unchanged and lets the generic residual estimator carry run-local bias.
-        knobs = env.schema.lower(env.ml, md=env.md)
+        knobs = env.knobs()
         bias_update_mode = str(knobs["bias_update_mode"])
         base_for_residual = base_pred_qf
         if bias_update_mode == _BIAS_UPDATE_MODE_HARD:
@@ -548,6 +555,36 @@ class QubitFreqBuilder(Builder):
     def build_node(self, env: RunEnv) -> QubitFreqNode:
         return QubitFreqNode(env, self)
 
+    def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
+        knobs = schema.read_knobs()
+        paths: list[OverridePath] = [
+            OverridePath(
+                "modules.qub_pulse.freq",
+                "all_points",
+                "predict_freq",
+                "qubit drive frequency is generated from predictor feedback",
+            )
+        ]
+        if knobs.get("drive_gain_mode") == _DRIVE_GAIN_MODE_ADAPTIVE:
+            paths.append(
+                OverridePath(
+                    "modules.qub_pulse.gain",
+                    "all_points",
+                    "generation.feedback.drive_gain_mode",
+                    "adaptive drive gain is generated from linewidth feedback",
+                )
+            )
+        paths.extend(
+            OverridePath(
+                f"modules.readout.{leaf}",
+                "all_points",
+                "readout module dependency",
+                "readout module is resolved from workflow/module-library dependency",
+            )
+            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
+        )
+        return OverridePlan(tuple(paths))
+
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> QubitFreqCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
 
@@ -570,23 +607,30 @@ class QubitFreqBuilder(Builder):
             raise RuntimeError(
                 "qubit_freq.make_cfg needs a readout module (none produced or preset)"
             )
-        raw_cfg = env.schema.lower_raw(ml, md=env.md)
-        knobs = env.schema.lower(ml, md=env.md)
+        knobs = env.knobs()
         predict_freq = float(snapshot["predict_freq"]) + _predict_freq_correction(env)
-        qub_pulse = module_dict(raw_cfg, "qub_pulse")
         qfw_factor = snapshot.get("qfw_factor")
         if qfw_factor is None:
             qfw_factor = _qfw_factor_seed(knobs)
         drive_gain = _resolve_drive_gain(
             str(knobs["drive_gain_mode"]),
             qfw_factor,
-            float(qub_pulse["gain"]),
+            float(knobs["qub_gain"]),
             target_kappa=float(knobs["target_kappa"]),
             max_drive_gain=float(knobs["max_drive_gain"]),
         )
-        qub_pulse["freq"] = predict_freq
-        qub_pulse["gain"] = drive_gain
-        raw_cfg["modules"]["qub_pulse"] = qub_pulse
-        raw_cfg["modules"]["readout"] = readout
+        patches: dict[str, object] = {
+            "modules.qub_pulse.freq": predict_freq,
+        }
+        if str(knobs["drive_gain_mode"]) == _DRIVE_GAIN_MODE_ADAPTIVE:
+            patches["modules.qub_pulse.gain"] = drive_gain
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.readout",
+                module=readout,
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
         return ml.make_cfg(raw_cfg, QubitFreqCfgTemplate)

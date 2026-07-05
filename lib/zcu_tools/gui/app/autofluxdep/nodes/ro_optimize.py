@@ -51,7 +51,14 @@ from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize.freq_gain import (
     RoOptFreqGainAdapter,
 )
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, SweepValue, str_choice_spec
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    FloatSpec,
+    OverridePath,
+    OverridePlan,
+    SweepValue,
+    module_leaf_patches,
+    str_choice_spec,
+)
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     axis_to_sweep,
@@ -61,11 +68,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    PULSE_MODULE_LEAF_PATHS,
+    READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
     ctx_module,
     generation_field,
-    move_module,
     readout_pulse_freq,
     readout_pulse_gain,
 )
@@ -342,6 +350,27 @@ def _resolve_relax_delay(
     raise RuntimeError(f"unsupported ro_optimize relax_delay_mode: {mode!r}")
 
 
+def _raw_range_tuple(value: Any) -> tuple[float, float]:
+    if hasattr(value, "start") and hasattr(value, "stop"):
+        return (float(value.start), float(value.stop))
+    lo, hi = value
+    return (float(lo), float(hi))
+
+
+def _pop_sweep_ranges(
+    raw_cfg: dict[str, Any], keys: tuple[str, ...]
+) -> dict[str, tuple[float, float]]:
+    sweep = raw_cfg.pop("sweep", None)
+    if not isinstance(sweep, dict):
+        raise RuntimeError("ro_optimize raw cfg has no sweep section")
+    ranges: dict[str, tuple[float, float]] = {}
+    for key in keys:
+        if key not in sweep:
+            raise RuntimeError(f"ro_optimize raw cfg has no sweep.{key}")
+        ranges[key] = _raw_range_tuple(sweep[key])
+    return ranges
+
+
 class RoOptimizeNode(Node):
     """One flux point's ro_optimize: set flux → real acquire → SNR argmax → Patch.
 
@@ -526,7 +555,7 @@ class RoOptimizeBuilder(Builder):
             ctx,
             logical_paths={
                 "reset": "modules.reset",
-                "pi_pulse": "modules.qub_pulse",
+                "pi_pulse": "modules.pi_pulse",
                 "readout": "modules.readout",
                 "relax_delay": "relax_delay",
                 "skew_penalty": "skew_penalty",
@@ -630,6 +659,7 @@ class RoOptimizeBuilder(Builder):
                     expts=31,
                 ),
             },
+            path_renames={"modules.qub_pulse": "modules.pi_pulse"},
         )
 
     def make_init_result(
@@ -671,6 +701,56 @@ class RoOptimizeBuilder(Builder):
     def build_node(self, env: RunEnv) -> RoOptimizeNode:
         return RoOptimizeNode(env, self)
 
+    def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
+        knobs = schema.read_knobs()
+        paths: list[OverridePath] = []
+        paths.extend(
+            OverridePath(
+                f"modules.pi_pulse.{leaf}",
+                "all_points",
+                "pi_pulse module dependency",
+                "pi pulse is resolved from workflow/module-library dependency",
+            )
+            for leaf in PULSE_MODULE_LEAF_PATHS
+        )
+        paths.extend(
+            OverridePath(
+                f"modules.readout.{leaf}",
+                "all_points",
+                "readout module dependency",
+                "readout module is resolved from workflow/module-library dependency",
+            )
+            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
+        )
+        if knobs.get("relax_delay_mode") == _RELAX_DELAY_MODE_AUTO_T1:
+            paths.append(
+                OverridePath(
+                    "relax_delay",
+                    "all_points",
+                    "generation.timing.relax_delay_mode",
+                    "relax delay is generated from T1 feedback",
+                )
+            )
+        if knobs.get("freq_range_mode") == _RANGE_MODE_PREVIOUS_BEST:
+            paths.append(
+                OverridePath(
+                    "sweep.freq",
+                    "all_points",
+                    "generation.sweep.freq_range_mode",
+                    "readout frequency window is generated from previous best",
+                )
+            )
+        if knobs.get("gain_range_mode") == _RANGE_MODE_PREVIOUS_BEST:
+            paths.append(
+                OverridePath(
+                    "sweep.gain",
+                    "all_points",
+                    "generation.sweep.gain_range_mode",
+                    "readout gain window is generated from previous best",
+                )
+            )
+        return OverridePlan(tuple(paths))
+
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> RoOptimizeCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
 
@@ -697,8 +777,7 @@ class RoOptimizeBuilder(Builder):
                 "ro_optimize.make_cfg needs the pi_pulse + readout modules "
                 "(none produced or preset)"
             )
-        raw_cfg = env.schema.lower_raw(ml, md=env.md)
-        knobs = env.schema.lower(ml, md=env.md)
+        knobs = env.knobs()
         freq_range_knob = knobs["freq_range"]
         gain_range_knob = knobs["gain_range"]
         freq_range = _resolve_range(
@@ -728,11 +807,29 @@ class RoOptimizeBuilder(Builder):
             fixed=float(knobs["relax_delay"]),
             relax_factor=float(knobs["relax_factor"]),
         )
-        move_module(raw_cfg, "qub_pulse", "pi_pulse")
-        raw_cfg["modules"]["pi_pulse"] = pi_pulse
-        raw_cfg["modules"]["readout"] = readout
-        raw_cfg.pop("sweep", None)
-        raw_cfg["relax_delay"] = relax_delay
-        raw_cfg["freq_range"] = freq_range
-        raw_cfg["gain_range"] = gain_range
+        patches: dict[str, object] = {}
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.pi_pulse",
+                module=pi_pulse,
+                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        patches.update(
+            module_leaf_patches(
+                prefix="modules.readout",
+                module=readout,
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+            )
+        )
+        if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
+            patches["relax_delay"] = relax_delay
+        if str(knobs["freq_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST:
+            patches["sweep.freq"] = freq_range
+        if str(knobs["gain_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST:
+            patches["sweep.gain"] = gain_range
+        raw_cfg = self.point_cfg(env, patches)
+        ranges = _pop_sweep_ranges(raw_cfg, ("freq", "gain"))
+        raw_cfg["freq_range"] = ranges["freq"]
+        raw_cfg["gain_range"] = ranges["gain"]
         return ml.make_cfg(raw_cfg, RoOptimizeCfgTemplate)

@@ -30,6 +30,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     IntSpec,
     NodeCfgSchema,
+    OverridePath,
+    OverridePlan,
     ScalarSpec,
     SweepValue,
     node_field,
@@ -96,6 +98,23 @@ class _SectionedBuilder(Builder):
     def build_node(self, env: RunEnv) -> Node:
         del env
         return _NoopNode()
+
+
+class _InitialOverrideBuilder(_SectionedBuilder):
+    name = "initial_override"
+
+    def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
+        del schema
+        return OverridePlan(
+            (
+                OverridePath(
+                    "acquire.reps",
+                    "after_first_point",
+                    "generation.synthetic",
+                    "later points replace acquisition reps",
+                ),
+            )
+        )
 
 
 @pytest.fixture
@@ -237,7 +256,10 @@ def test_cfg_form_decoration_provider_collects_nested_paths(qapp):
     env = LiveModelEnv(ctrl=ctrl)
     model = SectionLiveField(schema.schema.spec, env, schema.schema.value)
     provider = _DecorationProvider()
-    form = CfgFormWidget(decoration_provider=provider)
+    form = CfgFormWidget(
+        decoration_provider=provider,
+        field_label_max_width=500,
+    )
     try:
         form.attach(model)
 
@@ -253,11 +275,69 @@ def test_cfg_form_decoration_provider_collects_nested_paths(qapp):
         assert decoration.badge == "runtime"
         assert decoration.tooltip == "Generated at run time"
         assert form.decoration_for_path("drive.gain").enabled is True
+        runtime_labels = [
+            label
+            for label in form.findChildren(ElidedLabel)
+            if label.toolTip() == "Generated at run time"
+        ]
+        assert runtime_labels
+        assert getattr(runtime_labels[0], "_full_text") == "Reps [runtime]:"
+        assert runtime_labels[0].isEnabled() is False
         with pytest.raises(KeyError, match="Unknown cfg field path"):
             form.decoration_for_path("missing")
     finally:
         form.detach()
         model.teardown()
+        ctrl._background_svc.quiesce()
+
+
+def test_node_cfg_form_renders_override_plan_badges_and_refreshes(ctrl_node, qapp):
+    ctrl, node, index = ctrl_node
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        freq_decoration = form._default_form.decoration_for_path(
+            "modules.qub_pulse.freq"
+        )
+        assert freq_decoration.enabled is False
+        assert freq_decoration.badge == "generated"
+
+        gain_decoration = form._default_form.decoration_for_path(
+            "modules.qub_pulse.gain"
+        )
+        assert gain_decoration.enabled is False
+        assert gain_decoration.badge == "generated"
+
+        _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
+
+        refreshed = form._default_form.decoration_for_path("modules.qub_pulse.gain")
+        assert refreshed.enabled is True
+        assert refreshed.badge == ""
+    finally:
+        form.teardown()
+
+
+def test_node_cfg_form_renders_initial_override_badge(qapp):
+    ctrl = build_core()
+    node = ctrl.add_node(_InitialOverrideBuilder())
+    index = ctrl.state.nodes.index(node)
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        decoration = form._default_form.decoration_for_path("acquire.reps")
+        assert decoration.enabled is True
+        assert decoration.tone == "warning"
+        assert decoration.badge == "initial"
+        assert "Initial value is used at flux point 0" in decoration.tooltip
+
+        initial_labels = [
+            label
+            for label in form.findChildren(ElidedLabel)
+            if label.toolTip() == decoration.tooltip
+        ]
+        assert initial_labels
+        assert getattr(initial_labels[0], "_full_text") == "Reps [initial]:"
+        assert initial_labels[0].isEnabled() is True
+    finally:
+        form.teardown()
         ctrl._background_svc.quiesce()
 
 

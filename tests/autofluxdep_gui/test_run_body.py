@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, OverridePath, OverridePlan
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
@@ -210,6 +211,34 @@ def test_dry_run_omits_disabled_nodes():
     ctrl.dry_run()
 
     assert called == []
+
+
+def test_dry_run_uses_run_cfg_snapshots_for_override_plan_nodes():
+    plan = OverridePlan(
+        (OverridePath("freq", "all_points", "synthetic", "runtime patch"),)
+    )
+    seen: list[tuple[float, float]] = []
+
+    def record(env, snapshot):
+        del snapshot
+        cfg = env.point_cfg({"freq": 2.0 + env.flux})
+        seen.append((float(env.knobs()["freq"]), float(cfg["freq"])))
+        return Patch()
+
+    ctrl = build_core()
+    ctrl.add_node(
+        make_builder(
+            "cfg_node",
+            schema_fields=(("freq", FloatSpec("Frequency"), 1.0),),
+            override_plan=plan,
+            produce_fn=record,
+        )
+    )
+    ctrl.set_flux_values([0.0, 1.0])
+
+    ctrl.dry_run()
+
+    assert seen == [(1.0, 2.0), (1.0, 3.0)]
 
 
 def test_run_event_bus_payloads_emit_on_main_thread(qapp):
