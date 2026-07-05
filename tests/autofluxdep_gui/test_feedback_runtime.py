@@ -64,6 +64,44 @@ def test_idw_estimator_returns_none_without_observations_and_interpolates():
         IdwEstimator(decay_points=0.0)
 
 
+def test_last_good_replace_observations_reseeds_value_and_age():
+    estimator = LastGoodEstimator(decay_points=3.0)
+    estimator.observe(0.0, 1.0)
+    assert estimator.estimate(0.0) is not None
+    assert estimator.estimate(0.0) is not None
+
+    estimator.replace_observations(((0.1, 5.0), (0.2, 7.0)))
+
+    first = estimator.estimate(10.0)
+    assert first == FeedbackSample(value=7.0, confidence=1.0, age_queries=0)
+    second = estimator.estimate(10.0)
+    assert second is not None
+    assert second.confidence == pytest.approx(math.exp(-1.0 / 3.0))
+
+    estimator.replace_observations(())
+    assert estimator.estimate(0.0) is None
+
+
+def test_idw_replace_observations_rebuilds_points_and_age():
+    estimator = IdwEstimator(k=4, epsilon=1e-6, decay_points=4.0)
+    estimator.observe(0.0, 100.0)
+    assert estimator.estimate(0.0) is not None
+    assert estimator.estimate(0.0) is not None
+
+    estimator.replace_observations(((0.0, 1.0), (1.0, 3.0)))
+
+    first = estimator.estimate(0.5)
+    assert first is not None
+    assert first.value == pytest.approx(2.0)
+    assert first.confidence == pytest.approx(1.0)
+    second = estimator.estimate(0.5)
+    assert second is not None
+    assert second.confidence == pytest.approx(math.exp(-1.0 / 4.0))
+
+    estimator.replace_observations(())
+    assert estimator.estimate(0.5) is None
+
+
 def test_log_step_controller_proposes_in_log_domain_and_fast_fails_invalid_input():
     controller = LogStepController(step_gain=1.0)
 

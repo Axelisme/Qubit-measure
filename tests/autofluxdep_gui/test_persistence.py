@@ -57,6 +57,8 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
             "qub_gain": "0.2",
             "drive_gain_mode": "fixed",
             "bias_update_mode": "hard",
+            "physical_recovery_min_points": "12",
+            "physical_recovery_max_rms_mhz": "40.0",
             "earlystop_snr": "12.5",
         },
     )
@@ -81,6 +83,14 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
         "__kind": "direct",
         "value": "hard",
     }
+    assert generation_raw["physical_recovery_min_points"] == {
+        "__kind": "direct",
+        "value": 12,
+    }
+    assert generation_raw["physical_recovery_max_rms_mhz"] == {
+        "__kind": "direct",
+        "value": 40.0,
+    }
     assert generation_raw["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
     assert "feedback" not in generation_raw
     assert "safety" not in generation_raw
@@ -101,6 +111,8 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     assert knobs["qub_gain"] == pytest.approx(0.2)
     assert knobs["drive_gain_mode"] == "fixed"
     assert knobs["bias_update_mode"] == "hard"
+    assert knobs["physical_recovery_min_points"] == 12
+    assert knobs["physical_recovery_max_rms_mhz"] == pytest.approx(40.0)
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
     assert restored.get_flux_sweep_expressions() == (
         "span / 2",

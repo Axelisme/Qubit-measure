@@ -29,6 +29,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
+    IntSpec,
     OverridePath,
     OverridePlan,
     SweepValue,
@@ -65,6 +66,19 @@ from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import title_with_snr
+from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+    DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
+    DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
+    DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
+    DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
+    PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
+    PHYSICAL_RECOVERY_MODE_OFF,
+    on_fit_failed,
+    on_fit_succeeded,
+    physical_prediction_for_make_cfg,
+    physical_prediction_for_residual,
+    validate_recovery_bias_policy,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
@@ -318,6 +332,11 @@ class QubitFreqNode(Node):
                 "discarded, no calibrate, no qubit_freq produced",
                 idx,
             )
+            on_fit_failed(
+                env,
+                snapshot_predict_freq=base_pred_qf,
+                estimator_key=_PREDICT_FREQ_CORRECTION_SLOT.key,
+            )
             if env.round_hook is not None:
                 env.round_hook(idx)  # raw row already shown; fit fields stay nan
             return Patch()  # partial: omit qubit_freq → downstream latest-available
@@ -331,8 +350,15 @@ class QubitFreqNode(Node):
         # Bias policy is explicit: fixed mode keeps the physical/base predictor
         # unchanged and lets the generic residual estimator carry run-local bias.
         knobs = env.knobs()
+        validate_recovery_bias_policy(knobs)
+        recovery_reseeded = on_fit_succeeded(
+            env,
+            float(freq),
+            snapshot_predict_freq=base_pred_qf,
+            estimator_key=_PREDICT_FREQ_CORRECTION_SLOT.key,
+        )
         bias_update_mode = str(knobs["bias_update_mode"])
-        base_for_residual = base_pred_qf
+        base_for_residual = physical_prediction_for_residual(env, base_pred_qf, knobs)
         if bias_update_mode == _BIAS_UPDATE_MODE_HARD:
             if env.tools is not None and env.tools.predictor is not None:
                 env.tools.predictor.calibrate(env.flux, float(freq))
@@ -341,7 +367,8 @@ class QubitFreqNode(Node):
             raise RuntimeError(
                 f"unsupported qubit_freq bias_update_mode: {bias_update_mode!r}"
             )
-        _observe_predict_freq_residual(env, float(freq), base_for_residual)
+        if not recovery_reseeded:
+            _observe_predict_freq_residual(env, float(freq), base_for_residual)
 
         logger.debug(
             "qubit_freq fit @flux%d: freq=%.3f (predict=%.3f, detune=%+.3f) kappa=%.3f"
@@ -498,6 +525,42 @@ class QubitFreqBuilder(Builder):
                     group="feedback",
                 ),
                 logical_generation_field(
+                    "physical_recovery_mode",
+                    str_choice_spec(
+                        "physical_recovery_mode",
+                        (
+                            PHYSICAL_RECOVERY_MODE_OFF,
+                            PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
+                        ),
+                    ),
+                    PHYSICAL_RECOVERY_MODE_OFF,
+                    group="feedback",
+                ),
+                logical_generation_field(
+                    "physical_recovery_min_points",
+                    IntSpec(label="physical_recovery_min_points"),
+                    DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
+                    group="feedback",
+                ),
+                logical_generation_field(
+                    "physical_recovery_max_points",
+                    IntSpec(label="physical_recovery_max_points"),
+                    DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
+                    group="feedback",
+                ),
+                logical_generation_field(
+                    "physical_recovery_max_center_shift_mhz",
+                    FloatSpec(label="physical_recovery_max_center_shift_mhz"),
+                    DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
+                    group="feedback",
+                ),
+                logical_generation_field(
+                    "physical_recovery_max_rms_mhz",
+                    FloatSpec(label="physical_recovery_max_rms_mhz"),
+                    DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
+                    group="feedback",
+                ),
+                logical_generation_field(
                     "drive_gain_mode",
                     str_choice_spec(
                         "drive_gain_mode",
@@ -602,7 +665,12 @@ class QubitFreqBuilder(Builder):
                 "qubit_freq.make_cfg needs a readout module (none produced or preset)"
             )
         knobs = env.knobs()
-        predict_freq = float(snapshot["predict_freq"]) + _predict_freq_correction(env)
+        base_predict_freq = physical_prediction_for_make_cfg(
+            env,
+            float(snapshot["predict_freq"]),
+            knobs,
+        )
+        predict_freq = base_predict_freq + _predict_freq_correction(env)
         qfw_factor = snapshot.get("qfw_factor")
         if qfw_factor is None:
             qfw_factor = _qfw_factor_seed(knobs)

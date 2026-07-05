@@ -123,6 +123,41 @@ def test_qubit_freq_make_cfg_composes_prediction_correction():
     assert float(cfg.modules.qub_pulse.freq) == pytest.approx(5142.5)
 
 
+def test_qubit_freq_make_cfg_uses_recovery_overlay_before_correction():
+    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+        QubitFreqRecoveryState,
+    )
+    from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
+
+    builder = QubitFreqBuilder()
+    schema = builder.make_default_schema().with_overrides(
+        {"physical_recovery_mode": "fail_triggered_fit"}
+    )
+    feedback = build_feedback_runtime([_Provider("qf", builder, schema)])
+    view = feedback.view_for("qf")
+    estimator = view.estimator("predict_freq_correction")
+    assert estimator is not None
+    estimator.observe(0.0, 7.5)
+    tools = Tools(feedback=feedback)
+    state = tools.recovery_state("qubit_freq", QubitFreqRecoveryState)
+    state.overlay = SimplePredictor(base=5200.0, slope=0.0)
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        ml=_ml(),
+        tools=tools,
+        feedback=view,
+    )
+    snap = Snapshot(
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
+    )
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert float(cfg.modules.qub_pulse.freq) == pytest.approx(5207.5)
+
+
 def test_qubit_freq_prediction_correction_smoothly_reverts_to_base():
     builder = QubitFreqBuilder()
     schema = builder.make_default_schema()
@@ -181,6 +216,30 @@ def test_qubit_freq_make_cfg_can_fix_drive_gain():
     cfg = QubitFreqBuilder().make_cfg(env, snap)
 
     assert float(cfg.modules.qub_pulse.gain) == 0.05
+
+
+def test_qubit_freq_recovery_fast_fails_with_hard_bias_mode():
+    builder = QubitFreqBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            builder,
+            {
+                "qub_ch": 3,
+                "qub_nqz": 2,
+                "bias_update_mode": "hard",
+                "physical_recovery_mode": "fail_triggered_fit",
+            },
+        ),
+        ml=_ml(),
+    )
+    snap = Snapshot(
+        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
+    )
+
+    with pytest.raises(RuntimeError, match="mutually exclusive"):
+        builder.make_cfg(env, snap)
 
 
 def test_qubit_freq_produce_fast_fails_when_context_unconfigured():

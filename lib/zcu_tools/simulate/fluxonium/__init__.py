@@ -28,6 +28,11 @@ from .matrix_element import (
     calculate_sin_phi_oper_vs_flux,
     calculate_system_n_oper_vs_flux,
 )
+from .physical_fit import (
+    FluxoniumLocalFitResult,
+    FluxoniumModelSnapshot,
+    fit_local_fluxonium_model,
+)
 from .predict import FluxoniumPredictor
 from .prediction import (
     DEFAULT_PREDICTION_RESOLUTION,
@@ -76,4 +81,7 @@ __all__ = [
     "FluxoniumPredictionSession",
     "PredictionResolution",
     "FluxoniumPredictor",
+    "FluxoniumLocalFitResult",
+    "FluxoniumModelSnapshot",
+    "fit_local_fluxonium_model",
 ]

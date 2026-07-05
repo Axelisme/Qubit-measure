@@ -69,6 +69,65 @@ class _TrackingPredictor:
         self.base = float(measured_freq)
 
 
+class _RecoverablePredictor:
+    def __init__(self, base: float = 600.0, bias: float = 0.0) -> None:
+        self.base = float(base)
+        self.bias = float(bias)
+        self.calibrations: list[tuple[float, float]] = []
+
+    def predict_freq(self, flux: float) -> float:
+        del flux
+        return self.base + self.bias
+
+    def predict_matrix_element(self, flux: float) -> float:
+        del flux
+        return 1.0
+
+    def calibrate(self, flux: float, measured_freq: float) -> None:
+        self.calibrations.append((float(flux), float(measured_freq)))
+
+    def supports_physical_recovery(self) -> bool:
+        return True
+
+    def physical_snapshot(self):
+        from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
+
+        return FluxoniumModelSnapshot((8.0, 1.0, 1.0), 0.0, 1.0, self.bias)
+
+    def clone_physical(self):
+        return _RecoverablePredictor(self.base, self.bias)
+
+    def overlay_physical(self, snapshot):
+        return _RecoverablePredictor(self.base, float(snapshot.flux_bias))
+
+
+class _RecordingEstimator:
+    def __init__(self) -> None:
+        self.observe_calls: list[tuple[float, float]] = []
+        self.replace_calls: list[tuple[tuple[float, float], ...]] = []
+
+    def observe(self, flux: float, value: float) -> None:
+        self.observe_calls.append((float(flux), float(value)))
+
+    def replace_observations(self, observations) -> None:
+        self.replace_calls.append(
+            tuple((float(flux), float(value)) for flux, value in observations)
+        )
+
+    def estimate(self, flux: float):
+        del flux
+        return None
+
+
+class _RecordingFeedbackView:
+    def __init__(self, estimator: _RecordingEstimator) -> None:
+        self._estimator = estimator
+
+    def estimator(self, key: str):
+        assert key == "predict_freq_correction"
+        return self._estimator
+
+
 def _configure_context(ctrl) -> None:
     """Populate the active context's ml so qubit_freq's make_cfg has a readout +
     drive waveform.
@@ -383,6 +442,68 @@ def test_hard_bias_update_mode_calibrates_predictor_before_residual(monkeypatch)
     estimate = correction.estimate(0.0)
     assert estimate is not None
     assert estimate.value == 0.0
+
+
+def test_success_after_fail_reseed_skips_duplicate_residual_observe(monkeypatch):
+    from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq_recovery as recovery_mod
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+        QubitFreqRecoveryState,
+        TrustedFrequencyPoint,
+    )
+    from zcu_tools.simulate.fluxonium.physical_fit import (
+        FluxoniumLocalFitResult,
+        FluxoniumModelSnapshot,
+    )
+
+    fit_curve = np.linspace(0.0, 1.0, 11)
+    real = fit_curve + 0.15
+    predictor = _RecoverablePredictor(base=600.0)
+    builder, env, _result, _returned_predictor = _mocked_qubit_freq_produce_env(
+        monkeypatch,
+        real,
+        (605.0, 0.0, 4.0, 0.0, fit_curve, None),
+        predictor=predictor,
+        schema_overrides={
+            "drive_gain_mode": "fixed",
+            "physical_recovery_mode": "fail_triggered_fit",
+        },
+    )
+    estimator = _RecordingEstimator()
+    env.feedback = _RecordingFeedbackView(estimator)
+    assert env.tools is not None
+    state = env.tools.recovery_state("qubit_freq", QubitFreqRecoveryState)
+    state.fail_streak = 1
+    state.history = [
+        TrustedFrequencyPoint(float(flux), 605.0) for flux in np.linspace(0.0, 0.9, 10)
+    ]
+
+    def fake_fit(base, measured_points):
+        points = tuple(measured_points)
+        return FluxoniumLocalFitResult(
+            accepted=True,
+            reason="accepted",
+            base=base,
+            fitted=FluxoniumModelSnapshot(
+                base.params, base.flux_half, base.flux_period, 5.0
+            ),
+            predictor=None,
+            n_points=len(points),
+            base_rms_mhz=8.0,
+            fitted_rms_mhz=3.0,
+        )
+
+    monkeypatch.setattr(recovery_mod, "fit_local_fluxonium_model", fake_fit)
+
+    patch = builder.build_node(env).produce(
+        Snapshot(
+            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
+        )
+    )
+
+    assert patch.values()["qubit_freq"] == 605.0
+    assert len(estimator.replace_calls) == 1
+    assert estimator.observe_calls == []
 
 
 def test_poor_fit_skips_patch_and_predictor_calibration(monkeypatch):

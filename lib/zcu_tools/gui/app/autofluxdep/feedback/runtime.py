@@ -32,6 +32,9 @@ class ScalarEstimator(Protocol):
     """A scalar flux-indexed estimator."""
 
     def observe(self, flux: float, value: float) -> None: ...
+    def replace_observations(
+        self, observations: Iterable[tuple[float, float]]
+    ) -> None: ...
     def estimate(self, flux: float) -> FeedbackSample | None: ...
 
 
@@ -231,6 +234,15 @@ class LastGoodEstimator:
         self._value = _finite("observation", value)
         self._last_update_query = self._query_count
 
+    def replace_observations(self, observations: Iterable[tuple[float, float]]) -> None:
+        latest: float | None = None
+        for flux, value in observations:
+            _finite("flux", flux)
+            latest = _finite("observation", value)
+        self._value = latest
+        self._query_count = 0
+        self._last_update_query = 0
+
     def estimate(self, flux: float) -> FeedbackSample | None:
         del flux
         if self._value is None:
@@ -261,6 +273,17 @@ class IdwEstimator:
         self._idw.update(_finite("flux", flux), _finite("observation", value))
         self._observations += 1
         self._last_update_query = self._query_count
+
+    def replace_observations(self, observations: Iterable[tuple[float, float]]) -> None:
+        new_idw = IDWInterpolation(k=self.k, epsilon=self.epsilon)
+        count = 0
+        for flux, value in observations:
+            new_idw.update(_finite("flux", flux), _finite("observation", value))
+            count += 1
+        self._idw = new_idw
+        self._observations = count
+        self._query_count = 0
+        self._last_update_query = 0
 
     def estimate(self, flux: float) -> FeedbackSample | None:
         if self._observations == 0:
