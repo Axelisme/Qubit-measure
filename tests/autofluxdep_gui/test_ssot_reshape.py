@@ -27,12 +27,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 
 def test_placement_holds_schema_not_params():
     node = PlacedNode(builder=QubitFreqBuilder())
+    expected_reps = QubitFreqBuilder().make_default_schema().lower(None)["reps"]
     # the SSOT is the schema; the old sparse dict / base_params are gone
     assert hasattr(node, "schema")
     assert not hasattr(node, "params")
     assert not hasattr(Builder, "base_params")
     # the schema is seeded with the Builder's declared defaults
-    assert node.schema.lower(None)["reps"] == 1000
+    assert node.schema.lower(None)["reps"] == expected_reps
 
 
 def test_overrides_seed_the_schema_at_construction():
@@ -56,10 +57,11 @@ def test_two_placements_have_independent_schemas():
     builder = QubitFreqBuilder()
     a = PlacedNode(builder=builder)
     b = PlacedNode(builder=builder)
+    expected_reps = builder.make_default_schema().lower(None)["reps"]
     a.schema.set_field("reps", 111)
     # editing one placement does not bleed into the other (cloned default schemas)
     assert a.schema.lower(None)["reps"] == 111
-    assert b.schema.lower(None)["reps"] == 1000
+    assert b.schema.lower(None)["reps"] == expected_reps
 
 
 def test_set_node_params_writes_schema_and_bumps_version():

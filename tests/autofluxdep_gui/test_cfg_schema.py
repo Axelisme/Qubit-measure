@@ -5,10 +5,9 @@ Three families of test:
 1. **Structure** — each node's ``make_default_schema`` declares exactly the user
    knobs (the typed node settings), and *no* derived/upstream field (predict_freq,
    relax=3·T1, the pi/readout modules) leaks into the spec.
-2. **Defaults** — the lowered default knobs provide operator-ready initial values
-   (notebook / measure-gui conventions for the pulse "設定頭"), and a node's
-   ``make_cfg`` built from those defaults yields the expected run cfg
-   (golden, field-by-field).
+2. **Defaults** — default schemas lower through the same schema/helper paths as
+   production. Tests assert invariants and derive expected values from production
+   schemas/helpers instead of duplicating default tables.
 3. **Seam invariant** — only the ``cfg/`` seam (``__init__.py`` / ``schema.py`` /
    ``form.py``) may import ``zcu_tools.gui.app.main`` from inside the autofluxdep
    package.
@@ -20,7 +19,6 @@ import ast
 import pathlib
 from typing import Any, cast
 
-import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CfgSectionSpec,
@@ -42,14 +40,23 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.defaults import pulse_length, pulse_product
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
+from zcu_tools.gui.app.autofluxdep.nodes.readout_defaults import (
+    seed_readout_freq,
+    seed_readout_gain,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
+from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+    auto_relax_delay_from_t1,
+    auto_stop_sweep_range,
+)
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -169,6 +176,10 @@ def _assert_no_value_objects(value: object) -> None:
     if isinstance(value, dict):
         for child in value.values():
             _assert_no_value_objects(child)
+
+
+def _assert_sweep_bounds(sweep: Any, expected: tuple[float, float]) -> None:
+    assert (float(sweep.start), float(sweep.stop)) == pytest.approx(expected)
 
 
 # --- 1. structure: knob keys are the declared user knobs, no derived field ------
@@ -904,180 +915,79 @@ def test_sectioned_node_schema_duplicate_logical_key_fast_fails():
         )
 
 
-# --- 2. defaults: the lowered knobs provide operator-ready initial values -----
+# --- 2. defaults: schema/helper-derived invariants, not copied default tables ---
 
 
-def test_qubit_freq_default_knobs():
-    knobs = QubitFreqBuilder().make_default_schema().lower(None)
-    assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
-    assert knobs["relax_delay"] == 1.0
-    assert knobs["earlystop_snr"] == 50.0
-    assert knobs["qub_ch"] == 0
-    assert knobs["qub_nqz"] == 2
-    assert knobs["qub_gain"] == 0.1
-    assert knobs["qub_length"] == 5.0
-    assert knobs["drive_gain_mode"] == "adaptive"
-    assert knobs["bias_update_mode"] == "fixed"
-    assert knobs["target_kappa"] == 6.5
-    assert knobs["max_drive_gain"] == 1.0
-    assert knobs["qfw_seed_gain"] == 0.05
-    assert knobs["pred_freq_correction_idw_k"] == 10
-    assert knobs["pred_freq_correction_idw_epsilon"] == pytest.approx(1e-4)
-    assert knobs["pred_freq_correction_decay_points"] == 4.0
-    # clearing optional defaults still omits them; channel/nqz remain required raw
-    # cfg fields because PulseCfg cannot run without concrete hardware routing.
-    schema = QubitFreqBuilder().make_default_schema()
+@pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
+def test_real_builder_default_lowering_is_schema_projection(builder: Builder):
+    schema = builder.make_default_schema()
+
+    knobs = schema.lower(None)
+    raw = schema.lower_raw(ModuleLibrary(), md=MetaDict())
+
+    assert set(knobs) <= set(schema.keys), builder.name
+    assert {"generation", "modules", "sweep"}.isdisjoint(knobs)
+    assert "generation" not in raw
+    assert set(knobs).isdisjoint(_DERIVED_FORBIDDEN), builder.name
+
+
+@pytest.mark.parametrize(
+    "builder",
+    (
+        QubitFreqBuilder(),
+        LenRabiBuilder(),
+        T1Builder(),
+        T2RamseyBuilder(),
+        T2EchoBuilder(),
+    ),
+    ids=("qubit_freq", "lenrabi", "t1", "t2ramsey", "t2echo"),
+)
+def test_default_earlystop_snr_optional_clear_omits_key(builder: Builder):
+    schema = builder.make_default_schema()
+
+    assert "earlystop_snr" in schema.lower(None)
     schema.set_field("earlystop_snr", None)
-    cleared = schema.lower(None)
-    assert "earlystop_snr" not in cleared
-    schema.set_field("qub_ch", None)
-    with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.ch"):
-        schema.lower(None)
-    schema = QubitFreqBuilder().make_default_schema()
-    schema.set_field("qub_nqz", 0)
-    with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.nqz.*choices"):
-        schema.lower(None)
-    # autofluxdep copies the adapter-shaped cfg, then replaces the absolute
-    # twotone/freq sweep with md-style relative detune.
-    detune = knobs["detune_sweep"]
-    assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
-        -20.0,
-        50.0,
-        141,
-    )
+
+    assert "earlystop_snr" not in schema.lower(None)
 
 
-def test_lenrabi_default_knobs():
-    knobs = LenRabiBuilder().make_default_schema().lower(None)
-    assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
-    assert knobs["relax_delay"] == 30.0
-    assert knobs["earlystop_snr"] == 30.0
-    assert knobs["relax_delay_mode"] == "auto_t1"
-    assert knobs["t1_seed_us"] == 10.0
-    assert knobs["relax_factor"] == 3.0
-    assert knobs["relax_min_us"] == 0.0
-    assert knobs["sweep_range_mode"] == "auto_pi_length"
-    assert knobs["expected_pi_length"] == 1.0
-    assert knobs["sweep_start_us"] == 0.05
-    assert knobs["sweep_stop_factor"] == 5.0
-    assert knobs["sweep_stop_min_us"] == 0.5
-    assert knobs["drive_gain_mode"] == "auto_pi_product"
-    assert knobs["pi_product_seed"] == 1.0
-    assert knobs["pi_product_factor"] == 1.2
-    assert knobs["max_drive_gain"] == 1.0
-    assert knobs["pi_gain_feedback_step_gain"] == 0.5
-    assert knobs["pi_gain_feedback_decay_points"] == 3.0
-    assert knobs["qub_ch"] == 0
-    assert knobs["qub_nqz"] == 2
-    assert knobs["qub_gain"] == 0.3
-    sweep = knobs["sweep_range"]
-    assert np.allclose([float(sweep.start), float(sweep.stop)], [0.05, 5.0])
-    assert int(sweep.expts) == 101
+@pytest.mark.parametrize(
+    ("builder", "field", "invalid_value", "match"),
+    (
+        (QubitFreqBuilder(), "qub_ch", None, r"modules\.qub_pulse\.ch"),
+        (QubitFreqBuilder(), "qub_nqz", 0, r"modules\.qub_pulse\.nqz.*choices"),
+        (LenRabiBuilder(), "qub_ch", None, r"modules\.rabi_pulse\.ch"),
+        (LenRabiBuilder(), "qub_nqz", 0, r"modules\.rabi_pulse\.nqz.*choices"),
+        (MistBuilder(), "mist_ch", None, r"modules\.mist_pulse\.ch"),
+        (MistBuilder(), "mist_nqz", 0, r"modules\.mist_pulse\.nqz.*choices"),
+    ),
+    ids=(
+        "qubit_freq_ch",
+        "qubit_freq_nqz",
+        "lenrabi_ch",
+        "lenrabi_nqz",
+        "mist_ch",
+        "mist_nqz",
+    ),
+)
+def test_default_required_routing_fields_fast_fail(
+    builder: Builder, field: str, invalid_value: object, match: str
+):
+    schema = builder.make_default_schema()
 
+    schema.set_field(field, invalid_value)
 
-def test_mist_default_knobs():
-    knobs = MistBuilder().make_default_schema().lower(None)
-    assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
-    assert knobs["relax_delay"] == 30.5
-    assert knobs["mist_ch"] == 0
-    assert knobs["mist_nqz"] == 2
-    assert knobs["mist_freq"] == 6000.0
-    assert knobs["mist_gain"] == 0.05
-    assert knobs["mist_length"] == 1.0
-    gain = knobs["gain_sweep"]
-    assert (float(gain.start), float(gain.stop), int(gain.expts)) == (0.0, 1.0, 151)
-
-    schema = MistBuilder().make_default_schema()
-    schema.set_field("mist_nqz", 0)
-    with pytest.raises(RuntimeError, match="modules\\.mist_pulse\\.nqz.*choices"):
+    with pytest.raises(RuntimeError, match=match):
         schema.lower(None)
 
 
-def test_ro_optimize_default_knobs():
-    knobs = RoOptimizeBuilder().make_default_schema().lower(None)
-    freq_range = knobs["freq_range"]
-    gain_range = knobs["gain_range"]
-    assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
-    assert (
-        float(freq_range.start),
-        float(freq_range.stop),
-        int(freq_range.expts),
-    ) == (5999.0, 6001.0, 31)
-    assert np.allclose([float(gain_range.start), float(gain_range.stop)], [0.45, 0.55])
-    assert int(gain_range.expts) == 31
-    assert knobs["freq_range_mode"] == "previous_best"
-    assert knobs["gain_range_mode"] == "previous_best"
-    assert knobs["relax_delay_mode"] == "auto_t1"
-    assert knobs["relax_delay"] == 30.0
-    assert knobs["t1_seed_us"] == 10.0
-    assert knobs["relax_factor"] == 3.0
-    assert knobs["freq_window_mode"] == "fixed_half_width"
-    assert knobs["freq_half_width_mhz"] == 1.0
-    assert knobs["gain_window_mode"] == "fixed_half_width"
-    assert knobs["gain_half_width"] == 0.05
-    assert knobs["skew_penalty"] == 0.0
-    # The sweep range widgets carry the user-facing start/stop/expts raw-cfg shape.
+def test_ro_optimize_default_sweep_specs_are_user_facing_ranges():
     spec = RoOptimizeBuilder().make_default_schema().schema.spec
     sweep = spec.fields["sweep"]
+
     assert isinstance(sweep, CfgSectionSpec)
     assert isinstance(sweep.fields["freq"], SweepSpec)
     assert isinstance(sweep.fields["gain"], SweepSpec)
-
-
-def test_t1_default_knobs():
-    knobs = T1Builder().make_default_schema().lower(None)
-    assert knobs["reps"] == 1000
-    assert knobs["rounds"] == 10
-    assert knobs["earlystop_snr"] == 20.0
-    assert knobs["sweep_range_mode"] == "auto_t1"
-    assert knobs["relax_delay_mode"] == "auto_t1"
-    assert knobs["relax_delay"] == 30.0
-    assert knobs["t1_seed_us"] == 10.0
-    assert knobs["relax_factor"] == 3.0
-    assert knobs["relax_min_us"] == 1.0
-    assert knobs["sweep_start_us"] == 0.5
-    assert knobs["sweep_stop_factor"] == 5.0
-    assert knobs["sweep_stop_min_us"] == 1.0
-    sweep = knobs["sweep_range"]
-    assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
-        0.5,
-        50.0,
-        101,
-    )
-
-
-def test_t2_default_knobs():
-    for builder in (T2RamseyBuilder(), T2EchoBuilder()):
-        knobs = builder.make_default_schema().lower(None)
-        assert knobs["reps"] == 1000
-        assert knobs["rounds"] == 10
-        assert knobs["detune_ratio"] == 0.05
-        assert knobs["earlystop_snr"] == 20.0
-        assert knobs["relax_delay_mode"] == "auto_t1"
-        assert knobs["relax_delay"] == 30.0
-        assert knobs["t1_seed_us"] == 10.0
-        assert knobs["relax_factor"] == 3.0
-        assert knobs["relax_min_us"] == 1.0
-        assert knobs["sweep_start_us"] == 0.0
-        assert knobs["sweep_stop_factor"] == 2.5
-        assert knobs["sweep_range_mode"] == (
-            "auto_t2r" if builder.name == "t2ramsey" else "auto_t2e"
-        )
-        if builder.name == "t2ramsey":
-            assert knobs["t2r_seed_us"] == 5.0
-        else:
-            assert knobs["t2e_seed_us"] == 5.0
-            assert knobs["fit_method"] == "auto_by_detune"
-        sweep = knobs["sweep_range"]
-        assert (float(sweep.start), float(sweep.stop), int(sweep.expts)) == (
-            0.0,
-            12.5,
-            101,
-        ), builder.name
 
 
 def test_fresh_node_defaults_seed_from_md_values():
@@ -1100,50 +1010,101 @@ def test_fresh_node_defaults_seed_from_md_values():
     assert lenrabi["qub_ch"] == 7
     assert lenrabi["t1_seed_us"] == 12.0
     assert lenrabi["expected_pi_length"] == 0.2
-    assert lenrabi["relax_delay"] == 36.0
-    assert np.allclose(
-        [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
-        [0.05, 1.0],
+    assert lenrabi["relax_delay"] == pytest.approx(
+        auto_relax_delay_from_t1(
+            md.t1,
+            factor=lenrabi["relax_factor"],
+            minimum=lenrabi["relax_min_us"],
+        )
+    )
+    _assert_sweep_bounds(
+        lenrabi["sweep_range"],
+        auto_stop_sweep_range(
+            md.pi_len,
+            start=lenrabi["sweep_start_us"],
+            stop_factor=lenrabi["sweep_stop_factor"],
+            stop_min=lenrabi["sweep_stop_min_us"],
+        ),
     )
 
     ro = RoOptimizeBuilder().make_default_schema(ctx).lower(None, md=md)
     assert ro["t1_seed_us"] == 12.0
-    assert ro["relax_delay"] == 36.0
-    assert (
-        float(ro["freq_range"].start),
-        float(ro["freq_range"].stop),
-        int(ro["freq_range"].expts),
-    ) == (6199.0, 6201.0, 31)
+    assert ro["relax_delay"] == pytest.approx(
+        auto_relax_delay_from_t1(
+            md.t1,
+            factor=ro["relax_factor"],
+            minimum=None,
+        )
+    )
+    ro_freq_seed = seed_readout_freq(ctx, fallback=0.0)
+    _assert_sweep_bounds(
+        ro["freq_range"],
+        (
+            ro_freq_seed - float(ro["freq_half_width_mhz"]),
+            ro_freq_seed + float(ro["freq_half_width_mhz"]),
+        ),
+    )
 
     t1 = T1Builder().make_default_schema(ctx).lower(None, md=md)
     assert t1["t1_seed_us"] == 12.0
-    assert t1["relax_delay"] == 36.0
-    assert (float(t1["sweep_range"].start), float(t1["sweep_range"].stop)) == (
-        0.5,
-        60.0,
+    assert t1["relax_delay"] == pytest.approx(
+        auto_relax_delay_from_t1(
+            md.t1,
+            factor=t1["relax_factor"],
+            minimum=t1["relax_min_us"],
+        )
+    )
+    _assert_sweep_bounds(
+        t1["sweep_range"],
+        auto_stop_sweep_range(
+            md.t1,
+            start=t1["sweep_start_us"],
+            stop_factor=t1["sweep_stop_factor"],
+            stop_min=t1["sweep_stop_min_us"],
+        ),
     )
 
     ramsey = T2RamseyBuilder().make_default_schema(ctx).lower(None, md=md)
     echo = T2EchoBuilder().make_default_schema(ctx).lower(None, md=md)
     assert ramsey["t1_seed_us"] == 12.0
     assert ramsey["t2r_seed_us"] == 8.0
-    assert ramsey["relax_delay"] == 36.0
-    assert (float(ramsey["sweep_range"].start), float(ramsey["sweep_range"].stop)) == (
-        0.0,
-        20.0,
+    assert ramsey["relax_delay"] == pytest.approx(
+        auto_relax_delay_from_t1(
+            md.t1,
+            factor=ramsey["relax_factor"],
+            minimum=ramsey["relax_min_us"],
+        )
+    )
+    _assert_sweep_bounds(
+        ramsey["sweep_range"],
+        auto_stop_sweep_range(
+            md.t2r,
+            start=ramsey["sweep_start_us"],
+            stop_factor=ramsey["sweep_stop_factor"],
+            stop_min=None,
+        ),
     )
     assert echo["t1_seed_us"] == 12.0
     assert echo["t2e_seed_us"] == 9.0
-    assert echo["relax_delay"] == 36.0
-    assert (float(echo["sweep_range"].start), float(echo["sweep_range"].stop)) == (
-        0.0,
-        22.5,
+    assert echo["relax_delay"] == pytest.approx(
+        auto_relax_delay_from_t1(
+            md.t1,
+            factor=echo["relax_factor"],
+            minimum=echo["relax_min_us"],
+        )
+    )
+    _assert_sweep_bounds(
+        echo["sweep_range"],
+        auto_stop_sweep_range(
+            md.t2e,
+            start=echo["sweep_start_us"],
+            stop_factor=echo["sweep_stop_factor"],
+            stop_min=None,
+        ),
     )
 
     mist = MistBuilder().make_default_schema(ctx).lower(None, md=md)
-    assert mist["mist_ch"] == 0
-    assert mist["mist_freq"] == 6200.0
-    assert mist["relax_delay"] == 60.0
+    assert mist["mist_freq"] == seed_readout_freq(ctx, fallback=0.0)
 
 
 def test_fresh_node_defaults_seed_from_ml_modules():
@@ -1155,63 +1116,73 @@ def test_fresh_node_defaults_seed_from_ml_modules():
             "raise_waveform": {"style": "cosine", "length": 0.02},
         }
     )
-    ml.register_module(
-        pi_amp={
+    pi_amp = {
+        "type": "pulse",
+        "ch": 5,
+        "nqz": 1,
+        "freq": 5100.0,
+        "gain": 0.6,
+        "waveform": {"style": "const", "length": 0.24},
+    }
+    readout_dpm = {
+        "type": "readout/pulse",
+        "pulse_cfg": {
             "type": "pulse",
-            "ch": 5,
-            "nqz": 1,
-            "freq": 5100.0,
-            "gain": 0.6,
-            "waveform": {"style": "const", "length": 0.24},
+            "ch": 2,
+            "nqz": 2,
+            "freq": 6201.0,
+            "gain": 0.42,
+            "waveform": {"style": "const", "length": 1.0},
         },
-        readout_dpm={
-            "type": "readout/pulse",
-            "pulse_cfg": {
-                "type": "pulse",
-                "ch": 2,
-                "nqz": 2,
-                "freq": 6201.0,
-                "gain": 0.42,
-                "waveform": {"style": "const", "length": 1.0},
-            },
-            "ro_cfg": {
-                "type": "readout/direct",
-                "ro_ch": 0,
-                "ro_length": 0.9,
-                "ro_freq": 6201.0,
-                "trig_offset": 0.6,
-            },
+        "ro_cfg": {
+            "type": "readout/direct",
+            "ro_ch": 0,
+            "ro_length": 0.9,
+            "ro_freq": 6201.0,
+            "trig_offset": 0.6,
         },
-    )
+    }
+    ml.register_module(pi_amp=pi_amp, readout_dpm=readout_dpm)
     ctx = _ctx(ml=ml)
 
     lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
-    assert lenrabi["qub_ch"] == 0
-    assert lenrabi["qub_nqz"] == 2
-    assert lenrabi["qub_gain"] == 0.3
-    assert lenrabi["expected_pi_length"] == 0.24
-    assert lenrabi["pi_product_seed"] == pytest.approx(0.144)
-    assert np.allclose(
-        [float(lenrabi["sweep_range"].start), float(lenrabi["sweep_range"].stop)],
-        [0.05, 1.2],
+    assert lenrabi["expected_pi_length"] == pulse_length(pi_amp)
+    assert lenrabi["pi_product_seed"] == pytest.approx(pulse_product(pi_amp))
+    expected_pi_length = pulse_length(pi_amp)
+    assert expected_pi_length is not None
+    _assert_sweep_bounds(
+        lenrabi["sweep_range"],
+        auto_stop_sweep_range(
+            expected_pi_length,
+            start=lenrabi["sweep_start_us"],
+            stop_factor=lenrabi["sweep_stop_factor"],
+            stop_min=lenrabi["sweep_stop_min_us"],
+        ),
     )
 
     ro = RoOptimizeBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
-    assert np.allclose(
-        [float(ro["freq_range"].start), float(ro["freq_range"].stop)],
-        [6200.0, 6202.0],
+    ro_freq_seed = seed_readout_freq(ctx, fallback=0.0)
+    _assert_sweep_bounds(
+        ro["freq_range"],
+        (
+            ro_freq_seed - float(ro["freq_half_width_mhz"]),
+            ro_freq_seed + float(ro["freq_half_width_mhz"]),
+        ),
     )
-    assert np.allclose(
-        [float(ro["gain_range"].start), float(ro["gain_range"].stop)],
-        [0.37, 0.47],
+    ro_gain_seed = seed_readout_gain(ctx, fallback=0.0)
+    _assert_sweep_bounds(
+        ro["gain_range"],
+        (
+            max(0.0, ro_gain_seed - float(ro["gain_half_width"])),
+            min(1.0, ro_gain_seed + float(ro["gain_half_width"])),
+        ),
     )
 
 
-# --- 2b. equivalence: default-knob make_cfg == the prototype's hardcoded cfg ----
+# --- 2b. equivalence: default-knob make_cfg follows schema-lowered cfg ----
 #
-# The defaults live in the schema; building make_cfg from an empty placement (so
-# every knob takes its schema default) must yield the expected run cfg, field by
-# field. qubit_freq is the worked golden (TwoToneCfg with the drive "設定頭").
+# The defaults live in the schema; expected values come from the same schema
+# lowering path, while assertions still pin runtime-injected fields separately.
 
 
 def test_qubit_freq_make_cfg_uses_schema_defaults():
@@ -1227,13 +1198,17 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
         {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
     )
     cfg = builder.make_cfg(env, snap)
-    # the builder defaults, now sourced from the schema
-    assert cfg.reps == 1000
-    assert cfg.rounds == 10
-    assert cfg.relax_delay == 1.0
-    assert int(cfg.modules.qub_pulse.ch) == 0
-    assert int(cfg.modules.qub_pulse.nqz) == 2
-    assert float(cfg.modules.qub_pulse.gain) == 0.1
+    expected_raw = env.schema.lower_raw(ml, md=MetaDict())
+    expected_pulse = expected_raw["modules"]["qub_pulse"]
+
+    assert cfg.reps == expected_raw["reps"]
+    assert cfg.rounds == expected_raw["rounds"]
+    assert cfg.relax_delay == expected_raw["relax_delay"]
+    assert int(cfg.modules.qub_pulse.ch) == int(expected_pulse["ch"])
+    assert int(cfg.modules.qub_pulse.nqz) == int(expected_pulse["nqz"])
+    assert float(cfg.modules.qub_pulse.gain) == pytest.approx(
+        float(expected_pulse["gain"])
+    )
     assert float(cfg.modules.qub_pulse.freq) == 5135.0  # the injected predict_freq
 
 
@@ -1246,22 +1221,34 @@ def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
         schema=builder.make_default_schema(),
         ml=ml,
     )
+    knobs = env.schema.lower(ml)
 
+    qfw_factor = 65.0
     cfg = builder.make_cfg(
         env,
         Snapshot(
-            {"predict_freq": 5135.0, "qfw_factor": 65.0}, modules={"readout": _READOUT}
+            {"predict_freq": 5135.0, "qfw_factor": qfw_factor},
+            modules={"readout": _READOUT},
         ),
     )
-    assert float(cfg.modules.qub_pulse.gain) == 0.1
+    assert float(cfg.modules.qub_pulse.gain) == pytest.approx(
+        min(float(knobs["max_drive_gain"]), float(knobs["target_kappa"]) / qfw_factor)
+    )
 
+    clamped_qfw_factor = 3.0
     clamped = builder.make_cfg(
         env,
         Snapshot(
-            {"predict_freq": 5135.0, "qfw_factor": 3.0}, modules={"readout": _READOUT}
+            {"predict_freq": 5135.0, "qfw_factor": clamped_qfw_factor},
+            modules={"readout": _READOUT},
         ),
     )
-    assert float(clamped.modules.qub_pulse.gain) == 1.0
+    assert float(clamped.modules.qub_pulse.gain) == pytest.approx(
+        min(
+            float(knobs["max_drive_gain"]),
+            float(knobs["target_kappa"]) / clamped_qfw_factor,
+        )
+    )
 
 
 def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():
@@ -1277,9 +1264,13 @@ def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():
     )
 
     cfg = builder.make_cfg(env, snap)
+    expected_raw = env.schema.lower_raw(env.ml, md=MetaDict())
+    expected_waveform = expected_raw["modules"]["qub_pulse"]["waveform"]
 
     assert cfg.modules.qub_pulse.waveform.style == "const"
-    assert float(cfg.modules.qub_pulse.waveform.length) == 5.0
+    assert float(cfg.modules.qub_pulse.waveform.length) == pytest.approx(
+        float(expected_waveform["length"])
+    )
 
 
 def test_lenrabi_make_cfg_uses_const_waveform_when_named_waveform_missing():
@@ -1293,9 +1284,13 @@ def test_lenrabi_make_cfg_uses_const_waveform_when_named_waveform_missing():
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
     cfg = builder.make_cfg(env, snap)
+    expected_raw = env.schema.lower_raw(env.ml, md=MetaDict())
+    expected_waveform = expected_raw["modules"]["rabi_pulse"]["waveform"]
 
     assert cfg.modules.rabi_pulse.waveform.style == "const"
-    assert float(cfg.modules.rabi_pulse.waveform.length) == 1.0
+    assert float(cfg.modules.rabi_pulse.waveform.length) == pytest.approx(
+        float(expected_waveform["length"])
+    )
 
 
 def test_mist_make_cfg_uses_schema_defaults():
@@ -1311,13 +1306,20 @@ def test_mist_make_cfg_uses_schema_defaults():
         {"success": 1.0}, modules={"pi_pulse": _PI_PULSE, "opt_readout": _READOUT}
     )
     cfg = builder.make_cfg(env, snap)
-    assert cfg.reps == 1000
-    assert cfg.rounds == 10
-    assert cfg.relax_delay == 30.5
-    assert int(cfg.modules.mist_pulse.ch) == 0
-    assert float(cfg.modules.mist_pulse.gain) == 0.05
-    assert float(cfg.modules.mist_pulse.freq) == 6000.0
-    assert int(cfg.modules.mist_pulse.nqz) == 2
+    expected_raw = env.schema.lower_raw(ml, md=MetaDict())
+    expected_pulse = expected_raw["modules"]["mist_pulse"]
+
+    assert cfg.reps == expected_raw["reps"]
+    assert cfg.rounds == expected_raw["rounds"]
+    assert cfg.relax_delay == expected_raw["relax_delay"]
+    assert int(cfg.modules.mist_pulse.ch) == int(expected_pulse["ch"])
+    assert float(cfg.modules.mist_pulse.gain) == pytest.approx(
+        float(expected_pulse["gain"])
+    )
+    assert float(cfg.modules.mist_pulse.freq) == pytest.approx(
+        float(expected_pulse["freq"])
+    )
+    assert int(cfg.modules.mist_pulse.nqz) == int(expected_pulse["nqz"])
 
 
 def test_mist_make_cfg_uses_const_waveform_when_named_waveform_missing():
@@ -1333,9 +1335,13 @@ def test_mist_make_cfg_uses_const_waveform_when_named_waveform_missing():
     )
 
     cfg = builder.make_cfg(env, snap)
+    expected_raw = env.schema.lower_raw(env.ml, md=MetaDict())
+    expected_waveform = expected_raw["modules"]["mist_pulse"]["waveform"]
 
     assert cfg.modules.mist_pulse.waveform.style == "const"
-    assert float(cfg.modules.mist_pulse.waveform.length) == 1.0
+    assert float(cfg.modules.mist_pulse.waveform.length) == pytest.approx(
+        float(expected_waveform["length"])
+    )
 
 
 # --- 2c. set_field type coercion + unknown-key fast-fail (the 160a bridge) ------

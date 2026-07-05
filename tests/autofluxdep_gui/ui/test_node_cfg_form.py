@@ -498,6 +498,8 @@ def test_invalid_required_scalar_is_rejected(ctrl_node, qapp):
 
 def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
+    node.schema.set_field("reps", 321)
+    expected_reps = node.schema.lower(None)["reps"]
     form = NodeCfgForm(ctrl, node, index)
     try:
         form.set_read_only(True)
@@ -507,7 +509,7 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
         )
         # the model (values) is untouched — "what this run used" stays visible
         reps_value = form._default_model.fields["reps"].get_value()
-        assert isinstance(reps_value, DirectValue) and reps_value.value == 1000
+        assert isinstance(reps_value, DirectValue) and reps_value.value == expected_reps
         form.set_read_only(False)
         assert form._default_form.isEnabled()
         assert form._generation_form is not None and form._generation_form.isEnabled()

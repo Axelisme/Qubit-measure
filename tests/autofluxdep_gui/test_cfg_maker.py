@@ -20,6 +20,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
     QubitFreqBuilder,
     QubitFreqCfgTemplate,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+    auto_relax_delay_from_t1,
+    auto_stop_sweep_range,
+)
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -79,6 +83,14 @@ def _env(ml: ModuleLibrary) -> RunEnv:
             },
         ),
         ml=ml,
+    )
+
+
+def _expected_auto_relax_delay(knobs: dict[str, Any], t1: float) -> float:
+    return auto_relax_delay_from_t1(
+        t1,
+        factor=float(knobs["relax_factor"]),
+        minimum=float(knobs["relax_min_us"]) if "relax_min_us" in knobs else None,
     )
 
 
@@ -212,12 +224,13 @@ def test_lenrabi_make_cfg_lowers_context():
         "qub_gain": 0.3,
         "expected_pi_length": 0.25,
         "max_drive_gain": 2.0,
-        "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
+        "sweep_range": SweepValue(start=9.0, stop=10.0, expts=61),
         "reps": 1000,
         "rounds": 10,
         "relax_delay": 1.0,
     }
     env = RunEnv(flux=0.0, flux_idx=0, schema=_schema(LenRabiBuilder(), params), ml=ml)
+    knobs = env.schema.lower(ml)
     snap = Snapshot(
         {"qubit_freq": 5135.0, "t1": 10.0, "pi_length": 0.5, "pi_product": 0.3},
         modules={"opt_readout": _READOUT},
@@ -232,8 +245,16 @@ def test_lenrabi_make_cfg_lowers_context():
     assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(1.0)
     assert cfg.reps == 1000 and cfg.rounds == 10
     # sweep_range still tracks the latest measured pi_length by default.
-    assert cfg.sweep_range == (0.05, 2.5)
-    assert cfg.relax_delay == 30.0
+    assert cfg.sweep_range != (9.0, 10.0)
+    assert cfg.sweep_range == pytest.approx(
+        auto_stop_sweep_range(
+            0.5,
+            start=knobs["sweep_start_us"],
+            stop_factor=knobs["sweep_stop_factor"],
+            stop_min=knobs["sweep_stop_min_us"],
+        )
+    )
+    assert cfg.relax_delay == pytest.approx(_expected_auto_relax_delay(knobs, 10.0))
 
 
 def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
@@ -328,12 +349,20 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
         schema=builder.make_default_schema(ctx),
         ml=ml,
     )
+    knobs = env.schema.lower(ml)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
     cfg = builder.make_cfg(env, snap)
 
     assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.5)
-    assert cfg.sweep_range == (0.05, 1.2)
+    assert cfg.sweep_range == pytest.approx(
+        auto_stop_sweep_range(
+            knobs["expected_pi_length"],
+            start=knobs["sweep_start_us"],
+            stop_factor=knobs["sweep_stop_factor"],
+            stop_min=knobs["sweep_stop_min_us"],
+        )
+    )
 
 
 def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
@@ -356,12 +385,20 @@ def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
         ),
         ml=ml,
     )
+    knobs = env.schema.lower(ml)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
     cfg = builder.make_cfg(env, snap)
 
     assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(1.0)
-    assert cfg.sweep_range == (0.05, 1.5)
+    assert cfg.sweep_range == pytest.approx(
+        auto_stop_sweep_range(
+            knobs["expected_pi_length"],
+            start=knobs["sweep_start_us"],
+            stop_factor=knobs["sweep_stop_factor"],
+            stop_min=knobs["sweep_stop_min_us"],
+        )
+    )
 
 
 def test_lenrabi_produce_fast_fails_when_context_unconfigured():
@@ -463,17 +500,34 @@ def test_ro_optimize_make_cfg_lowers_context():
         ),
         ml=ml,
     )
+    knobs = env.schema.lower(ml)
     cfg = RoOptimizeBuilder().make_cfg(env, snap)
     assert isinstance(cfg, RoOptimizeCfgTemplate)
     # the sweep windows are centred on the previous best ± the window half-widths
-    assert cfg.freq_range == pytest.approx((7443.6, 7445.6))
-    assert cfg.gain_range == pytest.approx((0.45, 0.55))
+    assert cfg.freq_range == pytest.approx(
+        (
+            float(snap["best_ro_freq"]) - float(knobs["freq_half_width_mhz"]),
+            float(snap["best_ro_freq"]) + float(knobs["freq_half_width_mhz"]),
+        )
+    )
+    assert cfg.gain_range == pytest.approx(
+        (
+            max(0.0, float(snap["best_ro_gain"]) - float(knobs["gain_half_width"])),
+            min(1.0, float(snap["best_ro_gain"]) + float(knobs["gain_half_width"])),
+        )
+    )
     # the readout the cfg sweeps over comes whole from the snapshot
     assert float(cfg.modules.readout.pulse_cfg.freq) == 7444.6
     assert cfg.reps == 1000 and cfg.rounds == 10
     assert cfg.skew_penalty == 0.25
     # relax_delay = 3 * (smoothed) T1
-    assert cfg.relax_delay == 30.0
+    assert cfg.relax_delay == pytest.approx(
+        auto_relax_delay_from_t1(
+            float(snap["t1"]),
+            factor=float(knobs["relax_factor"]),
+            minimum=None,
+        )
+    )
 
 
 def test_ro_optimize_make_cfg_can_fix_center_and_relax_delay():
@@ -648,6 +702,7 @@ def test_t1_make_cfg_lowers_context():
     snap = Snapshot(
         {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
     )
+    knobs = env.schema.lower(env.ml)
     cfg = T1Builder().make_cfg(env, snap)
     assert isinstance(cfg, T1CfgTemplate)
     # the drive pi_pulse + readout are the snapshot modules, lowered to real cfgs
@@ -655,8 +710,17 @@ def test_t1_make_cfg_lowers_context():
     assert float(cfg.modules.pi_pulse.freq) == 5135.0
     assert cfg.modules.readout.type == "readout/pulse"
     # relax_delay + sweep_range derive from the smoothed t1 (the notebook formula)
-    assert cfg.relax_delay == 36.0  # max(1.0, 3 * 12)
-    assert cfg.sweep_range == (0.5, 60.0)  # (0.5, max(1.0, 5 * 12))
+    assert cfg.relax_delay == pytest.approx(
+        _expected_auto_relax_delay(knobs, float(snap["t1"]))
+    )
+    assert cfg.sweep_range == pytest.approx(
+        auto_stop_sweep_range(
+            float(snap["t1"]),
+            start=knobs["sweep_start_us"],
+            stop_factor=knobs["sweep_stop_factor"],
+            stop_min=knobs["sweep_stop_min_us"],
+        )
+    )
     # reps / rounds come from the node params
     assert cfg.reps == 100 and cfg.rounds == 2
 
@@ -762,14 +826,24 @@ def test_t2ramsey_make_cfg_lowers_context():
         {"t1": 12.0, "t2r": 8.0},
         modules={"pi2_pulse": _t2ramsey_pi2_pulse(ml), "opt_readout": _READOUT},
     )
+    knobs = env.schema.lower(ml)
     cfg = T2RamseyBuilder().make_cfg(env, snap)
     assert isinstance(cfg, T2RamseyCfgTemplate)
     # the pi/2 drive module is taken from the snapshot
     assert int(cfg.modules.pi2_pulse.ch) == 3
     assert float(cfg.modules.pi2_pulse.freq) == 5135.0
     # sweep_range spans 2.5 * smoothed t2r; relax_delay is 3 * smoothed t1
-    assert cfg.sweep_range == (0.0, 2.5 * 8.0)
-    assert cfg.relax_delay == max(1.0, 3.0 * 12.0)
+    assert cfg.sweep_range == pytest.approx(
+        auto_stop_sweep_range(
+            float(snap["t2r"]),
+            start=knobs["sweep_start_us"],
+            stop_factor=knobs["sweep_stop_factor"],
+            stop_min=None,
+        )
+    )
+    assert cfg.relax_delay == pytest.approx(
+        _expected_auto_relax_delay(knobs, float(snap["t1"]))
+    )
     assert cfg.reps == 1000 and cfg.rounds == 10
     # the readout module (snapshot's opt_readout) lowered into the cfg's readout
     assert cfg.modules.readout.type == "readout/pulse"
@@ -889,12 +963,23 @@ def test_t2echo_make_cfg_lowers_context():
             "opt_readout": _READOUT,
         },
     )
-    cfg = T2EchoBuilder().make_cfg(_t2echo_env(ml), snap)
+    env = _t2echo_env(ml)
+    knobs = env.schema.lower(ml)
+    cfg = T2EchoBuilder().make_cfg(env, snap)
     assert isinstance(cfg, T2EchoCfgTemplate)
     # the delay window is (0, 2.5 * smoothed_t2e) from the snapshot
-    assert cfg.sweep_range == (0.0, 2.5 * 8.0)
+    assert cfg.sweep_range == pytest.approx(
+        auto_stop_sweep_range(
+            float(snap["t2e"]),
+            start=knobs["sweep_start_us"],
+            stop_factor=knobs["sweep_stop_factor"],
+            stop_min=None,
+        )
+    )
     # relax_delay = max(1.0, 3 * smoothed_t1)
-    assert float(cfg.relax_delay) == 3.0 * 12.0
+    assert float(cfg.relax_delay) == pytest.approx(
+        _expected_auto_relax_delay(knobs, float(snap["t1"]))
+    )
     # the drive pulses come from the snapshot modules
     assert int(cfg.modules.pi_pulse.ch) == 3
     assert float(cfg.modules.pi_pulse.gain) == 0.5

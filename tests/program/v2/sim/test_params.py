@@ -13,9 +13,15 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
+from zcu_tools.experiment.v2_gui.adapters.shared.ctx_helpers import proper_flux_range
+from zcu_tools.gui.app.main.adapter import EvalValue, SweepValue
+from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
+from zcu_tools.program.v2.sim.readout import resonator_freqs, s21, value_to_flux
 
 # ---------------------------------------------------------------------------
 # Minimal valid kwargs reused across tests
@@ -36,6 +42,12 @@ _VALID: dict = {
     "snr": 10.0,
     "pi_gain_len": 0.4,
 }
+
+
+def _numeric_sweep_bounds(sweep: SweepValue) -> tuple[float, float]:
+    if isinstance(sweep.start, EvalValue) or isinstance(sweep.stop, EvalValue):
+        raise AssertionError("default guide sweep must have numeric fallback bounds")
+    return float(sweep.start), float(sweep.stop)
 
 
 class TestSimParamsConstruction:
@@ -372,31 +384,42 @@ class TestSimParamsParamsJsonRoundTrip:
 class TestDefaultSimParamFluxPeriod:
     """DEFAULT_SIMPARAM.flux_period must sit within the onetone/twotone guide sweep.
 
-    The guide default flux sweep is ~[-4e-3, 4e-3].  With flux_half=0 and
-    flux_bias=0, the formula value_to_flux(v) = v/flux_period + 0.5 must map that
-    sweep across at least one full period so the mock 2D flux_dep plot shows
-    visible dispersion.  A flux_period much larger than the sweep span would cover
-    only a tiny fraction of a period and produce a flat colour map.
+    The production flux-dep guide sweep must map across at least one full period
+    so the mock 2D flux_dep plot shows visible dispersion. A flux_period much
+    larger than the sweep span would cover only a tiny fraction of a period and
+    produce a flat colour map.
     """
 
-    def test_flux_period_is_realistic(self) -> None:
-        # 5e-3 sits inside the guide sweep so it covers >1 period.  Assert the
-        # exact value so an accidental reversion is caught.
-        assert DEFAULT_SIMPARAM.flux_period == pytest.approx(5e-3)
+    def test_default_readout_blobs_are_visible_over_base_noise(self) -> None:
+        guide_ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+        guide = proper_flux_range(guide_ctx, expts=2)
+        guide_start, guide_stop = _numeric_sweep_bounds(guide)
+        guide_center = 0.5 * (guide_start + guide_stop)
+        p = DEFAULT_SIMPARAM
+        reduced_flux = value_to_flux(p, guide_center)
+        rf_g, rf_e = resonator_freqs(p, reduced_flux)
 
-    def test_readout_contrast_defaults_are_moderate(self) -> None:
-        assert DEFAULT_SIMPARAM.g == pytest.approx(0.06)
-        assert DEFAULT_SIMPARAM.snr == pytest.approx(5.0)
+        probe = np.array([rf_g], dtype=np.float64)
+        ground_blob = s21(p, probe, rf_g)[0]
+        excited_blob = s21(p, probe, rf_e)[0]
+        separation_sigma = abs(excited_blob - ground_blob) * p.snr
+        assert separation_sigma > 1.0, (
+            "|g>/<e> readout blobs are not separated above the base noise scale; "
+            f"separation={separation_sigma:.3f} sigma"
+        )
 
     def test_guide_sweep_covers_at_least_one_period(self) -> None:
         # value_to_flux(v) = (v + flux_bias - flux_half) / flux_period + 0.5
-        # With flux_half=0, flux_bias=0, flux_period=5e-3 the guide sweep
-        # [-4e-3, 4e-3] spans 8e-3/5e-3 = 1.6 periods (>= 1 -> visible dispersion).
+        # The guide sweep should span at least one period for visible dispersion.
+        guide_ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+        guide = proper_flux_range(guide_ctx, expts=2)
+        guide_start, guide_stop = _numeric_sweep_bounds(guide)
         p = DEFAULT_SIMPARAM
-        flux_lo = (-4e-3 + p.flux_bias - p.flux_half) / p.flux_period + 0.5
-        flux_hi = (+4e-3 + p.flux_bias - p.flux_half) / p.flux_period + 0.5
+        flux_lo = (guide_start + p.flux_bias - p.flux_half) / p.flux_period + 0.5
+        flux_hi = (guide_stop + p.flux_bias - p.flux_half) / p.flux_period + 0.5
         span = flux_hi - flux_lo
         assert span >= 1.0, (
-            f"guide sweep [-4e-3, 4e-3] covers only {span:.3f} periods "
+            f"guide sweep [{guide_start:g}, {guide_stop:g}] covers only "
+            f"{span:.3f} periods "
             f"(need >= 1.0 for visible dispersion); flux_period={p.flux_period}"
         )
