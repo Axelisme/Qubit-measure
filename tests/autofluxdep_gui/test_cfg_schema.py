@@ -723,7 +723,7 @@ def test_generation_groups_keep_logical_knobs_flat():
 def test_generation_persistence_uses_flat_logical_keys():
     schema = QubitFreqBuilder().make_default_schema()
     schema.set_field("drive_gain_mode", "fixed")
-    schema.set_field("bias_update_mode", "hard")
+    schema.set_field("bias_update_mode", "fixed")
     schema.set_field("physical_recovery_mode", "fail_triggered_fit")
     schema.set_field("physical_recovery_max_center_shift_mhz", 120.0)
     schema.set_field("earlystop_snr", 12.5)
@@ -735,7 +735,7 @@ def test_generation_persistence_uses_flat_logical_keys():
     assert "feedback" not in generation
     assert "safety" not in generation
     assert generation["drive_gain_mode"] == {"__kind": "direct", "value": "fixed"}
-    assert generation["bias_update_mode"] == {"__kind": "direct", "value": "hard"}
+    assert generation["bias_update_mode"] == {"__kind": "direct", "value": "fixed"}
     assert generation["physical_recovery_mode"] == {
         "__kind": "direct",
         "value": "fail_triggered_fit",
@@ -751,7 +751,7 @@ def test_generation_persistence_uses_flat_logical_keys():
 
     knobs = restored.read_knobs()
     assert knobs["drive_gain_mode"] == "fixed"
-    assert knobs["bias_update_mode"] == "hard"
+    assert knobs["bias_update_mode"] == "fixed"
     assert knobs["physical_recovery_mode"] == "fail_triggered_fit"
     assert knobs["physical_recovery_max_center_shift_mhz"] == pytest.approx(120.0)
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
@@ -989,9 +989,14 @@ def test_default_earlystop_snr_optional_clear_omits_key(builder: Builder):
 
 
 def test_qubit_freq_recovery_default_knobs():
+    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+        validate_recovery_bias_policy,
+    )
+
     knobs = QubitFreqBuilder().make_default_schema().lower(None)
 
-    assert knobs["physical_recovery_mode"] == "off"
+    assert knobs["bias_update_mode"] == "fixed"
+    assert knobs["physical_recovery_mode"] == "fail_triggered_fit"
     assert knobs["physical_recovery_min_points"] == 10
     assert knobs["physical_recovery_max_points"] == 30
     assert knobs["physical_recovery_max_center_shift_mhz"] == 150.0
@@ -999,6 +1004,7 @@ def test_qubit_freq_recovery_default_knobs():
     assert knobs["pred_freq_correction_idw_k"] == 10
     assert knobs["pred_freq_correction_idw_epsilon"] == pytest.approx(1e-4)
     assert knobs["pred_freq_correction_decay_points"] == 4.0
+    validate_recovery_bias_policy(knobs)
 
 
 @pytest.mark.parametrize(

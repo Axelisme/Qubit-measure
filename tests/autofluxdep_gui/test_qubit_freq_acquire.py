@@ -425,7 +425,10 @@ def test_hard_bias_update_mode_calibrates_predictor_before_residual(monkeypatch)
         real,
         (605.0, 0.0, 4.0, 0.0, fit_curve, None),
         predictor=predictor,
-        schema_overrides={"bias_update_mode": "hard"},
+        schema_overrides={
+            "bias_update_mode": "hard",
+            "physical_recovery_mode": "off",
+        },
     )
 
     patch = builder.build_node(env).produce(

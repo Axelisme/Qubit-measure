@@ -533,7 +533,7 @@ class QubitFreqBuilder(Builder):
                             PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
                         ),
                     ),
-                    PHYSICAL_RECOVERY_MODE_OFF,
+                    PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
                     group="feedback",
                 ),
                 logical_generation_field(
