@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import time
 from typing import TYPE_CHECKING
 
@@ -14,14 +13,9 @@ from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
 from qick.qick_asm import get_version
 
-from .sim._profiling import PerfStats, elapsed_ms, perf_now
-
 if TYPE_CHECKING:
     from .sim import SimParams
     from .sim.engine import SimEngine
-
-logger = logging.getLogger(__name__)
-_POLL_DATA_PERF = PerfStats("worker.sim.poll_data", logger, slow_ms=50.0)
 
 
 def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
@@ -326,10 +320,7 @@ class MockQickSoc(QickConfig):
     def poll_data(self, totaltime: float = 0.1, timeout=None):
         if self._poll_done or self._readout_state is None:
             return []
-        profile_start = perf_now()
         total_shots, _ch_list, reads_per_shot = self._readout_state
-        compute_ms = 0.0
-        sleep_ms = 0.0
 
         if self._sim_engine is not None:
             # Sim path: compute *this* round's raw buffer lazily off the engine
@@ -338,20 +329,16 @@ class MockQickSoc(QickConfig):
             # accumulated loop writes into acc_buf via a flat reshape.  No budget
             # ceiling: the engine computes any round on demand, so a run that
             # early-stops simply never asks for the rounds it skips.
-            compute_start = perf_now()
             round_buf = self._sim_engine.compute_round(self._sim_round_idx)
-            compute_ms = elapsed_ms(compute_start)
             self._sim_round_idx += 1
             data = [ch.reshape(-1, 2) for ch in round_buf]
         else:
-            compute_start = perf_now()
             data = [
                 np.random.randint(
                     -(2**15), 2**15, size=(total_shots * n, 2), dtype=np.int64
                 )
                 for n in reads_per_shot
             ]
-            compute_ms = elapsed_ms(compute_start)
 
         # Synthetic poll pacing — not physics; sim path uses SimParams.poll_latency,
         # white-noise path uses the module-level _DEFAULT_POLL_LATENCY constant.
@@ -362,19 +349,9 @@ class MockQickSoc(QickConfig):
             else _DEFAULT_POLL_LATENCY
         )
         if latency > 0.0:
-            sleep_start = perf_now()
             time.sleep(latency * np.asarray(data).size)
-            sleep_ms = elapsed_ms(sleep_start)
 
         self._poll_done = True
-        _POLL_DATA_PERF.record(
-            elapsed_ms(profile_start),
-            detail=(
-                f"sim={self._sim_engine is not None} total_shots={total_shots} "
-                f"reads_per_shot={reads_per_shot} compute_ms={compute_ms:.1f} "
-                f"sleep_ms={sleep_ms:.1f}"
-            ),
-        )
         return [(total_shots, (data, {}))]
 
     def get_decimated(self, ch, address, length):

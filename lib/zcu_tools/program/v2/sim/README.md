@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-05 — Per-acquire seeds and mock readout defaults
+**Last updated:** 2026-07-05 — Remove SimEngine profiling probes
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -117,14 +117,6 @@ SNR early-stop are checked after a round completes, not inside one round's mock
 physics compute.  `SimEngine` still has an engine-local cancellation hook for
 direct/internal callers, but `MyProgramV2.acquire` does not feed acquire-level
 checkers into it.
-
-**Profiling is opt-in and observational.** `ZCU_AUTOFLUXDEP_PROFILE=1` enables
-MockSoc timing logs for the GUI stutter investigation without changing the
-simulation schedule or data path. The probes split `poll_data`, `compute_round`,
-signal-grid construction, operating-point lookup, and population-chain work so a
-run log can distinguish Qt redraw delay from worker-side mock physics compute.
-Each record includes the Python thread label; signal-grid logs also include the
-cooperative GIL yield count.
 
 **FLUX-AWARE-MOCK — operating flux from a live device.** By default the operating
 flux is pinned at reduced flux = 1.0 (R-3).  `SimParams.flux_device` opts into
