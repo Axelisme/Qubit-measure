@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-04 — streaming Labber writer validation
+**Last updated:** 2026-07-05 — Lorentzian edge peak fitting
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -48,6 +48,9 @@ import。
 `utils.fitting.base.fit_func` 保留既有 `curve_fit` 失敗時回退 `init_p` 的
 contract，但會發出 `RuntimeWarning`，讓 caller 不再把 fallback 靜默當成成功擬合。
 固定參數只在至少一個參數非 `None` 時啟用。
+
+Lorentzian family fitting 以 median baseline 判斷初始 peak/dip 方向，避免
+qubit-frequency peak 或 dip 靠近掃描邊界時被左右端點平均誤判成反向寬曲線。
 
 ## throttle / interpolation helpers
 

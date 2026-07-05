@@ -16,6 +16,25 @@ def lorfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
     return y0 + slope * (x - x0) + yscale / (1 + ((x - x0) / gamma) ** 2)
 
 
+def _guess_lorentzian_params(
+    xdata: NDArray[np.float64], ydata: NDArray[np.float64]
+) -> tuple[float, float, float, float, float]:
+    y0 = float(np.median(ydata))
+    slope = float((ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0]))
+    max_prominence = float(np.max(ydata) - y0)
+    min_prominence = float(y0 - np.min(ydata))
+    # Use the median baseline so an edge peak/dip does not poison the endpoint
+    # average and invert the initial peak-vs-dip decision.
+    if max_prominence >= min_prominence:
+        yscale = max_prominence
+        x0 = float(xdata[np.argmax(ydata)])
+    else:
+        yscale = -min_prominence
+        x0 = float(xdata[np.argmin(ydata)])
+    gamma = np.abs(yscale) / 10
+    return y0, slope, yscale, x0, gamma
+
+
 def fitlor(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
@@ -28,18 +47,7 @@ def fitlor(
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
-        y0 = (ydata[0] + ydata[-1]) / 2
-        slope = (ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])
-        curve_up = np.max(ydata) + np.min(ydata) < 2 * y0
-        if curve_up:
-            yscale = np.min(ydata) - y0
-            x0 = xdata[np.argmin(ydata)]
-        else:
-            yscale = np.max(ydata) - y0
-            x0 = xdata[np.argmax(ydata)]
-        gamma = np.abs(yscale) / 10
-
-        assign_init_p(fitparams, [y0, slope, yscale, x0, gamma])
+        assign_init_p(fitparams, _guess_lorentzian_params(xdata, ydata))
     fitparams = cast(list[float], fitparams)
 
     # bounds
@@ -76,17 +84,7 @@ def fit_asym_lor(
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
-        y0 = (ydata[0] + ydata[-1]) / 2
-        slope = (ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])
-        curve_up = np.max(ydata) + np.min(ydata) < 2 * y0
-        if curve_up:
-            yscale = np.min(ydata) - y0
-            x0 = xdata[np.argmin(ydata)]
-        else:
-            yscale = np.max(ydata) - y0
-            x0 = xdata[np.argmax(ydata)]
-
-        gamma = np.abs(yscale) / 10
+        y0, slope, yscale, x0, gamma = _guess_lorentzian_params(xdata, ydata)
         alpha = 0
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma, alpha])
