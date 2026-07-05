@@ -69,6 +69,9 @@ class NodeCfgForm(QWidget):
         self._ctrl = controller
         self._node = node
         self._index = index
+        self._default_override_plan = self._node.builder.override_plan(
+            self._node.schema
+        )
 
         root = QVBoxLayout(self)
         root.setSpacing(8)
@@ -130,12 +133,17 @@ class NodeCfgForm(QWidget):
     def _on_generation_schema_changed(self, schema: object) -> None:
         del schema
         self._ctrl.set_node_cfg_value(self._index, self._combined_value())
-        self._default_form.set_decoration_provider(self._default_decoration_provider())
+        self._refresh_default_decoration_provider()
 
     def _default_decoration_provider(self) -> _OverridePlanDecorationProvider:
-        return _OverridePlanDecorationProvider(
-            self._node.builder.override_plan(self._node.schema)
-        )
+        return _OverridePlanDecorationProvider(self._default_override_plan)
+
+    def _refresh_default_decoration_provider(self) -> None:
+        plan = self._node.builder.override_plan(self._node.schema)
+        if plan == self._default_override_plan:
+            return
+        self._default_override_plan = plan
+        self._default_form.set_decoration_provider(self._default_decoration_provider())
 
     def _combined_value(self) -> CfgSectionValue:
         """Merge the split UI drafts back into the schema's full root value tree."""

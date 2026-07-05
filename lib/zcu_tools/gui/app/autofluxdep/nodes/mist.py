@@ -45,6 +45,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
     module_leaf_patches,
+    module_override_paths,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -58,6 +59,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     PULSE_MODULE_LEAF_PATHS,
+    PULSE_READOUT_REF_LABELS,
     READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
 )
@@ -269,6 +271,7 @@ class MistBuilder(Builder):
             duplicate_paths={"modules.probe_pulse": "modules.pi_pulse"},
             path_renames={"modules.probe_pulse": "modules.mist_pulse"},
             drop_paths=("modules.init_pulse",),
+            module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
             default_overrides={"rounds": 10},
         )
 
@@ -290,22 +293,20 @@ class MistBuilder(Builder):
     def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
         paths: list[OverridePath] = []
         paths.extend(
-            OverridePath(
-                f"modules.pi_pulse.{leaf}",
-                "all_points",
-                "pi_pulse module dependency",
-                "pi pulse is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.pi_pulse",
+                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+                source="pi_pulse module dependency",
+                reason="pi pulse is resolved from workflow/module-library dependency",
             )
-            for leaf in PULSE_MODULE_LEAF_PATHS
         )
         paths.extend(
-            OverridePath(
-                f"modules.readout.{leaf}",
-                "all_points",
-                "opt_readout module dependency",
-                "readout module is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.readout",
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+                source="opt_readout module dependency",
+                reason="readout module is resolved from workflow/module-library dependency",
             )
-            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
         )
         return OverridePlan(tuple(paths))
 

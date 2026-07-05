@@ -226,17 +226,20 @@ def test_dry_run_uses_run_cfg_snapshots_for_override_plan_nodes():
         return Patch()
 
     ctrl = build_core()
-    ctrl.add_node(
-        make_builder(
-            "cfg_node",
-            schema_fields=(("freq", FloatSpec("Frequency"), 1.0),),
-            override_plan=plan,
-            produce_fn=record,
+    try:
+        ctrl.add_node(
+            make_builder(
+                "cfg_node",
+                schema_fields=(("freq", FloatSpec("Frequency"), 1.0),),
+                override_plan=plan,
+                produce_fn=record,
+            )
         )
-    )
-    ctrl.set_flux_values([0.0, 1.0])
+        ctrl.set_flux_values([0.0, 1.0])
 
-    ctrl.dry_run()
+        ctrl.dry_run()
+    finally:
+        ctrl._background_svc.quiesce()
 
     assert seen == [(1.0, 2.0), (1.0, 3.0)]
 

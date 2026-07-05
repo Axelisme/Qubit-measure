@@ -33,6 +33,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepValue,
     module_leaf_patches,
+    module_override_paths,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -53,6 +54,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    PULSE_READOUT_REF_LABELS,
     READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
@@ -540,6 +542,7 @@ class QubitFreqBuilder(Builder):
                 *feedback_generation_fields(_PREDICT_FREQ_CORRECTION_SLOT),
             ),
             default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP, "rounds": 10},
+            module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 
     def make_init_result(
@@ -575,13 +578,12 @@ class QubitFreqBuilder(Builder):
                 )
             )
         paths.extend(
-            OverridePath(
-                f"modules.readout.{leaf}",
-                "all_points",
-                "readout module dependency",
-                "readout module is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.readout",
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+                source="readout module dependency",
+                reason="readout module is resolved from workflow/module-library dependency",
             )
-            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
         )
         return OverridePlan(tuple(paths))
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
-from typing import Any, Literal, TypeAlias, cast
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, Literal, TypeAlias
 
 OverrideMode: TypeAlias = Literal["after_first_point", "all_points"]
 _VALID_MODES: frozenset[str] = frozenset({"after_first_point", "all_points"})
@@ -43,23 +44,29 @@ class OverridePlan:
     """Declared set of Default cfg paths a node may override at run time."""
 
     paths: tuple[OverridePath, ...] = ()
+    _by_path: Mapping[str, OverridePath] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         paths = tuple(self.paths)
         object.__setattr__(self, "paths", paths)
-        seen: set[str] = set()
+        by_path: dict[str, OverridePath] = {}
         duplicates: set[str] = set()
         for entry in paths:
-            if entry.path in seen:
+            if entry.path in by_path:
                 duplicates.add(entry.path)
-            seen.add(entry.path)
+            by_path[entry.path] = entry
         if duplicates:
             raise ValueError(
                 "duplicate override paths: " + ", ".join(sorted(duplicates))
             )
+        object.__setattr__(self, "_by_path", MappingProxyType(by_path))
 
     def to_wire(self) -> list[dict[str, str]]:
         return [entry.to_wire() for entry in self.paths]
+
+    @property
+    def by_path(self) -> Mapping[str, OverridePath]:
+        return self._by_path
 
 
 @dataclass(frozen=True)
@@ -119,12 +126,24 @@ def apply_override_patches(
     be replaced atomically.
     """
 
-    by_path = {entry.path: entry for entry in plan.paths}
+    by_path = plan.by_path
     unknown = set(patches) - set(by_path)
     if unknown:
         raise ValueError(
             f"node {node_name!r} generated undeclared override path(s): "
             + ", ".join(sorted(unknown))
+        )
+    required = {
+        entry.path
+        for entry in plan.paths
+        if entry.mode == "all_points"
+        or (entry.mode == "after_first_point" and flux_idx > 0)
+    }
+    missing = required - set(patches)
+    if missing:
+        raise ValueError(
+            f"node {node_name!r} missed generated override path(s): "
+            + ", ".join(sorted(missing))
         )
 
     point_cfg = deepcopy(dict(base_cfg))
@@ -139,6 +158,21 @@ def apply_override_patches(
     return point_cfg
 
 
+def module_override_paths(
+    *,
+    prefix: str,
+    leaf_paths: tuple[str, ...],
+    source: str,
+    reason: str,
+    mode: OverrideMode = "all_points",
+) -> tuple[OverridePath, ...]:
+    """Declare one module dependency as leaf-level override paths."""
+    return tuple(
+        OverridePath(f"{prefix}.{leaf_path}", mode, source, reason)
+        for leaf_path in leaf_paths
+    )
+
+
 def module_leaf_patches(
     *,
     prefix: str,
@@ -148,13 +182,13 @@ def module_leaf_patches(
     """Extract declared patches from a module-shaped object.
 
     Missing paths are skipped so raw dict fixtures and pydantic module objects can
-    share one path list; present values are patched exactly at ``prefix.path``.
+    share one path list; ``apply_override_patches`` later enforces that declared
+    required paths were actually produced for this point.
     """
 
-    source = _module_to_mapping(module)
     patches: dict[str, object] = {}
     for leaf_path in leaf_paths:
-        found, value = _try_get_path(source, leaf_path)
+        found, value = _try_get_path(module, leaf_path)
         if found:
             patches[f"{prefix}.{leaf_path}"] = value
     return patches
@@ -227,32 +261,17 @@ def _set_leaf(
     node[leaf] = value
 
 
-def _module_to_mapping(module: object) -> Mapping[str, object]:
-    if isinstance(module, Mapping):
-        return cast(Mapping[str, object], module)
-    to_dict = getattr(module, "to_dict", None)
-    if callable(to_dict):
-        value = to_dict()
-        if isinstance(value, Mapping):
-            return cast(Mapping[str, object], value)
-    model_dump = getattr(module, "model_dump", None)
-    if callable(model_dump):
-        value = model_dump(mode="python")
-        if isinstance(value, Mapping):
-            return cast(Mapping[str, object], value)
-    raise TypeError(
-        f"generated module must be mapping-like, got {type(module).__name__}"
-    )
-
-
-def _try_get_path(tree: Mapping[str, object], path: str) -> tuple[bool, object]:
+def _try_get_path(tree: object, path: str) -> tuple[bool, object]:
     node: object = tree
     for part in path.split("."):
-        if not isinstance(node, Mapping):
+        if isinstance(node, Mapping):
+            if part not in node:
+                return False, None
+            node = node[part]
+            continue
+        if not hasattr(node, part):
             return False, None
-        if part not in node:
-            return False, None
-        node = node[part]
+        node = getattr(node, part)
     return True, node
 
 
@@ -268,6 +287,7 @@ __all__ = [
     "RunCfgSnapshot",
     "apply_override_patches",
     "module_leaf_patches",
+    "module_override_paths",
     "override_plan_to_wire",
     "validate_override_plan_base_cfg",
 ]

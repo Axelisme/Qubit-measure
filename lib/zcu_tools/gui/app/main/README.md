@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-04 - missing linked refs
+**Last updated:** 2026-07-05 - cfg field decoration
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -93,6 +93,13 @@ without consulting `ModuleLibrary`.
 Adapter defaults are assembled in `experiment/v2_gui` with `CfgBuilder` and the
 role table. Locked literals are declared in `cfg_spec()`; adapter defaults do not
 hand-write those values.
+
+`CfgFormWidget` accepts an optional field decoration provider keyed by full value
+tree path. The shared widget owns only generic presentation metadata
+(`hidden`/`enabled`/tone/badge/tooltip/label suffix) and computes the default
+decoration from the spec; app-specific policy such as generated fields stays in
+the caller. Decoration is a view contract only: domain enforcement remains in the
+owning controller/runtime.
 
 ## Operation Model
 

@@ -41,6 +41,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepValue,
     module_leaf_patches,
+    module_override_paths,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -62,11 +63,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    PULSE_READOUT_REF_LABELS,
     READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
     ctx_module,
     generation_field,
+    pop_sweep_range,
     pulse_length,
     pulse_product,
 )
@@ -272,20 +275,6 @@ def _clamp_drive_gain(value: float, knobs: dict[str, Any]) -> float:
     gain = _require_positive_finite("drive_gain", value)
     max_gain = _require_positive_finite("max_drive_gain", knobs["max_drive_gain"])
     return min(max_gain, gain)
-
-
-def _raw_range_tuple(value: Any) -> tuple[float, float]:
-    if hasattr(value, "start") and hasattr(value, "stop"):
-        return (float(value.start), float(value.stop))
-    lo, hi = value
-    return (float(lo), float(hi))
-
-
-def _pop_sweep_range(raw_cfg: dict[str, Any], key: str) -> tuple[float, float]:
-    sweep = raw_cfg.pop("sweep", None)
-    if not isinstance(sweep, dict) or key not in sweep:
-        raise RuntimeError(f"lenrabi raw cfg has no sweep.{key}")
-    return _raw_range_tuple(sweep[key])
 
 
 def _blend_positive(prior: float, feedback: float, confidence: float) -> float:
@@ -719,6 +708,7 @@ class LenRabiBuilder(Builder):
                 ),
             },
             path_renames={"modules.qub_pulse": "modules.rabi_pulse"},
+            module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 
     def make_init_result(
@@ -778,13 +768,12 @@ class LenRabiBuilder(Builder):
                 )
             )
         paths.extend(
-            OverridePath(
-                f"modules.readout.{leaf}",
-                "all_points",
-                "opt_readout module dependency",
-                "readout module is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.readout",
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+                source="opt_readout module dependency",
+                reason="readout module is resolved from workflow/module-library dependency",
             )
-            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
         )
         return OverridePlan(tuple(paths))
 
@@ -868,5 +857,5 @@ class LenRabiBuilder(Builder):
         if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
             patches["sweep.length"] = sweep_range
         raw_cfg = self.point_cfg(env, patches)
-        raw_cfg["sweep_range"] = _pop_sweep_range(raw_cfg, "length")
+        raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
         return ml.make_cfg(raw_cfg, LenRabiCfgTemplate)

@@ -57,6 +57,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepValue,
     module_leaf_patches,
+    module_override_paths,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
@@ -74,6 +75,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     ctx_md_float,
     ctx_module,
     generation_field,
+    pop_sweep_ranges,
     readout_pulse_freq,
     readout_pulse_gain,
 )
@@ -348,27 +350,6 @@ def _resolve_relax_delay(
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported ro_optimize relax_delay_mode: {mode!r}")
-
-
-def _raw_range_tuple(value: Any) -> tuple[float, float]:
-    if hasattr(value, "start") and hasattr(value, "stop"):
-        return (float(value.start), float(value.stop))
-    lo, hi = value
-    return (float(lo), float(hi))
-
-
-def _pop_sweep_ranges(
-    raw_cfg: dict[str, Any], keys: tuple[str, ...]
-) -> dict[str, tuple[float, float]]:
-    sweep = raw_cfg.pop("sweep", None)
-    if not isinstance(sweep, dict):
-        raise RuntimeError("ro_optimize raw cfg has no sweep section")
-    ranges: dict[str, tuple[float, float]] = {}
-    for key in keys:
-        if key not in sweep:
-            raise RuntimeError(f"ro_optimize raw cfg has no sweep.{key}")
-        ranges[key] = _raw_range_tuple(sweep[key])
-    return ranges
 
 
 class RoOptimizeNode(Node):
@@ -705,22 +686,20 @@ class RoOptimizeBuilder(Builder):
         knobs = schema.read_knobs()
         paths: list[OverridePath] = []
         paths.extend(
-            OverridePath(
-                f"modules.pi_pulse.{leaf}",
-                "all_points",
-                "pi_pulse module dependency",
-                "pi pulse is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.pi_pulse",
+                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+                source="pi_pulse module dependency",
+                reason="pi pulse is resolved from workflow/module-library dependency",
             )
-            for leaf in PULSE_MODULE_LEAF_PATHS
         )
         paths.extend(
-            OverridePath(
-                f"modules.readout.{leaf}",
-                "all_points",
-                "readout module dependency",
-                "readout module is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.readout",
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+                source="readout module dependency",
+                reason="readout module is resolved from workflow/module-library dependency",
             )
-            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
         )
         if knobs.get("relax_delay_mode") == _RELAX_DELAY_MODE_AUTO_T1:
             paths.append(
@@ -829,7 +808,7 @@ class RoOptimizeBuilder(Builder):
         if str(knobs["gain_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST:
             patches["sweep.gain"] = gain_range
         raw_cfg = self.point_cfg(env, patches)
-        ranges = _pop_sweep_ranges(raw_cfg, ("freq", "gain"))
+        ranges = pop_sweep_ranges(raw_cfg, ("freq", "gain"), node_name=self.name)
         raw_cfg["freq_range"] = ranges["freq"]
         raw_cfg["gain_range"] = ranges["gain"]
         return ml.make_cfg(raw_cfg, RoOptimizeCfgTemplate)

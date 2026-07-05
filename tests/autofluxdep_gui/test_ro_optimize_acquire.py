@@ -34,7 +34,7 @@ _READOUT = {
         "gain": 0.3,
         "waveform": {"style": "const", "length": 1.0},
     },
-    "ro_cfg": {"ro_ch": 0, "ro_length": 0.9, "trig_offset": 0.6},
+    "ro_cfg": {"ro_ch": 0, "ro_freq": 6000.0, "ro_length": 0.9, "trig_offset": 0.6},
 }
 
 _PARAMS = {

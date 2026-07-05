@@ -32,7 +32,7 @@ _READOUT = {
         "gain": 1.0,
         "waveform": {"style": "const", "length": 1.0},
     },
-    "ro_cfg": {"ro_ch": 0, "ro_length": 0.9, "trig_offset": 0.6},
+    "ro_cfg": {"ro_ch": 0, "ro_freq": 7444.6, "ro_length": 0.9, "trig_offset": 0.6},
 }
 
 

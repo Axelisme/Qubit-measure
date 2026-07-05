@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from zcu_tools.gui.app.autofluxdep.cfg import (
@@ -18,6 +18,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    ModuleRefSpec,
     NodeCfgSchema,
     ScalarSpec,
     SweepSpec,
@@ -40,29 +41,22 @@ PULSE_MODULE_LEAF_PATHS: tuple[str, ...] = (
     "nqz",
     "freq",
     "gain",
-    "phase",
-    "pre_delay",
-    "post_delay",
     "waveform",
 )
 
 READOUT_PULSE_MODULE_LEAF_PATHS: tuple[str, ...] = (
     "type",
-    "pulse_cfg.type",
     "pulse_cfg.ch",
     "pulse_cfg.nqz",
     "pulse_cfg.freq",
     "pulse_cfg.gain",
-    "pulse_cfg.phase",
-    "pulse_cfg.pre_delay",
-    "pulse_cfg.post_delay",
     "pulse_cfg.waveform",
-    "ro_cfg.type",
     "ro_cfg.ro_ch",
     "ro_cfg.ro_freq",
     "ro_cfg.ro_length",
     "ro_cfg.trig_offset",
 )
+PULSE_READOUT_REF_LABELS: tuple[str, ...] = ("Pulse Readout",)
 
 
 @dataclass(frozen=True)
@@ -106,6 +100,7 @@ def adapter_node_schema(
     path_renames: Mapping[str, str] | None = None,
     duplicate_paths: Mapping[str, str] | None = None,
     drop_paths: tuple[str, ...] = (),
+    module_ref_labels: Mapping[str, tuple[str, ...]] | None = None,
 ) -> NodeCfgSchema:
     """Build a ``NodeCfgSchema`` from a copied measure-gui adapter cfg shape."""
     schema = adapter_cls().make_default_cfg(_ensure_context(ctx))
@@ -124,6 +119,8 @@ def adapter_node_schema(
         _rename_cfg_path(root_spec, root_value, source, target)
     for path in drop_paths:
         _drop_cfg_path(root_spec, root_value, path)
+    for path, labels in (module_ref_labels or {}).items():
+        _restrict_module_ref_labels(root_spec, path, labels)
     _prune_empty_sections(root_spec, root_value)
 
     projection = dict(logical_paths)
@@ -247,14 +244,31 @@ def readout_pulse_gain(module: Any) -> float | None:
     return None
 
 
-def module_dict(raw_cfg: dict[str, Any], key: str) -> dict[str, Any]:
-    modules = raw_cfg.get("modules")
-    if not isinstance(modules, dict):
-        raise RuntimeError("adapter raw cfg has no modules section")
-    module = modules.get(key)
-    if not isinstance(module, dict):
-        raise RuntimeError(f"adapter raw cfg module {key!r} is missing")
-    return deepcopy(module)
+def pop_sweep_range(
+    raw_cfg: dict[str, Any], key: str, *, node_name: str
+) -> tuple[float, float]:
+    return pop_sweep_ranges(raw_cfg, (key,), node_name=node_name)[key]
+
+
+def pop_sweep_ranges(
+    raw_cfg: dict[str, Any], keys: tuple[str, ...], *, node_name: str
+) -> dict[str, tuple[float, float]]:
+    sweep = raw_cfg.pop("sweep", None)
+    if not isinstance(sweep, dict):
+        raise RuntimeError(f"{node_name} raw cfg has no sweep section")
+    ranges: dict[str, tuple[float, float]] = {}
+    for key in keys:
+        if key not in sweep:
+            raise RuntimeError(f"{node_name} raw cfg has no sweep.{key}")
+        ranges[key] = _raw_range_tuple(sweep[key])
+    return ranges
+
+
+def _raw_range_tuple(value: Any) -> tuple[float, float]:
+    if hasattr(value, "start") and hasattr(value, "stop"):
+        return (float(value.start), float(value.stop))
+    lo, hi = value
+    return (float(lo), float(hi))
 
 
 def _ensure_context(ctx: Any | None) -> ExpContext:
@@ -325,6 +339,26 @@ def _drop_cfg_path(
     _pop_cfg_node(root_value, path)
 
 
+def _restrict_module_ref_labels(
+    root_spec: CfgSectionSpec,
+    path: str,
+    labels: tuple[str, ...],
+) -> None:
+    node = _get_cfg_node(root_spec, path)
+    if not isinstance(node, ModuleRefSpec):
+        raise TypeError(f"cfg spec path {path!r} is not a ModuleRefSpec")
+    allowed_labels = set(labels)
+    allowed = [spec for spec in node.allowed if spec.label in allowed_labels]
+    if not allowed:
+        available = ", ".join(spec.label for spec in node.allowed)
+        wanted = ", ".join(labels)
+        raise ValueError(
+            f"cfg spec path {path!r} has no allowed ModuleRef labels matching "
+            f"{wanted!r}; available: {available}"
+        )
+    _replace_cfg_node(root_spec, path, replace(node, allowed=allowed))
+
+
 def _get_cfg_node(root: CfgSectionSpec | CfgSectionValue, path: str) -> Any:
     node: Any = root
     for part in _split_path(path):
@@ -347,6 +381,24 @@ def _pop_cfg_node(root: CfgSectionSpec | CfgSectionValue, path: str) -> Any:
     if not isinstance(fields, dict) or parts[-1] not in fields:
         raise KeyError(f"cfg path {path!r} leaf {parts[-1]!r} is missing")
     return fields.pop(parts[-1])
+
+
+def _replace_cfg_node(
+    root: CfgSectionSpec | CfgSectionValue,
+    path: str,
+    node: Any,
+) -> None:
+    parts = _split_path(path)
+    parent: Any = root
+    for part in parts[:-1]:
+        fields = getattr(parent, "fields", None)
+        if not isinstance(fields, dict) or part not in fields:
+            raise KeyError(f"cfg path {path!r} segment {part!r} is missing")
+        parent = fields[part]
+    fields = getattr(parent, "fields", None)
+    if not isinstance(fields, dict) or parts[-1] not in fields:
+        raise KeyError(f"cfg path {path!r} leaf {parts[-1]!r} is missing")
+    fields[parts[-1]] = node
 
 
 def _set_cfg_node(

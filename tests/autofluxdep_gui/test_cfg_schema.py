@@ -29,6 +29,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     EvalValue,
     FloatSpec,
     IntSpec,
+    ModuleRefSpec,
     NodeCfgSchema,
     NodeFieldSpec,
     NodeSectionSpec,
@@ -69,7 +70,7 @@ _READOUT = {
         "gain": 1.0,
         "waveform": {"style": "const", "length": 1.0},
     },
-    "ro_cfg": {"ro_ch": 0, "ro_length": 0.9, "trig_offset": 0.6},
+    "ro_cfg": {"ro_ch": 0, "ro_freq": 7444.6, "ro_length": 0.9, "trig_offset": 0.6},
 }
 
 _PI_PULSE = {
@@ -1559,11 +1560,19 @@ def test_apply_override_patches_copies_base_and_enforces_plan_modes():
             flux_idx=1,
             node_name="qubit_freq",
         )
+    with pytest.raises(ValueError, match="missed generated override path"):
+        apply_override_patches(
+            base_cfg,
+            plan,
+            {"modules.qub_pulse.freq": 5140.0},
+            flux_idx=1,
+            node_name="qubit_freq",
+        )
     with pytest.raises(ValueError, match="initial-only path"):
         apply_override_patches(
             base_cfg,
             plan,
-            {"modules.qub_pulse.gain": 0.2},
+            {"modules.qub_pulse.freq": 5140.0, "modules.qub_pulse.gain": 0.2},
             flux_idx=0,
             node_name="qubit_freq",
         )
@@ -1630,6 +1639,16 @@ def test_real_builders_declare_nonempty_valid_override_plans():
     mist_schema = MistBuilder().make_default_schema()
     mist_base = mist_schema.lower_raw(ModuleLibrary(), md=MetaDict())
     assert set(mist_base["modules"]) == {"readout", "pi_pulse", "mist_pulse"}
+
+
+def test_real_builders_restrict_generated_readout_to_pulse_shape():
+    for builder in _BUILDERS:
+        schema = builder.make_default_schema()
+        modules = schema.schema.spec.fields["modules"]
+        assert isinstance(modules, CfgSectionSpec), builder.name
+        readout = modules.fields["readout"]
+        assert isinstance(readout, ModuleRefSpec), builder.name
+        assert [spec.label for spec in readout.allowed] == ["Pulse Readout"]
 
 
 # --- 3. seam invariant: only cfg/ imports gui.app.main from the package ---------

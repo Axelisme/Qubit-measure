@@ -55,6 +55,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepValue,
     module_leaf_patches,
+    module_override_paths,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -73,10 +74,12 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     PULSE_MODULE_LEAF_PATHS,
+    PULSE_READOUT_REF_LABELS,
     READOUT_PULSE_MODULE_LEAF_PATHS,
     adapter_node_schema,
     ctx_md_float,
     generation_field,
+    pop_sweep_range,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
@@ -180,20 +183,6 @@ def _resolve_cfg_relax_delay(
     if mode == _RELAX_DELAY_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported t2ramsey relax_delay_mode: {mode!r}")
-
-
-def _raw_range_tuple(value: Any) -> tuple[float, float]:
-    if hasattr(value, "start") and hasattr(value, "stop"):
-        return (float(value.start), float(value.stop))
-    lo, hi = value
-    return (float(lo), float(hi))
-
-
-def _pop_sweep_range(raw_cfg: dict[str, Any], key: str) -> tuple[float, float]:
-    sweep = raw_cfg.pop("sweep", None)
-    if not isinstance(sweep, dict) or key not in sweep:
-        raise RuntimeError(f"t2ramsey raw cfg has no sweep.{key}")
-    return _raw_range_tuple(sweep[key])
 
 
 class T2RamseyNode(Node):
@@ -425,6 +414,7 @@ class T2RamseyBuilder(Builder):
                     expts=101,
                 ),
             },
+            module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 
     def detune_ratio(self, schema: NodeCfgSchema, md: Any = None) -> float:
@@ -450,22 +440,20 @@ class T2RamseyBuilder(Builder):
         knobs = schema.read_knobs()
         paths: list[OverridePath] = []
         paths.extend(
-            OverridePath(
-                f"modules.pi2_pulse.{leaf}",
-                "all_points",
-                "pi2_pulse module dependency",
-                "pi/2 pulse is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.pi2_pulse",
+                leaf_paths=PULSE_MODULE_LEAF_PATHS,
+                source="pi2_pulse module dependency",
+                reason="pi/2 pulse is resolved from workflow/module-library dependency",
             )
-            for leaf in PULSE_MODULE_LEAF_PATHS
         )
         paths.extend(
-            OverridePath(
-                f"modules.readout.{leaf}",
-                "all_points",
-                "opt_readout module dependency",
-                "readout module is resolved from workflow/module-library dependency",
+            module_override_paths(
+                prefix="modules.readout",
+                leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+                source="opt_readout module dependency",
+                reason="readout module is resolved from workflow/module-library dependency",
             )
-            for leaf in READOUT_PULSE_MODULE_LEAF_PATHS
         )
         if knobs.get("relax_delay_mode") == _RELAX_DELAY_MODE_AUTO_T1:
             paths.append(
@@ -551,5 +539,5 @@ class T2RamseyBuilder(Builder):
             patches["sweep.length"] = sweep_range
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("detune_ratio", None)
-        raw_cfg["sweep_range"] = _pop_sweep_range(raw_cfg, "length")
+        raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
         return ml.make_cfg(raw_cfg, T2RamseyCfgTemplate)
