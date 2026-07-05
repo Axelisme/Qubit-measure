@@ -360,10 +360,10 @@ DEFAULT_SIMPARAM: SimParams = SimParams(
     T2=15.0,  # homogeneous (echo) T2; 15 <= 2*T1=40 ✓
     T2_star=8.0,  # Ramsey T2*; 8 <= T2=15 ✓ — non-zero inhomogeneous rate
     bare_rf=6.0,
-    g=0.08,
+    g=0.06,
     Ql=1000.0,
     Qi=50000.0,
-    snr=300.0,
+    snr=5.0,
     pi_gain_len=0.4,
     seed=12345,
 )

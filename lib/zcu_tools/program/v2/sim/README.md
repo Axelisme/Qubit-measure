@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-05 — Per-acquire seed derivation
+**Last updated:** 2026-07-05 — Per-acquire seeds and mock readout defaults
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -323,9 +323,10 @@ every coupling point.
   histogram). Two consequences: (1) the accumulated path carries genuine shot
   noise `~ sqrt(P_e(1−P_e)/reps)`, so slow low-contrast fits (echo T2) need enough
   reps to average it down — only reps, not the Gaussian noise parameters,
-  suppresses it; (2) a DEFAULT base snr=300 fully separates the blobs (fidelity
-  ~ 1), so a *meaningful* singleshot fidelity test must lower snr (~5–10) to
-  overlap the blobs.
+  suppresses it; (2) the GUI mock-connect default deliberately uses modest
+  dispersive contrast and low base readout SNR (`g=0.06`, base `snr=5`) so mock
+  spectra are not unrealistically clean; tests that need near-perfect blob
+  separation should override snr explicitly.
 
 ## Mock soccfg gotchas (when driving real experiments)
 
