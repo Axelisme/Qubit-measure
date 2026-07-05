@@ -122,11 +122,12 @@ class MyProgramV2(  # type: ignore[reportIncompatibleMethodOverride]
         """Build the SimEngine and inject it onto the mock soc for poll-time compute.
 
         Ensures the program is compiled (the engine reads loop_dims / ro_chs /
-        the module tree), constructs the engine, and hands it to the mock soc;
-        no rounds are computed here — poll_data drives compute lazily.  Lives
-        here (not in acquire) to keep the dispatch branch readable; engine
-        construction raises (does not swallow) so unsupported experiment
-        structures fail fast instead of degrading to noise.
+        the module tree), derives this acquire's child RNG seed from the mock soc,
+        constructs the engine, and hands it to the mock soc; no rounds are
+        computed here — poll_data drives compute lazily.  Lives here (not in
+        acquire) to keep the dispatch branch readable; engine construction raises
+        (does not swallow) so unsupported experiment structures fail fast instead
+        of degrading to noise.
         """
 
         from .sim.engine import SimEngine
@@ -134,4 +135,12 @@ class MyProgramV2(  # type: ignore[reportIncompatibleMethodOverride]
         if self.loop_dims is None or self.avg_level is None:
             self.compile()
 
-        soc.set_sim_engine(SimEngine(self, sim))
+        next_seed = getattr(soc, "next_sim_acquire_seed", None)
+        if not callable(next_seed):
+            raise TypeError(
+                "SimParams-backed soc must provide next_sim_acquire_seed() for "
+                "per-acquire RNG seed derivation"
+            )
+
+        rng_seed = next_seed()
+        soc.set_sim_engine(SimEngine(self, sim, rng_seed=rng_seed))

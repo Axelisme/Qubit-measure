@@ -40,9 +40,10 @@ PulseReadout gain/envelope.  The two independent sources are added in
 quadrature after their own integration scales are applied.  Averaging over the
 ``reps`` axis (and, across rounds, over ``rounds``) then improves the effective
 SNR by ``sqrt(reps * rounds)`` — exactly as on hardware, because the round loop
-reruns the program and software-averages.  ``seed`` makes the noise reproducible;
-each round draws fresh noise so re-running the round loop is statistically
-meaningful (Q1).
+reruns the program and software-averages.  ``SimParams.seed`` is the root/default
+seed; mock-soc acquire routes may pass a per-acquire child seed so consecutive
+acquires on one soc do not replay the same stream. Each round draws fresh noise so
+re-running the round loop is statistically meaningful (Q1).
 """
 
 from __future__ import annotations
@@ -450,7 +451,17 @@ class SimEngine:
         program,
         sim: SimParams,
         stop_checkers: list[Callable[[], bool]] | None = None,
+        *,
+        rng_seed: int | np.random.SeedSequence | None = None,
     ) -> None:
+        """Build a per-acquire simulation engine.
+
+        ``sim.seed`` remains the root/default seed used by direct
+        ``SimEngine(program, sim)`` callers. ``rng_seed`` is a caller-derived
+        per-acquire seed for routes that own a longer lifecycle, such as
+        ``MockQickSoc``.
+        """
+
         from zcu_tools.program.v2.modular import ModularProgramV2
 
         if not isinstance(program, ModularProgramV2):
@@ -496,7 +507,9 @@ class SimEngine:
             flux_period=sim.flux_period,
             flux_bias=sim.flux_bias,
         )
-        self._rng = np.random.default_rng(sim.seed)
+        self._rng = np.random.default_rng(
+            rng_seed if rng_seed is not None else sim.seed
+        )
 
         # Lorentzian quasi-static detune ensemble.
         # Gamma is the Lorentzian HWHM in rad/µs (numerically == the

@@ -203,11 +203,17 @@ class MockQickSoc(QickConfig):
         self._sim_params: SimParams | None = (
             sim.model_copy() if sim is not None else None
         )
+        self._sim_root_seed_sequence: np.random.SeedSequence | None = (
+            np.random.SeedSequence(self._sim_params.seed)
+            if self._sim_params is not None and self._sim_params.seed is not None
+            else None
+        )
 
         # The SimEngine compute handle, injected by MyProgramV2.acquire on the sim
-        # path (set_sim_engine).  poll_data computes one round *lazily* off it —
-        # nothing is pre-computed, so an early-stopping run never computes a round
-        # it does not poll.  The round counter tracks which round to ask for next;
+        # path (set_sim_engine).  The per-acquire RNG seed is derived before the
+        # engine is attached. poll_data computes one round *lazily* off the engine
+        # — nothing is pre-computed, so an early-stopping run never computes a round
+        # it does not poll. The round counter tracks which round to ask for next;
         # the engine redraws independent noise per round (deterministic grid is
         # cached inside the engine on first call).
         self._sim_engine: SimEngine | None = None
@@ -255,6 +261,25 @@ class MockQickSoc(QickConfig):
         """
         return self._sim_params
 
+    def next_sim_acquire_seed(self) -> np.random.SeedSequence | None:
+        """Return the child RNG seed for the next SimEngine-backed acquire.
+
+        ``SimParams.seed`` is the per-soc root seed. A fixed root seed spawns one
+        child per acquire/decimated-acquire in call order, while ``seed=None``
+        deliberately returns ``None`` so each engine remains non-deterministic.
+        """
+
+        if self._sim_params is None:
+            raise RuntimeError(
+                "next_sim_acquire_seed requires a SimParams-backed mock soc; this "
+                "soc was built without sim (white-noise path)"
+            )
+        if self._sim_root_seed_sequence is None:
+            return None
+
+        (child_seed,) = self._sim_root_seed_sequence.spawn(1)
+        return child_seed
+
     def set_flux_device(self, name: str | None) -> None:
         """Bind (or unbind) the operating-flux source device (FLUX-AWARE-MOCK).
 
@@ -285,9 +310,10 @@ class MockQickSoc(QickConfig):
         """Attach the SimEngine compute handle for this acquire() (sim path).
 
         Called by MyProgramV2.acquire on the sim path *before* the real round
-        loop runs.  Nothing is computed here — poll_data computes each round
-        lazily off this engine in poll order, so early-stop saves the unpolled
-        rounds' compute.
+        loop runs.  The caller has already derived this acquire's child RNG seed
+        and passed it into the engine. Nothing is computed here — poll_data
+        computes each round lazily off this engine in poll order, so early-stop
+        saves the unpolled rounds' compute.
         """
 
         self._sim_engine = engine

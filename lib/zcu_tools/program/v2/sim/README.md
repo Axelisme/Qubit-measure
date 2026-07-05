@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-04 — Population cache lifecycle
+**Last updated:** 2026-07-05 — Per-acquire seed derivation
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -27,6 +27,14 @@ skipped and the white-noise fallback path remains byte-for-byte stable (design
 boundary D1).
 This is why injecting params and running a real experiment class exercises the
 genuine acquire pipeline, not a parallel mock path.
+
+`SimParams.seed` is the mock simulator's root seed. A `MockQickSoc` owns the
+per-soc child-seed sequence for SimEngine-backed `acquire()` and
+`acquire_decimated()` calls, so consecutive acquires on one soc do not replay the
+same RNG stream. Creating a new mock soc with the same root seed and running the
+same acquire sequence reproduces the same child streams bit-for-bit. `seed=None`
+keeps the route non-deterministic; it does not synthesize a deterministic child
+sequence.
 
 ## TLS Bloch density-matrix model
 
@@ -189,8 +197,10 @@ every coupling point.
   select a blob, multiplies the deterministic signal by the linear readout gain
   and effective signal samples, and adds quadrature-combined base plus
   gain-proportional Gaussian integrated noise into the QICK
-  `(*loop_dims, nreads, 2)` int64 buffer (noise parameters / reps / rounds / seed;
-  fresh Bernoulli + noise per round so software-averaging works). The
+  `(*loop_dims, nreads, 2)` int64 buffer (noise parameters / reps / rounds /
+  per-engine RNG seed; fresh Bernoulli + noise per round so software-averaging
+  works). Direct callers use `SimParams.seed` as the engine seed; mock-soc acquire
+  routes pass a per-acquire child seed derived from that root. The
   reps-mean is the accumulated `mixed_signal` blend; `get_raw`
   sees the two blobs. Owns the Lorentzian quasi-static detune
   ensemble: it averages `P_e` over a deterministic Gauss-Legendre quadrature in `δ`
@@ -351,8 +361,10 @@ every coupling point.
   readout-induced backaction gates (excited blob center shift, raw mixture sampling,
   `q_post` population-cache behavior), the Lorentzian dephasing gates (quadrature
   reproduces the analytic FID, echo refocuses to T2, Ramsey decays faster, Γ=0
-  no-inhomogeneous-broadening), and a deterministic Branch smoke. The
-  coherence-envelope helpers run at `reps=2000` to average the per-shot shot noise.
+  no-inhomogeneous-broadening), per-soc child seed progression for accumulated and
+  decimated acquires, direct-engine root seed reproducibility, and a deterministic
+  Branch smoke. The coherence-envelope helpers run at `reps=2000` to average the
+  per-shot shot noise.
 - `test_integration.py` — cross-experiment inject -> recover: real experiment
   `run` + `analyze` recover the injected f_qubit / pi gain / gain scaling / T1 /
   T2 + detuning, the dephasing proof (echo -> T2 and Γ-insensitive, Ramsey -> T2\*,

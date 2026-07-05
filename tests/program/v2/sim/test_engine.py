@@ -26,8 +26,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from qick import QickConfig
 from zcu_tools.program.v2.base import ProgramV2Cfg
-from zcu_tools.program.v2.mocksoc import make_mock_soc
+from zcu_tools.program.v2.mocksoc import MockQickSoc, make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
@@ -176,6 +177,95 @@ def test_d1_no_sim_white_noise_unchanged():
     raw = prog.get_raw()
     assert raw is not None
     assert raw[0].shape == (10, 5, 1, 2)
+
+
+# ----------------------------------------------------------- acquire seed stream
+
+
+def _seed_progression_sim() -> SimParams:
+    return _SIM.model_copy(
+        update={
+            "Temp": 0.0,
+            "snr": 20.0,
+            "readout_gain_noise_per_gain": 0.0,
+            "poll_latency": 0.0,
+        }
+    )
+
+
+def _seed_progression_program(soccfg: QickConfig) -> ModularProgramV2:
+    rf_g = _rf_g_mhz()
+    sw = SweepCfg(start=rf_g - 25.0, stop=rf_g + 25.0, expts=7, step=50.0 / 6.0)
+    ro_param = sweep2param("ro_freq", sw)
+    readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=1),
+        modules=[readout],
+        sweep=[("ro_freq", sw)],
+    )
+    prog.compile()
+    return prog
+
+
+def _accumulated_seed_trace(
+    soc: MockQickSoc, soccfg: QickConfig
+) -> NDArray[np.float64]:
+    prog = _seed_progression_program(soccfg)
+    return np.asarray(prog.acquire(soc, progress=False)[0], dtype=np.float64).copy()
+
+
+def _accumulated_seed_sequence(sim: SimParams) -> list[NDArray[np.float64]]:
+    soc, soccfg = make_mock_soc(sim=sim)
+    return [
+        _accumulated_seed_trace(soc, soccfg),
+        _accumulated_seed_trace(soc, soccfg),
+    ]
+
+
+def test_mock_soc_accumulated_acquire_advances_child_seed() -> None:
+    """One SimParams-backed soc must not replay the root RNG stream per acquire."""
+
+    first, second = _accumulated_seed_sequence(_seed_progression_sim())
+
+    assert not np.array_equal(first, second)
+
+
+def test_mock_soc_accumulated_seed_sequence_reproducible_on_new_soc() -> None:
+    """Same root seed + same acquire sequence on a new soc reproduces child streams."""
+
+    sim = _seed_progression_sim()
+    seq_a = _accumulated_seed_sequence(sim)
+    seq_b = _accumulated_seed_sequence(sim)
+
+    np.testing.assert_array_equal(seq_a[0], seq_b[0])
+    np.testing.assert_array_equal(seq_a[1], seq_b[1])
+    assert not np.array_equal(seq_a[0], seq_a[1])
+
+
+def test_direct_simengine_uses_root_seed_and_advances_round_stream() -> None:
+    """Direct SimEngine callers keep root-seed reproducibility."""
+
+    sim = _seed_progression_sim()
+    _soc, soccfg = make_mock_soc(sim=sim)
+    prog = _seed_progression_program(soccfg)
+
+    engine = SimEngine(prog, sim)
+    first_round = engine.compute_round(0)[0]
+    second_round = engine.compute_round(1)[0]
+    replay = SimEngine(prog, sim).compute_round(0)[0]
+
+    np.testing.assert_array_equal(first_round, replay)
+    assert not np.array_equal(first_round, second_round)
+
+
+def test_mock_soc_seed_none_returns_no_deterministic_child_seed() -> None:
+    """seed=None keeps acquire routes on default_rng(None), not a child sequence."""
+
+    soc, _soccfg = make_mock_soc(sim=_SIM.model_copy(update={"seed": None}))
+
+    assert soc.next_sim_acquire_seed() is None
+    assert soc.next_sim_acquire_seed() is None
 
 
 # ------------------------------------------------------------ engine smoke path
@@ -424,8 +514,9 @@ def test_engine_qub_pulse_with_swept_ro_freq_dip_tracks_pe():
     ignored the qubit pulse entirely and always probed rf_g.
     """
 
+    sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_gain_noise_per_gain": 0.0})
     f_qubit = _f_qubit_mhz()
-    rf_g_mhz, rf_e_mhz = (f * 1e3 for f in resonator_freqs(_SIM, _OPERATING_FLUX))
+    rf_g_mhz, rf_e_mhz = (f * 1e3 for f in resonator_freqs(sim, _OPERATING_FLUX))
 
     # Sweep wide enough to bracket both rf_g and rf_e.
     lo = min(rf_g_mhz, rf_e_mhz) - 50.0
@@ -434,7 +525,7 @@ def test_engine_qub_pulse_with_swept_ro_freq_dip_tracks_pe():
     freqs = np.linspace(sw.start, sw.stop, sw.expts)
 
     def _dip_freq(pi_gain: float) -> float:
-        soc, soccfg = make_mock_soc(sim=_SIM)
+        soc, soccfg = make_mock_soc(sim=sim)
         # gain*length == pi_gain_len (0.4) is an exact π; gain=0 is no excitation.
         qub_pulse = PulseCfg(
             ch=0,
@@ -448,7 +539,7 @@ def test_engine_qub_pulse_with_swept_ro_freq_dip_tracks_pe():
         ro = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
         prog = ModularProgramV2(
             soccfg,
-            ProgramV2Cfg(reps=80, rounds=2),
+            ProgramV2Cfg(reps=80, rounds=2, relax_delay=_RESET_RELAX_DELAY),
             modules=[qub_pulse, ro],
             sweep=[("ro_freq", sw)],
         )
@@ -820,6 +911,44 @@ def _pulse_readout(
         ro_ch=0, ro_length=ro_length, ro_freq=ro_freq_mhz, trig_offset=trig_offset
     )
     return PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+
+
+def _decimated_seed_trace(soc: MockQickSoc, soccfg: QickConfig) -> NDArray[np.float64]:
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=1, rounds=1),
+        modules=[_pulse_readout(_rf_g_mhz(), ro_length=2.0, gain=1.0)],
+    )
+    trace = prog.acquire_decimated(soc, progress=False)[0]
+    return np.asarray(trace, dtype=np.float64).copy()
+
+
+def _decimated_seed_sequence(sim: SimParams) -> list[NDArray[np.float64]]:
+    soc, soccfg = make_mock_soc(sim=sim)
+    return [
+        _decimated_seed_trace(soc, soccfg),
+        _decimated_seed_trace(soc, soccfg),
+    ]
+
+
+def test_mock_soc_decimated_acquire_advances_child_seed() -> None:
+    """Decimated acquires share the per-soc child seed sequence."""
+
+    first, second = _decimated_seed_sequence(_seed_progression_sim())
+
+    assert not np.array_equal(first, second)
+
+
+def test_mock_soc_decimated_seed_sequence_reproducible_on_new_soc() -> None:
+    """Same root seed + same decimated sequence on a new soc is bit-reproducible."""
+
+    sim = _seed_progression_sim()
+    seq_a = _decimated_seed_sequence(sim)
+    seq_b = _decimated_seed_sequence(sim)
+
+    np.testing.assert_array_equal(seq_a[0], seq_b[0])
+    np.testing.assert_array_equal(seq_a[1], seq_b[1])
+    assert not np.array_equal(seq_a[0], seq_a[1])
 
 
 def _ground_raw_median(readout: Module, *, sim: SimParams) -> complex:
