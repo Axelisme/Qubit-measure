@@ -22,6 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_reset_module_spec,
     proper_relax,
     proper_res_freq_range,
+    readout_dpm_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -91,9 +92,10 @@ class RoOptFreqAdapter(
         ),
         typical_writeback=(
             "Proposes the SNR-maximizing readout frequency into MetaDict "
-            "'best_ro_freq' (MHz). No ModuleLibrary writeback — combine "
-            "'best_ro_freq' / 'best_ro_gain' / 'best_ro_length' into a "
-            "'readout_dpm' module afterwards (the 'readout_dpm' role)."
+            "'best_ro_freq' (MHz). When a cfg snapshot with pulse readout is "
+            "available and 'best_ro_freq' / 'best_ro_gain' / "
+            "'best_ro_length' are known from this result plus MetaDict, also "
+            "proposes ModuleLibrary 'readout_dpm'."
         ),
         recommended=(
             "Analysis denoises the SNR curve before picking the peak. "
@@ -147,13 +149,21 @@ class RoOptFreqAdapter(
         self, req: WritebackRequest[RoOptFreqRunResult, RoOptFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
         ]
+        items.extend(
+            readout_dpm_writeback_items(
+                req.ctx,
+                req.run_result.cfg_snapshot,
+                proposed={"best_ro_freq": result.best_freq},
+            )
+        )
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_ro_opt_freq_{time.strftime('%m%d')}"

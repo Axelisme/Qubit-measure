@@ -21,6 +21,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_pulse_readout_module_spec,
     make_reset_module_spec,
     proper_relax,
+    readout_dpm_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -92,9 +93,10 @@ class RoOptPowerAdapter(
         ),
         typical_writeback=(
             "Proposes the SNR-maximizing readout gain into MetaDict "
-            "'best_ro_gain' (a.u.). No ModuleLibrary writeback — combine the "
-            "best readout params into a 'readout_dpm' module afterwards (the "
-            "'readout_dpm' role)."
+            "'best_ro_gain' (a.u.). When a cfg snapshot with pulse readout is "
+            "available and 'best_ro_freq' / 'best_ro_gain' / "
+            "'best_ro_length' are known from this result plus MetaDict, also "
+            "proposes ModuleLibrary 'readout_dpm'."
         ),
         recommended=(
             "Analysis denoises the SNR curve before picking the peak; wavelet "
@@ -150,13 +152,21 @@ class RoOptPowerAdapter(
         self, req: WritebackRequest[RoOptPowerRunResult, RoOptPowerAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="best_ro_gain",
                 description="Optimal readout gain (a.u.)",
                 proposed_value=result.best_gain,
             ),
         ]
+        items.extend(
+            readout_dpm_writeback_items(
+                req.ctx,
+                req.run_result.cfg_snapshot,
+                proposed={"best_ro_gain": result.best_gain},
+            )
+        )
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_ro_opt_gain_{time.strftime('%m%d')}"

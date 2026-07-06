@@ -141,6 +141,8 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         wavelet_level: int = 0,
     ) -> tuple[float, Figure]:
         assert result is not None, "no result found"
+        if t0 is not None and t0 < 0.0:
+            raise ValueError("t0 length penalty must be non-negative")
 
         lengths, signals = result.lengths, result.signals
 
@@ -158,7 +160,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
             wavelet_level=wavelet_level,
         )
 
-        if t0 is None:
+        if t0 is None or t0 == 0.0:
             max_id = np.argmax(snrs)
         else:
             max_id = np.argmax(snrs / np.sqrt(lengths + t0))

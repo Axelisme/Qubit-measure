@@ -10,7 +10,7 @@ being "the last step" — letting any run that has the full calibration emit it.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import (
@@ -18,6 +18,7 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleWriteback,
 )
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+from zcu_tools.program.v2.modules import PulseReadoutCfg
 
 from .ctx_helpers import md_get_float, md_has_key
 
@@ -43,6 +44,69 @@ class _HasModules(Protocol):
 
     @property
     def modules(self) -> _HasTestedReset: ...
+
+
+class _HasReadout(Protocol):
+    @property
+    def readout(self) -> object: ...
+
+
+class _HasReadoutModules(Protocol):
+    @property
+    def modules(self) -> _HasReadout: ...
+
+
+_READOUT_DPM_KEYS = ("best_ro_freq", "best_ro_gain", "best_ro_length")
+
+
+def _resolve_readout_dpm_values(
+    ctx: ExpContext, proposed: Mapping[str, float]
+) -> tuple[float, float, float] | None:
+    values: list[float] = []
+    for key in _READOUT_DPM_KEYS:
+        if key in proposed:
+            values.append(float(proposed[key]))
+            continue
+        if not md_has_key(ctx, key):
+            return None
+        values.append(md_get_float(ctx, key, float("nan")))
+
+    best_ro_freq, best_ro_gain, best_ro_length = values
+    return best_ro_freq, best_ro_gain, best_ro_length
+
+
+def readout_dpm_writeback_items(
+    ctx: ExpContext,
+    cfg_snapshot: _HasReadoutModules | None,
+    *,
+    proposed: Mapping[str, float],
+) -> list[ModuleWriteback]:
+    if cfg_snapshot is None:
+        return []
+
+    resolved = _resolve_readout_dpm_values(ctx, proposed)
+    if resolved is None:
+        return []
+
+    readout_cfg = cfg_snapshot.modules.readout
+    if not isinstance(readout_cfg, PulseReadoutCfg):
+        return []
+
+    best_ro_freq, best_ro_gain, best_ro_length = resolved
+    spec, value = module_cfg_to_value(readout_cfg)
+    value.with_field("pulse_cfg.freq", best_ro_freq)
+    value.with_field("ro_cfg.ro_freq", best_ro_freq)
+    value.with_field("pulse_cfg.gain", best_ro_gain)
+    value.with_field("pulse_cfg.waveform.length", best_ro_length + 0.1)
+    value.with_field("ro_cfg.ro_length", best_ro_length)
+
+    return [
+        ModuleWriteback(
+            target_name="readout_dpm",
+            description="Optimized readout (DPM)",
+            edit_schema=CfgSchema(spec=spec, value=value),
+        )
+    ]
 
 
 def reset_module_writeback_items(

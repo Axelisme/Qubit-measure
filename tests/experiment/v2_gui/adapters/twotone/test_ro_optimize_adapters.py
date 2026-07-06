@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -18,16 +19,24 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize import (
 )
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
+    CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    LiteralSpec,
+    MetaDictWriteback,
+    ModuleRefSpec,
+    ModuleWriteback,
     RunRequest,
+    WaveformRefValue,
+    WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter import (
     SweepValue as GuiSweepValue,
 )
-from zcu_tools.meta_tool import MetaDict
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, PulseReadoutCfg, SweepCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
 def _make_ml() -> MagicMock:
@@ -52,6 +61,116 @@ def _make_req(ml: MagicMock | None = None) -> RunRequest:
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
     return schema.to_raw_dict(None, req.ml)
+
+
+def _ctx_with_md(**md_values: float) -> MagicMock:
+    ctx = MagicMock()
+    md = MetaDict()
+    for key, value in md_values.items():
+        setattr(md, key, value)
+    ctx.md = md
+    return ctx
+
+
+def _make_pulse_readout(
+    *, freq: float = 6000.0, gain: float = 0.05, length: float = 1.0
+) -> PulseReadoutCfg:
+    return PulseReadoutCfg(
+        pulse_cfg=PulseCfg(
+            type="pulse",
+            waveform=ConstWaveformCfg(style="const", length=length + 0.1),
+            ch=0,
+            nqz=1,
+            freq=freq,
+            gain=gain,
+        ),
+        ro_cfg=DirectReadoutCfg(
+            type="readout/direct",
+            ro_ch=0,
+            ro_length=length,
+            ro_freq=freq,
+            trig_offset=0.0,
+            gen_ch=0,
+        ),
+    )
+
+
+def _snapshot_with_readout(readout: object) -> Any:
+    modules = MagicMock()
+    modules.readout = readout
+    cfg = MagicMock()
+    cfg.modules = modules
+    return cfg
+
+
+def _analysis_result(**values: float) -> MagicMock:
+    result = MagicMock()
+    for key, value in values.items():
+        setattr(result, key, value)
+    return result
+
+
+def _writeback_request(
+    *,
+    analyze_result: object,
+    cfg_snapshot: object | None,
+    ctx: object | None = None,
+) -> WritebackRequest[Any, Any]:
+    run_result = MagicMock()
+    run_result.cfg_snapshot = cfg_snapshot
+    return WritebackRequest(
+        run_result=run_result,
+        analyze_result=analyze_result,
+        ctx=cast(Any, ctx if ctx is not None else _ctx_with_md()),
+    )
+
+
+def _module_item(items: Sequence[object]) -> ModuleWriteback | None:
+    module_items = [it for it in items if isinstance(it, ModuleWriteback)]
+    if not module_items:
+        return None
+    assert len(module_items) == 1
+    return module_items[0]
+
+
+def _direct_float(value: object) -> float:
+    assert isinstance(value, DirectValue)
+    direct = cast(DirectValue, value)
+    assert isinstance(direct.value, (int, float))
+    return float(direct.value)
+
+
+def _assert_readout_dpm_schema(
+    item: ModuleWriteback, *, freq: float, gain: float, length: float
+) -> None:
+    assert item.target_name == "readout_dpm"
+    assert item.description == "Optimized readout (DPM)"
+    assert isinstance(item.edit_schema, CfgSchema)
+
+    value = item.edit_schema.value
+    assert value.fields["type"] == DirectValue("readout/pulse")
+    pulse_cfg = value.fields["pulse_cfg"]
+    ro_cfg = value.fields["ro_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    assert isinstance(ro_cfg, CfgSectionValue)
+    assert _direct_float(pulse_cfg.fields["freq"]) == pytest.approx(freq)
+    assert _direct_float(ro_cfg.fields["ro_freq"]) == pytest.approx(freq)
+    assert _direct_float(pulse_cfg.fields["gain"]) == pytest.approx(gain)
+    waveform = pulse_cfg.fields["waveform"]
+    assert isinstance(waveform, WaveformRefValue)
+    assert _direct_float(waveform.value.fields["length"]) == pytest.approx(length + 0.1)
+    assert _direct_float(ro_cfg.fields["ro_length"]) == pytest.approx(length)
+
+    raw = item.edit_schema.to_raw_dict(MetaDict(), ModuleLibrary())
+    assert raw["type"] == "readout/pulse"
+    raw_pulse = cast(dict[str, Any], raw["pulse_cfg"])
+    raw_ro = cast(dict[str, Any], raw["ro_cfg"])
+    raw_waveform = cast(dict[str, Any], raw_pulse["waveform"])
+    assert raw_pulse["freq"] == pytest.approx(freq)
+    assert raw_pulse["gain"] == pytest.approx(gain)
+    assert raw_waveform["length"] == pytest.approx(length + 0.1)
+    assert raw_ro["ro_freq"] == pytest.approx(freq)
+    assert raw_ro["ro_length"] == pytest.approx(length)
 
 
 @pytest.mark.parametrize(
@@ -195,6 +314,27 @@ def test_ro_opt_auto_defaults_relax_num_points_and_gain_bounds() -> None:
 
 
 @pytest.mark.parametrize(
+    "adapter",
+    [
+        RoOptFreqAdapter(),
+        RoOptPowerAdapter(),
+        RoOptLengthAdapter(),
+        RoOptFreqGainAdapter(),
+        RoOptAutoAdapter(),
+    ],
+)
+def test_ro_opt_readout_spec_is_pulse_only(adapter: Any) -> None:
+    modules = adapter.cfg_spec().fields["modules"]
+    assert isinstance(modules, CfgSectionSpec)
+    readout = modules.fields["readout"]
+    assert isinstance(readout, ModuleRefSpec)
+    assert len(readout.allowed) == 1
+    type_spec = readout.allowed[0].fields["type"]
+    assert isinstance(type_spec, LiteralSpec)
+    assert type_spec.value == "readout/pulse"
+
+
+@pytest.mark.parametrize(
     ("adapter", "wb_keys"),
     [
         (RoOptFreqAdapter(), ["best_ro_freq"]),
@@ -208,12 +348,122 @@ def test_ro_opt_auto_defaults_relax_num_points_and_gain_bounds() -> None:
     ],
 )
 def test_ro_opt_writeback_targets(adapter: Any, wb_keys: list[str]) -> None:
-    # Each adapter writes its optimized readout params back to MetaDict scalars.
-    result = MagicMock()
-    result.best_freq = 6100.0
-    result.best_gain = 0.12
-    result.best_length = 1.5
-    req = MagicMock()
-    req.analyze_result = result
-    items = adapter.get_writeback_items(req)
+    # Without a cfg snapshot, module writeback gracefully skips and existing md
+    # scalar writeback remains unchanged.
+    result = _analysis_result(best_freq=6100.0, best_gain=0.12, best_length=1.5)
+    items = list(
+        adapter.get_writeback_items(
+            _writeback_request(analyze_result=result, cfg_snapshot=None)
+        )
+    )
+    assert all(isinstance(it, MetaDictWriteback) for it in items)
     assert [it.target_name for it in items] == wb_keys
+
+
+def test_ro_opt_auto_writeback_proposes_readout_dpm_from_current_results() -> None:
+    result = _analysis_result(best_freq=6100.0, best_gain=0.12, best_length=1.5)
+    items = list(
+        RoOptAutoAdapter().get_writeback_items(
+            _writeback_request(
+                analyze_result=result,
+                cfg_snapshot=_snapshot_with_readout(_make_pulse_readout()),
+            )
+        )
+    )
+
+    md_items = [it for it in items if isinstance(it, MetaDictWriteback)]
+    assert [it.target_name for it in md_items] == [
+        "best_ro_freq",
+        "best_ro_gain",
+        "best_ro_length",
+    ]
+    item = _module_item(items)
+    assert item is not None
+    _assert_readout_dpm_schema(item, freq=6100.0, gain=0.12, length=1.5)
+
+
+@pytest.mark.parametrize(
+    ("adapter", "result_values", "md_values", "expected"),
+    [
+        (
+            RoOptFreqAdapter(),
+            {"best_freq": 6101.0},
+            {
+                "best_ro_freq": 5800.0,
+                "best_ro_gain": 0.11,
+                "best_ro_length": 1.4,
+            },
+            {"freq": 6101.0, "gain": 0.11, "length": 1.4},
+        ),
+        (
+            RoOptPowerAdapter(),
+            {"best_gain": 0.12},
+            {
+                "best_ro_freq": 6100.0,
+                "best_ro_gain": 0.03,
+                "best_ro_length": 1.4,
+            },
+            {"freq": 6100.0, "gain": 0.12, "length": 1.4},
+        ),
+        (
+            RoOptLengthAdapter(),
+            {"best_length": 1.5},
+            {
+                "best_ro_freq": 6100.0,
+                "best_ro_gain": 0.11,
+                "best_ro_length": 0.7,
+            },
+            {"freq": 6100.0, "gain": 0.11, "length": 1.5},
+        ),
+        (
+            RoOptFreqGainAdapter(),
+            {"best_freq": 6102.0, "best_gain": 0.13},
+            {
+                "best_ro_freq": 5800.0,
+                "best_ro_gain": 0.03,
+                "best_ro_length": 1.4,
+            },
+            {"freq": 6102.0, "gain": 0.13, "length": 1.4},
+        ),
+    ],
+)
+def test_ro_opt_partial_adapters_complete_readout_dpm_from_current_result_and_md(
+    adapter: Any,
+    result_values: dict[str, float],
+    md_values: dict[str, float],
+    expected: dict[str, float],
+) -> None:
+    items = list(
+        adapter.get_writeback_items(
+            _writeback_request(
+                analyze_result=_analysis_result(**result_values),
+                cfg_snapshot=_snapshot_with_readout(_make_pulse_readout()),
+                ctx=_ctx_with_md(**md_values),
+            )
+        )
+    )
+
+    item = _module_item(items)
+    assert item is not None
+    _assert_readout_dpm_schema(
+        item,
+        freq=expected["freq"],
+        gain=expected["gain"],
+        length=expected["length"],
+    )
+
+
+def test_ro_opt_readout_dpm_not_emitted_until_missing_values_available() -> None:
+    result = _analysis_result(best_gain=0.12)
+    items = list(
+        RoOptPowerAdapter().get_writeback_items(
+            _writeback_request(
+                analyze_result=result,
+                cfg_snapshot=_snapshot_with_readout(_make_pulse_readout()),
+                ctx=_ctx_with_md(best_ro_freq=6100.0),
+            )
+        )
+    )
+
+    assert _module_item(items) is None
+    assert [it.target_name for it in items] == ["best_ro_gain"]

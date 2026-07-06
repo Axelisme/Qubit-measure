@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-06 — twotone/freq probe pulse label
+**Last updated:** 2026-07-07 — ro_optimize readout_dpm writeback
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -90,6 +90,15 @@ GUI / MCP 只呼叫 `guide()`。
 
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。
+
+twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；writeback
+產生兩層 readout writeback：`best_ro_freq` / `best_ro_gain` / `best_ro_length`
+仍是 MetaDict scalar；當 run result 帶有 `cfg_snapshot` 且三個 best 值可由本次
+analyze result 加上 current MetaDict 補齊時，adapter 同時提出 ModuleLibrary
+`readout_dpm`。`readout_dpm` 以 `cfg_snapshot.modules.readout` 作為 template，將
+readout pulse/readout 頻率設為 `best_ro_freq`、pulse gain 設為 `best_ro_gain`、
+pulse waveform length 設為 `best_ro_length + 0.1`、ADC readout length 設為
+`best_ro_length`。
 
 ---
 

@@ -18,10 +18,11 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     Init,
     build_exp_spec,
     make_pulse_module_spec,
-    make_readout_module_spec,
+    make_pulse_readout_module_spec,
     make_reset_module_spec,
     proper_relax,
     proper_res_freq_range,
+    readout_dpm_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -88,15 +89,15 @@ class RoOptAutoAdapter(
         ),
         expects_ml=(
             "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a readout module (e.g. 'readout_rf'); "
-            "references a ModuleLibrary waveform 'ro_waveform' when present. "
-            "Optionally references a reset module."
+            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
+            "'readout_rf'); references a ModuleLibrary waveform 'ro_waveform' "
+            "when present. Optionally references a reset module."
         ),
         typical_writeback=(
             "Proposes the optimizer's best readout frequency, gain and length "
             "into MetaDict 'best_ro_freq' (MHz), 'best_ro_gain' (a.u.) and "
-            "'best_ro_length' (us). No ModuleLibrary writeback — combine them "
-            "into a 'readout_dpm' module afterwards (the 'readout_dpm' role)."
+            "'best_ro_length' (us). When a cfg snapshot with pulse readout is "
+            "available, also proposes ModuleLibrary 'readout_dpm'."
         ),
         recommended=(
             "The three sweep axes define the optimizer's SEARCH BOUNDS (min / "
@@ -119,7 +120,7 @@ class RoOptAutoAdapter(
                 # run; "freq" writes both pulse and ro freq), so lock
                 # them off the form. Length is swept into the pulse
                 # waveform, not a top-level field — left editable.
-                "readout": make_readout_module_spec()
+                "readout": make_pulse_readout_module_spec()
                 .lock_literal("pulse_cfg.freq", 0.0)
                 .lock_literal("ro_cfg.ro_freq", 0.0)
                 .lock_literal("pulse_cfg.gain", 0.0),
@@ -190,7 +191,7 @@ class RoOptAutoAdapter(
         self, req: WritebackRequest[RoOptAutoRunResult, RoOptAutoAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="best_ro_freq",
                 description="Optimal readout frequency (MHz)",
@@ -207,6 +208,18 @@ class RoOptAutoAdapter(
                 proposed_value=result.best_length,
             ),
         ]
+        items.extend(
+            readout_dpm_writeback_items(
+                req.ctx,
+                req.run_result.cfg_snapshot,
+                proposed={
+                    "best_ro_freq": result.best_freq,
+                    "best_ro_gain": result.best_gain,
+                    "best_ro_length": result.best_length,
+                },
+            )
+        )
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_ro_opt_auto_{time.strftime('%m%d')}"
