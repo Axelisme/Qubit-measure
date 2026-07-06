@@ -887,6 +887,7 @@ def test_run_locks_then_unlocks(app):
     _run_to_completion(ctrl, win)
     # back in edit state after finish
     assert win._list._run_btn.text() == "▶ Run"
+    assert win._list._run_status_label.text() == "Finished"
     assert win._list._add_btn.isEnabled()
     assert win._detail.current_form is not None
     # progress reached the end
@@ -923,6 +924,7 @@ def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp):
         # the run ended and the UI is back in edit state
         assert not ctrl.is_running
         assert win._list._run_btn.text() == "▶ Run"
+        assert win._list._run_status_label.text() == "Failed"
         assert win._list._add_btn.isEnabled()
         # the failure surfaced to the user
         dialogs.consume_message_containing("warning", "node not configured")
@@ -1169,16 +1171,20 @@ def test_pause_continue_ui_states_lock_workflow_controls(app):
 
     win._on_run_started()
     assert win._list._run_btn.text() == "⏸ Pause"
+    assert win._list._run_status_label.text() == "Running"
     assert not win._list._abort_btn.isHidden()
+    assert win._list._abort_btn.text() == "■ Stop"
     assert not win._list._add_btn.isEnabled()
 
     win._on_run_pause_requested()
     assert win._list._run_btn.text() == "Pausing..."
+    assert win._list._run_status_label.text() == "Pausing"
     assert not win._list._run_btn.isEnabled()
     assert win._list._abort_btn.isEnabled()
 
     win._on_run_paused(1)
     assert win._list._run_btn.text() == "▶ Continue"
+    assert win._list._run_status_label.text() == "Paused"
     assert win._list._run_action_row.indexOf(win._list._run_btn) == 0
     assert win._list._run_action_row.indexOf(win._list._restart_btn) == 1
     assert win._list._run_btn.isEnabled()
@@ -1193,9 +1199,11 @@ def test_pause_continue_ui_states_lock_workflow_controls(app):
 
     win._on_run_continued(1)
     assert win._list._run_btn.text() == "⏸ Pause"
+    assert win._list._run_status_label.text() == "Running"
 
     win._on_run_done()
     assert win._list._run_btn.text() == "▶ Run"
+    assert win._list._run_status_label.text() == "Idle"
     assert win._list._abort_btn.isHidden()
     assert win._list._add_btn.isEnabled()
 

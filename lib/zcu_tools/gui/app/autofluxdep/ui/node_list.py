@@ -1,11 +1,10 @@
 """NodeListPane — the left side: node list + flux + Run/Stop.
 
 Owns workflow editing (select / add / remove / reorder Nodes), the flux sweep
-fields, the flux-source picker, and the single Run/Stop toggle button (▶ Run in
-edit state, ■ Stop while running). Global session actions (Setup / Devices /
-Predictor / Inspect) live in MainWindow's top toolbar, matching measure-gui's
-layout. Drives the Controller; emits a Qt signal when the selection changes so
-the right pane follows.
+fields, the flux-source picker, and the run action cluster. Global session
+actions (Setup / Devices / Predictor / Inspect) live in MainWindow's top toolbar,
+matching measure-gui's layout. Drives the Controller; emits a Qt signal when the
+selection changes so the right pane follows.
 """
 
 from __future__ import annotations
@@ -205,15 +204,21 @@ class NodeListPane(QWidget):
         src_row.addWidget(self._flux_unit)
         root.addLayout(src_row)
 
-        # run/stop toggle (single button)
+        # run status/actions
         self._auto_follow_tabs = QCheckBox("Auto-follow active tab")
         self._auto_follow_tabs.setChecked(self._ctrl.get_auto_follow_tabs())
         self._auto_follow_tabs.toggled.connect(self._on_auto_follow_toggled)
         root.addWidget(self._auto_follow_tabs)
 
+        status_row = QHBoxLayout()
+        status_row.addWidget(QLabel("Run:"))
+        self._run_status_label = QLabel("Idle")
+        status_row.addWidget(self._run_status_label, 1)
+        root.addLayout(status_row)
+
         self._run_btn = _btn("▶ Run", self._on_run_stop)
         self._restart_btn = _btn("↻ Restart", self._on_restart)
-        self._abort_btn = _btn("■ Abort", self._on_abort)
+        self._abort_btn = _btn("■ Stop", self._on_abort)
         self._export_sample_btn = _btn("Export sample", self._on_export_sample)
         self._run_action_row = QHBoxLayout()
         self._run_action_row.addWidget(self._run_btn, 1)
@@ -411,7 +416,9 @@ class NodeListPane(QWidget):
     def set_running(self, running: bool) -> None:
         self.set_run_state("running" if running else "idle")
 
-    def set_run_state(self, state: RunUiState) -> None:
+    def set_run_state(
+        self, state: RunUiState, *, status_text: str | None = None
+    ) -> None:
         self._run_state = state
         self._run_btn.setText(
             {
@@ -421,6 +428,7 @@ class NodeListPane(QWidget):
                 "paused": "▶ Continue",
             }[state]
         )
+        self._run_status_label.setText(status_text or _RUN_STATUS_TEXT[state])
         self.refresh_run_availability()
 
     def refresh_run_availability(self) -> None:
@@ -507,3 +515,11 @@ def _btn(text: str, slot) -> QPushButton:
     b = QPushButton(text)
     b.clicked.connect(slot)
     return b
+
+
+_RUN_STATUS_TEXT: dict[RunUiState, str] = {
+    "idle": "Idle",
+    "running": "Running",
+    "pausing": "Pausing",
+    "paused": "Paused",
+}

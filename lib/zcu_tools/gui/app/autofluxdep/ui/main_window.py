@@ -330,8 +330,8 @@ class MainWindow(QMainWindow):
         self._bridge.node_entered.connect(self._on_node_entered)
         self._bridge.point_done.connect(self._on_point_done)
         self._bridge.row_updated.connect(self._on_row_updated)
-        self._bridge.run_finished.connect(self._on_run_done)
-        self._bridge.run_stopped.connect(self._on_run_done)
+        self._bridge.run_finished.connect(self._on_run_finished)
+        self._bridge.run_stopped.connect(self._on_run_stopped)
         self._bridge.run_failed.connect(self._on_run_failed)
 
         # Shared session changes refresh the top status row, flux source picker, and
@@ -990,12 +990,22 @@ class MainWindow(QMainWindow):
         self._reset_run_ui(switch_tab=False)
         self._finish_close_after_run_terminal()
 
-    def _reset_run_ui(self, *, switch_tab: bool | None = None) -> None:
+    def _on_run_finished(self) -> None:
+        self._reset_run_ui(switch_tab=False, status_text="Finished")
+        self._finish_close_after_run_terminal()
+
+    def _on_run_stopped(self) -> None:
+        self._reset_run_ui(switch_tab=False, status_text="Stopped")
+        self._finish_close_after_run_terminal()
+
+    def _reset_run_ui(
+        self, *, switch_tab: bool | None = None, status_text: str | None = None
+    ) -> None:
         self._run_active = False
         self._run_paused = False
         self._active_run_node_name = None
         self._live_predictor_flux_idx = None
-        self._list.set_run_state("idle")
+        self._list.set_run_state("idle", status_text=status_text)
         if switch_tab is None:
             switch_tab = self._ctrl.get_auto_follow_tabs()
         self._detail.set_running(False, switch_tab=switch_tab)
@@ -1010,7 +1020,8 @@ class MainWindow(QMainWindow):
         the user sees why the sweep aborted (e.g. an unconfigured Node Fast-Failed)
         rather than the run silently ending."""
         closing_after_terminal = self._close_after_run_terminal
-        self._on_run_done()
+        self._reset_run_ui(switch_tab=False, status_text="Failed")
+        self._finish_close_after_run_terminal()
         if closing_after_terminal:
             return
         self._dialog_presenter.warning(self, "Run failed", message)
