@@ -585,19 +585,20 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
     progress_bars: list[RecordingProgressBar] = []
 
     def run_root_acquire(progress_leave: bool | None = None) -> None:
-        kwargs: dict[str, object] = {}
-        if progress_leave is not None:
-            kwargs["progress_leave"] = progress_leave
         with Schedule(_cfg(rounds=2), SignalBuffer((1,), dtype=np.float64)) as sched:
-            sched.prog_builder(
+            builder = sched.prog_builder(
                 "soc",
                 "soccfg",
                 program_cls=FakeProgram,
                 marker="kw",
-            ).add(FakeModule("readout")).build_and_acquire(
-                raw2signal_fn=_identity_array,
-                **kwargs,
-            )
+            ).add(FakeModule("readout"))
+            if progress_leave is None:
+                builder.build_and_acquire(raw2signal_fn=_identity_array)
+            else:
+                builder.build_and_acquire(
+                    raw2signal_fn=_identity_array,
+                    progress_leave=progress_leave,
+                )
 
     with use_pbar_factory(_recording_pbar_factory(progress_bars)):
         run_root_acquire()
@@ -720,6 +721,10 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
     class StopAfterBuildFailureProgram:
+        cfg_model: FlowCfg
+        modules: list[Module]
+        sweep: list[tuple[str, Any]] | None
+
         def __init__(
             self,
             soccfg: Any,

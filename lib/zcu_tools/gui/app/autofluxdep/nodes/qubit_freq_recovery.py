@@ -354,9 +354,8 @@ def _candidate_overlay(
         return None
     try:
         return base_predictor.overlay_physical(fit.fitted)
-    except Exception:
-        logger.exception("qubit_freq physical recovery overlay creation failed")
-        return None
+    except Exception as exc:
+        raise RuntimeError("qubit_freq physical recovery overlay failed") from exc
 
 
 def _accept_candidate(
@@ -434,21 +433,14 @@ def _accept_candidate(
 
     try:
         base_center = float(base_predictor.predict_freq(env.flux))
-        candidate_center = float(candidate.predict_freq(env.flux))
     except Exception:
         base_center = float(snapshot_predict_freq)
-        try:
-            candidate_center = float(candidate.predict_freq(env.flux))
-        except Exception:
-            return _attempt(
-                trigger,
-                False,
-                "candidate center prediction failed",
-                len(selected),
-                fit.base_rms_mhz,
-                fit.fitted_rms_mhz,
-                math.nan,
-            )
+    try:
+        candidate_center = float(candidate.predict_freq(env.flux))
+    except Exception as exc:
+        raise RuntimeError(
+            "qubit_freq physical recovery candidate prediction failed"
+        ) from exc
     center_shift = abs(candidate_center - base_center)
     if not math.isfinite(center_shift):
         return _attempt(

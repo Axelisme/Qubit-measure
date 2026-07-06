@@ -26,9 +26,8 @@ and runs *after* the Nodes through the orchestrator/run-session path;
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol, TypeVar, cast
+from typing import Any, Protocol, TypeVar
 
 # SmoothMode is owned by nodes.spec (a dependency's ``smooth`` flag is one);
 # re-used here so Smoother and the SmoothingService speak the same modes.
@@ -56,7 +55,6 @@ class Predictor(Protocol):
     def calibrate(self, flux: float, measured_freq: float) -> None: ...
     def supports_physical_recovery(self) -> bool: ...
     def physical_snapshot(self) -> FluxoniumModelSnapshot: ...
-    def clone_physical(self) -> Predictor: ...
     def overlay_physical(self, snapshot: FluxoniumModelSnapshot) -> Predictor: ...
 
 
@@ -93,9 +91,6 @@ class SimplePredictor:
     def physical_snapshot(self) -> FluxoniumModelSnapshot:
         raise RuntimeError("SimplePredictor does not support physical recovery")
 
-    def clone_physical(self) -> Predictor:
-        raise RuntimeError("SimplePredictor does not support physical recovery")
-
     def overlay_physical(self, snapshot: FluxoniumModelSnapshot) -> Predictor:
         del snapshot
         raise RuntimeError("SimplePredictor does not support physical recovery")
@@ -126,7 +121,7 @@ class FluxoniumPredictorAdapter:
         raw = self.fluxonium
         return all(
             hasattr(raw, attr)
-            for attr in ("clone", "params", "flux_half", "flux_period", "flux_bias")
+            for attr in ("params", "flux_half", "flux_period", "flux_bias")
         )
 
     def physical_snapshot(self) -> FluxoniumModelSnapshot:
@@ -144,13 +139,6 @@ class FluxoniumPredictorAdapter:
             flux_period=float(raw.flux_period),
             flux_bias=float(raw.flux_bias),
         )
-
-    def clone_physical(self) -> Predictor:
-        if not self.supports_physical_recovery():
-            raise RuntimeError(
-                "FluxoniumPredictorAdapter raw predictor is not recoverable"
-            )
-        return FluxoniumPredictorAdapter(fluxonium=self.fluxonium.clone())
 
     def overlay_physical(self, snapshot: FluxoniumModelSnapshot) -> Predictor:
         return FluxoniumPredictorAdapter(
@@ -229,15 +217,21 @@ class Tools:
     feedback: FeedbackRuntime = field(default_factory=FeedbackRuntime)
     _recovery_registry: dict[str, Any] = field(default_factory=dict)
 
-    def recovery_state(self, key: str, factory: Callable[[], T]) -> T:
+    def recovery_state(self, key: str, expected_type: type[T]) -> T:
         """Return placement-scoped run-lived recovery state, creating it once."""
         if not key:
             raise RuntimeError("Tools recovery registry key must be non-empty")
         state = self._recovery_registry.get(key)
         if state is None:
-            state = factory()
+            state = expected_type()
             self._recovery_registry[key] = state
-        return cast(T, state)
+            return state
+        if not isinstance(state, expected_type):
+            raise TypeError(
+                f"Tools recovery state for {key!r} is {type(state).__name__}, "
+                f"expected {expected_type.__name__}"
+            )
+        return state
 
     def peek_recovery_state(self, key: str, expected_type: type[T]) -> T | None:
         """Return existing placement-scoped recovery state without creating it."""

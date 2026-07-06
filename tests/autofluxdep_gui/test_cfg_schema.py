@@ -1074,6 +1074,34 @@ def test_t2echo_fresh_default_uses_recommended_detune_and_auto_fit():
     assert echo["fit_method"] == "auto_by_detune"
 
 
+def test_operator_facing_defaults_golden_subset():
+    qf = QubitFreqBuilder().make_default_schema().lower(None)
+    ro = RoOptimizeBuilder().make_default_schema().lower(None)
+    echo = T2EchoBuilder().make_default_schema().lower(None)
+
+    assert qf["acquire_retry"] == 3
+    assert qf["bias_update_mode"] == "fixed"
+    assert qf["physical_recovery_mode"] == "fail_triggered_fit"
+    assert qf["physical_recovery_min_points"] == 10
+    assert qf["physical_recovery_max_points"] == 30
+    assert qf["physical_recovery_max_center_shift_mhz"] == pytest.approx(150.0)
+    assert qf["physical_recovery_max_rms_mhz"] == pytest.approx(50.0)
+    assert qf["drive_gain_mode"] == "adaptive"
+
+    assert ro["gain_half_width"] == pytest.approx(0.1)
+    _assert_sweep_bounds(ro["gain_range"], (0.0, 0.2))
+
+    assert echo["detune_ratio"] == pytest.approx(0.1)
+    assert echo["fit_method"] == "auto_by_detune"
+
+    for builder in _BUILDERS:
+        base_cfg = builder.make_default_schema().lower_raw(
+            ModuleLibrary(),
+            md=MetaDict(),
+        )
+        assert "reset" not in base_cfg.get("modules", {}), builder.name
+
+
 def test_fresh_node_defaults_seed_from_md_values():
     md = MetaDict()
     md.qub_ch = 7

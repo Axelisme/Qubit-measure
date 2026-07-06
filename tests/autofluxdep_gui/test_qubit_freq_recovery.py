@@ -52,9 +52,6 @@ class _FakePredictor:
     def physical_snapshot(self) -> FluxoniumModelSnapshot:
         return FluxoniumModelSnapshot((8.0, 1.0, 1.0), 0.0, 1.0, self.offset_mhz)
 
-    def clone_physical(self) -> _FakePredictor:
-        return _FakePredictor(self.offset_mhz)
-
     def overlay_physical(self, snapshot: FluxoniumModelSnapshot) -> _FakePredictor:
         return _FakePredictor(float(snapshot.flux_bias))
 
@@ -253,3 +250,120 @@ def test_fail_triggered_recovery_fits_first_fail_and_first_success(monkeypatch):
     estimate = estimator.estimate(0.5)
     assert estimate is not None
     assert estimate.confidence == pytest.approx(1.0)
+
+
+def test_tools_recovery_state_fast_fails_wrong_existing_type():
+    tools = Tools()
+    tools._recovery_registry["qubit_freq"] = object()
+
+    with pytest.raises(TypeError, match="expected QubitFreqRecoveryState"):
+        tools.recovery_state("qubit_freq", QubitFreqRecoveryState)
+
+
+def test_recovery_overlay_failure_propagates(monkeypatch):
+    class BrokenOverlayPredictor(_FakePredictor):
+        def overlay_physical(self, snapshot: FluxoniumModelSnapshot) -> _FakePredictor:
+            del snapshot
+            raise ValueError("broken overlay")
+
+    builder = QubitFreqBuilder()
+    schema = _schema()
+    feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
+    tools = Tools(predictor=BrokenOverlayPredictor(), feedback=feedback)
+    state = tools.recovery_state("qubit_freq", QubitFreqRecoveryState)
+    state.history.extend(
+        TrustedFrequencyPoint(float(flux), 1000.0 + 10.0 * float(flux))
+        for flux in np.linspace(0.0, 0.9, 10)
+    )
+
+    def fake_fit(base, measured_points):
+        points = tuple(measured_points)
+        return FluxoniumLocalFitResult(
+            accepted=True,
+            reason="accepted",
+            base=base,
+            fitted=FluxoniumModelSnapshot(
+                base.params,
+                base.flux_half,
+                base.flux_period,
+                5.0,
+            ),
+            predictor=None,
+            n_points=len(points),
+            base_rms_mhz=8.0,
+            fitted_rms_mhz=3.0,
+        )
+
+    monkeypatch.setattr(recovery_mod, "fit_local_fluxonium_model", fake_fit)
+    env = _env(
+        flux=1.0,
+        flux_idx=10,
+        schema=schema,
+        tools=tools,
+        feedback_view=feedback.view_for("qubit_freq"),
+    )
+
+    with pytest.raises(RuntimeError, match="physical recovery overlay failed"):
+        on_fit_failed(
+            env,
+            snapshot_predict_freq=1010.0,
+            estimator_key="predict_freq_correction",
+        )
+
+
+def test_recovery_candidate_prediction_failure_propagates(monkeypatch):
+    class BrokenCandidatePredictor(_FakePredictor):
+        def predict_freq(self, flux: float) -> float:
+            del flux
+            raise ValueError("broken candidate")
+
+    class BrokenCandidateOverlayPredictor(_FakePredictor):
+        def overlay_physical(
+            self,
+            snapshot: FluxoniumModelSnapshot,
+        ) -> BrokenCandidatePredictor:
+            return BrokenCandidatePredictor(float(snapshot.flux_bias))
+
+    builder = QubitFreqBuilder()
+    schema = _schema()
+    feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
+    tools = Tools(predictor=BrokenCandidateOverlayPredictor(), feedback=feedback)
+    state = tools.recovery_state("qubit_freq", QubitFreqRecoveryState)
+    state.history.extend(
+        TrustedFrequencyPoint(float(flux), 1000.0 + 10.0 * float(flux))
+        for flux in np.linspace(0.0, 0.9, 10)
+    )
+
+    def fake_fit(base, measured_points):
+        points = tuple(measured_points)
+        return FluxoniumLocalFitResult(
+            accepted=True,
+            reason="accepted",
+            base=base,
+            fitted=FluxoniumModelSnapshot(
+                base.params,
+                base.flux_half,
+                base.flux_period,
+                5.0,
+            ),
+            predictor=None,
+            n_points=len(points),
+            base_rms_mhz=8.0,
+            fitted_rms_mhz=3.0,
+        )
+
+    monkeypatch.setattr(recovery_mod, "fit_local_fluxonium_model", fake_fit)
+    env = _env(
+        flux=1.0,
+        flux_idx=10,
+        schema=schema,
+        tools=tools,
+        feedback_view=feedback.view_for("qubit_freq"),
+    )
+
+    with pytest.raises(RuntimeError, match="candidate prediction failed"):
+        on_fit_failed(
+            env,
+            snapshot_predict_freq=1010.0,
+            estimator_key="predict_freq_correction",
+        )

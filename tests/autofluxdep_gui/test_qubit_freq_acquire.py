@@ -94,9 +94,6 @@ class _RecoverablePredictor:
 
         return FluxoniumModelSnapshot((8.0, 1.0, 1.0), 0.0, 1.0, self.bias)
 
-    def clone_physical(self):
-        return _RecoverablePredictor(self.base, self.bias)
-
     def overlay_physical(self, snapshot):
         return _RecoverablePredictor(self.base, float(snapshot.flux_bias))
 
