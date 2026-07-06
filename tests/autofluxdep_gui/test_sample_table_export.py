@@ -47,6 +47,10 @@ def _store(tmp_path: Path, *, results: dict[str, object] | None = None) -> RunSt
     )
 
 
+def _comment(store: RunStore) -> str:
+    return f"Autofluxdep snapeshot: {store.run_dir}"
+
+
 def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
     store = _store(tmp_path)
     store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
@@ -79,6 +83,7 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
         "T2r err (us)",
         "T2e (us)",
         "T2e err (us)",
+        "Tcomment",
     ]
     assert len(df) == 1
     row = df.iloc[0]
@@ -90,11 +95,12 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
     assert row["T2r err (us)"] == 0.5
     assert row["T2e (us)"] == 31.0
     assert row["T2e err (us)"] == 0.6
+    assert row["Tcomment"] == _comment(store)
     assert "pi_length" not in df.columns
     assert "rabi_len" not in df.columns
 
 
-def test_export_sample_table_accepts_manifest_path_and_omits_missing_columns(tmp_path):
+def test_export_sample_table_appends_by_default(tmp_path):
     store = _store(tmp_path)
     store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
     store.write_node_row("t1", 0, Patch({"t1": 12.0}), InfoStore())
@@ -102,14 +108,54 @@ def test_export_sample_table_accepts_manifest_path_and_omits_missing_columns(tmp
     store.finalize("stopped")
 
     output = tmp_path / "custom_samples.csv"
-    output.write_text("stale\n", encoding="utf-8")
+    pd.DataFrame(
+        [
+            {
+                "calibrated mA": -1.0,
+                "Freq (MHz)": 4000.0,
+                "Tcomment": "existing",
+            }
+        ]
+    ).to_csv(output, index=False)
     result = export_sample_table_from_artifact(store.manifest_path, filepath=output)
 
     assert result.path == str(output)
+    assert result.row_count == 1
     df = pd.read_csv(output)
-    assert list(df.columns) == ["calibrated mA", "Freq (MHz)", "T1 (us)"]
+    assert len(df) == 2
+    assert df.loc[0, "calibrated mA"] == -1.0
+    assert df.loc[0, "Freq (MHz)"] == 4000.0
+    assert df.loc[0, "Tcomment"] == "existing"
+    assert df.loc[1, "calibrated mA"] == 0.0
+    assert df.loc[1, "Freq (MHz)"] == 5001.25
+    assert df.loc[1, "T1 (us)"] == 12.0
+    assert df.loc[1, "Tcomment"] == _comment(store)
+
+
+def test_export_sample_table_can_overwrite_existing_file(tmp_path):
+    store = _store(tmp_path)
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
+    store.commit_flux(0, 0.0, InfoStore())
+    store.finalize("stopped")
+
+    output = tmp_path / "custom_samples.csv"
+    pd.DataFrame([{"calibrated mA": -1.0, "Freq (MHz)": 4000.0}]).to_csv(
+        output, index=False
+    )
+    result = export_sample_table_from_artifact(
+        store.manifest_path,
+        filepath=output,
+        append=False,
+    )
+
+    assert result.path == str(output)
+    df = pd.read_csv(output)
     assert df.to_dict(orient="records") == [
-        {"calibrated mA": 0.0, "Freq (MHz)": 5001.25, "T1 (us)": 12.0}
+        {
+            "calibrated mA": 0.0,
+            "Freq (MHz)": 5001.25,
+            "Tcomment": _comment(store),
+        }
     ]
 
 
@@ -123,7 +169,11 @@ def test_export_sample_table_accepts_paired_data_run_directory(tmp_path):
 
     df = pd.read_csv(result.path)
     assert df.to_dict(orient="records") == [
-        {"calibrated mA": 0.0, "Freq (MHz)": 5001.25}
+        {
+            "calibrated mA": 0.0,
+            "Freq (MHz)": 5001.25,
+            "Tcomment": _comment(store),
+        }
     ]
 
 
@@ -147,7 +197,11 @@ def test_export_sample_table_falls_back_to_qubit_freq_row_summary(tmp_path):
 
     df = pd.read_csv(exported.path)
     assert df.to_dict(orient="records") == [
-        {"calibrated mA": 0.0, "Freq (MHz)": 5123.0}
+        {
+            "calibrated mA": 0.0,
+            "Freq (MHz)": 5123.0,
+            "Tcomment": _comment(store),
+        }
     ]
 
 

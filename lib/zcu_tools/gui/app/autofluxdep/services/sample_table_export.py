@@ -15,6 +15,7 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 from zcu_tools.meta_tool.table import SampleTable
 
 CALIBRATED_FLUX_COLUMN = "calibrated mA"
+COMMENT_COLUMN = "Tcomment"
 
 SAMPLE_COLUMNS: tuple[str, ...] = (
     CALIBRATED_FLUX_COLUMN,
@@ -25,6 +26,7 @@ SAMPLE_COLUMNS: tuple[str, ...] = (
     "T2r err (us)",
     "T2e (us)",
     "T2e err (us)",
+    COMMENT_COLUMN,
 )
 
 _PATCH_SAMPLE_KEYS: tuple[tuple[str, str], ...] = (
@@ -128,37 +130,43 @@ def default_sample_table_path(manifest_or_path: Mapping[str, Any] | str | Path) 
 def export_sample_table_from_artifact(
     path: str | Path,
     filepath: str | Path | None = None,
+    *,
+    append: bool = True,
 ) -> SampleTableExportResult:
     """Write a notebook-style ``SampleTable`` CSV from a run artifact.
 
-    ``path`` accepts either the run directory or its ``manifest.json``. The output
-    CSV is replaced if it already exists, so repeated exports of the same artifact
-    stay deterministic instead of appending duplicate sample rows.
+    ``path`` accepts either the run directory or its ``manifest.json``. By default,
+    existing output CSV files are preserved and the exported rows are appended.
     """
 
     manifest_path = resolve_run_manifest(path)
     manifest = load_manifest(manifest_path)
     _validate_terminal_status(manifest)
     events = load_journal_events(_journal_path(manifest, manifest_path))
-    rows = sample_rows_from_journal(events)
+    rows = sample_rows_from_journal(
+        events,
+        comment=_sample_comment(manifest, manifest_path),
+    )
     output = (
         Path(filepath) if filepath is not None else default_sample_table_path(manifest)
     )
-    _write_sample_rows(rows, output)
+    _write_sample_rows(rows, output, append=append)
     return SampleTableExportResult(path=str(output), row_count=len(rows))
 
 
 def sample_rows_from_journal(
     events: Sequence[Mapping[str, Any]],
-) -> list[dict[str, float]]:
+    *,
+    comment: str | None = None,
+) -> list[dict[str, float | str]]:
     """Build notebook sample rows from committed flux points in journal events."""
 
     committed_flux_points = _committed_flux_points(events)
     if not committed_flux_points:
         raise ValueError("autofluxdep run has no completed flux points to export")
 
-    rows_by_flux: dict[int, dict[str, float]] = {
-        flux_idx: {CALIBRATED_FLUX_COLUMN: flux_value}
+    rows_by_flux: dict[int, dict[str, float | str]] = {
+        flux_idx: _sample_row_seed(flux_value, comment)
         for flux_idx, flux_value in committed_flux_points
     }
     for event in events:
@@ -201,7 +209,7 @@ def _committed_flux_points(
 
 
 def _apply_patch_values(
-    row: dict[str, float],
+    row: dict[str, float | str],
     patch: Mapping[str, Any] | None,
 ) -> None:
     if patch is None:
@@ -211,7 +219,7 @@ def _apply_patch_values(
 
 
 def _apply_row_summary(
-    row: dict[str, float],
+    row: dict[str, float | str],
     *,
     node: str,
     node_type: str,
@@ -228,7 +236,7 @@ def _apply_row_summary(
         return
 
 
-def _set_sample_value(row: dict[str, float], column: str, value: Any) -> None:
+def _set_sample_value(row: dict[str, float | str], column: str, value: Any) -> None:
     if column in row:
         return
     number = _finite_number(value)
@@ -236,8 +244,20 @@ def _set_sample_value(row: dict[str, float], column: str, value: Any) -> None:
         row[column] = number
 
 
-def _write_sample_rows(rows: Sequence[Mapping[str, float]], output: Path) -> None:
-    columns: dict[str, list[float | None]] = {}
+def _sample_row_seed(flux_value: float, comment: str | None) -> dict[str, float | str]:
+    row: dict[str, float | str] = {CALIBRATED_FLUX_COLUMN: flux_value}
+    if comment is not None:
+        row[COMMENT_COLUMN] = comment
+    return row
+
+
+def _write_sample_rows(
+    rows: Sequence[Mapping[str, float | str]],
+    output: Path,
+    *,
+    append: bool,
+) -> None:
+    columns: dict[str, list[float | str | None]] = {}
     for column in SAMPLE_COLUMNS:
         if not any(column in row for row in rows):
             continue
@@ -249,7 +269,8 @@ def _write_sample_rows(rows: Sequence[Mapping[str, float]], output: Path) -> Non
     if output.exists():
         if not output.is_file():
             raise IsADirectoryError(f"sample table output is not a file: {output}")
-        output.unlink()
+        if not append:
+            output.unlink()
     table = SampleTable(output)
     table.extend_samples(**columns)
 
@@ -277,6 +298,22 @@ def _journal_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:
     if isinstance(metadata_root, str) and metadata_root:
         return Path(metadata_root) / journal_path
     return manifest_path.parent / journal_path
+
+
+def _sample_comment(manifest: Mapping[str, Any], manifest_path: Path) -> str:
+    snapshot_dir = _metadata_root_path(manifest, manifest_path)
+    return f"Autofluxdep snapeshot: {snapshot_dir}"
+
+
+def _metadata_root_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:
+    paths = _require_mapping(manifest.get("paths"), "manifest paths")
+    metadata_root = paths.get("metadata_root")
+    if not isinstance(metadata_root, str) or not metadata_root:
+        return manifest_path.parent
+    path = Path(metadata_root)
+    if path.is_absolute():
+        return path
+    return manifest_path.parent / path
 
 
 def _event_flux_idx(event: Mapping[str, Any]) -> int:

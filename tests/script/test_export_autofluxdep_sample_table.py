@@ -25,11 +25,16 @@ class _Result:
 
 
 def test_main_exports_run_path_and_prints_result(monkeypatch, capsys, tmp_path):
-    calls: list[tuple[str, str | None]] = []
+    calls: list[tuple[str, str | None, bool]] = []
     output = tmp_path / "samples.csv"
 
-    def fake_export(run: str, filepath: str | None = None) -> _Result:
-        calls.append((run, filepath))
+    def fake_export(
+        run: str,
+        filepath: str | None = None,
+        *,
+        append: bool = True,
+    ) -> _Result:
+        calls.append((run, filepath, append))
         return _Result(str(output), 2)
 
     monkeypatch.setattr(
@@ -41,12 +46,18 @@ def test_main_exports_run_path_and_prints_result(monkeypatch, capsys, tmp_path):
     rc = export_script.main(["run-dir", "--output", str(output)])
 
     assert rc == 0
-    assert calls == [("run-dir", str(output))]
+    assert calls == [("run-dir", str(output), True)]
     assert capsys.readouterr().out == f"Exported 2 sample row(s) to {output}\n"
 
 
 def test_main_quiet_suppresses_success_message(monkeypatch, capsys):
-    def fake_export(run: str, filepath: str | None = None) -> _Result:
+    def fake_export(
+        run: str,
+        filepath: str | None = None,
+        *,
+        append: bool = True,
+    ) -> _Result:
+        assert append is True
         return _Result("samples.csv", 1)
 
     monkeypatch.setattr(
@@ -59,3 +70,28 @@ def test_main_quiet_suppresses_success_message(monkeypatch, capsys):
 
     assert rc == 0
     assert capsys.readouterr().out == ""
+
+
+def test_main_overwrite_disables_append(monkeypatch, tmp_path):
+    calls: list[tuple[str, str | None, bool]] = []
+    output = tmp_path / "samples.csv"
+
+    def fake_export(
+        run: str,
+        filepath: str | None = None,
+        *,
+        append: bool = True,
+    ) -> _Result:
+        calls.append((run, filepath, append))
+        return _Result(str(output), 1)
+
+    monkeypatch.setattr(
+        export_script,
+        "export_sample_table_from_artifact",
+        fake_export,
+    )
+
+    rc = export_script.main(["run-dir", "--output", str(output), "--overwrite"])
+
+    assert rc == 0
+    assert calls == [("run-dir", str(output), False)]

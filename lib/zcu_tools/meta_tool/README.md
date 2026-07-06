@@ -1,6 +1,6 @@
 # `zcu_tools.meta_tool` — persistent experiment metadata
 
-**Last updated:** 2026-07-06 — SampleTable autofluxdep flux column
+**Last updated:** 2026-07-06 — SampleTable append/comment export
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -199,7 +199,7 @@ exp_dir/
 
 ## `SampleTable`（`table.py`）
 
-以 CSV 儲存量測樣品紀錄（pandas DataFrame 包裝）。`SampleTable` 本身不固定 schema；notebook 與 GUI/script export 以呼叫端約定欄位，例如 single-qubit sample 使用 `calibrated mA`、`Freq (MHz)`、T1/T2r/T2e 與 error 欄位。
+以 CSV 儲存量測樣品紀錄（pandas DataFrame 包裝）。`SampleTable` 本身不固定 schema；notebook 與 GUI/script export 以呼叫端約定欄位，例如 single-qubit sample 使用 `calibrated mA`、`Freq (MHz)`、T1/T2r/T2e、error 與 `Tcomment` 欄位。`extend_samples()` 會接在既有 CSV 後面；要重建檔案需由 caller 先刪除或使用 export script 的 overwrite mode。
 
 ```python
 st = SampleTable("samples.csv")  # 也接受 pathlib.Path

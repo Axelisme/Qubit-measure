@@ -8,7 +8,8 @@ Usage:
 The input may be either an ``autofluxdep_runs/<run_slug>`` directory or its
 ``manifest.json`` file. Passing the paired heavy data root under
 ``Database/.../autofluxdep_runs/<run_slug>`` is also supported when its metadata
-manifest can be found nearby. Missing sample fields are left blank.
+manifest can be found nearby. Existing output CSV files are appended by default,
+and missing sample fields are left blank.
 """
 
 from __future__ import annotations
@@ -37,8 +38,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         help=(
             "output CSV path; defaults to <data_root>/exports/sample/samples.csv "
-            "and replaces any existing file"
+            "and appends to any existing file"
         ),
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="replace the output CSV instead of appending rows",
     )
     parser.add_argument(
         "-q",
@@ -51,7 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    result = export_sample_table_from_artifact(args.run, filepath=args.output)
+    result = export_sample_table_from_artifact(
+        args.run,
+        filepath=args.output,
+        append=not args.overwrite,
+    )
     if not args.quiet:
         print(f"Exported {result.row_count} sample row(s) to {result.path}")
     return 0
