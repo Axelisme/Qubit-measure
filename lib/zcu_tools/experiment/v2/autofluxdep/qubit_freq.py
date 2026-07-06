@@ -164,13 +164,11 @@ class QubitFreqTask(
             .add_readout("readout", modules.readout)
             .declare_sweep("detune", detune_sweep)
             .build_and_acquire(
-                stop_checkers=[
-                    snr_checker(
-                        signals_buffer.at(),
-                        self.earlystop_snr,
-                        qubitfreq_signal2real,
-                    )
-                ],
+                stop_condition=snr_checker(
+                    signals_buffer.at(),
+                    self.earlystop_snr,
+                    qubitfreq_signal2real,
+                ),
             )
         )
 

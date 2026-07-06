@@ -327,8 +327,8 @@ class Orchestrator:
             specs = [s for p in self.providers for s in p.smooth_specs()]
             self._smoothing = SmoothingService.from_specs(specs) if specs else None
         # The run's cooperative cancel poll, set at the start of ``run`` so
-        # ``_make_env`` can curry it into each RunEnv (a real acquire threads it
-        # into ``stop_checkers``). None until ``run`` is entered.
+        # ``_make_env`` can curry it into each RunEnv for flux/provider-boundary
+        # cancellation. None until ``run`` is entered.
         self._should_stop: Callable[[], bool] | None = None
         # The exception a Node's ``produce`` raised mid-sweep, if any. ``run``
         # catches it (a real acquire can Fast-Fail on an unconfigured Node), stops
@@ -417,8 +417,7 @@ class Orchestrator:
             len(flux_values),
             start_idx,
         )
-        # Stash for ``_make_env`` to curry into each RunEnv (a real acquire threads
-        # it into ``stop_checkers``).
+        # Stash for ``_make_env`` to curry into each RunEnv.
         self._should_stop = should_stop
         self.run_error = None
         run_info = info if info is not None else InfoStore()

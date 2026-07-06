@@ -399,10 +399,6 @@ class RoOptimizeNode(Node):
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        stop_checkers: list[Any] = []
-        if env.should_stop is not None:
-            stop_checkers.append(env.should_stop)
-
         acquire_start = perf_now()
         acquired = run_schedule_acquire(
             env=env,
@@ -423,7 +419,6 @@ class RoOptimizeNode(Node):
             raw2signal_fn=tracker_signal,
             on_update=on_update,
             program_cls=ModularProgramV2,
-            stop_checkers=stop_checkers,
             trackers=[tracker],
         )
         _RO_ACQUIRE_PERF.record(

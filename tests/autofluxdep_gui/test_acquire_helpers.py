@@ -94,7 +94,7 @@ def _recording_pbar_factory(
     return factory
 
 
-def test_snr_stop_checker_waits_until_probe_has_value(monkeypatch: Any):
+def test_snr_stop_condition_waits_until_probe_has_value(monkeypatch: Any):
     calls = {"count": 0}
 
     def fake_snr_checker(ctx: Any, snr_threshold: float | None, signal2real_fn: Any):
@@ -116,18 +116,18 @@ def test_snr_stop_checker_waits_until_probe_has_value(monkeypatch: Any):
         schema=QubitFreqBuilder().make_default_schema(),
     )
 
-    checkers = acquire_mod.build_stop_checkers(
+    stop_condition = acquire_mod.build_stop_condition(
         env,
         probe,
         lambda signals: np.asarray(signals, dtype=np.complex128).real,
     )
 
-    assert len(checkers) == 1
-    assert checkers[0]() is False
+    assert stop_condition is not None
+    assert stop_condition() is False
     assert calls["count"] == 0
 
     probe.value = np.asarray([1.0 + 0.0j], dtype=np.complex128)
-    assert checkers[0]() is True
+    assert stop_condition() is True
     assert calls["count"] == 1
 
 
@@ -186,13 +186,14 @@ def test_run_schedule_acquire_completed_updates_signal():
             *,
             progress: bool,
             round_hook: Any,
-            stop_checkers: list[Any],
+            cancel_flag: Any,
             **_kwargs: Any,
         ) -> np.ndarray:
             assert soc == "soc"
             assert progress is False
-            assert all(not checker() for checker in stop_checkers)
-            round_hook(1, np.array([1.0]))
+            assert not cancel_flag.is_set()
+            round_hook(1, np.array([1.0]), cancel_flag)
+            assert not cancel_flag.is_set()
             return np.array([2.0])
 
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -228,6 +229,63 @@ def test_run_schedule_acquire_completed_updates_signal():
     assert progress_bars[0].closed is True
 
 
+def test_run_schedule_acquire_stop_condition_sets_program_cancel_flag():
+    flags_after_hook: list[bool] = []
+
+    class StoppedByConditionProgram:
+        def __init__(
+            self,
+            soccfg: Any,
+            cfg: ProgramV2Cfg,
+            *,
+            modules: list[Module],
+            sweep: list[tuple[str, Any]] | None,
+        ) -> None:
+            self.cfg_model = cfg
+            self.modules = modules
+            self.sweep = sweep
+
+        def acquire(
+            self,
+            *_args: Any,
+            round_hook: Any,
+            cancel_flag: Any,
+            **_kwargs: Any,
+        ) -> np.ndarray:
+            assert not cancel_flag.is_set()
+            round_hook(1, np.array([1.0]), cancel_flag)
+            flags_after_hook.append(cancel_flag.is_set())
+            return np.array([1.0])
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=QubitFreqBuilder().make_default_schema(),
+        soc="soc",
+        soccfg="soccfg",
+        knobs_snapshot={"acquire_retry": 0},
+    )
+
+    acquired = acquire_mod.run_schedule_acquire(
+        env=env,
+        cfg=ProgramV2Cfg(rounds=2),
+        signal_shape=(1,),
+        dtype=np.float64,
+        configure_builder=lambda builder: builder.add(FakeModule("readout")),
+        raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
+        program_cls=StoppedByConditionProgram,
+        stop_condition=lambda: True,
+    )
+
+    assert flags_after_hook == [True]
+    assert acquired.stopped is False
+    assert acquired.signal is not None
+    np.testing.assert_allclose(acquired.signal, np.array([1.0]))
+
+
 def test_run_schedule_acquire_failed_raises_after_retry_exhaustion():
     attempts: list[int] = []
 
@@ -244,9 +302,15 @@ def test_run_schedule_acquire_failed_raises_after_retry_exhaustion():
             self.modules = modules
             self.sweep = sweep
 
-        def acquire(self, *_args: Any, round_hook: Any, **_kwargs: Any) -> np.ndarray:
+        def acquire(
+            self,
+            *_args: Any,
+            round_hook: Any,
+            cancel_flag: Any,
+            **_kwargs: Any,
+        ) -> np.ndarray:
             attempts.append(1)
-            round_hook(1, np.array([float(len(attempts))]))
+            round_hook(1, np.array([float(len(attempts))]), cancel_flag)
             raise RuntimeError("acquire failed")
 
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -291,9 +355,15 @@ def test_run_schedule_acquire_stopped_returns_sentinel_without_failure():
             self.modules = modules
             self.sweep = sweep
 
-        def acquire(self, *_args: Any, round_hook: Any, **_kwargs: Any) -> np.ndarray:
-            round_hook(1, np.array([1.0]))
-            stop.set_stop()
+        def acquire(
+            self,
+            *_args: Any,
+            round_hook: Any,
+            cancel_flag: Any,
+            **_kwargs: Any,
+        ) -> np.ndarray:
+            round_hook(1, np.array([1.0]), cancel_flag)
+            stop.set()
             return np.array([2.0])
 
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:

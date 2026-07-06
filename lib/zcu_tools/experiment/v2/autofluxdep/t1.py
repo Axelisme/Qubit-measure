@@ -164,9 +164,9 @@ class T1Task(
             )
             .declare_sweep("length", length_sweep)
             .build_and_acquire(
-                stop_checkers=[
-                    snr_checker(signals_buffer.at(), self.earlystop_snr, t1_signal2real)
-                ],
+                stop_condition=snr_checker(
+                    signals_buffer.at(), self.earlystop_snr, t1_signal2real
+                ),
             )
         )
 

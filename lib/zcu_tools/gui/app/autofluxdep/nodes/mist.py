@@ -177,10 +177,6 @@ class MistNode(Node):
         # fit_value[idx] and fit_curve[idx] remain nan — mist has no fit scalar.
         # probe=None: a single-round scatter, so there is no SNR early-stop to feed.
 
-        stop_checkers: list[Any] = []
-        if env.should_stop is not None:
-            stop_checkers.append(env.should_stop)
-
         def on_update(curve_value: NDArray[Any]) -> None:
             np.copyto(result.signal[idx], np.asarray(curve_value, dtype=np.float64))
             if env.round_hook is not None:
@@ -201,7 +197,6 @@ class MistNode(Node):
             raw2signal_fn=lambda raw: _mist_signal2real(acquire_to_complex(raw)),
             on_update=on_update,
             program_cls=ModularProgramV2,
-            stop_checkers=stop_checkers,
         )
         if acquired.stopped:
             return Patch()

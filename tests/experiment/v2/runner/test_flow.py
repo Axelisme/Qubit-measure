@@ -14,6 +14,7 @@ from zcu_tools.experiment.v2.runner import (
     StopSignal,
     schedule_stop_scope,
 )
+from zcu_tools.program.base import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
@@ -176,7 +177,7 @@ class FakeProgram:
         self.reps = getattr(cfg, "reps", None)
         self.rounds = getattr(cfg, "rounds", None)
         self.acquire_kwargs: dict[str, Any] = {}
-        self.stop_checker_count = 0
+        self.cancel_flag_seen = False
         FakeProgram.instances.append(self)
 
     def acquire(
@@ -185,15 +186,15 @@ class FakeProgram:
         *,
         progress: bool,
         round_hook,
-        stop_checkers,
+        cancel_flag,
         **kwargs: Any,
     ) -> np.ndarray:
         self.acquire_kwargs = dict(kwargs)
-        self.stop_checker_count = len(stop_checkers)
+        self.cancel_flag_seen = True
         assert soc == "soc"
         assert not progress
-        assert all(not checker() for checker in stop_checkers)
-        round_hook(1, np.array([1.0]))
+        assert not cancel_flag.is_set()
+        round_hook(1, np.array([1.0]), cancel_flag)
         return np.array([2.0])
 
     def acquire_decimated(
@@ -202,7 +203,7 @@ class FakeProgram:
         *,
         progress: bool,
         round_hook,
-        stop_checkers,
+        cancel_flag,
         **kwargs: Any,
     ) -> list[np.ndarray]:
         raise NotImplementedError
@@ -221,9 +222,11 @@ class FakeScalarProgram:
         self.cfg_model = cfg
         self.sweep = sweep
 
-    def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+    def acquire(
+        self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
+    ) -> np.ndarray:
         raw = np.array(float(getattr(self.cfg_model, "value")))
-        round_hook(1, raw)
+        round_hook(1, raw, cancel_flag)
         return raw
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -248,10 +251,12 @@ class FakeCachedProgram:
         self.acquire_count = 0
         FakeCachedProgram.instances.append(self)
 
-    def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+    def acquire(
+        self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
+    ) -> np.ndarray:
         self.acquire_count += 1
         raw = np.array(float(getattr(self.cfg_model, "value")))
-        round_hook(1, raw)
+        round_hook(1, raw, cancel_flag)
         return raw
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -274,7 +279,7 @@ class FakeDecimatedProgram:
         self.modules = modules
         self.sweep = sweep
         self.acquire_decimated_kwargs: dict[str, Any] = {}
-        self.stop_checker_count = 0
+        self.cancel_flag_seen = False
         FakeDecimatedProgram.instances.append(self)
 
     def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
@@ -286,15 +291,15 @@ class FakeDecimatedProgram:
         *,
         progress: bool,
         round_hook,
-        stop_checkers,
+        cancel_flag,
         **kwargs: Any,
     ) -> list[np.ndarray]:
         self.acquire_decimated_kwargs = dict(kwargs)
-        self.stop_checker_count = len(stop_checkers)
+        self.cancel_flag_seen = True
         assert soc == "soc"
         assert not progress
-        assert all(not checker() for checker in stop_checkers)
-        round_hook(1, [np.array([[1.0, 0.0], [0.0, 1.0]])])
+        assert not cancel_flag.is_set()
+        round_hook(1, [np.array([[1.0, 0.0], [0.0, 1.0]])], cancel_flag)
         return [np.array([[2.0, 0.0], [0.0, 2.0]])]
 
     def get_time_axis(self, ro_index: int = 0) -> np.ndarray:
@@ -318,12 +323,14 @@ class FlakyBuildProgram:
         self.acquire_count = 0
         FlakyBuildProgram.instances.append(self)
 
-    def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+    def acquire(
+        self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
+    ) -> np.ndarray:
         self.acquire_count += 1
         if len(FlakyBuildProgram.instances) == 1:
             raise RuntimeError("temporary failure")
         raw = np.array([4.0])
-        round_hook(1, np.array([3.0]))
+        round_hook(1, np.array([3.0]), cancel_flag)
         return raw
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -347,10 +354,12 @@ class AlwaysFailingProgram:
         self.acquire_count = 0
         AlwaysFailingProgram.instances.append(self)
 
-    def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+    def acquire(
+        self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
+    ) -> np.ndarray:
         self.acquire_count += 1
         raw = np.array([float(len(AlwaysFailingProgram.instances))])
-        round_hook(1, raw)
+        round_hook(1, raw, cancel_flag)
         raise RuntimeError("permanent failure")
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -372,9 +381,11 @@ class ConstructorFailingProgram:
         self.modules = modules
         self.sweep = sweep
 
-    def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+    def acquire(
+        self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
+    ) -> np.ndarray:
         raw = np.array([float(getattr(self.cfg_model, "value"))])
-        round_hook(1, raw)
+        round_hook(1, raw, cancel_flag)
         return raw
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -402,6 +413,34 @@ class InterruptingProgram:
     def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
         self.acquire_count += 1
         raise KeyboardInterrupt
+
+    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+        raise NotImplementedError
+
+
+class StopBeforeDataProgram:
+    external_stop: StopSignal | None = None
+
+    def __init__(
+        self,
+        soccfg: Any,
+        cfg: FlowCfg,
+        *,
+        modules: list[Module],
+        sweep: list[tuple[str, Any]] | None,
+    ) -> None:
+        self.cfg_model = cfg
+        self.modules = modules
+        self.sweep = sweep
+
+    def acquire(
+        self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
+    ) -> np.ndarray:
+        assert self.external_stop is not None
+        self.external_stop.set()
+        raise StoppedPartialAcquireError(
+            "acquire stopped before the first round completed"
+        )
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
         raise NotImplementedError
@@ -557,7 +596,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
             .build_and_acquire(
                 raw2signal_fn=_identity_array,
                 tag="x",
-                stop_checkers=[lambda: False],
+                stop_condition=lambda: False,
             )
         )
         assert getattr(sched.cfg, "reps") == 4
@@ -578,7 +617,30 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
     assert instance.reps == 4
     assert instance.rounds == 2
     assert instance.acquire_kwargs == {"tag": "x"}
-    assert instance.stop_checker_count == 2
+    assert instance.cancel_flag_seen is True
+
+
+def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+    ambient_stop = StopSignal()
+
+    with schedule_stop_scope(ambient_stop):
+        with Schedule(_cfg(reps=4, rounds=2), signals_buffer) as sched:
+            result = (
+                sched.prog_builder(
+                    "soc", "soccfg", program_cls=FakeProgram, marker="kw"
+                )
+                .add(FakeModule("readout"))
+                .build_and_acquire(
+                    raw2signal_fn=_identity_array,
+                    stop_condition=lambda: True,
+                )
+            )
+            assert sched.outcome.status == "completed"
+            assert ambient_stop.is_set() is False
+
+    np.testing.assert_allclose(result, np.array([2.0]))
+    np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
 
 
 def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
@@ -647,6 +709,25 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
 
 
+def test_build_and_acquire_first_round_stop_returns_nan_partial():
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+
+    with Schedule(_cfg(rounds=2), signals_buffer) as sched:
+        StopBeforeDataProgram.external_stop = sched.stop
+        result = (
+            sched.prog_builder("soc", "soccfg", program_cls=StopBeforeDataProgram)
+            .add(FakeModule("readout"))
+            .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
+        )
+        assert sched.is_stop() is True
+        assert sched.outcome.status == "stopped"
+        assert sched.outcome.reason == "stop requested"
+
+    np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
+    np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
+    StopBeforeDataProgram.external_stop = None
+
+
 def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
     AlwaysFailingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -687,10 +768,12 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
             self.modules = modules
             self.sweep = sweep
 
-        def acquire(self, *_args: Any, round_hook, **_kwargs: Any) -> np.ndarray:
+        def acquire(
+            self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
+        ) -> np.ndarray:
             attempts.append(1)
             raw = np.array([float(len(attempts))])
-            round_hook(1, raw)
+            round_hook(1, raw, cancel_flag)
             stop.set_stop()
             raise RuntimeError("failure with stop")
 
@@ -829,7 +912,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
             .add(FakeModule("readout"))
             .build_and_acquire_decimated(
                 tag="trace",
-                stop_checkers=[lambda: False],
+                stop_condition=lambda: False,
             )
         )
 
@@ -841,7 +924,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
     assert len(FakeDecimatedProgram.instances) == 1
     instance = FakeDecimatedProgram.instances[0]
     assert instance.acquire_decimated_kwargs == {"tag": "trace"}
-    assert instance.stop_checker_count == 2
+    assert instance.cancel_flag_seen is True
 
 
 def test_schedule_registers_program_derived_buffer_before_decimated_run():

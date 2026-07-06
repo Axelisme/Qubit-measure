@@ -24,6 +24,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.program.base import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -245,7 +246,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                     )
                     .build()
                 )
-                program.acquire(soc, progress=True, stop_checkers=[step.is_stop])
+                try:
+                    program.acquire(soc, progress=True, cancel_flag=step.stop)
+                except StoppedPartialAcquireError:
+                    step.set_stop()
+                    break
                 signals_buffer[step].set(raw_shots_to_signal(program))
             signals = signals_buffer.array
 

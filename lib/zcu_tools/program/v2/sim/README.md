@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-05 — Remove SimEngine profiling probes
+**Last updated:** 2026-07-07 — stop flag acquire contract
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -22,7 +22,7 @@ and routes through the `SimEngine`: the engine pre-computes the per-round raw
 `acc_buf` budget and stashes it on the soc, then the **real** round loop runs
 unchanged — `start_readout` / `poll_data` serve the budget, and
 `_process_accumulated` / `_summarize_accumulated` / `round_hook` /
-`stop_checkers` / `get_raw` are all reused. With no `SimParams` the branch is
+`cancel_flag` / `get_raw` are all reused. With no `SimParams` the branch is
 skipped and the white-noise fallback path remains byte-for-byte stable (design
 boundary D1).
 This is why injecting params and running a real experiment class exercises the
@@ -106,17 +106,17 @@ sets of distinct qubit state chains, including both detune ensembles and
 single-node no-dephasing runs, `SimEngine` uses a sim-local numba kernel when the
 optional `client` dependency is installed; otherwise it falls back to the
 numpy/scalar path. Small work, cache-collapsed readout-only sweeps, and
-direct/internal runs with active stop checkers stay on the Python path to avoid
+direct/internal runs with an active stop flag stay on the Python path to avoid
 JIT/cache-load overhead and preserve cooperative cancellation boundaries.
 Python-level ThreadPool/joblib and numba `prange` parallel paths are not enabled
 because measured scheduling/pickle overhead exceeds the current kernel savings.
 
-**Cooperative stop boundary.** Acquire-level `stop_checkers` stay owned by the
-real round loop's `finish_round()` path, matching hardware semantics: Stop and
-SNR early-stop are checked after a round completes, not inside one round's mock
-physics compute.  `SimEngine` still has an engine-local cancellation hook for
+**Cooperative stop boundary.** Acquire-level `cancel_flag` stays owned by the real
+round loop's `finish_round()` path, matching hardware semantics: stop and SNR
+early-stop are checked at completed-round boundaries, not inside one round's mock
+physics compute. `SimEngine` still accepts an engine-local `cancel_flag` for
 direct/internal callers, but `MyProgramV2.acquire` does not feed acquire-level
-checkers into it.
+flags into it.
 
 **FLUX-AWARE-MOCK — operating flux from a live device.** By default the operating
 flux is pinned at reduced flux = 1.0 (R-3).  `SimParams.flux_device` opts into

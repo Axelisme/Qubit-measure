@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-07-02 — MRO regression tests
+**Last updated:** 2026-07-07 — stop flag acquire contract
 
 這份筆記整理 `lib/zcu_tools/program` 對 QICK 的實際依賴，目的是讓後續開發能快速定位「應該看哪個 QICK 類別/方法」，而不用每次從頭追。
 
@@ -10,8 +10,8 @@
 - 主要加值分成四類：
   - 型別友善封裝（`TypedAcquireMixin`）：補強 `acquire()` / `acquire_decimated()` / `get_raw()` 等回傳型別。
   - 統計追蹤（`TrackerMixin`）：在 `finish_round()` 內注入 tracker 更新流程。
-  - 提前停止（`EarlyStopMixin`）：透過 `stop_checkers`（callable list）在 `finish_round()` 內中止後續 rounds。
-  - 每輪 callback（`RoundHookMixin`）與 single-shot population/threshold（`SingleShotMixin`）。
+  - 提前停止（`EarlyStopMixin`）：透過單一 `cancel_flag` 在 `finish_round()` 內中止後續 rounds。
+  - 每輪 callback（`RoundHookMixin`）與 single-shot population/threshold（`SingleShotMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
 
 ## `AcquireMixin` 行為對照（常見踩點）
 
@@ -20,7 +20,7 @@
   - `finish_acquire()` 負責 rounds 聚合（accumulated 或 decimated）。
 - 擴充掛點：
   - `TrackerMixin.finish_round()`：利用原生 `self.acc_buf`、`self.ro_chs`、`self.avg_level` 更新 tracker。
-  - `RoundHookMixin.finish_round()`：每 round 呼叫 `round_hook`，輸入增量摘要資料。
+  - `RoundHookMixin.finish_round()`：每 completed round 呼叫 `round_hook`，輸入增量摘要資料與同一個 stop flag。
   - `SingleShotMixin._process_accumulated()`：覆寫原生 threshold 路徑，新增 population radius 分類。
 - 相容性關鍵：
   - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
@@ -36,7 +36,7 @@
 - 想改「每回合後做什麼」：先看 `ImproveAcquireMixin` 各 `finish_round()`，再對照 `AcquireMixin.finish_round()`。
 - 想改「accumulated 輸出格式」：看 `SingleShotMixin._process_accumulated()` 與 `AcquireMixin._average_buf()`。
 - 想改「時間軸或原始資料格式」：看 `AcquireMixin.get_time_axis()`、`get_raw()`。
-- 想改「執行控制（early stop）」：看 `EarlyStopMixin.acquire()` 的 `stop_checkers` 參數與 `finish_round()`。
+- 想改「執行控制（early stop）」：看 `EarlyStopMixin.acquire()` 的 `cancel_flag` 參數與 `finish_round()`。
 
 ## QICK ASM dict 注意事項
 

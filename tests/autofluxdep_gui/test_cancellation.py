@@ -395,9 +395,15 @@ def test_schedule_acquire_failure_inside_run_session_does_not_emit_run_stopped()
             del soccfg, modules, sweep
             self.cfg_model = cfg
 
-        def acquire(self, *_args: Any, round_hook: Any, **_kwargs: Any) -> np.ndarray:
+        def acquire(
+            self,
+            *_args: Any,
+            round_hook: Any,
+            cancel_flag: Any,
+            **_kwargs: Any,
+        ) -> np.ndarray:
             attempts.append(1)
-            round_hook(1, np.array([float(len(attempts))]))
+            round_hook(1, np.array([float(len(attempts))]), cancel_flag)
             raise RuntimeError("schedule acquire failed")
 
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:

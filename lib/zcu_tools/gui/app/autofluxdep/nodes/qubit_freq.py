@@ -46,7 +46,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_retry_generation_field,
     acquire_to_complex,
     axis_to_sweep,
-    build_stop_checkers,
+    build_stop_condition,
     is_good_fit,
     make_signal_update,
     require_flux_device,
@@ -301,10 +301,10 @@ class QubitFreqNode(Node):
 
         # Real multi-round acquire. round_hook fires per round with the running
         # average; we rotate it to real, overwrite the Result row, and notify so the
-        # liveplot settles round by round. The SNR probe + stop poll are threaded
-        # into stop_checkers (early-stop on good SNR; cooperative cancel).
+        # liveplot settles round by round. The SNR probe + stop poll are evaluated
+        # as a completed-round stop condition.
         probe = SnrProbe()
-        stop_checkers = build_stop_checkers(env, probe, _signal2real)
+        stop_condition = build_stop_condition(env, probe, _signal2real)
         acquired = run_schedule_acquire(
             env=env,
             cfg=cfg,
@@ -326,7 +326,7 @@ class QubitFreqNode(Node):
                 probe=probe,
             ),
             program_cls=ModularProgramV2,
-            stop_checkers=stop_checkers,
+            stop_condition=stop_condition,
         )
         if acquired.stopped:
             return Patch()

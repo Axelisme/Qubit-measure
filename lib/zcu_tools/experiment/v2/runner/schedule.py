@@ -22,6 +22,7 @@ import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from typing_extensions import TypeVar
 
+from zcu_tools.program.base import CancelFlagProtocol
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Module,
@@ -51,6 +52,7 @@ T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
 RunStatus: TypeAlias = Literal["completed", "stopped", "interrupted", "failed"]
+StopCondition: TypeAlias = Callable[[], bool]
 
 
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
@@ -62,8 +64,8 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
         soc: object,
         *,
         progress: bool,
-        round_hook: Callable[[int, T_AcquireRaw_co], object],
-        stop_checkers: Sequence[Callable[[], bool]],
+        round_hook: Callable[[int, T_AcquireRaw_co, CancelFlagProtocol], object],
+        cancel_flag: CancelFlagProtocol,
         **kwargs: object,
     ) -> T_AcquireRaw_co: ...
 
@@ -72,8 +74,8 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
         soc: object,
         *,
         progress: bool,
-        round_hook: Callable[[int, T_DecimatedRaw_co], object],
-        stop_checkers: Sequence[Callable[[], bool]],
+        round_hook: Callable[[int, T_DecimatedRaw_co, CancelFlagProtocol], object],
+        cancel_flag: CancelFlagProtocol,
         **kwargs: object,
     ) -> T_DecimatedRaw_co: ...
 
@@ -115,12 +117,32 @@ class StopSignal:
     def set_stop(self) -> None:
         self._event.set()
 
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    def set(self) -> None:
+        self._event.set()
+
     def clear_stop(self) -> None:
         self._event.clear()
 
     @property
     def event(self) -> threading.Event:
         return self._event
+
+
+class _AcquireCancelFlag:
+    """Program-local stop flag that observes Schedule stop without mutating it."""
+
+    def __init__(self, external: StopSignal) -> None:
+        self._external = external
+        self._local = threading.Event()
+
+    def is_set(self) -> bool:
+        return self._external.is_set() or self._local.is_set()
+
+    def set(self) -> None:
+        self._local.set()
 
 
 @dataclass(frozen=True)
@@ -859,7 +881,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         progress: bool = False,
         progress_label: str = "rounds",
         progress_leave: bool | None = None,
-        stop_checkers: Sequence[Callable[[], bool]] | None = None,
+        stop_condition: StopCondition | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         self._schedule._ensure_active()
@@ -871,7 +893,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             progress=progress,
             progress_label=progress_label,
             progress_leave=progress_leave,
-            stop_checkers=stop_checkers,
+            stop_condition=stop_condition,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -883,7 +905,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         progress: bool = False,
         progress_label: str = "rounds",
         progress_leave: bool | None = None,
-        stop_checkers: Sequence[Callable[[], bool]] | None = None,
+        stop_condition: StopCondition | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         self._schedule._ensure_active()
@@ -895,7 +917,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             progress=progress,
             progress_label=progress_label,
             progress_leave=progress_leave,
-            stop_checkers=stop_checkers,
+            stop_condition=stop_condition,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -908,7 +930,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         progress: bool = False,
         progress_label: str = "rounds",
         progress_leave: bool | None = None,
-        stop_checkers: Sequence[Callable[[], bool]] | None = None,
+        stop_condition: StopCondition | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         return self._run_program(
@@ -920,7 +942,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             progress=progress,
             progress_label=progress_label,
             progress_leave=progress_leave,
-            stop_checkers=stop_checkers,
+            stop_condition=stop_condition,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -933,7 +955,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         progress: bool = False,
         progress_label: str = "rounds",
         progress_leave: bool | None = None,
-        stop_checkers: Sequence[Callable[[], bool]] | None = None,
+        stop_condition: StopCondition | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         return self._run_program(
@@ -945,7 +967,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
             progress=progress,
             progress_label=progress_label,
             progress_leave=progress_leave,
-            stop_checkers=stop_checkers,
+            stop_condition=stop_condition,
             acquire_kwargs=acquire_kwargs,
         )
 
@@ -958,7 +980,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         progress: bool,
         progress_label: str,
         progress_leave: bool | None,
-        stop_checkers: Sequence[Callable[[], bool]] | None,
+        stop_condition: StopCondition | None,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
         if retry < 0:
@@ -988,7 +1010,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                 progress=progress,
                 progress_label=progress_label,
                 progress_leave=progress_leave,
-                stop_checkers=stop_checkers,
+                stop_condition=stop_condition,
                 **acquire_kwargs,
             )
             if self._schedule._should_retry_after_failed_attempt(attempt, retry):
@@ -1008,7 +1030,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         progress: bool,
         progress_label: str,
         progress_leave: bool | None,
-        stop_checkers: Sequence[Callable[[], bool]] | None,
+        stop_condition: StopCondition | None,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
         if retry < 0:
@@ -1035,7 +1057,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                         acquire=acquire,
                         progress=progress,
                         acquire_kwargs=acquire_kwargs,
-                        stop_checkers=stop_checkers,
+                        stop_condition=stop_condition,
                         signal_fn=signal_fn,
                         slot=slot,
                         pbar=pbar,
@@ -1102,20 +1124,24 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         acquire: Callable[..., T_Raw],
         progress: bool,
         acquire_kwargs: dict[str, object],
-        stop_checkers: Sequence[Callable[[], bool]] | None,
+        stop_condition: StopCondition | None,
         signal_fn: Callable[[T_Raw], SignalArray],
         slot: SignalSlot,
         pbar: BaseProgressBar,
     ) -> T_Raw:
-        def update_hook(ir: int, raw: T_Raw) -> None:
+        acquire_cancel_flag = _AcquireCancelFlag(self._schedule.stop)
+
+        def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
             pbar.set_progress(ir)
             slot.set(signal_fn(raw))
+            if stop_condition is not None and stop_condition():
+                cancel_flag.set()
 
         return acquire(
             self._soc,
             progress=progress,
             round_hook=update_hook,
-            stop_checkers=[self._schedule.is_stop, *(stop_checkers or [])],
+            cancel_flag=acquire_cancel_flag,
             **dict(acquire_kwargs),
         )
 

@@ -4,8 +4,8 @@ Every measurement Node's ``produce`` follows the same lower-layer recipe
 (``experiment/v2/autofluxdep`` Schedule acquire + ``run``): write this flux point's
 value into ``cfg.dev`` BY NAME → ``setup_devices`` to push it → build a
 ``ModularProgramV2`` module list with the swept axis → ``.acquire`` with a
-running-average ``round_hook`` + cooperative-stop / SNR-early-stop
-``stop_checkers`` → collapse the raw IQ to a 1-D complex trace → rotate to real.
+    running-average ``round_hook`` + completed-round SNR stop condition
+→ collapse the raw IQ to a 1-D complex trace → rotate to real.
 
 These pieces are identical across qubit_freq / lenrabi / ro_optimize / t1 / t2* /
 mist, so they live here once rather than being copy-pasted into seven Nodes. The
@@ -53,6 +53,20 @@ class ScheduleAcquireResult:
     stopped: bool = False
 
 
+class CompletedRoundStopCondition:
+    """Data-quality stop condition evaluated after a completed round."""
+
+    def __init__(self, data: Callable[[], bool]) -> None:
+        self._data = data
+        self.data_stop_requested = False
+
+    def __call__(self) -> bool:
+        if self._data():
+            self.data_stop_requested = True
+            return True
+        return False
+
+
 def acquire_retry_generation_field(
     *, group: str = "acquisition", group_label: str | None = None
 ) -> GenerationField:
@@ -90,7 +104,7 @@ def run_schedule_acquire(
     raw2signal_fn: Callable[[Any], NDArray[Any]],
     on_update: Callable[[NDArray[Any]], None] | None = None,
     program_cls: Callable[..., Any] = ModularProgramV2,
-    stop_checkers: list[Callable[[], bool]] | None = None,
+    stop_condition: Callable[[], bool] | None = None,
     progress_label: str | None = None,
     **acquire_kwargs: object,
 ) -> ScheduleAcquireResult:
@@ -122,7 +136,7 @@ def run_schedule_acquire(
             progress=False,
             progress_label=label,
             progress_leave=False,
-            stop_checkers=stop_checkers,
+            stop_condition=stop_condition,
             **acquire_kwargs,
         )
         outcome = sched.outcome
@@ -287,20 +301,17 @@ def earlystop_snr(schema: NodeCfgSchema, md: Any = None) -> float | None:
     return schema.lower(None, md=md).get("earlystop_snr")
 
 
-def build_stop_checkers(
+def build_stop_condition(
     env: RunEnv,
     probe: SnrProbe,
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
-) -> list[Callable[[], bool]]:
-    """The ``stop_checkers`` list every measurement acquire passes to ``.acquire``.
+) -> Callable[[], bool] | None:
+    """Return the completed-round stop condition for a 1-D measurement acquire.
 
-    Threads the run's cooperative cancel (``env.should_stop``) + the SNR early-stop
-    (``snr_checker`` reading the running average via ``probe`` once the first
-    ``round_hook`` has populated it) — exactly the lower layer's
-    ``stop_checkers=[ctx.is_stop, snr_checker(ctx, ...)]`` after data exists."""
-    checkers: list[Callable[[], bool]] = []
-    if env.should_stop is not None:
-        checkers.append(env.should_stop)
+    The runner calls this after the completed round has updated ``SignalBuffer``, so
+    the SNR checker sees the same running average that was just painted in Result.
+    """
+    data_condition: Callable[[], bool] | None = None
     threshold = earlystop_snr(env.schema, md=env.md)
     if threshold is not None:
         check_snr = snr_checker(probe, threshold, signal2real_fn)
@@ -310,8 +321,10 @@ def build_stop_checkers(
                 return False
             return check_snr()
 
-        checkers.append(check_snr_when_ready)
-    return checkers
+        data_condition = check_snr_when_ready
+    if data_condition is None:
+        return None
+    return CompletedRoundStopCondition(data_condition)
 
 
 def make_signal_update(

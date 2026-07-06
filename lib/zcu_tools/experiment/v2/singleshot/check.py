@@ -21,6 +21,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.program.base import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
@@ -89,8 +90,12 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                 )
                 .build()
             )
-            program.acquire(soc, progress=True, stop_checkers=[sched.is_stop])
-            signals_buffer.set(raw_shots_to_signal(program))
+            try:
+                program.acquire(soc, progress=True, cancel_flag=sched.stop)
+            except StoppedPartialAcquireError:
+                sched.set_stop()
+            else:
+                signals_buffer.set(raw_shots_to_signal(program))
             signals = signals_buffer.array
 
         # Cache results

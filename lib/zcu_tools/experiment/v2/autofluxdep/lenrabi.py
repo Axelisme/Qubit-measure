@@ -182,13 +182,11 @@ class LenRabiTask(
             .add_readout("readout", modules.readout)
             .declare_sweep("length", len_sweep)
             .build_and_acquire(
-                stop_checkers=[
-                    snr_checker(
-                        signals_buffer.at(),
-                        self.earlystop_snr,
-                        lenrabi_signal2real,
-                    )
-                ],
+                stop_condition=snr_checker(
+                    signals_buffer.at(),
+                    self.earlystop_snr,
+                    lenrabi_signal2real,
+                ),
             )
         )
 

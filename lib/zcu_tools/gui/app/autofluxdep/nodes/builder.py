@@ -62,9 +62,9 @@ class RunEnv:
     ``result`` — the sweep-lived Result this Node fills (its row ``flux_idx``);
     None for pure-compute Nodes. ``round_hook`` — called by acquire each round
     (fill row + notify); None for pure-compute Nodes. ``should_stop`` — the run's
-    cooperative cancel poll (the controller's stop flag), threaded into a real
-    acquire's ``stop_checkers`` so a long sweep stops mid-acquire; None for a
-    pure-compute Node or a headless run with no cancel.
+    cooperative cancel poll (the controller's stop flag), observed at flux/provider
+    boundaries and by the ambient Schedule stop flag; None for a pure-compute Node
+    or a headless run with no cancel.
     """
 
     flux: float

@@ -140,14 +140,12 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
                         .add(PulseReadout("readout", modules.readout))
                         .declare_sweep("freq", freq_sweep)
                         .build_and_acquire(
-                            stop_checkers=[
-                                snr_checker(
-                                    signals_buffer[step],
-                                    earlystop_snr,
-                                    gaindep_signal2real,
-                                    after_check=update_snr,
-                                )
-                            ],
+                            stop_condition=snr_checker(
+                                signals_buffer[step],
+                                earlystop_snr,
+                                gaindep_signal2real,
+                                after_check=update_snr,
+                            ),
                             **(acquire_kwargs or {}),
                         )
                     )

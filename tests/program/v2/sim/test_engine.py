@@ -853,8 +853,9 @@ def test_engine_round_hook_called_per_round():
 
     calls: list[int] = []
 
-    def hook(round_count: int, _data) -> None:
+    def hook(round_count: int, _data, cancel_flag) -> None:
         calls.append(round_count)
+        assert not cancel_flag.is_set()
 
     sw = SweepCfg(start=f_qubit - 100.0, stop=f_qubit + 100.0, expts=5, step=50.0)
     freq_param = sweep2param("freq", sw)

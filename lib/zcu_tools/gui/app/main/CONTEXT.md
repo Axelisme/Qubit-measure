@@ -21,7 +21,7 @@ _Avoid_: guard token, ticket, voucher
 
 **outcome = `OperationOutcome`**（中性 status finished/failed/cancelled + error，**不帶 result**；result 走原有 snapshot/query）。啟動回 `operation_id`（= token），`operation.await(operation_id)` 阻塞取 outcome；查無 token=視為 finished（不 hang）。**三層分工**同版本號：operation_id 是 RPC↔mcp 簿記。Phase 171 起 START reply 直接外露 operation handle，agent 用泛型 `gui_op_wait(handle)` / `gui_op_poll(handle)` await（涵蓋 device connect/disconnect/apply 與 run，不再走語義名翻譯工具）。
 
-**cancel 不保證即停**：cancel 是「請求」，能否停是 operation 自己的事。run/device 有 stop_checkers 輪詢點會停；**connect 是阻塞網絡調用、無 stop 點 → 收到 cancel 仍跑到自然完成/超時**。關閉流程（closeEvent / app.shutdown）`cancel_all` 後用 QTimer poll 等所有 token settle，**超時則強關**（kill 沒停的 connect）。
+**cancel 不保證即停**：cancel 是「請求」，能否停是 operation 自己的事。run/device 有 stop polling point 會停；**connect 是阻塞網絡調用、無 stop 點 → 收到 cancel 仍跑到自然完成/超時**。關閉流程（closeEvent / app.shutdown）`cancel_all` 後用 QTimer poll 等所有 token settle，**超時則強關**（kill 沒停的 connect）。
 _Avoid_: 讓 outcome 帶 result payload、把 operation_id 暴露給 agent、把**互斥邏輯**混進 Registry（cancel 是 handle 能力、不是互斥；_Avoid_ 防的是把 exclusion 塞進 Registry）、期望 await 真協程讓出（是 off-main thread 模擬，見 qasync spike 備案）、期望 cancel 同步等待（會死鎖主線 / 卡死在不可中斷的 connect）
 _Avoid_: guard, lock token
 

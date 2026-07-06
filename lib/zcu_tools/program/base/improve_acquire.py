@@ -1,14 +1,40 @@
 from __future__ import annotations
 
+import functools
+import operator
 import warnings
 from collections.abc import Callable
 from typing import Protocol, TypeAlias, cast, final
 
 import numpy as np
 from numpy.typing import NDArray
-from qick.qick_asm import AcquireMixin
+from qick.qick_asm import AcquireMixin, logger, obtain, tqdm
 
-RoundHookType: TypeAlias = Callable[[int, list[NDArray[np.float64]]], None]
+
+class CancelFlagProtocol(Protocol):
+    def is_set(self) -> bool: ...
+
+    def set(self) -> None: ...
+
+
+class _LocalCancelFlag:
+    def __init__(self) -> None:
+        self._is_set = False
+
+    def is_set(self) -> bool:
+        return self._is_set
+
+    def set(self) -> None:
+        self._is_set = True
+
+
+RoundHookType: TypeAlias = Callable[
+    [int, list[NDArray[np.float64]], CancelFlagProtocol], None
+]
+
+
+class StoppedPartialAcquireError(RuntimeError):
+    """Raised when stop happens before the first round produces completed data."""
 
 
 class TypedAcquireMixin(AcquireMixin):
@@ -57,32 +83,179 @@ class TypedAcquireMixin(AcquireMixin):
     def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
 
+    def _completed_round_count(self) -> int:
+        rounds_buf = self.rounds_buf
+        if rounds_buf is None:
+            return 0
+        return len(rounds_buf)
+
 
 class EarlyStopMixin(TypedAcquireMixin):
-    def acquire(
-        self, *args, stop_checkers: list[Callable[[], bool]] | None = None, **kwargs
-    ):
+    def acquire(self, *args, cancel_flag: CancelFlagProtocol | None = None, **kwargs):
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(stop_checkers=stop_checkers)
+        extra_args.update(
+            cancel_flag=cancel_flag if cancel_flag is not None else _LocalCancelFlag()
+        )
         return super().acquire(*args, extra_args=extra_args, **kwargs)  # type: ignore
 
     def acquire_decimated(
-        self, *args, stop_checkers: list[Callable[[], bool]] | None = None, **kwargs
+        self, *args, cancel_flag: CancelFlagProtocol | None = None, **kwargs
     ):
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(stop_checkers=stop_checkers)
+        extra_args.update(
+            cancel_flag=cancel_flag if cancel_flag is not None else _LocalCancelFlag()
+        )
         return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)  # type: ignore
 
     def finish_round(self) -> bool:
+        assert self.acquire_params is not None
+        cancel_flag = cast(
+            CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
+        )
+        if cancel_flag is not None and cancel_flag.is_set():
+            self._cleanup_prepared_round()
+            self._close_rounds_pbar()
+            return False
+
+        if self.acquire_params["type"] == "accumulated" and cancel_flag is not None:
+            return self._finish_accumulated_round(cancel_flag)
+
         not_finish = super().finish_round()
-        if not_finish:
-            assert self.acquire_params is not None
-            stop_checkers = self.acquire_params.get("stop_checkers") or []
-            if any(c() for c in stop_checkers):
-                if self.rounds_pbar is not None:
-                    self.rounds_pbar.close()
-                return False
+        if not_finish and cancel_flag is not None and cancel_flag.is_set():
+            self._close_rounds_pbar()
+            return False
         return not_finish
+
+    def finish_acquire(self):
+        if self._is_stopped_before_first_completed_round():
+            self._close_rounds_pbar()
+            raise StoppedPartialAcquireError(
+                "acquire stopped before the first round completed"
+            )
+        return super().finish_acquire()
+
+    def _finish_accumulated_round(self, cancel_flag: CancelFlagProtocol) -> bool:
+        assert self.acquire_params is not None
+        soc = self.acquire_params["soc"]
+        total_count = functools.reduce(operator.mul, self.loop_dims)  # type: ignore[arg-type]
+        reads_per_shot = [ro["trigs"] for ro in self.ro_chs.values()]  # type: ignore[union-attr]
+
+        count = 0
+        stats_start = len(self.stats) if self.stats is not None else 0
+        with tqdm(
+            total=total_count, disable=self.acquire_params["hidereps"]
+        ) as reps_pbar:
+            soc.start_readout(
+                total_count,
+                counter_addr=self.counter_addr,
+                ch_list=list(self.ro_chs),  # type: ignore[arg-type]
+                reads_per_shot=reads_per_shot,
+            )
+            while count < total_count:
+                if cancel_flag.is_set():
+                    return self._finish_stopped_partial_accumulated_round(
+                        soc, stats_start=stats_start
+                    )
+
+                new_data = obtain(soc.poll_data())
+                for new_points, (data, stats) in new_data:
+                    if cancel_flag.is_set():
+                        return self._finish_stopped_partial_accumulated_round(
+                            soc, stats_start=stats_start
+                        )
+                    for ii, nreads in enumerate(reads_per_shot):
+                        if new_points * nreads != data[ii].shape[0]:
+                            logger.error(
+                                "data size mismatch: new_points=%d, nreads=%d, data shape %s"
+                                % (new_points, nreads, data[ii].shape)
+                            )
+                        if count + new_points > total_count:
+                            logger.error(
+                                "got too much data: count=%d, new_points=%d, total_count=%d"
+                                % (count, new_points, total_count)
+                            )
+                        self.acc_buf[ii].reshape((-1, 2))[  # type: ignore[index]
+                            count * nreads : (count + new_points) * nreads
+                        ] = data[ii]
+                    count += new_points
+                    self.stats.append(stats)  # type: ignore[attr-defined]
+                    reps_pbar.update(new_points)
+
+                if count < total_count and cancel_flag.is_set():
+                    return self._finish_stopped_partial_accumulated_round(
+                        soc, stats_start=stats_start
+                    )
+
+        if cancel_flag.is_set():
+            return self._finish_stopped_partial_accumulated_round(
+                soc, stats_start=stats_start
+            )
+
+        assert self.rounds_buf is not None
+        assert self.acc_buf is not None
+        self.rounds_buf.append(self._process_accumulated(self.acc_buf))
+
+        soc.cleanup_round()
+        if self.rounds_pbar is not None:
+            self.rounds_pbar.update()
+        self.acquire_params["rounds_remaining"] -= 1
+        done = self.acquire_params["rounds_remaining"] <= 0
+        if done:
+            self._close_rounds_pbar()
+        elif cancel_flag.is_set():
+            self._close_rounds_pbar()
+            return False
+        return not done
+
+    def _finish_stopped_partial_accumulated_round(
+        self, soc, *, stats_start: int
+    ) -> bool:
+        self._stop_started_accumulated_round(soc)
+        self._discard_partial_accumulated_round()
+        if self.stats is not None:
+            del self.stats[stats_start:]
+        soc.cleanup_round()
+        self._close_rounds_pbar()
+        return False
+
+    def _stop_started_accumulated_round(self, soc) -> None:
+        stop_tproc = getattr(soc, "stop_tproc", None)
+        if callable(stop_tproc):
+            stop_tproc()
+
+        streamer = getattr(soc, "streamer", None)
+        stop_readout = getattr(streamer, "stop_readout", None)
+        if callable(stop_readout):
+            stop_readout()
+
+    def _cleanup_prepared_round(self) -> None:
+        assert self.acquire_params is not None
+        soc = self.acquire_params["soc"]
+        cleanup = getattr(soc, "cleanup_round", None)
+        if callable(cleanup):
+            cleanup()
+
+    def _discard_partial_accumulated_round(self) -> None:
+        if self.acc_buf is None:
+            return
+        for buffer in self.acc_buf:
+            np.copyto(buffer, 0)
+
+    def _close_rounds_pbar(self) -> None:
+        if self.rounds_pbar is not None:
+            self.rounds_pbar.close()
+
+    def _is_stopped_before_first_completed_round(self) -> bool:
+        if self.acquire_params is None:
+            return False
+        cancel_flag = cast(
+            CancelFlagProtocol | None, self.acquire_params.get("cancel_flag")
+        )
+        return (
+            cancel_flag is not None
+            and cancel_flag.is_set()
+            and self._completed_round_count() == 0
+        )
 
 
 class SingleShotMixin(TypedAcquireMixin):
@@ -188,7 +361,10 @@ class TrackerMixin(TypedAcquireMixin):
     """
 
     def finish_round(self) -> bool:
+        completed_rounds = self._completed_round_count()
         not_finish = super().finish_round()
+        if self._completed_round_count() == completed_rounds:
+            return not_finish
 
         assert self.acc_buf is not None
         assert self.acquire_params is not None
@@ -307,7 +483,10 @@ class RoundHookMixin(TypedAcquireMixin):
         return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
     def finish_round(self) -> bool:
+        completed_rounds = self._completed_round_count()
         not_finish = super().finish_round()
+        if self._completed_round_count() == completed_rounds:
+            return not_finish
 
         acquire_params = self.acquire_params
         assert acquire_params is not None
@@ -324,17 +503,30 @@ class RoundHookMixin(TypedAcquireMixin):
             if acquire_type == "accumulated":
                 # avg_d = self._summarize_accumulated(self.rounds_buf)
                 avg_d = self._inc_summarize_accumulated(self.rounds_buf)
-                round_hook(round_count, avg_d)
+                round_hook(round_count, avg_d, self._round_hook_cancel_flag())
             elif acquire_type == "decimated":
                 # dec_d = self._summarize_decimated(self.rounds_buf)
                 dec_d = self._inc_summarize_decimated(self.rounds_buf)
-                round_hook(round_count, dec_d)
+                round_hook(round_count, dec_d, self._round_hook_cancel_flag())
             else:
                 raise NotImplementedError(
                     f"Round hook is not implemented for type {acquire_type}"
                 )
 
+        cancel_flag = self._round_hook_cancel_flag()
+        if cancel_flag.is_set():
+            if self.rounds_pbar is not None:
+                self.rounds_pbar.close()
+            return False
         return not_finish
+
+    def _round_hook_cancel_flag(self) -> CancelFlagProtocol:
+        acquire_params = self.acquire_params
+        assert acquire_params is not None
+        cancel_flag = cast(CancelFlagProtocol | None, acquire_params.get("cancel_flag"))
+        if cancel_flag is None:
+            raise RuntimeError("round_hook requires acquire cancel_flag")
+        return cancel_flag
 
 
 class ImproveAcquireMixin(

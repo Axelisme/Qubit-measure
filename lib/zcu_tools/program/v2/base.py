@@ -79,7 +79,7 @@ class MyProgramV2(  # type: ignore[reportIncompatibleMethodOverride]
         # compute); the real round loop then runs unchanged and the soc's
         # poll_data computes each round lazily off the engine, so round_hook /
         # _process_accumulated / _summarize_accumulated / get_raw are all reused.
-        # ``stop_checkers`` stay owned by the real round loop's finish_round(),
+        # ``cancel_flag`` stays owned by the real round loop's finish_round(),
         # matching hardware's round-boundary stop semantics. With no SimParams this
         # branch is skipped entirely and behaviour is identical to the prior real
         # path (D1).

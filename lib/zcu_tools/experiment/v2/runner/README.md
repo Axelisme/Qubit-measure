@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-05 — acquire progress leave override
+**Last updated:** 2026-07-07 — stop flag acquire contract
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -171,11 +171,18 @@ executor leaf contract 由 `runner/task.py` 擁有：
 - `StopSignal` 是唯一 stop token；GUI worker 用 `schedule_stop_scope(StopSignal(event))`
   讓 scope 內所有 `Schedule` 共用同一個 stop event。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
-  `sched.is_stop` 注入 program acquire 的 `stop_checkers`，中斷粒度為 round-level。
+  acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
+  stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。
+  `StopSignal` 同時提供 `is_stop` / `set_stop` 與 external flag contract 的 `is_set` / `set`。
+- `ProgramBuilder` 的 data-driven early stop 走 `stop_condition=`：internal
+  round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
+  acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
+  仍是 `completed`。
 - `Schedule.outcome` 記錄 run 結果：`completed`、`stopped`、`interrupted` 或
   `failed`。stop / `KeyboardInterrupt` / program build、acquire 或分析例外都會設定 `StopSignal`
   並保留目前已寫入 buffer / result tree 的 partial result；已寫入的 slot 保留，
-  未完成的 slot 維持 NaN 初始化值。
+  未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
+  以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
 - `ProgramBuilder.build_and_acquire(..., retry=N)` /
   `run_program(..., retry=N)` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。

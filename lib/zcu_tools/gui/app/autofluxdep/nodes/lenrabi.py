@@ -53,7 +53,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     acquire_retry_generation_field,
     acquire_to_complex,
     axis_to_sweep,
-    build_stop_checkers,
+    build_stop_condition,
     is_good_fit,
     make_signal_update,
     require_flux_device,
@@ -476,7 +476,7 @@ class LenRabiNode(Node):
         result.flux[idx] = env.flux
 
         probe = SnrProbe()
-        stop_checkers = build_stop_checkers(env, probe, signal2real_flip)
+        stop_condition = build_stop_condition(env, probe, signal2real_flip)
         acquired = run_schedule_acquire(
             env=env,
             cfg=cfg,
@@ -497,7 +497,7 @@ class LenRabiNode(Node):
                 probe=probe,
             ),
             program_cls=ModularProgramV2,
-            stop_checkers=stop_checkers,
+            stop_condition=stop_condition,
         )
         if acquired.stopped:
             return Patch()

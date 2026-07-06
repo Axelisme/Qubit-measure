@@ -63,6 +63,7 @@ from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 from qick.asm_v2 import QickParam
 
+from zcu_tools.program.base import CancelFlagProtocol
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
@@ -166,7 +167,7 @@ def _lorentzian_quadrature(
 
 
 class SimCancelledError(RuntimeError):
-    """Raised when a mock simulation stops cooperatively via ``stop_checkers``."""
+    """Raised when a mock simulation stops cooperatively via ``cancel_flag``."""
 
 
 @dataclass(frozen=True)
@@ -444,7 +445,7 @@ class SimEngine:
         self,
         program,
         sim: SimParams,
-        stop_checkers: list[Callable[[], bool]] | None = None,
+        cancel_flag: CancelFlagProtocol | None = None,
         *,
         rng_seed: int | np.random.SeedSequence | None = None,
     ) -> None:
@@ -471,7 +472,7 @@ class SimEngine:
 
         self.program = program
         self.sim = sim
-        self._stop_checkers = tuple(stop_checkers or ())
+        self._cancel_flag = cancel_flag
 
         # Deterministic per-(sweep-point, read) blob grids plus integration
         # scales, and the rep-resolved excited-population grid, built lazily on
@@ -521,13 +522,10 @@ class SimEngine:
             self._detune_weights = np.ones(1, dtype=np.float64)
 
     def _raise_if_cancelled(self) -> None:
-        """Fail fast when any acquire-level stop checker requests cancellation."""
+        """Fail fast when a direct/internal stop flag requests cancellation."""
 
-        for checker in self._stop_checkers:
-            if checker():
-                raise SimCancelledError(
-                    "mock simulation cancelled because a stop_checker returned True"
-                )
+        if self._cancel_flag is not None and self._cancel_flag.is_set():
+            raise SimCancelledError("mock simulation cancelled by cancel_flag")
 
     # ----------------------------------------------------------- sweep points
     def _sweep_axes(self) -> list[tuple[str, int]]:
@@ -661,7 +659,7 @@ class SimEngine:
         numba_work_units = len(unique_population_keys) * reps * node_count
         use_numba = (
             _population_chain_numba is not None
-            and not self._stop_checkers
+            and self._cancel_flag is None
             and numba_work_units >= _numba_min_work_units(node_count)
         )
 

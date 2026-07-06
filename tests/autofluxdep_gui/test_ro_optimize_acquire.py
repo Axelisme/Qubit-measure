@@ -91,7 +91,7 @@ def test_ro_optimize_acquire_finds_best_point():
         assert "opt_readout" in patch.modules()
 
 
-def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
+def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
     ctrl = build_core()
     sim_params = high_snr_simparams()
     connect_mock(ctrl, sim_params=sim_params)
@@ -107,9 +107,11 @@ def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
 
         def acquire(self, *args, **kwargs):
             del args
-            captured["stop_checkers"] = kwargs.get("stop_checkers")
+            cancel_flag = kwargs["cancel_flag"]
+            captured["cancel_flag_initial"] = cancel_flag.is_set()
             captured["trackers"] = kwargs.get("trackers")
-            kwargs["round_hook"](1, object())
+            kwargs["round_hook"](1, object(), cancel_flag)
+            captured["cancel_flag_after_round"] = cancel_flag.is_set()
             return object()
 
         def acquire_decimated(self, *args, **kwargs):
@@ -131,8 +133,11 @@ def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
     schema = node_schema(builder, {**_PARAMS, "rounds": 2})
     result = builder.make_init_result(schema, np.asarray([0.0]))
 
+    stop_polls = {"count": 0}
+
     def should_stop() -> bool:
-        return False
+        stop_polls["count"] += 1
+        return True
 
     env = make_acquire_env(
         ctrl,
@@ -150,10 +155,9 @@ def test_ro_optimize_acquire_threads_stop_checker(monkeypatch):
 
     builder.build_node(env).produce(snap)
 
-    stop_checkers = captured["stop_checkers"]
-    assert isinstance(stop_checkers, list)
-    assert should_stop in stop_checkers
-    assert len(stop_checkers) >= 2
+    assert captured["cancel_flag_initial"] is False
+    assert captured["cancel_flag_after_round"] is False
+    assert stop_polls["count"] == 0
     trackers = captured["trackers"]
     assert isinstance(trackers, list)
     assert trackers

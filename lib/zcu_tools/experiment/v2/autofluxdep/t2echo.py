@@ -180,13 +180,11 @@ class T2EchoTask(
             )
             .declare_sweep("length", length_sweep)
             .build_and_acquire(
-                stop_checkers=[
-                    snr_checker(
-                        signals_buffer.at(),
-                        self.earlystop_snr,
-                        t2echo_signal2real,
-                    )
-                ],
+                stop_condition=snr_checker(
+                    signals_buffer.at(),
+                    self.earlystop_snr,
+                    t2echo_signal2real,
+                ),
             )
         )
 

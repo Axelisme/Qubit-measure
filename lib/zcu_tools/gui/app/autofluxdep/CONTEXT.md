@@ -39,8 +39,9 @@ Node's `produce` builds the real run cfg from that context (`Builder.make_cfg`
 stores a device name, e.g. the auto-provisioned `fake_flux`; the lower layer's
 `flux_dev` label is a different dimension), pushes it with `setup_devices`, then
 runs the experiment program's `.acquire` (TwoToneProgram / ModularProgramV2 /
-…) with a running-average `round_hook` + `stop_checkers` (cooperative cancel +
-SNR early-stop), and fits — `qubit_freq` keeps the raw predictor immutable and
+…) with a running-average `round_hook` + completed-round SNR `stop_condition`
+(cooperative cancel flows through the ambient Schedule stop flag), and fits — `qubit_freq` keeps the raw
+predictor immutable and
 composes run-local physical overlay plus residual feedback; `ro_optimize`
 takes an argmax, `mist` reads the variance, both
 without a fit. There is **no synthetic fallback**: `make_cfg` Fast Fails
@@ -49,7 +50,7 @@ without a fit. There is **no synthetic fallback**: `make_cfg` Fast Fails
 never aborted). Offline, the acquire runs against the **flux-aware MockSoc**
 (`connect_mock` provisions `fake_flux`); since the SimEngine reads the operating
 flux live, the acquired signal varies with the swept flux. The shared
-real-acquire helpers (set-flux / stop-checkers / fit-quality gate / axis parse)
+real-acquire helpers (set-flux / stop condition / fit-quality gate / axis parse)
 live in `nodes/acquire.py`.
 
 ## Language

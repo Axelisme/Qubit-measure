@@ -347,7 +347,7 @@ def _mocked_qubit_freq_produce_env(
         def acquire(self, *args, **kwargs):
             del args
             raw = [[np.zeros((result.n_detune, 2), dtype=np.float64)]]
-            kwargs["round_hook"](1, raw)
+            kwargs["round_hook"](1, raw, kwargs["cancel_flag"])
             return raw
 
         def acquire_decimated(self, *args, **kwargs):

@@ -329,14 +329,12 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                         )
                         .declare_sweep("length", length_sweep)
                         .build_and_acquire(
-                            stop_checkers=[
-                                snr_checker(
-                                    signals_buffer[step],
-                                    earlystop_snr,
-                                    lambda x: rotate2real(x).real,
-                                    after_check=update_snr,
-                                )
-                            ],
+                            stop_condition=snr_checker(
+                                signals_buffer[step],
+                                earlystop_snr,
+                                lambda x: rotate2real(x).real,
+                                after_check=update_snr,
+                            ),
                             **(acquire_kwargs or {}),
                         )
                     )

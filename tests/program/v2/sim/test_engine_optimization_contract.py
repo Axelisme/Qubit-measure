@@ -11,6 +11,7 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.program.base import StoppedPartialAcquireError
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -44,6 +45,17 @@ def _clear_segment_propagator_lru() -> Iterator[None]:
     engine_module._cached_segment_propagator.cache_clear()
     yield
     engine_module._cached_segment_propagator.cache_clear()
+
+
+class _CancelFlag:
+    def __init__(self) -> None:
+        self._is_set = False
+
+    def is_set(self) -> bool:
+        return self._is_set
+
+    def set(self) -> None:
+        self._is_set = True
 
 
 def _segment(
@@ -94,21 +106,17 @@ def test_engine_lazy_compute_respects_early_stop(
     """R-2: an early-stopping run never computes the rounds it does not poll.
 
     With lazy poll-time compute the soc asks the engine for round N only when it
-    polls round N.  A stop_checker that fires after the first round halts the
+    polls round N.  A round hook that sets the stop flag after the first round halts the
     round loop, so compute_round is called exactly once even though 5 rounds were
     configured — proving the unpolled rounds' physics is never computed.
     """
 
     calls: list[int] = []
-    completed_rounds = 0
     real_compute_round = SimEngine.compute_round
 
     def spy_compute_round(self: SimEngine, round_idx: int):
-        nonlocal completed_rounds
         calls.append(round_idx)
-        result = real_compute_round(self, round_idx)
-        completed_rounds += 1
-        return result
+        return real_compute_round(self, round_idx)
 
     monkeypatch.setattr(SimEngine, "compute_round", spy_compute_round)
 
@@ -129,13 +137,16 @@ def test_engine_lazy_compute_respects_early_stop(
         modules=[pulse, _readout(_rf_g_mhz())],
     )
 
-    # The stop_checker fires after the first round has been computed, so this
+    # The hook fires after the first round has been computed, so this
     # remains a round-boundary early-stop test rather than an intra-round cancel
     # test (covered separately below).
+    def stop_after_first_round(_round_count: int, _raw, cancel_flag) -> None:
+        cancel_flag.set()
+
     prog.acquire(
         soc,
         progress=False,
-        stop_checkers=[lambda: completed_rounds >= 1],
+        round_hook=stop_after_first_round,
     )
 
     assert calls == [0], (
@@ -143,10 +154,10 @@ def test_engine_lazy_compute_respects_early_stop(
     )
 
 
-def test_acquire_stop_checker_is_checked_only_after_mock_round(
+def test_acquire_round_hook_cancel_flag_is_checked_after_mock_round(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Acquire-level stop_checkers keep hardware-like round-boundary semantics."""
+    """Acquire-level stop flags keep hardware-like round-boundary semantics."""
 
     calls: list[int] = []
     real_compute_round = SimEngine.compute_round
@@ -172,19 +183,37 @@ def test_acquire_stop_checker_is_checked_only_after_mock_round(
         modules=[pulse, _readout(_rf_g_mhz())],
     )
 
-    def stop_at_round_boundary() -> bool:
-        return True
+    def stop_at_round_boundary(_round_count: int, _raw, cancel_flag) -> None:
+        cancel_flag.set()
 
     prog.acquire(
         soc,
         progress=False,
-        stop_checkers=[stop_at_round_boundary],
+        round_hook=stop_at_round_boundary,
     )
 
     assert calls == [0], (
-        "acquire-level stop checker should stop after the first completed round, "
+        "acquire-level stop flag should stop after the first completed round, "
         f"not before mock round compute; got rounds {calls}"
     )
+
+
+def test_acquire_stop_before_first_round_raises_stopped_partial() -> None:
+    """Stopping before any completed round never averages an empty rounds buffer."""
+
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=20, rounds=5),
+        modules=[_readout(_rf_g_mhz())],
+    )
+    cancel_flag = _CancelFlag()
+    cancel_flag.set()
+
+    with pytest.raises(StoppedPartialAcquireError, match="first round"):
+        prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
+
+    assert prog.get_rounds() == []
 
 
 def test_segment_propagator_lru_reuses_identical_resolved_segment(
@@ -289,12 +318,14 @@ def test_sequence_prefix_cache_reuses_common_prefix() -> None:
     np.testing.assert_allclose(abd, engine_module._sequence_propagator((a, b, d)))
 
 
-def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(
+def test_acquire_cancel_flag_does_not_cancel_inside_mock_signal_grid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Acquire-level stop_checkers do not interrupt one mock round mid-compute."""
+    """Acquire-level stop flags discard a mock round only after poll_data returns."""
 
     readout_calls = 0
+    cancel_flag = _CancelFlag()
+    stop_tproc_calls = 0
 
     def fake_operating_signal(self: SimEngine) -> tuple[float, float, float]:
         return (4.0, 7.0, 7.01)
@@ -311,6 +342,8 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(
         del self, lowered, f_qubit_ghz, rf_g, rf_e, n_samples, sample_times_us
         nonlocal readout_calls
         readout_calls += 1
+        if readout_calls >= 2:
+            cancel_flag.set()
         return _PointReadout(
             s_g=np.array([1.0 + 0.0j], dtype=np.complex128),
             s_e=np.array([0.0 + 0.0j], dtype=np.complex128),
@@ -324,6 +357,14 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(
     monkeypatch.setattr(SimEngine, "_point_readout_model", fake_point_readout_model)
 
     soc, soccfg = make_mock_soc(sim=_SIM.model_copy(update={"poll_latency": 0.0}))
+    real_stop_tproc = soc.stop_tproc
+
+    def spy_stop_tproc(*args, **kwargs) -> None:
+        nonlocal stop_tproc_calls
+        stop_tproc_calls += 1
+        real_stop_tproc(*args, **kwargs)
+
+    soc.stop_tproc = spy_stop_tproc
     sw = SweepCfg(start=7000.0, stop=7010.0, expts=8, step=10.0 / 7)
     ro_param = sweep2param("ro_freq", sw)
     readout = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=ro_param).build("ro")
@@ -334,18 +375,19 @@ def test_acquire_stop_checker_does_not_cancel_inside_mock_signal_grid(
         sweep=[("ro_freq", sw)],
     )
 
-    def stop_after_two_points() -> bool:
-        return readout_calls >= 2
-
-    prog.acquire(soc, progress=False, stop_checkers=[stop_after_two_points])
+    with pytest.raises(StoppedPartialAcquireError, match="first round"):
+        prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
 
     assert readout_calls == sw.expts
+    assert prog.get_rounds() == []
+    assert prog.stats == []
+    assert stop_tproc_calls >= 1
 
 
 def test_engine_cancel_during_detune_loop_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The Lorentzian detune ensemble loop checks stop_checkers cooperatively."""
+    """The Lorentzian detune ensemble loop checks cancel_flag cooperatively."""
 
     sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
     soc, soccfg = make_mock_soc(sim=sim)
@@ -381,15 +423,15 @@ def test_engine_cancel_during_detune_loop_raises(
         del segments
         nonlocal propagator_calls
         propagator_calls += 1
+        if propagator_calls >= 3:
+            cancel_flag.set()
         return np.eye(4, dtype=np.float64)
-
-    def stop_after_three_detune_nodes() -> bool:
-        return propagator_calls >= 3
 
     monkeypatch.setattr(SimEngine, "_lower", fake_lower)
     monkeypatch.setattr(engine_module, "_sequence_propagator", fake_sequence_propagator)
 
-    engine = SimEngine(prog, sim, stop_checkers=[stop_after_three_detune_nodes])
+    cancel_flag = _CancelFlag()
+    engine = SimEngine(prog, sim, cancel_flag=cancel_flag)
     lowered = engine._lower({}, 4.0, 0.0)
     with pytest.raises(SimCancelledError, match="cancelled"):
         engine._point_evolution_props({}, 4.0, lowered)
@@ -525,7 +567,7 @@ def test_engine_scalar_population_chain_applies_readout_damping_before_relax() -
         inter_shot_props=(identity,),
     )
     engine = object.__new__(SimEngine)
-    engine._stop_checkers = ()
+    engine._cancel_flag = None
     engine._detune_weights = np.ones(1, dtype=np.float64)
 
     actual = engine._point_population_chain(model, reps=reps, nreads=1, use_numba=False)
@@ -558,7 +600,7 @@ def test_population_chain_q_post_one_skips_amplitude_damping_scalar(
         inter_shot_props=(relax_to_ground,),
     )
     engine = object.__new__(SimEngine)
-    engine._stop_checkers = ()
+    engine._cancel_flag = None
     engine._detune_weights = np.ones(1, dtype=np.float64)
 
     def fail_damping(_state: object, _q_post: object) -> NDArray[np.float64]:
@@ -592,7 +634,7 @@ def test_population_chain_q_post_one_skips_amplitude_damping_batched_fallback(
         inter_shot_props=(identity, identity),
     )
     engine = object.__new__(SimEngine)
-    engine._stop_checkers = ()
+    engine._cancel_flag = None
     engine._detune_weights = np.array([0.25, 0.75], dtype=np.float64)
 
     def fail_damping(_state: object, _q_post: object) -> NDArray[np.float64]:
@@ -640,7 +682,7 @@ def test_population_chain_q_post_near_one_still_uses_damping(
         inter_shot_props=(identity,),
     )
     engine = object.__new__(SimEngine)
-    engine._stop_checkers = ()
+    engine._cancel_flag = None
     engine._detune_weights = np.ones(1, dtype=np.float64)
 
     engine._point_population_chain(model, reps=3, nreads=1, use_numba=False)
@@ -942,13 +984,13 @@ def test_engine_uses_numba_for_large_single_node_unique_population_work(
     assert calls == sw.expts
 
 
-def test_engine_skips_numba_when_stop_checkers_are_registered(
+def test_engine_skips_numba_when_cancel_flag_is_registered(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Direct/internal stop checkers keep the Python-loop cancellation boundary."""
+    """Direct/internal stop flags keep the Python-loop cancellation boundary."""
 
     def fail_numba(*_args: object, **_kwargs: object) -> NDArray[np.float64]:
-        raise AssertionError("stop-checker signal grids should not use numba")
+        raise AssertionError("stop-flag signal grids should not use numba")
 
     monkeypatch.setattr(engine_module, "_NUMBA_MIN_SINGLE_NODE_WORK_UNITS", 1)
     monkeypatch.setattr(engine_module, "_population_chain_numba", fail_numba)
@@ -973,7 +1015,7 @@ def test_engine_skips_numba_when_stop_checkers_are_registered(
     )
     prog.compile()
 
-    engine = SimEngine(prog, _SIM, stop_checkers=[lambda: False])
+    engine = SimEngine(prog, _SIM, cancel_flag=_CancelFlag())
     engine._ensure_signal()
 
 
