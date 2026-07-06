@@ -43,9 +43,9 @@ from typing import Any, cast
 
 import numpy as np
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.autofluxdep.t2ramsey import T2RamseyModuleCfg
 from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain.t2ramsey import (
     T2RamseyAdapter,
 )
@@ -106,9 +106,9 @@ from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
     Readout,
-    Reset,
     sweep2param,
 )
+from zcu_tools.program.v2.modules import PulseCfg, ReadoutCfg
 from zcu_tools.utils.fitting import fit_decay_fringe
 
 logger = logging.getLogger(__name__)
@@ -126,13 +126,21 @@ _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
 _RELAX_DELAY_MODE_FIXED = "fixed"
 
 
+class T2RamseyModuleCfg(ConfigBase):
+    """The module bundle a t2ramsey run cfg carries."""
+
+    pi2_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
 class T2RamseyCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     """The base Ramsey cfg t2ramsey lowers a context into.
 
     ``ProgramV2Cfg`` (reps/rounds/relax) + the ``ExpCfgModel`` device/save fields,
-    plus the Ramsey ``modules`` (``pi2_pulse`` + ``readout``, optional ``reset``)
-    and a free ``sweep_range`` (the delay-time span) — mirroring the lower-layer
-    ``experiment/v2/autofluxdep`` ``T2RamseyCfgTemplate``. The flux ``dev`` entry,
+    plus the Ramsey ``modules`` (``pi2_pulse`` + ``readout``) and a free
+    ``sweep_range`` (the delay-time span) — mirroring the lower-layer
+    ``experiment/v2/autofluxdep`` ``T2RamseyCfgTemplate`` without the unused reset.
+    The flux ``dev`` entry,
     the concrete ``length`` sweep, and ``activate_detune`` are merged in by the
     lower-layer ``run()`` (not here): this template is the cfg-maker output, and
     ``produce`` reads the planted-t2 baseline from ``sweep_range``.
@@ -233,7 +241,6 @@ class T2RamseyNode(Node):
             dtype=np.complex128,
             configure_builder=lambda builder: builder.add(
                 [
-                    Reset("reset", cfg.modules.reset),
                     Pulse("pi2_pulse1", pi2_pulse),
                     Delay("t2r_delay", delay=length_param),
                     Pulse(
@@ -322,7 +329,6 @@ class T2RamseyBuilder(Builder):
             T2RamseyAdapter,
             ctx,
             logical_paths={
-                "reset": "modules.reset",
                 "pi2_pulse": "modules.pi2_pulse",
                 "readout": "modules.readout",
                 "relax_delay": "relax_delay",
@@ -411,6 +417,7 @@ class T2RamseyBuilder(Builder):
                     expts=101,
                 ),
             },
+            drop_paths=("modules.reset",),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 

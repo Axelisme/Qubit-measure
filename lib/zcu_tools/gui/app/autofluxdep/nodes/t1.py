@@ -115,8 +115,6 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     Readout,
     ReadoutCfg,
-    Reset,
-    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_decay
@@ -139,13 +137,11 @@ _RELAX_DELAY_MODE_FIXED = "fixed"
 class T1ModuleCfg(ConfigBase):
     """t1's run modules — mirrors the lower-layer ``experiment/v2/autofluxdep``.
 
-    ``pi_pulse`` excites the qubit, ``readout`` measures it after the relax delay;
-    ``reset`` is optional (notebook omits it, so it stays None). Both ``pi_pulse``
-    and ``readout`` are taken from the snapshot (lenrabi / ro_optimize produce
-    them), not built from params.
+    ``pi_pulse`` excites the qubit and ``readout`` measures it after the relax
+    delay. Both modules are taken from the snapshot (lenrabi / ro_optimize
+    produce them), not built from params.
     """
 
-    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -201,7 +197,7 @@ class T1Node(Node):
     """One flux point's t1: set flux → real acquire → fit_decay → fill row → Patch.
 
     Mirrors the lower-layer T1 Schedule acquire + ``run``: a
-    ``ModularProgramV2`` (Reset → pi_pulse → variable Delay → Readout) sweeps the
+    ``ModularProgramV2`` (pi_pulse → variable Delay → Readout) sweeps the
     relax delay (its axis spans ``5 × smoothed_t1``, from ``make_cfg``), and
     ``fit_decay`` recovers T1.
     """
@@ -247,7 +243,6 @@ class T1Node(Node):
             dtype=np.complex128,
             configure_builder=lambda builder: builder.add(
                 [
-                    Reset("reset", cfg.modules.reset),
                     Pulse("pi_pulse", cfg.modules.pi_pulse),
                     Delay("t1_delay", delay=length_param),
                     Readout("readout", cfg.modules.readout),
@@ -304,7 +299,6 @@ class T1Builder(Builder):
             T1Adapter,
             ctx,
             logical_paths={
-                "reset": "modules.reset",
                 "pi_pulse": "modules.pi_pulse",
                 "readout": "modules.readout",
                 "relax_delay": "relax_delay",
@@ -392,6 +386,7 @@ class T1Builder(Builder):
                     expts=101,
                 ),
             },
+            drop_paths=("modules.reset",),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 

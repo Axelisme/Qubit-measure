@@ -107,8 +107,6 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     PulseReadout,
     PulseReadoutCfg,
-    Reset,
-    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.process import smooth_signal_nd
@@ -225,15 +223,15 @@ def _accepted_ro_optimum(
 # the notebook raw cfg shape: previous-best center ± a small range. A calibrated
 # readout or previous ro_optimize result recenters the real run.
 _DEFAULT_FREQ_RANGE: tuple[float, float, int] = (5999.0, 6001.0, 21)
-_DEFAULT_GAIN_RANGE: tuple[float, float, int] = (0.45, 0.55, 21)
+_DEFAULT_GAIN_RANGE: tuple[float, float, int] = (0.0, 0.2, 21)
 
 _DEFAULT_CENTER_FREQ = 6000.0  # MHz — baseline readout resonance fallback
-_DEFAULT_CENTER_GAIN = 0.5
+_DEFAULT_CENTER_GAIN = 0.1
 
 _DEFAULT_T1 = 10.0  # us — fallback T1 for the relax_delay (3·T1)
 _DEFAULT_RELAX_FACTOR = 3.0
 _DEFAULT_FREQ_HALF_WIDTH = 1.0
-_DEFAULT_GAIN_HALF_WIDTH = 0.05
+_DEFAULT_GAIN_HALF_WIDTH = 0.1
 _RANGE_MODE_PREVIOUS_BEST = "previous_best"
 _RANGE_MODE_FIXED = "fixed"
 _WINDOW_MODE_DEFAULT_SWEEP = "from_default_sweep"
@@ -243,14 +241,13 @@ _RELAX_DELAY_MODE_FIXED = "fixed"
 
 
 class RoOptimizeModuleCfg(ConfigBase):
-    """The modules ro_optimize lowers — an optional reset + the pi-pulse + readout.
+    """The modules ro_optimize lowers — the pi-pulse + readout.
 
     Mirrors the lower-layer ``experiment/v2/autofluxdep`` ``RO_OptModuleCfg``: the
     ``pi_pulse`` prepares the excited state and the ``readout`` is the pulse whose
     ``freq`` / ``gain`` the sweep optimises over.
     """
 
-    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     readout: PulseReadoutCfg
 
@@ -340,7 +337,7 @@ class RoOptimizeNode(Node):
     """One flux point's ro_optimize: set flux → real acquire → SNR argmax → Patch.
 
     Mirrors the lower-layer RO optimize Schedule acquire + ``run``: a
-    ``ModularProgramV2`` (Reset → ge-Branch(pi_pulse) → PulseReadout) sweeps the
+    ``ModularProgramV2`` (ge-Branch(pi_pulse) → PulseReadout) sweeps the
     readout freq × gain (interleaved with the ge axis), a ``MomentTracker``
     accumulates per-shot moments, and ``snr_as_signal`` turns them
     into an SNR landscape whose argmax is the best (freq, gain). No fit step.
@@ -414,7 +411,6 @@ class RoOptimizeNode(Node):
             configure_builder=lambda builder: (
                 builder.add(
                     [
-                        Reset("reset", cfg.modules.reset),
                         Branch("ge", [], Pulse("pi_pulse", cfg.modules.pi_pulse)),
                         PulseReadout("readout", cfg.modules.readout),
                     ]
@@ -517,7 +513,6 @@ class RoOptimizeBuilder(Builder):
             RoOptFreqGainAdapter,
             ctx,
             logical_paths={
-                "reset": "modules.reset",
                 "pi_pulse": "modules.pi_pulse",
                 "readout": "modules.readout",
                 "relax_delay": "relax_delay",
@@ -619,6 +614,7 @@ class RoOptimizeBuilder(Builder):
                 ),
             },
             path_renames={"modules.qub_pulse": "modules.pi_pulse"},
+            drop_paths=("modules.reset",),
         )
 
     def make_init_result(

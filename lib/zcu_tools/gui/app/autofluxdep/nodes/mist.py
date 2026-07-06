@@ -1,9 +1,9 @@
 """mist — 1D gain sweep with variance readout.
 
 Sets this flux point's value on the picked flux device, sets up devices, acquires
-a state-disturbance curve over a gain axis with ``ModularProgramV2`` (Reset →
-pi_pulse → mist_pulse → Readout), reads the variance directly — there is no fit
-step — and fills its Sweep1DResult row in place. ``fit_value`` and ``fit_curve``
+a state-disturbance curve over a gain axis with ``ModularProgramV2`` (pi_pulse →
+mist_pulse → Readout), reads the variance directly — there is no fit step — and
+fills its Sweep1DResult row in place. ``fit_value`` and ``fit_curve``
 remain nan (allocated as nan by ``Sweep1DResult.allocate``); the
 ``ColormapLinePlotter`` shows the flux × gain colormap with the latest flux rows
 as traces (no fit marker).
@@ -79,7 +79,6 @@ from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
     Readout,
-    Reset,
     sweep2param,
 )
 
@@ -109,13 +108,11 @@ class MistModuleCfg(ConfigBase):
 
     ``pi_pulse`` prepares the excited state, ``mist_pulse`` is the disturbance
     drive whose gain the experiment sweeps, and ``readout`` reads the resulting
-    state. ``reset`` is optional (none in the prototype). Typed loosely as ``Any``
-    here — ``ml.make_cfg`` lowers the raw dicts/modules into the concrete
+    state. Typed loosely as ``Any`` here — ``ml.make_cfg`` lowers the raw dicts/modules into the concrete
     PulseCfg / ReadoutCfg via the module factory; the lower-layer
     ``experiment/v2/autofluxdep`` ``MistCfgTemplate`` carries the strict types.
     """
 
-    reset: Any | None = None
     pi_pulse: Any
     mist_pulse: Any
     readout: Any
@@ -196,7 +193,6 @@ class MistNode(Node):
             dtype=np.float64,
             configure_builder=lambda builder: builder.add(
                 [
-                    Reset("reset", cfg.modules.reset),
                     Pulse("pi_pulse", cfg.modules.pi_pulse),
                     Pulse("mist_pulse", cfg.modules.mist_pulse),
                     Readout("readout", cfg.modules.readout),
@@ -255,7 +251,6 @@ class MistBuilder(Builder):
             MistPowerAdapter,
             ctx,
             logical_paths={
-                "reset": "modules.reset",
                 "pi_pulse": "modules.pi_pulse",
                 "mist_pulse": "modules.mist_pulse",
                 "mist_ch": "modules.mist_pulse.ch",
@@ -272,7 +267,7 @@ class MistBuilder(Builder):
             generation_fields=(acquire_retry_generation_field(),),
             duplicate_paths={"modules.probe_pulse": "modules.pi_pulse"},
             path_renames={"modules.probe_pulse": "modules.mist_pulse"},
-            drop_paths=("modules.init_pulse",),
+            drop_paths=("modules.init_pulse", "modules.reset"),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
             default_overrides={"rounds": 10},
         )

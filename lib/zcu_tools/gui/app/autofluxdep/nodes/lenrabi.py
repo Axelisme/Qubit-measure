@@ -95,8 +95,6 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     Readout,
     ReadoutCfg,
-    Reset,
-    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_rabi
@@ -112,7 +110,7 @@ _DEFAULT_SWEEP_STOP_MIN = 0.5
 _DEFAULT_RELAX_FACTOR = 3.0
 _DEFAULT_RELAX_MIN = 0.0
 _DEFAULT_PI_PRODUCT_FACTOR = 1.2
-_DEFAULT_MAX_DRIVE_GAIN = 1.0
+_DRIVE_GAIN_CAP = 1.0
 _MIN_TRUSTED_PI_LENGTH = 0.03
 _MAX_PI_SWEEP_FRACTION = 0.9
 _MAX_FIT_RESIDUAL_RATIO = 0.1
@@ -134,10 +132,9 @@ _DRIVE_GAIN_SLOT = FeedbackSlotDecl(
 
 class LenRabiModuleCfg(ConfigBase):
     """The module bundle lenrabi lowers a context into (mirrors the lower-layer
-    ``experiment/v2/autofluxdep`` LenRabiModuleCfg): an optional reset, the
-    on-resonance ``rabi_pulse`` (the swept drive), and the ``readout``."""
+    ``experiment/v2/autofluxdep`` LenRabiModuleCfg without the unused reset): the
+    on-resonance ``rabi_pulse`` (the swept drive) and the ``readout``."""
 
-    reset: ResetCfg | None = None
     rabi_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -230,12 +227,12 @@ def _resolve_cfg_relax_delay(
 
 
 def _drive_gain_from_pi_product(
-    pi_product: float, target_pi_length: float, *, factor: float, max_drive_gain: float
+    pi_product: float, target_pi_length: float, *, factor: float, drive_gain_cap: float
 ) -> float:
     product = _require_positive_finite("pi_product", pi_product)
     target = _require_positive_finite("target_pi_length", target_pi_length)
     gain_factor = _require_positive_finite("pi_product_factor", factor)
-    gain_cap = _require_positive_finite("max_drive_gain", max_drive_gain)
+    gain_cap = _require_positive_finite("drive_gain_cap", drive_gain_cap)
     return min(gain_cap, product / (gain_factor * target))
 
 
@@ -252,17 +249,17 @@ def _resolve_drive_gain(
             pi_product,
             target_pi_length,
             factor=float(knobs["pi_product_factor"]),
-            max_drive_gain=float(knobs["max_drive_gain"]),
+            drive_gain_cap=_DRIVE_GAIN_CAP,
         )
     if mode == _DRIVE_GAIN_MODE_FIXED:
         return float(fixed)
     raise RuntimeError(f"unsupported lenrabi drive_gain_mode: {mode!r}")
 
 
-def _clamp_drive_gain(value: float, knobs: dict[str, Any]) -> float:
+def _clamp_drive_gain(value: float) -> float:
     gain = _require_positive_finite("drive_gain", value)
-    max_gain = _require_positive_finite("max_drive_gain", knobs["max_drive_gain"])
-    return min(max_gain, gain)
+    gain_cap = _DRIVE_GAIN_CAP
+    return min(gain_cap, gain)
 
 
 def _blend_positive(prior: float, feedback: float, confidence: float) -> float:
@@ -439,7 +436,7 @@ class LenRabiNode(Node):
     """One flux point's lenrabi: set flux → real acquire → fit_rabi → fill row → Patch.
 
     Mirrors the lower-layer LenRabi Schedule acquire + ``run``: the on-resonance
-    drive sweeps its pulse length, ``ModularProgramV2`` (Reset → rabi_pulse → Readout)
+    drive sweeps its pulse length, ``ModularProgramV2`` (rabi_pulse → Readout)
     acquires per round, and ``fit_rabi`` recovers the pi / pi2 lengths + Rabi freq.
     """
 
@@ -486,7 +483,6 @@ class LenRabiNode(Node):
             dtype=np.complex128,
             configure_builder=lambda builder: builder.add(
                 [
-                    Reset("reset", cfg.modules.reset),
                     Pulse("rabi_pulse", cfg.modules.rabi_pulse),
                     Readout("readout", cfg.modules.readout),
                 ]
@@ -560,7 +556,6 @@ class LenRabiBuilder(Builder):
             LenRabiAdapter,
             ctx,
             logical_paths={
-                "reset": "modules.reset",
                 "rabi_pulse": "modules.rabi_pulse",
                 "qub_ch": "modules.rabi_pulse.ch",
                 "qub_nqz": "modules.rabi_pulse.nqz",
@@ -660,12 +655,6 @@ class LenRabiBuilder(Builder):
                     _DEFAULT_PI_PRODUCT_FACTOR,
                     group="feedback",
                 ),
-                logical_generation_field(
-                    "max_drive_gain",
-                    FloatSpec(label="max_drive_gain"),
-                    _DEFAULT_MAX_DRIVE_GAIN,
-                    group="feedback",
-                ),
                 *feedback_generation_fields(_DRIVE_GAIN_SLOT),
             ),
             default_overrides={
@@ -686,6 +675,7 @@ class LenRabiBuilder(Builder):
                 ),
             },
             path_renames={"modules.qub_pulse": "modules.rabi_pulse"},
+            drop_paths=("modules.reset",),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 
@@ -803,7 +793,7 @@ class LenRabiBuilder(Builder):
                         latest.value,
                         latest.confidence,
                     )
-                    drive_gain = _clamp_drive_gain(drive_gain, knobs)
+                    drive_gain = _clamp_drive_gain(drive_gain)
         patches: dict[str, object] = {
             "modules.rabi_pulse.freq": qubit_freq,
         }

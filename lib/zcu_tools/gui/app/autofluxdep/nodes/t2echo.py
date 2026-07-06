@@ -101,10 +101,9 @@ from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
     Readout,
-    Reset,
     sweep2param,
 )
-from zcu_tools.program.v2.modules import PulseCfg, ReadoutCfg, ResetCfg
+from zcu_tools.program.v2.modules import PulseCfg, ReadoutCfg
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 
 logger = logging.getLogger(__name__)
@@ -179,14 +178,13 @@ def _fit_t2echo(
 class T2EchoModuleCfg(ConfigBase):
     """The module bundle a t2echo run cfg carries.
 
-    Mirrors the lower-layer ``experiment/v2/autofluxdep`` ``T2EchoModuleCfg``: an
-    optional reset, the pi refocusing pulse, the pi/2 pulse (used twice in the
-    Hahn-echo sequence), and the readout. ``pi_pulse`` / ``pi2_pulse`` are the
+    Mirrors the lower-layer ``experiment/v2/autofluxdep`` ``T2EchoModuleCfg``
+    without the unused reset: the pi refocusing pulse, the pi/2 pulse (used
+    twice in the Hahn-echo sequence), and the readout. ``pi_pulse`` / ``pi2_pulse`` are the
     lenrabi-produced drive pulses; ``readout`` is the (optionally optimised)
     readout module.
     """
 
-    reset: ResetCfg | None = None
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
@@ -259,7 +257,6 @@ class T2EchoNode(Node):
             dtype=np.complex128,
             configure_builder=lambda builder: builder.add(
                 [
-                    Reset("reset", cfg.modules.reset),
                     Pulse("pi2_pulse1", pi2_pulse),
                     Delay("t2e_delay1", delay=0.5 * length_param),
                     Pulse("pi_pulse", cfg.modules.pi_pulse),
@@ -348,7 +345,6 @@ class T2EchoBuilder(Builder):
             T2EchoAdapter,
             ctx,
             logical_paths={
-                "reset": "modules.reset",
                 "pi_pulse": "modules.pi_pulse",
                 "pi2_pulse": "modules.pi2_pulse",
                 "readout": "modules.readout",
@@ -431,7 +427,7 @@ class T2EchoBuilder(Builder):
                 ),
             ),
             default_overrides={
-                "detune_ratio": 0.05,
+                "detune_ratio": 0.1,
                 "rounds": 10,
                 "relax_delay": auto_relax_delay_from_t1(
                     t1_seed,
@@ -448,11 +444,12 @@ class T2EchoBuilder(Builder):
                     expts=101,
                 ),
             },
+            drop_paths=("modules.reset",),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 
     def detune_ratio(self, schema: NodeCfgSchema, md: Any = None) -> float:
-        """The activate-detune ratio for this placement (typed knob, default 0.05)."""
+        """The activate-detune ratio for this placement (typed knob, default 0.1)."""
         return float(schema.lower(None, md=md)["detune_ratio"])
 
     def fit_method(self, schema: NodeCfgSchema, md: Any = None) -> str:

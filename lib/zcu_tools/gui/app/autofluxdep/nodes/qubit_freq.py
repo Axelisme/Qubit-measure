@@ -86,7 +86,6 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
     Readout,
-    Reset,
     TwoToneCfg,
     sweep2param,
 )
@@ -96,10 +95,10 @@ from zcu_tools.utils.process import rotate2real
 logger = logging.getLogger(__name__)
 
 _DEFAULT_EARLYSTOP_SNR = 50.0
-_DEFAULT_DETUNE_SWEEP = SweepValue(start=-20.0, stop=50.0, expts=141)
+_DEFAULT_DETUNE_SWEEP = SweepValue(start=-50.0, stop=50.0, expts=201)
 _QFW_TARGET_KAPPA = 6.5
 _DEFAULT_QFW_SEED_GAIN = 0.05
-_DEFAULT_MAX_DRIVE_GAIN = 1.0
+_DRIVE_GAIN_CAP = 1.0
 _FREQ_FIT_RESIDUAL_RATIO = 0.2
 _LINEWIDTH_FIT_RESIDUAL_RATIO = 0.1
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
@@ -142,7 +141,7 @@ def _drive_gain_from_qfw_factor(
     initial_gain: float,
     *,
     target_kappa: float,
-    max_drive_gain: float,
+    drive_gain_cap: float,
 ) -> float:
     if qfw_factor is None:
         return float(initial_gain)
@@ -151,7 +150,7 @@ def _drive_gain_from_qfw_factor(
         raise RuntimeError(
             "qubit_freq.make_cfg needs positive qfw_factor to derive drive gain"
         )
-    return min(float(max_drive_gain), float(target_kappa) / factor)
+    return min(float(drive_gain_cap), float(target_kappa) / factor)
 
 
 def _resolve_drive_gain(
@@ -160,14 +159,14 @@ def _resolve_drive_gain(
     initial_gain: float,
     *,
     target_kappa: float,
-    max_drive_gain: float,
+    drive_gain_cap: float,
 ) -> float:
     if mode == _DRIVE_GAIN_MODE_ADAPTIVE:
         return _drive_gain_from_qfw_factor(
             qfw_factor,
             initial_gain,
             target_kappa=target_kappa,
-            max_drive_gain=max_drive_gain,
+            drive_gain_cap=drive_gain_cap,
         )
     if mode == _DRIVE_GAIN_MODE_FIXED:
         return float(initial_gain)
@@ -316,7 +315,6 @@ class QubitFreqNode(Node):
             dtype=np.complex128,
             configure_builder=lambda builder: builder.add(
                 [
-                    Reset("reset", cfg.modules.reset),
                     Pulse("init_pulse", cfg.modules.init_pulse, tag="init_pulse"),
                     Pulse("qubit_pulse", cfg.modules.qub_pulse, tag="qub_pulse"),
                     Readout("readout", cfg.modules.readout),
@@ -513,7 +511,6 @@ class QubitFreqBuilder(Builder):
             FreqAdapter,
             ctx,
             logical_paths={
-                "reset": "modules.reset",
                 "qub_pulse": "modules.qub_pulse",
                 "qub_ch": "modules.qub_pulse.ch",
                 "qub_nqz": "modules.qub_pulse.nqz",
@@ -600,12 +597,6 @@ class QubitFreqBuilder(Builder):
                     group="feedback",
                 ),
                 logical_generation_field(
-                    "max_drive_gain",
-                    FloatSpec(label="max_drive_gain"),
-                    _DEFAULT_MAX_DRIVE_GAIN,
-                    group="feedback",
-                ),
-                logical_generation_field(
                     "qf_width_seed",
                     FloatSpec(label="qf_width_seed", optional=True),
                     _qf_width_seed(ctx),
@@ -620,6 +611,7 @@ class QubitFreqBuilder(Builder):
                 *feedback_generation_fields(_PREDICT_FREQ_CORRECTION_SLOT),
             ),
             default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP, "rounds": 10},
+            drop_paths=("modules.reset",),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 
@@ -700,7 +692,7 @@ class QubitFreqBuilder(Builder):
             qfw_factor,
             float(knobs["qub_gain"]),
             target_kappa=float(knobs["target_kappa"]),
-            max_drive_gain=float(knobs["max_drive_gain"]),
+            drive_gain_cap=_DRIVE_GAIN_CAP,
         )
         patches: dict[str, object] = {
             "modules.qub_pulse.freq": predict_freq,

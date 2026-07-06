@@ -195,7 +195,6 @@ _EXPECTED_KEYS = {
         "relax_delay",
         "earlystop_snr",
         "acquire_retry",
-        "reset",
         "qub_pulse",
         "readout",
         "qub_ch",
@@ -204,7 +203,6 @@ _EXPECTED_KEYS = {
         "qub_length",
         "drive_gain_mode",
         "target_kappa",
-        "max_drive_gain",
         "qf_width_seed",
         "qfw_seed_gain",
         "bias_update_mode",
@@ -226,7 +224,6 @@ _EXPECTED_KEYS = {
         "relax_delay",
         "earlystop_snr",
         "acquire_retry",
-        "reset",
         "rabi_pulse",
         "readout",
         "qub_ch",
@@ -244,7 +241,6 @@ _EXPECTED_KEYS = {
         "drive_gain_mode",
         "pi_product_seed",
         "pi_product_factor",
-        "max_drive_gain",
         "pi_gain_feedback_enabled",
         "pi_gain_feedback_strategy",
         "pi_gain_feedback_step_gain",
@@ -253,7 +249,6 @@ _EXPECTED_KEYS = {
     "ro_optimize": {
         "freq_range",
         "gain_range",
-        "reset",
         "pi_pulse",
         "readout",
         "reps",
@@ -273,7 +268,6 @@ _EXPECTED_KEYS = {
     },
     "t1": {
         "sweep_range",
-        "reset",
         "pi_pulse",
         "readout",
         "reps",
@@ -293,7 +287,6 @@ _EXPECTED_KEYS = {
     "t2ramsey": {
         "sweep_range",
         "detune_ratio",
-        "reset",
         "pi2_pulse",
         "readout",
         "reps",
@@ -313,7 +306,6 @@ _EXPECTED_KEYS = {
     "t2echo": {
         "sweep_range",
         "detune_ratio",
-        "reset",
         "pi_pulse",
         "pi2_pulse",
         "readout",
@@ -334,7 +326,6 @@ _EXPECTED_KEYS = {
     },
     "mist": {
         "gain_sweep",
-        "reset",
         "pi_pulse",
         "mist_pulse",
         "readout",
@@ -358,7 +349,6 @@ _EXPECTED_PATHS = {
         "relax_delay": "relax_delay",
         "earlystop_snr": "generation.safety.earlystop_snr",
         "acquire_retry": "generation.safety.acquire_retry",
-        "reset": "modules.reset",
         "qub_pulse": "modules.qub_pulse",
         "readout": "modules.readout",
         "qub_ch": "modules.qub_pulse.ch",
@@ -367,7 +357,6 @@ _EXPECTED_PATHS = {
         "qub_length": "modules.qub_pulse.waveform.length",
         "drive_gain_mode": "generation.feedback.drive_gain_mode",
         "target_kappa": "generation.feedback.target_kappa",
-        "max_drive_gain": "generation.feedback.max_drive_gain",
         "qf_width_seed": "generation.feedback.qf_width_seed",
         "qfw_seed_gain": "generation.feedback.qfw_seed_gain",
         "bias_update_mode": "generation.feedback.bias_update_mode",
@@ -407,7 +396,6 @@ _EXPECTED_PATHS = {
         "relax_delay": "relax_delay",
         "earlystop_snr": "generation.safety.earlystop_snr",
         "acquire_retry": "generation.safety.acquire_retry",
-        "reset": "modules.reset",
         "rabi_pulse": "modules.rabi_pulse",
         "readout": "modules.readout",
         "qub_ch": "modules.rabi_pulse.ch",
@@ -425,7 +413,6 @@ _EXPECTED_PATHS = {
         "drive_gain_mode": "generation.feedback.drive_gain_mode",
         "pi_product_seed": "generation.feedback.pi_product_seed",
         "pi_product_factor": "generation.feedback.pi_product_factor",
-        "max_drive_gain": "generation.feedback.max_drive_gain",
         "pi_gain_feedback_enabled": "generation.feedback.pi_gain_feedback_enabled",
         "pi_gain_feedback_strategy": "generation.feedback.pi_gain_feedback_strategy",
         "pi_gain_feedback_step_gain": (
@@ -438,7 +425,6 @@ _EXPECTED_PATHS = {
     "ro_optimize": {
         "freq_range": "sweep.freq",
         "gain_range": "sweep.gain",
-        "reset": "modules.reset",
         "pi_pulse": "modules.pi_pulse",
         "readout": "modules.readout",
         "reps": "reps",
@@ -458,7 +444,6 @@ _EXPECTED_PATHS = {
     },
     "t1": {
         "sweep_range": "sweep.length",
-        "reset": "modules.reset",
         "pi_pulse": "modules.pi_pulse",
         "readout": "modules.readout",
         "reps": "reps",
@@ -478,7 +463,6 @@ _EXPECTED_PATHS = {
     "t2ramsey": {
         "sweep_range": "sweep.length",
         "detune_ratio": "detune_ratio",
-        "reset": "modules.reset",
         "pi2_pulse": "modules.pi2_pulse",
         "readout": "modules.readout",
         "reps": "reps",
@@ -498,7 +482,6 @@ _EXPECTED_PATHS = {
     "t2echo": {
         "sweep_range": "sweep.length",
         "detune_ratio": "detune_ratio",
-        "reset": "modules.reset",
         "pi_pulse": "modules.pi_pulse",
         "pi2_pulse": "modules.pi2_pulse",
         "readout": "modules.readout",
@@ -519,7 +502,6 @@ _EXPECTED_PATHS = {
     },
     "mist": {
         "gain_sweep": "sweep.gain",
-        "reset": "modules.reset",
         "pi_pulse": "modules.pi_pulse",
         "mist_pulse": "modules.mist_pulse",
         "readout": "modules.readout",
@@ -1031,6 +1013,14 @@ def test_qubit_freq_recovery_default_knobs():
     validate_recovery_bias_policy(knobs)
 
 
+def test_qubit_freq_default_detune_sweep_is_symmetric_100mhz_window():
+    detune = QubitFreqBuilder().make_default_schema().lower(None)["detune_sweep"]
+
+    assert float(detune.start) == pytest.approx(-50.0)
+    assert float(detune.stop) == pytest.approx(50.0)
+    assert int(detune.expts) == 201
+
+
 @pytest.mark.parametrize(
     ("builder", "field", "invalid_value", "match"),
     (
@@ -1068,6 +1058,20 @@ def test_ro_optimize_default_sweep_specs_are_user_facing_ranges():
     assert isinstance(sweep, CfgSectionSpec)
     assert isinstance(sweep.fields["freq"], SweepSpec)
     assert isinstance(sweep.fields["gain"], SweepSpec)
+
+
+def test_ro_optimize_fresh_gain_fallback_is_low_power_window():
+    ro = RoOptimizeBuilder().make_default_schema().lower(None)
+
+    assert ro["gain_half_width"] == pytest.approx(0.1)
+    _assert_sweep_bounds(ro["gain_range"], (0.0, 0.2))
+
+
+def test_t2echo_fresh_default_uses_recommended_detune_and_auto_fit():
+    echo = T2EchoBuilder().make_default_schema().lower(None)
+
+    assert echo["detune_ratio"] == pytest.approx(0.1)
+    assert echo["fit_method"] == "auto_by_detune"
 
 
 def test_fresh_node_defaults_seed_from_md_values():
@@ -1312,7 +1316,7 @@ def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
         ),
     )
     assert float(cfg.modules.qub_pulse.gain) == pytest.approx(
-        min(float(knobs["max_drive_gain"]), float(knobs["target_kappa"]) / qfw_factor)
+        min(1.0, float(knobs["target_kappa"]) / qfw_factor)
     )
 
     clamped_qfw_factor = 3.0
@@ -1325,7 +1329,7 @@ def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
     )
     assert float(clamped.modules.qub_pulse.gain) == pytest.approx(
         min(
-            float(knobs["max_drive_gain"]),
+            1.0,
             float(knobs["target_kappa"]) / clamped_qfw_factor,
         )
     )
@@ -1732,6 +1736,12 @@ def test_real_builders_declare_nonempty_valid_override_plans():
     mist_schema = MistBuilder().make_default_schema()
     mist_base = mist_schema.lower_raw(ModuleLibrary(), md=MetaDict())
     assert set(mist_base["modules"]) == {"readout", "pi_pulse", "mist_pulse"}
+
+    for builder in _BUILDERS:
+        base_cfg = builder.make_default_schema().lower_raw(
+            ModuleLibrary(), md=MetaDict()
+        )
+        assert "reset" not in base_cfg.get("modules", {}), builder.name
 
 
 def test_real_builders_restrict_generated_readout_to_pulse_shape():

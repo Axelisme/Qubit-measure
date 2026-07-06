@@ -252,7 +252,7 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
     builder = QubitFreqBuilder()
     result = builder.make_init_result(
         _schema(
-            builder, {"detune_sweep": SweepValue(start=-20.0, stop=50.0, expts=141)}
+            builder, {"detune_sweep": SweepValue(start=-50.0, stop=50.0, expts=201)}
         ),
         np.array([0.0]),
     )
@@ -282,7 +282,6 @@ def test_lenrabi_make_cfg_lowers_context():
         "qub_nqz": 2,
         "qub_gain": 0.3,
         "expected_pi_length": 0.25,
-        "max_drive_gain": 2.0,
         "sweep_range": SweepValue(start=9.0, stop=10.0, expts=61),
         "reps": 1000,
         "rounds": 10,
@@ -327,7 +326,6 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
             "qub_ch": 4,
             "qub_nqz": 2,
             "expected_pi_length": 0.25,
-            "max_drive_gain": 0.5,
             "pi_gain_feedback_step_gain": 1.0,
             "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         },
@@ -336,14 +334,14 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
     view = feedback.view_for("rabi")
     controller = view.controller("drive_gain")
     assert controller is not None
-    proposal = controller.propose(0.3, math.log(2.0))
-    assert proposal.value == pytest.approx(0.6)
+    proposal = controller.propose(0.6, math.log(4.0))
+    assert proposal.value == pytest.approx(2.4)
     env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml, feedback=view)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
     cfg = builder.make_cfg(env, snap)
 
-    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(0.5)
+    assert float(cfg.modules.rabi_pulse.gain) == pytest.approx(1.0)
 
 
 def test_lenrabi_controller_proposal_smoothly_reverts_to_open_loop_gain():
@@ -359,7 +357,6 @@ def test_lenrabi_controller_proposal_smoothly_reverts_to_open_loop_gain():
             "expected_pi_length": 0.25,
             "pi_product_seed": 0.3,
             "pi_product_factor": 1.2,
-            "max_drive_gain": 2.0,
             "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         },
     )
@@ -439,7 +436,6 @@ def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
                 "qub_nqz": 2,
                 "expected_pi_length": 0.3,
                 "pi_product_seed": 0.36,
-                "max_drive_gain": 2.0,
             },
         ),
         ml=ml,
@@ -553,7 +549,7 @@ def test_ro_optimize_make_cfg_lowers_context():
                 "reps": 1000,
                 "rounds": 10,
                 "freq_range": SweepValue(start=5999.0, stop=6001.0, expts=21),
-                "gain_range": SweepValue(start=0.45, stop=0.55, expts=21),
+                "gain_range": SweepValue(start=0.0, stop=0.2, expts=21),
                 "skew_penalty": 0.25,
             },
         ),
@@ -648,8 +644,8 @@ def test_ro_optimize_init_result_uses_window_params():
     assert result.freq[0] == 5999.0
     assert result.freq[-1] == 6001.0
     assert result.n_gain == 31
-    assert result.gain[0] == 0.45
-    assert result.gain[-1] == 0.55
+    assert result.gain[0] == 0.4
+    assert result.gain[-1] == 0.6
 
 
 def test_ro_optimize_init_result_can_use_default_sweep_width():
@@ -711,7 +707,7 @@ def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
     builder = RoOptimizeBuilder()
     params = {
         "freq_range": SweepValue(start=5999.0, stop=6001.0, expts=21),
-        "gain_range": SweepValue(start=0.45, stop=0.55, expts=21),
+        "gain_range": SweepValue(start=0.0, stop=0.2, expts=21),
     }
     schema = _schema(builder, params)
     result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 11))

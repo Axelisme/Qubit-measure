@@ -1,7 +1,7 @@
 """RB-2: ro_optimize end-to-end real acquire against the flux-aware MockSoc.
 
 Runs the ro_optimize Node's real acquire path (set flux device -> setup_devices ->
-ModularProgramV2(Reset, ge-Branch(pi_pulse), PulseReadout) over the freq x gain
+ModularProgramV2(ge-Branch(pi_pulse), PulseReadout) over the freq x gain
 sweep with a MomentTracker -> snr_as_signal -> argmax) and asserts a finite best
 (freq, gain) inside the sweep window comes back, and the SNR landscape row is
 filled (not all-nan). No fit -- the argmax of the SNR map is the result.
@@ -80,7 +80,7 @@ def test_ro_optimize_acquire_finds_best_point():
         # allocation defaults. These use the md-like generation window around
         # the previous best in snap.
         np.testing.assert_allclose(result.freq[[0, -1]], [5999.0, 6001.0])
-        np.testing.assert_allclose(result.gain[[0, -1]], [0.45, 0.55])
+        np.testing.assert_allclose(result.gain[[0, -1]], [0.4, 0.6])
         # finite best point inside the swept window
         assert np.isfinite(best_freq) and np.isfinite(best_gain)
         assert result.freq[0] <= best_freq <= result.freq[-1]
