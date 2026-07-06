@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-03 — adapter notebook-aligned defaults
+**Last updated:** 2026-07-06 — twotone/freq probe pulse label
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -43,6 +43,9 @@ ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline bl
 Adapter defaults 以 notebook bring-up seed 與目前 MetaDict 校準值共同定義：有可信 md 時保持
 md-linked expression，缺校準時退回保守 notebook seed；guide prose 需描述這個 operator-facing
 fallback policy，而不是臆測固定硬體值。
+
+`twotone/freq` 的 qubit-drive module 是 spectroscopy probe，不是 state-prep init pulse；
+UI label 使用 `Probe Pulse`，欄位 key 仍維持 runtime/notebook contract 的 `qub_pulse`。
 
 `build_exp_spec(extra=...)` 表示 adapter-defined top-level knobs，放在 `sweep` 與 `reps`
 之間；它們可以是正式 ExpCfg 欄位，也可以是 run-only adapter 欄位。正式欄位正常 lower 到

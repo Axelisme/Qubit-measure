@@ -987,7 +987,7 @@ class MainWindow(QMainWindow):
         self._flux_progress_snapshot = snapshot
 
     def _on_run_done(self) -> None:
-        self._reset_run_ui()
+        self._reset_run_ui(switch_tab=False)
         self._finish_close_after_run_terminal()
 
     def _reset_run_ui(self, *, switch_tab: bool | None = None) -> None:

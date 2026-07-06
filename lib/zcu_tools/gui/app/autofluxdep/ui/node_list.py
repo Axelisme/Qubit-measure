@@ -215,8 +215,10 @@ class NodeListPane(QWidget):
         self._restart_btn = _btn("↻ Restart", self._on_restart)
         self._abort_btn = _btn("■ Abort", self._on_abort)
         self._export_sample_btn = _btn("Export sample", self._on_export_sample)
-        root.addWidget(self._run_btn)
-        root.addWidget(self._restart_btn)
+        self._run_action_row = QHBoxLayout()
+        self._run_action_row.addWidget(self._run_btn, 1)
+        self._run_action_row.addWidget(self._restart_btn, 1)
+        root.addLayout(self._run_action_row)
         root.addWidget(self._abort_btn)
         root.addWidget(self._export_sample_btn)
 

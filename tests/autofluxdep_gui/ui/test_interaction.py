@@ -1058,6 +1058,21 @@ def test_run_switches_detail_to_run_tab(app):
     assert captured.get("predictor_enabled") is True
     assert captured.get("inspect_enabled") is True
     assert win._setup_btn.isEnabled()
+    assert win._detail.current_tab == 1
+
+
+def test_run_done_preserves_manual_detail_tab(app):
+    _ctrl, win = app
+    win._list.select_index(0)
+
+    win._on_run_started()
+    win._detail._tabs.setCurrentIndex(0)
+    assert win._detail.current_tab == 0
+
+    win._on_run_done()
+
+    assert win._detail.current_tab == 0
+    assert win._list._run_btn.text() == "▶ Run"
 
 
 def test_predictor_dialog_can_open_as_live_view_during_run(app):
@@ -1164,7 +1179,10 @@ def test_pause_continue_ui_states_lock_workflow_controls(app):
 
     win._on_run_paused(1)
     assert win._list._run_btn.text() == "▶ Continue"
+    assert win._list._run_action_row.indexOf(win._list._run_btn) == 0
+    assert win._list._run_action_row.indexOf(win._list._restart_btn) == 1
     assert win._list._run_btn.isEnabled()
+    assert not win._list._restart_btn.isHidden()
     assert win._list._abort_btn.isEnabled()
     assert not win._list._add_btn.isEnabled()
     assert not win._list._flux_source.isEnabled()
@@ -1285,7 +1303,7 @@ def test_deferred_edit_form_materializes_when_user_opens_edit_tab_during_run(app
     win._on_run_done()
 
 
-def test_run_done_materializes_pending_edit_form_after_auto_follow(app):
+def test_run_done_preserves_run_tab_and_defers_pending_edit_form(app):
     _ctrl, win = app
     win._list.select_index(0)
     win._on_run_started()
@@ -1294,7 +1312,11 @@ def test_run_done_materializes_pending_edit_form_after_auto_follow(app):
 
     win._on_run_done()
 
-    assert win._detail.current_tab == 0
+    assert win._detail.current_tab == 1
+    assert _current_form_node_name(win) == "qubit_freq"
+
+    win._detail._tabs.setCurrentIndex(0)
+
     assert _current_form_node_name(win) == "probe"
     assert win._detail.current_form is not None
     assert _current_form_editors_enabled(win)
@@ -1319,6 +1341,11 @@ def test_auto_follow_checkbox_can_turn_on_during_run(app):
     assert win._detail.current_tab == 1
     assert _current_form_node_name(win) == "qubit_freq"
     win._on_run_done()
+    assert win._detail.current_tab == 1
+    assert _current_form_node_name(win) == "qubit_freq"
+
+    win._detail._tabs.setCurrentIndex(0)
+
     assert _current_form_node_name(win) == "probe"
 
 

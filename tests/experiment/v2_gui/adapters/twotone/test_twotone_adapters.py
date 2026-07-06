@@ -24,9 +24,11 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
 )
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
+    CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    ModuleRefSpec,
     RunRequest,
     SweepValue,
 )
@@ -158,6 +160,15 @@ def test_twotone_freq_sweep_contains_freq() -> None:
 
     sweep = cast(dict[str, Any], raw["sweep"])
     assert isinstance(sweep["freq"], SweepCfg)
+
+
+def test_twotone_freq_qubit_drive_label_is_probe_pulse() -> None:
+    schema = FreqAdapter().make_default_cfg(_make_ctx())
+    modules = schema.spec.fields["modules"]
+    assert isinstance(modules, CfgSectionSpec)
+    qub_pulse = modules.fields["qub_pulse"]
+    assert isinstance(qub_pulse, ModuleRefSpec)
+    assert qub_pulse.label == "Probe Pulse"
 
 
 def test_flux_dep_build_exp_cfg_converts_device_section() -> None:

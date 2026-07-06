@@ -204,6 +204,7 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "rounds",
             "sweep",
         }
+        assert _field_labels(_section(form, "modules"))["qub_pulse"] == "Probe Pulse"
         qub_pulse = _ref_subsection(_section(form, "modules"), "qub_pulse")
         assert {"waveform", "ch", "nqz", "gain"}.issubset(qub_pulse.fields)
         ch_spec = qub_pulse.fields["ch"].spec

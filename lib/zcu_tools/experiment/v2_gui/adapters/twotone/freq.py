@@ -112,7 +112,9 @@ class FreqAdapter(
                 # The sweep axis owns the qubit-drive frequency
                 # (set_param("freq") at run); lock it so the form does not
                 # show a field the sweep silently overwrites.
-                "qub_pulse": make_pulse_module_spec().lock_literal("freq", 0.0),
+                "qub_pulse": make_pulse_module_spec(label="Probe Pulse").lock_literal(
+                    "freq", 0.0
+                ),
                 "readout": make_readout_module_spec(),
             },
             sweep={"freq": SweepSpec(label="Freq (MHz)")},
