@@ -21,7 +21,9 @@ from zcu_tools.gui.app.main.adapter import (
     CfgNodeSpec,
     CfgNodeValue,
     CfgSectionSpec,
+    ChoiceSectionSpec,
     DeviceRefSpec,
+    DirectValue,
     EvalValue,
     LiteralSpec,
     ModuleRefSpec,
@@ -132,6 +134,7 @@ class CfgFormWidget(QWidget):
         self._field_label_max_width = field_label_max_width
         self._decoration_provider = decoration_provider
         self._field_decorations: dict[str, FieldDecoration] = {}
+        self._choice_state: tuple[tuple[str, str], ...] = ()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -158,8 +161,9 @@ class CfgFormWidget(QWidget):
 
         self._model = model
         self._field_decorations = {}
+        self._choice_state = _choice_state_for_model(model)
         model.on_validity_changed.connect(self.validity_changed.emit)
-        model.on_change.connect(self._emit_schema_changed)
+        model.on_change.connect(self._on_model_changed)
 
         self._root_widget = SectionWidget(
             model,
@@ -181,7 +185,7 @@ class CfgFormWidget(QWidget):
         editing it); only its signal bindings + the Qt widget tree go away.
         """
         if self._model is not None:
-            self._model.on_change.disconnect(self._emit_schema_changed)
+            self._model.on_change.disconnect(self._on_model_changed)
             self._model.on_validity_changed.disconnect(self.validity_changed.emit)
             self._model = None  # NOTE: never self._model.teardown()
 
@@ -191,6 +195,7 @@ class CfgFormWidget(QWidget):
             self._root_widget.deleteLater()
             self._root_widget = None
         self._field_decorations = {}
+        self._choice_state = ()
 
     def set_decoration_provider(self, provider: FieldDecorationProvider | None) -> None:
         self._decoration_provider = provider
@@ -248,6 +253,16 @@ class CfgFormWidget(QWidget):
         if self._model is None:
             return
         self.schema_changed.emit(self.read_schema())
+
+    def _on_model_changed(self, *_: object) -> None:
+        if self._model is None:
+            return
+        self.schema_changed.emit(self.read_schema())
+        state = _choice_state_for_model(self._model)
+        if state == self._choice_state:
+            return
+        self._choice_state = state
+        self.attach(self._model)
 
     def _resolve_decoration(self, path: str, field: LiveField) -> FieldDecoration:
         spec = cast(CfgNodeSpec, field.spec)
@@ -330,3 +345,28 @@ __all__ = [
     "Tone",
     "default_decoration_for_spec",
 ]
+
+
+def _choice_state_for_model(model: SectionLiveField) -> tuple[tuple[str, str], ...]:
+    state: list[tuple[str, str]] = []
+    _collect_choice_state(model, "", state)
+    return tuple(sorted(state))
+
+
+def _collect_choice_state(
+    field: SectionLiveField, path: str, state: list[tuple[str, str]]
+) -> None:
+    spec = field.spec
+    if isinstance(spec, ChoiceSectionSpec):
+        for binding in spec.bindings:
+            selector = field.fields.get(binding.selector_key)
+            value = selector.get_value() if selector is not None else None
+            choice = str(value.value) if isinstance(value, DirectValue) else ""
+            selector_path = (
+                f"{path}.{binding.selector_key}" if path else binding.selector_key
+            )
+            state.append((selector_path, choice))
+    for key, child in field.fields.items():
+        if isinstance(child, SectionLiveField):
+            child_path = f"{path}.{key}" if path else key
+            _collect_choice_state(child, child_path, state)

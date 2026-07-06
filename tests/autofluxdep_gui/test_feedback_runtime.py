@@ -141,7 +141,7 @@ class _Provider:
 def test_disabled_slot_returns_none_and_undeclared_slot_fast_fails():
     builder = QubitFreqBuilder()
     schema = builder.make_default_schema()
-    schema.set_field("pred_freq_correction_enabled", False)
+    schema.set_field("pred_freq_correction_strategy", "off")
     runtime = build_feedback_runtime([_Provider("qf", builder, schema)])
 
     view = runtime.view_for("qf")
@@ -234,7 +234,7 @@ def test_feedback_policy_strategy_and_full_values_persist_flat():
 
 def test_controller_feedback_policy_values_persist_flat():
     schema = LenRabiBuilder().make_default_schema()
-    schema.set_field("pi_gain_feedback_enabled", False)
+    schema.set_field("pi_gain_feedback_strategy", "off")
     schema.set_field("pi_gain_feedback_step_gain", 0.25)
     schema.set_field("pi_gain_feedback_decay_points", 6.0)
 
@@ -243,9 +243,9 @@ def test_controller_feedback_policy_values_persist_flat():
     generation = raw["generation"]
     assert isinstance(generation, dict)
     assert "feedback" not in generation
-    assert generation["pi_gain_feedback_enabled"] == {
+    assert generation["pi_gain_feedback_strategy"] == {
         "__kind": "direct",
-        "value": False,
+        "value": "off",
     }
     assert generation["pi_gain_feedback_step_gain"] == {
         "__kind": "direct",
@@ -260,6 +260,9 @@ def test_controller_feedback_policy_values_persist_flat():
     restored.restore_persisted_raw(raw)
 
     knobs = restored.lower(None)
-    assert knobs["pi_gain_feedback_enabled"] is False
+    assert knobs["pi_gain_feedback_strategy"] == "off"
     assert knobs["pi_gain_feedback_step_gain"] == pytest.approx(0.25)
     assert knobs["pi_gain_feedback_decay_points"] == pytest.approx(6.0)
+
+    runtime = build_feedback_runtime([_Provider("lenrabi", LenRabiBuilder(), restored)])
+    assert runtime.view_for("lenrabi").controller("drive_gain") is None

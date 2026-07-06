@@ -74,6 +74,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     PULSE_READOUT_REF_LABELS,
     adapter_node_schema,
+    generation_choice,
     logical_generation_field,
     pop_sweep_range,
     pulse_module_override_paths,
@@ -343,62 +344,89 @@ class T2RamseyBuilder(Builder):
                     "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
-                    group="safety",
+                    group="acquisition",
                 ),
                 acquire_retry_generation_field(),
                 logical_generation_field(
-                    "sweep_range_mode",
-                    str_choice_spec(
-                        "sweep_range_mode",
-                        (_SWEEP_RANGE_MODE_AUTO_T2R, _SWEEP_RANGE_MODE_FIXED),
-                    ),
-                    _SWEEP_RANGE_MODE_AUTO_T2R,
-                    group="sweep",
-                ),
-                logical_generation_field(
                     "relax_delay_mode",
                     str_choice_spec(
-                        "relax_delay_mode",
+                        "delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
-                    group="timing",
+                    group="relax",
                 ),
                 logical_generation_field(
                     "t1_seed_us",
                     FloatSpec(label="t1_seed_us"),
                     t1_seed,
-                    group="timing",
-                ),
-                logical_generation_field(
-                    "t2r_seed_us",
-                    FloatSpec(label="t2r_seed_us"),
-                    t2r_seed,
-                    group="timing",
+                    group="relax",
                 ),
                 logical_generation_field(
                     "relax_factor",
-                    FloatSpec(label="relax_factor"),
+                    FloatSpec(label="factor"),
                     _DEFAULT_RELAX_FACTOR,
-                    group="timing",
+                    group="relax",
                 ),
                 logical_generation_field(
                     "relax_min_us",
-                    FloatSpec(label="relax_min_us"),
+                    FloatSpec(label="min_us"),
                     _DEFAULT_RELAX_MIN,
-                    group="timing",
+                    group="relax",
+                ),
+                logical_generation_field(
+                    "sweep_range_mode",
+                    str_choice_spec(
+                        "range_mode",
+                        (_SWEEP_RANGE_MODE_AUTO_T2R, _SWEEP_RANGE_MODE_FIXED),
+                    ),
+                    _SWEEP_RANGE_MODE_AUTO_T2R,
+                    group="sweep",
+                    group_label="T2R sweep window",
+                ),
+                logical_generation_field(
+                    "t2r_seed_us",
+                    FloatSpec(label="seed_us"),
+                    t2r_seed,
+                    group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_start_us",
-                    FloatSpec(label="sweep_start_us"),
+                    FloatSpec(label="start_us"),
                     _DEFAULT_SWEEP_START,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_stop_factor",
-                    FloatSpec(label="sweep_stop_factor"),
+                    FloatSpec(label="stop_factor"),
                     _SWEEP_T2R_FACTOR,
                     group="sweep",
+                ),
+            ),
+            generation_choices=(
+                generation_choice(
+                    "relax",
+                    "relax_delay_mode",
+                    {
+                        _RELAX_DELAY_MODE_FIXED: (),
+                        _RELAX_DELAY_MODE_AUTO_T1: (
+                            "t1_seed_us",
+                            "relax_factor",
+                            "relax_min_us",
+                        ),
+                    },
+                ),
+                generation_choice(
+                    "sweep",
+                    "sweep_range_mode",
+                    {
+                        _SWEEP_RANGE_MODE_FIXED: (),
+                        _SWEEP_RANGE_MODE_AUTO_T2R: (
+                            "t2r_seed_us",
+                            "sweep_start_us",
+                            "sweep_stop_factor",
+                        ),
+                    },
                 ),
             ),
             default_overrides={
@@ -462,7 +490,7 @@ class T2RamseyBuilder(Builder):
                 OverridePath(
                     "relax_delay",
                     "all_points",
-                    "generation.timing.relax_delay_mode",
+                    "generation.relax.relax_delay_mode",
                     "relax delay is generated from T1 feedback",
                 )
             )

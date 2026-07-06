@@ -17,6 +17,8 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    ChoiceBinding,
+    ChoiceSectionSpec,
     DirectValue,
     ModuleRefSpec,
     NodeCfgSchema,
@@ -31,10 +33,22 @@ from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 GENERATION_GROUP_LABELS: dict[str, str] = {
+    "acquisition": "Acquisition guardrails",
+    "drive_gain": "Drive-gain adaptation",
+    "freq_recovery": "Frequency recovery",
+    "pi_feedback": "Pi-length feedback",
+    "predictor_correction": "Predictor correction",
+    "relax": "Relax timing",
+    "search_center": "Readout search center",
+    "search_window": "Readout search window",
+    # Older/generic groups remain available for helper tests and future nodes; real
+    # builders choose domain-specific groups when a clearer label exists.
     "sweep": "Sweep generation",
     "timing": "Timing / relax",
     "feedback": "Feedback / adaptive",
     "fit": "Fit behavior",
+    "freq_search": "Readout frequency search",
+    "gain_search": "Readout gain search",
     "safety": "Safety gates",
 }
 
@@ -70,6 +84,13 @@ class GenerationField:
     default: Any
     group_key: str
     group_label: str
+
+
+@dataclass(frozen=True)
+class GenerationChoice:
+    group_key: str
+    selector_key: str
+    choices: Mapping[str, tuple[str, ...]]
 
 
 def generation_field(
@@ -109,6 +130,20 @@ def logical_generation_field(
         group=group,
         group_label=group_label,
     )
+
+
+def generation_choice(
+    group: str,
+    selector: str,
+    choices: Mapping[str, tuple[str, ...]],
+) -> GenerationChoice:
+    if not group:
+        raise ValueError("generation choice group must be non-empty")
+    if not selector:
+        raise ValueError("generation choice selector must be non-empty")
+    if not choices:
+        raise ValueError("generation choice needs at least one choice")
+    return GenerationChoice(group, selector, choices)
 
 
 def pulse_module_override_paths(
@@ -160,6 +195,7 @@ def adapter_node_schema(
     duplicate_paths: Mapping[str, str] | None = None,
     drop_paths: tuple[str, ...] = (),
     module_ref_labels: Mapping[str, tuple[str, ...]] | None = None,
+    generation_choices: tuple[GenerationChoice, ...] = (),
 ) -> NodeCfgSchema:
     """Build a ``NodeCfgSchema`` from a copied measure-gui adapter cfg shape."""
     schema = adapter_cls().make_default_cfg(_ensure_context(ctx))
@@ -204,6 +240,26 @@ def adapter_node_schema(
             group_value.fields[field.field_key] = _default_value(
                 field.spec, field.default
             )
+        if generation_choices:
+            choices_by_group: dict[str, list[ChoiceBinding]] = {}
+            for choice in generation_choices:
+                group_spec = generation_spec_fields.get(choice.group_key)
+                if not isinstance(group_spec, CfgSectionSpec):
+                    raise ValueError(
+                        f"generation choice group {choice.group_key!r} is not declared"
+                    )
+                choices_by_group.setdefault(choice.group_key, []).append(
+                    _generation_choice_binding(group_spec, choice)
+                )
+            for group_key, bindings in choices_by_group.items():
+                group_spec = generation_spec_fields[group_key]
+                assert isinstance(group_spec, CfgSectionSpec)
+                generation_spec_fields[group_key] = ChoiceSectionSpec(
+                    fields=dict(group_spec.fields),
+                    label=group_spec.label,
+                    inherit_hook=group_spec.inherit_hook,
+                    bindings=tuple(bindings),
+                )
         root_spec.fields["generation"] = CfgSectionSpec(
             label="Generation overrides",
             fields=generation_spec_fields,
@@ -228,6 +284,24 @@ def adapter_node_schema(
     if default_overrides:
         node_schema.with_overrides(default_overrides)
     return node_schema
+
+
+def _generation_choice_binding(
+    group_spec: CfgSectionSpec, choice: GenerationChoice
+) -> ChoiceBinding:
+    variants: dict[str, CfgSectionSpec] = {}
+    for value, field_keys in choice.choices.items():
+        fields: dict[str, Any] = {}
+        for key in field_keys:
+            try:
+                fields[key] = group_spec.fields[key]
+            except KeyError as exc:
+                raise ValueError(
+                    f"generation choice {choice.group_key}.{choice.selector_key}="
+                    f"{value!r} references unknown field {key!r}"
+                ) from exc
+        variants[value] = CfgSectionSpec(fields=fields, label=value)
+    return ChoiceBinding(choice.selector_key, variants)
 
 
 def ctx_md_float(ctx: Any | None, key: str) -> float | None:

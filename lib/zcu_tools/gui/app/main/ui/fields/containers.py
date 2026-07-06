@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.session.events import MlChangedPayload
 
-from ...adapter import LiteralSpec
+from ...adapter import CfgSectionSpec, ChoiceSectionSpec, DirectValue, LiteralSpec
 from ...live_model import (
     DeviceRefLiveField,
     ModuleRefLiveField,
@@ -145,12 +145,15 @@ class SectionWidget(BaseLiveWidget):
 
     def _build_children(self) -> None:
         field = cast(SectionLiveField, self._field)
+        visible_keys = _choice_visible_keys(field)
         # Fields carrying a non-empty ScalarSpec.group render together under a
         # collapsed sub-header (e.g. "Advanced"), AFTER the ungrouped fields.
         # This is presentation-only: the value tree is unchanged — a grouped
         # field is still a flat leaf of this section (it lowers at top level).
         grouped: dict[str, list[tuple[str, str, FieldWidgetProtocol, Any | None]]] = {}
         for key, child_field in field.fields.items():
+            if visible_keys is not None and key not in visible_keys:
+                continue
             child_path = f"{self._path}.{key}" if self._path else key
             spec = child_field.spec
             decoration = (
@@ -251,6 +254,20 @@ class SectionWidget(BaseLiveWidget):
 
     def _on_validity_changed(self, valid: bool) -> None:
         self._container.set_invalid(not valid)
+
+
+def _choice_visible_keys(field: SectionLiveField) -> set[str] | None:
+    spec = field.spec
+    if not isinstance(spec, ChoiceSectionSpec):
+        return None
+    visible = set(spec.fields)
+    for binding in spec.bindings:
+        selector = field.fields.get(binding.selector_key)
+        value = selector.get_value() if selector is not None else None
+        choice = str(value.value) if isinstance(value, DirectValue) else ""
+        active = set(binding.choices.get(choice, CfgSectionSpec()).fields)
+        visible -= binding.controlled_field_keys() - active
+    return visible
 
 
 @register_widget(ModuleRefLiveField)

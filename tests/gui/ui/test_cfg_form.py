@@ -7,9 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (
+    CfgNodeSpec,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    ChoiceBinding,
+    ChoiceSectionSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -21,7 +24,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from zcu_tools.gui.app.main.live_model import SweepLiveField
+from zcu_tools.gui.app.main.live_model import SectionLiveField, SweepLiveField
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 # ---------------------------------------------------------------------------
@@ -646,6 +649,94 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
     inner = out.fields["inner"]
     assert isinstance(inner, CfgSectionValue)
     assert inner.fields["gain"].value == pytest.approx(0.05)  # type: ignore[union-attr]
+
+
+def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+
+    fields: dict[str, CfgNodeSpec] = {
+        "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
+        "half_width": ScalarSpec(label="Half width", type=float),
+        "decay": ScalarSpec(label="Decay", type=float),
+        "manual_value": ScalarSpec(label="Manual", type=float),
+    }
+    schema = _schema(
+        {
+            "search": ChoiceSectionSpec(
+                label="Search",
+                fields=fields,
+                bindings=(
+                    ChoiceBinding(
+                        "mode",
+                        {
+                            "auto": CfgSectionSpec(
+                                fields={
+                                    "half_width": fields["half_width"],
+                                    "decay": fields["decay"],
+                                }
+                            ),
+                            "fixed": CfgSectionSpec(
+                                fields={"manual_value": fields["manual_value"]}
+                            ),
+                        },
+                    ),
+                ),
+            )
+        },
+        {
+            "search": CfgSectionValue(
+                fields={
+                    "mode": DirectValue("auto"),
+                    "half_width": DirectValue(1.0),
+                    "decay": DirectValue(3.0),
+                    "manual_value": DirectValue(2.0),
+                }
+            )
+        },
+    )
+    w = CfgFormWidget()
+    model = _attach(w, schema, ctrl)
+
+    paths = set(w.decoration_paths())
+    assert "search.mode" in paths
+    assert "search.half_width" in paths
+    assert "search.decay" in paths
+    assert "search.manual_value" not in paths
+
+    search = model.fields["search"]
+    assert isinstance(search, SectionLiveField)
+    search.fields["mode"].set_value(DirectValue("fixed"))
+
+    paths = set(w.decoration_paths())
+    assert "search.mode" in paths
+    assert "search.half_width" not in paths
+    assert "search.decay" not in paths
+    assert "search.manual_value" in paths
+
+    out = w.read_values().fields["search"]
+    assert isinstance(out, CfgSectionValue)
+    assert set(out.fields) == {"mode", "half_width", "decay", "manual_value"}
+
+
+def test_choice_section_rejects_unknown_choice_fields():
+    fields: dict[str, CfgNodeSpec] = {
+        "mode": ScalarSpec(label="Mode", type=str, choices=["auto"]),
+    }
+
+    with pytest.raises(RuntimeError, match="unknown field"):
+        ChoiceSectionSpec(
+            fields=fields,
+            bindings=(
+                ChoiceBinding(
+                    "mode",
+                    {
+                        "auto": CfgSectionSpec(
+                            fields={"missing": ScalarSpec(label="Missing", type=float)}
+                        )
+                    },
+                ),
+            ),
+        )
 
 
 def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):

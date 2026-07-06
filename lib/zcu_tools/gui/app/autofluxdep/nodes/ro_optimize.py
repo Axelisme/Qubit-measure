@@ -70,6 +70,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     adapter_node_schema,
+    generation_choice,
     logical_generation_field,
     pop_sweep_ranges,
     pulse_module_override_paths,
@@ -525,73 +526,124 @@ class RoOptimizeBuilder(Builder):
             generation_fields=(
                 acquire_retry_generation_field(),
                 logical_generation_field(
-                    "freq_range_mode",
-                    str_choice_spec(
-                        "freq_range_mode",
-                        (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
-                    ),
-                    _RANGE_MODE_PREVIOUS_BEST,
-                    group="sweep",
-                ),
-                logical_generation_field(
-                    "gain_range_mode",
-                    str_choice_spec(
-                        "gain_range_mode",
-                        (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
-                    ),
-                    _RANGE_MODE_PREVIOUS_BEST,
-                    group="sweep",
-                ),
-                logical_generation_field(
                     "relax_delay_mode",
                     str_choice_spec(
-                        "relax_delay_mode",
+                        "delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
-                    group="timing",
+                    group="relax",
                 ),
                 logical_generation_field(
                     "t1_seed_us",
                     FloatSpec(label="t1_seed_us"),
                     t1_seed,
-                    group="timing",
+                    group="relax",
                 ),
                 logical_generation_field(
                     "relax_factor",
-                    FloatSpec(label="relax_factor"),
+                    FloatSpec(label="factor"),
                     _DEFAULT_RELAX_FACTOR,
-                    group="timing",
+                    group="relax",
+                ),
+                logical_generation_field(
+                    "freq_range_mode",
+                    str_choice_spec(
+                        "freq_mode",
+                        (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
+                    ),
+                    _RANGE_MODE_PREVIOUS_BEST,
+                    group="freq_search",
+                ),
+                logical_generation_field(
+                    "gain_range_mode",
+                    str_choice_spec(
+                        "gain_mode",
+                        (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
+                    ),
+                    _RANGE_MODE_PREVIOUS_BEST,
+                    group="gain_search",
                 ),
                 logical_generation_field(
                     "freq_window_mode",
                     str_choice_spec(
-                        "freq_window_mode",
+                        "freq_mode",
                         (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
                     ),
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
-                    group="feedback",
+                    group="freq_search",
                 ),
                 logical_generation_field(
                     "freq_half_width_mhz",
                     FloatSpec(label="freq_half_width_mhz"),
                     _DEFAULT_FREQ_HALF_WIDTH,
-                    group="feedback",
+                    group="freq_search",
                 ),
                 logical_generation_field(
                     "gain_window_mode",
                     str_choice_spec(
-                        "gain_window_mode",
+                        "gain_mode",
                         (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
                     ),
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
-                    group="feedback",
+                    group="gain_search",
                 ),
                 logical_generation_field(
                     "gain_half_width",
                     FloatSpec(label="gain_half_width"),
                     _DEFAULT_GAIN_HALF_WIDTH,
-                    group="feedback",
+                    group="gain_search",
+                ),
+            ),
+            generation_choices=(
+                generation_choice(
+                    "relax",
+                    "relax_delay_mode",
+                    {
+                        _RELAX_DELAY_MODE_FIXED: (),
+                        _RELAX_DELAY_MODE_AUTO_T1: (
+                            "t1_seed_us",
+                            "relax_factor",
+                        ),
+                    },
+                ),
+                generation_choice(
+                    "freq_search",
+                    "freq_range_mode",
+                    {
+                        _RANGE_MODE_FIXED: (),
+                        _RANGE_MODE_PREVIOUS_BEST: (
+                            "freq_window_mode",
+                            "freq_half_width_mhz",
+                        ),
+                    },
+                ),
+                generation_choice(
+                    "freq_search",
+                    "freq_window_mode",
+                    {
+                        _WINDOW_MODE_DEFAULT_SWEEP: (),
+                        _WINDOW_MODE_FIXED_HALF_WIDTH: ("freq_half_width_mhz",),
+                    },
+                ),
+                generation_choice(
+                    "gain_search",
+                    "gain_range_mode",
+                    {
+                        _RANGE_MODE_FIXED: (),
+                        _RANGE_MODE_PREVIOUS_BEST: (
+                            "gain_window_mode",
+                            "gain_half_width",
+                        ),
+                    },
+                ),
+                generation_choice(
+                    "gain_search",
+                    "gain_window_mode",
+                    {
+                        _WINDOW_MODE_DEFAULT_SWEEP: (),
+                        _WINDOW_MODE_FIXED_HALF_WIDTH: ("gain_half_width",),
+                    },
                 ),
             ),
             default_overrides={
@@ -677,7 +729,7 @@ class RoOptimizeBuilder(Builder):
                 OverridePath(
                     "relax_delay",
                     "all_points",
-                    "generation.timing.relax_delay_mode",
+                    "generation.relax.relax_delay_mode",
                     "relax delay is generated from T1 feedback",
                 )
             )
@@ -686,7 +738,7 @@ class RoOptimizeBuilder(Builder):
                 OverridePath(
                     "sweep.freq",
                     "all_points",
-                    "generation.sweep.freq_range_mode",
+                    "generation.freq_search.freq_range_mode",
                     "readout frequency window is generated from previous best",
                 )
             )
@@ -695,7 +747,7 @@ class RoOptimizeBuilder(Builder):
                 OverridePath(
                     "sweep.gain",
                     "all_points",
-                    "generation.sweep.gain_range_mode",
+                    "generation.gain_search.gain_range_mode",
                     "readout gain window is generated from previous best",
                 )
             )

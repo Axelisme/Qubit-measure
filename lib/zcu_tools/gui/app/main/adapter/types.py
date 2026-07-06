@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field, replace
 from enum import Enum
 from typing import (
@@ -603,6 +603,65 @@ class CfgSectionSpec:
 
 
 @dataclass(frozen=True)
+class ChoiceBinding:
+    """One selector-driven variant list inside a ChoiceSectionSpec.
+
+    ``choices`` maps a selector value to the section spec whose fields should be
+    visible for that value. The owner ChoiceSectionSpec still owns the complete
+    union ``fields``; the choice specs are the display contract.
+    """
+
+    selector_key: str
+    choices: Mapping[str, CfgSectionSpec]
+
+    def __post_init__(self) -> None:
+        if not self.selector_key:
+            raise RuntimeError("ChoiceBinding.selector_key must be non-empty")
+        if not self.choices:
+            raise RuntimeError("ChoiceBinding.choices must be non-empty")
+
+    def controlled_field_keys(self) -> set[str]:
+        keys: set[str] = set()
+        for spec in self.choices.values():
+            keys.update(spec.fields)
+        return keys
+
+
+@dataclass(frozen=True)
+class ChoiceSectionSpec(CfgSectionSpec):
+    """A section that renders selector-specific child specs.
+
+    The value tree remains a normal complete CfgSectionValue over the union of
+    ``fields``. Only rendering is variant-aware: selector fields stay editable, and
+    fields listed by inactive choice specs are omitted from the form.
+    """
+
+    bindings: tuple[ChoiceBinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.bindings:
+            raise RuntimeError("ChoiceSectionSpec.bindings must be non-empty")
+        field_keys = set(self.fields)
+        for binding in self.bindings:
+            if binding.selector_key not in field_keys:
+                raise RuntimeError(
+                    f"Choice selector {binding.selector_key!r} is not a section field"
+                )
+            for choice, spec in binding.choices.items():
+                unknown = set(spec.fields) - field_keys
+                if unknown:
+                    raise RuntimeError(
+                        f"Choice {binding.selector_key!r}={choice!r} references "
+                        "unknown field(s): " + ", ".join(sorted(unknown))
+                    )
+                if binding.selector_key in spec.fields:
+                    raise RuntimeError(
+                        f"Choice {binding.selector_key!r}={choice!r} must not include "
+                        "its own selector field"
+                    )
+
+
+@dataclass(frozen=True)
 class DeviceRefSpec:
     """A field that selects a registered device by name."""
 
@@ -616,6 +675,7 @@ CfgNodeSpec = (
     | ModuleRefSpec
     | WaveformRefSpec
     | CfgSectionSpec
+    | ChoiceSectionSpec
     | DeviceRefSpec
 )
 

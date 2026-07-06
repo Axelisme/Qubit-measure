@@ -31,6 +31,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePath,
     OverridePlan,
+    ScalarSpec,
     SweepSpec,
     SweepValue,
     apply_override_patches,
@@ -128,6 +129,26 @@ _BUILDERS: tuple[Builder, ...] = (
 _BUILDER_IDS = [builder.name for builder in _BUILDERS]
 
 
+def _section_spec(schema: NodeCfgSchema, key: str) -> CfgSectionSpec:
+    section = schema.schema.spec.fields[key]
+    assert isinstance(section, CfgSectionSpec)
+    return section
+
+
+def _generation_group_spec(schema: NodeCfgSchema, key: str) -> CfgSectionSpec:
+    group = _section_spec(schema, "generation").fields[key]
+    assert isinstance(group, CfgSectionSpec)
+    return group
+
+
+def _scalar_labels(section: CfgSectionSpec) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for key, spec in section.fields.items():
+        assert isinstance(spec, ScalarSpec)
+        labels[key] = spec.label
+    return labels
+
+
 def _sectioned_test_schema() -> NodeCfgSchema:
     return sectioned_node_schema(
         (
@@ -209,7 +230,6 @@ _EXPECTED_KEYS = {
         "physical_recovery_max_points",
         "physical_recovery_max_center_shift_mhz",
         "physical_recovery_max_rms_mhz",
-        "pred_freq_correction_enabled",
         "pred_freq_correction_strategy",
         "pred_freq_correction_idw_k",
         "pred_freq_correction_idw_epsilon",
@@ -239,7 +259,6 @@ _EXPECTED_KEYS = {
         "drive_gain_mode",
         "pi_product_seed",
         "pi_product_factor",
-        "pi_gain_feedback_enabled",
         "pi_gain_feedback_strategy",
         "pi_gain_feedback_step_gain",
         "pi_gain_feedback_decay_points",
@@ -345,44 +364,41 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "earlystop_snr": "generation.safety.earlystop_snr",
-        "acquire_retry": "generation.safety.acquire_retry",
+        "earlystop_snr": "generation.acquisition.earlystop_snr",
+        "acquire_retry": "generation.acquisition.acquire_retry",
         "qub_pulse": "modules.qub_pulse",
         "readout": "modules.readout",
         "qub_ch": "modules.qub_pulse.ch",
         "qub_nqz": "modules.qub_pulse.nqz",
         "qub_gain": "modules.qub_pulse.gain",
         "qub_length": "modules.qub_pulse.waveform.length",
-        "drive_gain_mode": "generation.feedback.drive_gain_mode",
-        "target_kappa": "generation.feedback.target_kappa",
-        "qf_width_seed": "generation.feedback.qf_width_seed",
-        "physical_recovery_mode": "generation.feedback.physical_recovery_mode",
+        "drive_gain_mode": "generation.drive_gain.drive_gain_mode",
+        "target_kappa": "generation.drive_gain.target_kappa",
+        "qf_width_seed": "generation.drive_gain.qf_width_seed",
+        "physical_recovery_mode": "generation.freq_recovery.physical_recovery_mode",
         "physical_recovery_min_points": (
-            "generation.feedback.physical_recovery_min_points"
+            "generation.freq_recovery.physical_recovery_min_points"
         ),
         "physical_recovery_max_points": (
-            "generation.feedback.physical_recovery_max_points"
+            "generation.freq_recovery.physical_recovery_max_points"
         ),
         "physical_recovery_max_center_shift_mhz": (
-            "generation.feedback.physical_recovery_max_center_shift_mhz"
+            "generation.freq_recovery.physical_recovery_max_center_shift_mhz"
         ),
         "physical_recovery_max_rms_mhz": (
-            "generation.feedback.physical_recovery_max_rms_mhz"
-        ),
-        "pred_freq_correction_enabled": (
-            "generation.feedback.pred_freq_correction_enabled"
+            "generation.freq_recovery.physical_recovery_max_rms_mhz"
         ),
         "pred_freq_correction_strategy": (
-            "generation.feedback.pred_freq_correction_strategy"
+            "generation.predictor_correction.pred_freq_correction_strategy"
         ),
         "pred_freq_correction_idw_k": (
-            "generation.feedback.pred_freq_correction_idw_k"
+            "generation.predictor_correction.pred_freq_correction_idw_k"
         ),
         "pred_freq_correction_idw_epsilon": (
-            "generation.feedback.pred_freq_correction_idw_epsilon"
+            "generation.predictor_correction.pred_freq_correction_idw_epsilon"
         ),
         "pred_freq_correction_decay_points": (
-            "generation.feedback.pred_freq_correction_decay_points"
+            "generation.predictor_correction.pred_freq_correction_decay_points"
         ),
     },
     "lenrabi": {
@@ -390,32 +406,31 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "earlystop_snr": "generation.safety.earlystop_snr",
-        "acquire_retry": "generation.safety.acquire_retry",
+        "earlystop_snr": "generation.acquisition.earlystop_snr",
+        "acquire_retry": "generation.acquisition.acquire_retry",
         "rabi_pulse": "modules.rabi_pulse",
         "readout": "modules.readout",
         "qub_ch": "modules.rabi_pulse.ch",
         "qub_nqz": "modules.rabi_pulse.nqz",
         "qub_gain": "modules.rabi_pulse.gain",
-        "relax_delay_mode": "generation.timing.relax_delay_mode",
-        "t1_seed_us": "generation.timing.t1_seed_us",
-        "relax_factor": "generation.timing.relax_factor",
-        "relax_min_us": "generation.timing.relax_min_us",
+        "relax_delay_mode": "generation.relax.relax_delay_mode",
+        "t1_seed_us": "generation.relax.t1_seed_us",
+        "relax_factor": "generation.relax.relax_factor",
+        "relax_min_us": "generation.relax.relax_min_us",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
         "expected_pi_length": "generation.sweep.expected_pi_length",
         "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
-        "drive_gain_mode": "generation.feedback.drive_gain_mode",
-        "pi_product_seed": "generation.feedback.pi_product_seed",
-        "pi_product_factor": "generation.feedback.pi_product_factor",
-        "pi_gain_feedback_enabled": "generation.feedback.pi_gain_feedback_enabled",
-        "pi_gain_feedback_strategy": "generation.feedback.pi_gain_feedback_strategy",
+        "drive_gain_mode": "generation.drive_gain.drive_gain_mode",
+        "pi_product_seed": "generation.drive_gain.pi_product_seed",
+        "pi_product_factor": "generation.drive_gain.pi_product_factor",
+        "pi_gain_feedback_strategy": "generation.pi_feedback.pi_gain_feedback_strategy",
         "pi_gain_feedback_step_gain": (
-            "generation.feedback.pi_gain_feedback_step_gain"
+            "generation.pi_feedback.pi_gain_feedback_step_gain"
         ),
         "pi_gain_feedback_decay_points": (
-            "generation.feedback.pi_gain_feedback_decay_points"
+            "generation.pi_feedback.pi_gain_feedback_decay_points"
         ),
     },
     "ro_optimize": {
@@ -426,17 +441,17 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "acquire_retry": "generation.safety.acquire_retry",
-        "freq_range_mode": "generation.sweep.freq_range_mode",
-        "gain_range_mode": "generation.sweep.gain_range_mode",
-        "relax_delay_mode": "generation.timing.relax_delay_mode",
+        "acquire_retry": "generation.acquisition.acquire_retry",
+        "freq_range_mode": "generation.freq_search.freq_range_mode",
+        "gain_range_mode": "generation.gain_search.gain_range_mode",
+        "relax_delay_mode": "generation.relax.relax_delay_mode",
         "skew_penalty": "skew_penalty",
-        "t1_seed_us": "generation.timing.t1_seed_us",
-        "relax_factor": "generation.timing.relax_factor",
-        "freq_window_mode": "generation.feedback.freq_window_mode",
-        "freq_half_width_mhz": "generation.feedback.freq_half_width_mhz",
-        "gain_window_mode": "generation.feedback.gain_window_mode",
-        "gain_half_width": "generation.feedback.gain_half_width",
+        "t1_seed_us": "generation.relax.t1_seed_us",
+        "relax_factor": "generation.relax.relax_factor",
+        "freq_window_mode": "generation.freq_search.freq_window_mode",
+        "freq_half_width_mhz": "generation.freq_search.freq_half_width_mhz",
+        "gain_window_mode": "generation.gain_search.gain_window_mode",
+        "gain_half_width": "generation.gain_search.gain_half_width",
     },
     "t1": {
         "sweep_range": "sweep.length",
@@ -444,14 +459,14 @@ _EXPECTED_PATHS = {
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "generation.safety.earlystop_snr",
-        "acquire_retry": "generation.safety.acquire_retry",
+        "earlystop_snr": "generation.acquisition.earlystop_snr",
+        "acquire_retry": "generation.acquisition.acquire_retry",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
-        "relax_delay_mode": "generation.timing.relax_delay_mode",
+        "relax_delay_mode": "generation.relax.relax_delay_mode",
         "relax_delay": "relax_delay",
-        "t1_seed_us": "generation.timing.t1_seed_us",
-        "relax_factor": "generation.timing.relax_factor",
-        "relax_min_us": "generation.timing.relax_min_us",
+        "t1_seed_us": "generation.relax.t1_seed_us",
+        "relax_factor": "generation.relax.relax_factor",
+        "relax_min_us": "generation.relax.relax_min_us",
         "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
@@ -463,15 +478,15 @@ _EXPECTED_PATHS = {
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "generation.safety.earlystop_snr",
-        "acquire_retry": "generation.safety.acquire_retry",
+        "earlystop_snr": "generation.acquisition.earlystop_snr",
+        "acquire_retry": "generation.acquisition.acquire_retry",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
-        "relax_delay_mode": "generation.timing.relax_delay_mode",
+        "relax_delay_mode": "generation.relax.relax_delay_mode",
         "relax_delay": "relax_delay",
-        "t1_seed_us": "generation.timing.t1_seed_us",
-        "t2r_seed_us": "generation.timing.t2r_seed_us",
-        "relax_factor": "generation.timing.relax_factor",
-        "relax_min_us": "generation.timing.relax_min_us",
+        "t1_seed_us": "generation.relax.t1_seed_us",
+        "t2r_seed_us": "generation.sweep.t2r_seed_us",
+        "relax_factor": "generation.relax.relax_factor",
+        "relax_min_us": "generation.relax.relax_min_us",
         "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
     },
@@ -483,15 +498,15 @@ _EXPECTED_PATHS = {
         "readout": "modules.readout",
         "reps": "reps",
         "rounds": "rounds",
-        "earlystop_snr": "generation.safety.earlystop_snr",
-        "acquire_retry": "generation.safety.acquire_retry",
+        "earlystop_snr": "generation.acquisition.earlystop_snr",
+        "acquire_retry": "generation.acquisition.acquire_retry",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
-        "relax_delay_mode": "generation.timing.relax_delay_mode",
+        "relax_delay_mode": "generation.relax.relax_delay_mode",
         "relax_delay": "relax_delay",
-        "t1_seed_us": "generation.timing.t1_seed_us",
-        "t2e_seed_us": "generation.timing.t2e_seed_us",
-        "relax_factor": "generation.timing.relax_factor",
-        "relax_min_us": "generation.timing.relax_min_us",
+        "t1_seed_us": "generation.relax.t1_seed_us",
+        "t2e_seed_us": "generation.sweep.t2e_seed_us",
+        "relax_factor": "generation.relax.relax_factor",
+        "relax_min_us": "generation.relax.relax_min_us",
         "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "fit_method": "generation.fit.fit_method",
@@ -504,7 +519,7 @@ _EXPECTED_PATHS = {
         "reps": "reps",
         "rounds": "rounds",
         "relax_delay": "relax_delay",
-        "acquire_retry": "generation.safety.acquire_retry",
+        "acquire_retry": "generation.acquisition.acquire_retry",
         "mist_ch": "modules.mist_pulse.ch",
         "mist_nqz": "modules.mist_pulse.nqz",
         "mist_freq": "modules.mist_pulse.freq",
@@ -676,28 +691,43 @@ def test_generation_groups_keep_logical_knobs_flat():
     generation_value = schema.schema.value.fields["generation"]
     assert isinstance(generation_spec, CfgSectionSpec)
     assert isinstance(generation_value, CfgSectionValue)
-    assert set(generation_spec.fields) == {"feedback", "safety"}
-    assert set(generation_value.fields) == {"feedback", "safety"}
-    feedback_spec = generation_spec.fields["feedback"]
-    feedback_value = generation_value.fields["feedback"]
-    assert isinstance(feedback_spec, CfgSectionSpec)
-    assert isinstance(feedback_value, CfgSectionValue)
-    safety_spec = generation_spec.fields["safety"]
-    safety_value = generation_value.fields["safety"]
-    assert isinstance(safety_spec, CfgSectionSpec)
-    assert isinstance(safety_value, CfgSectionValue)
-    assert set(safety_spec.fields) == {"earlystop_snr", "acquire_retry"}
-    assert set(safety_value.fields) == {"earlystop_snr", "acquire_retry"}
-    assert "drive_gain_mode" in feedback_spec.fields
-    assert "drive_gain_mode" in feedback_value.fields
-    assert "physical_recovery_mode" in feedback_spec.fields
-    assert "physical_recovery_mode" in feedback_value.fields
+    assert set(generation_spec.fields) == {
+        "acquisition",
+        "drive_gain",
+        "freq_recovery",
+        "predictor_correction",
+    }
+    assert set(generation_value.fields) == {
+        "acquisition",
+        "drive_gain",
+        "freq_recovery",
+        "predictor_correction",
+    }
+    acquisition_spec = generation_spec.fields["acquisition"]
+    acquisition_value = generation_value.fields["acquisition"]
+    assert isinstance(acquisition_spec, CfgSectionSpec)
+    assert isinstance(acquisition_value, CfgSectionValue)
+    assert set(acquisition_spec.fields) == {"earlystop_snr", "acquire_retry"}
+    assert set(acquisition_value.fields) == {"earlystop_snr", "acquire_retry"}
+    drive_gain_spec = generation_spec.fields["drive_gain"]
+    drive_gain_value = generation_value.fields["drive_gain"]
+    assert isinstance(drive_gain_spec, CfgSectionSpec)
+    assert isinstance(drive_gain_value, CfgSectionValue)
+    assert "drive_gain_mode" in drive_gain_spec.fields
+    assert "drive_gain_mode" in drive_gain_value.fields
+    recovery_spec = generation_spec.fields["freq_recovery"]
+    recovery_value = generation_value.fields["freq_recovery"]
+    assert isinstance(recovery_spec, CfgSectionSpec)
+    assert isinstance(recovery_value, CfgSectionValue)
+    assert "physical_recovery_mode" in recovery_spec.fields
+    assert "physical_recovery_mode" in recovery_value.fields
     assert (
-        schema.logical_paths["drive_gain_mode"] == "generation.feedback.drive_gain_mode"
+        schema.logical_paths["drive_gain_mode"]
+        == "generation.drive_gain.drive_gain_mode"
     )
     assert (
         schema.logical_paths["physical_recovery_mode"]
-        == "generation.feedback.physical_recovery_mode"
+        == "generation.freq_recovery.physical_recovery_mode"
     )
 
     knobs = schema.read_knobs()
@@ -705,11 +735,84 @@ def test_generation_groups_keep_logical_knobs_flat():
     assert "drive_gain_mode" in knobs
     assert "physical_recovery_mode" in knobs
     assert knobs["acquire_retry"] == 3
-    assert "feedback" not in knobs
-    assert "safety" not in knobs
-    assert read_value_tree(schema)["generation"]["feedback"]["drive_gain_mode"] == (
+    assert "drive_gain" not in knobs
+    assert "freq_recovery" not in knobs
+    assert "acquisition" not in knobs
+    assert read_value_tree(schema)["generation"]["drive_gain"]["drive_gain_mode"] == (
         "adaptive"
     )
+
+
+def test_generation_display_labels_drop_redundant_group_prefixes():
+    qf_schema = QubitFreqBuilder().make_default_schema()
+    assert _scalar_labels(_generation_group_spec(qf_schema, "freq_recovery")) == {
+        "physical_recovery_mode": "mode",
+        "physical_recovery_min_points": "min_points",
+        "physical_recovery_max_points": "max_points",
+        "physical_recovery_max_center_shift_mhz": "max_center_shift_mhz",
+        "physical_recovery_max_rms_mhz": "max_rms_mhz",
+    }
+    assert _scalar_labels(
+        _generation_group_spec(qf_schema, "predictor_correction")
+    ) == {
+        "pred_freq_correction_strategy": "strategy",
+        "pred_freq_correction_idw_k": "idw_k",
+        "pred_freq_correction_idw_epsilon": "idw_epsilon",
+        "pred_freq_correction_decay_points": "decay_points",
+    }
+    pred_strategy = _generation_group_spec(qf_schema, "predictor_correction").fields[
+        "pred_freq_correction_strategy"
+    ]
+    assert isinstance(pred_strategy, ScalarSpec)
+    assert pred_strategy.choices == ["off", "idw", "last_good"]
+
+    lenrabi_schema = LenRabiBuilder().make_default_schema()
+    assert _scalar_labels(_generation_group_spec(lenrabi_schema, "relax")) == {
+        "relax_delay_mode": "delay_mode",
+        "t1_seed_us": "t1_seed_us",
+        "relax_factor": "factor",
+        "relax_min_us": "min_us",
+    }
+    assert _scalar_labels(_generation_group_spec(lenrabi_schema, "sweep")) == {
+        "sweep_range_mode": "range_mode",
+        "expected_pi_length": "expected_pi_length",
+        "sweep_start_us": "start_us",
+        "sweep_stop_factor": "stop_factor",
+        "sweep_stop_min_us": "stop_min_us",
+    }
+    assert _scalar_labels(_generation_group_spec(lenrabi_schema, "pi_feedback")) == {
+        "pi_gain_feedback_strategy": "strategy",
+        "pi_gain_feedback_step_gain": "step_gain",
+        "pi_gain_feedback_decay_points": "decay_points",
+    }
+    pi_strategy = _generation_group_spec(lenrabi_schema, "pi_feedback").fields[
+        "pi_gain_feedback_strategy"
+    ]
+    assert isinstance(pi_strategy, ScalarSpec)
+    assert pi_strategy.choices == ["off", "log_step"]
+
+    ro_schema = RoOptimizeBuilder().make_default_schema()
+    assert _scalar_labels(_generation_group_spec(ro_schema, "freq_search")) == {
+        "freq_range_mode": "freq_mode",
+        "freq_window_mode": "freq_mode",
+        "freq_half_width_mhz": "freq_half_width_mhz",
+    }
+    assert _scalar_labels(_generation_group_spec(ro_schema, "gain_search")) == {
+        "gain_range_mode": "gain_mode",
+        "gain_window_mode": "gain_mode",
+        "gain_half_width": "gain_half_width",
+    }
+
+    echo_schema = T2EchoBuilder().make_default_schema()
+    assert _scalar_labels(_generation_group_spec(echo_schema, "sweep")) == {
+        "sweep_range_mode": "range_mode",
+        "t2e_seed_us": "seed_us",
+        "sweep_start_us": "start_us",
+        "sweep_stop_factor": "stop_factor",
+    }
+    assert _scalar_labels(_generation_group_spec(echo_schema, "fit")) == {
+        "fit_method": "method"
+    }
 
 
 def test_generation_persistence_uses_flat_logical_keys():
@@ -747,7 +850,7 @@ def test_generation_persistence_uses_flat_logical_keys():
     assert knobs["physical_recovery_max_center_shift_mhz"] == pytest.approx(120.0)
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
     assert knobs["acquire_retry"] == 2
-    assert read_value_tree(restored)["generation"]["feedback"]["drive_gain_mode"] == (
+    assert read_value_tree(restored)["generation"]["drive_gain"]["drive_gain_mode"] == (
         "fixed"
     )
 
@@ -763,12 +866,29 @@ def test_generation_restore_rejects_unknown_flat_persisted_key():
         QubitFreqBuilder().make_default_schema().restore_persisted_raw(raw)
 
 
+def test_generation_restore_rejects_removed_feedback_enabled_key():
+    schema = QubitFreqBuilder().make_default_schema()
+    raw = schema.to_persisted_raw()
+    generation = raw["generation"]
+    assert isinstance(generation, dict)
+    generation["pred_freq_correction_enabled"] = {
+        "__kind": "direct",
+        "value": False,
+    }
+
+    with pytest.raises(
+        NodeCfgPersistenceError,
+        match=r"Unknown persisted generation key\(s\): pred_freq_correction_enabled",
+    ):
+        QubitFreqBuilder().make_default_schema().restore_persisted_raw(raw)
+
+
 def test_grouped_generation_section_is_removed_from_lower_raw():
     schema = path_node_schema(
         (
             node_path(
                 "drive_gain_mode",
-                "generation.feedback.drive_gain_mode",
+                "generation.drive_gain.drive_gain_mode",
                 str_choice_spec("drive_gain_mode", ("adaptive", "fixed")),
                 "adaptive",
             ),
@@ -776,7 +896,7 @@ def test_grouped_generation_section_is_removed_from_lower_raw():
         ),
         section_labels={
             "generation": "Generation overrides",
-            "generation.feedback": "Feedback / adaptive",
+            "generation.drive_gain": "Drive-gain adaptation",
         },
     )
 
@@ -1578,7 +1698,7 @@ def test_override_plan_serializes_and_validates_base_cfg_leaf_paths():
             OverridePath(
                 "modules.qub_pulse.gain",
                 "after_first_point",
-                "generation.feedback.drive_gain",
+                "generation.drive_gain.drive_gain",
                 "adaptive qubit drive",
             ),
         )
@@ -1594,7 +1714,7 @@ def test_override_plan_serializes_and_validates_base_cfg_leaf_paths():
         {
             "path": "modules.qub_pulse.gain",
             "mode": "after_first_point",
-            "source": "generation.feedback.drive_gain",
+            "source": "generation.drive_gain.drive_gain",
             "reason": "adaptive qubit drive",
         }
     ]
@@ -1611,7 +1731,7 @@ def test_override_plan_rejects_ambiguous_or_absent_paths():
             )
         )
     with pytest.raises(ValueError, match="must target Default cfg"):
-        OverridePath("generation.feedback.drive_gain", "all_points", "x", "y")
+        OverridePath("generation.drive_gain.drive_gain", "all_points", "x", "y")
     with pytest.raises(ValueError, match="empty segment"):
         OverridePath("modules..gain", "all_points", "x", "y")
     with pytest.raises(ValueError, match="unsupported override mode"):
@@ -1775,6 +1895,20 @@ def test_real_builders_declare_nonempty_valid_override_plans():
             ModuleLibrary(), md=MetaDict()
         )
         assert "reset" not in base_cfg.get("modules", {}), builder.name
+
+
+def test_real_builder_override_generation_sources_match_declared_paths():
+    for builder in _BUILDERS:
+        schema = builder.make_default_schema()
+        generation_paths = {
+            path
+            for path in schema.logical_paths.values()
+            if path.startswith("generation.")
+        }
+
+        for path in builder.override_plan(schema).paths:
+            if path.source.startswith("generation."):
+                assert path.source in generation_paths, (builder.name, path.source)
 
 
 def test_real_builders_restrict_generated_readout_to_pulse_shape():

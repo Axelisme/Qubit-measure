@@ -32,20 +32,26 @@ state 應位於 run-lived service/capability。
    capability state 不經 Patch / Snapshot 流動。
 
 3. **Builder 宣告 semantic slots。** Builder 以 node-owned declaration 宣告 slot
-   key、kind、schema prefix 與 defaults；slot policy fields 掛在既有
-   `generation.feedback` group，persisted raw 仍是 flat logical generation keys。
-   同一 Builder 可被放置多次，runtime key 使用 placed-node name，因此每個
-   placement 有獨立 hyperparameters 與 state。
+   key、kind、schema prefix 與 defaults；generic helper 預設可掛在
+   `generation.feedback` group，但實際 node 會依領域語意選擇更清楚的
+   generation group（例如 `generation.predictor_correction` 或
+   `generation.pi_feedback`）。visible label 可只顯示 slot suffix（如
+   `strategy` / `decay_points`），因為 group 已提供 semantic context；
+   strategy selector 以 `ChoiceSectionSpec` 只顯示目前 strategy 需要的
+   hyperparameters；persisted raw 仍是 flat logical generation keys。同一 Builder
+   可被放置多次，runtime key 使用 placed-node name，因此每個 placement 有獨立
+   hyperparameters 與 state。
 
 4. **generic feedback 只提供抽象 scalar mechanics。** Estimator strategy 是
-   `idw` / `last_good`；controller strategy 是 `log_step`。generic layer 回傳
+   `off` / `idw` / `last_good`；controller strategy 是 `off` / `log_step`。
+   `off` 表示該 slot disabled，runtime lookup 回傳 `None`。generic layer 回傳
    `FeedbackSample(value, confidence, age_queries)`，只做 finite/positive 等自身
    數學前置檢查與 age-based confidence decay，不處理 bounds、clamp、saturation、
    max-step、stop/fail、fit-quality gate、fallback target 或 acceptance policy。
 
-5. **disabled 與 undeclared 語意明確。** 已宣告但 disabled 的 slot lookup 回傳
-   `None`，由 use site 決定 fallback；未宣告 slot lookup fast-fail，表示 node
-   與 Builder declaration 不一致。
+5. **disabled 與 undeclared 語意明確。** 已宣告但 `strategy=off` 的 slot lookup
+   回傳 `None`，由 use site 決定 fallback；未宣告 slot lookup fast-fail，表示
+   node 與 Builder declaration 不一致。
 
 6. **no-observation 不產生 generic fallback。** estimator 沒有 observation 時回傳
    `None`，generic layer 不回傳 `0`、seed 或 default correction。use site 決定

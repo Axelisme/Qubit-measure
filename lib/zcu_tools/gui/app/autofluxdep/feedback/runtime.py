@@ -14,17 +14,20 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 import numpy as np
 
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, IntSpec, ScalarSpec
+from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, IntSpec
 from zcu_tools.gui.app.autofluxdep.cfg.schema import str_choice_spec
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+    GenerationChoice,
     GenerationField,
+    generation_choice,
     generation_field,
 )
 from zcu_tools.utils.math import IDWInterpolation
 
 FeedbackKind = Literal["estimator", "controller"]
-EstimatorStrategy = Literal["idw", "last_good"]
-ControllerStrategy = Literal["log_step"]
+EstimatorStrategy = Literal["off", "idw", "last_good"]
+ControllerStrategy = Literal["off", "log_step"]
+STRATEGY_OFF = "off"
 
 
 @runtime_checkable
@@ -74,7 +77,6 @@ class FeedbackSlotDecl:
     key: str
     kind: FeedbackKind
     prefix: str
-    default_enabled: bool = True
     default_strategy: str | None = None
     default_idw_k: int = 4
     default_idw_epsilon: float = 1e-6
@@ -90,14 +92,14 @@ class FeedbackSlotDecl:
         if self.kind == "estimator":
             if default_strategy is None:
                 object.__setattr__(self, "default_strategy", "idw")
-            elif default_strategy not in ("idw", "last_good"):
+            elif default_strategy not in (STRATEGY_OFF, "idw", "last_good"):
                 raise ValueError(
                     f"unsupported estimator strategy: {default_strategy!r}"
                 )
         elif self.kind == "controller":
             if default_strategy is None:
                 object.__setattr__(self, "default_strategy", "log_step")
-            elif default_strategy != "log_step":
+            elif default_strategy not in (STRATEGY_OFF, "log_step"):
                 raise ValueError(
                     f"unsupported controller strategy: {default_strategy!r}"
                 )
@@ -108,48 +110,46 @@ class FeedbackSlotDecl:
         return f"{self.prefix}_{suffix}"
 
 
-def feedback_generation_fields(slot: FeedbackSlotDecl) -> tuple[GenerationField, ...]:
-    """Return generation fields for ``slot`` under ``generation.feedback``."""
+def feedback_generation_fields(
+    slot: FeedbackSlotDecl, *, group: str = "feedback", group_label: str | None = None
+) -> tuple[GenerationField, ...]:
+    """Return generation fields for ``slot`` under the requested group."""
 
-    fields: list[GenerationField] = [
-        generation_field(
-            slot.field_name("enabled"),
-            slot.field_name("enabled"),
-            ScalarSpec(label=slot.field_name("enabled"), type=bool),
-            slot.default_enabled,
-            group="feedback",
-        )
-    ]
+    fields: list[GenerationField] = []
     if slot.kind == "estimator":
         fields.extend(
             (
                 generation_field(
                     slot.field_name("strategy"),
                     slot.field_name("strategy"),
-                    str_choice_spec(slot.field_name("strategy"), ("idw", "last_good")),
+                    str_choice_spec("strategy", (STRATEGY_OFF, "idw", "last_good")),
                     str(slot.default_strategy),
-                    group="feedback",
+                    group=group,
+                    group_label=group_label,
                 ),
                 generation_field(
                     slot.field_name("idw_k"),
                     slot.field_name("idw_k"),
-                    IntSpec(label=slot.field_name("idw_k")),
+                    IntSpec(label="idw_k"),
                     slot.default_idw_k,
-                    group="feedback",
+                    group=group,
+                    group_label=group_label,
                 ),
                 generation_field(
                     slot.field_name("idw_epsilon"),
                     slot.field_name("idw_epsilon"),
-                    FloatSpec(label=slot.field_name("idw_epsilon")),
+                    FloatSpec(label="idw_epsilon"),
                     slot.default_idw_epsilon,
-                    group="feedback",
+                    group=group,
+                    group_label=group_label,
                 ),
                 generation_field(
                     slot.field_name("decay_points"),
                     slot.field_name("decay_points"),
-                    FloatSpec(label=slot.field_name("decay_points")),
+                    FloatSpec(label="decay_points"),
                     slot.default_decay_points,
-                    group="feedback",
+                    group=group,
+                    group_label=group_label,
                 ),
             )
         )
@@ -159,27 +159,62 @@ def feedback_generation_fields(slot: FeedbackSlotDecl) -> tuple[GenerationField,
                 generation_field(
                     slot.field_name("strategy"),
                     slot.field_name("strategy"),
-                    str_choice_spec(slot.field_name("strategy"), ("log_step",)),
+                    str_choice_spec("strategy", (STRATEGY_OFF, "log_step")),
                     str(slot.default_strategy),
-                    group="feedback",
+                    group=group,
+                    group_label=group_label,
                 ),
                 generation_field(
                     slot.field_name("step_gain"),
                     slot.field_name("step_gain"),
-                    FloatSpec(label=slot.field_name("step_gain")),
+                    FloatSpec(label="step_gain"),
                     slot.default_step_gain,
-                    group="feedback",
+                    group=group,
+                    group_label=group_label,
                 ),
                 generation_field(
                     slot.field_name("decay_points"),
                     slot.field_name("decay_points"),
-                    FloatSpec(label=slot.field_name("decay_points")),
+                    FloatSpec(label="decay_points"),
                     slot.default_decay_points,
-                    group="feedback",
+                    group=group,
+                    group_label=group_label,
                 ),
             )
         )
     return tuple(fields)
+
+
+def feedback_generation_choice(
+    slot: FeedbackSlotDecl, *, group: str = "feedback"
+) -> GenerationChoice:
+    """Return ChoiceSectionSpec binding metadata for ``slot`` strategy fields."""
+
+    if slot.kind == "estimator":
+        return generation_choice(
+            group,
+            slot.field_name("strategy"),
+            {
+                STRATEGY_OFF: (),
+                "idw": (
+                    slot.field_name("idw_k"),
+                    slot.field_name("idw_epsilon"),
+                    slot.field_name("decay_points"),
+                ),
+                "last_good": (slot.field_name("decay_points"),),
+            },
+        )
+    return generation_choice(
+        group,
+        slot.field_name("strategy"),
+        {
+            STRATEGY_OFF: (),
+            "log_step": (
+                slot.field_name("step_gain"),
+                slot.field_name("decay_points"),
+            ),
+        },
+    )
 
 
 def _finite(name: str, value: Any) -> float:
@@ -402,10 +437,9 @@ def build_feedback_runtime(providers: Iterable[Any], md: Any = None) -> Feedback
 def _build_capability(
     slot: FeedbackSlotDecl, knobs: Mapping[str, Any]
 ) -> FeedbackCapability | None:
-    enabled = bool(knobs[slot.field_name("enabled")])
-    if not enabled:
-        return None
     strategy = str(knobs[slot.field_name("strategy")])
+    if strategy == STRATEGY_OFF:
+        return None
     if slot.kind == "estimator":
         if strategy == "last_good":
             return LastGoodEstimator(

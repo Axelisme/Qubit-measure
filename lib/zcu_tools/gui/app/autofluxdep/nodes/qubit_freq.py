@@ -38,6 +38,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.feedback import (
     FeedbackSlotDecl,
+    feedback_generation_choice,
     feedback_generation_fields,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -57,6 +58,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     PULSE_READOUT_REF_LABELS,
     adapter_node_schema,
     ctx_md_float,
+    generation_choice,
     logical_generation_field,
     readout_module_override_paths,
     readout_module_patches,
@@ -105,7 +107,6 @@ _PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
     key="predict_freq_correction",
     kind="estimator",
     prefix="pred_freq_correction",
-    default_enabled=True,
     default_strategy="idw",
     default_idw_k=10,
     default_idw_epsilon=1e-4,
@@ -514,70 +515,100 @@ class QubitFreqBuilder(Builder):
                     "earlystop_snr",
                     FloatSpec(label="earlystop_snr", optional=True),
                     _DEFAULT_EARLYSTOP_SNR,
-                    group="safety",
+                    group="acquisition",
                 ),
                 acquire_retry_generation_field(),
                 logical_generation_field(
                     "physical_recovery_mode",
                     str_choice_spec(
-                        "physical_recovery_mode",
+                        "mode",
                         (
                             PHYSICAL_RECOVERY_MODE_OFF,
                             PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
                         ),
                     ),
                     PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
-                    group="feedback",
+                    group="freq_recovery",
                 ),
                 logical_generation_field(
                     "physical_recovery_min_points",
-                    IntSpec(label="physical_recovery_min_points"),
+                    IntSpec(label="min_points"),
                     DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
-                    group="feedback",
+                    group="freq_recovery",
                 ),
                 logical_generation_field(
                     "physical_recovery_max_points",
-                    IntSpec(label="physical_recovery_max_points"),
+                    IntSpec(label="max_points"),
                     DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
-                    group="feedback",
+                    group="freq_recovery",
                 ),
                 logical_generation_field(
                     "physical_recovery_max_center_shift_mhz",
-                    FloatSpec(label="physical_recovery_max_center_shift_mhz"),
+                    FloatSpec(label="max_center_shift_mhz"),
                     DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
-                    group="feedback",
+                    group="freq_recovery",
                 ),
                 logical_generation_field(
                     "physical_recovery_max_rms_mhz",
-                    FloatSpec(label="physical_recovery_max_rms_mhz"),
+                    FloatSpec(label="max_rms_mhz"),
                     DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
-                    group="feedback",
+                    group="freq_recovery",
                 ),
                 logical_generation_field(
                     "drive_gain_mode",
                     str_choice_spec(
-                        "drive_gain_mode",
+                        "mode",
                         (
                             _DRIVE_GAIN_MODE_ADAPTIVE,
                             _DRIVE_GAIN_MODE_FIXED,
                         ),
                     ),
                     _DRIVE_GAIN_MODE_ADAPTIVE,
-                    group="feedback",
+                    group="drive_gain",
                 ),
                 logical_generation_field(
                     "target_kappa",
                     FloatSpec(label="target_kappa"),
                     _QFW_TARGET_KAPPA,
-                    group="feedback",
+                    group="drive_gain",
                 ),
                 logical_generation_field(
                     "qf_width_seed",
                     FloatSpec(label="qf_width_seed", optional=True),
                     _qf_width_seed(ctx),
-                    group="feedback",
+                    group="drive_gain",
                 ),
-                *feedback_generation_fields(_PREDICT_FREQ_CORRECTION_SLOT),
+                *feedback_generation_fields(
+                    _PREDICT_FREQ_CORRECTION_SLOT,
+                    group="predictor_correction",
+                ),
+            ),
+            generation_choices=(
+                generation_choice(
+                    "freq_recovery",
+                    "physical_recovery_mode",
+                    {
+                        PHYSICAL_RECOVERY_MODE_OFF: (),
+                        PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT: (
+                            "physical_recovery_min_points",
+                            "physical_recovery_max_points",
+                            "physical_recovery_max_center_shift_mhz",
+                            "physical_recovery_max_rms_mhz",
+                        ),
+                    },
+                ),
+                generation_choice(
+                    "drive_gain",
+                    "drive_gain_mode",
+                    {
+                        _DRIVE_GAIN_MODE_FIXED: (),
+                        _DRIVE_GAIN_MODE_ADAPTIVE: ("target_kappa", "qf_width_seed"),
+                    },
+                ),
+                feedback_generation_choice(
+                    _PREDICT_FREQ_CORRECTION_SLOT,
+                    group="predictor_correction",
+                ),
             ),
             default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP, "rounds": 10},
             drop_paths=("modules.reset",),
@@ -612,7 +643,7 @@ class QubitFreqBuilder(Builder):
                 OverridePath(
                     "modules.qub_pulse.gain",
                     "all_points",
-                    "generation.feedback.drive_gain_mode",
+                    "generation.drive_gain.drive_gain_mode",
                     "adaptive drive gain is generated from linewidth feedback",
                 )
             )

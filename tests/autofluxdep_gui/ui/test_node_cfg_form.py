@@ -162,6 +162,16 @@ def _generation_leaf(form: NodeCfgForm, key: str) -> Any:
     raise AssertionError(f"generation leaf {key!r} not found")
 
 
+def _field_labels(section: SectionLiveField) -> dict[str, str]:
+    return {key: cast(Any, field).spec.label for key, field in section.fields.items()}
+
+
+def _rendered_generation_paths(form: NodeCfgForm) -> set[str]:
+    generation_form = form._generation_form
+    assert generation_form is not None
+    return set(generation_form.decoration_paths())
+
+
 class _DecorationProvider:
     def __init__(self) -> None:
         self.seen: list[str] = []
@@ -203,25 +213,55 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert ch_spec.optional is False
         assert nqz_spec.choices == [1, 2]
         assert "qub_gain" not in form._default_model.fields
-        assert set(_generation(form).fields.keys()) == {"feedback", "safety"}
-        assert set(_generation_group(form, "safety").fields.keys()) == {
+        assert set(_generation(form).fields.keys()) == {
+            "acquisition",
+            "drive_gain",
+            "freq_recovery",
+            "predictor_correction",
+        }
+        assert set(_generation_group(form, "acquisition").fields.keys()) == {
             "earlystop_snr",
             "acquire_retry",
         }
-        assert set(_generation_group(form, "feedback").fields.keys()) == {
+        assert set(_generation_group(form, "drive_gain").fields.keys()) == {
             "drive_gain_mode",
             "target_kappa",
             "qf_width_seed",
+        }
+        assert set(_generation_group(form, "freq_recovery").fields.keys()) == {
             "physical_recovery_mode",
             "physical_recovery_min_points",
             "physical_recovery_max_points",
             "physical_recovery_max_center_shift_mhz",
             "physical_recovery_max_rms_mhz",
-            "pred_freq_correction_enabled",
+        }
+        assert set(_generation_group(form, "predictor_correction").fields.keys()) == {
             "pred_freq_correction_strategy",
             "pred_freq_correction_idw_k",
             "pred_freq_correction_idw_epsilon",
             "pred_freq_correction_decay_points",
+        }
+        assert _field_labels(_generation_group(form, "acquisition")) == {
+            "earlystop_snr": "earlystop_snr",
+            "acquire_retry": "retry",
+        }
+        assert _field_labels(_generation_group(form, "drive_gain")) == {
+            "drive_gain_mode": "mode",
+            "target_kappa": "target_kappa",
+            "qf_width_seed": "qf_width_seed",
+        }
+        assert _field_labels(_generation_group(form, "freq_recovery")) == {
+            "physical_recovery_mode": "mode",
+            "physical_recovery_min_points": "min_points",
+            "physical_recovery_max_points": "max_points",
+            "physical_recovery_max_center_shift_mhz": "max_center_shift_mhz",
+            "physical_recovery_max_rms_mhz": "max_rms_mhz",
+        }
+        assert _field_labels(_generation_group(form, "predictor_correction")) == {
+            "pred_freq_correction_strategy": "strategy",
+            "pred_freq_correction_idw_k": "idw_k",
+            "pred_freq_correction_idw_epsilon": "idw_epsilon",
+            "pred_freq_correction_decay_points": "decay_points",
         }
         assert set(node.schema.keys) == {
             "detune_sweep",
@@ -244,7 +284,6 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "physical_recovery_max_points",
             "physical_recovery_max_center_shift_mhz",
             "physical_recovery_max_rms_mhz",
-            "pred_freq_correction_enabled",
             "pred_freq_correction_strategy",
             "pred_freq_correction_idw_k",
             "pred_freq_correction_idw_epsilon",
@@ -252,6 +291,117 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         }
     finally:
         form.teardown()
+
+
+def test_generation_choices_render_only_active_strategy_fields(ctrl_node, qapp):
+    del qapp
+    ctrl, node, index = ctrl_node
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        paths = _rendered_generation_paths(form)
+        assert "predictor_correction.pred_freq_correction_strategy" in paths
+        assert "predictor_correction.pred_freq_correction_idw_k" in paths
+        assert "predictor_correction.pred_freq_correction_idw_epsilon" in paths
+        assert "predictor_correction.pred_freq_correction_decay_points" in paths
+        assert "freq_recovery.physical_recovery_min_points" in paths
+        assert "drive_gain.target_kappa" in paths
+
+        strategy = _generation_group(form, "predictor_correction").fields[
+            "pred_freq_correction_strategy"
+        ]
+        strategy.set_value(DirectValue(value="last_good"))
+
+        paths = _rendered_generation_paths(form)
+        assert "predictor_correction.pred_freq_correction_strategy" in paths
+        assert "predictor_correction.pred_freq_correction_idw_k" not in paths
+        assert "predictor_correction.pred_freq_correction_idw_epsilon" not in paths
+        assert "predictor_correction.pred_freq_correction_decay_points" in paths
+
+        strategy.set_value(DirectValue(value="off"))
+
+        paths = _rendered_generation_paths(form)
+        assert "predictor_correction.pred_freq_correction_strategy" in paths
+        assert "predictor_correction.pred_freq_correction_idw_k" not in paths
+        assert "predictor_correction.pred_freq_correction_decay_points" not in paths
+
+        recovery_mode = _generation_group(form, "freq_recovery").fields[
+            "physical_recovery_mode"
+        ]
+        recovery_mode.set_value(DirectValue(value="off"))
+
+        paths = _rendered_generation_paths(form)
+        assert "freq_recovery.physical_recovery_mode" in paths
+        assert "freq_recovery.physical_recovery_min_points" not in paths
+        assert "freq_recovery.physical_recovery_max_rms_mhz" not in paths
+
+        drive_gain_mode = _generation_group(form, "drive_gain").fields[
+            "drive_gain_mode"
+        ]
+        drive_gain_mode.set_value(DirectValue(value="fixed"))
+
+        paths = _rendered_generation_paths(form)
+        assert "drive_gain.drive_gain_mode" in paths
+        assert "drive_gain.target_kappa" not in paths
+        assert "drive_gain.qf_width_seed" not in paths
+    finally:
+        form.teardown()
+
+
+def test_generation_choices_render_only_active_readout_search_fields(qapp):
+    del qapp
+    ctrl = build_core()
+    node = ctrl.add_node_by_type("ro_optimize")
+    index = ctrl.state.nodes.index(node)
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        paths = _rendered_generation_paths(form)
+        assert "relax.relax_delay_mode" in paths
+        assert "relax.t1_seed_us" in paths
+        assert "relax.relax_factor" in paths
+        assert "freq_search.freq_range_mode" in paths
+        assert "freq_search.freq_window_mode" in paths
+        assert "freq_search.freq_half_width_mhz" in paths
+        assert "gain_search.gain_range_mode" in paths
+        assert "gain_search.gain_window_mode" in paths
+        assert "gain_search.gain_half_width" in paths
+
+        _generation_group(form, "freq_search").fields["freq_window_mode"].set_value(
+            DirectValue(value="from_default_sweep")
+        )
+
+        paths = _rendered_generation_paths(form)
+        assert "freq_search.freq_window_mode" in paths
+        assert "freq_search.freq_half_width_mhz" not in paths
+
+        _generation_group(form, "freq_search").fields["freq_range_mode"].set_value(
+            DirectValue(value="fixed")
+        )
+
+        paths = _rendered_generation_paths(form)
+        assert "freq_search.freq_range_mode" in paths
+        assert "freq_search.freq_window_mode" not in paths
+        assert "freq_search.freq_half_width_mhz" not in paths
+
+        _generation_group(form, "gain_search").fields["gain_range_mode"].set_value(
+            DirectValue(value="fixed")
+        )
+
+        paths = _rendered_generation_paths(form)
+        assert "gain_search.gain_range_mode" in paths
+        assert "gain_search.gain_window_mode" not in paths
+        assert "gain_search.gain_half_width" not in paths
+
+        _generation_group(form, "relax").fields["relax_delay_mode"].set_value(
+            DirectValue(value="fixed")
+        )
+
+        paths = _rendered_generation_paths(form)
+        assert "relax.relax_delay_mode" in paths
+        assert "relax.t1_seed_us" not in paths
+        assert "relax.relax_factor" not in paths
+    finally:
+        form.teardown()
+        ctrl._background_svc.quiesce()
 
 
 def test_cfg_form_decoration_provider_collects_nested_paths(qapp):

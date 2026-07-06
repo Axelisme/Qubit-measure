@@ -33,6 +33,8 @@ from .types import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    ChoiceBinding,
+    ChoiceSectionSpec,
     DeviceRefSpec,
     DirectValue,
     EvalValue,

@@ -53,13 +53,16 @@ class ScheduleAcquireResult:
     stopped: bool = False
 
 
-def acquire_retry_generation_field() -> GenerationField:
+def acquire_retry_generation_field(
+    *, group: str = "acquisition", group_label: str | None = None
+) -> GenerationField:
     """Return the common node-level acquire retry generation knob."""
     return logical_generation_field(
         "acquire_retry",
-        IntSpec(label="acquire_retry"),
+        IntSpec(label="retry"),
         DEFAULT_ACQUIRE_RETRY,
-        group="safety",
+        group=group,
+        group_label=group_label,
     )
 
 
