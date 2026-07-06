@@ -19,6 +19,7 @@ import math
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from numbers import Real
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -78,6 +79,8 @@ from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
     AppPersistedState,
     PersistedFluxSweep,
     PersistedNode,
+    PersistedPredictorDialogState,
+    PersistedPredictorModel,
     PersistedUiPrefs,
     PersistedWorkflow,
     PersistenceError,
@@ -300,7 +303,9 @@ class Controller(SessionControllerMixin):
             session.device_control, self._require_session_mutable
         )
         self._predictor_control = GuardedPredictorControl(
-            session.predictor_control, self._require_session_mutable
+            session.predictor_control,
+            self._require_session_mutable,
+            on_mutated=self._schedule_persist_all,
         )
         self._setup_control = GuardedSetupControl(
             session.setup_control, self._require_session_mutable
@@ -406,14 +411,60 @@ class Controller(SessionControllerMixin):
                 npts_expr=self._state.flux_npts_expr,
                 values=tuple(float(v) for v in self._state.flux_values),
             ),
-            ui=PersistedUiPrefs(auto_follow_tabs=self._state.auto_follow_tabs),
+            predictor=self._capture_predictor_model(),
+            ui=PersistedUiPrefs(
+                auto_follow_tabs=self._state.auto_follow_tabs,
+                predictor_dialog=self._state.predictor_dialog_state,
+            ),
         )
+
+    def _capture_predictor_model(self) -> PersistedPredictorModel | None:
+        info = self._pred_svc.get_predictor_info()
+        if info is None:
+            return None
+        path = info.get("path")
+        return PersistedPredictorModel(
+            EJ=self._finite_float(info["EJ"], "predictor.EJ"),
+            EC=self._finite_float(info["EC"], "predictor.EC"),
+            EL=self._finite_float(info["EL"], "predictor.EL"),
+            flux_half=self._finite_float(info["flux_half"], "predictor.flux_half"),
+            flux_period=self._finite_float(
+                info["flux_period"], "predictor.flux_period"
+            ),
+            flux_bias=self._finite_float(info["flux_bias"], "predictor.flux_bias"),
+            path=str(path) if path else None,
+        )
+
+    @staticmethod
+    def _finite_float(value: object, field: str) -> float:
+        if isinstance(value, bool):
+            raise TypeError(f"{field} must be a finite number")
+        if not isinstance(value, (Real, str)):
+            raise TypeError(f"{field} must be a finite number")
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError(f"{field} must be finite")
+        return numeric
 
     def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
         """Apply a persisted workflow snapshot, rejecting only invalid nodes."""
         rejected: list[RestoreIssue] = []
+        predictor_issue: RestoreIssue | None = None
+        restored_predictor = False
         self._startup_svc.restore_startup(state.startup)
         self._state.nodes = []
+
+        try:
+            restored_predictor = self._restore_predictor_model(state.predictor)
+        except (
+            PredictorLoadError,
+            TypeError,
+            ValueError,
+            KeyError,
+            RuntimeError,
+        ) as exc:
+            self._pred_svc.clear_predictor()
+            predictor_issue = RestoreIssue(subject="predictor", message=str(exc))
 
         for index, persisted in enumerate(state.workflow.nodes):
             subject = f"node[{index}] {persisted.name!r}"
@@ -438,13 +489,34 @@ class Controller(SessionControllerMixin):
         self._state.flux_npts_expr = state.flux.npts_expr
         self._state.flux_values = [float(v) for v in state.flux.values]
         self._state.auto_follow_tabs = state.ui.auto_follow_tabs
+        self._state.predictor_dialog_state = state.ui.predictor_dialog
         self._commit_workflow_edit(changed_name=None)
         self._state.version.bump(FLUX_VERSION_KEY)
         self._bus.emit(FluxChangedPayload(count=len(self._state.flux_values)))
         return RestoreReport(
             restored_nodes=len(self._state.nodes),
             rejected_nodes=tuple(rejected),
+            restored_predictor=restored_predictor,
+            predictor_issue=predictor_issue,
         )
+
+    def _restore_predictor_model(self, model: PersistedPredictorModel | None) -> bool:
+        if model is None:
+            self._pred_svc.clear_predictor()
+            return False
+        self._pred_svc.set_model_params(
+            SetModelParamsRequest(
+                EJ=self._finite_float(model.EJ, "predictor.EJ"),
+                EC=self._finite_float(model.EC, "predictor.EC"),
+                EL=self._finite_float(model.EL, "predictor.EL"),
+                flux_half=self._finite_float(model.flux_half, "predictor.flux_half"),
+                flux_period=self._finite_float(
+                    model.flux_period, "predictor.flux_period"
+                ),
+                flux_bias=self._finite_float(model.flux_bias, "predictor.flux_bias"),
+            )
+        )
+        return True
 
     def restore_all(self, *, load: bool = True) -> RestoreOutcome | None:
         if self._caretaker is None:
@@ -458,6 +530,11 @@ class Controller(SessionControllerMixin):
                 "autofluxdep persistence rejected %d node(s): %s",
                 len(report.rejected_nodes),
                 "; ".join(f"{i.subject}: {i.message}" for i in report.rejected_nodes),
+            )
+        if isinstance(report, RestoreReport) and report.predictor_issue is not None:
+            logger.warning(
+                "autofluxdep persistence rejected predictor: %s",
+                report.predictor_issue.message,
             )
         return outcome
 
@@ -549,6 +626,7 @@ class Controller(SessionControllerMixin):
                     flux_period=fit.flux_period,
                 )
             )
+            self._schedule_persist_all()
         except (OSError, QubitParamsError, PredictorLoadError, ValueError) as exc:
             logger.warning(
                 "autofluxdep predictor auto-load failed for %s: %s",
@@ -780,6 +858,15 @@ class Controller(SessionControllerMixin):
 
     def get_auto_follow_tabs(self) -> bool:
         return self._state.auto_follow_tabs
+
+    def get_predictor_dialog_state(self) -> PersistedPredictorDialogState:
+        return self._state.predictor_dialog_state
+
+    def set_predictor_dialog_state(self, state: PersistedPredictorDialogState) -> None:
+        if self._state.predictor_dialog_state == state:
+            return
+        self._state.predictor_dialog_state = state
+        self._schedule_persist_all()
 
     def set_flux_device(self, name: str | None) -> None:
         """Designate which connected device the flux sweep is applied through.

@@ -29,6 +29,7 @@ from zcu_tools.gui.session.ui.predictor_dialog import (
     _DEFAULT_FLUX_PERIOD,
     _DEFAULT_TRANSITIONS,
     PredictorDialog,
+    PredictorDialogState,
 )
 
 
@@ -740,6 +741,87 @@ def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
     assert dialog.isVisible() is False
     finished.assert_not_called()
     unsubscribe.assert_not_called()
+
+
+def test_predictor_dialog_capture_restore_state_roundtrip(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    source = PredictorDialog(ctrl)
+    state = PredictorDialogState(
+        tracked_transitions=((2, 3), (3, 5)),
+        tab_index=2,
+        params_path_text="/saved/params.json",
+    )
+
+    source.restore_state(state)
+    captured = source.capture_state()
+    restored = PredictorDialog(ctrl)
+    restored.restore_state(captured)
+
+    assert captured == state
+    assert tuple(restored._tracked) == state.tracked_transitions
+    assert restored._table.rowCount() == 2
+    assert restored._tab_widget.currentIndex() == 2
+    assert restored._params_path_edit.text() == "/saved/params.json"
+
+
+def test_predictor_dialog_restore_state_allows_empty_transitions(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+
+    dialog.restore_state(
+        PredictorDialogState(
+            tracked_transitions=(),
+            tab_index=1,
+            params_path_text="",
+        )
+    )
+
+    assert dialog._tracked == []
+    assert dialog._table.rowCount() == 0
+    assert dialog._freq_canvas._marker_value is None
+    assert dialog._mat_n_canvas._marker_value is None
+    assert dialog._mat_phi_canvas._marker_value is None
+
+
+def test_predictor_dialog_restore_state_skips_invalid_transitions(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+
+    dialog.restore_state(
+        PredictorDialogState(
+            tracked_transitions=((0, 1), (0, 1), (2, 2), (-1, 3), (3, 5)),
+            tab_index=99,
+            params_path_text="/p.json",
+        )
+    )
+
+    assert tuple(dialog._tracked) == ((0, 1), (3, 5))
+    assert dialog._table.rowCount() == 2
+    assert dialog._tab_widget.currentIndex() == 2
+
+
+def test_predictor_dialog_state_changed_only_for_persisted_ui_state(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    changed = MagicMock()
+    dialog.state_changed.connect(changed)
+
+    dialog._params_path_edit.setText("/typed/params.json")
+    dialog._tab_widget.setCurrentIndex(1)
+    dialog._add_from_spin.setValue(2)
+    dialog._add_to_spin.setValue(5)
+    dialog._on_add_clicked()
+    dialog._table.selectRow(0)
+    dialog._on_remove_selected()
+
+    assert changed.call_count == 4
+
+    changed.reset_mock()
+    dialog.set_live_device_value(0.25)
+    dialog._on_spinbox_changed(0.5)
+    dialog._on_canvas_lock(0.75)
+
+    changed.assert_not_called()
 
 
 def test_predictor_dialog_init_with_predictor_all_canvases_have_axes(qapp):

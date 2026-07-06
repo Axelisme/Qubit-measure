@@ -14,6 +14,8 @@ from zcu_tools.gui.app.autofluxdep.services import (
     AppPersistedState,
     PersistedFluxSweep,
     PersistedNode,
+    PersistedPredictorDialogState,
+    PersistedPredictorModel,
     PersistedStartup,
     PersistedUiPrefs,
     PersistedWorkflow,
@@ -22,6 +24,7 @@ from zcu_tools.gui.app.autofluxdep.services import (
     RestoreReport,
 )
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
+from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
 from zcu_tools.gui.session.services.startup import (
     StartupConnectionRequest,
     StartupProjectRequest,
@@ -205,6 +208,181 @@ def test_restore_old_memento_without_ui_defaults_auto_follow_true(tmp_path: Path
     assert ctrl.get_auto_follow_tabs() is True
     assert ctrl.get_persisted_startup() == PersistedStartup()
     assert ctrl.state.flux_values == pytest.approx([0.0, 0.5, 1.0])
+
+
+def test_predictor_model_persistence_roundtrip(tmp_path: Path):
+    ctrl = build_core()
+    req = SetModelParamsRequest(
+        EJ=4.2,
+        EC=1.1,
+        EL=0.7,
+        flux_half=0.3,
+        flux_period=0.8,
+        flux_bias=0.05,
+    )
+    ctrl.predictor_control.set_predictor_model_params(req)
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    ctrl.attach_caretaker(caretaker)
+    ctrl.persist_all()
+
+    payload = json.loads(caretaker.state_path.read_text(encoding="utf-8"))
+    assert payload["predictor"]["EJ"] == pytest.approx(4.2)
+    assert payload["predictor"]["EC"] == pytest.approx(1.1)
+    assert payload["predictor"]["EL"] == pytest.approx(0.7)
+    assert payload["predictor"]["flux_half"] == pytest.approx(0.3)
+    assert payload["predictor"]["flux_period"] == pytest.approx(0.8)
+    assert payload["predictor"]["flux_bias"] == pytest.approx(0.05)
+
+    restored = build_core()
+    restored.attach_caretaker(PersistenceCaretaker(restored, cache_dir=tmp_path))
+    outcome = restored.restore_all()
+
+    assert outcome is not None
+    assert outcome.load_error is None
+    assert isinstance(outcome.report, RestoreReport)
+    assert outcome.report.restored_predictor is True
+    info = restored.predictor_control.get_predictor_info()
+    assert info is not None
+    assert info["EJ"] == pytest.approx(req.EJ)
+    assert info["EC"] == pytest.approx(req.EC)
+    assert info["EL"] == pytest.approx(req.EL)
+    assert info["flux_half"] == pytest.approx(req.flux_half)
+    assert info["flux_period"] == pytest.approx(req.flux_period)
+    assert info["flux_bias"] == pytest.approx(req.flux_bias)
+
+
+def test_predictor_model_mutation_autosaves_after_debounce(tmp_path: Path, qapp):
+    ctrl = build_core()
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    ctrl.attach_caretaker(caretaker)
+    req = SetModelParamsRequest(
+        EJ=4.2,
+        EC=1.1,
+        EL=0.7,
+        flux_half=0.3,
+        flux_period=0.8,
+        flux_bias=0.05,
+    )
+
+    assert not caretaker.state_path.exists()
+    ctrl.predictor_control.set_predictor_model_params(req)
+
+    assert ctrl._persist_timer.isActive()
+    _pump_for(qapp, 0.7)
+    payload = json.loads(caretaker.state_path.read_text(encoding="utf-8"))
+    assert payload["predictor"]["EJ"] == pytest.approx(req.EJ)
+    assert payload["predictor"]["EC"] == pytest.approx(req.EC)
+    assert payload["predictor"]["EL"] == pytest.approx(req.EL)
+    assert payload["predictor"]["flux_half"] == pytest.approx(req.flux_half)
+    assert payload["predictor"]["flux_period"] == pytest.approx(req.flux_period)
+    assert payload["predictor"]["flux_bias"] == pytest.approx(req.flux_bias)
+
+
+def test_predictor_clear_autosaves_null_after_debounce(tmp_path: Path, qapp):
+    ctrl = build_core()
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    ctrl.attach_caretaker(caretaker)
+    req = SetModelParamsRequest(
+        EJ=4.2,
+        EC=1.1,
+        EL=0.7,
+        flux_half=0.3,
+        flux_period=0.8,
+        flux_bias=0.05,
+    )
+    ctrl.predictor_control.set_predictor_model_params(req)
+    _pump_for(qapp, 0.7)
+    payload = json.loads(caretaker.state_path.read_text(encoding="utf-8"))
+    assert payload["predictor"] is not None
+
+    ctrl.predictor_control.clear_predictor()
+
+    assert ctrl._persist_timer.isActive()
+    _pump_for(qapp, 0.7)
+    payload = json.loads(caretaker.state_path.read_text(encoding="utf-8"))
+    assert payload["predictor"] is None
+
+
+def test_restore_invalid_predictor_reports_issue_without_rejecting_workflow():
+    ctrl = build_core()
+    state = AppPersistedState(
+        predictor=PersistedPredictorModel(
+            EJ=4.2,
+            EC=1.1,
+            EL=0.7,
+            flux_half=0.3,
+            flux_period=0.0,
+        ),
+        workflow=PersistedWorkflow(
+            nodes=(PersistedNode(type_name="qubit_freq", name="freq_scan"),)
+        ),
+    )
+
+    report = ctrl.restore_persisted_state(state)
+
+    assert report.restored_nodes == 1
+    assert report.rejected_nodes == ()
+    assert report.restored_predictor is False
+    assert report.predictor_issue is not None
+    assert report.predictor_issue.subject == "predictor"
+    assert ctrl.state.node_names() == ["freq_scan"]
+    assert ctrl.predictor_control.get_predictor_info() is None
+
+
+def test_restore_without_predictor_defaults_none_and_default_dialog_state(
+    tmp_path: Path,
+):
+    ctrl = build_core()
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    caretaker.state_path.parent.mkdir(parents=True, exist_ok=True)
+    caretaker.state_path.write_text(
+        json.dumps(
+            {
+                "version": APP_STATE_VERSION,
+                "workflow": {"nodes": []},
+                "ui": {"auto_follow_tabs": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    ctrl.attach_caretaker(caretaker)
+
+    outcome = ctrl.restore_all()
+
+    assert outcome is not None
+    assert outcome.load_error is None
+    assert ctrl.predictor_control.get_predictor_info() is None
+    assert ctrl.get_predictor_dialog_state() == PersistedPredictorDialogState()
+    assert ctrl.get_auto_follow_tabs() is False
+
+
+def test_predictor_dialog_state_persistence_roundtrip(tmp_path: Path):
+    dialog_state = PersistedPredictorDialogState(
+        tracked_transitions=((2, 3), (3, 5)),
+        tab_index=2,
+        params_path_text="/saved/params.json",
+    )
+    ctrl = build_core()
+    ctrl.set_predictor_dialog_state(dialog_state)
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    ctrl.attach_caretaker(caretaker)
+    ctrl.persist_all()
+
+    payload = json.loads(caretaker.state_path.read_text(encoding="utf-8"))
+    assert payload["ui"]["predictor_dialog"]["tracked_transitions"] == [
+        [2, 3],
+        [3, 5],
+    ]
+    assert payload["ui"]["predictor_dialog"]["tab_index"] == 2
+    assert payload["ui"]["predictor_dialog"]["params_path_text"] == "/saved/params.json"
+
+    restored = build_core()
+    restored.attach_caretaker(PersistenceCaretaker(restored, cache_dir=tmp_path))
+    outcome = restored.restore_all()
+
+    assert outcome is not None
+    assert outcome.load_error is None
+    assert restored.get_predictor_dialog_state() == dialog_state
 
 
 def test_restore_rejects_invalid_node_and_keeps_valid_nodes():

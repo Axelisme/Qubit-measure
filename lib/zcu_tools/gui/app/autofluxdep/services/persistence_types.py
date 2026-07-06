@@ -40,10 +40,39 @@ class PersistedFluxSweep(BaseModel):
     values: tuple[float, ...] = ()
 
 
+class PersistedPredictorModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    EJ: float
+    EC: float
+    EL: float
+    flux_half: float
+    flux_period: float
+    flux_bias: float = 0.0
+    path: str | None = None
+
+
+class PersistedPredictorDialogState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tracked_transitions: tuple[tuple[int, int], ...] = (
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (1, 2),
+        (1, 3),
+    )
+    tab_index: int = 0
+    params_path_text: str = ""
+
+
 class PersistedUiPrefs(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     auto_follow_tabs: bool = True
+    predictor_dialog: PersistedPredictorDialogState = Field(
+        default_factory=PersistedPredictorDialogState
+    )
 
 
 class AppPersistedState(BaseModel):
@@ -55,6 +84,7 @@ class AppPersistedState(BaseModel):
     startup: PersistedStartup = Field(default_factory=PersistedStartup)
     workflow: PersistedWorkflow = Field(default_factory=PersistedWorkflow)
     flux: PersistedFluxSweep = Field(default_factory=PersistedFluxSweep)
+    predictor: PersistedPredictorModel | None = None
     ui: PersistedUiPrefs = Field(default_factory=PersistedUiPrefs)
 
 
@@ -72,6 +102,8 @@ class RestoreReport:
 
     restored_nodes: int
     rejected_nodes: tuple[RestoreIssue, ...] = ()
+    restored_predictor: bool = False
+    predictor_issue: RestoreIssue | None = None
 
 
 __all__ = [
@@ -79,6 +111,8 @@ __all__ = [
     "AppPersistedState",
     "PersistedFluxSweep",
     "PersistedNode",
+    "PersistedPredictorDialogState",
+    "PersistedPredictorModel",
     "PersistedStartup",
     "PersistedUiPrefs",
     "PersistedWorkflow",

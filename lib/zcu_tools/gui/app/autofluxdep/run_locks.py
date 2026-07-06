@@ -270,9 +270,20 @@ class GuardedDeviceControl:
 class GuardedPredictorControl:
     """PredictorControlPort wrapper that allows reads but blocks calibration edits."""
 
-    def __init__(self, inner: PredictorControlPort, guard: GuardFn) -> None:
+    def __init__(
+        self,
+        inner: PredictorControlPort,
+        guard: GuardFn,
+        *,
+        on_mutated: Callable[[], None] | None = None,
+    ) -> None:
         self._inner = inner
         self._guard = guard
+        self._on_mutated = on_mutated
+
+    def _notify_mutated(self) -> None:
+        if self._on_mutated is not None:
+            self._on_mutated()
 
     def on_predictor_changed(
         self, handler: Callable[[PredictorChangedPayload], None]
@@ -282,14 +293,17 @@ class GuardedPredictorControl:
     def load_predictor(self, req: LoadPredictorRequest) -> None:
         self._guard("predictor")
         self._inner.load_predictor(req)
+        self._notify_mutated()
 
     def set_predictor_model_params(self, req: SetModelParamsRequest) -> None:
         self._guard("predictor")
         self._inner.set_predictor_model_params(req)
+        self._notify_mutated()
 
     def clear_predictor(self) -> None:
         self._guard("predictor")
         self._inner.clear_predictor()
+        self._notify_mutated()
 
     def predict_freq(self, req: PredictFreqRequest) -> float:
         return self._inner.predict_freq(req)

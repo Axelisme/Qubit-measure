@@ -37,6 +37,9 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStartedPayload,
     RunStoppedPayload,
 )
+from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
+    PersistedPredictorDialogState,
+)
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow, _RunBridge
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -48,6 +51,7 @@ from zcu_tools.gui.session.events import (
     SocChangedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationOutcome
+from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialogState
 
 from .._helpers import connect_mock, make_builder, make_measurement_builder
 
@@ -1025,6 +1029,72 @@ def test_predictor_dialog_can_open_as_live_view_during_run(app):
 
     assert not dlg._live_mode
     assert dlg._apply_btn.isEnabled()
+
+
+def test_predictor_dialog_uses_persistent_close_and_reuses_hidden_instance(app):
+    _ctrl, win = app
+
+    win._on_predictor_clicked()
+    dlg = win._predictor_dialog
+    assert dlg is not None
+
+    dlg.reject()
+    QApplication.processEvents()
+
+    assert not dlg.isVisible()
+    assert win._dialog_refs.get("predictor") is dlg
+
+    win._on_predictor_clicked()
+    QApplication.processEvents()
+
+    assert win._predictor_dialog is dlg
+    assert dlg.isVisible()
+
+
+def test_predictor_dialog_restores_saved_ui_state_on_open(app):
+    ctrl, win = app
+    state = PersistedPredictorDialogState(
+        tracked_transitions=((2, 3), (3, 5)),
+        tab_index=2,
+        params_path_text="/saved/params.json",
+    )
+    ctrl.set_predictor_dialog_state(state)
+
+    win._on_predictor_clicked()
+
+    dlg = win._predictor_dialog
+    assert dlg is not None
+    assert tuple(dlg._tracked) == state.tracked_transitions
+    assert dlg._tab_widget.currentIndex() == 2
+    assert dlg._params_path_edit.text() == "/saved/params.json"
+
+
+def test_window_captures_predictor_dialog_state_before_persist(app, monkeypatch):
+    ctrl, win = app
+    win._on_predictor_clicked()
+    dlg = win._predictor_dialog
+    assert dlg is not None
+    state = PersistedPredictorDialogState(
+        tracked_transitions=((4, 6),),
+        tab_index=1,
+        params_path_text="/close/params.json",
+    )
+    dlg.restore_state(
+        PredictorDialogState(
+            tracked_transitions=state.tracked_transitions,
+            tab_index=state.tab_index,
+            params_path_text=state.params_path_text,
+        )
+    )
+    persist_all = MagicMock()
+    monkeypatch.setattr(ctrl, "persist_all", persist_all)
+    monkeypatch.setattr(ctrl, "quiesce_background", MagicMock(return_value=True))
+    monkeypatch.setattr(win, "close", MagicMock())
+
+    win._perform_close()
+
+    assert ctrl.get_predictor_dialog_state() == state
+    persist_all.assert_called_once_with()
 
 
 def test_pause_continue_ui_states_lock_workflow_controls(app):

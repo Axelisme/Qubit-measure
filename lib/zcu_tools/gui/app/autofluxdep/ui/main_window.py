@@ -58,6 +58,9 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStoppedPayload,
 )
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
+from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
+    PersistedPredictorDialogState,
+)
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -76,7 +79,10 @@ from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
+    from zcu_tools.gui.session.ui.predictor_dialog import (
+        PredictorDialog,
+        PredictorDialogState,
+    )
 
 logger = logging.getLogger(__name__)
 _ProgressSnapshot = tuple[int, str, int]
@@ -350,6 +356,7 @@ class MainWindow(QMainWindow):
         self._progress_unsub()
         self._list.teardown()
         self._detail.teardown()
+        self._capture_predictor_dialog_state()
         self._ctrl.persist_all()
         self._ctrl.quiesce_background()
         self.close()
@@ -535,15 +542,42 @@ class MainWindow(QMainWindow):
             self._ctrl.predictor_control,
             self,
             device=self._ctrl.device_control,
+            persistent_on_close=True,
         )
+        dlg.restore_state(self._shared_predictor_dialog_state())
+        dlg.state_changed.connect(self._capture_predictor_dialog_state)
 
         def _on_finished(_status: int) -> None:
+            self._capture_predictor_dialog_state()
             self._predictor_dialog = None
             self._refresh_session_status()
 
         self._predictor_dialog = dlg
         self._sync_predictor_dialog_live_state()
         self._dialog_refs.open_named("predictor", dlg, on_finished=_on_finished)
+
+    def _shared_predictor_dialog_state(self) -> PredictorDialogState:
+        from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialogState
+
+        state = self._ctrl.get_predictor_dialog_state()
+        return PredictorDialogState(
+            tracked_transitions=state.tracked_transitions,
+            tab_index=state.tab_index,
+            params_path_text=state.params_path_text,
+        )
+
+    def _capture_predictor_dialog_state(self) -> None:
+        dlg = self._predictor_dialog
+        if dlg is None:
+            return
+        state = dlg.capture_state()
+        self._ctrl.set_predictor_dialog_state(
+            PersistedPredictorDialogState(
+                tracked_transitions=state.tracked_transitions,
+                tab_index=state.tab_index,
+                params_path_text=state.params_path_text,
+            )
+        )
 
     def _on_inspect(self) -> None:
         """Open the shared context inspector, or raise it if already open.

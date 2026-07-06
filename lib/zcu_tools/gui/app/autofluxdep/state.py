@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
+from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
+    PersistedPredictorDialogState,
+)
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ExpContext
 
@@ -73,6 +76,9 @@ class AutoFluxDepState(SessionState):
         self.flux_stop_expr: str = "-0.2e-3"
         self.flux_npts_expr: str = "101"
         self.auto_follow_tabs: bool = True
+        self.predictor_dialog_state: PersistedPredictorDialogState = (
+            PersistedPredictorDialogState()
+        )
         # Which connected device the flux sweep is applied through (its unit
         # labels the flux axis; recorded for the run cfg's flux ``dev`` entry).
         # None = unset (the flux values are then bare numbers).

@@ -24,13 +24,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent, QShowEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractItemView,
@@ -92,8 +93,40 @@ _COL_MAG_N = 2
 _COL_MAG_PHI = 3
 
 
+@dataclass(frozen=True)
+class PredictorDialogState:
+    """App-neutral persistent UI state for PredictorDialog."""
+
+    tracked_transitions: tuple[tuple[int, int], ...]
+    tab_index: int
+    params_path_text: str
+
+
+def _normalize_tracked_transitions(
+    transitions: tuple[tuple[int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    normalized: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for transition in transitions:
+        if len(transition) != 2:
+            continue
+        frm_raw, to_raw = transition
+        if isinstance(frm_raw, bool) or isinstance(to_raw, bool):
+            continue
+        frm = int(frm_raw)
+        to = int(to_raw)
+        candidate = (frm, to)
+        if frm < 0 or to < 0 or frm >= to or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalized.append(candidate)
+    return tuple(normalized)
+
+
 class PredictorDialog(QDialog):
     """Modal dialog for loading a FluxoniumPredictor and predicting frequencies."""
+
+    state_changed = Signal()
 
     def __init__(
         self,
@@ -108,6 +141,7 @@ class PredictorDialog(QDialog):
         self._dev = device
         self._persistent_on_close = persistent_on_close
         self._live_mode = False
+        self._suppress_state_changed = False
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
         self.setMinimumHeight(480)
@@ -334,6 +368,8 @@ class PredictorDialog(QDialog):
         # Pre-fill with current predictor state.
         self._sync_predictor_from_control(refresh_curves=True)
         self._sync_live_mode_controls()
+        self._params_path_edit.textChanged.connect(self._emit_state_changed)
+        self._tab_widget.currentChanged.connect(self._emit_state_changed)
 
         # Facet subscription for live predictor state updates.
         self._unsubscribe_predictor_changed: Callable[[], None] | None = (
@@ -346,6 +382,35 @@ class PredictorDialog(QDialog):
         )
         self.finished.connect(self._cleanup_subscriptions)
         self.destroyed.connect(self._cleanup_subscriptions)
+
+    def capture_state(self) -> PredictorDialogState:
+        """Return the persistent UI state only; live marker/device/cache state is excluded."""
+        return PredictorDialogState(
+            tracked_transitions=tuple(self._tracked),
+            tab_index=int(self._tab_widget.currentIndex()),
+            params_path_text=self._params_path_edit.text(),
+        )
+
+    def restore_state(self, state: PredictorDialogState) -> None:
+        """Restore persistent UI state without touching the active predictor model."""
+        transitions = _normalize_tracked_transitions(state.tracked_transitions)
+        tab_count = self._tab_widget.count()
+        tab_index = max(0, min(int(state.tab_index), max(0, tab_count - 1)))
+        self._suppress_state_changed = True
+        try:
+            self._tracked = list(transitions)
+            self._params_path_edit.setText(state.params_path_text)
+            self._tab_widget.setCurrentIndex(tab_index)
+            self._rebuild_table()
+        finally:
+            self._suppress_state_changed = False
+        self._refresh_curves()
+        self._update_value_columns()
+
+    def _emit_state_changed(self, *_args: object) -> None:
+        if self._suppress_state_changed:
+            return
+        self.state_changed.emit()
 
     def reject(self) -> None:
         if self._persistent_on_close:
@@ -966,6 +1031,7 @@ class PredictorDialog(QDialog):
         self._tracked.remove(transition)
         self._rebuild_table()
         self._refresh_curves()
+        self._emit_state_changed()
 
     def _on_add_clicked(self) -> None:
         """Validate and add the transition from the add-row spinboxes."""
@@ -979,6 +1045,7 @@ class PredictorDialog(QDialog):
         if self._add_transition(frm, to):
             self._rebuild_table()
             self._refresh_curves()
+            self._emit_state_changed()
 
     def _on_remove_selected(self) -> None:
         """Remove ALL currently selected transitions and refresh."""
@@ -995,6 +1062,7 @@ class PredictorDialog(QDialog):
                 self._tracked.remove(transition)
         self._rebuild_table()
         self._refresh_curves()
+        self._emit_state_changed()
 
     # ------------------------------------------------------------------
     # Spinbox / canvas bidirectional coupling
