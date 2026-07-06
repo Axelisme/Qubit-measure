@@ -148,6 +148,7 @@ class NodeListPane(QWidget):
         self._ctrl = ctrl
         self._dialog_presenter = dialog_presenter or QtDialogPresenter()
         self._run_state: RunUiState = "idle"
+        self._sample_export_pending = False
         self._torn_down = False
 
         root = QVBoxLayout(self)
@@ -462,9 +463,15 @@ class NodeListPane(QWidget):
         self._abort_btn.setEnabled(self._run_state in {"running", "pausing", "paused"})
         self._restart_btn.setVisible(self._run_state == "paused")
         self._restart_btn.setEnabled(self._run_state == "paused")
-        can_export = self._run_state == "idle" and self._ctrl.can_export_sample_table()
-        self._export_sample_btn.setVisible(can_export)
-        self._export_sample_btn.setEnabled(can_export)
+        has_export = self._run_state == "idle" and self._ctrl.can_export_sample_table()
+        self._export_sample_btn.setVisible(has_export)
+        self._export_sample_btn.setEnabled(
+            has_export and not self._sample_export_pending
+        )
+
+    def set_sample_export_pending(self, pending: bool) -> None:
+        self._sample_export_pending = bool(pending)
+        self.refresh_run_availability()
 
     def _run_disabled_reason(self) -> str | None:
         return self._ctrl.run_readiness()

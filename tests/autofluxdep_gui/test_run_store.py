@@ -456,6 +456,38 @@ def test_qubit_freq_export_excludes_memory_rows_without_journal_commit(tmp_path)
     np.testing.assert_allclose(raw["signals"][1].real, [10.0, 11.0, 12.0])
 
 
+def test_run_store_generate_exports_reuses_one_journal_snapshot(tmp_path, monkeypatch):
+    node = place(make_builder("qubit_freq", provides=("qubit_freq",)))
+    result = QubitFreqResult.allocate(
+        np.array([1.0, 0.0], dtype=float),
+        np.array([-1.0, 0.0, 1.0], dtype=float),
+    )
+    result.predict_freq[:] = [5001.0, 6001.0]
+    result.signal[0] = [10.0, 11.0, 12.0]
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[1.0, 0.0],
+        flux_device_name=None,
+        nodes=[node],
+        results={"qubit_freq": result},
+    )
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.0}), InfoStore())
+    real_iter_journal_events = store.iter_journal_events
+    call_count = 0
+
+    def counted_iter_journal_events():
+        nonlocal call_count
+        call_count += 1
+        return real_iter_journal_events()
+
+    monkeypatch.setattr(store, "iter_journal_events", counted_iter_journal_events)
+
+    exports = store._generate_exports()
+
+    assert call_count == 1
+    assert exports["fluxdep_spectrum"] == "exports/fluxdep/qubit_freq.hdf5"
+
+
 def test_manifest_and_journal_unknown_versions_fast_fail(tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"format_version": 2}), encoding="utf-8")

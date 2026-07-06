@@ -407,6 +407,28 @@ class Controller(SessionControllerMixin):
             filepath=filepath,
         )
 
+    def export_sample_table_async(
+        self,
+        filepath: str,
+        *,
+        on_done: Callable[[SampleTableExportResult], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        if not self.can_export_sample_table():
+            raise RuntimeError("no finished or stopped autofluxdep run is exportable")
+        assert self._last_terminal_manifest_path is not None
+        manifest_path = self._last_terminal_manifest_path
+
+        def work() -> SampleTableExportResult:
+            return export_sample_table_from_artifact(manifest_path, filepath=filepath)
+
+        self._background_svc.submit(
+            work,
+            run_in_pool=True,
+            on_done=on_done,
+            on_error=on_error,
+        )
+
     # ------------------------------------------------------------------
     # Shared setup/inspect/device/predictor dialogs use control facets. The
     # remaining identical compatibility forwards live in SessionControllerMixin

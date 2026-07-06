@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from qtpy.QtCore import QCoreApplication, QThread  # type: ignore[attr-defined]
+from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
@@ -246,3 +248,58 @@ def test_export_sample_table_rejects_runs_without_completed_sample_rows(tmp_path
 
     with pytest.raises(ValueError, match="no completed flux points"):
         export_sample_table_from_artifact(store.run_dir)
+
+
+def test_controller_export_sample_table_async_uses_background_runner(tmp_path):
+    app = QCoreApplication.instance()
+    assert app is not None
+    ctrl = build_core(project=_project(tmp_path))
+    try:
+        store = _store(tmp_path)
+        store.write_node_row(
+            "qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore()
+        )
+        store.commit_flux(0, 0.0, InfoStore())
+        store.finalize("finished")
+        ctrl._last_terminal_manifest_path = store.manifest_path
+        ctrl._last_terminal_status = "finished"
+        output = tmp_path / "async_samples.csv"
+        done: list[tuple[int, bool]] = []
+        errors: list[Exception] = []
+
+        ctrl.export_sample_table_async(
+            str(output),
+            on_done=lambda result: done.append(
+                (result.row_count, QThread.currentThread() == app.thread())
+            ),
+            on_error=errors.append,
+        )
+
+        assert ctrl.quiesce_background()
+        assert done == [(1, True)]
+        assert errors == []
+        assert output.exists()
+
+        non_terminal = _store(tmp_path)
+        non_terminal.write_node_row(
+            "qubit_freq", 0, Patch({"qubit_freq": 6001.25}), InfoStore()
+        )
+        non_terminal.commit_flux(0, 0.5, InfoStore())
+        ctrl._last_terminal_manifest_path = non_terminal.manifest_path
+        ctrl._last_terminal_status = "finished"
+        done.clear()
+
+        ctrl.export_sample_table_async(
+            str(tmp_path / "should_not_exist.csv"),
+            on_done=lambda result: done.append(
+                (result.row_count, QThread.currentThread() == app.thread())
+            ),
+            on_error=errors.append,
+        )
+
+        assert ctrl.quiesce_background()
+        assert done == []
+        assert len(errors) == 1
+        assert "non-terminal" in str(errors[0])
+    finally:
+        ctrl.quiesce_background()

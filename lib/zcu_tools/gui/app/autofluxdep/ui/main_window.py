@@ -229,6 +229,7 @@ class MainWindow(QMainWindow):
         self._close_prompt_open = False
         self._close_after_run_terminal = False
         self._force_close_prompt_open = False
+        self._sample_export_pending = False
         self._active_run_node_name: str | None = None
         self._live_predictor_flux_idx: int | None = None
         self._auto_follow_navigation = False
@@ -775,20 +776,38 @@ class MainWindow(QMainWindow):
         if not filepath:
             return
 
+        self._sample_export_pending = True
+        self._list.set_sample_export_pending(True)
+
+        def on_done(result: Any) -> None:
+            self._sample_export_pending = False
+            self._list.set_sample_export_pending(False)
+            self._dialog_presenter.information(
+                self,
+                "Sample exported",
+                f"Exported {result.row_count} sample row(s) to:\n{result.path}",
+            )
+
+        def on_error(exc: Exception) -> None:
+            logger.error(
+                "autofluxdep sample table export failed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            self._sample_export_pending = False
+            self._list.set_sample_export_pending(False)
+            self._dialog_presenter.warning(self, "Export sample failed", str(exc))
+
         try:
-            result = self._ctrl.export_sample_table(filepath)
+            self._ctrl.export_sample_table_async(
+                filepath,
+                on_done=on_done,
+                on_error=on_error,
+            )
         except Exception as exc:
             logger.exception("autofluxdep sample table export failed")
-            self._list.refresh_run_availability()
+            self._sample_export_pending = False
+            self._list.set_sample_export_pending(False)
             self._dialog_presenter.warning(self, "Export sample failed", str(exc))
-            return
-
-        self._list.refresh_run_availability()
-        self._dialog_presenter.information(
-            self,
-            "Sample exported",
-            f"Exported {result.row_count} sample row(s) to:\n{result.path}",
-        )
 
     def _on_run_started(self) -> None:
         self._enter_active_run_ui(start_idx=0)

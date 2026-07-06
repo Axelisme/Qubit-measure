@@ -16,6 +16,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.result import (
     QubitFreqResult,
     Sweep1DResult,
 )
+from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
+    relative_to_artifact,
+    safe_artifact_slug,
+)
 from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )
@@ -25,7 +29,6 @@ LABBER_BROWSER_ROOT_EXPORT_KEY = "labber_browser_root"
 LABBER_BROWSER_SIDECARS_EXPORT_KEY = "labber_browser_sidecars"
 
 _RUN_SLUG_RE = re.compile(r"^(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})-")
-_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 @dataclass(frozen=True)
@@ -93,7 +96,7 @@ def export_labber_browser_sidecars(
         )
 
     return LabberBrowserExport(
-        root=_relative(data_root_path, root_path),
+        root=relative_to_artifact(data_root_path, root_path),
         sidecars=tuple(entries),
     )
 
@@ -318,12 +321,9 @@ def _require_result(
 
 
 def _filename(index: int, node_type: str, role: str) -> str:
-    return f"{index:03d}-{_safe_slug(node_type)}_{_safe_slug(role)}.hdf5"
-
-
-def _safe_slug(value: str) -> str:
-    slug = _SAFE_FILENAME_RE.sub("-", value.strip()).strip("-")
-    return slug or "unnamed"
+    node_slug = safe_artifact_slug(node_type)
+    role_slug = safe_artifact_slug(role)
+    return f"{index:03d}-{node_slug}_{role_slug}.hdf5"
 
 
 def _sidecar(
@@ -339,12 +339,8 @@ def _sidecar(
         node=node_name,
         node_type=node_type,
         role=role,
-        path=_relative(data_root, path),
+        path=relative_to_artifact(data_root, path),
     )
-
-
-def _relative(root: Path, path: Path) -> str:
-    return str(path.relative_to(root))
 
 
 __all__ = [

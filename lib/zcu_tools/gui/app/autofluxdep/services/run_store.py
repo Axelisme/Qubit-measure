@@ -20,6 +20,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
+from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
+    relative_to_artifact,
+    safe_artifact_slug,
+)
 from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )
@@ -328,8 +332,10 @@ class RunStore:
             writer_errors.append(str(exc))
 
         exports: dict[str, Any] = {}
+        journal_events: Sequence[Mapping[str, Any]] | None = None
         try:
-            exports = self._generate_exports()
+            journal_events = self.iter_journal_events()
+            exports = self._generate_exports(journal_events)
         except Exception as exc:
             export_errors.append(str(exc))
 
@@ -346,7 +352,7 @@ class RunStore:
         }
         reports: dict[str, str] = {}
         try:
-            reports = self._generate_report(report_manifest)
+            reports = self._generate_report(report_manifest, journal_events)
         except Exception as exc:
             report_errors.append(str(exc))
 
@@ -357,7 +363,7 @@ class RunStore:
             "run_finalized",
             {
                 "terminal_status": status,
-                "completed_flux_count": self._completed_flux_count(),
+                "completed_flux_count": self._completed_flux_count(journal_events),
                 "node_row_count": int(sum(self._row_counts.values())),
                 "skip_count": int(sum(self._skip_counts.values())),
                 "failure_count": int(sum(self._failure_counts.values())),
@@ -409,7 +415,9 @@ class RunStore:
             result = self._results.get(node.name)
             if result is None:
                 continue
-            filename = f"{index:03d}-{_safe_slug(node.name)}.hdf5"
+            filename = (
+                f"{index:03d}-{safe_artifact_slug(node.name, fallback='node')}.hdf5"
+            )
             relpath = f"nodes/{filename}"
             specs = result_role_specs(node.name, node.type_name, result)
             writer = open_streaming_grouped_labber_data(
@@ -553,12 +561,18 @@ class RunStore:
         )
         os.replace(tmp_path, self._manifest_path)
 
-    def _generate_exports(self) -> dict[str, Any]:
+    def _generate_exports(
+        self, journal_events: Sequence[Mapping[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        events = (
+            self.iter_journal_events() if journal_events is None else journal_events
+        )
+        committed_masks = self._committed_node_row_masks(events)
         exports: dict[str, Any] = {}
         for node_name, result in self._results.items():
             if not isinstance(result, QubitFreqResult):
                 continue
-            committed_mask = self._committed_node_row_mask(node_name, result.n_flux)
+            committed_mask = committed_masks[node_name]
             if not committed_mask.any():
                 continue
             relpath = "exports/fluxdep/qubit_freq.hdf5"
@@ -567,52 +581,74 @@ class RunStore:
                 self.data_dir / relpath,
                 committed_mask=committed_mask,
             )
-            exports["fluxdep_spectrum"] = _relative(self.data_dir, Path(written))
+            exports["fluxdep_spectrum"] = relative_to_artifact(self.data_dir, written)
             break
         labber_browser = export_labber_browser_sidecars(
             data_root=self.data_dir,
             nodes=self._nodes,
             results=self._results,
-            committed_masks=self._committed_node_row_masks(),
+            committed_masks=committed_masks,
         )
         if labber_browser.sidecars:
             exports.update(labber_browser.to_manifest_exports())
         return exports
 
-    def _committed_node_row_masks(self) -> dict[str, np.ndarray]:
+    def _committed_node_row_masks(
+        self, journal_events: Sequence[Mapping[str, Any]] | None = None
+    ) -> dict[str, np.ndarray]:
         masks: dict[str, np.ndarray] = {}
         for node_name, result in self._results.items():
             n_flux = int(getattr(result, "n_flux"))
-            masks[node_name] = self._committed_node_row_mask(node_name, n_flux)
+            masks[node_name] = np.zeros(n_flux, dtype=np.bool_)
+        self._mark_committed_node_rows(
+            masks,
+            self.iter_journal_events() if journal_events is None else journal_events,
+        )
         return masks
 
-    def _generate_report(self, manifest: Mapping[str, Any]) -> dict[str, str]:
+    def _generate_report(
+        self,
+        manifest: Mapping[str, Any],
+        journal_events: Sequence[Mapping[str, Any]] | None = None,
+    ) -> dict[str, str]:
         relpath = "report.md"
         written = write_markdown_report(
             self.run_dir / relpath,
             manifest,
-            self.iter_journal_events(),
+            self.iter_journal_events() if journal_events is None else journal_events,
         )
-        return {"markdown": _relative(self.run_dir, Path(written))}
+        return {"markdown": relative_to_artifact(self.run_dir, written)}
 
     def _committed_node_row_mask(self, node_name: str, n_flux: int) -> np.ndarray:
-        mask = np.zeros(int(n_flux), dtype=np.bool_)
-        for event in self.iter_journal_events():
+        masks = {node_name: np.zeros(int(n_flux), dtype=np.bool_)}
+        self._mark_committed_node_rows(masks, self.iter_journal_events())
+        return masks[node_name]
+
+    @staticmethod
+    def _mark_committed_node_rows(
+        masks: Mapping[str, np.ndarray],
+        journal_events: Sequence[Mapping[str, Any]],
+    ) -> None:
+        for event in journal_events:
             if event.get("type") != "node_row_written":
                 continue
-            if event.get("node") != node_name:
+            event_node = event.get("node")
+            if not isinstance(event_node, str):
+                continue
+            mask = masks.get(event_node)
+            if mask is None:
                 continue
             flux_idx = int(event.get("flux_idx", -1))
             if 0 <= flux_idx < mask.shape[0]:
                 mask[flux_idx] = True
-        return mask
 
-    def _completed_flux_count(self) -> int:
-        return sum(
-            1
-            for event in self.iter_journal_events()
-            if event.get("type") == "flux_committed"
+    def _completed_flux_count(
+        self, journal_events: Sequence[Mapping[str, Any]] | None = None
+    ) -> int:
+        events = (
+            self.iter_journal_events() if journal_events is None else journal_events
         )
+        return sum(1 for event in events if event.get("type") == "flux_committed")
 
 
 def load_manifest(path: str | Path) -> dict[str, Any]:
@@ -743,15 +779,6 @@ def _run_id() -> str:
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _safe_slug(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-")
-    return slug or "node"
-
-
-def _relative(root: Path, path: Path) -> str:
-    return str(path.relative_to(root))
 
 
 __all__ = [

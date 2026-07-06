@@ -1221,8 +1221,19 @@ def test_export_sample_button_appears_after_terminal_run_and_exports(
         "default_sample_table_path",
         MagicMock(return_value=str(output)),
     )
-    export = MagicMock(return_value=SimpleNamespace(path=str(output), row_count=2))
-    monkeypatch.setattr(ctrl, "export_sample_table", export)
+    callbacks: dict[str, Any] = {}
+
+    def export_async(
+        filepath: str,
+        *,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        callbacks["filepath"] = filepath
+        callbacks["on_done"] = on_done
+        callbacks["on_error"] = on_error
+
+    monkeypatch.setattr(ctrl, "export_sample_table_async", export_async)
 
     from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
 
@@ -1238,8 +1249,59 @@ def test_export_sample_button_appears_after_terminal_run_and_exports(
 
     win._list._export_sample_btn.click()
 
-    export.assert_called_once_with(str(output))
+    assert callbacks["filepath"] == str(output)
+    assert not win._list._export_sample_btn.isHidden()
+    assert not win._list._export_sample_btn.isEnabled()
+
+    callbacks["on_done"](SimpleNamespace(path=str(output), row_count=2))
+
+    assert win._list._export_sample_btn.isEnabled()
     dialogs.consume_message_containing("information", "Exported 2 sample row(s)")
+
+
+def test_export_sample_button_reenables_after_background_failure(
+    app, monkeypatch, tmp_path
+):
+    ctrl, win = app
+    output = tmp_path / "samples.csv"
+    callbacks: dict[str, Any] = {}
+
+    monkeypatch.setattr(ctrl, "can_export_sample_table", MagicMock(return_value=True))
+    monkeypatch.setattr(
+        ctrl,
+        "default_sample_table_path",
+        MagicMock(return_value=str(output)),
+    )
+
+    def export_async(
+        filepath: str,
+        *,
+        on_done: Callable[[Any], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        callbacks["filepath"] = filepath
+        callbacks["on_done"] = on_done
+        callbacks["on_error"] = on_error
+
+    monkeypatch.setattr(ctrl, "export_sample_table_async", export_async)
+
+    from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        MagicMock(return_value=(str(output), "CSV files (*.csv)")),
+    )
+    dialogs = _dialogs(win)
+
+    win._on_run_done()
+    win._list._export_sample_btn.click()
+    assert not win._list._export_sample_btn.isEnabled()
+
+    callbacks["on_error"](RuntimeError("write failed"))
+
+    assert win._list._export_sample_btn.isEnabled()
+    dialogs.consume_message_containing("warning", "write failed")
 
 
 def test_auto_follow_checkbox_disables_tab_switch_and_navigation(app):
