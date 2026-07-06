@@ -380,8 +380,8 @@ def _mocked_qubit_freq_produce_env(
 
 def test_medium_fit_observes_residual_without_hard_calibration(monkeypatch):
     # A fit between the frequency and linewidth gates is still useful for centring
-    # the run-local residual estimator, but default fixed-bias mode must not
-    # calibrate the raw predictor and its FWHM must not drive qfw_factor feedback.
+    # the run-local residual estimator, but qubit_freq must not calibrate the raw
+    # predictor and its FWHM must not drive qfw_factor feedback.
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 
     fit_curve = np.linspace(0.0, 1.0, 11)
@@ -416,39 +416,6 @@ def test_medium_fit_observes_residual_without_hard_calibration(monkeypatch):
         abs(predictor.predict_freq(0.0) + estimate.confidence * estimate.value - 605.0)
         < 1e-6
     )
-
-
-def test_hard_bias_update_mode_calibrates_predictor_before_residual(monkeypatch):
-    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-
-    fit_curve = np.linspace(0.0, 1.0, 11)
-    real = fit_curve + 0.15
-    predictor = _TrackingPredictor(base=600.0)
-    builder, env, _result, _returned_predictor = _mocked_qubit_freq_produce_env(
-        monkeypatch,
-        real,
-        (605.0, 0.0, 4.0, 0.0, fit_curve, None),
-        predictor=predictor,
-        schema_overrides={
-            "bias_update_mode": "hard",
-            "physical_recovery_mode": "off",
-        },
-    )
-
-    patch = builder.build_node(env).produce(
-        Snapshot(
-            {"predict_freq": 600.0, "qfw_factor": None}, modules={"readout": _READOUT}
-        )
-    )
-
-    assert patch.values()["qubit_freq"] == 605.0
-    assert predictor.calibrations == [(0.0, 605.0)]
-    assert predictor.predict_freq(0.0) == 605.0
-    correction = env.feedback.estimator("predict_freq_correction")
-    assert correction is not None
-    estimate = correction.estimate(0.0)
-    assert estimate is not None
-    assert estimate.value == 0.0
 
 
 def test_success_after_fail_reseed_skips_duplicate_residual_observe(monkeypatch):

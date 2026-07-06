@@ -78,7 +78,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
     on_fit_succeeded,
     physical_prediction_for_make_cfg,
     physical_prediction_for_residual,
-    validate_recovery_bias_policy,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
@@ -97,14 +96,11 @@ logger = logging.getLogger(__name__)
 _DEFAULT_EARLYSTOP_SNR = 50.0
 _DEFAULT_DETUNE_SWEEP = SweepValue(start=-50.0, stop=50.0, expts=201)
 _QFW_TARGET_KAPPA = 6.5
-_DEFAULT_QFW_SEED_GAIN = 0.05
 _DRIVE_GAIN_CAP = 1.0
 _FREQ_FIT_RESIDUAL_RATIO = 0.2
 _LINEWIDTH_FIT_RESIDUAL_RATIO = 0.1
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
-_BIAS_UPDATE_MODE_FIXED = "fixed"
-_BIAS_UPDATE_MODE_HARD = "hard"
 _PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
     key="predict_freq_correction",
     kind="estimator",
@@ -204,9 +200,9 @@ def _qfw_factor_seed(knobs: dict[str, Any]) -> float | None:
     width = knobs.get("qf_width_seed")
     if width is None:
         return None
-    seed_gain = float(knobs["qfw_seed_gain"])
+    seed_gain = float(knobs["qub_gain"])
     if seed_gain <= 0.0:
-        raise RuntimeError("qubit_freq qfw_seed_gain must be positive")
+        raise RuntimeError("qubit_freq qub_gain must be positive to seed qfw_factor")
     return float(width) / seed_gain
 
 
@@ -365,26 +361,17 @@ class QubitFreqNode(Node):
         if env.round_hook is not None:
             env.round_hook(idx)
 
-        # Bias policy is explicit: fixed mode keeps the physical/base predictor
-        # unchanged and lets the generic residual estimator carry run-local bias.
+        # The physical/base predictor stays immutable during the run. Physical
+        # recovery may install a run-local overlay; generic feedback carries the
+        # remaining residual correction.
         knobs = env.knobs()
-        validate_recovery_bias_policy(knobs)
         recovery_reseeded = on_fit_succeeded(
             env,
             float(freq),
             snapshot_predict_freq=base_pred_qf,
             estimator_key=_PREDICT_FREQ_CORRECTION_SLOT.key,
         )
-        bias_update_mode = str(knobs["bias_update_mode"])
         base_for_residual = physical_prediction_for_residual(env, base_pred_qf, knobs)
-        if bias_update_mode == _BIAS_UPDATE_MODE_HARD:
-            if env.tools is not None and env.tools.predictor is not None:
-                env.tools.predictor.calibrate(env.flux, float(freq))
-                base_for_residual = float(env.tools.predictor.predict_freq(env.flux))
-        elif bias_update_mode != _BIAS_UPDATE_MODE_FIXED:
-            raise RuntimeError(
-                f"unsupported qubit_freq bias_update_mode: {bias_update_mode!r}"
-            )
         if not recovery_reseeded:
             _observe_predict_freq_residual(env, float(freq), base_for_residual)
 
@@ -531,18 +518,6 @@ class QubitFreqBuilder(Builder):
                 ),
                 acquire_retry_generation_field(),
                 logical_generation_field(
-                    "bias_update_mode",
-                    str_choice_spec(
-                        "bias_update_mode",
-                        (
-                            _BIAS_UPDATE_MODE_FIXED,
-                            _BIAS_UPDATE_MODE_HARD,
-                        ),
-                    ),
-                    _BIAS_UPDATE_MODE_FIXED,
-                    group="feedback",
-                ),
-                logical_generation_field(
                     "physical_recovery_mode",
                     str_choice_spec(
                         "physical_recovery_mode",
@@ -600,12 +575,6 @@ class QubitFreqBuilder(Builder):
                     "qf_width_seed",
                     FloatSpec(label="qf_width_seed", optional=True),
                     _qf_width_seed(ctx),
-                    group="feedback",
-                ),
-                logical_generation_field(
-                    "qfw_seed_gain",
-                    FloatSpec(label="qfw_seed_gain"),
-                    _DEFAULT_QFW_SEED_GAIN,
                     group="feedback",
                 ),
                 *feedback_generation_fields(_PREDICT_FREQ_CORRECTION_SLOT),

@@ -116,22 +116,12 @@ def recovery_config_from_knobs(knobs: Mapping[str, Any]) -> PhysicalRecoveryConf
     )
 
 
-def validate_recovery_bias_policy(knobs: Mapping[str, Any]) -> None:
-    cfg = recovery_config_from_knobs(knobs)
-    if cfg.enabled and str(knobs["bias_update_mode"]) == "hard":
-        raise RuntimeError(
-            "qubit_freq physical recovery is mutually exclusive with "
-            'bias_update_mode="hard"'
-        )
-
-
 def physical_prediction_for_make_cfg(
     env: RunEnv,
     snapshot_predict_freq: float,
     knobs: Mapping[str, Any],
 ) -> float:
     """Return active physical prediction before generic residual correction."""
-    validate_recovery_bias_policy(knobs)
     cfg = recovery_config_from_knobs(knobs)
     if not cfg.enabled or env.tools is None:
         return float(snapshot_predict_freq)
@@ -156,7 +146,6 @@ def on_fit_failed(
     estimator_key: str,
 ) -> None:
     knobs = env.knobs()
-    validate_recovery_bias_policy(knobs)
     cfg = recovery_config_from_knobs(knobs)
     if not cfg.enabled or env.tools is None:
         return
@@ -181,7 +170,6 @@ def on_fit_succeeded(
     estimator_key: str,
 ) -> bool:
     knobs = env.knobs()
-    validate_recovery_bias_policy(knobs)
     cfg = recovery_config_from_knobs(knobs)
     if not cfg.enabled or env.tools is None:
         return False
@@ -465,8 +453,8 @@ def _accept_candidate(
     if estimator is None:
         return _attempt(
             trigger,
-            False,
-            "correction estimator unavailable",
+            True,
+            "accepted without correction reseed",
             len(selected),
             fit.base_rms_mhz,
             fit.fitted_rms_mhz,

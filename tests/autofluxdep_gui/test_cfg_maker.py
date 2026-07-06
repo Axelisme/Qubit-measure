@@ -218,30 +218,6 @@ def test_qubit_freq_make_cfg_can_fix_drive_gain():
     assert float(cfg.modules.qub_pulse.gain) == 0.05
 
 
-def test_qubit_freq_recovery_fast_fails_with_hard_bias_mode():
-    builder = QubitFreqBuilder()
-    env = RunEnv(
-        flux=0.0,
-        flux_idx=0,
-        schema=_schema(
-            builder,
-            {
-                "qub_ch": 3,
-                "qub_nqz": 2,
-                "bias_update_mode": "hard",
-                "physical_recovery_mode": "fail_triggered_fit",
-            },
-        ),
-        ml=_ml(),
-    )
-    snap = Snapshot(
-        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
-    )
-
-    with pytest.raises(RuntimeError, match="mutually exclusive"):
-        builder.make_cfg(env, snap)
-
-
 def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
     # the real-acquire contract: produce Fast Fails (no synthetic fallback) when the
     # context is unconfigured — here ml is None, so make_cfg cannot lower a drive

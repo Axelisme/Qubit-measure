@@ -59,7 +59,6 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
         {
             "qub_gain": "0.2",
             "drive_gain_mode": "fixed",
-            "bias_update_mode": "fixed",
             "physical_recovery_min_points": "12",
             "physical_recovery_max_rms_mhz": "40.0",
             "earlystop_snr": "12.5",
@@ -80,10 +79,6 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     assert payload["workflow"]["nodes"][1]["enabled"] is False
     generation_raw = payload["workflow"]["nodes"][0]["cfg_raw"]["generation"]
     assert generation_raw["drive_gain_mode"] == {
-        "__kind": "direct",
-        "value": "fixed",
-    }
-    assert generation_raw["bias_update_mode"] == {
         "__kind": "direct",
         "value": "fixed",
     }
@@ -115,7 +110,6 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     knobs = restored.state.nodes[0].schema.read_knobs()
     assert knobs["qub_gain"] == pytest.approx(0.2)
     assert knobs["drive_gain_mode"] == "fixed"
-    assert knobs["bias_update_mode"] == "fixed"
     assert knobs["physical_recovery_min_points"] == 12
     assert knobs["physical_recovery_max_rms_mhz"] == pytest.approx(40.0)
     assert knobs["earlystop_snr"] == pytest.approx(12.5)

@@ -40,8 +40,8 @@ stores a device name, e.g. the auto-provisioned `fake_flux`; the lower layer's
 `flux_dev` label is a different dimension), pushes it with `setup_devices`, then
 runs the experiment program's `.acquire` (TwoToneProgram / ModularProgramV2 /
 …) with a running-average `round_hook` + `stop_checkers` (cooperative cancel +
-SNR early-stop), and fits — `qubit_freq` defaults to fixed-bias residual
-feedback and only hard-bias mode feeds `predictor.calibrate`; `ro_optimize`
+SNR early-stop), and fits — `qubit_freq` keeps the raw predictor immutable and
+composes run-local physical overlay plus residual feedback; `ro_optimize`
 takes an argmax, `mist` reads the variance, both
 without a fit. There is **no synthetic fallback**: `make_cfg` Fast Fails
 (`RuntimeError`) when the context is unconfigured, and the orchestrator turns a
@@ -154,17 +154,14 @@ built by a `make_services` hook were rejected as over-design — a capability us
 by only one Builder today is still a general Tools service.
 _Avoid_: per-node service, make_services.
 
-The **predictor service** has two faces. *Query* (general): `predict_freq(flux)`
-and `predict_matrix_element(flux)` — the predictor predicts both, used by the
-predictor Node to produce base `predict_freq` / `cur_m`. *Calibration* (a service
-method triggered by a Node, NOT by the orchestrator): `calibrate(flux,
-measured_freq)` — qubit_freq uses it only when its `bias_update_mode` is `hard`,
-handing a trusted measured freq to the service to adjust the physical/base
-prediction when the backend supports it. Fixed-bias mode leaves the raw predictor
-unchanged. The predictor does **not** hide residual IDW correction; qubit_freq
-owns composition of `base predict_freq + correction`, and the correction
-estimator is a generic feedback slot in `Tools.feedback`. The orchestrator never
-calibrates and never updates feedback slots itself.
+The **predictor service** query face is general: `predict_freq(flux)` and
+`predict_matrix_element(flux)` — the predictor predicts both, used by the
+predictor Node to produce base `predict_freq` / `cur_m`. qubit_freq keeps this
+raw/base predictor immutable during a run. Physical recovery may install a
+run-local overlay in `Tools` recovery state, and residual IDW correction remains a
+generic feedback slot in `Tools.feedback`; qubit_freq owns composition of
+`base-or-overlay predict_freq + correction`. The orchestrator never calibrates,
+installs overlays, or updates feedback slots itself.
 
 **Feedback capability**:
 A run-lived, placement-scoped map of generic scalar estimators/controllers,

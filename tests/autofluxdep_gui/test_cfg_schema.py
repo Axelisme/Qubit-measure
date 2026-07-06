@@ -204,8 +204,6 @@ _EXPECTED_KEYS = {
         "drive_gain_mode",
         "target_kappa",
         "qf_width_seed",
-        "qfw_seed_gain",
-        "bias_update_mode",
         "physical_recovery_mode",
         "physical_recovery_min_points",
         "physical_recovery_max_points",
@@ -358,8 +356,6 @@ _EXPECTED_PATHS = {
         "drive_gain_mode": "generation.feedback.drive_gain_mode",
         "target_kappa": "generation.feedback.target_kappa",
         "qf_width_seed": "generation.feedback.qf_width_seed",
-        "qfw_seed_gain": "generation.feedback.qfw_seed_gain",
-        "bias_update_mode": "generation.feedback.bias_update_mode",
         "physical_recovery_mode": "generation.feedback.physical_recovery_mode",
         "physical_recovery_min_points": (
             "generation.feedback.physical_recovery_min_points"
@@ -694,16 +690,10 @@ def test_generation_groups_keep_logical_knobs_flat():
     assert set(safety_value.fields) == {"earlystop_snr", "acquire_retry"}
     assert "drive_gain_mode" in feedback_spec.fields
     assert "drive_gain_mode" in feedback_value.fields
-    assert "bias_update_mode" in feedback_spec.fields
-    assert "bias_update_mode" in feedback_value.fields
     assert "physical_recovery_mode" in feedback_spec.fields
     assert "physical_recovery_mode" in feedback_value.fields
     assert (
         schema.logical_paths["drive_gain_mode"] == "generation.feedback.drive_gain_mode"
-    )
-    assert (
-        schema.logical_paths["bias_update_mode"]
-        == "generation.feedback.bias_update_mode"
     )
     assert (
         schema.logical_paths["physical_recovery_mode"]
@@ -713,7 +703,6 @@ def test_generation_groups_keep_logical_knobs_flat():
     knobs = schema.read_knobs()
 
     assert "drive_gain_mode" in knobs
-    assert "bias_update_mode" in knobs
     assert "physical_recovery_mode" in knobs
     assert knobs["acquire_retry"] == 3
     assert "feedback" not in knobs
@@ -726,7 +715,6 @@ def test_generation_groups_keep_logical_knobs_flat():
 def test_generation_persistence_uses_flat_logical_keys():
     schema = QubitFreqBuilder().make_default_schema()
     schema.set_field("drive_gain_mode", "fixed")
-    schema.set_field("bias_update_mode", "fixed")
     schema.set_field("physical_recovery_mode", "fail_triggered_fit")
     schema.set_field("physical_recovery_max_center_shift_mhz", 120.0)
     schema.set_field("earlystop_snr", 12.5)
@@ -739,7 +727,6 @@ def test_generation_persistence_uses_flat_logical_keys():
     assert "feedback" not in generation
     assert "safety" not in generation
     assert generation["drive_gain_mode"] == {"__kind": "direct", "value": "fixed"}
-    assert generation["bias_update_mode"] == {"__kind": "direct", "value": "fixed"}
     assert generation["physical_recovery_mode"] == {
         "__kind": "direct",
         "value": "fail_triggered_fit",
@@ -756,7 +743,6 @@ def test_generation_persistence_uses_flat_logical_keys():
 
     knobs = restored.read_knobs()
     assert knobs["drive_gain_mode"] == "fixed"
-    assert knobs["bias_update_mode"] == "fixed"
     assert knobs["physical_recovery_mode"] == "fail_triggered_fit"
     assert knobs["physical_recovery_max_center_shift_mhz"] == pytest.approx(120.0)
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
@@ -995,13 +981,8 @@ def test_default_earlystop_snr_optional_clear_omits_key(builder: Builder):
 
 
 def test_qubit_freq_recovery_default_knobs():
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
-        validate_recovery_bias_policy,
-    )
-
     knobs = QubitFreqBuilder().make_default_schema().lower(None)
 
-    assert knobs["bias_update_mode"] == "fixed"
     assert knobs["physical_recovery_mode"] == "fail_triggered_fit"
     assert knobs["physical_recovery_min_points"] == 10
     assert knobs["physical_recovery_max_points"] == 30
@@ -1010,7 +991,6 @@ def test_qubit_freq_recovery_default_knobs():
     assert knobs["pred_freq_correction_idw_k"] == 10
     assert knobs["pred_freq_correction_idw_epsilon"] == pytest.approx(1e-4)
     assert knobs["pred_freq_correction_decay_points"] == 4.0
-    validate_recovery_bias_policy(knobs)
 
 
 def test_qubit_freq_default_detune_sweep_is_symmetric_100mhz_window():
@@ -1080,7 +1060,6 @@ def test_operator_facing_defaults_golden_subset():
     echo = T2EchoBuilder().make_default_schema().lower(None)
 
     assert qf["acquire_retry"] == 3
-    assert qf["bias_update_mode"] == "fixed"
     assert qf["physical_recovery_mode"] == "fail_triggered_fit"
     assert qf["physical_recovery_min_points"] == 10
     assert qf["physical_recovery_max_points"] == 30
@@ -1360,6 +1339,32 @@ def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
             1.0,
             float(knobs["target_kappa"]) / clamped_qfw_factor,
         )
+    )
+
+
+def test_qubit_freq_make_cfg_seeds_qfw_factor_from_md_width_and_default_gain():
+    ml = _ml()
+    builder = QubitFreqBuilder()
+    schema = builder.make_default_schema().with_overrides(
+        {
+            "qf_width_seed": 20.0,
+            "qub_gain": 0.2,
+        }
+    )
+    env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml)
+    knobs = schema.lower(ml)
+
+    cfg = builder.make_cfg(
+        env,
+        Snapshot(
+            {"predict_freq": 5135.0, "qfw_factor": None},
+            modules={"readout": _READOUT},
+        ),
+    )
+
+    seeded_qfw_factor = float(knobs["qf_width_seed"]) / float(knobs["qub_gain"])
+    assert float(cfg.modules.qub_pulse.gain) == pytest.approx(
+        min(1.0, float(knobs["target_kappa"]) / seeded_qfw_factor)
     )
 
 

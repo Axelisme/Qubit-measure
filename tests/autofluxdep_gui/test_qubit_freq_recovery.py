@@ -252,6 +252,52 @@ def test_fail_triggered_recovery_fits_first_fail_and_first_success(monkeypatch):
     assert estimate.confidence == pytest.approx(1.0)
 
 
+def test_recovery_accepts_overlay_without_correction_estimator(monkeypatch):
+    builder = QubitFreqBuilder()
+    schema = _schema()
+    tools = Tools(predictor=_FakePredictor())
+    state = tools.recovery_state("qubit_freq", QubitFreqRecoveryState)
+    state.history.extend(
+        TrustedFrequencyPoint(float(flux), 1000.0 + 10.0 * float(flux) + 5.0)
+        for flux in np.linspace(0.0, 0.9, 10)
+    )
+
+    def fake_fit(base, measured_points):
+        points = tuple(measured_points)
+        return FluxoniumLocalFitResult(
+            accepted=True,
+            reason="accepted",
+            base=base,
+            fitted=FluxoniumModelSnapshot(
+                base.params, base.flux_half, base.flux_period, 5.0
+            ),
+            predictor=None,
+            n_points=len(points),
+            base_rms_mhz=8.0,
+            fitted_rms_mhz=3.0,
+        )
+
+    monkeypatch.setattr(recovery_mod, "fit_local_fluxonium_model", fake_fit)
+    env = _env(
+        flux=1.0,
+        flux_idx=10,
+        schema=schema,
+        tools=tools,
+        feedback_view=None,
+    )
+
+    on_fit_failed(
+        env,
+        snapshot_predict_freq=1010.0,
+        estimator_key="predict_freq_correction",
+    )
+
+    assert state.overlay is not None
+    assert state.last_attempt is not None
+    assert state.last_attempt.accepted
+    assert state.last_attempt.reason == "accepted without correction reseed"
+
+
 def test_tools_recovery_state_fast_fails_wrong_existing_type():
     tools = Tools()
     tools._recovery_registry["qubit_freq"] = object()
