@@ -772,6 +772,49 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
     assert "Sigma:" in labels
 
 
+def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+    from zcu_tools.gui.app.main.ui.cfg_form import (
+        CfgFormWidget,
+        FieldDecorationPatch,
+    )
+    from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
+
+    class RevealLiteralProvider:
+        def decoration_for(
+            self, path: str, spec: object, value: object
+        ) -> FieldDecorationPatch | None:
+            del spec, value
+            if path == "freq":
+                return FieldDecorationPatch(
+                    hidden=False,
+                    enabled=False,
+                    badge="generated",
+                    tooltip="Generated at run time",
+                )
+            return None
+
+    schema = _schema(
+        {"freq": LiteralSpec(0.0, label="Freq")},
+        {},
+    )
+    w = CfgFormWidget(decoration_provider=RevealLiteralProvider())
+    _attach(w, schema, ctrl)
+
+    labels = [
+        label
+        for label in w.findChildren(ElidedLabel)
+        if getattr(label, "_full_text") == "Freq [generated]:"
+    ]
+    assert labels
+    assert labels[0].isEnabled() is False
+
+    literal_edits = [edit for edit in w.findChildren(QLineEdit) if edit.text() == "0.0"]
+    assert len(literal_edits) == 1
+    assert literal_edits[0].isReadOnly() is True
+    assert literal_edits[0].isEnabled() is False
+
+
 def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget

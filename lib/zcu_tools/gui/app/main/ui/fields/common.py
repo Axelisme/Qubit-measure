@@ -235,13 +235,16 @@ class BaseLiveWidget(QWidget):
 
 
 @register_widget(LiteralLiveField)
-class LiteralWidget(QLabel):
-    """Hidden widget for Literal values."""
+class LiteralWidget(QLineEdit):
+    """Read-only display for fixed literal values when a view reveals them."""
 
     def __init__(self, field: LiteralLiveField, parent: QWidget | None = None):
         super().__init__(parent)
         self._field = field
         self.setText(str(field.spec.value))
+        self.setReadOnly(True)
+        self.setFocusPolicy(Qt.NoFocus)  # type: ignore[attr-defined]
+        self.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
 
     @property
     def field(self) -> LiveField:

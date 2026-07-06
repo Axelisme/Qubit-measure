@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-06 - cfg choice sections
+**Last updated:** 2026-07-06 - cfg choice sections and visible literals
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -98,8 +98,10 @@ hand-write those values.
 tree path. The shared widget owns only generic presentation metadata
 (`hidden`/`enabled`/tone/badge/tooltip/label suffix) and computes the default
 decoration from the spec; app-specific policy such as generated fields stays in
-the caller. Decoration is a view contract only: domain enforcement remains in the
-owning controller/runtime.
+the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider
+can explicitly reveal them as framed read-only values for generated or locked
+review fields. Decoration is a view contract only: domain enforcement remains in
+the owning controller/runtime.
 
 `ChoiceSectionSpec` is the shared selector-driven display contract for sections
 whose fields depend on a local mode/strategy. The section still owns a complete
