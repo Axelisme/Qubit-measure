@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,8 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 from zcu_tools.meta_tool.table import SampleTable
 
 CALIBRATED_FLUX_COLUMN = "calibrated mA"
-COMMENT_COLUMN = "Tcomment"
+COMMENT_COLUMN = "comment"
+DATE_COLUMN = "date"
 
 SAMPLE_COLUMNS: tuple[str, ...] = (
     CALIBRATED_FLUX_COLUMN,
@@ -27,6 +29,7 @@ SAMPLE_COLUMNS: tuple[str, ...] = (
     "T2e (us)",
     "T2e err (us)",
     COMMENT_COLUMN,
+    DATE_COLUMN,
 )
 
 _PATCH_SAMPLE_KEYS: tuple[tuple[str, str], ...] = (
@@ -146,6 +149,7 @@ def export_sample_table_from_artifact(
     rows = sample_rows_from_journal(
         events,
         comment=_sample_comment(manifest, manifest_path),
+        date=_sample_date(),
     )
     output = (
         Path(filepath) if filepath is not None else default_sample_table_path(manifest)
@@ -158,6 +162,7 @@ def sample_rows_from_journal(
     events: Sequence[Mapping[str, Any]],
     *,
     comment: str | None = None,
+    date: str | None = None,
 ) -> list[dict[str, float | str]]:
     """Build notebook sample rows from committed flux points in journal events."""
 
@@ -166,7 +171,7 @@ def sample_rows_from_journal(
         raise ValueError("autofluxdep run has no completed flux points to export")
 
     rows_by_flux: dict[int, dict[str, float | str]] = {
-        flux_idx: _sample_row_seed(flux_value, comment)
+        flux_idx: _sample_row_seed(flux_value, comment, date)
         for flux_idx, flux_value in committed_flux_points
     }
     for event in events:
@@ -244,10 +249,16 @@ def _set_sample_value(row: dict[str, float | str], column: str, value: Any) -> N
         row[column] = number
 
 
-def _sample_row_seed(flux_value: float, comment: str | None) -> dict[str, float | str]:
+def _sample_row_seed(
+    flux_value: float,
+    comment: str | None,
+    date: str | None,
+) -> dict[str, float | str]:
     row: dict[str, float | str] = {CALIBRATED_FLUX_COLUMN: flux_value}
     if comment is not None:
         row[COMMENT_COLUMN] = comment
+    if date is not None:
+        row[DATE_COLUMN] = date
     return row
 
 
@@ -303,6 +314,10 @@ def _journal_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:
 def _sample_comment(manifest: Mapping[str, Any], manifest_path: Path) -> str:
     snapshot_dir = _metadata_root_path(manifest, manifest_path)
     return f"Autofluxdep snapeshot: {snapshot_dir}"
+
+
+def _sample_date() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _metadata_root_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:

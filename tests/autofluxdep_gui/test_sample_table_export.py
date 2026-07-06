@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
+from zcu_tools.gui.app.autofluxdep.services import (
+    sample_table_export as sample_table_export_module,
+)
 from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore
 from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
     export_sample_table_from_artifact,
@@ -20,6 +24,19 @@ from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 
 from ._helpers import make_builder, place
+
+_SAMPLE_DATE = "2026-07-06 12:34:56"
+
+
+@pytest.fixture(autouse=True)
+def _fixed_sample_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            del tz
+            return cls(2026, 7, 6, 12, 34, 56)
+
+    monkeypatch.setattr(sample_table_export_module, "datetime", FixedDateTime)
 
 
 def _project(tmp_path: Path) -> ProjectInfo:
@@ -83,7 +100,8 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
         "T2r err (us)",
         "T2e (us)",
         "T2e err (us)",
-        "Tcomment",
+        "comment",
+        "date",
     ]
     assert len(df) == 1
     row = df.iloc[0]
@@ -95,7 +113,8 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
     assert row["T2r err (us)"] == 0.5
     assert row["T2e (us)"] == 31.0
     assert row["T2e err (us)"] == 0.6
-    assert row["Tcomment"] == _comment(store)
+    assert row["comment"] == _comment(store)
+    assert row["date"] == _SAMPLE_DATE
     assert "pi_length" not in df.columns
     assert "rabi_len" not in df.columns
 
@@ -113,7 +132,8 @@ def test_export_sample_table_appends_by_default(tmp_path):
             {
                 "calibrated mA": -1.0,
                 "Freq (MHz)": 4000.0,
-                "Tcomment": "existing",
+                "comment": "existing",
+                "date": "2026-07-01 00:00:00",
             }
         ]
     ).to_csv(output, index=False)
@@ -125,11 +145,13 @@ def test_export_sample_table_appends_by_default(tmp_path):
     assert len(df) == 2
     assert df.loc[0, "calibrated mA"] == -1.0
     assert df.loc[0, "Freq (MHz)"] == 4000.0
-    assert df.loc[0, "Tcomment"] == "existing"
+    assert df.loc[0, "comment"] == "existing"
+    assert df.loc[0, "date"] == "2026-07-01 00:00:00"
     assert df.loc[1, "calibrated mA"] == 0.0
     assert df.loc[1, "Freq (MHz)"] == 5001.25
     assert df.loc[1, "T1 (us)"] == 12.0
-    assert df.loc[1, "Tcomment"] == _comment(store)
+    assert df.loc[1, "comment"] == _comment(store)
+    assert df.loc[1, "date"] == _SAMPLE_DATE
 
 
 def test_export_sample_table_can_overwrite_existing_file(tmp_path):
@@ -154,7 +176,8 @@ def test_export_sample_table_can_overwrite_existing_file(tmp_path):
         {
             "calibrated mA": 0.0,
             "Freq (MHz)": 5001.25,
-            "Tcomment": _comment(store),
+            "comment": _comment(store),
+            "date": _SAMPLE_DATE,
         }
     ]
 
@@ -172,7 +195,8 @@ def test_export_sample_table_accepts_paired_data_run_directory(tmp_path):
         {
             "calibrated mA": 0.0,
             "Freq (MHz)": 5001.25,
-            "Tcomment": _comment(store),
+            "comment": _comment(store),
+            "date": _SAMPLE_DATE,
         }
     ]
 
@@ -200,7 +224,8 @@ def test_export_sample_table_falls_back_to_qubit_freq_row_summary(tmp_path):
         {
             "calibrated mA": 0.0,
             "Freq (MHz)": 5123.0,
-            "Tcomment": _comment(store),
+            "comment": _comment(store),
+            "date": _SAMPLE_DATE,
         }
     ]
 
