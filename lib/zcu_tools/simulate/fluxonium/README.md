@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-07-04 — matrix-element fast-fail contract
+**Last updated:** 2026-07-06 — floquet 微擾 TLS 掃頻函式（mist_tls 交付物 #2）
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -100,6 +100,12 @@ floquet 效能要點(design search 的 snr stage 主成本即在此):
   `snr.calc_snr`)預設 `SNR_SOLVER_OPTIONS`(rtol=1e-3/atol=1e-5,snr[-3] rel_err ~6e-5,
   崩潰邊界在 rtol≥5e-2),傳 `None` 回嚴格。`calc_branch_infos_with_tls` 預設嚴格(餵 mist
   精度敏感分析)。
+- **微擾 TLS 掃頻**(`calc_floquet_fourier_melem` / `calc_tls_resonance_map`):對已算好的
+  無 TLS `fbasis_n` 做純代數後處理,以 Lorentzian 加權 `|g_tls·M_k|²` 對 E_tls 軸免費掃頻,
+  取代 `calc_branch_infos_with_tls` 的逐 E_tls 全掃(mist_tls_analysis.md 交付物 #2)。
+  map 的 argmax 由最強矩陣元的 pair 支配,判讀特定過程(如 e→g+TLS↑ 的 `(1,0)` pair)時
+  應限縮 `branch_pairs` 而非直接取全域 argmax。注意 qutip `FloquetBasis.mode(t)` 每次呼叫
+  重新積分、帶 ~1e-10 solver 噪聲,跨呼叫比較矩陣元時容差不可低於此。
 - 結果 **bit-exact deterministic**(同參數重跑 spread=0),golden 測試見
   `tests/simulate/fluxonium/branch/test_floquet.py`；TLS / dual-coupling 路徑也有小維度 characterization 測試。strict path golden 對目前
   Python / numpy / qutip / BLAS 組合敏感；依賴組合改變導致 ULP 級漂移時，重錄 golden 並保留

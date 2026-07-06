@@ -350,6 +350,95 @@ def calc_branch_infos_with_tls(
     return branch_infos, fbasis_n
 
 
+def calc_floquet_fourier_melem(
+    fbasis: qt.FloquetBasis,
+    n_op: NDArray[np.complex128],
+    i_from: int,
+    i_to: int,
+    harmonics: Sequence[int],
+    ts: NDArray[np.float64],
+    omega: float,
+) -> dict[int, complex]:
+    """Time-averaged Fourier components of ``<u_{i_to}(t)| n |u_{i_from}(t)>``.
+
+    ``ts`` must sample exactly one drive period ``[0, 2*pi/omega)`` uniformly
+    with the endpoint excluded, so the plain mean below is the period average.
+    Modes come from ``fbasis.mode(t)``: the columns of the returned matrix are
+    the periodic Floquet modes ``u_b(t)``.
+    """
+    if len(ts) == 0:
+        raise ValueError("ts must contain at least one sample of the drive period")
+    modes = np.stack([fbasis.mode(t=t, data=True).to_array() for t in ts])  # (nt,D,D)
+    ket = modes[:, :, i_from]  # (nt, D)
+    bra = modes[:, :, i_to].conj()  # (nt, D)
+    mel = np.einsum("ti,ij,tj->t", bra, n_op, ket)  # (nt,)
+    return {k: complex(np.mean(np.exp(1j * k * omega * ts) * mel)) for k in harmonics}
+
+
+def calc_tls_resonance_map(
+    fbasis_n: Sequence[qt.FloquetBasis],
+    branch_energies: dict[int, list[float]],
+    branch_infos: dict[int, list[int]],
+    n_op: NDArray[np.complex128],
+    *,
+    branch_pairs: Sequence[tuple[int, int]],
+    harmonics: Sequence[int],
+    E_tls_axis: NDArray[np.float64],
+    g_tls: float,
+    r_f: float,
+    ts: NDArray[np.float64],
+    gamma: float,
+    progress: bool = True,
+) -> NDArray[np.float64]:
+    """Detuning-weighted TLS resonance strength, shape ``(len(E_tls_axis), len(fbasis_n))``.
+
+    Perturbative E_tls sweep over an already-computed no-TLS Floquet basis: for
+    each photon column ``n``, branch pair ``(b_from, b_to)`` and drive harmonic
+    ``k``, the Lorentzian-weighted ``|g_tls * M_k|**2`` is accumulated with
+    detuning ``(E[b_to] - E[b_from]) + k*r_f - E_tls``, where ``M_k`` is the
+    period-averaged Fourier component of ``<u_{b_to}(t)| n |u_{b_from}(t)>``.
+    This is pure algebraic post-processing (no new ODE integration), so the
+    E_tls axis is swept for free — the cheap replacement for a full
+    ``calc_branch_infos_with_tls`` frequency scan.
+
+    ``g_tls`` only sets the overall scale of the map; ``gamma`` is the
+    Lorentzian visualization width. Branch labels are mapped to per-photon
+    Floquet indices via ``branch_infos`` so tracking stays consistent with the
+    quasi-energy curves. ``ts`` must sample one drive period as in
+    ``calc_floquet_fourier_melem``; both directions of a pair carry distinct
+    physics (``dE`` is signed), so include ``(1, 0)`` as well as ``(0, 1)``.
+    """
+    if gamma <= 0:
+        raise ValueError(f"gamma must be positive, got {gamma}")
+    if len(E_tls_axis) == 0:
+        raise ValueError("E_tls_axis must not be empty")
+    if len(ts) == 0:
+        raise ValueError("ts must contain at least one sample of the drive period")
+    n_photons = len(fbasis_n)
+    for b in {b for pair in branch_pairs for b in pair}:
+        if b not in branch_infos or b not in branch_energies:
+            raise KeyError(f"branch {b} missing from branch_infos/branch_energies")
+        if len(branch_infos[b]) != n_photons or len(branch_energies[b]) != n_photons:
+            raise ValueError(
+                f"branch {b} tracking length does not match len(fbasis_n)={n_photons}"
+            )
+
+    E_tls_axis = np.asarray(E_tls_axis, dtype=np.float64)
+    strength = np.zeros((len(E_tls_axis), n_photons))
+    for n in tqdm(range(n_photons), desc="TLS resonance map", disable=not progress):
+        modes = np.stack([fbasis_n[n].mode(t=t, data=True).to_array() for t in ts])
+        for b_from, b_to in branch_pairs:
+            ket = modes[:, :, branch_infos[b_from][n]]
+            bra = modes[:, :, branch_infos[b_to][n]].conj()
+            mel = np.einsum("ti,ij,tj->t", bra, n_op, ket)
+            dE = branch_energies[b_to][n] - branch_energies[b_from][n]
+            for k in harmonics:
+                Mk = np.mean(np.exp(1j * k * r_f * ts) * mel)
+                det = dE + k * r_f - E_tls_axis  # (nE,)
+                strength[:, n] += (np.abs(g_tls * Mk) ** 2) / (det**2 + gamma**2)
+    return strength
+
+
 class FloquetDualCouplingBranchAnalysis(_BaseFloquetBranchAnalysis):
     def __init__(
         self,
