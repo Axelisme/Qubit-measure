@@ -14,7 +14,10 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 )
 from zcu_tools.meta_tool.table import SampleTable
 
+CALIBRATED_FLUX_COLUMN = "calibrated mA"
+
 SAMPLE_COLUMNS: tuple[str, ...] = (
+    CALIBRATED_FLUX_COLUMN,
     "Freq (MHz)",
     "T1 (us)",
     "T1err (us)",
@@ -150,12 +153,13 @@ def sample_rows_from_journal(
 ) -> list[dict[str, float]]:
     """Build notebook sample rows from committed flux points in journal events."""
 
-    committed_flux_indices = _committed_flux_indices(events)
-    if not committed_flux_indices:
+    committed_flux_points = _committed_flux_points(events)
+    if not committed_flux_points:
         raise ValueError("autofluxdep run has no completed flux points to export")
 
     rows_by_flux: dict[int, dict[str, float]] = {
-        flux_idx: {} for flux_idx in committed_flux_indices
+        flux_idx: {CALIBRATED_FLUX_COLUMN: flux_value}
+        for flux_idx, flux_value in committed_flux_points
     }
     for event in events:
         if event.get("type") != "node_row_written":
@@ -172,7 +176,7 @@ def sample_rows_from_journal(
             summary=_optional_mapping(event.get("row_summary")),
         )
 
-    rows = [rows_by_flux[idx] for idx in committed_flux_indices if rows_by_flux[idx]]
+    rows = [rows_by_flux[idx] for idx, _ in committed_flux_points if rows_by_flux[idx]]
     if not rows:
         raise ValueError(
             "autofluxdep run has completed flux points but no sample table fields"
@@ -180,8 +184,10 @@ def sample_rows_from_journal(
     return rows
 
 
-def _committed_flux_indices(events: Sequence[Mapping[str, Any]]) -> tuple[int, ...]:
-    flux_indices: list[int] = []
+def _committed_flux_points(
+    events: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[int, float], ...]:
+    flux_points: list[tuple[int, float]] = []
     seen: set[int] = set()
     for event in events:
         if event.get("type") != "flux_committed":
@@ -190,8 +196,8 @@ def _committed_flux_indices(events: Sequence[Mapping[str, Any]]) -> tuple[int, .
         if flux_idx in seen:
             continue
         seen.add(flux_idx)
-        flux_indices.append(flux_idx)
-    return tuple(flux_indices)
+        flux_points.append((flux_idx, _event_flux_value(event)))
+    return tuple(flux_points)
 
 
 def _apply_patch_values(
@@ -280,6 +286,15 @@ def _event_flux_idx(event: Mapping[str, Any]) -> int:
             f"autofluxdep journal event has invalid flux_idx: {flux_idx!r}"
         )
     return flux_idx
+
+
+def _event_flux_value(event: Mapping[str, Any]) -> float:
+    flux_value = _finite_number(event.get("flux_value"))
+    if flux_value is None:
+        raise ValueError(
+            f"autofluxdep journal event has invalid flux_value: {event.get('flux_value')!r}"
+        )
+    return flux_value
 
 
 def _finite_number(value: Any) -> float | None:

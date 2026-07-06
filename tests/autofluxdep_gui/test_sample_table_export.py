@@ -61,7 +61,7 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
         "t2ramsey", 0, Patch({"t2r": 21.0, "t2r_err": 0.5}), InfoStore()
     )
     store.write_node_row("t2echo", 0, Patch({"t2e": 31.0, "t2e_err": 0.6}), InfoStore())
-    store.commit_flux(0, 0.0, InfoStore())
+    store.commit_flux(0, 0.125, InfoStore())
 
     store.write_node_row("qubit_freq", 1, Patch({"qubit_freq": 6001.0}), InfoStore())
     store.finalize("finished")
@@ -71,6 +71,7 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
     assert result.row_count == 1
     df = pd.read_csv(result.path)
     assert list(df.columns) == [
+        "calibrated mA",
         "Freq (MHz)",
         "T1 (us)",
         "T1err (us)",
@@ -81,6 +82,7 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
     ]
     assert len(df) == 1
     row = df.iloc[0]
+    assert row["calibrated mA"] == 0.125
     assert row["Freq (MHz)"] == 5001.25
     assert row["T1 (us)"] == 12.0
     assert row["T1err (us)"] == 0.4
@@ -105,8 +107,10 @@ def test_export_sample_table_accepts_manifest_path_and_omits_missing_columns(tmp
 
     assert result.path == str(output)
     df = pd.read_csv(output)
-    assert list(df.columns) == ["Freq (MHz)", "T1 (us)"]
-    assert df.to_dict(orient="records") == [{"Freq (MHz)": 5001.25, "T1 (us)": 12.0}]
+    assert list(df.columns) == ["calibrated mA", "Freq (MHz)", "T1 (us)"]
+    assert df.to_dict(orient="records") == [
+        {"calibrated mA": 0.0, "Freq (MHz)": 5001.25, "T1 (us)": 12.0}
+    ]
 
 
 def test_export_sample_table_accepts_paired_data_run_directory(tmp_path):
@@ -118,7 +122,9 @@ def test_export_sample_table_accepts_paired_data_run_directory(tmp_path):
     result = export_sample_table_from_artifact(store.data_dir)
 
     df = pd.read_csv(result.path)
-    assert df.to_dict(orient="records") == [{"Freq (MHz)": 5001.25}]
+    assert df.to_dict(orient="records") == [
+        {"calibrated mA": 0.0, "Freq (MHz)": 5001.25}
+    ]
 
 
 def test_decay_nodes_declare_sample_error_patch_keys():
@@ -140,7 +146,9 @@ def test_export_sample_table_falls_back_to_qubit_freq_row_summary(tmp_path):
     exported = export_sample_table_from_artifact(store.run_dir)
 
     df = pd.read_csv(exported.path)
-    assert df.to_dict(orient="records") == [{"Freq (MHz)": 5123.0}]
+    assert df.to_dict(orient="records") == [
+        {"calibrated mA": 0.0, "Freq (MHz)": 5123.0}
+    ]
 
 
 def test_export_sample_table_rejects_non_terminal_run(tmp_path):
