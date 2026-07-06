@@ -670,17 +670,29 @@ def make_measurement_builder(name: str) -> Builder:
     auto-follow) without a real experiment's acquire — the run path under test is
     the UI's, not the physics. Provides nothing (UI tests don't assert deps)."""
     import numpy as np
-    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.nodes.result import (
+        QubitFreqResult,
+        Sweep1DResult,
+    )
 
     def _result_factory(schema: Any, flux: Any) -> Any:
         del schema
+        if name == "qubit_freq":
+            return QubitFreqResult.allocate(
+                np.asarray(flux, dtype=float), np.linspace(-1.0, 1.0, 4)
+            )
         return Sweep1DResult.allocate(
             np.asarray(flux, dtype=float), np.linspace(0.0, 1.0, 4), x_label="x"
         )
 
     def _produce(env: RunEnv, snapshot: Snapshot) -> Patch:
         del snapshot
-        env.result.signal[env.flux_idx] = np.ones(env.result.n_x)
+        env.result.signal[env.flux_idx] = np.ones(env.result.signal.shape[1])
+        if isinstance(env.result, QubitFreqResult):
+            env.result.predict_freq[env.flux_idx] = 5000.0 + env.flux
+            env.result.fit_freq[env.flux_idx] = 5000.0 + env.flux
+            env.result.fit_curve[env.flux_idx] = env.result.signal[env.flux_idx]
+            env.result.snr[env.flux_idx] = 10.0
         if env.round_hook is not None:
             env.round_hook(env.flux_idx)
         return Patch()

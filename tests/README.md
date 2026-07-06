@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-05 — autofluxdep Schedule acquire retry
+**Last updated:** 2026-07-06 — autofluxdep fake measurement result contract
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -239,6 +239,11 @@ Autofluxdep real-acquire smoke tests 依賴 flux-aware `MockSoc` 的物理模型
 `connect_mock(..., sim_params=...)`、`mock_flux_predictor(sim_params)` 與 drive pulse calibration
 使用同一個 `SimParams`。π / π/2 drive pulse 優先用 helper 依 `pi_gain_len / gain` 校準；當測試目標是
 real acquire + fit 本身時，將 sweep/gain/relax 的 generation mode 固定，避免 feedback auto mode 覆寫測試輸入。
+
+UI mechanics tests 的 `make_measurement_builder("qubit_freq")` 仍使用 production node type/name，
+因此 fake Result 也必須符合 `qubit_freq` artifact/export contract（`QubitFreqResult`），不能用 generic
+`Sweep1DResult` 冒充；否則 run 會在 terminal Labber Browser export Fast Fail，headless 測試可能卡在
+`QMessageBox.warning` modal dialog。其它 fake 1D measurement type 可繼續用 `Sweep1DResult`。
 
 ### GUI device service tests
 
