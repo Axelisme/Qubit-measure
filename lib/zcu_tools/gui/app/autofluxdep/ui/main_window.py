@@ -307,6 +307,7 @@ class MainWindow(QMainWindow):
         self._list.continue_requested.connect(self._continue)
         self._list.restart_requested.connect(self._restart)
         self._list.abort_requested.connect(self._stop)
+        self._list.sample_export_requested.connect(self._export_sample_table)
         self._list.auto_follow_changed.connect(self._on_auto_follow_changed)
         self._detail.user_tab_changed.connect(self._on_user_detail_tab_changed)
 
@@ -731,6 +732,42 @@ class MainWindow(QMainWindow):
             from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
 
             QMessageBox.warning(self, "Restart failed", str(exc))
+
+    def _export_sample_table(self) -> None:
+        from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+            QFileDialog,
+            QMessageBox,
+        )
+
+        default_path = self._ctrl.default_sample_table_path()
+        if default_path is None:
+            self._list.refresh_run_availability()
+            QMessageBox.warning(self, "Export sample", "No finished run is exportable.")
+            return
+
+        filepath, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export sample table",
+            default_path,
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not filepath:
+            return
+
+        try:
+            result = self._ctrl.export_sample_table(filepath)
+        except Exception as exc:
+            logger.exception("autofluxdep sample table export failed")
+            self._list.refresh_run_availability()
+            QMessageBox.warning(self, "Export sample failed", str(exc))
+            return
+
+        self._list.refresh_run_availability()
+        QMessageBox.information(
+            self,
+            "Sample exported",
+            f"Exported {result.row_count} sample row(s) to:\n{result.path}",
+        )
 
     def _on_run_started(self) -> None:
         self._enter_active_run_ui(start_idx=0)

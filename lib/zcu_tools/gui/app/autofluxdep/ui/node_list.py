@@ -135,6 +135,7 @@ class NodeListPane(QWidget):
     continue_requested = Signal()
     restart_requested = Signal()
     abort_requested = Signal()
+    sample_export_requested = Signal()
     auto_follow_changed = Signal(bool)
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
@@ -206,9 +207,11 @@ class NodeListPane(QWidget):
         self._run_btn = _btn("▶ Run", self._on_run_stop)
         self._restart_btn = _btn("↻ Restart", self._on_restart)
         self._abort_btn = _btn("■ Abort", self._on_abort)
+        self._export_sample_btn = _btn("Export sample", self._on_export_sample)
         root.addWidget(self._run_btn)
         root.addWidget(self._restart_btn)
         root.addWidget(self._abort_btn)
+        root.addWidget(self._export_sample_btn)
 
         self.refresh_list()
         self.refresh_run_availability()
@@ -386,6 +389,9 @@ class NodeListPane(QWidget):
     def _on_restart(self) -> None:
         self.restart_requested.emit()
 
+    def _on_export_sample(self) -> None:
+        self.sample_export_requested.emit()
+
     def _commit_flux(self) -> None:
         self._ctrl.commit_flux_sweep(
             self._flux_start.expression_text(),
@@ -439,6 +445,9 @@ class NodeListPane(QWidget):
         self._abort_btn.setEnabled(self._run_state in {"running", "pausing", "paused"})
         self._restart_btn.setVisible(self._run_state == "paused")
         self._restart_btn.setEnabled(self._run_state == "paused")
+        can_export = self._run_state == "idle" and self._ctrl.can_export_sample_table()
+        self._export_sample_btn.setVisible(can_export)
+        self._export_sample_btn.setEnabled(can_export)
 
     def _run_disabled_reason(self) -> str | None:
         return self._ctrl.run_readiness()

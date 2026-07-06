@@ -462,25 +462,27 @@ def test_t2echo_auto_fit_method_dispatches_by_detune(monkeypatch):
 
     def fake_decay(_times, _real):
         calls.append("decay")
-        return 12.0, None, np.zeros_like(_times), None
+        return 12.0, 0.12, np.zeros_like(_times), None
 
     def fake_fringe(_times, _real):
         calls.append("fringe")
-        return 8.0, None, None, None, np.ones_like(_times), None
+        return 8.0, 0.08, None, None, np.ones_like(_times), None
 
     monkeypatch.setattr(t2echo_mod, "fit_decay", fake_decay)
     monkeypatch.setattr(t2echo_mod, "fit_decay_fringe", fake_fringe)
 
-    t2e, fit_curve = t2echo_mod._fit_t2echo(
+    t2e, t2e_err, fit_curve = t2echo_mod._fit_t2echo(
         "auto_by_detune", detune_ratio=0.0, times=times, real=real
     )
     assert t2e == 12.0
+    assert t2e_err == 0.12
     np.testing.assert_allclose(fit_curve, np.zeros_like(times))
 
-    t2e, fit_curve = t2echo_mod._fit_t2echo(
+    t2e, t2e_err, fit_curve = t2echo_mod._fit_t2echo(
         "auto_by_detune", detune_ratio=0.05, times=times, real=real
     )
     assert t2e == 8.0
+    assert t2e_err == 0.08
     np.testing.assert_allclose(fit_curve, np.ones_like(times))
     assert calls == ["decay", "fringe"]
 

@@ -2,19 +2,22 @@
 
 The Builder lowers the active context plus resolved modules into a T1 run cfg.
 The short-lived Node applies flux, sweeps relax time, fills the Result row, and
-emits trusted raw ``t1``. See ``CONTEXT.md`` for the Builder/Node boundary.
+emits trusted raw ``t1`` plus ``t1err``. See ``CONTEXT.md`` for the Builder/Node
+boundary.
 
 - needs the ``pi_pulse`` module (lenrabi or ModuleLibrary produces it) — without
   a concrete pi-pulse there is no excited state to relax, so the resolver skips.
 - reads ``t1`` declared ``smooth="ewma"`` (the notebook's smooth_t1) for the
-  relax_delay guess + the planted decay constant; reports raw ``t1`` back.
+  relax_delay guess + the planted decay constant; reports raw ``t1`` / ``t1err``
+  back.
 - the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
   default).
 
 The smoothing is consumer-declared and same-key: this Builder reads ``t1``
 smoothed and provides raw ``t1`` — the orchestrator's SmoothingService projects
 the smoothed estimate under the same key for the next point's readers (lenrabi /
-ro_optimize / t2*), so no separate ``smooth_t1`` key exists.
+ro_optimize / t2*), so no separate ``smooth_t1`` key exists. ``t1err`` is
+diagnostic and is not smoothed by default.
 
 ``make_cfg`` lowers the active context + this point's snapshot into a runnable
 ``T1CfgTemplate``, mirroring the notebook's T1Task ``cfg_maker``:
@@ -265,7 +268,7 @@ class T1Node(Node):
             raise RuntimeError("t1 Schedule acquire completed without signal")
         real = signal2real_flip(np.asarray(acquired.signal, dtype=np.complex128))
 
-        t1, _t1err, fit_curve, _ = fit_decay(times, real)
+        t1, t1err, fit_curve, _ = fit_decay(times, real)
 
         if not fill_decay_fit_or_skip(
             result, idx, real, times, float(t1), fit_curve, env.round_hook, logger, "t1"
@@ -276,6 +279,7 @@ class T1Node(Node):
 
         patch = Patch()
         patch.set("t1", float(t1))
+        patch.set("t1err", float(t1err))
         return patch
 
 
@@ -283,7 +287,7 @@ class T1Builder(Builder):
     """The t1 provider — acquire exp decay, real fit_decay, accumulating colormap."""
 
     name = "t1"
-    provides = ("t1",)
+    provides = ("t1", "t1err")
     optional = (Dependency("t1", smooth="ewma", default=missing_info_value),)
     requires_modules = (ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),)
     optional_modules = (

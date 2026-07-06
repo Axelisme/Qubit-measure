@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -1128,6 +1129,41 @@ def test_pause_continue_ui_states_lock_workflow_controls(app):
     assert win._list._run_btn.text() == "▶ Run"
     assert win._list._abort_btn.isHidden()
     assert win._list._add_btn.isEnabled()
+
+
+def test_export_sample_button_appears_after_terminal_run_and_exports(
+    app, monkeypatch, tmp_path
+):
+    ctrl, win = app
+    output = tmp_path / "samples.csv"
+
+    assert win._list._export_sample_btn.isHidden()
+    monkeypatch.setattr(ctrl, "can_export_sample_table", MagicMock(return_value=True))
+    monkeypatch.setattr(
+        ctrl,
+        "default_sample_table_path",
+        MagicMock(return_value=str(output)),
+    )
+    export = MagicMock(return_value=SimpleNamespace(path=str(output), row_count=2))
+    monkeypatch.setattr(ctrl, "export_sample_table", export)
+
+    from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        MagicMock(return_value=(str(output), "CSV files (*.csv)")),
+    )
+    information = MagicMock()
+    monkeypatch.setattr(QMessageBox, "information", information)
+
+    win._on_run_done()
+    assert not win._list._export_sample_btn.isHidden()
+
+    win._list._export_sample_btn.click()
+
+    export.assert_called_once_with(str(output))
+    information.assert_called_once()
 
 
 def test_auto_follow_checkbox_disables_tab_switch_and_navigation(app):

@@ -2,7 +2,8 @@
 
 The Builder lowers resolved pi/pi2/readout modules plus timing knobs into the
 run cfg. The short-lived Node applies flux, sweeps echo delay, dispatches the
-configured fit, fills the Result row, and emits trusted raw ``t2e``.
+configured fit, fills the Result row, and emits trusted raw ``t2e`` /
+``t2e_err``.
 
 Unlike t2ramsey, the echo sequence refocuses static dephasing and typically
 yields a longer coherence time; the difference is purely in the pulse sequence.
@@ -163,15 +164,15 @@ def _resolve_cfg_relax_delay(
 
 def _fit_t2echo(
     method: str, *, detune_ratio: float, times: np.ndarray, real: np.ndarray
-) -> tuple[float, Any]:
+) -> tuple[float, float, Any]:
     if method == _FIT_METHOD_AUTO:
         method = _FIT_METHOD_DECAY if detune_ratio == 0.0 else _FIT_METHOD_FRINGE
     if method == _FIT_METHOD_DECAY:
-        t2f, _, fit_curve, _ = fit_decay(times, real)
-        return float(t2f), fit_curve
+        t2f, t2f_err, fit_curve, _ = fit_decay(times, real)
+        return float(t2f), float(t2f_err), fit_curve
     if method == _FIT_METHOD_FRINGE:
-        t2f, _, _, _, fit_curve, _ = fit_decay_fringe(times, real)
-        return float(t2f), fit_curve
+        t2f, t2f_err, _, _, fit_curve, _ = fit_decay_fringe(times, real)
+        return float(t2f), float(t2f_err), fit_curve
     raise RuntimeError(f"unsupported t2echo fit_method: {method!r}")
 
 
@@ -288,7 +289,7 @@ class T2EchoNode(Node):
         real = signal2real_flip(np.asarray(acquired.signal, dtype=np.complex128))
 
         fit_method = str(knobs["fit_method"])
-        t2f, fit_curve = _fit_t2echo(
+        t2f, t2f_err, fit_curve = _fit_t2echo(
             fit_method, detune_ratio=detune_ratio, times=times, real=real
         )
 
@@ -309,6 +310,7 @@ class T2EchoNode(Node):
 
         patch = Patch()
         patch.set("t2e", float(t2f))
+        patch.set("t2e_err", float(t2f_err))
         return patch
 
 
@@ -319,7 +321,7 @@ class T2EchoBuilder(Builder):
     """
 
     name = "t2echo"
-    provides = ("t2e",)
+    provides = ("t2e", "t2e_err")
     optional = (
         Dependency("t1", smooth="ewma", default=missing_info_value),
         Dependency("t2e", smooth="ewma", default=missing_info_value),

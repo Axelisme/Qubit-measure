@@ -2,7 +2,7 @@
 
 The Builder lowers resolved pi/2/readout modules plus timing knobs into the run
 cfg. The short-lived Node applies flux, sweeps delay time, fits the fringe, and
-emits trusted raw ``t2r`` / detune values.
+emits trusted raw ``t2r`` / ``t2r_err`` / detune values.
 
 - requires the ``pi2_pulse`` module (lenrabi or ModuleLibrary produces it); the
   resolver skips the node until a concrete pi/2 pulse is available.
@@ -269,7 +269,7 @@ class T2RamseyNode(Node):
             raise RuntimeError("t2ramsey Schedule acquire completed without signal")
         real = signal2real_flip(np.asarray(acquired.signal, dtype=np.complex128))
 
-        t2f, _, detune, _, fit_curve, _ = fit_decay_fringe(times, real)
+        t2f, t2f_err, detune, _, fit_curve, _ = fit_decay_fringe(times, real)
         detune = detune - activate_detune  # back out the applied activate-detune
 
         if not fill_decay_fit_or_skip(
@@ -294,6 +294,7 @@ class T2RamseyNode(Node):
 
         patch = Patch()
         patch.set("t2r", float(t2f))
+        patch.set("t2r_err", float(t2f_err))
         patch.set("t2r_detune", float(detune))
         return patch
 
@@ -304,7 +305,7 @@ class T2RamseyBuilder(Builder):
     """
 
     name = "t2ramsey"
-    provides = ("t2r", "t2r_detune")
+    provides = ("t2r", "t2r_err", "t2r_detune")
     optional = (
         Dependency("t1", smooth="ewma", default=missing_info_value),
         Dependency("t2r", smooth="ewma", default=missing_info_value),

@@ -88,6 +88,13 @@ from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
     RestoreReport,
 )
 from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore
+from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
+    SampleTableExportResult,
+    export_sample_table_from_artifact,
+)
+from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
+    default_sample_table_path as sample_table_default_path,
+)
 from zcu_tools.gui.app.autofluxdep.state import (
     FLUX_VERSION_KEY,
     WORKFLOW_VERSION_KEY,
@@ -242,6 +249,8 @@ class Controller(SessionControllerMixin):
         self._active_run_token: int | None = None
         self._run_session: RunSession | None = None
         self._last_run_info: InfoStore | None = None
+        self._last_terminal_manifest_path: Path | None = None
+        self._last_terminal_status: str | None = None
         self._caretaker: PersistenceCaretaker | None = None
         self._shutdown_driver: QtShutdownDriver | None = None
         self._persist_timer = QTimer()
@@ -372,6 +381,31 @@ class Controller(SessionControllerMixin):
     def last_run_info(self) -> InfoStore | None:
         """Testing/support entry: latest terminal sweep InfoStore, if produced."""
         return self._last_run_info
+
+    def can_export_sample_table(self) -> bool:
+        path = self._last_terminal_manifest_path
+        return (
+            self._last_terminal_status in {"finished", "stopped"}
+            and path is not None
+            and path.exists()
+        )
+
+    def default_sample_table_path(self) -> str | None:
+        if not self.can_export_sample_table():
+            return None
+        assert self._last_terminal_manifest_path is not None
+        return str(sample_table_default_path(self._last_terminal_manifest_path))
+
+    def export_sample_table(
+        self, filepath: str | None = None
+    ) -> SampleTableExportResult:
+        if not self.can_export_sample_table():
+            raise RuntimeError("no finished or stopped autofluxdep run is exportable")
+        assert self._last_terminal_manifest_path is not None
+        return export_sample_table_from_artifact(
+            self._last_terminal_manifest_path,
+            filepath=filepath,
+        )
 
     # ------------------------------------------------------------------
     # Shared setup/inspect/device/predictor dialogs use control facets. The
@@ -555,6 +589,16 @@ class Controller(SessionControllerMixin):
     def _clear_run_products(self) -> None:
         self._state.run_results = {}
         self._state.run_predictor = None
+
+    def _clear_terminal_sample_artifact(self) -> None:
+        self._last_terminal_manifest_path = None
+        self._last_terminal_status = None
+
+    def _remember_terminal_sample_artifact(
+        self, session: RunSession, status: str
+    ) -> None:
+        self._last_terminal_manifest_path = session.store.manifest_path
+        self._last_terminal_status = status
 
     def _commit_workflow_edit(self, changed_name: str | None) -> None:
         self._clear_run_products()
@@ -996,9 +1040,11 @@ class Controller(SessionControllerMixin):
             session.finalize("stopped")
         except Exception as exc:
             logger.exception("autofluxdep paused artifact finalize failed")
+            self._clear_terminal_sample_artifact()
             self._run_session = None
             self._bus.emit(RunFailedPayload(message=str(exc), stage="paused_finalize"))
             raise
+        self._remember_terminal_sample_artifact(session, "stopped")
         self._run_session = None
         self.persist_all()
         self._bus.emit(RunStoppedPayload())
@@ -1102,6 +1148,7 @@ class Controller(SessionControllerMixin):
 
         self._cur_idx = 0
         self._last_run_info = None
+        self._clear_terminal_sample_artifact()
         try:
             session = self._create_run_session(notify)
         except Exception:
@@ -1312,6 +1359,7 @@ class Controller(SessionControllerMixin):
         logger.info("run finished: %d flux point(s)", len(session.flux_values))
         self._prepare_run_segment_terminal(release_session=True)
         if (exc := self._finalize_terminal_session(session, "finished")) is not None:
+            self._clear_terminal_sample_artifact()
             logger.error(
                 "autofluxdep artifact finalize failed",
                 exc_info=(type(exc), exc, exc.__traceback__),
@@ -1322,6 +1370,7 @@ class Controller(SessionControllerMixin):
                 RunFailedPayload(message=str(exc), stage="finalize"),
             )
             return
+        self._remember_terminal_sample_artifact(session, "finished")
         self._settle_run_segment(
             settle, OperationOutcome("finished"), RunFinishedPayload()
         )
@@ -1347,6 +1396,7 @@ class Controller(SessionControllerMixin):
         logger.info("run stopped at flux idx %d", self._cur_idx)
         self._prepare_run_segment_terminal(release_session=True)
         if (exc := self._finalize_terminal_session(session, "stopped")) is not None:
+            self._clear_terminal_sample_artifact()
             logger.error(
                 "autofluxdep stopped artifact finalize failed",
                 exc_info=(type(exc), exc, exc.__traceback__),
@@ -1357,6 +1407,7 @@ class Controller(SessionControllerMixin):
                 RunFailedPayload(message=str(exc), stage="stop_finalize"),
             )
             return
+        self._remember_terminal_sample_artifact(session, "stopped")
         self._settle_run_segment(
             settle, OperationOutcome("cancelled"), RunStoppedPayload()
         )
@@ -1373,6 +1424,7 @@ class Controller(SessionControllerMixin):
     ) -> None:
         logger.error("run failed at flux idx %d: %s", self._cur_idx, error)
         self._prepare_run_segment_terminal(release_session=True)
+        self._clear_terminal_sample_artifact()
         if (
             exc := self._finalize_terminal_session(
                 session,
