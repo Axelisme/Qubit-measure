@@ -42,6 +42,7 @@ package-lock.json
 *.csv
 *.log
 *.npz
+*.pdf
 
 # Jupytext generated files
 notebook/*
