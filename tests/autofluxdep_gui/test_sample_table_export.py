@@ -65,7 +65,7 @@ def _store(tmp_path: Path, *, results: dict[str, object] | None = None) -> RunSt
 
 
 def _comment(store: RunStore) -> str:
-    return f"Autofluxdep snapeshot: {store.run_dir}"
+    return f"Autofluxdep snapshot: {store.run_dir}"
 
 
 def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):

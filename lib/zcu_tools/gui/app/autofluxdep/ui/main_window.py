@@ -226,6 +226,7 @@ class MainWindow(QMainWindow):
         self._run_active = False
         self._run_paused = False
         self._closing = False
+        self._close_prompt_open = False
         self._close_after_run_terminal = False
         self._force_close_prompt_open = False
         self._active_run_node_name: str | None = None
@@ -391,33 +392,54 @@ class MainWindow(QMainWindow):
 
         active = self._ctrl.active_operation_count()
         if active > 0:
-            confirmed = self._dialog_presenter.confirm(
-                self,
-                "Operations in progress",
-                f"Cancel {active} operation(s) in progress and close once they stop?",
-                default=False,
-            )
-            if not confirmed:
-                if a0 is not None:
-                    a0.ignore()
-                return
+            if a0 is not None:
+                a0.ignore()
+            self._confirm_active_operations_close(active)
+            return
         if a0 is not None:
             a0.ignore()
         QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
 
+    def _confirm_active_operations_close(self, active: int) -> None:
+        """Ask before cancelling non-run operations during window close."""
+        if self._close_prompt_open:
+            return
+        self._close_prompt_open = True
+        self._dialog_presenter.confirm_async(
+            self,
+            "Operations in progress",
+            f"Cancel {active} operation(s) in progress and close once they stop?",
+            on_decision=self._on_active_operations_close_decision,
+            default=False,
+        )
+
+    def _on_active_operations_close_decision(self, confirmed: bool) -> None:
+        self._close_prompt_open = False
+        if not confirmed or self._closing:
+            return
+        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
+
     def _confirm_running_close(self) -> None:
         """Ask before turning a running close into a terminal stop-and-close."""
-        if self._close_after_run_terminal:
+        if self._close_after_run_terminal or self._close_prompt_open:
             return
-        confirmed = self._dialog_presenter.confirm(
+        self._close_prompt_open = True
+        self._dialog_presenter.confirm_async(
             self,
             "Run in progress",
             "Stop the running autofluxdep sweep and close once it stops?",
+            on_decision=self._on_running_close_decision,
             default=False,
         )
-        if not confirmed:
+
+    def _on_running_close_decision(self, confirmed: bool) -> None:
+        self._close_prompt_open = False
+        if not confirmed or self._closing:
             return
         self._close_after_run_terminal = True
+        if not self._ctrl.is_running:
+            self._perform_close()
+            return
         if not self._ctrl.stop_run(reason="Window close requested terminal stop"):
             self._perform_close()
             return
@@ -425,13 +447,20 @@ class MainWindow(QMainWindow):
 
     def _confirm_paused_close(self) -> None:
         """Ask before discarding same-process continue state on close."""
-        confirmed = self._dialog_presenter.confirm(
+        if self._close_prompt_open:
+            return
+        self._close_prompt_open = True
+        self._dialog_presenter.confirm_async(
             self,
             "Paused run",
             "Finalize the paused run as stopped and close? Continue will no longer be available.",
+            on_decision=self._on_paused_close_decision,
             default=False,
         )
-        if not confirmed:
+
+    def _on_paused_close_decision(self, confirmed: bool) -> None:
+        self._close_prompt_open = False
+        if not confirmed or self._closing:
             return
         try:
             self._ctrl.finalize_paused_run_as_stopped()
@@ -449,18 +478,19 @@ class MainWindow(QMainWindow):
         ):
             return
         self._force_close_prompt_open = True
-        try:
-            confirmed = self._dialog_presenter.destructive_confirm(
-                self,
-                "Run still stopping",
-                "The run has not stopped after 30 seconds. Force Close may leave the "
-                "artifact at the last flushed state.",
-                action_text="Force Close",
-                default=False,
-            )
-        finally:
-            self._force_close_prompt_open = False
-        if confirmed:
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "Run still stopping",
+            "The run has not stopped after 30 seconds. Force Close may leave the "
+            "artifact at the last flushed state.",
+            action_text="Force Close",
+            on_decision=self._on_force_close_decision,
+            default=False,
+        )
+
+    def _on_force_close_decision(self, confirmed: bool) -> None:
+        self._force_close_prompt_open = False
+        if confirmed and self._close_after_run_terminal and not self._closing:
             self._perform_close()
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:

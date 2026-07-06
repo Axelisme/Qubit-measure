@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
-from qtpy.QtWidgets import QMessageBox, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QMessageBox,
+    QPushButton,
+    QWidget,
+)
 
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
 
@@ -27,6 +32,16 @@ class DialogPresenter(Protocol):
         default: bool = False,
     ) -> bool: ...
 
+    def confirm_async(
+        self,
+        parent: QWidget,
+        title: str,
+        message: str,
+        *,
+        on_decision: Callable[[bool], None],
+        default: bool = False,
+    ) -> None: ...
+
     def destructive_confirm(
         self,
         parent: QWidget,
@@ -34,8 +49,9 @@ class DialogPresenter(Protocol):
         message: str,
         *,
         action_text: str,
+        on_decision: Callable[[bool], None],
         default: bool = False,
-    ) -> bool: ...
+    ) -> None: ...
 
 
 class QtDialogPresenter:
@@ -43,6 +59,7 @@ class QtDialogPresenter:
 
     def __init__(self, dialog_refs: DialogRefStore | None = None) -> None:
         self._dialog_refs = dialog_refs
+        self._owned_dialog_refs = DialogRefStore()
 
     def information(self, parent: QWidget, title: str, message: str) -> None:
         if self._dialog_refs is None:
@@ -84,6 +101,25 @@ class QtDialogPresenter:
         )
         return answer == yes
 
+    def confirm_async(
+        self,
+        parent: QWidget,
+        title: str,
+        message: str,
+        *,
+        on_decision: Callable[[bool], None],
+        default: bool = False,
+    ) -> None:
+        box = self._message_box(parent, QMessageBox.Icon.Question, title, message)
+        yes_button = self._require_button(
+            box.addButton(QMessageBox.StandardButton.Yes), "Yes"
+        )
+        no_button = self._require_button(
+            box.addButton(QMessageBox.StandardButton.No), "No"
+        )
+        box.setDefaultButton(yes_button if default else no_button)
+        self._open_decision_box(box, yes_button, on_decision)
+
     def destructive_confirm(
         self,
         parent: QWidget,
@@ -91,19 +127,44 @@ class QtDialogPresenter:
         message: str,
         *,
         action_text: str,
+        on_decision: Callable[[bool], None],
         default: bool = False,
-    ) -> bool:
+    ) -> None:
         box = self._message_box(parent, QMessageBox.Icon.Warning, title, message)
-        action_button = box.addButton(
-            action_text, QMessageBox.ButtonRole.DestructiveRole
+        action_button = self._require_button(
+            box.addButton(action_text, QMessageBox.ButtonRole.DestructiveRole),
+            action_text,
         )
-        box.addButton(QMessageBox.StandardButton.Cancel)
+        cancel_button = self._require_button(
+            box.addButton(QMessageBox.StandardButton.Cancel), "Cancel"
+        )
         if default:
             box.setDefaultButton(action_button)
         else:
-            box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-        box.exec()
-        return box.clickedButton() is action_button
+            box.setDefaultButton(cancel_button)
+        self._open_decision_box(box, action_button, on_decision)
+
+    def _open_decision_box(
+        self,
+        box: QMessageBox,
+        accept_button: QPushButton,
+        on_decision: Callable[[bool], None],
+    ) -> None:
+        def _on_finished(_status: int) -> None:
+            on_decision(box.clickedButton() is accept_button)
+
+        refs = (
+            self._dialog_refs
+            if self._dialog_refs is not None
+            else self._owned_dialog_refs
+        )
+        refs.open_transient(box, on_finished=_on_finished)
+
+    @staticmethod
+    def _require_button(button: QPushButton | None, label: str) -> QPushButton:
+        if button is None:
+            raise RuntimeError(f"Qt did not create message-box button: {label}")
+        return button
 
     @staticmethod
     def _message_box(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -71,6 +71,17 @@ class RecordingDialogPresenter:
             f"title={title!r}, message={message!r}"
         )
 
+    def confirm_async(
+        self,
+        parent: QWidget,
+        title: str,
+        message: str,
+        *,
+        on_decision: Callable[[bool], None],
+        default: bool = False,
+    ) -> None:
+        on_decision(self.confirm(parent, title, message, default=default))
+
     def destructive_confirm(
         self,
         parent: QWidget,
@@ -78,8 +89,9 @@ class RecordingDialogPresenter:
         message: str,
         *,
         action_text: str,
+        on_decision: Callable[[bool], None],
         default: bool = False,
-    ) -> bool:
+    ) -> None:
         del parent
         self.calls.append(
             DialogCall(
@@ -91,7 +103,8 @@ class RecordingDialogPresenter:
             )
         )
         if self._destructive_answers:
-            return self._destructive_answers.popleft()
+            on_decision(self._destructive_answers.popleft())
+            return
         raise AssertionError(
             "Unexpected destructive confirmation dialog without a queued answer: "
             f"title={title!r}, message={message!r}, action_text={action_text!r}"

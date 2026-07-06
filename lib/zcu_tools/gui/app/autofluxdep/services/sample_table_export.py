@@ -189,12 +189,7 @@ def sample_rows_from_journal(
             summary=_optional_mapping(event.get("row_summary")),
         )
 
-    rows = [rows_by_flux[idx] for idx, _ in committed_flux_points if rows_by_flux[idx]]
-    if not rows:
-        raise ValueError(
-            "autofluxdep run has completed flux points but no sample table fields"
-        )
-    return rows
+    return [rows_by_flux[idx] for idx, _ in committed_flux_points]
 
 
 def _committed_flux_points(
@@ -313,7 +308,7 @@ def _journal_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:
 
 def _sample_comment(manifest: Mapping[str, Any], manifest_path: Path) -> str:
     snapshot_dir = _metadata_root_path(manifest, manifest_path)
-    return f"Autofluxdep snapeshot: {snapshot_dir}"
+    return f"Autofluxdep snapshot: {snapshot_dir}"
 
 
 def _sample_date() -> str:

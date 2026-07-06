@@ -473,7 +473,7 @@ class Controller(SessionControllerMixin):
     def _finite_float(value: object, field: str) -> float:
         if isinstance(value, bool):
             raise TypeError(f"{field} must be a finite number")
-        if not isinstance(value, (Real, str)):
+        if not isinstance(value, Real):
             raise TypeError(f"{field} must be a finite number")
         numeric = float(value)
         if not math.isfinite(numeric):

@@ -42,9 +42,11 @@ Widgets that need information messages, warnings, critical errors,
 confirmations, or explicit destructive confirmations receive the shared
 `DialogPresenter` port. Production uses `QtDialogPresenter`; when a
 `DialogRefStore` is supplied, information, warning, and critical boxes stay
-non-blocking and retained through the shared lifecycle helper. Tests inject a
-recording presenter instead of monkeypatching `QMessageBox`, so dialog decisions
-are scripted at the object boundary.
+non-blocking and retained through the shared lifecycle helper. Close paths or
+operation-running prompts use callback-style `confirm_async` /
+`destructive_confirm`, so the Qt event loop keeps pumping while the decision is
+pending. Tests inject a recording presenter instead of monkeypatching
+`QMessageBox`, so dialog decisions are scripted at the object boundary.
 
 Non-modal dialogs opened with `open()` use the shared dialog lifecycle helper,
 or an equivalent named registry when remote screenshot/list semantics require

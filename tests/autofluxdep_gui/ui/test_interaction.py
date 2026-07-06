@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -53,7 +54,7 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialogState
 
-from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._dialog_fakes import DialogCall, RecordingDialogPresenter
 
 from .._helpers import connect_mock, make_builder, make_measurement_builder
 
@@ -84,6 +85,36 @@ def app(qapp):
 
 def _dialogs(win: MainWindow) -> RecordingDialogPresenter:
     return cast(RecordingDialogPresenter, win._dialog_presenter)
+
+
+class PendingConfirmPresenter(RecordingDialogPresenter):
+    """Recording presenter that keeps async confirmations pending until answered."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pending_confirm: Callable[[bool], None] | None = None
+
+    def confirm_async(
+        self,
+        parent: QWidget,
+        title: str,
+        message: str,
+        *,
+        on_decision: Callable[[bool], None],
+        default: bool = False,
+    ) -> None:
+        del parent
+        if self._pending_confirm is not None:
+            raise AssertionError("confirmation is already pending")
+        self.calls.append(DialogCall("confirm", title, message, default=default))
+        self._pending_confirm = on_decision
+
+    def answer_confirm(self, answer: bool) -> None:
+        callback = self._pending_confirm
+        if callback is None:
+            raise AssertionError("no confirmation is pending")
+        self._pending_confirm = None
+        callback(answer)
 
 
 def _list_labels(win: MainWindow) -> list[str]:
@@ -516,6 +547,30 @@ def test_main_window_close_waits_for_live_operation(app):
     assert ctrl.active_operation_count() == 0
 
 
+def test_pending_live_operation_close_prompt_is_not_duplicated(app):
+    ctrl, win = app
+    token = ctrl._operation_handles.create(cancel_hook=lambda: None)
+    dialogs = PendingConfirmPresenter()
+    win._dialog_presenter = dialogs
+
+    first = QCloseEvent()
+    second = QCloseEvent()
+    win.closeEvent(first)
+    win.closeEvent(second)
+
+    assert not first.isAccepted()
+    assert not second.isAccepted()
+    assert [call.title for call in dialogs.calls] == ["Operations in progress"]
+    assert win._close_prompt_open is True
+
+    dialogs.answer_confirm(False)
+
+    assert win._close_prompt_open is False
+    assert ctrl.active_operation_count() == 1
+    ctrl._operation_handles.settle(token, OperationOutcome("cancelled"))
+    win._closing = True
+
+
 def test_running_close_requests_terminal_stop_then_closes_after_run_done(
     app, monkeypatch
 ):
@@ -575,9 +630,17 @@ def test_force_close_prompt_only_closes_when_force_button_clicked(app, monkeypat
     token = ctrl._operation_handles.create(cancel_hook=lambda: None)
     ctrl._active_run_token = token
     win._close_after_run_terminal = True
-    _dialogs(win).queue_destructive_confirm(True)
     monkeypatch.setattr(win, "_perform_close", perform_close)
 
+    _dialogs(win).queue_destructive_confirm(False)
+    win._show_force_close_prompt()
+
+    assert _dialogs(win).calls[-1].title == "Run still stopping"
+    assert _dialogs(win).calls[-1].action_text == "Force Close"
+    perform_close.assert_not_called()
+    assert win._force_close_prompt_open is False
+
+    _dialogs(win).queue_destructive_confirm(True)
     win._show_force_close_prompt()
 
     assert _dialogs(win).calls[-1].title == "Run still stopping"
