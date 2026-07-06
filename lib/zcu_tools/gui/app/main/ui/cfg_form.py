@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QScrollArea,
     QVBoxLayout,
@@ -135,6 +135,8 @@ class CfgFormWidget(QWidget):
         self._decoration_provider = decoration_provider
         self._field_decorations: dict[str, FieldDecoration] = {}
         self._choice_state: tuple[tuple[str, str], ...] = ()
+        self._pending_section_refresh_paths: set[str] = set()
+        self._section_refresh_scheduled = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -196,20 +198,28 @@ class CfgFormWidget(QWidget):
             self._root_widget = None
         self._field_decorations = {}
         self._choice_state = ()
+        self._pending_section_refresh_paths = set()
+        self._section_refresh_scheduled = False
 
     def set_decoration_provider(self, provider: FieldDecorationProvider | None) -> None:
         self._decoration_provider = provider
         model = self._model
-        if model is not None:
-            self.attach(model)
+        if model is None or self._root_widget is None:
+            return
+        changed_paths = _changed_decoration_paths(
+            self._field_decorations, self._decoration_state_for_model(model)
+        )
+        self._queue_section_refresh(_parent_section_paths(changed_paths))
 
     def decoration_for_path(self, path: str) -> FieldDecoration:
+        self._flush_pending_section_refresh()
         try:
             return self._field_decorations[path]
         except KeyError as exc:
             raise KeyError(f"Unknown cfg field path {path!r}") from exc
 
     def decoration_paths(self) -> tuple[str, ...]:
+        self._flush_pending_section_refresh()
         return tuple(self._field_decorations)
 
     def read_values(self) -> CfgSectionValue:
@@ -261,17 +271,84 @@ class CfgFormWidget(QWidget):
         state = _choice_state_for_model(self._model)
         if state == self._choice_state:
             return
+        changed_selectors = _changed_choice_selector_paths(self._choice_state, state)
         self._choice_state = state
-        self.attach(self._model)
+        self._queue_section_refresh(_parent_section_paths(changed_selectors))
 
     def _resolve_decoration(self, path: str, field: LiveField) -> FieldDecoration:
+        decoration = self._decoration_for_field(path, field)
+        self._field_decorations[path] = decoration
+        return decoration
+
+    def _decoration_for_field(self, path: str, field: LiveField) -> FieldDecoration:
         spec = cast(CfgNodeSpec, field.spec)
         value = cast(CfgNodeValue | None, field.get_value())
         provider = self._decoration_provider
         patch = None if provider is None else provider.decoration_for(path, spec, value)
-        decoration = default_decoration_for_spec(spec).merge(patch)
-        self._field_decorations[path] = decoration
-        return decoration
+        return default_decoration_for_spec(spec).merge(patch)
+
+    def _decoration_state_for_model(
+        self, model: SectionLiveField
+    ) -> dict[str, FieldDecoration]:
+        state: dict[str, FieldDecoration] = {}
+        self._collect_decoration_state(model, "", state)
+        return state
+
+    def _collect_decoration_state(
+        self, field: LiveField, path: str, state: dict[str, FieldDecoration]
+    ) -> None:
+        if path:
+            state[path] = self._decoration_for_field(path, field)
+        if isinstance(field, SectionLiveField):
+            for key, child in field.fields.items():
+                child_path = f"{path}.{key}" if path else key
+                self._collect_decoration_state(child, child_path, state)
+            return
+        if isinstance(field, ModuleRefLiveField) and field.sub_field is not None:
+            for key, child in field.sub_field.fields.items():
+                child_path = f"{path}.{key}" if path else key
+                self._collect_decoration_state(child, child_path, state)
+
+    def _queue_section_refresh(self, section_paths: set[str]) -> None:
+        if not section_paths:
+            return
+        self._pending_section_refresh_paths.update(section_paths)
+        if self._section_refresh_scheduled:
+            return
+        self._section_refresh_scheduled = True
+        QTimer.singleShot(0, self._flush_pending_section_refresh)
+
+    def _flush_pending_section_refresh(self) -> None:
+        if not self._pending_section_refresh_paths:
+            self._section_refresh_scheduled = False
+            return
+        section_paths = set(self._pending_section_refresh_paths)
+        self._pending_section_refresh_paths = set()
+        self._section_refresh_scheduled = False
+        self._refresh_section_paths(section_paths)
+
+    def _refresh_section_paths(self, section_paths: set[str]) -> None:
+        root = self._root_widget
+        if root is None:
+            return
+        for path in _minimal_section_paths(section_paths):
+            self._drop_decorations_under(path)
+            if not root.refresh_section(path):
+                # A stale or unsupported path should not leave the form half-updated.
+                if self._model is not None:
+                    self.attach(self._model)
+                return
+
+    def _drop_decorations_under(self, section_path: str) -> None:
+        if not section_path:
+            self._field_decorations = {}
+            return
+        prefix = f"{section_path}."
+        self._field_decorations = {
+            path: decoration
+            for path, decoration in self._field_decorations.items()
+            if not path.startswith(prefix)
+        }
 
     def _find_first_invalid(self, field: LiveField, *, path: str) -> str | None:
         if isinstance(field, ScalarLiveField):
@@ -370,3 +447,41 @@ def _collect_choice_state(
         if isinstance(child, SectionLiveField):
             child_path = f"{path}.{key}" if path else key
             _collect_choice_state(child, child_path, state)
+
+
+def _changed_choice_selector_paths(
+    old: tuple[tuple[str, str], ...], new: tuple[tuple[str, str], ...]
+) -> set[str]:
+    old_map = dict(old)
+    new_map = dict(new)
+    return {
+        path
+        for path in set(old_map) | set(new_map)
+        if old_map.get(path) != new_map.get(path)
+    }
+
+
+def _changed_decoration_paths(
+    old: dict[str, FieldDecoration], new: dict[str, FieldDecoration]
+) -> set[str]:
+    return {path for path in set(old) | set(new) if old.get(path) != new.get(path)}
+
+
+def _parent_section_paths(paths: set[str]) -> set[str]:
+    section_paths: set[str] = set()
+    for path in paths:
+        section, sep, _leaf = path.rpartition(".")
+        section_paths.add(section if sep else "")
+    return section_paths
+
+
+def _minimal_section_paths(paths: set[str]) -> tuple[str, ...]:
+    ordered = sorted(paths, key=lambda p: (p.count("."), p))
+    minimal: list[str] = []
+    for path in ordered:
+        if not path:
+            return ("",)
+        if any(path == parent or path.startswith(f"{parent}.") for parent in minimal):
+            continue
+        minimal.append(path)
+    return tuple(minimal)

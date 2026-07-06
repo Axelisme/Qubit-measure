@@ -139,6 +139,7 @@ class SectionWidget(BaseLiveWidget):
         layout.addWidget(self._container)
 
         self._child_widgets: dict[str, FieldWidgetProtocol] = {}
+        self._group_widgets: list[_CollapsibleSection] = []
         self._build_children()
         field.on_validity_changed.connect(self._on_validity_changed)
         self._on_validity_changed(field.is_valid())
@@ -211,7 +212,52 @@ class SectionWidget(BaseLiveWidget):
                     field.fields[key],
                     decoration=decoration,
                 )
+            self._group_widgets.append(section)
             self._container.body_layout.addWidget(section)
+
+    def refresh_section(self, path: str) -> bool:
+        """Rebuild one descendant section in place.
+
+        ``path`` is a dotted cfg value-tree path. An empty path rebuilds this
+        section. The method deliberately keeps ancestor widgets alive so mode
+        changes inside one ``ChoiceSectionSpec`` do not force the whole form to
+        detach and reattach its LiveModel.
+        """
+        if path == self._path:
+            self._rebuild_children()
+            return True
+
+        prefix = f"{self._path}." if self._path else ""
+        if prefix and not path.startswith(prefix):
+            return False
+        remainder = path.removeprefix(prefix)
+        key = remainder.split(".", 1)[0]
+        child = self._child_widgets.get(key)
+        if child is None:
+            return False
+        child_path = f"{prefix}{key}" if prefix else key
+        if path == child_path and isinstance(child, SectionWidget):
+            child._rebuild_children()
+            return True
+        refresher = getattr(child, "refresh_section", None)
+        if callable(refresher):
+            return bool(refresher(path))
+        return False
+
+    def _rebuild_children(self) -> None:
+        self._clear_children()
+        self._build_children()
+
+    def _clear_children(self) -> None:
+        for widget in self._child_widgets.values():
+            widget.teardown()
+        self._child_widgets = {}
+        while self._container.form.rowCount():
+            self._container.form.removeRow(0)
+        for section in self._group_widgets:
+            self._container.body_layout.removeWidget(section)
+            section.deleteLater()
+        self._group_widgets = []
 
     def _add_field_row(
         self,
@@ -229,6 +275,10 @@ class SectionWidget(BaseLiveWidget):
             return
         label = _decorated_label_text(child_field.spec.label or key, decoration)
         widget = cast(QWidget, w)
+        if isinstance(child_field, SectionLiveField):
+            _apply_widget_decoration(widget, decoration)
+            form.addRow(widget)
+            return
         if isinstance(child_field, SweepLiveField):
             # Sweep widgets get their own full-width row; label goes on the line above
             label_widget = ElidedLabel(
@@ -249,8 +299,7 @@ class SectionWidget(BaseLiveWidget):
     def teardown(self) -> None:
         field = cast(SectionLiveField, self._field)
         field.on_validity_changed.disconnect(self._on_validity_changed)
-        for w in self._child_widgets.values():
-            w.teardown()
+        self._clear_children()
 
     def _on_validity_changed(self, valid: bool) -> None:
         self._container.set_invalid(not valid)
@@ -510,6 +559,14 @@ class ModuleRefWidget(BaseLiveWidget):
             self._sub_layout.addWidget(cast(QWidget, w))
         self._sync_expand_btn()
 
+    def refresh_section(self, path: str) -> bool:
+        if self._sub_widget is None:
+            return False
+        refresher = getattr(self._sub_widget, "refresh_section", None)
+        if callable(refresher):
+            return bool(refresher(path))
+        return False
+
     def teardown(self) -> None:
         field = cast(ModuleRefLiveField, self._field)
         field.on_change.disconnect(self._on_model_changed)
@@ -553,17 +610,31 @@ def _apply_decoration(
 ) -> None:
     if decoration is None:
         return
-    enabled = bool(getattr(decoration, "enabled", True))
+    enabled, tooltip, style = _decoration_widget_state(decoration)
     label_widget.setEnabled(enabled)
     value_widget.setEnabled(enabled)
-    tooltip = str(getattr(decoration, "tooltip", "") or "")
     if tooltip:
         label_widget.setToolTip(tooltip)
         value_widget.setToolTip(tooltip)
-    tone = str(getattr(decoration, "tone", "normal") or "normal")
-    style = _TONE_STYLES.get(tone, "")
     if style:
         label_widget.setStyleSheet(style)
+
+
+def _apply_widget_decoration(value_widget: QWidget, decoration: Any | None) -> None:
+    if decoration is None:
+        return
+    enabled, tooltip, _style = _decoration_widget_state(decoration)
+    value_widget.setEnabled(enabled)
+    if tooltip:
+        value_widget.setToolTip(tooltip)
+
+
+def _decoration_widget_state(decoration: Any) -> tuple[bool, str, str]:
+    enabled = bool(getattr(decoration, "enabled", True))
+    tooltip = str(getattr(decoration, "tooltip", "") or "")
+    tone = str(getattr(decoration, "tone", "normal") or "normal")
+    style = _TONE_STYLES.get(tone, "")
+    return enabled, tooltip, style
 
 
 @register_widget(DeviceRefLiveField)

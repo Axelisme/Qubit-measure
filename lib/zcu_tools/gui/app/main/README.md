@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-06 - cfg choice sections and visible literals
+**Last updated:** 2026-07-06 - cfg section presentation
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -103,12 +103,20 @@ can explicitly reveal them as framed read-only values for generated or locked
 review fields. Decoration is a view contract only: domain enforcement remains in
 the owning controller/runtime.
 
+Nested `CfgSectionSpec` fields render as full-width collapsible sections and do
+not get an additional parent-row label. The section header is the label, which
+keeps grouped forms such as autofluxdep Generation overrides from showing
+duplicated text like `Frequency recovery:` next to a second `Frequency recovery`
+header.
+
 `ChoiceSectionSpec` is the shared selector-driven display contract for sections
 whose fields depend on a local mode/strategy. The section still owns a complete
 union `CfgSectionValue`; each `ChoiceBinding` names the selector field and the
-fields rendered for each selector value. `CfgFormWidget` rebuilds the affected
-view when a selector changes, while hidden inactive fields keep their values in
-the model and lower/persist through the normal section path.
+fields rendered for each selector value. `CfgFormWidget` refreshes only the
+affected section subtree when a selector changes, while hidden inactive fields
+keep their values in the model and lower/persist through the normal section
+path. Decoration-provider changes follow the same section-local refresh path
+instead of reattaching the full LiveModel-backed form.
 
 ## Operation Model
 

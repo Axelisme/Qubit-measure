@@ -651,6 +651,28 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
     assert inner.fields["gain"].value == pytest.approx(0.05)  # type: ignore[union-attr]
 
 
+def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+
+    schema = _schema(
+        {
+            "inner": CfgSectionSpec(
+                label="Inner",
+                fields={"gain": ScalarSpec(label="Gain", type=float)},
+            )
+        },
+        {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
+    )
+    w = CfgFormWidget()
+    _attach(w, schema, ctrl)
+
+    labels = [label.text() for label in w.findChildren(QLabel)]
+    assert "Inner:" not in labels
+    assert "<b>Inner</b>" in labels
+    assert "Gain:" in labels
+
+
 def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
@@ -716,6 +738,115 @@ def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
     out = w.read_values().fields["search"]
     assert isinstance(out, CfgSectionValue)
     assert set(out.fields) == {"mode", "half_width", "decay", "manual_value"}
+
+
+def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
+
+    fields: dict[str, CfgNodeSpec] = {
+        "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
+        "half_width": ScalarSpec(label="Half width", type=float),
+        "manual_value": ScalarSpec(label="Manual", type=float),
+    }
+    schema = _schema(
+        {
+            "search": ChoiceSectionSpec(
+                label="Search",
+                fields=fields,
+                bindings=(
+                    ChoiceBinding(
+                        "mode",
+                        {
+                            "auto": CfgSectionSpec(
+                                fields={"half_width": fields["half_width"]}
+                            ),
+                            "fixed": CfgSectionSpec(
+                                fields={"manual_value": fields["manual_value"]}
+                            ),
+                        },
+                    ),
+                ),
+            ),
+            "stable": ScalarSpec(label="Stable", type=float),
+        },
+        {
+            "search": CfgSectionValue(
+                fields={
+                    "mode": DirectValue("auto"),
+                    "half_width": DirectValue(1.0),
+                    "manual_value": DirectValue(2.0),
+                }
+            ),
+            "stable": DirectValue(3.0),
+        },
+    )
+    w = CfgFormWidget()
+    model = _attach(w, schema, ctrl)
+    root_widget = w._root_widget
+    assert isinstance(root_widget, SectionWidget)
+    search_widget = root_widget._child_widgets["search"]
+    stable_widget = root_widget._child_widgets["stable"]
+    assert isinstance(search_widget, SectionWidget)
+    assert "half_width" in search_widget._child_widgets
+
+    search = model.fields["search"]
+    assert isinstance(search, SectionLiveField)
+    search.fields["mode"].set_value(DirectValue("fixed"))
+    w.decoration_paths()
+
+    assert w._root_widget is root_widget
+    assert root_widget._child_widgets["search"] is search_widget
+    assert root_widget._child_widgets["stable"] is stable_widget
+    assert "half_width" not in search_widget._child_widgets
+    assert "manual_value" in search_widget._child_widgets
+
+
+def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
+    from zcu_tools.gui.app.main.ui.cfg_form import (
+        CfgFormWidget,
+        FieldDecorationPatch,
+    )
+    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
+
+    class BadgeProvider:
+        def __init__(self, badge: str) -> None:
+            self._badge = badge
+
+        def decoration_for(
+            self, path: str, spec: object, value: object
+        ) -> FieldDecorationPatch | None:
+            del spec, value
+            if path == "group.value":
+                return FieldDecorationPatch(badge=self._badge)
+            return None
+
+    schema = _schema(
+        {
+            "group": CfgSectionSpec(
+                label="Group",
+                fields={"value": ScalarSpec(label="Value", type=float)},
+            ),
+            "stable": ScalarSpec(label="Stable", type=float),
+        },
+        {
+            "group": CfgSectionValue(fields={"value": DirectValue(1.0)}),
+            "stable": DirectValue(2.0),
+        },
+    )
+    w = CfgFormWidget()
+    _attach(w, schema, ctrl)
+    root_widget = w._root_widget
+    assert isinstance(root_widget, SectionWidget)
+    group_widget = root_widget._child_widgets["group"]
+    stable_widget = root_widget._child_widgets["stable"]
+
+    w.set_decoration_provider(BadgeProvider("generated"))
+
+    assert w._root_widget is root_widget
+    assert root_widget._child_widgets["group"] is group_widget
+    assert root_widget._child_widgets["stable"] is stable_widget
+    assert w.decoration_for_path("group.value").badge == "generated"
 
 
 def test_choice_section_rejects_unknown_choice_fields():
