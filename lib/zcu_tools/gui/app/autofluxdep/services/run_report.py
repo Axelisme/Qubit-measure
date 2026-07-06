@@ -66,8 +66,7 @@ def render_markdown_report(
     ]
     for node_file in files.get("nodes", ()):
         lines.append(f"- Node {node_file.get('name')}: {node_file.get('path')}")
-    for label, path in dict(manifest.get("exports", {})).items():
-        lines.append(f"- Export {label}: {path}")
+    lines.extend(_export_lines(dict(manifest.get("exports", {}))))
     for label, path in dict(manifest.get("reports", {})).items():
         lines.append(f"- Report {label}: {path}")
 
@@ -107,6 +106,32 @@ def render_markdown_report(
 def _project_label(manifest: Mapping[str, Any]) -> str:
     project = dict(manifest.get("project", {}))
     return f"{project.get('chip_name', '')}/{project.get('qub_name', '')}"
+
+
+def _export_lines(exports: Mapping[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for label, value in exports.items():
+        if label == "labber_browser_sidecars":
+            lines.extend(_labber_browser_sidecar_lines(value))
+            continue
+        lines.append(f"- Export {label}: {value}")
+    return lines
+
+
+def _labber_browser_sidecar_lines(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return [f"- Export labber_browser_sidecars: {value}"]
+    lines: list[str] = []
+    for raw_entry in value:
+        if not isinstance(raw_entry, Mapping):
+            lines.append(f"- Export labber_browser_sidecar: {raw_entry}")
+            continue
+        entry = dict(raw_entry)
+        node = entry.get("node", "")
+        role = entry.get("role", "")
+        path = entry.get("path", "")
+        lines.append(f"- Export labber_browser_sidecar {node}/{role}: {path}")
+    return lines
 
 
 def _node_names(

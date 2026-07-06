@@ -23,6 +23,9 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
 from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )
+from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
+    export_labber_browser_sidecars,
+)
 from zcu_tools.gui.app.autofluxdep.services.result_io import (
     result_role_specs,
     result_row_role_names,
@@ -40,6 +43,7 @@ from zcu_tools.utils.datasaver import (
 MANIFEST_FORMAT_VERSION = 1
 JOURNAL_EVENT_VERSION = 1
 ARTIFACT_KIND = "zcu_tools.autofluxdep.run"
+_LABBER_DAY_FOLDER_RE = re.compile(r"^Data_(?P<month>\d{2})(?P<day>\d{2})$")
 
 
 class RunStore:
@@ -81,7 +85,7 @@ class RunStore:
         self._row_counts: Counter[str] = Counter()
         self._skip_counts: Counter[str] = Counter()
         self._failure_counts: Counter[str] = Counter()
-        self._exports: dict[str, str] = {}
+        self._exports: dict[str, Any] = {}
         self._reports: dict[str, str] = {}
         self._terminal_errors: list[str] = []
         self._manifest = self._initial_manifest(flux_device_name)
@@ -104,7 +108,11 @@ class RunStore:
         run_suffix = run_id.rsplit("-", maxsplit=1)[-1]
         slug = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_flux-sweep-{run_suffix}"
         run_dir = Path(project.result_dir) / "autofluxdep_runs" / slug
-        data_dir = Path(project.database_path) / "autofluxdep_runs" / slug
+        data_dir = (
+            _autofluxdep_database_root(project.database_path)
+            / "autofluxdep_runs"
+            / slug
+        )
         run_dir.mkdir(parents=True, exist_ok=False)
         data_dir.mkdir(parents=True, exist_ok=False)
         (data_dir / "nodes").mkdir()
@@ -319,7 +327,7 @@ class RunStore:
         except RuntimeError as exc:
             writer_errors.append(str(exc))
 
-        exports: dict[str, str] = {}
+        exports: dict[str, Any] = {}
         try:
             exports = self._generate_exports()
         except Exception as exc:
@@ -545,8 +553,8 @@ class RunStore:
         )
         os.replace(tmp_path, self._manifest_path)
 
-    def _generate_exports(self) -> dict[str, str]:
-        exports: dict[str, str] = {}
+    def _generate_exports(self) -> dict[str, Any]:
+        exports: dict[str, Any] = {}
         for node_name, result in self._results.items():
             if not isinstance(result, QubitFreqResult):
                 continue
@@ -561,7 +569,22 @@ class RunStore:
             )
             exports["fluxdep_spectrum"] = _relative(self.data_dir, Path(written))
             break
+        labber_browser = export_labber_browser_sidecars(
+            data_root=self.data_dir,
+            nodes=self._nodes,
+            results=self._results,
+            committed_masks=self._committed_node_row_masks(),
+        )
+        if labber_browser.sidecars:
+            exports.update(labber_browser.to_manifest_exports())
         return exports
+
+    def _committed_node_row_masks(self) -> dict[str, np.ndarray]:
+        masks: dict[str, np.ndarray] = {}
+        for node_name, result in self._results.items():
+            n_flux = int(getattr(result, "n_flux"))
+            masks[node_name] = self._committed_node_row_mask(node_name, n_flux)
+        return masks
 
     def _generate_report(self, manifest: Mapping[str, Any]) -> dict[str, str]:
         relpath = "report.md"
@@ -695,6 +718,23 @@ def _terminal_error_message(
 
 def _is_already_closed_writer_error(exc: RuntimeError) -> bool:
     return str(exc) == "streaming Labber writer is closed"
+
+
+def _autofluxdep_database_root(database_path: str | Path) -> Path:
+    path = Path(database_path)
+    if len(path.parts) < 3:
+        return path
+    year = path.parts[-3]
+    month = path.parts[-2]
+    day_folder = path.parts[-1]
+    match = _LABBER_DAY_FOLDER_RE.match(day_folder)
+    if match is None:
+        return path
+    if not re.fullmatch(r"\d{4}", year) or not re.fullmatch(r"\d{2}", month):
+        return path
+    if match.group("month") != month:
+        return path
+    return path.parents[2]
 
 
 def _run_id() -> str:

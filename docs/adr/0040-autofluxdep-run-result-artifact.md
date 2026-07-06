@@ -23,7 +23,7 @@ status: accepted
 
 2. **artifact 以 run-scoped metadata/data root 表達。** 每次 run 有一個 sortable slug，對應兩個同 slug root：metadata root 包含 manifest、append-only journal 與 report sidecar；data root 包含每個 placed node 的 result file 與 heavy exports。manifest 擁有 run identity、workflow hash、project result/database roots、metadata/data roots、node file list、terminal status 與 export/report path；journal 擁有 row-level audit events。
 
-3. **result_dir 只放輕量 metadata，heavy HDF5 放 project database_path。** metadata root 位於 project `result_dir/autofluxdep_runs/<run_slug>/`，不放 active context 的 `exps/` 目錄；data root 位於 project `database_path/autofluxdep_runs/<run_slug>/`。`database_path` 使用 shared startup resolved value，通常是 dated raw folder `Database/<chip>/<qub>/YYYY/MM/Data_MMDD`。autofluxdep 是 workflow-level sweep，不是 measure-gui tab experiment；其 metadata/report 要被 result tooling 找到，應掛在 qubit scope 的 project result directory；Labber-readable heavy data 則留在 Database tree。
+3. **result_dir 只放輕量 metadata，heavy HDF5 放 qubit database root。** metadata root 位於 project `result_dir/autofluxdep_runs/<run_slug>/`，不放 active context 的 `exps/` 目錄；data root 位於 `Database/<chip>/<qub>/autofluxdep_runs/<run_slug>/`。若 project `database_path` 是 shared startup resolved dated raw folder `Database/<chip>/<qub>/YYYY/MM/Data_MMDD`，RunStore 會剝掉尾端 Labber 日期三段，再建立 autofluxdep run root。autofluxdep 是 workflow-level sweep，不是 measure-gui tab experiment；其 metadata/report 要被 result tooling 找到，應掛在 qubit scope 的 project result directory；Labber-readable heavy data 則留在 Database tree。
 
 4. **run directory name 以 timestamp 為主，語意 slug 為輔。** 目錄名使用 sortable wall-clock timestamp 加可讀 slug，例如 `20260704-153012_flux-sweep`；真正 identity 是 manifest 內的 `run_id`，包含 timestamp 與短 random suffix，避免同秒 collision。slug 只供人閱讀，不作 stable identity。
 
@@ -67,6 +67,8 @@ status: accepted
 
 21. **A1 的第一個可用 implementation slice 包含 exports/report，但不包含 resume/browser。** A1 必須足以直接支援長掃使用：run 自動落盤、per-node HDF5 可用 Labber 開啟、`qubit_freq` 產生 fluxdep-compatible spectrum export、terminal 產生 markdown report 與 result references。Resume、repair-run、result browser UI、PNG / MP4 export 是後續功能；它們依賴同一 artifact，但不拖住 A1 可用版。
 
+22. **Labber Browser sidecars 是 terminal exchange export，不是 canonical artifact。** canonical node data 仍是 `nodes/*.hdf5` grouped artifact；Labber Browser sidecars 只在 terminal finalize 從 journal-committed rows 派生。sidecar root 位於 run-scoped data root 內的 `labber/YYYY/MM/Data_MMDD/`，日期由 run slug 的 `YYYYMMDD-...` 前綴決定；例如 `Database/<chip>/<qub>/autofluxdep_runs/20260705-223908_flux-sweep-.../labber/2026/07/Data_0705/`。每個 sidecar 都是 `save_labber_data()` 可讀的 single-log Labber HDF5，未 committed rows 保持 NaN。manifest 的 `exports["fluxdep_spectrum"]` 保持既有 fluxdep handoff 語意；`exports["labber_browser_root"]` 保存 Labber Browser dated folder 相對 data root 的路徑，`exports["labber_browser_sidecars"]` 保存每個 sidecar 的 node、node type、role 與相對 data root path。第一版 sidecar contract：`qubit_freq` 輸出 `<index>-qubit_freq_qubit_freq.hdf5`，內容等同 fluxdep-compatible qubit frequency spectrum；`lenrabi` 輸出 `<index>-lenrabi_signal.hdf5`；`ro_optimize` 不輸出；`t1` 輸出 `<index>-t1_signal.hdf5` 與 `<index>-t1_t1.hdf5`；`t2ramsey` 輸出 `<index>-t2ramsey_signal.hdf5` 與 `<index>-t2ramsey_t2r.hdf5`；`t2echo` 輸出 `<index>-t2echo_signal.hdf5` 與 `<index>-t2echo_t2e.hdf5`；`mist` 輸出 `<index>-mist_signal.hdf5`。
+
 ## 後果
 
 - `autofluxdep` persistence 不是 memento。Memento 只保存 workflow definition / UI preference；Run Result Artifact 保存 run output 與 audit trail。
@@ -75,6 +77,7 @@ status: accepted
 - `project_snapshot()` / resolver skip path 需要提供 machine-readable skip reason，否則 artifact 無法完整稽核 skipped node。這是 resolver boundary 的顯式化，不改變 orchestrator 的「requirement resolver」角色。
 - `save_labber_data` 不承擔 long-lived partial write；新增 streaming primitive 時需保持與 ADR-0027 one-shot Experiment Data File 語意分離。
 - `fluxdep` handoff 第一版可由 `qubit_freq` node result 產生 Labber-compatible spectrum export，但 canonical evidence 是 data root 內的 node/export file 加 metadata root 內的 journal/manifest。
+- Labber Browser sidecars 讓人工瀏覽使用 dated Labber folder，不改變 run-scoped data root 與 canonical evidence；修復或重匯出 sidecars 時必須以 journal committed rows 為準。
 
 ## 拒絕的替代方案
 
