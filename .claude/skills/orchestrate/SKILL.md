@@ -10,6 +10,12 @@ skill_version: 10
 
 session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英文（同 `CLAUDE.md`）。
 
+## 用戶短語
+
+- `MCCT` = merge and commit then close task。這是明確收尾授權：跳過主 checkout preview，在完成必要 review / validation / 二次驗證後，用 `workflow.py merge run <task-id> --action final --requested-by <agent-id> --wait` 排隊、等待、refresh integration branch、final merge，再清理 lane / integration worktree、刪除已整合 branch、歸檔 plan，並關閉已完成的 sub-agent。若 final 時 refresh 產生新的 target commit，script 會保留 queue head 並要求 agent 重新驗證；agent 驗證後重跑同一個 final command。
+- `MCCT` 的 `commit` 指 task / lane / integration worktree 中仍屬於該 task 的 tracked diff 先整理成清楚 commit；若沒有未提交 diff，不建立空 commit。commit 只包含 task write scope 內的變更，不納入主 checkout 的 unrelated dirty / untracked files。
+- `MCCT` 只省略人工 preview 階段，不省略 merge queue、integration refresh、fast-forward、tracked clean、untracked overwrite protection、review independence gate、測試驗證或用戶明確要求的其它收尾條件。缺 task-id、refresh/rebase 失敗、final merge 不是 fast-forward、validation 失敗、review 缺失、或發現 unrelated dirty tracked files 時，停下回報具體阻塞點，不自行猜測或強行收尾。
+
 ## 核心原則
 
 1. **保持在高層（altitude），但保留直接驗證權**。你的價值是整體架構心智模型與 roadmap，不是某個檔案的 diff。為建立 context 你可以直接讀高層文件：相關模組 `README.md`（lib/tests 子目錄 cheat-sheet）、`docs/adr/`（先查 `docs/adr/README.md` 索引）、`.agent_state/plans/<task-id>/` 三件套。需要廣泛定位、搜尋或讀大量實作細節時委派 Explore；但當 planner / reviewer 報告影響架構、API contract、測試策略或整合決策時，你應親自讀相關 source / diff / test failure 做 thin-slice sanity check，再決定是否接受報告。
@@ -270,6 +276,8 @@ git branch -d agent/<task-id>
 ## 委派地圖（task-type → agent）
 
 用 Agent tool 委派；獨立工作項在同一則訊息一次發多個以並行。
+
+sub-agent 收尾規則：sub-agent 回傳 final / completed 狀態後，orchestrator 先保存 final message 與 report path，確認沒有仍需追問的內容，接著用當前 runtime 可用的 sub-agent close / archive 工具釋放該 agent。已完成的 sub-agent 不保持開啟；需要後續追問時再建立新的具體委派，避免完成的 sub-agent 佔住 agent 數量上限。若當前 runtime 暫時沒有 close / archive tool，記錄已完成 agent id 與狀態並停止對該 agent wait / poll；工具可用時立即關閉。
 
 | 工作性質 | 委派對象 |
 |---|---|

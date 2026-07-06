@@ -57,8 +57,8 @@ autofluxdep_launch             # opens the GUI for the user, connects (control p
                                # or autofluxdep_connect to attach to a GUI the user already started
 autofluxdep_state_check        # {has_project, has_soc, node_count, flux_count,
                                #  has_flux_device, is_running, has_results, ...predictor flags}
-autofluxdep_project_info       # {chip_name, qub_name, result_dir, params_path}
-autofluxdep_workflow_list      # each node's {name, type, provides, requires, has_result}
+autofluxdep_project_info       # {chip_name, qub_name, result_dir, database_path, params_path}
+autofluxdep_workflow_list      # each node's {name, type, enabled, provides, requires, has_result}
 autofluxdep_node_cfg name=...  # one placed node's {name, type, knobs:{...}}
 autofluxdep_result_summary     # per node-with-result {name, kind, n_flux, n_measured, fit_summary}
 autofluxdep_disconnect         # detach the bridge; does NOT stop the user's GUI
@@ -73,8 +73,9 @@ tools. The agent never mutates the workflow and never stops the GUI or the sweep
   agent cannot — it launches the GUI and the user drives it. Report the state you
   can read; do not claim to have performed steps you cannot perform.
 - **The node list excludes the predictor service.** `autofluxdep_workflow_list`
-  shows only the user-placed nodes; the predictor service is prepended only while
-  a run is in progress and never appears as a list row.
+  shows only the user-placed nodes; disabled nodes remain listed with
+  `enabled=false` but are omitted from future runs. The predictor service is
+  prepended only while a run is in progress and never appears as a list row.
 - **`result_summary` is a progress summary, not the raw data.** It reports how many
   flux rows are measured and a tiny fit summary per node, never the raw 2D signal
   arrays (the agent does not plot).

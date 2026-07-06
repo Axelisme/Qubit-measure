@@ -54,19 +54,19 @@ session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英
 3. 若不知道是否已有 plan，執行：
 
 ```bash
-.venv/bin/python .codex/skills/planning-with-files/scripts/session-catchup.py "$(pwd)"
+.venv/bin/python <skill-dir>/scripts/session-catchup.py "$(pwd)"
 ```
 
 4. 若要建立新 plan，執行：
 
 ```bash
-.codex/skills/planning-with-files/scripts/init-plan.sh <task-id> "任務目標"
+<skill-dir>/scripts/init-plan.sh <task-id> "任務目標"
 ```
 
 5. 若要切換 active plan：
 
 ```bash
-.codex/skills/planning-with-files/scripts/set-active-plan.sh <task-id>
+<skill-dir>/scripts/set-active-plan.sh <task-id>
 ```
 
 ## 核心規則
@@ -91,7 +91,7 @@ session 回應與計劃檔用中文；程式碼、變數名、技術名詞用英
 停止前檢查：
 
 ```bash
-.codex/skills/planning-with-files/scripts/check-complete.sh
+<skill-dir>/scripts/check-complete.sh
 ```
 
 這只檢查 planning files 的狀態，不取代 repo 任務收尾要求。開發任務仍依 AGENTS 規則執行 `pyright`、`pytest`、`ruff`，並更新必要的模組 `README.md`。

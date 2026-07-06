@@ -1,41 +1,29 @@
 #!/usr/bin/env bash
-# Sync this skill (.claude is the source of truth) into the other agents' skill
-# dirs (.agent, .codex). The three are independent files — NOT hard-linked (the
-# editor's write-then-rename breaks links) — so run this after editing SKILL.md.
-# .gemini has no skill copy, so it is left alone.
-#
-# Usage:  bash .claude/skills/run-dispersive-gui/sync_skills.sh
+# Sync the skill directory that contains this script into the matching skill
+# directory under .agents, .codex, and .claude. The three copies are independent
+# files, not hard-linked, so run this after editing a skill copy.
 set -euo pipefail
 
-SKILL_REL="skills/run-dispersive-gui"
-FILES=(SKILL.md)
-DESTS=(.agent .codex)
-
-# Repo root = three levels up from this script (.claude/skills/run-dispersive-gui).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-SRC_DIR="$REPO_ROOT/.claude/$SKILL_REL"
+SKILL_NAME="$(basename "$SCRIPT_DIR")"
+AGENT_DIRS=(.agents .codex .claude)
 
-for f in "${FILES[@]}"; do
-    [ -f "$SRC_DIR/$f" ] || { echo "FATAL: source missing: $SRC_DIR/$f" >&2; exit 1; }
-done
-
-for dst in "${DESTS[@]}"; do
-    dst_dir="$REPO_ROOT/$dst/$SKILL_REL"
+for agent_dir in "${AGENT_DIRS[@]}"; do
+    dst_dir="$REPO_ROOT/$agent_dir/skills/$SKILL_NAME"
     mkdir -p "$dst_dir"
-    for f in "${FILES[@]}"; do
-        cp "$SRC_DIR/$f" "$dst_dir/$f"
-    done
+    if [ "$dst_dir" = "$SCRIPT_DIR" ]; then
+        continue
+    fi
+    cp -a "$SCRIPT_DIR"/. "$dst_dir"/
 done
 
-# Verify: every dest TRACKED file is byte-identical to the source.
-for dst in "${DESTS[@]}"; do
-    for f in "${FILES[@]}"; do
-        if ! diff -q "$SRC_DIR/$f" "$REPO_ROOT/$dst/$SKILL_REL/$f" >/dev/null; then
-            echo "FATAL: $dst/$SKILL_REL/$f differs from source after copy" >&2
-            exit 1
-        fi
-    done
+for agent_dir in "${AGENT_DIRS[@]}"; do
+    dst_dir="$REPO_ROOT/$agent_dir/skills/$SKILL_NAME"
+    if ! diff -qr "$SCRIPT_DIR" "$dst_dir" >/dev/null; then
+        echo "FATAL: $agent_dir/skills/$SKILL_NAME differs from source after copy" >&2
+        exit 1
+    fi
 done
 
-echo "synced run-dispersive-gui to: ${DESTS[*]}"
+echo "synced $SKILL_NAME to: ${AGENT_DIRS[*]}"
