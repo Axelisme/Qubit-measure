@@ -44,6 +44,7 @@ from zcu_tools.meta_tool import (
 )
 import zcu_tools.notebook.analysis.t1_curve as zt1
 from zcu_tools.simulate import value2flux
+from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 import zcu_tools.simulate.fluxonium as zf
 ```
 
@@ -125,8 +126,67 @@ s_omegas = zt1.freq2omega(s_fpts)
 freqs_df.head(10)
 ```
 
+## Correct flx from measured f01
+
+Use the measured `f01_freq` at each T1 point to pull the current-calibrated flux
+axis back onto the fitted fluxonium model. This compensates small flux drift
+between the flux-dependence fit and the T1 scan.
+
 ```python
-fig, _ = zt1.plot_sample_t1(s_mAs, s_T1s, s_T1errs, flx_half, flx_period)
+correct_flx_from_f01 = True
+max_abs_flx_correction = 0.03  # Phi0; keep this small to avoid branch jumps
+
+s_flxs_raw = s_flxs.copy()
+s_mAs_for_plot = s_mAs.copy()
+plot_xlabel = "Current (mA)"
+
+if correct_flx_from_f01:
+    predictor = FluxoniumPredictor(params, flx_half, flx_period, flux_bias=0.0)
+    f01_biases = np.asarray(
+        [
+            predictor.calculate_bias(
+                float(mA),
+                float(f01_freq * 1e3),  # calculate_bias expects MHz
+                transition=(0, 1),
+            )
+            for mA, f01_freq in zip(s_mAs, s_fpts)
+        ],
+        dtype=np.float64,
+    )
+    f01_corrected_flxs = value2flux(s_mAs + f01_biases, flx_half, flx_period)
+    flx_correction = f01_corrected_flxs - s_flxs_raw
+    accepted = np.isfinite(flx_correction) & (
+        np.abs(flx_correction) <= max_abs_flx_correction
+    )
+
+    skipped = np.count_nonzero(~accepted)
+    if skipped:
+        print(
+            f"Skipped {skipped} f01-based flx corrections larger than "
+            f"{max_abs_flx_correction:.3f} Phi0."
+        )
+
+    s_flxs = np.where(accepted, f01_corrected_flxs, s_flxs_raw)
+    s_mAs_for_plot = np.where(accepted, s_mAs + f01_biases, s_mAs)
+    if np.any(accepted):
+        plot_xlabel = "f01-corrected Current (mA)"
+
+    print(
+        "f01 flx correction: "
+        f"median={np.nanmedian(s_flxs - s_flxs_raw):+.4f} Phi0, "
+        f"max={np.nanmax(np.abs(s_flxs - s_flxs_raw)):.4f} Phi0"
+    )
+```
+
+```python
+fig, _ = zt1.plot_sample_t1(
+    s_mAs_for_plot,
+    s_T1s,
+    s_T1errs,
+    flx_half,
+    flx_period,
+    xlabel=plot_xlabel,
+)
 plt.show()
 fig.savefig(os.path.join(image_dir, "T1s.png"))
 plt.close(fig)
@@ -145,7 +205,7 @@ s_phi_spectrum_data = None
 Temp = 60e-3
 
 plot_args = (
-    s_mAs,
+    s_mAs_for_plot,
     s_T1s,
     s_T1errs,
     flx_half,
@@ -229,6 +289,7 @@ fig, _ = zt1.plot_t1_with_sample(
     noise_name="t1_capacitive",
     noise_values=[down_Q, Q_cap, up_Q],
     Temp=Temp_Qcap,
+    xlabel=plot_xlabel,
 )
 
 plt.show()
@@ -312,6 +373,7 @@ fig, _ = zt1.plot_t1_with_sample(
     noise_name="t1_quasiparticle_tunneling",
     noise_values=[1/down_Q, x_qp, 1/up_Q],
     Temp=Temp,
+    xlabel=plot_xlabel,
 )
 
 plt.show()
@@ -394,6 +456,7 @@ fig, ax = zt1.plot_t1_with_sample(
     noise_name="t1_inductive",
     noise_values=[down_Q, Q_ind, up_Q],
     Temp=Temp_Qind,
+    xlabel=plot_xlabel,
 )
 # ax.set_xlim(-5, -4)
 
@@ -500,7 +563,7 @@ QubitParams(os.path.join(result_dir, "params.json")).set_t1_curve_fit(
 
 %matplotlib inline
 fig, ax = zt1.plot_eff_t1_with_sample(
-    s_mAs,
+    s_mAs_for_plot,
     s_T1s,
     s_T1errs,
     fit_t1_effs,
@@ -509,6 +572,7 @@ fig, ax = zt1.plot_eff_t1_with_sample(
     t_flxs,
     label="all-in-one fit",
     title=f"Temperature = {fit_Temp * 1e3:.2f} mK",
+    xlabel=plot_xlabel,
 )
 
 fit_annotation = "\n".join(
@@ -549,16 +613,16 @@ print(f"all-in-one fit image saved to {fit_image_path}")
 # Advance
 
 ```python
-Temp = Temp_Qcap
+Temp = fit_Temp
 ```
 
 ```python
-# noise_channels = fit_noise
-noise_channels = [
-    ("t1_capacitive", dict(Q_cap=Q_cap)),
-    ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
-    ("t1_inductive", dict(Q_ind=Q_ind)),
-]
+noise_channels = fit_noise
+# noise_channels = [
+#     ("t1_capacitive", dict(Q_cap=Q_cap)),
+#     ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
+#     ("t1_inductive", dict(Q_ind=Q_ind)),
+# ]
 
 noise_label = "\n".join(
     [
@@ -573,39 +637,10 @@ noise_label = "\n".join(
 t1_effs = zf.calculate_eff_t1_vs_flux_fast(params, t_flxs, noise_channels, Temp)
 ```
 
-## Percell Effect
-
-```python
-percell_t1s = zf.calculate_percell_t1_vs_flux(
-    t_flxs, bare_rf=bare_rf, kappa=rf_w, g=g, Temp=Temp, params=params
-)
-```
-
 ```python
 %matplotlib inline
 fig, ax = zt1.plot_eff_t1_with_sample(
-    s_mAs,
-    s_T1s,
-    s_T1errs,
-    1 / (1 / t1_effs + 1 / percell_t1s),
-    flx_half,
-    flx_period,
-    t_flxs,
-    label=noise_label,
-    title=f"Temperature = {Temp * 1e3:.2f} mK",
-)
-
-plt.show()
-fig.savefig(os.path.join(image_dir, "T1s_fit_eff_with_percell.png"))
-plt.close(fig)
-```
-
-## Plot eff
-
-```python
-%matplotlib inline
-fig, ax = zt1.plot_eff_t1_with_sample(
-    s_mAs,
+    s_mAs_for_plot,
     s_T1s,
     s_T1errs,
     t1_effs,
@@ -614,6 +649,7 @@ fig, ax = zt1.plot_eff_t1_with_sample(
     t_flxs,
     label=noise_label,
     title=f"Temperature = {Temp * 1e3:.2f} mK",
+    xlabel=plot_xlabel,
 )
 
 plt.show()
@@ -631,6 +667,34 @@ t1 = zf.calculate_eff_t1_fast(
 )
 
 print(f"T1 = {1e-3 * t1:.2f} us")
+```
+
+## Percell Effect
+
+```python
+percell_t1s = zf.calculate_purcell_t1_vs_flux(
+    t_flxs, bare_rf=bare_rf, kappa=rf_w, g=g, Temp=Temp, params=params
+)
+```
+
+```python
+%matplotlib inline
+fig, ax = zt1.plot_eff_t1_with_sample(
+    s_mAs_for_plot,
+    s_T1s,
+    s_T1errs,
+    1 / (1 / t1_effs + 1 / percell_t1s),
+    flx_half,
+    flx_period,
+    t_flxs,
+    label=noise_label,
+    title=f"Temperature = {Temp * 1e3:.2f} mK",
+    xlabel=plot_xlabel,
+)
+
+plt.show()
+fig.savefig(os.path.join(image_dir, "T1s_fit_eff_with_percell.png"))
+plt.close(fig)
 ```
 
 ```python

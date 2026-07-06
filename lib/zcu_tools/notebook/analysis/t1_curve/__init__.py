@@ -11,4 +11,10 @@ from .fit import T1FitParams, T1FitResult, fit_t1_noise_params
 from .Qcap import calc_cap_dipole, calc_Qcap_vs_omega, charge_spectral_density
 from .Qind import calc_ind_dipole, calc_Qind_vs_omega, inductive_spectral_density
 from .Qqp import calc_qp_dipole, calc_qp_oper, calc_Qqp_vs_omega, qp_spectral_density
-from .utils import calc_therm_ratio, format_exponent, freq2omega
+from .utils import (
+    F01FluxCorrectionResult,
+    calc_therm_ratio,
+    correct_flux_from_f01,
+    format_exponent,
+    freq2omega,
+)

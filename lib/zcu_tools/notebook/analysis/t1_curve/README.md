@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-02 — t1_curve_fit white-list channels
+**Last updated:** 2026-07-06 — f01 flux correction helper
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -17,6 +17,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 ### `utils.py` — 基礎工具
 
 - `freq2omega(f)`：GHz → rad/ns。
+- `correct_flux_from_f01(dev_values, f01_freqs, params, flux_half, flux_period, ...)`：用量到的 f01 頻率把 device-value 校準得到的 flux 軸拉回 fluxonium 模型；`f01_freqs` 單位是 GHz，回傳 `F01FluxCorrectionResult`，其中 `corrected_fluxs` 供後續矩陣元/T1 擬合使用，`corrected_dev_values` 供現有 plotting helpers 使用。
 - `convert_eV_to_Hz(v)`：eV → Hz（用於超導能隙）。
 - `calc_therm_ratio(omega, T)`：計算 `ℏω/(kT)`，是所有 spectral density 的核心 Bose 因子參數。
 - `format_exponent(n)`：把數字渲染成 LaTeX 科學記號，供圖例用。
@@ -64,11 +65,12 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ## 典型使用流程
 
-1. 用 `scqubits.Fluxonium` 在 `t_fluxs` 解出 `spectrum_data`，取樣點 flux 處求 `omegas` 與矩陣元 (`n`, `φ`, 或 `sin(φ/2)`)。
-2. 呼叫 `calc_Q{cap,ind,qp}_vs_omega` 得到 Q(ω) 與誤差。
-3. 若想自洽找溫度：`find_proper_Temp(T0, lambda T: calc_Qxxx_vs_omega(..., Temp=T))`。
-4. `plot_Q_vs_omega` + `add_Q_fit` 檢視頻率相依性。
-5. `plot_t1_with_sample` 把候選 Q 值 / Q(ω) 函數疊回 T1(φ) 曲線做視覺比對。
+1. 從 sample 表讀出 device value、f01 頻率、T1 與 T1err；若 fluxdep fit 與 T1 scan 之間可能有小漂移，先用 `correct_flux_from_f01` 產生校正後 flux 軸。
+2. 用 `scqubits.Fluxonium` 在 `t_fluxs` 解出 `spectrum_data`，取樣點 flux 處求 `omegas` 與矩陣元 (`n`, `φ`, 或 `sin(φ/2)`)。
+3. 呼叫 `calc_Q{cap,ind,qp}_vs_omega` 得到 Q(ω) 與誤差。
+4. 若想自洽找溫度：`find_proper_Temp(T0, lambda T: calc_Qxxx_vs_omega(..., Temp=T))`。
+5. `plot_Q_vs_omega` + `add_Q_fit` 檢視頻率相依性。
+6. `plot_t1_with_sample` 把候選 Q 值 / Q(ω) 函數疊回 T1(φ) 曲線做視覺比對。
 
 ## 注意事項
 
