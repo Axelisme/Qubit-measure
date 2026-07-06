@@ -235,9 +235,20 @@ class MainWindow(QMainWindow):
     def _on_bus_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload
     ) -> None:
-        snapshot = self._ctrl.get_tab_snapshot(payload.tab_id)
-        self.refresh_tab_writeback(payload.tab_id, snapshot)
-        self.refresh_tab_interaction(payload.tab_id, snapshot)
+        tab_id = payload.tab_id
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        self.refresh_tab_writeback(tab_id, snapshot)
+        self.refresh_tab_interaction(tab_id, snapshot)
+        interaction = snapshot.interaction
+        if interaction is not None and not (
+            interaction.is_running
+            or interaction.is_analyzing
+            or interaction.is_saving_data
+        ):
+            if interaction.has_analyze_result:
+                self.refresh_tab_figure(tab_id, snapshot)
+            if interaction.has_post_analyze_result:
+                self.refresh_tab_post_figure(tab_id, snapshot)
         # Interactive analyze start/finish both emit TabInteractionChangedPayload;
         # refresh widget visibility and stop-gating on every change.
         self._refresh_feedback_widget()

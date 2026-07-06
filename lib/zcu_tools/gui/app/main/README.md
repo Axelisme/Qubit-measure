@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-06 - cfg section presentation
+**Last updated:** 2026-07-07 - analyze figure refresh
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -155,6 +155,10 @@ Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib
 figures attach to the active `FigureContainer` through routing context; refresh,
 activate, and close resolve through the figure registry. Figure export uses fixed
 logical sizes so saved images and agent screenshots do not depend on window size.
+Analyze interaction refresh keeps writeback controls and the current
+analyze/post-analyze figure in sync once the corresponding result exists; start
+events still leave plot teardown to the render host so stale figures do not
+reappear while a new analysis is running.
 
 ## Remote / MCP Boundary
 

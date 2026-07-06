@@ -714,6 +714,143 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
 
+def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
+    from dataclasses import replace
+
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.has_tab.return_value = True
+    figure = Figure()
+    writeback_item = MagicMock()
+    ctrl.get_tab_snapshot.return_value = replace(
+        _snapshot(
+            "tab-1",
+            is_analyzing=False,
+            has_analyze_result=True,
+            has_figure=True,
+        ),
+        figure=figure,
+        writeback_items=(writeback_item,),
+    )
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+
+    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+    tab.update_writeback_items.assert_called_once_with([writeback_item])
+    tab.show_analysis_figure.assert_called_once_with(figure)
+
+
+def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_start(
+    qapp,
+):
+    from dataclasses import replace
+
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.has_tab.return_value = True
+    figure = Figure()
+    ctrl.get_tab_snapshot.return_value = replace(
+        _snapshot(
+            "tab-1",
+            is_analyzing=True,
+            has_analyze_result=True,
+            has_figure=True,
+        ),
+        figure=figure,
+    )
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+
+    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+    tab.show_analysis_figure.assert_not_called()
+
+
+def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
+    qapp,
+):
+    from dataclasses import replace
+
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.has_tab.return_value = True
+    figure = Figure()
+    ctrl.get_tab_snapshot.return_value = replace(
+        _snapshot(
+            "tab-1",
+            is_running=True,
+            is_analyzing=False,
+            has_analyze_result=True,
+            has_figure=True,
+        ),
+        figure=figure,
+    )
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+
+    ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+    tab.show_analysis_figure.assert_not_called()
+
+
+def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
+    from dataclasses import replace
+
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.has_tab.return_value = True
+    primary = Figure()
+    post = Figure()
+    ctrl.get_tab_snapshot.return_value = replace(
+        _snapshot(
+            "tab-1",
+            is_analyzing=False,
+            has_analyze_result=True,
+            has_figure=True,
+            has_post_analyze_result=True,
+        ),
+        figure=primary,
+        post_figure=post,
+    )
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    window._tab_widgets["tab-1"] = tab
+
+    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+
+    assert tab.show_analysis_figure.call_args_list == [
+        ((primary,),),
+        ((post,),),
+    ]
+
+
 def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
     from zcu_tools.gui.app.main.events.run import RunFinishedPayload
 
