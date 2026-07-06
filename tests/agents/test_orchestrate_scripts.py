@@ -91,6 +91,32 @@ def create_integration_branch(root: Path, task_id: str = "demo-task") -> str:
     return target
 
 
+def create_file_branch(root: Path, task_id: str, file_name: str, content: str) -> str:
+    run_git(root, "checkout", "-b", f"agent/{task_id}")
+    (root / file_name).write_text(content, encoding="utf-8")
+    run_git(root, "add", file_name)
+    run_git(root, "commit", "-m", task_id)
+    target = git_stdout(root, "rev-parse", "HEAD")
+    run_git(root, "checkout", "main")
+    return target
+
+
+def commit_file(root: Path, file_name: str, content: str, message: str) -> str:
+    path = root / file_name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    run_git(root, "add", file_name)
+    run_git(root, "commit", "-m", message)
+    return git_stdout(root, "rev-parse", "HEAD")
+
+
+def add_lane_worktree(root: Path, task_id: str) -> Path:
+    worktree_path = root / ".agent_state" / "worktrees" / "trees" / task_id
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+    run_git(root, "worktree", "add", worktree_path.as_posix(), f"agent/{task_id}")
+    return worktree_path
+
+
 def create_task_and_lane(
     root: Path,
     task_id: str = "demo-task",
@@ -761,6 +787,516 @@ def test_final_fast_forward_waits_behind_queue_head(tmp_path: Path) -> None:
     assert "queued behind first-task" in result.stderr
     queue = json.loads(queue_file.read_text(encoding="utf-8"))["queue"]
     assert [entry["task_id"] for entry in queue] == ["first-task", "second-task"]
+    assert queue[1]["target_commit"] == second_target
+
+
+def test_merge_run_preview_holds_queue_head(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_file_branch(
+        tmp_path,
+        "demo-task",
+        "demo.txt",
+        "demo\n",
+    )
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "demo-task",
+        "--action",
+        "preview",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+        "--json",
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "preview"
+    assert payload["target_commit"] == target_commit
+    assert payload["base_changed"] is False
+    assert git_stdout(tmp_path, "rev-parse", "MERGE_HEAD") == target_commit
+    queue = json.loads(
+        (tmp_path / ".agent_state" / "worktrees" / "merge_queue.json").read_text(
+            encoding="utf-8",
+        )
+    )["queue"]
+    assert queue[0]["task_id"] == "demo-task"
+    assert queue[0]["action"] == "preview"
+    assert queue[0]["status"] == "merging"
+    assert read_task(tmp_path)["status"] == "merge_preview"
+
+
+def test_merge_run_final_closes_same_task_preview(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_file_branch(
+        tmp_path,
+        "demo-task",
+        "demo.txt",
+        "demo\n",
+    )
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "demo-task",
+        "--action",
+        "preview",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "demo-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+        "--json",
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "final"
+    assert payload["target_commit"] == target_commit
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+    assert git_stdout(tmp_path, "rev-parse", "HEAD") == target_commit
+    missing = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "task",
+        "show",
+        "demo-task",
+        check=False,
+    )
+    assert missing.returncode == 40
+
+
+def test_merge_run_final_requeues_when_preview_target_moves(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_file_branch(
+        tmp_path,
+        "demo-task",
+        "demo.txt",
+        "demo\n",
+    )
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    lane = add_lane_worktree(tmp_path, "demo-task")
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "demo-task",
+        "--action",
+        "preview",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+    )
+
+    advanced_target = commit_file(lane, "extra.txt", "extra\n", "advance target")
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "demo-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+        check=False,
+    )
+
+    assert result.returncode == 20
+    assert "integration branch changed from queued target" in result.stderr
+    assert target_commit in result.stderr
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+    assert git_stdout(tmp_path, "rev-parse", "HEAD") == base_commit
+    queue = json.loads(
+        (tmp_path / ".agent_state" / "worktrees" / "merge_queue.json").read_text(
+            encoding="utf-8",
+        )
+    )["queue"]
+    assert queue[0]["task_id"] == "demo-task"
+    assert queue[0]["action"] == "final"
+    assert queue[0]["status"] == "queued"
+    assert queue[0]["target_commit"] == advanced_target
+    assert read_task(tmp_path)["status"] == "reviewing"
+
+
+def test_merge_run_final_refreshes_integration_after_base_moves(
+    tmp_path: Path,
+) -> None:
+    base_commit = init_git_repo(tmp_path)
+    first_target = create_file_branch(
+        tmp_path,
+        "first-task",
+        "first.txt",
+        "first\n",
+    )
+    create_file_branch(
+        tmp_path,
+        "second-task",
+        "second.txt",
+        "second\n",
+    )
+    create_task_and_lane(tmp_path, "first-task", base_commit=base_commit)
+    create_task_and_lane(tmp_path, "second-task", base_commit=base_commit)
+    add_lane_worktree(tmp_path, "second-task")
+
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "first-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+    )
+
+    assert git_stdout(tmp_path, "rev-parse", "HEAD") == first_target
+    refreshed = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "second-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-b",
+        "--wait",
+        check=False,
+    )
+
+    assert refreshed.returncode == 20
+    assert "integration branch refreshed" in refreshed.stderr
+    queue = json.loads(
+        (tmp_path / ".agent_state" / "worktrees" / "merge_queue.json").read_text(
+            encoding="utf-8",
+        )
+    )["queue"]
+    assert queue[0]["task_id"] == "second-task"
+    assert queue[0]["status"] == "queued"
+    assert read_task(tmp_path, "second-task")["status"] == "reviewing"
+    assert (
+        git_returncode(
+            tmp_path,
+            "merge-base",
+            "--is-ancestor",
+            first_target,
+            "agent/second-task",
+        )
+        == 0
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "second-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-b",
+        "--wait",
+        "--json",
+    )
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "final"
+    assert payload["base_changed"] is False
+    assert git_stdout(tmp_path, "show", "HEAD:first.txt") == "first"
+    assert git_stdout(tmp_path, "show", "HEAD:second.txt") == "second"
+    queue = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "queue",
+        "list",
+        "--json",
+    )
+    assert json.loads(queue.stdout)["queue"]["queue"] == []
+
+
+def test_merge_run_final_requeues_when_waiting_target_moves(
+    tmp_path: Path,
+) -> None:
+    base_commit = init_git_repo(tmp_path)
+    first_target = create_file_branch(
+        tmp_path,
+        "first-task",
+        "first.txt",
+        "first\n",
+    )
+    second_target = create_file_branch(
+        tmp_path,
+        "second-task",
+        "second.txt",
+        "second\n",
+    )
+    create_task_and_lane(tmp_path, "first-task", base_commit=base_commit)
+    create_task_and_lane(tmp_path, "second-task", base_commit=base_commit)
+    second_lane = add_lane_worktree(tmp_path, "second-task")
+    write_queue(
+        tmp_path,
+        [
+            queue_entry(
+                tmp_path,
+                "first-task",
+                action="final",
+                base_commit=base_commit,
+                status="queued",
+                target_commit=first_target,
+            )
+        ],
+    )
+    queued = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "second-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-b",
+        "--wait",
+        "--timeout",
+        "0",
+        check=False,
+    )
+    assert queued.returncode == 20
+
+    commit_file(second_lane, "second-extra.txt", "extra\n", "advance target")
+    run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "first-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "second-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-b",
+        "--wait",
+        check=False,
+    )
+
+    refreshed_target = git_stdout(tmp_path, "rev-parse", "agent/second-task")
+    assert result.returncode == 20
+    assert "integration branch changed from queued target" in result.stderr
+    assert second_target in result.stderr
+    assert git_stdout(tmp_path, "rev-parse", "HEAD") == first_target
+    assert (
+        git_returncode(
+            tmp_path,
+            "merge-base",
+            "--is-ancestor",
+            first_target,
+            "agent/second-task",
+        )
+        == 0
+    )
+    queue = json.loads(
+        (tmp_path / ".agent_state" / "worktrees" / "merge_queue.json").read_text(
+            encoding="utf-8",
+        )
+    )["queue"]
+    assert [entry["task_id"] for entry in queue] == ["second-task"]
+    assert queue[0]["status"] == "queued"
+    assert queue[0]["target_commit"] == refreshed_target
+    assert read_task(tmp_path, "second-task")["status"] == "reviewing"
+
+
+def test_merge_run_rejects_untracked_collision(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    create_file_branch(
+        tmp_path,
+        "demo-task",
+        "demo.txt",
+        "demo\n",
+    )
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    (tmp_path / "demo.txt").write_text("local\n", encoding="utf-8")
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "demo-task",
+        "--action",
+        "preview",
+        "--requested-by",
+        "agent-a",
+        "--wait",
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert "untracked files overlap the merge target" in result.stderr
+    assert "demo.txt" in result.stderr
+    assert not (tmp_path / ".git" / "MERGE_HEAD").exists()
+    assert read_task(tmp_path)["status"] == "blocked"
+
+
+def test_merge_run_wait_timeout_keeps_task_queued(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    first_target = create_file_branch(
+        tmp_path,
+        "first-task",
+        "first.txt",
+        "first\n",
+    )
+    second_target = create_file_branch(
+        tmp_path,
+        "second-task",
+        "second.txt",
+        "second\n",
+    )
+    create_task_and_lane(tmp_path, "first-task", base_commit=base_commit)
+    create_task_and_lane(tmp_path, "second-task", base_commit=base_commit)
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
+    write_queue(
+        tmp_path,
+        [
+            queue_entry(
+                tmp_path,
+                "first-task",
+                action="final",
+                base_commit=base_commit,
+                status="queued",
+                target_commit=first_target,
+            )
+        ],
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "second-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-b",
+        "--wait",
+        "--timeout",
+        "0",
+        check=False,
+    )
+
+    assert result.returncode == 20
+    assert "timed out waiting for merge queue" in result.stderr
+    queue = json.loads(queue_file.read_text(encoding="utf-8"))["queue"]
+    assert [entry["task_id"] for entry in queue] == ["first-task", "second-task"]
+    assert queue[1]["target_commit"] == second_target
+
+
+def test_merge_run_stops_on_blocked_queue_head(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    first_target = create_file_branch(
+        tmp_path,
+        "first-task",
+        "first.txt",
+        "first\n",
+    )
+    second_target = create_file_branch(
+        tmp_path,
+        "second-task",
+        "second.txt",
+        "second\n",
+    )
+    create_task_and_lane(tmp_path, "first-task", base_commit=base_commit)
+    create_task_and_lane(tmp_path, "second-task", base_commit=base_commit)
+    write_queue(
+        tmp_path,
+        [
+            {
+                **queue_entry(
+                    tmp_path,
+                    "first-task",
+                    action="final",
+                    base_commit=base_commit,
+                    status="blocked",
+                    target_commit=first_target,
+                ),
+                "note": "manual block",
+            }
+        ],
+    )
+
+    result = run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(tmp_path),
+        "merge",
+        "run",
+        "second-task",
+        "--action",
+        "final",
+        "--requested-by",
+        "agent-b",
+        "--wait",
+        check=False,
+    )
+
+    assert result.returncode == 20
+    assert "merge queue head first-task is blocked" in result.stderr
+    assert "manual block" in result.stderr
+    queue = json.loads(
+        (tmp_path / ".agent_state" / "worktrees" / "merge_queue.json").read_text(
+            encoding="utf-8",
+        )
+    )["queue"]
+    assert [entry["task_id"] for entry in queue] == ["first-task", "second-task"]
+    assert queue[0]["status"] == "blocked"
+    assert queue[1]["status"] == "queued"
     assert queue[1]["target_commit"] == second_target
 
 

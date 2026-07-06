@@ -398,6 +398,20 @@ def git_branch_exists(root: Path, branch: str) -> bool:
     )
 
 
+def git_is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    return (
+        run_git(
+            root,
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
 def git_current_branch(root: Path) -> str:
     branch = git_stdout(root, "branch", "--show-current")
     if not branch:
@@ -521,6 +535,23 @@ def queue_wait_error(queue: dict[str, Any], task_id: str) -> OrchestrateError:
     return OrchestrateError(f"task {task_id} is queued behind {head}", 20)
 
 
+def blocked_queue_head_error(entry: dict[str, Any]) -> OrchestrateError:
+    return OrchestrateError(
+        f"merge queue head {entry['task_id']} is blocked: {entry.get('note', '')}",
+        20,
+    )
+
+
+def require_pinned_target(entry: dict[str, Any]) -> str:
+    target = entry.get("target_commit")
+    if not isinstance(target, str) or not target:
+        raise OrchestrateError(
+            f"queue entry for {entry['task_id']} is missing target_commit",
+            40,
+        )
+    return target
+
+
 def build_queue_entry(
     *,
     task_id: str,
@@ -562,6 +593,37 @@ def upsert_queue_entry(
         return len(entries) - 1, entry
     entries[index] = entry
     return index, entry
+
+
+def requeue_for_validation(
+    *,
+    args: argparse.Namespace,
+    root: Path,
+    state: dict[str, Any],
+    queue: dict[str, Any],
+    task: dict[str, Any],
+    entry: dict[str, Any],
+    target_commit: str,
+    base_head: str,
+    note: str,
+    message: str,
+) -> None:
+    entry.update(
+        build_queue_entry(
+            task_id=args.task_id,
+            task=task,
+            action=args.action,
+            requested_by=args.requested_by,
+            target_commit=target_commit,
+            base_head=base_head,
+            main_worktree=root,
+            note=note,
+            current=entry,
+        )
+    )
+    task["status"] = "reviewing"
+    save_workflow(root, state, queue)
+    raise OrchestrateError(message, 20)
 
 
 def claim_entry(
@@ -622,6 +684,82 @@ def abort_preview_merge(root: Path, entry: dict[str, Any]) -> None:
                 f"merge abort left HEAD at {current_head}, expected {expected_base}",
                 50,
             )
+
+
+def find_integration_worktree(root: Path, task: dict[str, Any]) -> Path | None:
+    integration_branch = task["integration_branch"]
+    lanes = list(task["worktrees"].values())
+    candidates = [
+        lane
+        for lane in lanes
+        if lane["role"] == "integration" or lane["branch"] == integration_branch
+    ]
+    for lane in candidates:
+        path = root / lane["worktree_path"]
+        if path.exists():
+            return path
+    return None
+
+
+def refresh_integration_branch(
+    root: Path,
+    task: dict[str, Any],
+    base_head: str,
+) -> dict[str, Any]:
+    integration_branch = task["integration_branch"]
+    target_before = git_commit(root, integration_branch)
+    if git_is_ancestor(root, base_head, target_before):
+        return {
+            "base_changed": False,
+            "target_before": target_before,
+            "target_commit": target_before,
+            "worktree_path": None,
+        }
+
+    worktree_path = find_integration_worktree(root, task)
+    if worktree_path is None:
+        raise OrchestrateError(
+            f"integration branch {integration_branch} must be refreshed to "
+            f"{base_head}, but no integration worktree exists",
+            40,
+        )
+    current_branch = git_current_branch(worktree_path)
+    if current_branch != integration_branch:
+        raise OrchestrateError(
+            f"integration worktree {worktree_path} is on {current_branch}, "
+            f"expected {integration_branch}",
+            40,
+        )
+    ensure_tracked_clean_worktree(worktree_path)
+    result = run_git(worktree_path, "rebase", base_head, check=False)
+    if result.returncode != 0:
+        raise OrchestrateError(
+            f"integration refresh failed: {format_git_output(result)}",
+            50,
+        )
+
+    target_after = git_commit(root, integration_branch)
+    if not git_is_ancestor(root, base_head, target_after):
+        raise OrchestrateError(
+            f"integration refresh left {integration_branch} at {target_after}, "
+            f"which does not contain base {base_head}",
+            50,
+        )
+    return {
+        "base_changed": target_after != target_before,
+        "target_before": target_before,
+        "target_commit": target_after,
+        "worktree_path": worktree_path.as_posix(),
+    }
+
+
+def queue_timeout_error(queue: dict[str, Any], task_id: str) -> OrchestrateError:
+    entries = queue_entries(queue)
+    head = entries[0]["task_id"] if entries else "<none>"
+    return OrchestrateError(
+        f"timed out waiting for merge queue; task {task_id} is queued behind {head}",
+        20,
+    )
 
 
 def print_result(args: argparse.Namespace, result: dict[str, Any], text: str) -> None:
@@ -1229,6 +1367,290 @@ def command_final_fast_forward(args: argparse.Namespace) -> None:
     )
 
 
+def command_merge_run(args: argparse.Namespace) -> None:
+    validate_id(args.task_id, "task-id")
+    validate_action(args.action)
+    if args.timeout < 0:
+        raise OrchestrateError("--timeout must be non-negative", 40)
+    if args.poll_interval <= 0:
+        raise OrchestrateError("--poll-interval must be positive", 40)
+
+    root = normalize_root(args.root)
+    deadline = time.monotonic() + args.timeout
+    while True:
+        with workflow_locks(root, args.lock_timeout):
+            state = load_state(root)
+            queue = load_queue(root)
+            task = require_task(state, args.task_id)
+            ensure_on_base_branch(root, task)
+            target_commit = git_commit(root, task["integration_branch"])
+            base_head = git_commit(root, "HEAD")
+            entries = queue_entries(queue)
+            index, current = find_queue_entry(queue, args.task_id)
+
+            if current is not None and current["status"] == "blocked":
+                raise OrchestrateError(
+                    f"task {args.task_id} queue entry is blocked: "
+                    f"{current.get('note', '')}",
+                    40,
+                )
+
+            if current is not None and current["status"] == "merging":
+                if not (
+                    index == 0
+                    and current["action"] == "preview"
+                    and args.action == "final"
+                ):
+                    raise OrchestrateError(
+                        f"task {args.task_id} already holds the merge queue",
+                        40,
+                    )
+                entry = current
+            elif current is not None:
+                if current["action"] != args.action:
+                    raise OrchestrateError(
+                        f"task {args.task_id} is already queued for "
+                        f"{current['action']}, requested {args.action}",
+                        40,
+                    )
+                require_pinned_target(current)
+                entry = current
+            else:
+                entry = build_queue_entry(
+                    task_id=args.task_id,
+                    task=task,
+                    action=args.action,
+                    requested_by=args.requested_by,
+                    target_commit=target_commit,
+                    base_head=base_head,
+                    main_worktree=root,
+                    note=args.note,
+                    current=current,
+                )
+                index, entry = upsert_queue_entry(queue, entry)
+
+            if index == 0:
+                _run_queue_head_merge(args, root, state, queue, task, entry)
+                return
+
+            if entries and entries[0]["status"] == "blocked":
+                save_workflow(root, state, queue)
+                raise blocked_queue_head_error(entries[0])
+
+            save_workflow(root, state, queue)
+
+        if not args.wait:
+            raise queue_wait_error(queue, args.task_id)
+        if time.monotonic() >= deadline:
+            raise queue_timeout_error(queue, args.task_id)
+        time.sleep(min(args.poll_interval, max(0.0, deadline - time.monotonic())))
+
+
+def _run_queue_head_merge(
+    args: argparse.Namespace,
+    root: Path,
+    state: dict[str, Any],
+    queue: dict[str, Any],
+    task: dict[str, Any],
+    entry: dict[str, Any],
+) -> None:
+    entries = queue_entries(queue)
+    if not entries or entries[0] is not entry:
+        raise OrchestrateError(f"task {args.task_id} does not hold queue head", 40)
+
+    base_head = git_commit(root, "HEAD")
+    preview_was_open = entry["status"] == "merging" and entry["action"] == "preview"
+    if preview_was_open:
+        if args.action != "final":
+            raise OrchestrateError(
+                f"preview is already open for {args.task_id}",
+                40,
+            )
+        try:
+            abort_preview_merge(root, entry)
+        except OrchestrateError as exc:
+            block_entry(entry, str(exc))
+            task["status"] = "blocked"
+            save_workflow(root, state, queue)
+            raise
+    else:
+        ensure_no_merge_in_progress(root)
+        ensure_tracked_clean_worktree(root)
+
+    pinned_target = require_pinned_target(entry)
+    base_head = git_commit(root, "HEAD")
+    try:
+        refresh = refresh_integration_branch(root, task, base_head)
+        target_commit = str(refresh["target_commit"])
+    except OrchestrateError as exc:
+        block_entry(entry, str(exc))
+        task["status"] = "blocked"
+        save_workflow(root, state, queue)
+        raise
+
+    if refresh["target_before"] != pinned_target:
+        note = (
+            "integration branch changed after queue entry was pinned; rerun "
+            f"validation, then rerun merge run --action {args.action}"
+        )
+        requeue_for_validation(
+            args=args,
+            root=root,
+            state=state,
+            queue=queue,
+            task=task,
+            entry=entry,
+            target_commit=target_commit,
+            base_head=base_head,
+            note=note,
+            message=(
+                f"integration branch changed from queued target {pinned_target} "
+                f"to {refresh['target_before']}; rerun validation, then rerun "
+                f"merge run --action {args.action}"
+            ),
+        )
+
+    if args.action == "final" and refresh["base_changed"]:
+        requeue_for_validation(
+            args=args,
+            root=root,
+            state=state,
+            queue=queue,
+            task=task,
+            entry=entry,
+            target_commit=target_commit,
+            base_head=base_head,
+            note=(
+                "integration branch refreshed; rerun validation, then rerun "
+                "merge run --action final"
+            ),
+            message=(
+                f"integration branch refreshed from {refresh['target_before']} to "
+                f"{target_commit}; rerun validation, then rerun merge run "
+                "--action final"
+            ),
+        )
+
+    try:
+        ensure_untracked_files_do_not_overlap_merge_target(root, target_commit)
+    except OrchestrateError as exc:
+        block_entry(entry, str(exc))
+        task["status"] = "blocked"
+        save_workflow(root, state, queue)
+        raise
+
+    claim_entry(
+        entry,
+        action=args.action,
+        requested_by=args.requested_by,
+        target_commit=target_commit,
+        base_head=base_head,
+        main_worktree=root,
+        note=args.note,
+    )
+    task["status"] = "merge_preview"
+    save_workflow(root, state, queue)
+
+    if args.action == "preview":
+        _open_queue_managed_preview(args, root, state, queue, task, entry, refresh)
+        return
+    _complete_queue_managed_final(args, root, state, queue, entry, refresh)
+
+
+def _open_queue_managed_preview(
+    args: argparse.Namespace,
+    root: Path,
+    state: dict[str, Any],
+    queue: dict[str, Any],
+    task: dict[str, Any],
+    entry: dict[str, Any],
+    refresh: dict[str, Any],
+) -> None:
+    target_commit = str(entry["target_commit"])
+    result = run_git(
+        root,
+        "merge",
+        "--no-overwrite-ignore",
+        "--no-commit",
+        "--no-ff",
+        target_commit,
+        check=False,
+    )
+    if result.returncode != 0:
+        note = f"preview merge failed: {format_git_output(result)}"
+        block_entry(entry, note)
+        task["status"] = "blocked"
+        save_workflow(root, state, queue)
+        raise OrchestrateError(note, 50)
+
+    current_target = git_merge_head(root)
+    if current_target != target_commit:
+        note = f"preview MERGE_HEAD is {current_target}, expected {target_commit}"
+        block_entry(entry, note)
+        task["status"] = "blocked"
+        save_workflow(root, state, queue)
+        raise OrchestrateError(note, 50)
+    save_workflow(root, state, queue)
+    print_result(
+        args,
+        {
+            "action": "preview",
+            "base_changed": refresh["base_changed"],
+            "entry": entry,
+            "target_commit": target_commit,
+            "task_id": args.task_id,
+        },
+        f"preview started for {args.task_id} at {target_commit}",
+    )
+
+
+def _complete_queue_managed_final(
+    args: argparse.Namespace,
+    root: Path,
+    state: dict[str, Any],
+    queue: dict[str, Any],
+    entry: dict[str, Any],
+    refresh: dict[str, Any],
+) -> None:
+    target_commit = str(entry["target_commit"])
+    result = run_git(
+        root,
+        "merge",
+        "--no-overwrite-ignore",
+        "--ff-only",
+        target_commit,
+        check=False,
+    )
+    if result.returncode != 0:
+        note = f"final fast-forward failed: {format_git_output(result)}"
+        block_entry(entry, note)
+        state["tasks"][args.task_id]["status"] = "blocked"
+        save_workflow(root, state, queue)
+        raise OrchestrateError(note, 50)
+
+    head = git_commit(root, "HEAD")
+    if head != target_commit:
+        note = f"final fast-forward left HEAD at {head}, expected {target_commit}"
+        block_entry(entry, note)
+        state["tasks"][args.task_id]["status"] = "blocked"
+        save_workflow(root, state, queue)
+        raise OrchestrateError(note, 50)
+
+    queue_entries(queue).pop(0)
+    del state["tasks"][args.task_id]
+    save_workflow(root, state, queue)
+    print_result(
+        args,
+        {
+            "action": "final",
+            "base_changed": refresh["base_changed"],
+            "target_commit": target_commit,
+            "task_id": args.task_id,
+        },
+        f"final merge completed for {args.task_id} at {target_commit}",
+    )
+
+
 def default_worktree_id(task_id: str, lane_id: str) -> str:
     if lane_id == "main":
         return task_id
@@ -1526,6 +1948,20 @@ def build_parser() -> argparse.ArgumentParser:
     final_ff.add_argument("--note", default="")
     add_common_args(final_ff)
     final_ff.set_defaults(func=command_final_fast_forward)
+
+    merge = subparsers.add_parser("merge")
+    merge_subparsers = merge.add_subparsers(dest="merge_command", required=True)
+
+    merge_run = merge_subparsers.add_parser("run")
+    merge_run.add_argument("task_id")
+    merge_run.add_argument("--action", required=True, choices=sorted(QUEUE_ACTIONS))
+    merge_run.add_argument("--requested-by", required=True)
+    merge_run.add_argument("--note", default="")
+    merge_run.add_argument("--wait", action="store_true")
+    merge_run.add_argument("--timeout", type=float, default=3600.0)
+    merge_run.add_argument("--poll-interval", type=float, default=2.0)
+    add_common_args(merge_run)
+    merge_run.set_defaults(func=command_merge_run)
 
     worktree = subparsers.add_parser("worktree")
     worktree_subparsers = worktree.add_subparsers(
