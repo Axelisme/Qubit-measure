@@ -22,7 +22,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -36,6 +35,7 @@ from zcu_tools.gui.app.autofluxdep.cfg.form import (
 )
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.registry import available_node_types
+from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 
 RunUiState = Literal["idle", "running", "pausing", "paused"]
 
@@ -138,9 +138,16 @@ class NodeListPane(QWidget):
     sample_export_requested = Signal()
     auto_follow_changed = Signal(bool)
 
-    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        ctrl: Controller,
+        parent: QWidget | None = None,
+        *,
+        dialog_presenter: DialogPresenter | None = None,
+    ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._dialog_presenter = dialog_presenter or QtDialogPresenter()
         self._run_state: RunUiState = "idle"
         self._torn_down = False
 
@@ -379,7 +386,7 @@ class NodeListPane(QWidget):
             try:
                 self._commit_flux()
             except Exception as exc:
-                QMessageBox.warning(self, "Invalid flux sweep", str(exc))
+                self._dialog_presenter.warning(self, "Invalid flux sweep", str(exc))
                 return
             self.run_requested.emit()
 

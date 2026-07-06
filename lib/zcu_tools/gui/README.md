@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-05 (cfg form decoration)
+**Last updated:** 2026-07-06 (dialog presenter)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -37,6 +37,14 @@ thread. Its nested modal loop still services the control socket's queued
 notifier, so it neither stalls startup nor deadlocks cross-thread
 marshalling. The `open()` rule still governs every dialog that hosts a
 long-running flow or can surface while an operation is running.
+
+Widgets that need information messages, warnings, critical errors,
+confirmations, or explicit destructive confirmations receive the shared
+`DialogPresenter` port. Production uses `QtDialogPresenter`; when a
+`DialogRefStore` is supplied, information, warning, and critical boxes stay
+non-blocking and retained through the shared lifecycle helper. Tests inject a
+recording presenter instead of monkeypatching `QMessageBox`, so dialog decisions
+are scripted at the object boundary.
 
 Non-modal dialogs opened with `open()` use the shared dialog lifecycle helper,
 or an equivalent named registry when remote screenshot/list semantics require

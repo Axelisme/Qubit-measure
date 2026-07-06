@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-06 — autofluxdep fake measurement result contract
+**Last updated:** 2026-07-06 — GUI dialog presenter fakes
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -230,6 +230,14 @@ contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md
 `tests/gui/services/remote/test_remote_mcp_toolchain.py` 保留 remote MCP startup/device/schema/wrapper 與 base async contract；bundle/stage tools 放在 `test_bundle_tools.py`，screenshot/debug/overview 放在 `test_screenshot_overview_tools.py`。新增 remote MCP 測試時優先放到對應 focused file；只有真正跨 toolchain 的行為才放回 `test_remote_mcp_toolchain.py`。
 
 `tests/gui/_control_fakes.py` 提供 control facet tests 的 typed recording fakes。新增 `test_*_control.py` contract 時，偏好 recording fake + 表驅動 public forwarding contract；只在需要 Qt signal / event bus behavior 時測 event disposer、signal rebind 或 state transition，不把 `MagicMock.assert_called_once_with` 當成主要測試內容。
+
+GUI widget tests use `tests/gui/_dialog_fakes.py::RecordingDialogPresenter` for
+information messages, warnings, critical errors, confirmations, and destructive
+confirmations exposed through the shared `DialogPresenter` port. Prefer
+injecting this adapter into the widget under test over monkeypatching
+`QMessageBox`; keep QFileDialog, QInputDialog, QMenu, or method monkeypatches
+only when the tested object has no dialog-presenter boundary for that
+interaction.
 
 ### Autofluxdep GUI tests
 

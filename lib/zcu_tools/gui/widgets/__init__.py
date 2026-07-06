@@ -8,5 +8,6 @@ backend is selected (i.e. when building the UI).
 """
 
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
+from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
-__all__ = ["DialogRefStore"]
+__all__ = ["DialogPresenter", "DialogRefStore", "QtDialogPresenter"]

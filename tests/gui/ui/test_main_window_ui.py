@@ -14,6 +14,8 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import ExpContext
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
+
 
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
@@ -936,24 +938,17 @@ def _make_pulse_model(ctrl):
     return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
 
 
-def test_exp_tab_reset_reseeds_cfg_editor_session(qapp, monkeypatch):
+def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
     """Reset tears down the old cfg-editor session and re-seeds a fresh one over
     the controller's regenerated default schema (user confirms the dialog)."""
     import dataclasses
 
-    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    # Simulate the user clicking Yes in the confirmation dialog.
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-    )
-
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
     first_model = ctrl.get_cfg_editor_root.return_value
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -968,6 +963,7 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp, monkeypatch):
 
     tab._on_reset_cfg_clicked()
 
+    assert dialogs.calls[-1].title == "Reset config"
     ctrl.reset_tab_cfg.assert_called_once_with("tab-1")
     # Old session torn down, new one opened keyed by the same tab.
     ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
@@ -982,22 +978,15 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp, monkeypatch):
     assert actions.calls[-1] == ("refresh_interaction", "tab-1")
 
 
-def test_exp_tab_reset_confirm_no_does_not_reset(qapp, monkeypatch):
+def test_exp_tab_reset_confirm_no_does_not_reset(qapp):
     """Clicking No in the confirmation dialog must not reset the cfg."""
     import dataclasses
 
-    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    # Simulate the user clicking No.
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.No,
-    )
-
+    dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1008,6 +997,7 @@ def test_exp_tab_reset_confirm_no_does_not_reset(qapp, monkeypatch):
 
     tab._on_reset_cfg_clicked()
 
+    assert dialogs.calls[-1].title == "Reset config"
     # Controller must not be touched when the user cancels.
     ctrl.reset_tab_cfg.assert_not_called()
     ctrl.open_seeded_cfg_editor.assert_not_called()
@@ -1033,23 +1023,16 @@ def test_exp_tab_reset_btn_idle_only_enable(qapp):
     assert tab.reset_btn.isEnabled() is True
 
 
-def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp, monkeypatch):
+def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
     """After reset, editing a field commits exactly once — re-seeding must not
     duplicate the widget→controller schema_changed binding."""
     import dataclasses
 
-    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    # Simulate the user clicking Yes in the confirmation dialog.
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-    )
-
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1073,7 +1056,7 @@ def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp, monkeypatch)
 
 
 def test_main_window_confirms_and_begins_shutdown_when_operations_active(
-    qapp, monkeypatch
+    qapp,
 ):
     """User close with work in progress: confirm, then begin_shutdown (which
     cancels-all and waits). The event is ignored now; begin_shutdown is deferred
@@ -1081,45 +1064,37 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     later."""
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QCloseEvent
-    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 2
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-    )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, dialog_presenter=dialogs)
     event = QCloseEvent()
 
     window.closeEvent(event)
 
+    assert dialogs.calls[-1].title == "Operations in progress"
     assert event.isAccepted() is False  # async wait — not closed yet
     QCoreApplication.processEvents()  # drain the deferred singleShot(0)
     ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
 
 
-def test_main_window_declining_confirmation_keeps_window_open(qapp, monkeypatch):
+def test_main_window_declining_confirmation_keeps_window_open(qapp):
     from qtpy.QtGui import QCloseEvent
-    from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
+    dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 1
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.No,
-    )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, dialog_presenter=dialogs)
     event = QCloseEvent()
 
     window.closeEvent(event)
 
+    assert dialogs.calls[-1].title == "Operations in progress"
     assert event.isAccepted() is False
     ctrl.begin_shutdown.assert_not_called()
 

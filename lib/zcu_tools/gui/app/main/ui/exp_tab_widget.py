@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
+from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -134,11 +134,17 @@ class ExpTabWidget(QWidget):
     """A single experiment tab: Config | Plot | Result areas."""
 
     def __init__(
-        self, tab_id: str, ctrl: Controller, parent: QWidget | None = None
+        self,
+        tab_id: str,
+        ctrl: Controller,
+        parent: QWidget | None = None,
+        *,
+        dialog_presenter: DialogPresenter | None = None,
     ) -> None:
         super().__init__(parent)
         self.tab_id = tab_id
         self._ctrl = ctrl
+        self._dialog_presenter = dialog_presenter or QtDialogPresenter()
         self._progress_control = ctrl.progress_control
         self._writeback_count: int = 0
         # editor_id of this tab's shared cfg-editor session (set on bind, when
@@ -653,14 +659,13 @@ class ExpTabWidget(QWidget):
 
     def _on_reset_cfg_clicked(self) -> None:
         # Guard: ask before discarding — Reset is destructive (drops entire cfg).
-        reply = QMessageBox.question(
+        confirmed = self._dialog_presenter.confirm(
             self,
             "Reset config",
             "Reset config to defaults? This discards the current configuration.",
-            QMessageBox.Yes | QMessageBox.No,  # type: ignore[attr-defined]
-            QMessageBox.No,  # type: ignore[attr-defined]
+            default=False,
         )
-        if reply != QMessageBox.Yes:  # type: ignore[attr-defined]
+        if not confirmed:
             return
         # Controller regenerates + commits the adapter-default cfg (and gates a
         # running tab); we just re-seed the form over the new committed schema.

@@ -23,7 +23,6 @@ from qtpy.QtCore import QObject, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
-    QMessageBox,
     QSizePolicy,
     QWidget,
 )
@@ -54,6 +53,8 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialogState
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
+
 from .._helpers import connect_mock, make_builder, make_measurement_builder
 
 
@@ -63,14 +64,26 @@ def app(qapp):
     ctrl.add_node(make_measurement_builder("qubit_freq"))
     # a second provider (ad-hoc, no Result → no liveplot) so the list has 2 rows
     ctrl.add_node(make_builder("probe", provides=("v",)))
-    win = MainWindow(ctrl)
-    yield ctrl, win
-    # Quiesce the controller's BackgroundRunner before GC: device setup and
-    # other session operations submit pool workers via the runner;
-    # a pending queued delivery to a GC'd runner segfaults a later test's event pump.
-    ctrl._background_svc.quiesce()
-    win.close()
-    win.deleteLater()
+    dialogs = RecordingDialogPresenter()
+    win = MainWindow(ctrl, dialog_presenter=dialogs)
+    try:
+        yield ctrl, win
+    finally:
+        try:
+            dialogs.assert_no_unexpected_messages()
+        finally:
+            # Quiesce the controller's BackgroundRunner before GC: device setup and
+            # other session operations submit pool workers via the runner;
+            # a pending queued delivery to a GC'd runner segfaults a later test's event pump.
+            try:
+                ctrl._background_svc.quiesce()
+            finally:
+                win.close()
+                win.deleteLater()
+
+
+def _dialogs(win: MainWindow) -> RecordingDialogPresenter:
+    return cast(RecordingDialogPresenter, win._dialog_presenter)
 
 
 def _list_labels(win: MainWindow) -> list[str]:
@@ -481,21 +494,18 @@ def test_main_window_close_removes_event_bus_subscriptions(app):
         assert not has_owner(payload_type, win._bridge)
 
 
-def test_main_window_close_waits_for_live_operation(app, monkeypatch):
+def test_main_window_close_waits_for_live_operation(app):
     ctrl, win = app
     cancelled: list[bool] = []
     token = ctrl._operation_handles.create(cancel_hook=lambda: cancelled.append(True))
     persist_all = MagicMock()
     ctrl.persist_all = persist_all  # type: ignore[method-assign]
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: QMessageBox.StandardButton.Yes,
-    )
+    _dialogs(win).queue_confirm(True)
 
     event = QCloseEvent()
     win.closeEvent(event)
 
+    assert _dialogs(win).calls[-1].title == "Operations in progress"
     assert not event.isAccepted()
     QApplication.processEvents()
     assert cancelled == [True]
@@ -516,16 +526,13 @@ def test_running_close_requests_terminal_stop_then_closes_after_run_done(
         cancel_hook=lambda: stop_reasons.append("cancelled")
     )
     ctrl._active_run_token = token
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: QMessageBox.StandardButton.Yes,
-    )
+    _dialogs(win).queue_confirm(True)
     monkeypatch.setattr(win, "_perform_close", perform_close)
 
     event = QCloseEvent()
     win.closeEvent(event)
 
+    assert _dialogs(win).calls[-1].title == "Run in progress"
     assert not event.isAccepted()
     assert stop_reasons == ["cancelled"]
     assert win._close_after_run_terminal is True
@@ -548,17 +555,14 @@ def test_paused_close_finalizes_stopped_then_closes(app, monkeypatch):
     finalize = MagicMock()
     perform_close = MagicMock()
     monkeypatch.setattr(Controller, "is_paused", property(lambda _self: True))
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: QMessageBox.StandardButton.Yes,
-    )
+    _dialogs(win).queue_confirm(True)
     monkeypatch.setattr(ctrl, "finalize_paused_run_as_stopped", finalize)
     monkeypatch.setattr(win, "_perform_close", perform_close)
 
     event = QCloseEvent()
     win.closeEvent(event)
 
+    assert _dialogs(win).calls[-1].title == "Paused run"
     assert not event.isAccepted()
     finalize.assert_called_once_with()
     perform_close.assert_called_once_with()
@@ -568,24 +572,16 @@ def test_paused_close_finalizes_stopped_then_closes(app, monkeypatch):
 def test_force_close_prompt_only_closes_when_force_button_clicked(app, monkeypatch):
     ctrl, win = app
     perform_close = MagicMock()
-    buttons: list[object] = []
     token = ctrl._operation_handles.create(cancel_hook=lambda: None)
     ctrl._active_run_token = token
     win._close_after_run_terminal = True
-
-    def fake_add_button(self, *args):
-        del self, args
-        button = object()
-        buttons.append(button)
-        return button
-
+    _dialogs(win).queue_destructive_confirm(True)
     monkeypatch.setattr(win, "_perform_close", perform_close)
-    monkeypatch.setattr(QMessageBox, "addButton", fake_add_button)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: None)
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: buttons[0])
 
     win._show_force_close_prompt()
 
+    assert _dialogs(win).calls[-1].title == "Run still stopping"
+    assert _dialogs(win).calls[-1].action_text == "Force Close"
     perform_close.assert_called_once_with()
     assert win._force_close_prompt_open is False
     ctrl._active_run_token = None
@@ -834,12 +830,11 @@ def test_run_locks_then_unlocks(app):
     assert win._progress.value() == 3
 
 
-def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp, monkeypatch):
+def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp):
     # a Node whose produce raises mid-run (e.g. an unconfigured real acquire) must
     # NOT abort the run worker QThread: the orchestrator catches it, the run ends on
     # RUN_FAILED, and the UI unlocks back to edit state. The warning dialog is
-    # stubbed so the headless test does not block on a modal.
-    from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+    # recorded so the headless test does not block on a modal.
     from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 
     from .._helpers import make_builder
@@ -852,35 +847,34 @@ def test_produce_exception_during_gui_run_does_not_crash_and_unlocks(qapp, monke
     ctrl.add_node(
         make_builder("broken", requires=(Dependency("predict_freq"),), produce_fn=boom)
     )
-    win = MainWindow(ctrl)
-    shown: list[str] = []
-    monkeypatch.setattr(
-        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
-    )
+    dialogs = RecordingDialogPresenter()
+    win = MainWindow(ctrl, dialog_presenter=dialogs)
 
-    ctrl.set_flux_values([0.0, 1.0])
-    connect_mock(ctrl)
-    win._list.refresh_run_availability()
-    win._start()
-    _pump_until_done(ctrl, win)
+    try:
+        ctrl.set_flux_values([0.0, 1.0])
+        connect_mock(ctrl)
+        win._list.refresh_run_availability()
+        win._start()
+        _pump_until_done(ctrl, win)
 
-    # the run ended and the UI is back in edit state
-    assert not ctrl.is_running
-    assert win._list._run_btn.text() == "▶ Run"
-    assert win._list._add_btn.isEnabled()
-    # the failure surfaced to the user
-    assert any("node not configured" in m for m in shown)
-    ctrl._background_svc.quiesce()
-    win.close()
-    win.deleteLater()
+        # the run ended and the UI is back in edit state
+        assert not ctrl.is_running
+        assert win._list._run_btn.text() == "▶ Run"
+        assert win._list._add_btn.isEnabled()
+        # the failure surfaced to the user
+        dialogs.consume_message_containing("warning", "node not configured")
+        dialogs.assert_no_unexpected_messages()
+    finally:
+        try:
+            ctrl._background_svc.quiesce()
+        finally:
+            win.close()
+            win.deleteLater()
 
 
 def test_run_start_exception_does_not_escape_qt_slot(app, monkeypatch):
     ctrl, win = app
-    shown: list[str] = []
-    monkeypatch.setattr(
-        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
-    )
+    dialogs = _dialogs(win)
 
     def boom(*_args, **_kwargs):
         raise RuntimeError("store failed")
@@ -892,26 +886,23 @@ def test_run_start_exception_does_not_escape_qt_slot(app, monkeypatch):
 
     assert not ctrl.is_running
     assert win._list._run_btn.text() == "▶ Run"
-    assert any("store failed" in message for message in shown)
+    dialogs.consume_message_containing("warning", "store failed")
     assert ctrl.state.run_results == {}
     assert ctrl.state.run_predictor is None
 
 
-def test_empty_flux_start_failure_warns_and_does_not_create_products(app, monkeypatch):
+def test_empty_flux_start_failure_warns_and_does_not_create_products(app):
     from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor
 
     ctrl, win = app
     ctrl.set_flux_values([])
     ctrl.state.run_results = {"stale": object()}
     ctrl.state.run_predictor = SimplePredictor()
-    shown: list[str] = []
-    monkeypatch.setattr(
-        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
-    )
+    dialogs = _dialogs(win)
 
     win._start()
 
-    assert any("at least one flux point" in message for message in shown)
+    dialogs.consume_message_containing("warning", "at least one flux point")
     assert not ctrl.is_running
     assert win._list._run_btn.text() == "▶ Run"
     assert win._list._add_btn.isEnabled()
@@ -923,10 +914,7 @@ def test_run_build_plot_exception_clears_stale_products(app, monkeypatch):
     from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor
 
     ctrl, win = app
-    shown: list[str] = []
-    monkeypatch.setattr(
-        QMessageBox, "warning", lambda *a, **k: shown.append(a[2] if len(a) > 2 else "")
-    )
+    dialogs = _dialogs(win)
     ctrl.set_flux_values([0.0])
 
     def fail_after_publish() -> None:
@@ -940,7 +928,7 @@ def test_run_build_plot_exception_clears_stale_products(app, monkeypatch):
 
     assert ctrl.state.run_results == {}
     assert ctrl.state.run_predictor is None
-    assert any("plot build failed" in message for message in shown)
+    dialogs.consume_message_containing("warning", "plot build failed")
 
 
 def test_row_update_plotter_exception_is_logged_and_coalescing_released(
@@ -1154,8 +1142,7 @@ def test_export_sample_button_appears_after_terminal_run_and_exports(
         "getSaveFileName",
         MagicMock(return_value=(str(output), "CSV files (*.csv)")),
     )
-    information = MagicMock()
-    monkeypatch.setattr(QMessageBox, "information", information)
+    dialogs = _dialogs(win)
 
     win._on_run_done()
     assert not win._list._export_sample_btn.isHidden()
@@ -1163,7 +1150,7 @@ def test_export_sample_button_appears_after_terminal_run_and_exports(
     win._list._export_sample_btn.click()
 
     export.assert_called_once_with(str(output))
-    information.assert_called_once()
+    dialogs.consume_message_containing("information", "Exported 2 sample row(s)")
 
 
 def test_auto_follow_checkbox_disables_tab_switch_and_navigation(app):

@@ -31,7 +31,7 @@ from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
-from zcu_tools.gui.widgets import DialogRefStore
+from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +106,21 @@ class _MainWindowTabActions:
 class MainWindow(QMainWindow):
     """Top-level window; implements ViewProtocol for Controller callbacks."""
 
-    def __init__(self, controller: Controller) -> None:
+    def __init__(
+        self,
+        controller: Controller,
+        *,
+        dialog_presenter: DialogPresenter | None = None,
+    ) -> None:
         super().__init__()
         self._ctrl = controller
         self._tab_widgets: dict[str, ExpTabWidget] = {}
         self._tab_actions: TabActions = _MainWindowTabActions(self)
-        self._dialog_registry = MainDialogRegistry(self._ctrl, parent=self)
         self._dialog_refs = DialogRefStore()
+        self._dialog_presenter = dialog_presenter or QtDialogPresenter(
+            self._dialog_refs
+        )
+        self._dialog_registry = MainDialogRegistry(self._ctrl, parent=self)
         self._bus_subs = EventSubscriptions()
         # True once _perform_close has begun the actual teardown, so the second
         # closeEvent (triggered by _perform_close's self.close()) passes straight
@@ -290,7 +298,9 @@ class MainWindow(QMainWindow):
             return
 
         tab_label = adapter_name
-        tab_w = ExpTabWidget(tab_id, self._ctrl)
+        tab_w = ExpTabWidget(
+            tab_id, self._ctrl, dialog_presenter=self._dialog_presenter
+        )
         self._tab_widgets[tab_id] = tab_w
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
@@ -621,15 +631,7 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(message)
 
     def show_error_dialog(self, title: str, message: str) -> None:
-        from qtpy.QtWidgets import QMessageBox
-
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Critical)
-        msg_box.setWindowTitle(title)
-        msg_box.setText(message)
-        # Non-blocking: don't stall the Qt event loop (and the RPC control
-        # socket) waiting for the user to dismiss the dialog.
-        self._dialog_refs.open_transient(msg_box)
+        self._dialog_presenter.critical(self, title, message)
 
     def show_plot(self, tab_id: str, fig: Any) -> None:  # Phase 11
         logger.debug("show_plot: tab_id=%r fig=%s", tab_id, type(fig).__name__)
@@ -1025,16 +1027,13 @@ class MainWindow(QMainWindow):
         if active > 0:
             if a0 is None:
                 return
-            from qtpy.QtWidgets import QMessageBox
-
-            answer = QMessageBox.question(
+            confirmed = self._dialog_presenter.confirm(
                 self,
                 "Operations in progress",
                 f"Cancel {active} operation(s) in progress and close once they stop?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                default=False,
             )
-            if answer != QMessageBox.StandardButton.Yes:
+            if not confirmed:
                 a0.ignore()
                 return
             a0.ignore()

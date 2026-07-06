@@ -73,7 +73,7 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
-from zcu_tools.gui.widgets import DialogRefStore
+from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 
 from .node_detail import NodeDetailPane
 from .node_list import NodeListPane
@@ -193,12 +193,21 @@ class _RunBridge(QObject):
 class MainWindow(QMainWindow):
     """autofluxdep-gui main window: node list + node detail + flux progress."""
 
-    def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        ctrl: Controller,
+        parent: QWidget | None = None,
+        *,
+        dialog_presenter: DialogPresenter | None = None,
+    ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self._progress_control = ctrl.progress_control
         self._bus_subs = EventSubscriptions()
         self._dialog_refs = DialogRefStore()
+        self._dialog_presenter = dialog_presenter or QtDialogPresenter(
+            self._dialog_refs
+        )
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
         self._row_update_perf = PerfStats("main.row_update", logger, slow_ms=30.0)
@@ -277,7 +286,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(session_row)
 
         split = QSplitter()
-        self._list = NodeListPane(ctrl)
+        self._list = NodeListPane(ctrl, dialog_presenter=self._dialog_presenter)
         self._detail = NodeDetailPane()
         self._detail.set_canvas_park(self._canvas_park)
         split.addWidget(self._list)
@@ -382,16 +391,13 @@ class MainWindow(QMainWindow):
 
         active = self._ctrl.active_operation_count()
         if active > 0:
-            from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
-
-            answer = QMessageBox.question(
+            confirmed = self._dialog_presenter.confirm(
                 self,
                 "Operations in progress",
                 f"Cancel {active} operation(s) in progress and close once they stop?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                default=False,
             )
-            if answer != QMessageBox.StandardButton.Yes:
+            if not confirmed:
                 if a0 is not None:
                     a0.ignore()
                 return
@@ -403,16 +409,13 @@ class MainWindow(QMainWindow):
         """Ask before turning a running close into a terminal stop-and-close."""
         if self._close_after_run_terminal:
             return
-        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
-
-        answer = QMessageBox.question(
+        confirmed = self._dialog_presenter.confirm(
             self,
             "Run in progress",
             "Stop the running autofluxdep sweep and close once it stops?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default=False,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
         self._close_after_run_terminal = True
         if not self._ctrl.stop_run(reason="Window close requested terminal stop"):
@@ -422,16 +425,13 @@ class MainWindow(QMainWindow):
 
     def _confirm_paused_close(self) -> None:
         """Ask before discarding same-process continue state on close."""
-        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
-
-        answer = QMessageBox.question(
+        confirmed = self._dialog_presenter.confirm(
             self,
             "Paused run",
             "Finalize the paused run as stopped and close? Continue will no longer be available.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            default=False,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
         try:
             self._ctrl.finalize_paused_run_as_stopped()
@@ -448,23 +448,19 @@ class MainWindow(QMainWindow):
             or self._force_close_prompt_open
         ):
             return
-        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
-
         self._force_close_prompt_open = True
-        box = QMessageBox(self)
-        box.setWindowTitle("Run still stopping")
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(
-            "The run has not stopped after 30 seconds. Force Close may leave the "
-            "artifact at the last flushed state."
-        )
-        force_button = box.addButton(
-            "Force Close", QMessageBox.ButtonRole.DestructiveRole
-        )
-        box.addButton(QMessageBox.StandardButton.Cancel)
-        box.exec()
-        self._force_close_prompt_open = False
-        if box.clickedButton() is force_button:
+        try:
+            confirmed = self._dialog_presenter.destructive_confirm(
+                self,
+                "Run still stopping",
+                "The run has not stopped after 30 seconds. Force Close may leave the "
+                "artifact at the last flushed state.",
+                action_text="Force Close",
+                default=False,
+            )
+        finally:
+            self._force_close_prompt_open = False
+        if confirmed:
             self._perform_close()
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
@@ -667,9 +663,7 @@ class MainWindow(QMainWindow):
             self._clear_plots()
             self._ctrl.clear_run_products()
             self._reset_run_ui()
-            from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
-
-            QMessageBox.warning(self, "Run failed to start", str(exc))
+            self._dialog_presenter.warning(self, "Run failed to start", str(exc))
 
     def _clear_plots(self) -> None:
         self._detail.show_run_canvas(None)
@@ -729,20 +723,17 @@ class MainWindow(QMainWindow):
             self._start()
         except Exception as exc:
             logger.exception("autofluxdep run failed to restart")
-            from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
-
-            QMessageBox.warning(self, "Restart failed", str(exc))
+            self._dialog_presenter.warning(self, "Restart failed", str(exc))
 
     def _export_sample_table(self) -> None:
-        from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-            QFileDialog,
-            QMessageBox,
-        )
+        from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
 
         default_path = self._ctrl.default_sample_table_path()
         if default_path is None:
             self._list.refresh_run_availability()
-            QMessageBox.warning(self, "Export sample", "No finished run is exportable.")
+            self._dialog_presenter.warning(
+                self, "Export sample", "No finished run is exportable."
+            )
             return
 
         filepath, _selected_filter = QFileDialog.getSaveFileName(
@@ -759,11 +750,11 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             logger.exception("autofluxdep sample table export failed")
             self._list.refresh_run_availability()
-            QMessageBox.warning(self, "Export sample failed", str(exc))
+            self._dialog_presenter.warning(self, "Export sample failed", str(exc))
             return
 
         self._list.refresh_run_availability()
-        QMessageBox.information(
+        self._dialog_presenter.information(
             self,
             "Sample exported",
             f"Exported {result.row_count} sample row(s) to:\n{result.path}",
@@ -988,13 +979,11 @@ class MainWindow(QMainWindow):
         Same unlock path as a stop/finish (the run is over), plus a message box so
         the user sees why the sweep aborted (e.g. an unconfigured Node Fast-Failed)
         rather than the run silently ending."""
-        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
-
         closing_after_terminal = self._close_after_run_terminal
         self._on_run_done()
         if closing_after_terminal:
             return
-        QMessageBox.warning(self, "Run failed", message)
+        self._dialog_presenter.warning(self, "Run failed", message)
 
     def _finish_close_after_run_terminal(self) -> None:
         if not self._close_after_run_terminal or self._closing:
