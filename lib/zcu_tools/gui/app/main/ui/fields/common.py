@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QSize, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QDoubleValidator, QIntValidator  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractSpinBox,
@@ -20,7 +20,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLineEdit,
     QMenu,
     QSizePolicy,
-    QSpacerItem,
     QSpinBox,
     QWidget,
 )
@@ -47,7 +46,6 @@ if TYPE_CHECKING:
 
 FIELD_INPUT_MIN_WIDTH = 20
 FIELD_LABEL_MAX_WIDTH = 80
-SWEEP_INPUT_MAX_WIDTH = 180
 
 _TONE_STYLES = {
     "muted": "color: #6b7280;",
@@ -183,23 +181,66 @@ def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     )
 
 
-def _keep_sweep_input_compact(widget: QWidget) -> None:
-    widget.setMaximumWidth(SWEEP_INPUT_MAX_WIDTH)
+def _sweep_cell(label: QLabel, widget: QWidget) -> QWidget:
+    cell = QWidget()
+    cell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    row = QHBoxLayout(cell)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(4)
+    label.setMinimumWidth(0)
+    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    row.addWidget(label)
+    row.addWidget(widget, stretch=1)
+    return cell
 
 
-def _add_sweep_spacer(layout: QGridLayout) -> None:
-    layout.setColumnStretch(4, 1)
-    layout.addItem(
-        QSpacerItem(
-            0,
-            0,
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Minimum,
-        ),
-        0,
-        4,
-        2,
-        1,
+class _SweepPairRow(QWidget):
+    """Two sweep cells whose outer widths are always split 50/50."""
+
+    _SPACING = 4
+
+    def __init__(self, left: QWidget, right: QWidget) -> None:
+        super().__init__()
+        self._left = left
+        self._right = right
+        self._left.setParent(self)
+        self._right.setParent(self)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self) -> QSize:  # type: ignore[override]
+        left_hint = self._left.sizeHint()
+        right_hint = self._right.sizeHint()
+        return QSize(
+            2 * max(left_hint.width(), right_hint.width()) + self._SPACING,
+            max(left_hint.height(), right_hint.height()),
+        )
+
+    def minimumSizeHint(self) -> QSize:  # type: ignore[override]
+        left_hint = self._left.minimumSizeHint()
+        right_hint = self._right.minimumSizeHint()
+        return QSize(
+            2 * max(left_hint.width(), right_hint.width()) + self._SPACING,
+            max(left_hint.height(), right_hint.height()),
+        )
+
+    def resizeEvent(self, event: Any) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        available = max(0, self.width() - self._SPACING)
+        left_width = available // 2
+        right_width = available - left_width
+        self._left.setGeometry(0, 0, left_width, self.height())
+        self._right.setGeometry(
+            left_width + self._SPACING, 0, right_width, self.height()
+        )
+
+
+def _sweep_pair(
+    left_label: QLabel, left_widget: QWidget, right_label: QLabel, right_widget: QWidget
+) -> QWidget:
+    return _SweepPairRow(
+        _sweep_cell(left_label, left_widget),
+        _sweep_cell(right_label, right_widget),
     )
 
 
@@ -590,15 +631,12 @@ class SweepWidget(BaseLiveWidget):
 
         self._start_widget = ScalarWidget(field.start_field, self)
         self._stop_widget = ScalarWidget(field.stop_field, self)
-        _keep_sweep_input_compact(self._start_widget)
-        _keep_sweep_input_compact(self._stop_widget)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
         self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._expts.setValue(sv.expts)
         self._expts.valueChanged.connect(self._on_expts_changed)
-        _keep_sweep_input_compact(self._expts)
 
         self._step = TrimDoubleSpinBox()
         self._step.setRange(-1e12, 1e12)
@@ -606,7 +644,6 @@ class SweepWidget(BaseLiveWidget):
         self._step.setDecimals(decimals if decimals is not None else 6)
         self._step.setValue(sv.step)
         self._step.valueChanged.connect(self._on_step_changed)
-        _keep_sweep_input_compact(self._step)
 
         enabled = field.spec.editable
         start_decoration = _edge_decoration(
@@ -625,15 +662,16 @@ class SweepWidget(BaseLiveWidget):
         _apply_edge_decoration(start_label, self._start_widget, start_decoration)
         _apply_edge_decoration(stop_label, self._stop_widget, stop_decoration)
 
-        layout.addWidget(start_label, 0, 0)
-        layout.addWidget(self._start_widget, 0, 1)
-        layout.addWidget(stop_label, 0, 2)
-        layout.addWidget(self._stop_widget, 0, 3)
-        layout.addWidget(QLabel("expts"), 1, 0)
-        layout.addWidget(self._expts, 1, 1)
-        layout.addWidget(QLabel("step"), 1, 2)
-        layout.addWidget(self._step, 1, 3)
-        _add_sweep_spacer(layout)
+        layout.addWidget(
+            _sweep_pair(start_label, self._start_widget, stop_label, self._stop_widget),
+            0,
+            0,
+        )
+        layout.addWidget(
+            _sweep_pair(QLabel("expts"), self._expts, QLabel("step"), self._step),
+            1,
+            0,
+        )
 
         field.on_change.connect(self._on_model_changed)
 
@@ -685,7 +723,6 @@ class CenteredSweepWidget(BaseLiveWidget):
         decimals = field.spec.decimals
 
         self._center_widget = ScalarWidget(field.center_field, self)
-        _keep_sweep_input_compact(self._center_widget)
 
         self._span = TrimDoubleSpinBox()
         self._span.setRange(0.0, 1e12)
@@ -693,14 +730,12 @@ class CenteredSweepWidget(BaseLiveWidget):
         self._span.setDecimals(decimals if decimals is not None else 6)
         self._span.setValue(sv.span)
         self._span.valueChanged.connect(self._on_span_changed)
-        _keep_sweep_input_compact(self._span)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
         self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._expts.setValue(sv.expts)
         self._expts.valueChanged.connect(self._on_expts_changed)
-        _keep_sweep_input_compact(self._expts)
 
         self._step = TrimDoubleSpinBox()
         self._step.setRange(0.0, 1e12)
@@ -708,7 +743,6 @@ class CenteredSweepWidget(BaseLiveWidget):
         self._step.setDecimals(decimals if decimals is not None else 6)
         self._step.setValue(sv.step)
         self._step.valueChanged.connect(self._on_step_changed)
-        _keep_sweep_input_compact(self._step)
 
         enabled = field.spec.editable
         self._center_widget.setEnabled(enabled and field.spec.center_editable)
@@ -722,15 +756,16 @@ class CenteredSweepWidget(BaseLiveWidget):
             center_label.setToolTip(center_tooltip)
             self._center_widget.setToolTip(center_tooltip)
 
-        layout.addWidget(center_label, 0, 0)
-        layout.addWidget(self._center_widget, 0, 1)
-        layout.addWidget(QLabel("span"), 0, 2)
-        layout.addWidget(self._span, 0, 3)
-        layout.addWidget(QLabel("expts"), 1, 0)
-        layout.addWidget(self._expts, 1, 1)
-        layout.addWidget(QLabel("step"), 1, 2)
-        layout.addWidget(self._step, 1, 3)
-        _add_sweep_spacer(layout)
+        layout.addWidget(
+            _sweep_pair(center_label, self._center_widget, QLabel("span"), self._span),
+            0,
+            0,
+        )
+        layout.addWidget(
+            _sweep_pair(QLabel("expts"), self._expts, QLabel("step"), self._step),
+            1,
+            0,
+        )
 
         field.on_change.connect(self._on_model_changed)
 

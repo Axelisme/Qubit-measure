@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - compact centered sweep editor
+**Last updated:** 2026-07-07 - balanced sweep editors
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -89,9 +89,9 @@ Sweep-like fields keep their UI value model until this lowering boundary:
 `center` / `span` / `expts` and lowers to a program sweep only when building the
 raw experiment cfg. Centered sweep centers may be locked independently from the
 span/expts controls, which lets callers expose generated centers while keeping
-the search window editable. Sweep editors use compact input columns with trailing
-empty stretch, so full-width form rows do not make numeric center/start fields
-consume the whole row.
+the search window editable. Sweep editors render as two balanced label+input
+columns per row, so start/stop or center/span share the available width evenly
+inside a full-width form row.
 
 Linked `ModuleRef` / `WaveformRef` fields preserve their embedded value snapshot
 when the library key is missing. The field stays library-keyed and invalid so

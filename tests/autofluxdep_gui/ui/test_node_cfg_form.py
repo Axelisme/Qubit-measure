@@ -227,7 +227,6 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert set(_generation_group(form, "drive_gain").fields.keys()) == {
             "drive_gain_mode",
             "target_kappa",
-            "qf_width_seed",
         }
         assert set(_generation_group(form, "freq_recovery").fields.keys()) == {
             "physical_recovery_mode",
@@ -245,7 +244,6 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert _field_labels(_generation_group(form, "drive_gain")) == {
             "drive_gain_mode": "mode",
             "target_kappa": "target_kappa",
-            "qf_width_seed": "initial_linewidth_mhz",
         }
         assert _field_labels(_generation_group(form, "freq_recovery")) == {
             "physical_recovery_mode": "mode",
@@ -256,12 +254,6 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "pred_freq_correction_idw_epsilon": "idw_epsilon",
             "pred_freq_correction_decay_points": "decay_points",
         }
-        generation_form = form._generation_form
-        assert generation_form is not None
-        assert (
-            generation_form.decoration_for_path("drive_gain.qf_width_seed").tooltip
-            == "Initial linewidth before measured feedback exists."
-        )
         assert set(node.schema.keys) == {
             "detune_sweep",
             "reps",
@@ -277,7 +269,6 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "qub_length",
             "drive_gain_mode",
             "target_kappa",
-            "qf_width_seed",
             "physical_recovery_mode",
             "pred_freq_correction_strategy",
             "pred_freq_correction_idw_k",
@@ -335,7 +326,6 @@ def test_generation_choices_render_only_active_strategy_fields(ctrl_node, qapp):
         paths = _rendered_generation_paths(form)
         assert "drive_gain.drive_gain_mode" in paths
         assert "drive_gain.target_kappa" not in paths
-        assert "drive_gain.qf_width_seed" not in paths
     finally:
         form.teardown()
 
@@ -451,8 +441,9 @@ def test_node_cfg_form_renders_override_plan_badges_and_refreshes(ctrl_node, qap
         gain_decoration = form._default_form.decoration_for_path(
             "modules.qub_pulse.gain"
         )
-        assert gain_decoration.enabled is False
-        assert gain_decoration.badge == "generated"
+        assert gain_decoration.enabled is True
+        assert gain_decoration.badge == "initial"
+        assert "Initial value is used at flux point 0" in gain_decoration.tooltip
 
         readout_decoration = form._default_form.decoration_for_path("modules.readout")
         assert readout_decoration.enabled is True
@@ -547,6 +538,8 @@ def test_lenrabi_auto_sweep_marks_only_stop_generated(qapp):
     index = ctrl.state.nodes.index(node)
     form = NodeCfgForm(ctrl, node, index)
     try:
+        assert _field_labels(_section(form, "modules"))["rabi_pulse"] == "Rabi Pulse"
+
         length_decoration = form._default_form.decoration_for_path("sweep.length")
         assert length_decoration.enabled is True
         assert length_decoration.badge == ""

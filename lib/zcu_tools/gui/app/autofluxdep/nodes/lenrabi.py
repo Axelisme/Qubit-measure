@@ -69,6 +69,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     ctx_module,
     generation_choice,
     logical_generation_field,
+    module_ref_value_from_ctx,
     pop_sweep_range,
     pulse_length,
     pulse_product,
@@ -109,7 +110,6 @@ _DEFAULT_T1 = 10.0
 _DEFAULT_EXPECTED_PI_LENGTH = 1.0
 _DEFAULT_SWEEP_START = 0.05
 _DEFAULT_SWEEP_STOP_FACTOR = 5.0
-_DEFAULT_SWEEP_STOP_MIN = 0.5
 _DEFAULT_RELAX_FACTOR = 3.0
 _DEFAULT_RELAX_MIN = 0.0
 _DEFAULT_PI_PRODUCT_FACTOR = 1.2
@@ -123,6 +123,7 @@ _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
 _RELAX_DELAY_MODE_FIXED = "fixed"
 _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT = "auto_pi_product"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
+_PI_PULSE_SEED_NAMES = ("pi_len", "pi_amp", "pi_pulse")
 _DRIVE_GAIN_SLOT = FeedbackSlotDecl(
     key="drive_gain",
     kind="controller",
@@ -190,12 +191,12 @@ def _seed_pi_length(ctx: Any | None) -> float:
     md_value = ctx_md_float(ctx, "pi_len")
     if md_value is not None:
         return md_value
-    module = ctx_module(ctx, "pi_amp", "pi_len", "pi_pulse")
+    module = ctx_module(ctx, *_PI_PULSE_SEED_NAMES)
     return pulse_length(module) or _DEFAULT_EXPECTED_PI_LENGTH
 
 
 def _seed_pi_product(ctx: Any | None) -> float:
-    module = ctx_module(ctx, "pi_amp", "pi_len", "pi_pulse")
+    module = ctx_module(ctx, *_PI_PULSE_SEED_NAMES)
     return pulse_product(module) or _seed_pi_length(ctx)
 
 
@@ -208,7 +209,7 @@ def _resolve_cfg_sweep_range(
             auto_sweep_stop(
                 pi_length,
                 stop_factor=float(knobs["sweep_stop_factor"]),
-                stop_min=float(knobs["sweep_stop_min_us"]),
+                stop_min=None,
             ),
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
@@ -555,6 +556,26 @@ class LenRabiBuilder(Builder):
         """Adapter-backed default cfg plus autofluxdep generation controls."""
         t1_seed = _seed_t1(ctx)
         pi_len_seed = _seed_pi_length(ctx)
+        rabi_pulse_seed = module_ref_value_from_ctx(ctx, *_PI_PULSE_SEED_NAMES)
+        default_overrides: dict[str, Any] = {
+            "rounds": 10,
+            "relax_delay": auto_relax_delay_from_t1(
+                t1_seed,
+                factor=_DEFAULT_RELAX_FACTOR,
+                minimum=_DEFAULT_RELAX_MIN,
+            ),
+            "sweep_range": SweepValue(
+                *auto_stop_sweep_range(
+                    pi_len_seed,
+                    start=_DEFAULT_SWEEP_START,
+                    stop_factor=_DEFAULT_SWEEP_STOP_FACTOR,
+                    stop_min=None,
+                ),
+                expts=101,
+            ),
+        }
+        if rabi_pulse_seed is not None:
+            default_overrides["rabi_pulse"] = rabi_pulse_seed
         return adapter_node_schema(
             LenRabiAdapter,
             ctx,
@@ -651,15 +672,6 @@ class LenRabiBuilder(Builder):
                     group="sweep",
                 ),
                 logical_generation_field(
-                    "sweep_stop_min_us",
-                    FloatSpec(
-                        label="stop_min_us",
-                        tooltip="Minimum stop value for the auto Rabi sweep.",
-                    ),
-                    _DEFAULT_SWEEP_STOP_MIN,
-                    group="sweep",
-                ),
-                logical_generation_field(
                     "drive_gain_mode",
                     str_choice_spec(
                         "mode",
@@ -699,10 +711,7 @@ class LenRabiBuilder(Builder):
                     "sweep_range_mode",
                     {
                         _SWEEP_RANGE_MODE_FIXED: (),
-                        _SWEEP_RANGE_MODE_AUTO_PI_LENGTH: (
-                            "sweep_stop_factor",
-                            "sweep_stop_min_us",
-                        ),
+                        _SWEEP_RANGE_MODE_AUTO_PI_LENGTH: ("sweep_stop_factor",),
                     },
                 ),
                 generation_choice(
@@ -715,24 +724,9 @@ class LenRabiBuilder(Builder):
                 ),
                 feedback_generation_choice(_DRIVE_GAIN_SLOT, group="pi_feedback"),
             ),
-            default_overrides={
-                "rounds": 10,
-                "relax_delay": auto_relax_delay_from_t1(
-                    t1_seed,
-                    factor=_DEFAULT_RELAX_FACTOR,
-                    minimum=_DEFAULT_RELAX_MIN,
-                ),
-                "sweep_range": SweepValue(
-                    *auto_stop_sweep_range(
-                        pi_len_seed,
-                        start=_DEFAULT_SWEEP_START,
-                        stop_factor=_DEFAULT_SWEEP_STOP_FACTOR,
-                        stop_min=_DEFAULT_SWEEP_STOP_MIN,
-                    ),
-                    expts=101,
-                ),
-            },
+            default_overrides=default_overrides,
             path_renames={"modules.qub_pulse": "modules.rabi_pulse"},
+            label_overrides={"modules.rabi_pulse": "Rabi Pulse"},
             drop_paths=("modules.reset",),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )

@@ -24,11 +24,14 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     ChoiceSectionSpec,
     DirectValue,
     ModuleRefSpec,
+    ModuleRefValue,
     NodeCfgSchema,
     OverridePath,
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    align_locked_literals,
+    module_cfg_to_value,
     module_leaf_patches,
     module_override_paths,
 )
@@ -195,6 +198,7 @@ def adapter_node_schema(
     duplicate_paths: Mapping[str, str] | None = None,
     drop_paths: tuple[str, ...] = (),
     module_ref_labels: Mapping[str, tuple[str, ...]] | None = None,
+    label_overrides: Mapping[str, str] | None = None,
     generation_choices: tuple[GenerationChoice, ...] = (),
 ) -> NodeCfgSchema:
     """Build a ``NodeCfgSchema`` from a copied measure-gui adapter cfg shape."""
@@ -218,6 +222,8 @@ def adapter_node_schema(
         _restrict_module_ref_labels(root_spec, path, labels)
     for path, spec_node in (spec_overrides or {}).items():
         _replace_cfg_node(root_spec, path, spec_node)
+    for path, label in (label_overrides or {}).items():
+        _relabel_cfg_node(root_spec, path, label)
     _prune_empty_sections(root_spec, root_value)
 
     projection = dict(logical_paths)
@@ -285,6 +291,7 @@ def adapter_node_schema(
     )
     if default_overrides:
         node_schema.with_overrides(default_overrides)
+        align_locked_literals(node_schema.schema.spec, node_schema.schema.value)
     return node_schema
 
 
@@ -327,6 +334,22 @@ def ctx_module(ctx: Any | None, *names: str) -> Any | None:
             module = None
         if module is not None:
             return module
+    return None
+
+
+def module_ref_value_from_ctx(ctx: Any | None, *names: str) -> ModuleRefValue | None:
+    """Return a linked module ref for the first named module present in ``ctx``."""
+    if not isinstance(ctx, ExpContext):
+        return None
+    for name in names:
+        try:
+            module = ctx.ml.get_module(name)
+        except (KeyError, ValueError):
+            module = None
+        if module is None:
+            continue
+        _, value = module_cfg_to_value(module)
+        return ModuleRefValue(chosen_key=name, value=value)
     return None
 
 
@@ -501,6 +524,13 @@ def _restrict_module_ref_labels(
             f"{wanted!r}; available: {available}"
         )
     _replace_cfg_node(root_spec, path, replace(node, allowed=allowed))
+
+
+def _relabel_cfg_node(root_spec: CfgSectionSpec, path: str, label: str) -> None:
+    node = _get_cfg_node(root_spec, path)
+    if not hasattr(node, "label"):
+        raise TypeError(f"cfg spec path {path!r} does not have a label")
+    _replace_cfg_node(root_spec, path, replace(node, label=label))
 
 
 def _get_cfg_node(root: CfgSectionSpec | CfgSectionValue, path: str) -> Any:

@@ -31,10 +31,13 @@ from zcu_tools.gui.app.main.adapter import (
     FloatSpec,
     IntSpec,
     ModuleRefSpec,
+    ModuleRefValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    align_locked_literals,
 )
+from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 from .override_plan import (
     OverrideMode,
@@ -67,6 +70,7 @@ __all__ = [
     "FloatSpec",
     "IntSpec",
     "ModuleRefSpec",
+    "ModuleRefValue",
     "NodeCfgSchema",
     "OverrideMode",
     "OverridePath",
@@ -75,9 +79,11 @@ __all__ = [
     "ScalarSpec",
     "SweepSpec",
     "SweepValue",
+    "align_locked_literals",
     "apply_override_patches",
     "empty_node_schema",
     "module_leaf_patches",
+    "module_cfg_to_value",
     "module_override_paths",
     "override_plan_to_wire",
     "str_choice_spec",

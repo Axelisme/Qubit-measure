@@ -556,12 +556,9 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
 
 
 def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
-    from qtpy.QtWidgets import QLabel
+    from qtpy.QtWidgets import QLabel, QSizePolicy
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.common import (
-        SWEEP_INPUT_MAX_WIDTH,
-        CenteredSweepWidget,
-    )
+    from zcu_tools.gui.app.main.ui.fields.common import CenteredSweepWidget
 
     schema = _schema(
         {
@@ -582,14 +579,29 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
     field = cast(CenteredSweepLiveField, model.fields["f"])
     assert field.center_field.spec.editable is False
     assert sweep_widget._center_widget.isEnabled() is False
-    assert sweep_widget._center_widget.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
-    assert sweep_widget._span.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
-    assert sweep_widget._expts.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
-    assert sweep_widget._step.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
-    labels = {
-        label.text(): label.toolTip() for label in sweep_widget.findChildren(QLabel)
-    }
-    assert labels["center [generated]"] == "Generated center"
+    for value_widget in (
+        sweep_widget._center_widget,
+        sweep_widget._span,
+        sweep_widget._expts,
+        sweep_widget._step,
+    ):
+        assert (
+            value_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+        )
+    labels = {label.text(): label for label in sweep_widget.findChildren(QLabel)}
+    center_label = labels["center [generated]"]
+    span_label = labels["span"]
+    assert center_label.toolTip() == "Generated center"
+    center_cell = center_label.parentWidget()
+    span_cell = span_label.parentWidget()
+    assert center_cell is not None
+    assert span_cell is not None
+    pair_row = center_cell.parentWidget()
+    assert pair_row is span_cell.parentWidget()
+    assert pair_row is not None
+    pair_row.resize(801, pair_row.sizeHint().height())
+    qapp.processEvents()
+    assert abs(center_cell.width() - span_cell.width()) <= 1
 
     sweep_widget._span.setValue(120.0)
     sweep_widget._expts.setValue(121)

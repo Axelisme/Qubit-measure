@@ -72,10 +72,10 @@ def _schema(builder: Builder, params: dict[str, Any]) -> NodeCfgSchema:
     return builder.make_default_schema().with_overrides(params)
 
 
-def _env(ml: ModuleLibrary) -> RunEnv:
+def _env(ml: ModuleLibrary, *, flux_idx: int = 0) -> RunEnv:
     return RunEnv(
         flux=0.0,
-        flux_idx=0,
+        flux_idx=flux_idx,
         schema=_schema(
             QubitFreqBuilder(),
             {
@@ -191,7 +191,7 @@ def test_qubit_freq_make_cfg_uses_qfw_factor_feedback():
         {"predict_freq": 5135.0, "qfw_factor": 32.5}, modules={"readout": _READOUT}
     )
 
-    cfg = QubitFreqBuilder().make_cfg(_env(_ml()), snap)
+    cfg = QubitFreqBuilder().make_cfg(_env(_ml(), flux_idx=1), snap)
 
     assert float(cfg.modules.qub_pulse.gain) == 0.2
 
@@ -290,7 +290,7 @@ def test_lenrabi_make_cfg_lowers_context():
             0.5,
             start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
-            stop_min=knobs["sweep_stop_min_us"],
+            stop_min=None,
         )
     )
     assert cfg.relax_delay == pytest.approx(_expected_auto_relax_delay(knobs, 10.0))
@@ -395,7 +395,7 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
             knobs["expected_pi_length"],
             start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
-            stop_min=knobs["sweep_stop_min_us"],
+            stop_min=None,
         )
     )
 
@@ -430,7 +430,7 @@ def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
             knobs["expected_pi_length"],
             start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
-            stop_min=knobs["sweep_stop_min_us"],
+            stop_min=None,
         )
     )
 

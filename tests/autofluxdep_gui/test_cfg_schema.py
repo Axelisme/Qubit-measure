@@ -230,7 +230,6 @@ _EXPECTED_KEYS = {
         "qub_length",
         "drive_gain_mode",
         "target_kappa",
-        "qf_width_seed",
         "physical_recovery_mode",
         "pred_freq_correction_strategy",
         "pred_freq_correction_idw_k",
@@ -256,7 +255,6 @@ _EXPECTED_KEYS = {
         "sweep_range_mode",
         "expected_pi_length",
         "sweep_stop_factor",
-        "sweep_stop_min_us",
         "drive_gain_mode",
         "pi_product_seed",
         "pi_gain_feedback_strategy",
@@ -369,7 +367,6 @@ _EXPECTED_PATHS = {
         "qub_length": "modules.qub_pulse.waveform.length",
         "drive_gain_mode": "generation.drive_gain.drive_gain_mode",
         "target_kappa": "generation.drive_gain.target_kappa",
-        "qf_width_seed": "generation.drive_gain.qf_width_seed",
         "physical_recovery_mode": "generation.freq_recovery.physical_recovery_mode",
         "pred_freq_correction_strategy": (
             "generation.predictor_correction.pred_freq_correction_strategy"
@@ -403,7 +400,6 @@ _EXPECTED_PATHS = {
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
         "expected_pi_length": "generation.sweep.expected_pi_length",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
-        "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
         "drive_gain_mode": "generation.drive_gain.drive_gain_mode",
         "pi_product_seed": "generation.drive_gain.pi_product_seed",
         "pi_gain_feedback_strategy": "generation.pi_feedback.pi_gain_feedback_strategy",
@@ -723,7 +719,6 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     assert _scalar_labels(_generation_group_spec(qf_schema, "drive_gain")) == {
         "drive_gain_mode": "mode",
         "target_kappa": "target_kappa",
-        "qf_width_seed": "initial_linewidth_mhz",
     }
     assert _scalar_labels(
         _generation_group_spec(qf_schema, "predictor_correction")
@@ -750,7 +745,6 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
         "sweep_range_mode": "range_mode",
         "expected_pi_length": "target_pi_length_us",
         "sweep_stop_factor": "stop_factor",
-        "sweep_stop_min_us": "stop_min_us",
     }
     assert _scalar_labels(_generation_group_spec(lenrabi_schema, "drive_gain")) == {
         "drive_gain_mode": "mode",
@@ -1263,7 +1257,7 @@ def test_fresh_node_defaults_seed_from_md_values():
             md.pi_len,
             start=lenrabi["sweep_range"].start,
             stop_factor=lenrabi["sweep_stop_factor"],
-            stop_min=lenrabi["sweep_stop_min_us"],
+            stop_min=None,
         ),
     )
 
@@ -1372,7 +1366,7 @@ def test_fresh_node_defaults_seed_from_ml_modules():
             "raise_waveform": {"style": "cosine", "length": 0.02},
         }
     )
-    pi_amp = {
+    pi_len = {
         "type": "pulse",
         "ch": 5,
         "nqz": 1,
@@ -1398,13 +1392,15 @@ def test_fresh_node_defaults_seed_from_ml_modules():
             "trig_offset": 0.6,
         },
     }
-    ml.register_module(pi_amp=pi_amp, readout_dpm=readout_dpm)
+    ml.register_module(pi_len=pi_len, readout_dpm=readout_dpm)
     ctx = _ctx(ml=ml)
 
     lenrabi = LenRabiBuilder().make_default_schema(ctx).lower(ml, md=ctx.md)
-    assert lenrabi["expected_pi_length"] == pulse_length(pi_amp)
-    assert lenrabi["pi_product_seed"] == pytest.approx(pulse_product(pi_amp))
-    expected_pi_length = pulse_length(pi_amp)
+    assert lenrabi["expected_pi_length"] == pulse_length(pi_len)
+    assert lenrabi["pi_product_seed"] == pytest.approx(pulse_product(pi_len))
+    assert lenrabi["qub_ch"] == 5
+    assert lenrabi["qub_gain"] == pytest.approx(0.6)
+    expected_pi_length = pulse_length(pi_len)
     assert expected_pi_length is not None
     _assert_sweep_bounds(
         lenrabi["sweep_range"],
@@ -1412,7 +1408,7 @@ def test_fresh_node_defaults_seed_from_ml_modules():
             expected_pi_length,
             start=lenrabi["sweep_range"].start,
             stop_factor=lenrabi["sweep_stop_factor"],
-            stop_min=lenrabi["sweep_stop_min_us"],
+            stop_min=None,
         ),
     )
 
@@ -1543,30 +1539,26 @@ def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
     )
 
 
-def test_qubit_freq_make_cfg_seeds_qfw_factor_from_md_width_and_default_gain():
+def test_qubit_freq_make_cfg_uses_default_gain_before_linewidth_feedback():
     ml = _ml()
     builder = QubitFreqBuilder()
     schema = builder.make_default_schema().with_overrides(
         {
-            "qf_width_seed": 20.0,
             "qub_gain": 0.2,
         }
     )
     env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml)
-    knobs = schema.lower(ml)
 
     cfg = builder.make_cfg(
         env,
         Snapshot(
-            {"predict_freq": 5135.0, "qfw_factor": None},
+            {"predict_freq": 5135.0, "qfw_factor": -1.0},
             modules={"readout": _READOUT},
         ),
     )
 
-    seeded_qfw_factor = float(knobs["qf_width_seed"]) / float(knobs["qub_gain"])
-    assert float(cfg.modules.qub_pulse.gain) == pytest.approx(
-        min(1.0, float(knobs["target_kappa"]) / seeded_qfw_factor)
-    )
+    assert "qf_width_seed" not in schema.keys
+    assert float(cfg.modules.qub_pulse.gain) == pytest.approx(0.2)
 
 
 def test_qubit_freq_make_cfg_uses_const_waveform_when_named_waveform_missing():

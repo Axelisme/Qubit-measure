@@ -57,7 +57,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     PULSE_READOUT_REF_LABELS,
     adapter_node_schema,
-    ctx_md_float,
     generation_choice,
     logical_generation_field,
     readout_module_override_paths,
@@ -187,20 +186,6 @@ def _observe_predict_freq_residual(
     if estimator is None:
         return
     estimator.observe(env.flux, float(measured_freq) - float(base_after_calibration))
-
-
-def _qf_width_seed(ctx: Any | None) -> float | None:
-    return ctx_md_float(ctx, "qf_w")
-
-
-def _qfw_factor_seed(knobs: dict[str, Any]) -> float | None:
-    width = knobs.get("qf_width_seed")
-    if width is None:
-        return None
-    seed_gain = float(knobs["qub_gain"])
-    if seed_gain <= 0.0:
-        raise RuntimeError("qubit_freq qub_gain must be positive to seed qfw_factor")
-    return float(width) / seed_gain
 
 
 def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -553,16 +538,6 @@ class QubitFreqBuilder(Builder):
                     _QFW_TARGET_KAPPA,
                     group="drive_gain",
                 ),
-                logical_generation_field(
-                    "qf_width_seed",
-                    FloatSpec(
-                        label="initial_linewidth_mhz",
-                        optional=True,
-                        tooltip="Initial linewidth before measured feedback exists.",
-                    ),
-                    _qf_width_seed(ctx),
-                    group="drive_gain",
-                ),
                 *feedback_generation_fields(
                     _PREDICT_FREQ_CORRECTION_SLOT,
                     group="predictor_correction",
@@ -574,7 +549,7 @@ class QubitFreqBuilder(Builder):
                     "drive_gain_mode",
                     {
                         _DRIVE_GAIN_MODE_FIXED: (),
-                        _DRIVE_GAIN_MODE_ADAPTIVE: ("target_kappa", "qf_width_seed"),
+                        _DRIVE_GAIN_MODE_ADAPTIVE: ("target_kappa",),
                     },
                 ),
                 feedback_generation_choice(
@@ -629,9 +604,9 @@ class QubitFreqBuilder(Builder):
             paths.append(
                 OverridePath(
                     "modules.qub_pulse.gain",
-                    "all_points",
+                    "after_first_point",
                     "generation.drive_gain.drive_gain_mode",
-                    "adaptive drive gain is generated from linewidth feedback",
+                    "adaptive drive gain is generated from linewidth feedback after the initial point",
                 )
             )
         paths.extend(
@@ -671,21 +646,20 @@ class QubitFreqBuilder(Builder):
             knobs,
         )
         predict_freq = base_predict_freq + _predict_freq_correction(env)
-        qfw_factor = snapshot.get("qfw_factor")
-        if qfw_factor is None:
-            qfw_factor = _qfw_factor_seed(knobs)
-        drive_gain = _resolve_drive_gain(
-            str(knobs["drive_gain_mode"]),
-            qfw_factor,
-            float(knobs["qub_gain"]),
-            target_kappa=float(knobs["target_kappa"]),
-            drive_gain_cap=_DRIVE_GAIN_CAP,
-        )
         patches: dict[str, object] = {
             "modules.qub_pulse.freq": predict_freq,
         }
-        if str(knobs["drive_gain_mode"]) == _DRIVE_GAIN_MODE_ADAPTIVE:
-            patches["modules.qub_pulse.gain"] = drive_gain
+        if (
+            str(knobs["drive_gain_mode"]) == _DRIVE_GAIN_MODE_ADAPTIVE
+            and env.flux_idx > 0
+        ):
+            patches["modules.qub_pulse.gain"] = _resolve_drive_gain(
+                str(knobs["drive_gain_mode"]),
+                snapshot.get("qfw_factor"),
+                float(knobs["qub_gain"]),
+                target_kappa=float(knobs["target_kappa"]),
+                drive_gain_cap=_DRIVE_GAIN_CAP,
+            )
         patches.update(readout_module_patches(readout))
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
