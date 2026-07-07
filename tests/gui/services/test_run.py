@@ -19,6 +19,9 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.experiment import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer, current_stop_signal
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -282,6 +285,33 @@ def test_cancel_run_sets_operation_stop_event():
     # The stop_event is set, but the operation only settles when the worker
     # self-judges and the terminal handler releases the lease.
     assert gate.has_active(OperationKind.RUN)
+
+
+def test_cancel_run_stops_experiment_setup_devices_before_first_device():
+    state, tab_id, adapter = _make_state()
+    dev = FakeDevice(fast_mode=True)
+    cfg = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.1)
+    GlobalDeviceManager.register_device("run-dev", dev)
+
+    def run_setup_devices(*_args: Any) -> object:
+        exp_cfg = ExpCfgModel(dev={"run-dev": cfg})
+        setup_devices(exp_cfg, progress=False)
+        return object()
+
+    try:
+        adapter.run.side_effect = run_setup_devices
+        svc, _gate, bg, handles = _make_run_service(state)
+        token = svc.start_run(_make_permit(state, tab_id, adapter))
+        svc.cancel_run()
+        bg.run_work()
+
+        assert dev.get_output() == "off"
+        assert dev.get_value() == 0.0
+        outcome = handles.poll(token)
+        assert outcome is not None
+        assert outcome.status == "cancelled"
+    finally:
+        GlobalDeviceManager.drop_device("run-dev", ignore_error=True)
 
 
 def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():

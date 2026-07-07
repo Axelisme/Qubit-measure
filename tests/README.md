@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-07 — onetone readout_rf adapter tests
+**Last updated:** 2026-07-07 — device setup cancel scope tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -196,6 +196,13 @@ result = _optimize_tree(root, [SomePass()], ctx)
 ### Autofluxdep typed context tests
 
 `tests/experiment/v2/autofluxdep/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
+
+### Device manager tests
+
+`tests/device/test_manager_lock.py` 覆蓋 `GlobalDeviceManager` registry lock 只保護
+registry dict、`get_info` 不被其它 device 的 setup ramp 阻塞、整批 name validation
+fast-fail、以及 `setup_devices(..., cancel_signal=...)` / `device_setup_cancel_scope(...)`
+的協作取消語意。取消測試使用真 `FakeDevice`，不註冊 MagicMock driver。
 
 ### 補充 — `make_mock_soc()`（`lib/zcu_tools/program/v2/mocksoc.py`）
 

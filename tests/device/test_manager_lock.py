@@ -16,7 +16,12 @@ import threading
 from typing import Any, cast
 
 import pytest
-from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
+from zcu_tools.device import (
+    FakeDevice,
+    FakeDeviceInfo,
+    GlobalDeviceManager,
+    device_setup_cancel_scope,
+)
 
 # ---------------------------------------------------------------------------
 # Fixture: clean registry before/after each test
@@ -219,3 +224,93 @@ def test_setup_devices_validates_all_names_before_any_setup() -> None:
         "Device A was set up despite the batch being rejected; "
         "fast-fail before any I/O is broken."
     )
+
+
+def test_setup_devices_validates_names_before_cancel_short_circuit() -> None:
+    dev = _make_fast_device()
+    GlobalDeviceManager.register_device("known", dev)
+    cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
+    cancel_signal = threading.Event()
+    cancel_signal.set()
+
+    with pytest.raises(ValueError, match="unknown"):
+        GlobalDeviceManager.setup_devices(
+            {"known": cfg, "unknown": cfg},
+            cancel_signal=cancel_signal,
+        )
+
+    assert dev.get_output() == "off"
+    assert dev.get_value() == 0.0
+
+
+def test_setup_devices_explicit_cancel_signal_skips_before_first_device() -> None:
+    dev = _make_fast_device()
+    GlobalDeviceManager.register_device("A", dev)
+    cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
+    cancel_signal = threading.Event()
+    cancel_signal.set()
+
+    GlobalDeviceManager.setup_devices({"A": cfg}, cancel_signal=cancel_signal)
+
+    assert dev.get_output() == "off"
+    assert dev.get_value() == 0.0
+
+
+def test_setup_devices_ambient_cancel_signal_skips_before_first_device() -> None:
+    dev = _make_fast_device()
+    GlobalDeviceManager.register_device("A", dev)
+    cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
+    cancel_signal = threading.Event()
+    cancel_signal.set()
+
+    with device_setup_cancel_scope(cancel_signal):
+        GlobalDeviceManager.setup_devices({"A": cfg})
+
+    assert dev.get_output() == "off"
+    assert dev.get_value() == 0.0
+
+
+def test_setup_devices_mid_ramp_cancel_stops_before_next_device() -> None:
+    dev_a = _make_slow_ramp_device()
+    dev_b = _make_fast_device()
+    GlobalDeviceManager.register_device("A", dev_a)
+    GlobalDeviceManager.register_device("B", dev_b)
+    cfg_a = FakeDeviceInfo(
+        address="none", output="on", value=1.0, rampstep=dev_a._rampstep
+    )
+    cfg_b = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
+    cancel_signal = threading.Event()
+    timer = threading.Timer(0.03, cancel_signal.set)
+
+    timer.start()
+    try:
+        GlobalDeviceManager.setup_devices(
+            {"A": cfg_a, "B": cfg_b},
+            cancel_signal=cancel_signal,
+        )
+    finally:
+        timer.cancel()
+
+    assert cancel_signal.is_set()
+    assert dev_a.get_output() == "on"
+    assert 0.0 < dev_a.get_value() < 1.0
+    assert dev_b.get_output() == "off"
+    assert dev_b.get_value() == 0.0
+
+
+def test_setup_devices_explicit_cancel_signal_overrides_ambient_signal() -> None:
+    dev = _make_fast_device()
+    GlobalDeviceManager.register_device("A", dev)
+    cfg = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
+    ambient_cancel = threading.Event()
+    ambient_cancel.set()
+    explicit_cancel = threading.Event()
+
+    with device_setup_cancel_scope(ambient_cancel):
+        GlobalDeviceManager.setup_devices(
+            {"A": cfg},
+            cancel_signal=explicit_cancel,
+        )
+
+    assert dev.get_output() == "on"
+    assert dev.get_value() == pytest.approx(0.5)

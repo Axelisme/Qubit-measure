@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-07-03 — strict device value validation
+**Last updated:** 2026-07-07 — setup_devices cancel scope
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -22,7 +22,12 @@ BaseDevice (ABC, wraps pyvisa session)
       ↑ register_device
 GlobalDeviceManager (classmethods only, module-level registry)
 
-DeviceInfo = Union[YOKOGS200Info, RohdeSchwarzSGS100AInfo, FakeDeviceInfo]  # in __init__.py
+DeviceInfo = Union[
+    YOKOGS200Info,
+    RohdeSchwarzSGS100AInfo,
+    FakeDeviceInfo,
+    AnritsuMG3692Info,
+]  # in __init__.py
 ```
 
 ---
@@ -46,7 +51,7 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 `with_updates(**kwargs)`：拒絕修改 `type` / `address`（protected fields），確保 immutable identity；其他欄位透過 Pydantic `model_validate` 更新。
 
-**`DeviceInfo` TypeAlias**（`__init__.py:11`）：`Union[YOKOGS200Info, RohdeSchwarzSGS100AInfo, FakeDeviceInfo]`，供 `GlobalDeviceManager` API 型別標注用。
+**`DeviceInfo` TypeAlias**（`__init__.py:12`）匯總所有已知 info model，供 `GlobalDeviceManager` API 型別標注用。
 
 ---
 
@@ -113,7 +118,7 @@ Process-wide registry（class-level `_devices` dict）：
 | `drop_device(name, ignore_error=False)` | 移除 |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
-| `setup_devices(dev_cfg: Mapping[str, DeviceInfo], *, progress=True)` | 批次對已註冊裝置呼叫 `setup(cfg)` |
+| `setup_devices(dev_cfg: Mapping[str, DeviceInfo], *, progress=True, cancel_signal=None)` | 批次對已註冊裝置呼叫 `setup(cfg)` |
 | `get_info(name)` | 取得單一 device 的 `get_info()` 結果；找不到 `ValueError` |
 | `get_all_info()` | 把每個 device 的 `get_info()` 收成 dict，方便存檔 |
 
@@ -123,7 +128,13 @@ Process-wide registry（class-level `_devices` dict）：
 
 **`setup_devices` 的兩段式流程**：
 1. **鎖內驗證**：先在 manager 鎖內一次性驗完 `dev_cfg` 裡所有 name 是否已註冊，並取出 instance 引用快照。任一 name 不存在立即 `ValueError`，整批都不執行（fast-fail）。
-2. **鎖外執行**：對快照逐一呼叫 `device.setup(cfg, progress=progress)`。期間 manager 鎖已釋放；busy device 會 raise `DeviceBusyError`（fail-fast，不吞）。
+2. **鎖外執行**：先解析取消訊號，然後對快照逐一呼叫
+   `device.setup(cfg, progress=progress, stop_event=resolved_cancel_signal)`。期間
+   manager 鎖已釋放；busy device 會 raise `DeviceBusyError`（fail-fast，不吞）。
+
+**setup cancel scope**：`cancel_signal` 明確提供 non-`None`
+`threading.Event` 時優先；`cancel_signal=None` 視為未提供，會讀取
+`device_setup_cancel_scope(cancel_signal)` 登記在目前 call stack 的 ambient 訊號；兩者都沒有時維持 `None`。若 resolved cancel signal 在任何 device setup 前已經 set，`setup_devices` 會在完成 registry name validation 後直接 return，不觸碰硬體。這讓 measure-gui run worker 可在不修改每個 experiment call site 的情況下，把 Stop 按鈕的 run-local `threading.Event` 傳給實驗內部的 `setup_devices`。
 
 **`get_info` / `get_all_info`**：在 manager 鎖內僅做 instance 解析（複用 `get_device` / `get_all_devices`），鎖外才呼叫各裝置的 `get_info()`。`get_all_devices` 回傳 dict shallow copy，外部迭代不 race 於並發的 register/drop。
 
@@ -267,7 +278,9 @@ snapshot = GlobalDeviceManager.get_all_info()
 
 - `lib/zcu_tools/device/base.py` — `BaseDeviceInfo`（Pydantic ConfigBase）, `BaseDevice`
 - `lib/zcu_tools/device/manager.py` — `GlobalDeviceManager`
+- `lib/zcu_tools/device/cancel_scope.py` — device setup ambient cancel scope
 - `lib/zcu_tools/device/__init__.py` — `DeviceInfo` Union TypeAlias 與對外匯出
 - `lib/zcu_tools/device/yoko.py` — `YOKOGS200Info`, `YOKOGS200`
 - `lib/zcu_tools/device/sgs100a.py` — `RohdeSchwarzSGS100AInfo`, `RohdeSchwarzSGS100A`
 - `lib/zcu_tools/device/fake.py` — `FakeDeviceInfo`, `FakeDevice`
+- `lib/zcu_tools/device/mg3692.py` — `AnritsuMG3692Info`, `AnritsuMG3692`

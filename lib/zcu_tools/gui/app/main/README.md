@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - cfg form editing lock / operation state ports
+**Last updated:** 2026-07-07 - cfg form editing lock / operation state ports / device setup cancel scope
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -62,7 +62,7 @@ Key ownership rules:
 2. The tab owns a cfg editor draft backed by `LiveModel`.
 3. `GuardService` validates static preconditions and materializes a permit.
 4. The operation policy builds worker thunks with the needed ambient scopes:
-   plotting, progress, and `Schedule` cancellation.
+   plotting, progress, `Schedule` cancellation, and device setup cancellation.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /
@@ -156,10 +156,13 @@ cancellation sets the operation `stop_event`; worker thunks expose it to
 Schedule-based experiments and executors through
 `schedule_stop_scope(StopSignal(stop_event))`, so `ProgramBuilder`,
 `Schedule.repeat/scan/batch`, and executor root schedules observe Stop without a
-global task runner context. Run terminal policy treats the cancel hook as the
-source of user cancellation intent; `Schedule` may also set the same stop flag for
-internal failed/interrupted outcomes, and those are surfaced as failed operation
-outcomes instead of cancelled.
+global task runner context. The same run-local `stop_event` is explicitly bridged
+into `device_setup_cancel_scope(stop_event)`, so experiment-internal
+`setup_devices(...)` calls can stop long device ramps without making the runner
+module know about device policy. Run terminal policy treats the cancel hook as
+the source of user cancellation intent; `Schedule` may also set the same stop flag
+for internal failed/interrupted outcomes, and those are surfaced as failed
+operation outcomes instead of cancelled.
 
 ## Progress And Plotting
 

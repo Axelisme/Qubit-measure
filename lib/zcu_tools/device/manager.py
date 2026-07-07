@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, ClassVar
 
 from .base import BaseDevice
+from .cancel_scope import current_device_setup_cancel_signal
 
 if TYPE_CHECKING:
     from . import DeviceInfo
@@ -51,7 +52,11 @@ class GlobalDeviceManager:
 
     @classmethod
     def setup_devices(
-        cls, dev_cfg: Mapping[str, DeviceInfo], *, progress: bool = True
+        cls,
+        dev_cfg: Mapping[str, DeviceInfo],
+        *,
+        progress: bool = True,
+        cancel_signal: threading.Event | None = None,
     ) -> None:
         # Validate all names and snapshot references under the registry lock so
         # that the check-then-act is atomic with respect to concurrent
@@ -67,10 +72,22 @@ class GlobalDeviceManager:
                 (cls._devices[name], cfg) for name, cfg in dev_cfg.items()
             ]
 
+        resolved_cancel_signal = (
+            cancel_signal
+            if cancel_signal is not None
+            else current_device_setup_cancel_signal()
+        )
+
         # Per-instance op_lock serializes each setup() call. Busy devices raise
         # DeviceBusyError immediately (fail-fast); we do not swallow that error.
         for device, cfg in snapshot:
-            device.setup(cfg, progress=progress)
+            if resolved_cancel_signal is not None and resolved_cancel_signal.is_set():
+                return
+            device.setup(
+                cfg,
+                progress=progress,
+                stop_event=resolved_cancel_signal,
+            )
 
     @classmethod
     def get_info(cls, name: str) -> DeviceInfo:

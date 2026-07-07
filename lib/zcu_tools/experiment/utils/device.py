@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from typing import Literal
 
@@ -57,10 +58,19 @@ def set_output_in_dev_cfg(
     get_labeled_device_cfg(devs_cfg, label).set_output(output)
 
 
-def setup_devices(cfg: ExpCfgModel, *, progress: bool = False) -> None:
+def setup_devices(
+    cfg: ExpCfgModel,
+    *,
+    progress: bool = False,
+    cancel_signal: threading.Event | None = None,
+) -> None:
     """Apply device setup when the experiment config contains a dev section."""
 
     if cfg.dev is None:
         return
 
-    GlobalDeviceManager.setup_devices(cfg.dev, progress=progress)
+    GlobalDeviceManager.setup_devices(
+        cfg.dev,
+        progress=progress,
+        cancel_signal=cancel_signal,
+    )
