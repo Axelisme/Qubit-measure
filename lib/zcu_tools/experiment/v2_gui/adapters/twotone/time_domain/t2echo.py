@@ -97,9 +97,9 @@ class T2EchoAdapter(
         ),
         expects_ml=(
             "Needs both a qubit pi-pulse module (prefers library 'pi_amp' / "
-            "'pi_len') and a pi/2-pulse module (prefers 'pi2_amp' / 'pi2_len', "
-            "degrading to 'pi_amp' / 'pi_len'); each falls back to a blank "
-            "inline pulse. Plus a readout module (calibrated 'readout_dpm' / "
+            "'pi_len') and a pi/2-pulse module (prefers 'pi2_amp' / 'pi2_len'); "
+            "each falls back to a blank inline pulse. Plus a readout module "
+            "(calibrated 'readout_dpm' / "
             "'readout_rf' / 'readout' / 'res_readout', else a blank "
             "pulse-readout referencing 'ro_waveform' when present). Optional "
             "reset references a library reset ('reset_bath' / 'reset_10' / "

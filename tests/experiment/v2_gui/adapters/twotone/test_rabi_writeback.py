@@ -39,7 +39,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefValue,
     WritebackRequest,
 )
-from zcu_tools.meta_tool import MetaDict
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.twotone import TwoToneModuleCfg
@@ -49,14 +49,20 @@ from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 # ---------------------------------------------------------------------------
 
 
-def _make_qub_pulse(gain: float = 0.5, length: float = 0.1) -> PulseCfg:
+def _make_qub_pulse(
+    gain: float = 0.5,
+    length: float = 0.1,
+    *,
+    ch: int = 0,
+    freq: float = 3000.0,
+) -> PulseCfg:
     """Construct a minimal PulseCfg with a const waveform for testing."""
     return PulseCfg(
         type="pulse",
         waveform=ConstWaveformCfg(style="const", length=length),
-        ch=0,
+        ch=ch,
         nqz=1,
-        freq=3000.0,
+        freq=freq,
         gain=gain,
     )
 
@@ -352,8 +358,14 @@ def _make_ctx_with_md(**md_values: float) -> MagicMock:
     for key, value in md_values.items():
         setattr(md, key, value)
     ctx.md = md
-    ctx.ml = MagicMock()
+    ctx.ml = ModuleLibrary()
     ctx.qub_name = "Q1"
+    return ctx
+
+
+def _make_ctx_with_ml(**modules: PulseCfg) -> MagicMock:
+    ctx = _make_ctx_with_md()
+    ctx.ml.register_module(**modules)
     return ctx
 
 
@@ -380,6 +392,15 @@ def _amp_qub_waveform_length(ctx: MagicMock) -> DirectValue | EvalValue:
     length = waveform.value.fields["length"]
     assert isinstance(length, DirectValue | EvalValue)
     return length
+
+
+def _amp_qub_pulse(ctx: MagicMock) -> ModuleRefValue:
+    val = AmpRabiAdapter().make_default_value(ctx)
+    modules = val.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    qub_pulse = modules.fields["qub_pulse"]
+    assert isinstance(qub_pulse, ModuleRefValue)
+    return qub_pulse
 
 
 class TestAmpRabiDefaultValueGainSeed:
@@ -419,6 +440,34 @@ class TestAmpRabiDefaultValueGainSeed:
         length = _amp_qub_waveform_length(ctx)
         assert length == DirectValue(1.1)
 
+    def test_pi_len_module_inherits_pulse_and_only_overrides_gain(self) -> None:
+        ctx = _make_ctx_with_ml(
+            pi_len=_make_qub_pulse(gain=0.42, length=0.24, ch=5, freq=5100.0),
+            pi_amp=_make_qub_pulse(gain=0.61, length=0.31, ch=6, freq=5200.0),
+        )
+
+        qub_pulse = _amp_qub_pulse(ctx)
+
+        assert qub_pulse.chosen_key == "pi_len"
+        assert qub_pulse.value.fields["gain"] == DirectValue(0.0)
+        assert qub_pulse.value.fields["ch"] == DirectValue(5)
+        assert qub_pulse.value.fields["freq"] == DirectValue(5100.0)
+        waveform = qub_pulse.value.fields["waveform"]
+        assert isinstance(waveform, WaveformRefValue)
+        assert waveform.value.fields["length"] == DirectValue(0.24)
+
+    def test_pi_amp_module_is_secondary_pulse_seed(self) -> None:
+        ctx = _make_ctx_with_ml(
+            pi_amp=_make_qub_pulse(gain=0.61, length=0.31, ch=6, freq=5200.0),
+        )
+
+        qub_pulse = _amp_qub_pulse(ctx)
+
+        assert qub_pulse.chosen_key == "pi_amp"
+        assert qub_pulse.value.fields["gain"] == DirectValue(0.0)
+        assert qub_pulse.value.fields["ch"] == DirectValue(6)
+        assert qub_pulse.value.fields["freq"] == DirectValue(5200.0)
+
 
 # ---------------------------------------------------------------------------
 # LenRabiAdapter — make_default_value length-sweep seed
@@ -457,6 +506,15 @@ def _len_qub_gain(ctx: MagicMock) -> DirectValue:
     return gain
 
 
+def _len_qub_pulse(ctx: MagicMock) -> ModuleRefValue:
+    val = LenRabiAdapter().make_default_value(ctx)
+    modules = val.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    qub_pulse = modules.fields["qub_pulse"]
+    assert isinstance(qub_pulse, ModuleRefValue)
+    return qub_pulse
+
+
 class TestLenRabiDefaultValueLengthSeed:
     def test_pi_len_present_yields_eval_expr(self) -> None:
         # When md has pi_len, the stop edge must be an EvalValue referencing
@@ -479,3 +537,34 @@ class TestLenRabiDefaultValueLengthSeed:
 
     def test_default_qubit_gain_matches_notebook_seed(self) -> None:
         assert _len_qub_gain(_make_ctx_with_md()) == DirectValue(0.3)
+
+    def test_pi_len_module_inherits_pulse_and_only_overrides_length(self) -> None:
+        ctx = _make_ctx_with_ml(
+            pi_len=_make_qub_pulse(gain=0.42, length=0.24, ch=5, freq=5100.0),
+            pi_amp=_make_qub_pulse(gain=0.61, length=0.31, ch=6, freq=5200.0),
+        )
+
+        qub_pulse = _len_qub_pulse(ctx)
+
+        assert qub_pulse.chosen_key == "pi_len"
+        assert qub_pulse.value.fields["gain"] == DirectValue(0.42)
+        assert qub_pulse.value.fields["ch"] == DirectValue(5)
+        assert qub_pulse.value.fields["freq"] == DirectValue(5100.0)
+        waveform = qub_pulse.value.fields["waveform"]
+        assert isinstance(waveform, WaveformRefValue)
+        assert waveform.value.fields["length"] == DirectValue(1.0)
+
+    def test_pi_amp_module_is_secondary_pulse_seed(self) -> None:
+        ctx = _make_ctx_with_ml(
+            pi_amp=_make_qub_pulse(gain=0.61, length=0.31, ch=6, freq=5200.0),
+        )
+
+        qub_pulse = _len_qub_pulse(ctx)
+
+        assert qub_pulse.chosen_key == "pi_amp"
+        assert qub_pulse.value.fields["gain"] == DirectValue(0.61)
+        assert qub_pulse.value.fields["ch"] == DirectValue(6)
+        assert qub_pulse.value.fields["freq"] == DirectValue(5200.0)
+        waveform = qub_pulse.value.fields["waveform"]
+        assert isinstance(waveform, WaveformRefValue)
+        assert waveform.value.fields["length"] == DirectValue(1.0)

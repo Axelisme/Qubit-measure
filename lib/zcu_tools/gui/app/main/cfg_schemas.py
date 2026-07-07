@@ -15,6 +15,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
+    ModuleRefValue,
     ScalarValue,
     WaveformRefValue,
     make_default_value,
@@ -165,6 +166,14 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
     )
 
 
+def _pulse_ref_to_value(cfg: object) -> ModuleRefValue:
+    if isinstance(cfg, dict):
+        value = _pulse_to_value(cfg)
+    else:
+        value = make_default_value(make_pulse_spec())
+    return ModuleRefValue(chosen_key="<Custom:Pulse>", value=value)
+
+
 def _direct_readout_to_value(cfg: dict) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
@@ -243,15 +252,9 @@ def _bath_reset_to_value(cfg: dict) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
             "type": DirectValue("reset/bath"),
-            "cavity_tone_cfg": _pulse_to_value(cav)
-            if isinstance(cav, dict)
-            else make_default_value(make_pulse_spec()),
-            "qubit_tone_cfg": _pulse_to_value(qub)
-            if isinstance(qub, dict)
-            else make_default_value(make_pulse_spec()),
-            "pi2_cfg": _pulse_to_value(pi2)
-            if isinstance(pi2, dict)
-            else make_default_value(make_pulse_spec()),
+            "cavity_tone_cfg": _pulse_ref_to_value(cav),
+            "qubit_tone_cfg": _pulse_ref_to_value(qub),
+            "pi2_cfg": _pulse_ref_to_value(pi2),
             "relax_delay": _val(cfg, "relax_delay"),
         }
     )

@@ -100,8 +100,8 @@ class T2RamseyAdapter(
         ),
         expects_ml=(
             "Needs a qubit pi/2-pulse module — references a calibrated library "
-            "entry ('pi2_amp' / 'pi2_len', degrading to 'pi_amp' / 'pi_len') "
-            "when present, else a blank inline pulse — and a readout module "
+            "entry ('pi2_amp' / 'pi2_len') when present, else a blank inline "
+            "pulse — and a readout module "
             "(calibrated 'readout_dpm' / 'readout_rf' / 'readout' / "
             "'res_readout', else a blank pulse-readout referencing "
             "'ro_waveform' when present). Optional reset references a library "

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-07 — onetone readout_rf writeback
+**Last updated:** 2026-07-07 — Reset bath nested pulse refs
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -43,6 +43,17 @@ ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline bl
 Adapter defaults 以 notebook bring-up seed 與目前 MetaDict 校準值共同定義：有可信 md 時保持
 md-linked expression，缺校準時退回保守 notebook seed；guide prose 需描述這個 operator-facing
 fallback policy，而不是臆測固定硬體值。
+
+qubit 類 Pulse role 的 channel seed 依 setup alias fallback `qub_ch → qub_1_4_ch → qub_4_5_ch`
+解析，最後才退回 `0`。Rabi 專用 drive pulse 預設採 ModuleLibrary `pi_len → pi_amp`，讓
+`len_rabi` / `amp_rabi` 優先沿用已校準的 pi pulse，再由各 adapter 的 spec lock 覆寫 sweep-owned
+欄位（`len_rabi` 覆寫 waveform length，`amp_rabi` 覆寫 gain）；library 缺項時才使用 blank pulse
+與 notebook fallback seed。一般 state-prep pi pulse role 維持 `pi_amp → pi_len`。Pi/2 pulse role
+只採 `pi2_amp → pi2_len`，不降級到 pi pulse role。
+
+`bath_reset` role 的 `cavity_tone_cfg`、`qubit_tone_cfg`、`pi2_cfg` 都是 nested pulse refs：
+前兩者預設為 custom pulse 並由 bath reset seed/md 填值，`pi2_cfg` 預設採 pi/2 pulse role
+（`pi2_amp → pi2_len`）讓 reset tomography pulse 可直接引用既有校準 module。
 
 `twotone/freq` 的 qubit-drive module 是 spectroscopy probe，不是 state-prep init pulse；
 UI label 使用 `Probe Pulse`，欄位 key 仍維持 runtime/notebook contract 的 `qub_pulse`。

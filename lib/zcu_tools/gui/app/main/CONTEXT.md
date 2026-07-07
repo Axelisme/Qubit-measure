@@ -115,7 +115,7 @@ _Avoid_: 可變 SpecBuilder 鏡像、`.build()`/`.done()` 收尾、把 spec meth
 _Avoid_: 在 default factory 摻入 spec/鎖定邏輯、把覆寫寫成一長串 factory 參數
 
 **角色 default（語義 wrapper）**:
-對齊 notebook 真實角色的薄 wrapper，把「該角色的固定 fallback 策略」封進名字，使用上是獨立 helper，實作上委派少數通用 default factory：`default_pi`（優先 pi_amp→pi_len）、`default_pi2`（優先 pi2_amp→pi2_len→降級 pi）、`default_qub_probe`（blank pulse + ch/waveform/freq value 預設）、`default_res_probe`、`default_reset`。fallback 是 notebook 觀察到的**一致策略**（非單純 rename）。**default factory 零鎖定**：只產 value 預設，不預設鎖任何欄位（即使高頻），鎖定一律由 adapter 在 cfg_spec 用 lock_literal 宣告——鎖屬 spec 層、factory 屬 value 層，不跨層。
+對齊 notebook 真實角色的薄 wrapper，把「該角色的固定 fallback 策略」封進名字，使用上是獨立 helper，實作上委派少數通用 default factory：`default_pi`（優先 pi_amp→pi_len）、`default_rabi`（優先 pi_len→pi_amp）、`default_pi2`（優先 pi2_amp→pi2_len）、`default_qub_probe`（blank pulse + ch/waveform/freq value 預設）、`default_res_probe`、`default_reset`。fallback 是 notebook 觀察到的**一致策略**（非單純 rename）。**default factory 零鎖定**：只產 value 預設，不預設鎖任何欄位（即使高頻），鎖定一律由 adapter 在 cfg_spec 用 lock_literal 宣告——鎖屬 spec 層、factory 屬 value 層，不跨層。
 _Avoid_: 每個角色重寫一份 factory（應委派通用 helper + 填 preferred_names/結構）、把角色 wrapper 當成只換名（它封裝 fallback 策略）、在 default factory 預設鎖欄位（即使高頻也歸 adapter 的 cfg_spec）
 
 **Value OO 覆寫（value 層，與 spec 層不對稱）**:

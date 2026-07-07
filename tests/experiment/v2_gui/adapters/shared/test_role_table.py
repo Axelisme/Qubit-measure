@@ -24,6 +24,8 @@ from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
 from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue, EvalValue
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
 from zcu_tools.gui.session.value_lookup import ValueKey, ValueRegistry
+from zcu_tools.program.v2 import PulseCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from .test_role_default_characterization import (
     _POPULATED_MD,
@@ -83,6 +85,50 @@ def test_readout_dpm_freq_falls_back_to_live_r_f_when_best_ro_freq_absent() -> N
     assert pulse_freq.expr == "r_f"
     assert isinstance(ro_freq, EvalValue)
     assert ro_freq.expr == "r_f"
+
+
+@pytest.mark.parametrize(
+    ("md", "expected"),
+    [
+        ({"qub_ch": 3, "qub_1_4_ch": 4, "qub_4_5_ch": 5}, EvalValue("qub_ch")),
+        ({"qub_1_4_ch": 4, "qub_4_5_ch": 5}, EvalValue("qub_1_4_ch")),
+        ({"qub_4_5_ch": 5}, EvalValue("qub_4_5_ch")),
+        ({}, DirectValue(0)),
+    ],
+)
+def test_qubit_pulse_channel_follows_wiring_alias_fallback(
+    md: dict[str, int], expected: DirectValue | EvalValue
+) -> None:
+    node = role_blank(ROLE_TABLE["qub_probe"], _mk_ctx(md))
+
+    assert node.value.fields["ch"] == expected
+
+
+def _pulse(gain: float, length: float) -> PulseCfg:
+    return PulseCfg(
+        type="pulse",
+        waveform=ConstWaveformCfg(style="const", length=length),
+        ch=0,
+        nqz=2,
+        freq=4100.0,
+        gain=gain,
+    )
+
+
+def test_pi_and_rabi_roles_have_distinct_library_priority() -> None:
+    ctx = _mk_ctx({})
+    ctx.ml.modules = {
+        "pi_amp": _pulse(gain=0.6, length=0.3),
+        "pi_len": _pulse(gain=0.4, length=0.2),
+    }
+
+    pi = role_ref(ROLE_TABLE["pi_pulse"], ctx)
+    rabi = role_ref(ROLE_TABLE["rabi_pulse"], ctx)
+
+    assert pi is not None
+    assert pi.chosen_key == "pi_amp"
+    assert rabi is not None
+    assert rabi.chosen_key == "pi_len"
 
 
 def test_role_source_seed_resolves_against_value_registry() -> None:

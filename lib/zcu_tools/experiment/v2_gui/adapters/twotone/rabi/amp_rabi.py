@@ -32,6 +32,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    ModuleRefValue,
     ModuleWriteback,
     ParamMeta,
     SweepSpec,
@@ -42,6 +43,16 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 AmpRabiRunResult: TypeAlias = AmpRabiResult
+
+
+def _uses_blank_qub_pulse(value: CfgSectionValue) -> bool:
+    modules = value.fields.get("modules")
+    if not isinstance(modules, CfgSectionValue):
+        raise RuntimeError("AmpRabi default value is missing modules section")
+    qub_pulse = modules.fields.get("qub_pulse")
+    if not isinstance(qub_pulse, ModuleRefValue):
+        raise RuntimeError("AmpRabi default value is missing qub_pulse module ref")
+    return qub_pulse.chosen_key == "<Custom:Pulse>"
 
 
 @dataclass
@@ -90,8 +101,9 @@ class AmpRabiAdapter(
             "'timeFly' for the readout trigger offset (~0–1 us)."
         ),
         expects_ml=(
-            "Needs a qubit drive-pulse module (defaults to a blank inline "
-            "pulse) and a readout module — references a calibrated library "
+            "Needs a qubit drive-pulse module — prefers calibrated library "
+            "pi pulses ('pi_len' / 'pi_amp') and falls back to a blank inline "
+            "pulse — and a readout module that references a calibrated library "
             "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
             "'res_readout') when present, else a blank pulse-readout that "
             "references the 'ro_waveform' waveform when one exists. Optional "
@@ -123,7 +135,9 @@ class AmpRabiAdapter(
                 # The sweep axis owns the qubit-drive gain (set_param
                 # ("gain") at run); lock it so the form does not show a
                 # field the sweep silently overwrites.
-                "qub_pulse": make_pulse_module_spec().lock_literal("gain", 0.0),
+                "qub_pulse": make_pulse_module_spec(label="Rabi Pulse").lock_literal(
+                    "gain", 0.0
+                ),
                 "readout": make_readout_module_spec(),
             },
             sweep={"gain": SweepSpec(label="Gain (a.u.)")},
@@ -132,18 +146,14 @@ class AmpRabiAdapter(
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         # gain sweep spans up to 1.2*pi_gain (md-linked) → an EvalValue stop edge,
         # so the sweep is pre-built and mounted via set_sweep.
-        return (
+        value = (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
             )
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .set(
-                "modules.qub_pulse.waveform.length",
-                md_eval_scaled_or_value(ctx, "pi_len", factor=1.01, fallback=1.1),
-            )
+            .role("modules.qub_pulse", "rabi_pulse")
             .role("modules.readout", "readout")
             .set_sweep(
                 "sweep.gain",
@@ -157,6 +167,12 @@ class AmpRabiAdapter(
             )
             .build()
         )
+        if _uses_blank_qub_pulse(value):
+            value.with_field(
+                "modules.qub_pulse.waveform.length",
+                md_eval_scaled_or_value(ctx, "pi_len", factor=1.01, fallback=1.1),
+            )
+        return value
 
     def analyze(
         self, req: AnalyzeRequest[AmpRabiRunResult, AmpRabiAnalyzeParams]

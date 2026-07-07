@@ -65,7 +65,9 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
 )
 from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
+    CfgSectionValue,
     MetaDictWriteback,
+    ModuleRefValue,
     ModuleWriteback,
     RunRequest,
     WritebackRequest,
@@ -107,6 +109,12 @@ def _make_req(ml: MagicMock | None = None) -> RunRequest:
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
     return schema.to_raw_dict(None, req.ml)
+
+
+def _pulse_ref_section(node: object) -> CfgSectionValue:
+    assert isinstance(node, ModuleRefValue)
+    assert isinstance(node.value, CfgSectionValue)
+    return node.value
 
 
 def _make_pulse(freq: float = 100.0, gain: float = 0.5) -> PulseCfg:
@@ -883,16 +891,42 @@ def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
     assert isinstance(tested, ModuleRefValue)
-    cavity = tested.value.fields["cavity_tone_cfg"]
-    assert isinstance(cavity, CfgSectionValue)
+    cavity = _pulse_ref_section(tested.value.fields["cavity_tone_cfg"])
     # The sweep owns cavity freq + gain → locked to 0.0 (notebook: not used).
     assert cavity.fields["freq"] == DirectValue(0.0)
     assert cavity.fields["gain"] == DirectValue(0.0)
     # The domain adds the 4-point phase axis onto pi2_cfg.phase → locked to the
     # notebook base offset (90 deg).
-    pi2 = tested.value.fields["pi2_cfg"]
-    assert isinstance(pi2, CfgSectionValue)
+    pi2 = _pulse_ref_section(tested.value.fields["pi2_cfg"])
     assert pi2.fields["phase"] == DirectValue(90.0)
+
+
+def test_bath_reset_default_uses_nested_refs_and_pi2_role_priority() -> None:
+    from zcu_tools.gui.app.main.adapter import DirectValue
+
+    ml = _make_ml()
+    ml.modules = {
+        "pi2_amp": _make_pulse(freq=3210.0, gain=0.21),
+        "pi2_len": _make_pulse(freq=4321.0, gain=0.11),
+    }
+    schema = BathFreqGainAdapter().make_default_cfg(_make_ctx(ml))
+    modules = schema.value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    tested = modules.fields["tested_reset"]
+    assert isinstance(tested, ModuleRefValue)
+
+    cavity_ref = tested.value.fields["cavity_tone_cfg"]
+    qubit_ref = tested.value.fields["qubit_tone_cfg"]
+    pi2_ref = tested.value.fields["pi2_cfg"]
+    assert isinstance(cavity_ref, ModuleRefValue)
+    assert cavity_ref.chosen_key == "<Custom:Pulse>"
+    assert isinstance(qubit_ref, ModuleRefValue)
+    assert qubit_ref.chosen_key == "<Custom:Pulse>"
+    assert isinstance(pi2_ref, ModuleRefValue)
+    assert pi2_ref.chosen_key == "pi2_amp"
+
+    pi2 = _pulse_ref_section(pi2_ref)
+    assert pi2.fields["freq"] == DirectValue(3210.0)
 
 
 # The four md keys both gated bath variants need (cavity freq/gain + the two
@@ -918,7 +952,7 @@ def _bath_snapshot() -> Any:
 
 
 def _assert_reset_bath_pair(items: list[Any]) -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue, DirectValue
+    from zcu_tools.gui.app.main.adapter import CfgSchema, DirectValue
 
     mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
     by_name = {it.target_name: it for it in mod_items}
@@ -934,12 +968,10 @@ def _assert_reset_bath_pair(items: list[Any]) -> None:
     for target, phase in [("reset_bath", 12.5), ("reset_bath_e", 192.5)]:
         edit_schema = by_name[target].edit_schema
         assert isinstance(edit_schema, CfgSchema)
-        pi2 = edit_schema.value.fields["pi2_cfg"]
-        assert isinstance(pi2, CfgSectionValue)
+        pi2 = _pulse_ref_section(edit_schema.value.fields["pi2_cfg"])
         assert pi2.fields["phase"] == DirectValue(phase)
         # Cavity freq/gain taken from md (overwriting the swept 0.0).
-        cavity = edit_schema.value.fields["cavity_tone_cfg"]
-        assert isinstance(cavity, CfgSectionValue)
+        cavity = _pulse_ref_section(edit_schema.value.fields["cavity_tone_cfg"])
         assert cavity.fields["freq"] == DirectValue(5500.0)
         assert cavity.fields["gain"] == DirectValue(0.7)
 
@@ -1075,8 +1107,7 @@ def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
     assert isinstance(tested, ModuleRefValue)
-    cavity = tested.value.fields["cavity_tone_cfg"]
-    assert isinstance(cavity, CfgSectionValue)
+    cavity = _pulse_ref_section(tested.value.fields["cavity_tone_cfg"])
     # Cavity freq/gain held md-linked so the cfg snapshot carries the calibrated
     # reset forward (D2(a)).
     assert isinstance(cavity.fields["freq"], EvalValue)
@@ -1084,8 +1115,7 @@ def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
     assert isinstance(cavity.fields["gain"], EvalValue)
     assert cast(EvalValue, cavity.fields["gain"]).expr == "bathreset_gain"
     # The domain replaces pi2_cfg.phase with its own sweep → locked off the form.
-    pi2 = tested.value.fields["pi2_cfg"]
-    assert isinstance(pi2, CfgSectionValue)
+    pi2 = _pulse_ref_section(tested.value.fields["pi2_cfg"])
     assert pi2.fields["phase"] == DirectValue(90.0)
 
     # D5: no scalar fit → no md writeback; with empty md the gated module proposal
@@ -1132,12 +1162,10 @@ def test_bath_phase_locks_pi2_phase_and_holds_cavity() -> None:
     tested = modules.fields["tested_reset"]
     assert isinstance(tested, ModuleRefValue)
     # The sweep owns pi2_cfg.phase → locked to 0.0.
-    pi2 = tested.value.fields["pi2_cfg"]
-    assert isinstance(pi2, CfgSectionValue)
+    pi2 = _pulse_ref_section(tested.value.fields["pi2_cfg"])
     assert pi2.fields["phase"] == DirectValue(0.0)
     # Cavity still carries the calibrated freq/gain forward (D2(a)).
-    cavity = tested.value.fields["cavity_tone_cfg"]
-    assert isinstance(cavity, CfgSectionValue)
+    cavity = _pulse_ref_section(tested.value.fields["cavity_tone_cfg"])
     assert isinstance(cavity.fields["freq"], EvalValue)
     assert cast(EvalValue, cavity.fields["freq"]).expr == "bathreset_freq"
 

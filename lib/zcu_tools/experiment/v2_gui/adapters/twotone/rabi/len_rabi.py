@@ -33,6 +33,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
+    ModuleRefValue,
     ModuleWriteback,
     ParamMeta,
     RunRequest,
@@ -45,6 +46,16 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 LenRabiRunResult: TypeAlias = LenRabiResult
+
+
+def _uses_blank_qub_pulse(value: CfgSectionValue) -> bool:
+    modules = value.fields.get("modules")
+    if not isinstance(modules, CfgSectionValue):
+        raise RuntimeError("LenRabi default value is missing modules section")
+    qub_pulse = modules.fields.get("qub_pulse")
+    if not isinstance(qub_pulse, ModuleRefValue):
+        raise RuntimeError("LenRabi default value is missing qub_pulse module ref")
+    return qub_pulse.chosen_key == "<Custom:Pulse>"
 
 
 @dataclass
@@ -92,8 +103,9 @@ class LenRabiAdapter(
             "'timeFly' for the readout trigger offset (~0–1 us)."
         ),
         expects_ml=(
-            "Needs a qubit drive-pulse module (defaults to a blank inline "
-            "pulse) and a readout module — references a calibrated library "
+            "Needs a qubit drive-pulse module — prefers calibrated library "
+            "pi pulses ('pi_len' / 'pi_amp') and falls back to a blank inline "
+            "pulse — and a readout module that references a calibrated library "
             "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
             "'res_readout') when present, else a blank pulse-readout that "
             "references the 'ro_waveform' waveform when one exists. Optional "
@@ -124,7 +136,7 @@ class LenRabiAdapter(
         return build_exp_spec(
             modules={
                 "reset": make_reset_module_spec(optional=True),
-                "qub_pulse": make_pulse_module_spec().lock_literal(
+                "qub_pulse": make_pulse_module_spec(label="Rabi Pulse").lock_literal(
                     "waveform.length", 1.0
                 ),
                 "readout": make_readout_module_spec(),
@@ -133,15 +145,14 @@ class LenRabiAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        return (
+        value = (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
             )
             # optional → None (disabled) when no library reset (ADR-0010)
             .role("modules.reset", "reset", Init.DISABLED)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
-            .set("modules.qub_pulse.gain", 0.3)
+            .role("modules.qub_pulse", "rabi_pulse")
             .role("modules.readout", "readout")
             .set_sweep(
                 "sweep.length",
@@ -155,6 +166,9 @@ class LenRabiAdapter(
             )
             .build()
         )
+        if _uses_blank_qub_pulse(value):
+            value.with_field("modules.qub_pulse.gain", 0.3)
+        return value
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         cfg = self.build_exp_cfg(raw_cfg, req)

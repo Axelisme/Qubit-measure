@@ -1,283 +1,307 @@
 {
  "bath_reset": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Bath Reset>",
+   "ov": false,
    "v": {
-    "cavity_tone_cfg": {
-     "ch": {
-      "D": 0
-     },
-     "freq": {
-      "D": 6000.0
-     },
-     "gain": {
-      "D": 0.1
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
-      "D": 0.0
-     },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
-     }
+    "type": {
+     "D": "reset/bath"
     },
-    "pi2_cfg": {
-     "ch": {
-      "D": 0
-     },
-     "freq": {
-      "D": 4000.0
-     },
-     "gain": {
-      "D": 0.2
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
-      "D": 0.0
-     },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
+    "cavity_tone_cfg": {
+     "ref": "<Custom:Pulse>",
+     "ov": false,
+     "v": {
+      "type": {
+       "D": "pulse"
+      },
+      "waveform": {
+       "ref": "<Custom:Const>",
+       "ov": false,
+       "v": {
+        "style": {
+         "D": "const"
+        },
+        "length": {
+         "D": 1.0
+        }
        }
+      },
+      "ch": {
+       "D": 0
+      },
+      "nqz": {
+       "D": 2
+      },
+      "freq": {
+       "D": 6000.0
+      },
+      "gain": {
+       "D": 0.1
+      },
+      "phase": {
+       "D": 0.0
+      },
+      "pre_delay": {
+       "D": 0.0
+      },
+      "post_delay": {
+       "D": 0.0
+      },
+      "mixer_freq": {
+       "D": null
       }
      }
     },
     "qubit_tone_cfg": {
-     "ch": {
-      "D": 0
-     },
-     "freq": {
-      "D": 4000.0
-     },
-     "gain": {
-      "D": 0.2
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
-      "D": 0.0
-     },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
+     "ref": "<Custom:Pulse>",
+     "ov": false,
+     "v": {
+      "type": {
+       "D": "pulse"
+      },
+      "waveform": {
+       "ref": "<Custom:Const>",
+       "ov": false,
+       "v": {
+        "style": {
+         "D": "const"
+        },
+        "length": {
+         "D": 1.0
+        }
        }
+      },
+      "ch": {
+       "D": 0
+      },
+      "nqz": {
+       "D": 2
+      },
+      "freq": {
+       "D": 4000.0
+      },
+      "gain": {
+       "D": 0.2
+      },
+      "phase": {
+       "D": 0.0
+      },
+      "pre_delay": {
+       "D": 0.0
+      },
+      "post_delay": {
+       "D": 0.0
+      },
+      "mixer_freq": {
+       "D": null
       }
      }
     },
-    "type": {
-     "D": "reset/bath"
+    "pi2_cfg": {
+     "ref": "<Custom:Pulse>",
+     "ov": false,
+     "v": {
+      "type": {
+       "D": "pulse"
+      },
+      "waveform": {
+       "ref": "<Custom:Const>",
+       "ov": false,
+       "v": {
+        "style": {
+         "D": "const"
+        },
+        "length": {
+         "D": 5.1
+        }
+       }
+      },
+      "ch": {
+       "D": 0
+      },
+      "nqz": {
+       "D": 2
+      },
+      "freq": {
+       "D": 4000.0
+      },
+      "gain": {
+       "D": 0.1
+      },
+      "phase": {
+       "D": 0.0
+      },
+      "pre_delay": {
+       "D": 0.0
+      },
+      "post_delay": {
+       "D": 0.0
+      },
+      "mixer_freq": {
+       "D": null
+      }
+     }
     }
    }
   },
   "blank/pop": {
-   "ov": false,
    "ref": "<Custom:Bath Reset>",
+   "ov": false,
    "v": {
-    "cavity_tone_cfg": {
-     "ch": {
-      "E": "res_ch",
-      "r": null
-     },
-     "freq": {
-      "E": "r_f",
-      "r": null
-     },
-     "gain": {
-      "D": 0.1
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
-      "D": 0.0
-     },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
-     }
+    "type": {
+     "D": "reset/bath"
     },
-    "pi2_cfg": {
-     "ch": {
-      "E": "qub_ch",
-      "r": null
-     },
-     "freq": {
-      "E": "q_f",
-      "r": null
-     },
-     "gain": {
-      "D": 0.2
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
-      "D": 0.0
-     },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
+    "cavity_tone_cfg": {
+     "ref": "<Custom:Pulse>",
+     "ov": false,
+     "v": {
+      "type": {
+       "D": "pulse"
+      },
+      "waveform": {
+       "ref": "<Custom:Const>",
+       "ov": false,
+       "v": {
+        "style": {
+         "D": "const"
+        },
+        "length": {
+         "D": 1.0
+        }
        }
+      },
+      "ch": {
+       "E": "res_ch",
+       "r": null
+      },
+      "nqz": {
+       "D": 2
+      },
+      "freq": {
+       "E": "r_f",
+       "r": null
+      },
+      "gain": {
+       "D": 0.1
+      },
+      "phase": {
+       "D": 0.0
+      },
+      "pre_delay": {
+       "D": 0.0
+      },
+      "post_delay": {
+       "D": 0.0
+      },
+      "mixer_freq": {
+       "D": null
       }
      }
     },
     "qubit_tone_cfg": {
-     "ch": {
-      "E": "qub_ch",
-      "r": null
-     },
-     "freq": {
-      "E": "q_f",
-      "r": null
-     },
-     "gain": {
-      "D": 0.2
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
-      "D": 0.0
-     },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
+     "ref": "<Custom:Pulse>",
+     "ov": false,
+     "v": {
+      "type": {
+       "D": "pulse"
+      },
+      "waveform": {
+       "ref": "<Custom:Const>",
+       "ov": false,
+       "v": {
+        "style": {
+         "D": "const"
+        },
+        "length": {
+         "D": 1.0
+        }
        }
+      },
+      "ch": {
+       "E": "qub_ch",
+       "r": null
+      },
+      "nqz": {
+       "D": 2
+      },
+      "freq": {
+       "E": "q_f",
+       "r": null
+      },
+      "gain": {
+       "D": 0.2
+      },
+      "phase": {
+       "D": 0.0
+      },
+      "pre_delay": {
+       "D": 0.0
+      },
+      "post_delay": {
+       "D": 0.0
+      },
+      "mixer_freq": {
+       "D": null
       }
      }
     },
-    "type": {
-     "D": "reset/bath"
+    "pi2_cfg": {
+     "ref": "<Custom:Pulse>",
+     "ov": false,
+     "v": {
+      "type": {
+       "D": "pulse"
+      },
+      "waveform": {
+       "ref": "<Custom:Const>",
+       "ov": false,
+       "v": {
+        "style": {
+         "D": "const"
+        },
+        "length": {
+         "D": 5.1
+        }
+       }
+      },
+      "ch": {
+       "E": "qub_ch",
+       "r": null
+      },
+      "nqz": {
+       "D": 2
+      },
+      "freq": {
+       "E": "q_f",
+       "r": null
+      },
+      "gain": {
+       "D": 0.1
+      },
+      "phase": {
+       "D": 0.0
+      },
+      "pre_delay": {
+       "D": 0.0
+      },
+      "post_delay": {
+       "D": 0.0
+      },
+      "mixer_freq": {
+       "D": null
+      }
+     }
     }
    }
   }
  },
  "direct_readout": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Direct Readout>",
+   "ov": false,
    "v": {
-    "gen_ch": {
-     "D": null
+    "type": {
+     "D": "readout/direct"
     },
     "ro_ch": {
      "D": 0
@@ -291,17 +315,17 @@
     "trig_offset": {
      "D": 0.55
     },
-    "type": {
-     "D": "readout/direct"
+    "gen_ch": {
+     "D": null
     }
    }
   },
   "blank/pop": {
-   "ov": false,
    "ref": "<Custom:Direct Readout>",
+   "ov": false,
    "v": {
-    "gen_ch": {
-     "D": null
+    "type": {
+     "D": "readout/direct"
     },
     "ro_ch": {
      "E": "ro_ch",
@@ -318,16 +342,16 @@
      "E": "timeFly + 0.05",
      "r": null
     },
-    "type": {
-     "D": "readout/direct"
+    "gen_ch": {
+     "D": null
     }
    }
   }
  },
  "none_reset": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:None Reset>",
+   "ov": false,
    "v": {
     "type": {
      "D": "reset/none"
@@ -335,8 +359,8 @@
    }
   },
   "blank/pop": {
-   "ov": false,
    "ref": "<Custom:None Reset>",
+   "ov": false,
    "v": {
     "type": {
      "D": "reset/none"
@@ -346,11 +370,29 @@
  },
  "pi2_pulse": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 4000.0
@@ -358,91 +400,44 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Pulse>",
-   "v": {
-    "ch": {
-     "E": "qub_ch",
-     "r": null
-    },
-    "freq": {
-     "E": "q_f",
-     "r": null
-    },
-    "gain": {
-     "D": 0.1
-    },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
-    "phase": {
-     "D": 0.0
-    },
     "post_delay": {
      "D": 0.0
     },
-    "pre_delay": {
-     "D": 0.0
-    },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 4000.0
@@ -450,46 +445,46 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
+    "post_delay": {
+     "D": 0.0
     },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "E": "qub_ch",
      "r": null
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "E": "q_f",
@@ -498,35 +493,64 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
-     "ov": false,
      "ref": "<Custom:Const>",
+     "ov": false,
      "v": {
-      "length": {
-       "D": 5.1
-      },
       "style": {
        "D": "const"
+      },
+      "length": {
+       "D": 5.1
       }
      }
+    },
+    "ch": {
+     "E": "qub_ch",
+     "r": null
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "E": "q_f",
+     "r": null
+    },
+    "gain": {
+     "D": 0.1
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
     }
    }
   },
@@ -534,11 +558,29 @@
  },
  "pi_pulse": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 4000.0
@@ -546,91 +588,44 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Pulse>",
-   "v": {
-    "ch": {
-     "E": "qub_ch",
-     "r": null
-    },
-    "freq": {
-     "E": "q_f",
-     "r": null
-    },
-    "gain": {
-     "D": 0.1
-    },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
-    "phase": {
-     "D": 0.0
-    },
     "post_delay": {
      "D": 0.0
     },
-    "pre_delay": {
-     "D": 0.0
-    },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 4000.0
@@ -638,46 +633,46 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
+    "post_delay": {
+     "D": 0.0
     },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "E": "qub_ch",
      "r": null
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "E": "q_f",
@@ -686,35 +681,64 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
-     "ov": false,
      "ref": "<Custom:Const>",
+     "ov": false,
      "v": {
-      "length": {
-       "D": 5.1
-      },
       "style": {
        "D": "const"
+      },
+      "length": {
+       "D": 5.1
       }
      }
+    },
+    "ch": {
+     "E": "qub_ch",
+     "r": null
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "E": "q_f",
+     "r": null
+    },
+    "gain": {
+     "D": 0.1
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
     }
    }
   },
@@ -722,11 +746,29 @@
  },
  "qub_probe": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 4000.0
@@ -734,91 +776,44 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Pulse>",
-   "v": {
-    "ch": {
-     "E": "qub_ch",
-     "r": null
-    },
-    "freq": {
-     "E": "q_f",
-     "r": null
-    },
-    "gain": {
-     "D": 0.1
-    },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
-    "phase": {
-     "D": 0.0
-    },
     "post_delay": {
      "D": 0.0
     },
-    "pre_delay": {
-     "D": 0.0
-    },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 4000.0
@@ -826,46 +821,46 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
+    "post_delay": {
+     "D": 0.0
     },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 5.1
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
     "ch": {
      "E": "qub_ch",
      "r": null
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "E": "q_f",
@@ -874,35 +869,64 @@
     "gain": {
      "D": 0.1
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
-     "ov": false,
      "ref": "<Custom:Const>",
+     "ov": false,
      "v": {
-      "length": {
-       "D": 5.1
-      },
       "style": {
        "D": "const"
+      },
+      "length": {
+       "D": 5.1
       }
      }
+    },
+    "ch": {
+     "E": "qub_ch",
+     "r": null
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "E": "q_f",
+     "r": null
+    },
+    "gain": {
+     "D": 0.1
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
     }
    }
   },
@@ -910,51 +934,239 @@
  },
  "qub_waveform": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Cosine>",
+   "ov": false,
    "v": {
-    "length": {
-     "D": 0.1
-    },
     "style": {
      "D": "cosine"
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Cosine>",
-   "v": {
+    },
     "length": {
      "D": 0.1
-    },
-    "style": {
-     "D": "cosine"
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Cosine>",
+   "ov": false,
    "v": {
-    "length": {
-     "D": 0.1
-    },
     "style": {
      "D": "cosine"
+    },
+    "length": {
+     "D": 0.1
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Cosine>",
+   "ov": false,
    "v": {
-    "length": {
-     "D": 0.1
-    },
     "style": {
      "D": "cosine"
+    },
+    "length": {
+     "D": 0.1
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Cosine>",
+   "ov": false,
+   "v": {
+    "style": {
+     "D": "cosine"
+    },
+    "length": {
+     "D": 0.1
+    }
+   }
+  },
+  "ref/pop/opt=True": null
+ },
+ "rabi_pulse": {
+  "blank/empty": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
+    "ch": {
+     "D": 0
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "D": 4000.0
+    },
+    "gain": {
+     "D": 0.1
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
+    }
+   }
+  },
+  "ref/empty/opt=False": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
+    "ch": {
+     "D": 0
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "D": 4000.0
+    },
+    "gain": {
+     "D": 0.1
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
+    }
+   }
+  },
+  "ref/empty/opt=True": null,
+  "blank/pop": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
+    "ch": {
+     "E": "qub_ch",
+     "r": null
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "E": "q_f",
+     "r": null
+    },
+    "gain": {
+     "D": 0.1
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 5.1
+      }
+     }
+    },
+    "ch": {
+     "E": "qub_ch",
+     "r": null
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "E": "q_f",
+     "r": null
+    },
+    "gain": {
+     "D": 0.1
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
     }
    }
   },
@@ -962,12 +1174,33 @@
  },
  "readout": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Pulse Readout>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "readout/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "D": 0
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "D": 6000.0
@@ -975,40 +1208,22 @@
      "gain": {
       "D": 0.1
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
     },
     "ro_cfg": {
-     "gen_ch": {
-      "D": null
+     "type": {
+      "D": "readout/direct"
      },
      "ro_ch": {
       "D": 0
@@ -1022,97 +1237,40 @@
      "trig_offset": {
       "D": 0.55
      },
-     "type": {
-      "D": "readout/direct"
-     }
-    },
-    "type": {
-     "D": "readout/pulse"
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Pulse Readout>",
-   "v": {
-    "pulse_cfg": {
-     "ch": {
-      "E": "res_ch",
-      "r": null
-     },
-     "freq": {
-      "E": "r_f",
-      "r": null
-     },
-     "gain": {
-      "D": 0.1
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
-      "D": 0.0
-     },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
-     }
-    },
-    "ro_cfg": {
      "gen_ch": {
       "D": null
-     },
-     "ro_ch": {
-      "E": "ro_ch",
-      "r": null
-     },
-     "ro_freq": {
-      "E": "r_f",
-      "r": null
-     },
-     "ro_length": {
-      "D": 0.9
-     },
-     "trig_offset": {
-      "E": "timeFly + 0.05",
-      "r": null
-     },
-     "type": {
-      "D": "readout/direct"
      }
-    },
-    "type": {
-     "D": "readout/pulse"
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Pulse Readout>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "readout/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "D": 0
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "D": 6000.0
@@ -1120,40 +1278,22 @@
      "gain": {
       "D": 0.1
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
     },
     "ro_cfg": {
-     "gen_ch": {
-      "D": null
+     "type": {
+      "D": "readout/direct"
      },
      "ro_ch": {
       "D": 0
@@ -1167,24 +1307,42 @@
      "trig_offset": {
       "D": 0.55
      },
-     "type": {
-      "D": "readout/direct"
+     "gen_ch": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "readout/pulse"
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Pulse Readout>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "readout/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "E": "res_ch",
       "r": null
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "E": "r_f",
@@ -1193,40 +1351,22 @@
      "gain": {
       "D": 0.1
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
     },
     "ro_cfg": {
-     "gen_ch": {
-      "D": null
+     "type": {
+      "D": "readout/direct"
      },
      "ro_ch": {
       "E": "ro_ch",
@@ -1243,12 +1383,84 @@
       "E": "timeFly + 0.05",
       "r": null
      },
-     "type": {
-      "D": "readout/direct"
+     "gen_ch": {
+      "D": null
      }
-    },
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Pulse Readout>",
+   "ov": false,
+   "v": {
     "type": {
      "D": "readout/pulse"
+    },
+    "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
+     "ch": {
+      "E": "res_ch",
+      "r": null
+     },
+     "nqz": {
+      "D": 2
+     },
+     "freq": {
+      "E": "r_f",
+      "r": null
+     },
+     "gain": {
+      "D": 0.1
+     },
+     "phase": {
+      "D": 0.0
+     },
+     "pre_delay": {
+      "D": 0.0
+     },
+     "post_delay": {
+      "D": 0.0
+     },
+     "mixer_freq": {
+      "D": null
+     }
+    },
+    "ro_cfg": {
+     "type": {
+      "D": "readout/direct"
+     },
+     "ro_ch": {
+      "E": "ro_ch",
+      "r": null
+     },
+     "ro_freq": {
+      "E": "r_f",
+      "r": null
+     },
+     "ro_length": {
+      "D": 0.9
+     },
+     "trig_offset": {
+      "E": "timeFly + 0.05",
+      "r": null
+     },
+     "gen_ch": {
+      "D": null
+     }
     }
    }
   },
@@ -1256,12 +1468,33 @@
  },
  "readout_dpm": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Pulse Readout>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "readout/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.1
+       }
+      }
+     },
      "ch": {
       "D": 0
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "D": 6000.0
@@ -1269,40 +1502,22 @@
      "gain": {
       "D": 0.1
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.1
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
     },
     "ro_cfg": {
-     "gen_ch": {
-      "D": null
+     "type": {
+      "D": "readout/direct"
      },
      "ro_ch": {
       "D": 0
@@ -1316,23 +1531,42 @@
      "trig_offset": {
       "D": 0.55
      },
-     "type": {
-      "D": "readout/direct"
+     "gen_ch": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "readout/pulse"
     }
    }
   },
   "blank/pop": {
-   "ov": false,
    "ref": "<Custom:Pulse Readout>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "readout/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "E": "best_ro_length + 0.1",
+        "r": null
+       }
+      }
+     },
      "ch": {
       "E": "res_ch",
       "r": null
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "E": "best_ro_freq",
@@ -1342,41 +1576,22 @@
       "E": "best_ro_gain",
       "r": null
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "E": "best_ro_length + 0.1",
-        "r": null
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
     },
     "ro_cfg": {
-     "gen_ch": {
-      "D": null
+     "type": {
+      "D": "readout/direct"
      },
      "ro_ch": {
       "E": "ro_ch",
@@ -1394,23 +1609,38 @@
       "E": "timeFly + 0.05",
       "r": null
      },
-     "type": {
-      "D": "readout/direct"
+     "gen_ch": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "readout/pulse"
     }
    }
   }
  },
  "res_probe": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 1.0
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 6000.0
@@ -1418,91 +1648,44 @@
     "gain": {
      "D": 0.05
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 1.0
-      },
-      "style": {
-       "D": "const"
-      }
-     }
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Pulse>",
-   "v": {
-    "ch": {
-     "E": "res_ch",
-     "r": null
-    },
-    "freq": {
-     "E": "r_f",
-     "r": null
-    },
-    "gain": {
-     "D": 0.05
-    },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
-    "phase": {
-     "D": 0.0
-    },
     "post_delay": {
      "D": 0.0
     },
-    "pre_delay": {
-     "D": 0.0
-    },
-    "type": {
-     "D": "pulse"
-    },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 1.0
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 1.0
+      }
+     }
+    },
     "ch": {
      "D": 0
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "D": 6000.0
@@ -1510,46 +1693,46 @@
     "gain": {
      "D": 0.05
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
-    "type": {
-     "D": "pulse"
+    "post_delay": {
+     "D": 0.0
     },
-    "waveform": {
-     "ov": false,
-     "ref": "<Custom:Const>",
-     "v": {
-      "length": {
-       "D": 1.0
-      },
-      "style": {
-       "D": "const"
-      }
-     }
+    "mixer_freq": {
+     "D": null
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Pulse>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "pulse"
+    },
+    "waveform": {
+     "ref": "<Custom:Const>",
+     "ov": false,
+     "v": {
+      "style": {
+       "D": "const"
+      },
+      "length": {
+       "D": 1.0
+      }
+     }
+    },
     "ch": {
      "E": "res_ch",
      "r": null
+    },
+    "nqz": {
+     "D": 2
     },
     "freq": {
      "E": "r_f",
@@ -1558,35 +1741,64 @@
     "gain": {
      "D": 0.05
     },
-    "mixer_freq": {
-     "D": null
-    },
-    "nqz": {
-     "D": 2
-    },
     "phase": {
-     "D": 0.0
-    },
-    "post_delay": {
      "D": 0.0
     },
     "pre_delay": {
      "D": 0.0
     },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Pulse>",
+   "ov": false,
+   "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
-     "ov": false,
      "ref": "<Custom:Const>",
+     "ov": false,
      "v": {
-      "length": {
-       "D": 1.0
-      },
       "style": {
        "D": "const"
+      },
+      "length": {
+       "D": 1.0
       }
      }
+    },
+    "ch": {
+     "E": "res_ch",
+     "r": null
+    },
+    "nqz": {
+     "D": 2
+    },
+    "freq": {
+     "E": "r_f",
+     "r": null
+    },
+    "gain": {
+     "D": 0.05
+    },
+    "phase": {
+     "D": 0.0
+    },
+    "pre_delay": {
+     "D": 0.0
+    },
+    "post_delay": {
+     "D": 0.0
+    },
+    "mixer_freq": {
+     "D": null
     }
    }
   },
@@ -1594,51 +1806,51 @@
  },
  "res_waveform": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Const>",
+   "ov": false,
    "v": {
-    "length": {
-     "D": 1.0
-    },
     "style": {
      "D": "const"
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Const>",
-   "v": {
+    },
     "length": {
      "D": 1.0
-    },
-    "style": {
-     "D": "const"
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Const>",
+   "ov": false,
    "v": {
-    "length": {
-     "D": 1.0
-    },
     "style": {
      "D": "const"
+    },
+    "length": {
+     "D": 1.0
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Const>",
+   "ov": false,
    "v": {
-    "length": {
-     "D": 1.0
-    },
     "style": {
      "D": "const"
+    },
+    "length": {
+     "D": 1.0
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Const>",
+   "ov": false,
+   "v": {
+    "style": {
+     "D": "const"
+    },
+    "length": {
+     "D": 1.0
     }
    }
   },
@@ -1646,12 +1858,33 @@
  },
  "reset": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Pulse Reset>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "reset/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "D": 0
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "D": 4000.0
@@ -1659,101 +1892,49 @@
      "gain": {
       "D": 0.2
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
-     }
-    },
-    "type": {
-     "D": "reset/pulse"
-    }
-   }
-  },
-  "blank/pop": {
-   "ov": false,
-   "ref": "<Custom:Pulse Reset>",
-   "v": {
-    "pulse_cfg": {
-     "ch": {
-      "E": "qub_ch",
-      "r": null
-     },
-     "freq": {
-      "E": "q_f",
-      "r": null
-     },
-     "gain": {
-      "D": 0.2
-     },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
-     "phase": {
-      "D": 0.0
-     },
      "post_delay": {
       "D": 0.0
      },
-     "pre_delay": {
-      "D": 0.0
-     },
-     "type": {
-      "D": "pulse"
-     },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "reset/pulse"
     }
    }
   },
   "ref/empty/opt=False": {
-   "ov": false,
    "ref": "<Custom:Pulse Reset>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "reset/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "D": 0
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "D": 4000.0
@@ -1761,51 +1942,51 @@
      "gain": {
       "D": 0.2
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "reset/pulse"
     }
    }
   },
   "ref/empty/opt=True": null,
-  "ref/pop/opt=False": {
-   "ov": false,
+  "blank/pop": {
    "ref": "<Custom:Pulse Reset>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "reset/pulse"
+    },
     "pulse_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "E": "qub_ch",
       "r": null
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "E": "q_f",
@@ -1814,39 +1995,70 @@
      "gain": {
       "D": 0.2
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
+     "post_delay": {
+      "D": 0.0
+     },
+     "mixer_freq": {
+      "D": null
+     }
+    }
+   }
+  },
+  "ref/pop/opt=False": {
+   "ref": "<Custom:Pulse Reset>",
+   "ov": false,
+   "v": {
+    "type": {
+     "D": "reset/pulse"
+    },
+    "pulse_cfg": {
      "type": {
       "D": "pulse"
      },
      "waveform": {
-      "ov": false,
       "ref": "<Custom:Const>",
+      "ov": false,
       "v": {
-       "length": {
-        "D": 1.0
-       },
        "style": {
         "D": "const"
+       },
+       "length": {
+        "D": 1.0
        }
       }
+     },
+     "ch": {
+      "E": "qub_ch",
+      "r": null
+     },
+     "nqz": {
+      "D": 2
+     },
+     "freq": {
+      "E": "q_f",
+      "r": null
+     },
+     "gain": {
+      "D": 0.2
+     },
+     "phase": {
+      "D": 0.0
+     },
+     "pre_delay": {
+      "D": 0.0
+     },
+     "post_delay": {
+      "D": 0.0
+     },
+     "mixer_freq": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "reset/pulse"
     }
    }
   },
@@ -1854,12 +2066,33 @@
  },
  "two_pulse_reset": {
   "blank/empty": {
-   "ov": false,
    "ref": "<Custom:Two-Pulse Reset>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "reset/two_pulse"
+    },
     "pulse1_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "D": 0
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "D": 4000.0
@@ -1867,40 +2100,40 @@
      "gain": {
       "D": 0.2
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
     },
     "pulse2_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "D": 0
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "D": 4000.0
@@ -1908,50 +2141,50 @@
      "gain": {
       "D": 0.2
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "reset/two_pulse"
     }
    }
   },
   "blank/pop": {
-   "ov": false,
    "ref": "<Custom:Two-Pulse Reset>",
+   "ov": false,
    "v": {
+    "type": {
+     "D": "reset/two_pulse"
+    },
     "pulse1_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "E": "qub_ch",
       "r": null
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "E": "q_f",
@@ -1960,41 +2193,41 @@
      "gain": {
       "D": 0.2
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
     },
     "pulse2_cfg": {
+     "type": {
+      "D": "pulse"
+     },
+     "waveform": {
+      "ref": "<Custom:Const>",
+      "ov": false,
+      "v": {
+       "style": {
+        "D": "const"
+       },
+       "length": {
+        "D": 1.0
+       }
+      }
+     },
      "ch": {
       "E": "qub_ch",
       "r": null
+     },
+     "nqz": {
+      "D": 2
      },
      "freq": {
       "E": "q_f",
@@ -2003,39 +2236,18 @@
      "gain": {
       "D": 0.2
      },
-     "mixer_freq": {
-      "D": null
-     },
-     "nqz": {
-      "D": 2
-     },
      "phase": {
-      "D": 0.0
-     },
-     "post_delay": {
       "D": 0.0
      },
      "pre_delay": {
       "D": 0.0
      },
-     "type": {
-      "D": "pulse"
+     "post_delay": {
+      "D": 0.0
      },
-     "waveform": {
-      "ov": false,
-      "ref": "<Custom:Const>",
-      "v": {
-       "length": {
-        "D": 1.0
-       },
-       "style": {
-        "D": "const"
-       }
-      }
+     "mixer_freq": {
+      "D": null
      }
-    },
-    "type": {
-     "D": "reset/two_pulse"
     }
    }
   }

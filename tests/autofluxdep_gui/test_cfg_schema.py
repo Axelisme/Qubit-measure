@@ -48,6 +48,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.defaults import pulse_length, pulse_pro
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+    PI_PULSE_LIBRARY_ALIASES,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.readout_defaults import (
     seed_readout_freq,
@@ -131,6 +134,10 @@ _BUILDERS: tuple[Builder, ...] = (
 )
 
 _BUILDER_IDS = [builder.name for builder in _BUILDERS]
+
+
+def test_pi_pulse_library_aliases_prefer_length_calibrated_pulse() -> None:
+    assert PI_PULSE_LIBRARY_ALIASES == ("pi_len", "pi_amp", "pi_pulse")
 
 
 def _section_spec(schema: NodeCfgSchema, key: str) -> CfgSectionSpec:

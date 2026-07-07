@@ -159,6 +159,15 @@ class Pulse:
 
 
 @dataclass(frozen=True)
+class Ref:
+    """A nested module/waveform ref inside a composite role seeded from another role."""
+
+    at: str
+    role_id: str
+    optional: bool = False
+
+
+@dataclass(frozen=True)
 class Ro:
     """A readout ``ro_cfg`` seed (applied via ``patch_ro_cfg_fields``); the
     trig-offset is always the ``TRIG`` rule. ``at`` is ``""`` for a bare
@@ -178,6 +187,7 @@ class RoleDef:
     shape: Callable[[], CfgSectionSpec]
     tag: str
     pulses: tuple[Pulse, ...] = ()
+    refs: tuple[Ref, ...] = ()
     ro: Ro | None = None
     wf_length: SeedVal | None = None
     adopt_waveform: str | None = None
@@ -194,9 +204,23 @@ def _section(value: CfgSectionValue, at: str) -> CfgSectionValue:
     if at == "":
         return value
     sub = value.fields.get(at)
+    if isinstance(sub, (ModuleRefValue, WaveformRefValue)):
+        return sub.value
     if not isinstance(sub, CfgSectionValue):
         raise RuntimeError(f"role seed path {at!r} is not a section")
     return sub
+
+
+def _nested_ref(role_id: str, ctx: ExpContext, *, optional: bool) -> _RefNode | None:
+    try:
+        role = ROLE_TABLE[role_id]
+    except KeyError as exc:
+        raise RuntimeError(f"unknown nested role {role_id!r}") from exc
+    if role.lib is None:
+        if optional:
+            return None
+        return role_blank(role, ctx)
+    return role_ref(role, ctx, optional=optional)
 
 
 def _adopt_waveform(value: CfgSectionValue, ctx: ExpContext, name: str) -> None:
@@ -216,6 +240,9 @@ def _adopt_waveform(value: CfgSectionValue, ctx: ExpContext, name: str) -> None:
 def role_blank(role: RoleDef, ctx: ExpContext) -> _RefNode:
     """Assemble a role's blank value tree from its data (never a library lookup)."""
     value = make_default_value(role.shape())
+
+    for ref in role.refs:
+        value.fields[ref.at] = _nested_ref(ref.role_id, ctx, optional=ref.optional)
 
     for p in role.pulses:
         patch_pulse_fields(
@@ -273,9 +300,10 @@ def role_ref(
 # ROLE_TABLE — the single declarative source of every role default.
 # ---------------------------------------------------------------------------
 
-# Shared seed: a blank qubit pulse (q_f / qub_ch). qub_probe, pi_pulse and
-# pi2_pulse all default to this and differ only in their library names.
-_QUB_PULSE: tuple[Pulse, ...] = (Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.1, 5.1),)
+# Shared seed: a blank qubit pulse. Channel selection follows the qubit wiring
+# aliases used by setup files before falling back to the legacy numeric default.
+_QUB_CH = Md("qub_ch", Md("qub_1_4_ch", Md("qub_4_5_ch", 0)))
+_QUB_PULSE: tuple[Pulse, ...] = (Pulse(Md("q_f", 4000.0), _QUB_CH, 0.1, 5.1),)
 
 ROLE_TABLE: dict[str, RoleDef] = {
     # qubit / resonator probe pulses
@@ -297,11 +325,17 @@ ROLE_TABLE: dict[str, RoleDef] = {
         _QUB_PULSE,
         lib=Lib(PulseCfg, ("pi_amp", "pi_len")),
     ),
+    "rabi_pulse": RoleDef(
+        make_pulse_spec_,
+        "<Custom:Pulse>",
+        _QUB_PULSE,
+        lib=Lib(PulseCfg, ("pi_len", "pi_amp")),
+    ),
     "pi2_pulse": RoleDef(
         make_pulse_spec_,
         "<Custom:Pulse>",
         _QUB_PULSE,
-        lib=Lib(PulseCfg, ("pi2_amp", "pi2_len", "pi_amp", "pi_len")),
+        lib=Lib(PulseCfg, ("pi2_amp", "pi2_len")),
     ),
     # readout: "readout" is the library-aware pulse readout (Init.ADOPT prefers a
     # calibrated library entry; Init.INLINE seeds a fresh inline pulse readout —
@@ -351,7 +385,7 @@ ROLE_TABLE: dict[str, RoleDef] = {
     "reset": RoleDef(
         make_pulse_reset_spec_,
         "<Custom:Pulse Reset>",
-        (Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.2, 1.0, at="pulse_cfg"),),
+        (Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse_cfg"),),
         lib=Lib(AbsResetCfg, ("reset_bath", "reset_10", "reset_120")),
     ),
     "none_reset": RoleDef(make_none_reset_spec_, "<Custom:None Reset>"),
@@ -359,8 +393,8 @@ ROLE_TABLE: dict[str, RoleDef] = {
         make_two_pulse_reset_spec_,
         "<Custom:Two-Pulse Reset>",
         (
-            Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.2, 1.0, at="pulse1_cfg"),
-            Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.2, 1.0, at="pulse2_cfg"),
+            Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse1_cfg"),
+            Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse2_cfg"),
         ),
     ),
     "bath_reset": RoleDef(
@@ -368,9 +402,9 @@ ROLE_TABLE: dict[str, RoleDef] = {
         "<Custom:Bath Reset>",
         (
             Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.1, 1.0, at="cavity_tone_cfg"),
-            Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.2, 1.0, at="qubit_tone_cfg"),
-            Pulse(Md("q_f", 4000.0), Md("qub_ch", 0), 0.2, 1.0, at="pi2_cfg"),
+            Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="qubit_tone_cfg"),
         ),
+        refs=(Ref("pi2_cfg", "pi2_pulse"),),
     ),
     # waveforms
     "qub_waveform": RoleDef(
