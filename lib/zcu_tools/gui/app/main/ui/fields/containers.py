@@ -30,7 +30,7 @@ from ...live_model import (
     SectionLiveField,
     SweepLiveField,
 )
-from .common import BaseLiveWidget, ElidedLabel
+from .common import BaseLiveWidget, ElidedLabel, SweepWidget
 from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
 
 _TONE_STYLES = {
@@ -184,6 +184,12 @@ class SectionWidget(BaseLiveWidget):
                     path=child_path,
                     decoration_for_path=self._decoration_for_path,
                     field_label_max_width=self._field_label_max_width,
+                )
+            elif widget_cls is SweepWidget:
+                w = SweepWidget(
+                    cast(SweepLiveField, child_field),
+                    path=child_path,
+                    decoration_for_path=self._decoration_for_path,
                 )
             else:
                 w = widget_cls(child_field)  # type: ignore

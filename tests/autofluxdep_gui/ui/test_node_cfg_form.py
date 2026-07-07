@@ -538,6 +538,59 @@ def test_ro_optimize_previous_best_ranges_are_editable_initial_fields(qapp):
         ctrl._background_svc.quiesce()
 
 
+def test_lenrabi_auto_sweep_marks_only_stop_generated(qapp):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
+
+    ctrl = build_core()
+    node = ctrl.add_node_by_type("lenrabi")
+    index = ctrl.state.nodes.index(node)
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        length_decoration = form._default_form.decoration_for_path("sweep.length")
+        assert length_decoration.enabled is True
+        assert length_decoration.badge == ""
+
+        start_decoration = form._default_form.decoration_for_path("sweep.length.start")
+        assert start_decoration.enabled is True
+        assert start_decoration.badge == ""
+
+        stop_decoration = form._default_form.decoration_for_path("sweep.length.stop")
+        assert stop_decoration.enabled is False
+        assert stop_decoration.badge == "generated"
+        assert "sweep stop is generated" in stop_decoration.tooltip
+
+        sweep_widget = form._default_form.findChild(SweepWidget)
+        assert sweep_widget is not None
+        assert sweep_widget._start_widget.isEnabled() is True
+        assert sweep_widget._stop_widget.isEnabled() is False
+        assert sweep_widget._expts.isEnabled() is True
+        labels = {
+            label.text(): label.toolTip() for label in sweep_widget.findChildren(QLabel)
+        }
+        assert labels["stop [generated]"] == stop_decoration.tooltip
+
+        _generation_group(form, "sweep").fields["sweep_range_mode"].set_value(
+            DirectValue(value="fixed")
+        )
+
+        refreshed = form._default_form.decoration_for_path("sweep.length.stop")
+        assert refreshed.enabled is True
+        assert refreshed.badge == ""
+        refreshed_sweep_widget = form._default_form.findChild(SweepWidget)
+        assert refreshed_sweep_widget is not None
+        assert refreshed_sweep_widget._stop_widget.isEnabled() is True
+        refreshed_labels = {
+            label.text(): label.toolTip()
+            for label in refreshed_sweep_widget.findChildren(QLabel)
+        }
+        assert "stop" in refreshed_labels
+        assert "stop [generated]" not in refreshed_labels
+    finally:
+        form.teardown()
+        ctrl._background_svc.quiesce()
+
+
 def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)

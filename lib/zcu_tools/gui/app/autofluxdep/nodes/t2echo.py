@@ -93,6 +93,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
+    auto_sweep_stop,
     fixed_sweep_range,
     seed_md_float,
     snapshot_float,
@@ -138,11 +139,13 @@ def _resolve_cfg_sweep_range(
     mode: str, *, t2e: float, fixed: Any, knobs: dict[str, Any]
 ) -> tuple[float, float]:
     if mode == _SWEEP_RANGE_MODE_AUTO_T2E:
-        return auto_stop_sweep_range(
-            t2e,
-            start=float(knobs["sweep_start_us"]),
-            stop_factor=float(knobs["sweep_stop_factor"]),
-            stop_min=None,
+        return (
+            float(fixed.start),
+            auto_sweep_stop(
+                t2e,
+                stop_factor=float(knobs["sweep_stop_factor"]),
+                stop_min=None,
+            ),
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
         return fixed_sweep_range(fixed)
@@ -408,7 +411,10 @@ class T2EchoBuilder(Builder):
                     str_choice_spec(
                         "range_mode",
                         (_SWEEP_RANGE_MODE_AUTO_T2E, _SWEEP_RANGE_MODE_FIXED),
-                        tooltip="Auto derives the echo sweep from latest trusted T2E.",
+                        tooltip=(
+                            "Auto derives the echo sweep stop from latest trusted "
+                            "T2E; start/expts stay in Default cfg."
+                        ),
                     ),
                     _SWEEP_RANGE_MODE_AUTO_T2E,
                     group="sweep",
@@ -421,15 +427,6 @@ class T2EchoBuilder(Builder):
                         tooltip="Initial T2E before measured feedback exists.",
                     ),
                     t2e_seed,
-                    group="sweep",
-                ),
-                logical_generation_field(
-                    "sweep_start_us",
-                    FloatSpec(
-                        label="start_us",
-                        tooltip="Lower bound for the auto echo sweep.",
-                    ),
-                    _DEFAULT_SWEEP_START,
                     group="sweep",
                 ),
                 logical_generation_field(
@@ -472,7 +469,6 @@ class T2EchoBuilder(Builder):
                         _SWEEP_RANGE_MODE_FIXED: (),
                         _SWEEP_RANGE_MODE_AUTO_T2E: (
                             "t2e_seed_us",
-                            "sweep_start_us",
                             "sweep_stop_factor",
                         ),
                     },
@@ -562,10 +558,10 @@ class T2EchoBuilder(Builder):
         if knobs.get("sweep_range_mode") == _SWEEP_RANGE_MODE_AUTO_T2E:
             paths.append(
                 OverridePath(
-                    "sweep.length",
+                    "sweep.length.stop",
                     "all_points",
                     "generation.sweep.sweep_range_mode",
-                    "T2Echo sweep range is generated from T2Echo feedback",
+                    "T2Echo sweep stop is generated from T2Echo feedback",
                 )
             )
         return OverridePlan(tuple(paths))
@@ -623,7 +619,7 @@ class T2EchoBuilder(Builder):
         if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
             patches["relax_delay"] = relax_delay
         if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_T2E:
-            patches["sweep.length"] = sweep_range
+            patches["sweep.length.stop"] = sweep_range[1]
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("detune_ratio", None)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)

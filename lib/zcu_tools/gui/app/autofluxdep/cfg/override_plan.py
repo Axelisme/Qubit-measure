@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 OverrideMode: TypeAlias = Literal["after_first_point", "all_points", "fallback"]
 _VALID_MODES: frozenset[str] = frozenset(
@@ -211,13 +211,9 @@ def _validate_path(path: str) -> None:
 
 
 def _path_exists(tree: Mapping[str, object], path: str) -> bool:
-    node: object = tree
-    for part in path.split("."):
-        if not isinstance(node, Mapping):
-            return False
-        if part not in node:
-            return False
-        node = node[part]
+    found, node = _try_get_path(tree, path)
+    if not found:
+        return False
     if isinstance(node, Mapping) and _is_module_root_path(path):
         return False
     return True
@@ -230,37 +226,176 @@ def _set_leaf(
     *,
     node_name: str,
 ) -> None:
+    if _is_module_root_path(path):
+        raise ValueError(
+            f"override path {path!r} for node {node_name!r} targets a module root; "
+            "whole-module replacement is not allowed"
+        )
     parts = path.split(".")
     node: object = tree
+    parent: object | None = None
+    parent_part = ""
     for part in parts[:-1]:
-        if not isinstance(node, dict):
+        parent = node
+        parent_part = part
+        node = _get_child(node, part, path=path, node_name=node_name)
+    leaf = parts[-1]
+
+    if isinstance(node, dict):
+        if leaf not in node:
             raise ValueError(
-                f"override path {path!r} for node {node_name!r} cannot descend "
-                f"through {type(node).__name__}"
+                f"override path {path!r} for node {node_name!r} is absent "
+                "from run-start base_cfg"
             )
+        if isinstance(node[leaf], Mapping) and _is_module_root_path(path):
+            raise ValueError(
+                f"override path {path!r} for node {node_name!r} targets a mapping; "
+                "whole-module replacement is not allowed"
+            )
+        node[leaf] = value
+        return
+
+    if isinstance(node, Mapping):
+        raise ValueError(
+            f"override path {path!r} for node {node_name!r} cannot assign "
+            f"inside immutable mapping {type(node).__name__}"
+        )
+    found, _value = _try_get_object_child(node, leaf)
+    if not found:
+        raise ValueError(
+            f"override path {path!r} for node {node_name!r} is absent "
+            "from run-start base_cfg"
+        )
+
+    replacement = _copy_object_with_updated_leaf(
+        node, leaf, value, path=path, node_name=node_name
+    )
+    if parent is None:
+        raise ValueError(
+            f"override path {path!r} for node {node_name!r} cannot replace "
+            "the cfg root object"
+        )
+    _assign_child(
+        parent,
+        parent_part,
+        replacement,
+        path=path,
+        node_name=node_name,
+    )
+
+
+def _get_child(
+    node: object,
+    part: str,
+    *,
+    path: str,
+    node_name: str,
+) -> object:
+    if isinstance(node, Mapping):
         if part not in node:
             raise ValueError(
                 f"override path {path!r} for node {node_name!r} is absent "
                 "from run-start base_cfg"
             )
-        node = node[part]
-    if not isinstance(node, dict):
+        return node[part]
+    found, value = _try_get_object_child(node, part)
+    if found:
+        return value
+    raise ValueError(
+        f"override path {path!r} for node {node_name!r} cannot descend "
+        f"through {type(node).__name__}"
+    )
+
+
+def _assign_child(
+    parent: object,
+    part: str,
+    value: object,
+    *,
+    path: str,
+    node_name: str,
+) -> None:
+    if isinstance(parent, dict):
+        parent[part] = value
+        return
+    if hasattr(parent, part):
+        try:
+            setattr(parent, part, value)
+        except Exception as exc:
+            raise ValueError(
+                f"override path {path!r} for node {node_name!r} cannot replace "
+                f"{part!r} on {type(parent).__name__}"
+            ) from exc
+        return
+    raise ValueError(
+        f"override path {path!r} for node {node_name!r} cannot replace "
+        f"{part!r} on {type(parent).__name__}"
+    )
+
+
+def _copy_object_with_updated_leaf(
+    obj: object,
+    leaf: str,
+    value: object,
+    *,
+    path: str,
+    node_name: str,
+) -> object:
+    if _is_sweep_cfg_like(obj) and leaf in {"start", "stop", "expts", "step"}:
+        return _copy_sweep_cfg_with_updated_leaf(obj, leaf, value)
+
+    clone = deepcopy(obj)
+    try:
+        setattr(clone, leaf, value)
+    except Exception as exc:
         raise ValueError(
             f"override path {path!r} for node {node_name!r} cannot assign "
-            f"inside {type(node).__name__}"
-        )
-    leaf = parts[-1]
-    if leaf not in node:
-        raise ValueError(
-            f"override path {path!r} for node {node_name!r} is absent "
-            "from run-start base_cfg"
-        )
-    if isinstance(node[leaf], Mapping) and _is_module_root_path(path):
-        raise ValueError(
-            f"override path {path!r} for node {node_name!r} targets a mapping; "
-            "whole-module replacement is not allowed"
-        )
-    node[leaf] = value
+            f"{leaf!r} inside {type(obj).__name__}"
+        ) from exc
+    return clone
+
+
+def _is_sweep_cfg_like(obj: object) -> bool:
+    return all(
+        hasattr(obj, field_name) for field_name in ("start", "stop", "expts", "step")
+    )
+
+
+def _copy_sweep_cfg_with_updated_leaf(
+    sweep: object,
+    leaf: str,
+    value: object,
+) -> object:
+    start = float(getattr(sweep, "start"))
+    stop = float(getattr(sweep, "stop"))
+    expts = int(getattr(sweep, "expts"))
+    step = float(getattr(sweep, "step"))
+
+    if leaf == "start":
+        start = float(cast(Any, value))
+    elif leaf == "stop":
+        stop = float(cast(Any, value))
+    elif leaf == "expts":
+        expts = _coerce_sweep_expts(value)
+    elif leaf == "step":
+        step = float(cast(Any, value))
+        stop = start + step * (expts - 1)
+
+    if leaf != "step":
+        step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
+
+    sweep_type = cast(Any, type(sweep))
+    return sweep_type(start=start, stop=stop, expts=expts, step=step)
+
+
+def _coerce_sweep_expts(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("SweepCfg expts patch must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise ValueError("SweepCfg expts patch must be an integer")
 
 
 def _try_get_path(tree: object, path: str) -> tuple[bool, object]:
@@ -271,10 +406,29 @@ def _try_get_path(tree: object, path: str) -> tuple[bool, object]:
                 return False, None
             node = node[part]
             continue
-        if not hasattr(node, part):
+        found, value = _try_get_object_child(node, part)
+        if not found:
             return False, None
-        node = getattr(node, part)
+        node = value
     return True, node
+
+
+def _try_get_object_child(node: object, part: str) -> tuple[bool, object]:
+    model_fields = _model_field_names(node)
+    if model_fields is not None:
+        if part not in model_fields:
+            return False, None
+        return True, getattr(node, part)
+    if not hasattr(node, part):
+        return False, None
+    return True, getattr(node, part)
+
+
+def _model_field_names(node: object) -> frozenset[str] | None:
+    fields = getattr(type(node), "model_fields", None)
+    if not isinstance(fields, Mapping):
+        return None
+    return frozenset(str(key) for key in fields)
 
 
 def _is_module_root_path(path: str) -> bool:

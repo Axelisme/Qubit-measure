@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -63,7 +64,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.program.v2 import PulseReadoutCfg
+from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
 
 from ._helpers import (
     NodeFieldSpec,
@@ -254,7 +255,6 @@ _EXPECTED_KEYS = {
         "relax_min_us",
         "sweep_range_mode",
         "expected_pi_length",
-        "sweep_start_us",
         "sweep_stop_factor",
         "sweep_stop_min_us",
         "drive_gain_mode",
@@ -295,7 +295,6 @@ _EXPECTED_KEYS = {
         "t1_seed_us",
         "relax_factor",
         "relax_min_us",
-        "sweep_start_us",
         "sweep_stop_factor",
         "sweep_stop_min_us",
     },
@@ -315,7 +314,6 @@ _EXPECTED_KEYS = {
         "t2r_seed_us",
         "relax_factor",
         "relax_min_us",
-        "sweep_start_us",
         "sweep_stop_factor",
     },
     "t2echo": {
@@ -335,7 +333,6 @@ _EXPECTED_KEYS = {
         "t2e_seed_us",
         "relax_factor",
         "relax_min_us",
-        "sweep_start_us",
         "sweep_stop_factor",
         "fit_method",
     },
@@ -405,7 +402,6 @@ _EXPECTED_PATHS = {
         "relax_min_us": "generation.relax.relax_min_us",
         "sweep_range_mode": "generation.sweep.sweep_range_mode",
         "expected_pi_length": "generation.sweep.expected_pi_length",
-        "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
         "drive_gain_mode": "generation.drive_gain.drive_gain_mode",
@@ -446,7 +442,6 @@ _EXPECTED_PATHS = {
         "t1_seed_us": "generation.relax.t1_seed_us",
         "relax_factor": "generation.relax.relax_factor",
         "relax_min_us": "generation.relax.relax_min_us",
-        "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
     },
@@ -466,7 +461,6 @@ _EXPECTED_PATHS = {
         "t2r_seed_us": "generation.sweep.t2r_seed_us",
         "relax_factor": "generation.relax.relax_factor",
         "relax_min_us": "generation.relax.relax_min_us",
-        "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
     },
     "t2echo": {
@@ -486,7 +480,6 @@ _EXPECTED_PATHS = {
         "t2e_seed_us": "generation.sweep.t2e_seed_us",
         "relax_factor": "generation.relax.relax_factor",
         "relax_min_us": "generation.relax.relax_min_us",
-        "sweep_start_us": "generation.sweep.sweep_start_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "fit_method": "generation.fit.fit_method",
     },
@@ -756,7 +749,6 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     assert _scalar_labels(_generation_group_spec(lenrabi_schema, "sweep")) == {
         "sweep_range_mode": "range_mode",
         "expected_pi_length": "target_pi_length_us",
-        "sweep_start_us": "start_us",
         "sweep_stop_factor": "stop_factor",
         "sweep_stop_min_us": "stop_min_us",
     }
@@ -777,7 +769,6 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     assert _scalar_labels(_generation_group_spec(ramsey_schema, "sweep")) == {
         "sweep_range_mode": "range_mode",
         "t2r_seed_us": "initial_t2r_us",
-        "sweep_start_us": "start_us",
         "sweep_stop_factor": "stop_factor",
     }
 
@@ -797,7 +788,6 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     assert _scalar_labels(_generation_group_spec(echo_schema, "sweep")) == {
         "sweep_range_mode": "range_mode",
         "t2e_seed_us": "initial_t2e_us",
-        "sweep_start_us": "start_us",
         "sweep_stop_factor": "stop_factor",
     }
     assert _scalar_labels(_generation_group_spec(echo_schema, "fit")) == {
@@ -1271,7 +1261,7 @@ def test_fresh_node_defaults_seed_from_md_values():
         lenrabi["sweep_range"],
         auto_stop_sweep_range(
             md.pi_len,
-            start=lenrabi["sweep_start_us"],
+            start=lenrabi["sweep_range"].start,
             stop_factor=lenrabi["sweep_stop_factor"],
             stop_min=lenrabi["sweep_stop_min_us"],
         ),
@@ -1308,7 +1298,7 @@ def test_fresh_node_defaults_seed_from_md_values():
         t1["sweep_range"],
         auto_stop_sweep_range(
             md.t1,
-            start=t1["sweep_start_us"],
+            start=t1["sweep_range"].start,
             stop_factor=t1["sweep_stop_factor"],
             stop_min=t1["sweep_stop_min_us"],
         ),
@@ -1329,7 +1319,7 @@ def test_fresh_node_defaults_seed_from_md_values():
         ramsey["sweep_range"],
         auto_stop_sweep_range(
             md.t2r,
-            start=ramsey["sweep_start_us"],
+            start=ramsey["sweep_range"].start,
             stop_factor=ramsey["sweep_stop_factor"],
             stop_min=None,
         ),
@@ -1347,7 +1337,7 @@ def test_fresh_node_defaults_seed_from_md_values():
         echo["sweep_range"],
         auto_stop_sweep_range(
             md.t2e,
-            start=echo["sweep_start_us"],
+            start=echo["sweep_range"].start,
             stop_factor=echo["sweep_stop_factor"],
             stop_min=None,
         ),
@@ -1355,6 +1345,22 @@ def test_fresh_node_defaults_seed_from_md_values():
 
     mist = MistBuilder().make_default_schema(ctx).lower(None, md=md)
     assert mist["mist_freq"] == seed_readout_freq(ctx, fallback=0.0)
+
+
+@pytest.mark.parametrize(
+    "builder",
+    (LenRabiBuilder(), T1Builder(), T2RamseyBuilder(), T2EchoBuilder()),
+    ids=("lenrabi", "t1", "t2ramsey", "t2echo"),
+)
+def test_time_sweep_start_and_expts_drive_init_axis(builder: Builder):
+    schema = builder.make_default_schema().with_overrides(
+        {"sweep_range": SweepValue(start=1.25, stop=20.0, expts=37)}
+    )
+
+    result = builder.make_init_result(schema, [0.0, 0.5, 1.0])
+
+    assert result.n_x == 37
+    assert result.x[0] == pytest.approx(1.25)
 
 
 def test_fresh_node_defaults_seed_from_ml_modules():
@@ -1404,7 +1410,7 @@ def test_fresh_node_defaults_seed_from_ml_modules():
         lenrabi["sweep_range"],
         auto_stop_sweep_range(
             expected_pi_length,
-            start=lenrabi["sweep_start_us"],
+            start=lenrabi["sweep_range"].start,
             stop_factor=lenrabi["sweep_stop_factor"],
             stop_min=lenrabi["sweep_stop_min_us"],
         ),
@@ -1834,6 +1840,17 @@ def test_override_plan_rejects_ambiguous_or_absent_paths():
     with pytest.raises(ValueError, match="absent from run-start base_cfg"):
         validate_override_plan_base_cfg(missing, base_cfg, node_name="qubit_freq")
 
+    method_path = OverridePlan(
+        (OverridePath("sweep.length.model_dump", "all_points", "x", "y"),)
+    )
+    object_base_cfg = {
+        "sweep": {"length": SweepCfg(start=1.25, stop=10.25, expts=10, step=1.0)}
+    }
+    with pytest.raises(ValueError, match="absent from run-start base_cfg"):
+        validate_override_plan_base_cfg(
+            method_path, object_base_cfg, node_name="len_rabi"
+        )
+
     whole_module = OverridePlan(
         (OverridePath("modules.qub_pulse", "all_points", "x", "y"),)
     )
@@ -1931,6 +1948,60 @@ def test_apply_override_patches_copies_base_and_enforces_plan_modes():
         )
 
 
+def test_apply_override_patches_updates_nested_sweep_cfg_leaf():
+    plan = OverridePlan(
+        (
+            OverridePath(
+                "sweep.length.stop",
+                "all_points",
+                "generation.sweep.sweep_range_mode",
+                "adaptive time sweep stop",
+            ),
+        )
+    )
+    base_sweep = SweepCfg(start=1.25, stop=10.25, expts=10, step=1.0)
+    base_cfg = {"sweep": {"length": base_sweep}}
+
+    validate_override_plan_base_cfg(plan, base_cfg, node_name="len_rabi")
+
+    point = apply_override_patches(
+        base_cfg,
+        plan,
+        {"sweep.length.stop": 20.25},
+        flux_idx=0,
+        node_name="len_rabi",
+    )
+
+    point_sweep_section = cast(dict[str, Any], point["sweep"])
+    point_sweep = point_sweep_section["length"]
+    assert isinstance(point_sweep, SweepCfg)
+    assert point_sweep.start == 1.25
+    assert point_sweep.stop == 20.25
+    assert point_sweep.expts == 10
+    assert point_sweep.step == pytest.approx((20.25 - 1.25) / 9)
+    assert base_sweep.stop == 10.25
+    assert base_sweep.step == 1.0
+
+    expts_plan = OverridePlan(
+        (
+            OverridePath(
+                "sweep.length.expts",
+                "all_points",
+                "generation.test",
+                "test expts patch validation",
+            ),
+        )
+    )
+    with pytest.raises(ValueError, match="expts patch must be an integer"):
+        apply_override_patches(
+            base_cfg,
+            expts_plan,
+            {"sweep.length.expts": 2.9},
+            flux_idx=0,
+            node_name="len_rabi",
+        )
+
+
 def test_apply_override_patches_rejects_whole_module_replacement():
     plan = OverridePlan(
         (
@@ -1956,6 +2027,16 @@ def test_apply_override_patches_rejects_whole_module_replacement():
             base_cfg,
             plan,
             {"modules.qub_pulse": {"freq": 5135.0, "gain": 0.2}},
+            flux_idx=1,
+            node_name="qubit_freq",
+        )
+
+    object_base_cfg = {"modules": {"qub_pulse": SimpleNamespace(freq=5000.0, gain=0.1)}}
+    with pytest.raises(ValueError, match="whole-module replacement is not allowed"):
+        apply_override_patches(
+            object_base_cfg,
+            plan,
+            {"modules.qub_pulse": SimpleNamespace(freq=5135.0, gain=0.2)},
             flux_idx=1,
             node_name="qubit_freq",
         )

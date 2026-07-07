@@ -961,6 +961,48 @@ def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl)
     assert "Sweep tooltip" in value_tooltips
 
 
+def test_sweep_edge_decoration_disables_only_that_edge(qapp, ctrl):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.gui.app.main.ui.cfg_form import (
+        CfgFormWidget,
+        FieldDecorationPatch,
+    )
+    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
+
+    class StopGeneratedProvider:
+        def decoration_for(
+            self, path: str, spec: object, value: object
+        ) -> FieldDecorationPatch | None:
+            del spec, value
+            if path == "window.stop":
+                return FieldDecorationPatch(
+                    enabled=False,
+                    tone="muted",
+                    badge="generated",
+                    tooltip="Stop is generated",
+                )
+            return None
+
+    schema = _schema(
+        {"window": SweepSpec(label="Window")},
+        {"window": SweepValue(start=0.0, stop=10.0, expts=21)},
+    )
+    w = CfgFormWidget(decoration_provider=StopGeneratedProvider())
+    _attach(w, schema, ctrl)
+
+    sweep_widget = w.findChild(SweepWidget)
+    assert sweep_widget is not None
+    assert w.decoration_for_path("window.start").enabled is True
+    assert w.decoration_for_path("window.stop").enabled is False
+    assert sweep_widget._start_widget.isEnabled() is True
+    assert sweep_widget._stop_widget.isEnabled() is False
+    assert sweep_widget._expts.isEnabled() is True
+    labels = {
+        label.text(): label.toolTip() for label in sweep_widget.findChildren(QLabel)
+    }
+    assert labels["stop [generated]"] == "Stop is generated"
+
+
 def test_choice_section_rejects_unknown_choice_fields():
     fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto"]),

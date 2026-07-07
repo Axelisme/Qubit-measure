@@ -288,7 +288,7 @@ def test_lenrabi_make_cfg_lowers_context():
     assert cfg.sweep_range == pytest.approx(
         auto_stop_sweep_range(
             0.5,
-            start=knobs["sweep_start_us"],
+            start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=knobs["sweep_stop_min_us"],
         )
@@ -393,7 +393,7 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
     assert cfg.sweep_range == pytest.approx(
         auto_stop_sweep_range(
             knobs["expected_pi_length"],
-            start=knobs["sweep_start_us"],
+            start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=knobs["sweep_stop_min_us"],
         )
@@ -428,7 +428,7 @@ def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
     assert cfg.sweep_range == pytest.approx(
         auto_stop_sweep_range(
             knobs["expected_pi_length"],
-            start=knobs["sweep_start_us"],
+            start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=knobs["sweep_stop_min_us"],
         )
@@ -787,7 +787,7 @@ def test_t1_make_cfg_lowers_context():
     assert cfg.sweep_range == pytest.approx(
         auto_stop_sweep_range(
             float(snap["t1"]),
-            start=knobs["sweep_start_us"],
+            start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=knobs["sweep_stop_min_us"],
         )
@@ -907,7 +907,7 @@ def test_t2ramsey_make_cfg_lowers_context():
     assert cfg.sweep_range == pytest.approx(
         auto_stop_sweep_range(
             float(snap["t2r"]),
-            start=knobs["sweep_start_us"],
+            start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=None,
         )
@@ -1042,7 +1042,7 @@ def test_t2echo_make_cfg_lowers_context():
     assert cfg.sweep_range == pytest.approx(
         auto_stop_sweep_range(
             float(snap["t2e"]),
-            start=knobs["sweep_start_us"],
+            start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=None,
         )

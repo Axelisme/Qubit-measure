@@ -49,6 +49,13 @@ FIELD_INPUT_MIN_WIDTH = 20
 FIELD_LABEL_MAX_WIDTH = 80
 SWEEP_INPUT_MAX_WIDTH = 180
 
+_TONE_STYLES = {
+    "muted": "color: #6b7280;",
+    "info": "color: #2563eb;",
+    "warning": "color: #8a5a00;",
+    "error": "color: #b00020;",
+}
+
 
 class ElidedLabel(QLabel):
     """QLabel that elides text when it exceeds the configured label width.
@@ -194,6 +201,54 @@ def _add_sweep_spacer(layout: QGridLayout) -> None:
         2,
         1,
     )
+
+
+def _edge_decoration(
+    path: str,
+    edge: str,
+    edge_field: LiveField,
+    decoration_for_path: Callable[[str, Any], Any] | None,
+) -> Any | None:
+    if not path or decoration_for_path is None:
+        return None
+    return decoration_for_path(f"{path}.{edge}", edge_field)
+
+
+def _decorated_label_text(label: str, decoration: Any | None) -> str:
+    if decoration is None:
+        return label
+    label_suffix = getattr(decoration, "label_suffix", "")
+    badge = getattr(decoration, "badge", "")
+    text = f"{label}{label_suffix}"
+    if badge:
+        text = f"{text} [{badge}]"
+    return text
+
+
+def _decoration_enabled(decoration: Any | None) -> bool:
+    if decoration is None:
+        return True
+    return bool(getattr(decoration, "enabled", True))
+
+
+def _apply_edge_decoration(
+    label_widget: QLabel,
+    value_widget: QWidget,
+    decoration: Any | None,
+) -> None:
+    if decoration is None:
+        return
+    enabled = _decoration_enabled(decoration)
+    tooltip = str(getattr(decoration, "tooltip", "") or "")
+    tone = str(getattr(decoration, "tone", "normal") or "normal")
+    style = _TONE_STYLES.get(tone, "")
+    label_widget.setEnabled(enabled)
+    value_widget.setEnabled(enabled)
+    if tooltip:
+        label_widget.setToolTip(tooltip)
+        value_widget.setToolTip(tooltip)
+    if style:
+        label_widget.setStyleSheet(style)
 
 
 def _dynamic_choices_for_scalar(field: ScalarLiveField, current: Any) -> list | None:
@@ -514,7 +569,14 @@ class ScalarWidget(BaseLiveWidget):
 class SweepWidget(BaseLiveWidget):
     """Inline 2x2 input for start/stop/expts/step with synchronized updates."""
 
-    def __init__(self, field: SweepLiveField, parent: QWidget | None = None):
+    def __init__(
+        self,
+        field: SweepLiveField,
+        parent: QWidget | None = None,
+        *,
+        path: str = "",
+        decoration_for_path: Callable[[str, Any], Any] | None = None,
+    ):
         super().__init__(field, parent)
         self._updating = False
 
@@ -547,14 +609,25 @@ class SweepWidget(BaseLiveWidget):
         _keep_sweep_input_compact(self._step)
 
         enabled = field.spec.editable
-        self._start_widget.setEnabled(enabled)
-        self._stop_widget.setEnabled(enabled)
+        start_decoration = _edge_decoration(
+            path, "start", field.start_field, decoration_for_path
+        )
+        stop_decoration = _edge_decoration(
+            path, "stop", field.stop_field, decoration_for_path
+        )
+        self._start_widget.setEnabled(enabled and _decoration_enabled(start_decoration))
+        self._stop_widget.setEnabled(enabled and _decoration_enabled(stop_decoration))
         self._expts.setEnabled(enabled)
         self._step.setEnabled(enabled)
 
-        layout.addWidget(QLabel("start"), 0, 0)
+        start_label = QLabel(_decorated_label_text("start", start_decoration))
+        stop_label = QLabel(_decorated_label_text("stop", stop_decoration))
+        _apply_edge_decoration(start_label, self._start_widget, start_decoration)
+        _apply_edge_decoration(stop_label, self._stop_widget, stop_decoration)
+
+        layout.addWidget(start_label, 0, 0)
         layout.addWidget(self._start_widget, 0, 1)
-        layout.addWidget(QLabel("stop"), 0, 2)
+        layout.addWidget(stop_label, 0, 2)
         layout.addWidget(self._stop_widget, 0, 3)
         layout.addWidget(QLabel("expts"), 1, 0)
         layout.addWidget(self._expts, 1, 1)

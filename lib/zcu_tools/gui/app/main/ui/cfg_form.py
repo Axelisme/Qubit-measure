@@ -310,6 +310,14 @@ class CfgFormWidget(QWidget):
             for key, child in field.sub_field.fields.items():
                 child_path = f"{path}.{key}" if path else key
                 self._collect_decoration_state(child, child_path, state)
+            return
+        if isinstance(field, SweepLiveField):
+            for edge, child in (
+                ("start", field.start_field),
+                ("stop", field.stop_field),
+            ):
+                child_path = f"{path}.{edge}" if path else edge
+                state[child_path] = self._decoration_for_field(child_path, child)
 
     def _queue_section_refresh(self, section_paths: set[str]) -> None:
         if not section_paths:
@@ -479,8 +487,11 @@ def _changed_decoration_paths(
 
 def _parent_section_paths(paths: set[str]) -> set[str]:
     section_paths: set[str] = set()
+    sweep_edges = {"center", "span", "start", "stop", "expts", "step"}
     for path in paths:
         section, sep, _leaf = path.rpartition(".")
+        if sep and _leaf in sweep_edges:
+            section, _sep, _sweep_leaf = section.rpartition(".")
         section_paths.add(section if sep else "")
     return section_paths
 

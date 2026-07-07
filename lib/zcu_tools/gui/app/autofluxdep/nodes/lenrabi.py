@@ -87,6 +87,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
+    auto_sweep_stop,
     fixed_sweep_range,
     seed_md_float,
 )
@@ -202,11 +203,13 @@ def _resolve_cfg_sweep_range(
     mode: str, *, pi_length: float, fixed: Any, knobs: dict[str, Any]
 ) -> tuple[float, float]:
     if mode == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
-        return auto_stop_sweep_range(
-            pi_length,
-            start=float(knobs["sweep_start_us"]),
-            stop_factor=float(knobs["sweep_stop_factor"]),
-            stop_min=float(knobs["sweep_stop_min_us"]),
+        return (
+            float(fixed.start),
+            auto_sweep_stop(
+                pi_length,
+                stop_factor=float(knobs["sweep_stop_factor"]),
+                stop_min=float(knobs["sweep_stop_min_us"]),
+            ),
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
         return fixed_sweep_range(fixed)
@@ -620,7 +623,10 @@ class LenRabiBuilder(Builder):
                     str_choice_spec(
                         "range_mode",
                         (_SWEEP_RANGE_MODE_AUTO_PI_LENGTH, _SWEEP_RANGE_MODE_FIXED),
-                        tooltip="Auto derives the Rabi sweep from pi-length feedback.",
+                        tooltip=(
+                            "Auto derives the Rabi sweep stop from pi-length feedback; "
+                            "start/expts stay in Default cfg."
+                        ),
                     ),
                     _SWEEP_RANGE_MODE_AUTO_PI_LENGTH,
                     group="sweep",
@@ -633,15 +639,6 @@ class LenRabiBuilder(Builder):
                         tooltip="Pi-length setpoint for drive gain feedback.",
                     ),
                     pi_len_seed,
-                    group="sweep",
-                ),
-                logical_generation_field(
-                    "sweep_start_us",
-                    FloatSpec(
-                        label="start_us",
-                        tooltip="Lower bound for the auto Rabi sweep.",
-                    ),
-                    _DEFAULT_SWEEP_START,
                     group="sweep",
                 ),
                 logical_generation_field(
@@ -703,7 +700,6 @@ class LenRabiBuilder(Builder):
                     {
                         _SWEEP_RANGE_MODE_FIXED: (),
                         _SWEEP_RANGE_MODE_AUTO_PI_LENGTH: (
-                            "sweep_start_us",
                             "sweep_stop_factor",
                             "sweep_stop_min_us",
                         ),
@@ -791,10 +787,10 @@ class LenRabiBuilder(Builder):
         if knobs.get("sweep_range_mode") == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
             paths.append(
                 OverridePath(
-                    "sweep.length",
+                    "sweep.length.stop",
                     "all_points",
                     "generation.sweep.sweep_range_mode",
-                    "Rabi sweep range is generated from pi-length feedback",
+                    "Rabi sweep stop is generated from pi-length feedback",
                 )
             )
         paths.extend(
@@ -876,7 +872,7 @@ class LenRabiBuilder(Builder):
             knobs=knobs,
         )
         if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
-            patches["sweep.length"] = sweep_range
+            patches["sweep.length.stop"] = sweep_range[1]
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
         return ml.make_cfg(raw_cfg, LenRabiCfgTemplate)

@@ -107,6 +107,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
+    auto_sweep_stop,
     fixed_sweep_range,
     seed_md_float,
     snapshot_float,
@@ -172,11 +173,13 @@ def _resolve_cfg_sweep_range(
     mode: str, *, smoothed_t1: float, fixed: Any, knobs: dict[str, Any]
 ) -> tuple[float, float]:
     if mode == _SWEEP_RANGE_MODE_AUTO_T1:
-        return auto_stop_sweep_range(
-            smoothed_t1,
-            start=float(knobs["sweep_start_us"]),
-            stop_factor=float(knobs["sweep_stop_factor"]),
-            stop_min=float(knobs["sweep_stop_min_us"]),
+        return (
+            float(fixed.start),
+            auto_sweep_stop(
+                smoothed_t1,
+                stop_factor=float(knobs["sweep_stop_factor"]),
+                stop_min=float(knobs["sweep_stop_min_us"]),
+            ),
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
         return fixed_sweep_range(fixed)
@@ -362,20 +365,14 @@ class T1Builder(Builder):
                     str_choice_spec(
                         "range_mode",
                         (_SWEEP_RANGE_MODE_AUTO_T1, _SWEEP_RANGE_MODE_FIXED),
-                        tooltip="Auto derives the sweep window from latest trusted T1.",
+                        tooltip=(
+                            "Auto derives the sweep stop from latest trusted T1; "
+                            "start/expts stay in Default cfg."
+                        ),
                     ),
                     _SWEEP_RANGE_MODE_AUTO_T1,
                     group="sweep",
                     group_label="T1 sweep window",
-                ),
-                logical_generation_field(
-                    "sweep_start_us",
-                    FloatSpec(
-                        label="start_us",
-                        tooltip="Lower bound for the auto T1 sweep.",
-                    ),
-                    _DEFAULT_SWEEP_START,
-                    group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_stop_factor",
@@ -414,7 +411,6 @@ class T1Builder(Builder):
                     {
                         _SWEEP_RANGE_MODE_FIXED: (),
                         _SWEEP_RANGE_MODE_AUTO_T1: (
-                            "sweep_start_us",
                             "sweep_stop_factor",
                             "sweep_stop_min_us",
                         ),
@@ -485,10 +481,10 @@ class T1Builder(Builder):
         if knobs.get("sweep_range_mode") == _SWEEP_RANGE_MODE_AUTO_T1:
             paths.append(
                 OverridePath(
-                    "sweep.length",
+                    "sweep.length.stop",
                     "all_points",
                     "generation.sweep.sweep_range_mode",
-                    "T1 sweep range is generated from T1 feedback",
+                    "T1 sweep stop is generated from T1 feedback",
                 )
             )
         return OverridePlan(tuple(paths))
@@ -538,7 +534,7 @@ class T1Builder(Builder):
         if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
             patches["relax_delay"] = relax_delay
         if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_T1:
-            patches["sweep.length"] = sweep_range
+            patches["sweep.length.stop"] = sweep_range[1]
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
         return ml.make_cfg(raw_cfg, T1CfgTemplate)
