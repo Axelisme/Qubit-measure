@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
+    OverridePath,
     OverridePlan,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.form import (
@@ -225,6 +226,7 @@ def _split_generation_section(
 class _OverridePlanDecorationProvider:
     def __init__(self, plan: OverridePlan) -> None:
         self._entries = {entry.path: entry for entry in plan.paths}
+        self._children_by_template_path = _partial_template_children(plan)
 
     def decoration_for(
         self,
@@ -235,7 +237,16 @@ class _OverridePlanDecorationProvider:
         del spec, value
         entry = self._entries.get(path)
         if entry is None:
-            return None
+            template_children = self._children_by_template_path.get(path)
+            if template_children is None:
+                return None
+            return FieldDecorationPatch(
+                hidden=False,
+                enabled=True,
+                tone="info",
+                badge="template",
+                tooltip=_template_tooltip(template_children),
+            )
         if entry.mode == "after_first_point":
             return FieldDecorationPatch(
                 hidden=False,
@@ -245,6 +256,17 @@ class _OverridePlanDecorationProvider:
                 tooltip=(
                     "Initial value is used at flux point 0; later points use a "
                     f"generated value. Source: {entry.source}. {entry.reason}"
+                ),
+            )
+        if entry.mode == "fallback":
+            return FieldDecorationPatch(
+                hidden=False,
+                enabled=True,
+                tone="info",
+                badge="fallback",
+                tooltip=(
+                    "Default value is used unless a runtime dependency provides an "
+                    f"overlay value. Source: {entry.source}. {entry.reason}"
                 ),
             )
         return FieldDecorationPatch(
@@ -257,3 +279,66 @@ class _OverridePlanDecorationProvider:
                 f"generated value. Source: {entry.source}. {entry.reason}"
             ),
         )
+
+
+def _partial_template_children(
+    plan: OverridePlan,
+) -> dict[str, tuple[OverridePath, ...]]:
+    by_path: dict[str, list[OverridePath]] = {}
+    for entry in plan.paths:
+        template_path = _template_module_path(entry.path)
+        if template_path is None:
+            continue
+        by_path.setdefault(template_path, []).append(entry)
+    return {
+        path: tuple(sorted(children, key=lambda child: child.path))
+        for path, children in by_path.items()
+    }
+
+
+def _template_module_path(path: str) -> str | None:
+    parts = path.split(".")
+    if len(parts) < 4:
+        return None
+    if parts[0] != "modules":
+        return None
+    # Readout dependencies overlay only the fallback frequency/gain/length leaves;
+    # the module row remains the user-editable template for channel/trigger/etc.
+    if parts[2] in {"pulse_cfg", "ro_cfg"}:
+        return ".".join(parts[:2])
+    return None
+
+
+def _template_tooltip(children: tuple[OverridePath, ...]) -> str:
+    overlays = "; ".join(_mode_group_summary(children))
+    sources = ", ".join(sorted({child.source for child in children}))
+    return (
+        "This module is an editable template. Runtime overlay leaves: "
+        f"{overlays}. Other module fields still apply. Source: {sources}."
+    )
+
+
+def _mode_group_summary(children: tuple[OverridePath, ...]) -> list[str]:
+    summaries: list[str] = []
+    for mode in ("all_points", "after_first_point", "fallback"):
+        paths = [_relative_path(child.path) for child in children if child.mode == mode]
+        if paths:
+            summaries.append(f"{_mode_badge(mode)}: {', '.join(paths)}")
+    return summaries
+
+
+def _mode_badge(mode: str) -> str:
+    if mode == "all_points":
+        return "generated"
+    if mode == "after_first_point":
+        return "initial"
+    if mode == "fallback":
+        return "fallback"
+    return mode
+
+
+def _relative_path(path: str) -> str:
+    parts = path.split(".")
+    if len(parts) <= 2:
+        return path
+    return ".".join(parts[2:])

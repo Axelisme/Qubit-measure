@@ -8,13 +8,15 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, TypeAlias
 
-OverrideMode: TypeAlias = Literal["after_first_point", "all_points"]
-_VALID_MODES: frozenset[str] = frozenset({"after_first_point", "all_points"})
+OverrideMode: TypeAlias = Literal["after_first_point", "all_points", "fallback"]
+_VALID_MODES: frozenset[str] = frozenset(
+    {"after_first_point", "all_points", "fallback"}
+)
 
 
 @dataclass(frozen=True)
 class OverridePath:
-    """One Default cfg path that generation may patch during a run."""
+    """One Default cfg path that runtime may patch during a run."""
 
     path: str
     mode: OverrideMode
@@ -117,20 +119,20 @@ def apply_override_patches(
     flux_idx: int,
     node_name: str,
 ) -> dict[str, object]:
-    """Return this point's cfg by applying declared generation patches.
+    """Return this point's cfg by applying declared runtime patches.
 
     The input base cfg is never mutated. Every patch path must be declared by the
     builder's run-start OverridePlan, must exist in the run-start base cfg, and
     must be legal for this flux index. Whole-module replacement is rejected, but
-    a declared nested object such as ``modules.readout.pulse_cfg.waveform`` may
-    be replaced atomically.
+    a declared nested object may be replaced atomically. ``fallback`` paths are
+    optional: when no patch is supplied, the run-start base cfg remains in effect.
     """
 
     by_path = plan.by_path
     unknown = set(patches) - set(by_path)
     if unknown:
         raise ValueError(
-            f"node {node_name!r} generated undeclared override path(s): "
+            f"node {node_name!r} produced undeclared override path(s): "
             + ", ".join(sorted(unknown))
         )
     required = {

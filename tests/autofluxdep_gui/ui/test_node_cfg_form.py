@@ -454,6 +454,26 @@ def test_node_cfg_form_renders_override_plan_badges_and_refreshes(ctrl_node, qap
         assert gain_decoration.enabled is False
         assert gain_decoration.badge == "generated"
 
+        readout_decoration = form._default_form.decoration_for_path("modules.readout")
+        assert readout_decoration.enabled is True
+        assert readout_decoration.badge == "template"
+        assert "pulse_cfg.freq" in readout_decoration.tooltip
+        assert "ro_cfg.ro_freq" in readout_decoration.tooltip
+        assert "fallback" in readout_decoration.tooltip
+        assert "ro_cfg.trig_offset" not in readout_decoration.tooltip
+
+        readout_freq = form._default_form.decoration_for_path(
+            "modules.readout.pulse_cfg.freq"
+        )
+        assert readout_freq.enabled is True
+        assert readout_freq.badge == "fallback"
+
+        readout_trigger = form._default_form.decoration_for_path(
+            "modules.readout.ro_cfg.trig_offset"
+        )
+        assert readout_trigger.enabled is True
+        assert readout_trigger.badge == ""
+
         _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
 
         refreshed = form._default_form.decoration_for_path("modules.qub_pulse.gain")

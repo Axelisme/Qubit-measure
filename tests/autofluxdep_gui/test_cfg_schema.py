@@ -61,6 +61,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.program.v2 import PulseReadoutCfg
 
 from ._helpers import (
     NodeFieldSpec,
@@ -1413,12 +1414,30 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
         schema=builder.make_default_schema(),
         ml=ml,
     )
+    dependency_readout = {
+        "type": "readout/pulse",
+        "pulse_cfg": {
+            "ch": 7,
+            "nqz": 1,
+            "freq": 6200.5,
+            "gain": 0.73,
+            "waveform": {"style": "const", "length": 1.7},
+        },
+        "ro_cfg": {
+            "ro_ch": 3,
+            "ro_freq": 6200.5,
+            "ro_length": 1.7,
+            "trig_offset": 9.0,
+        },
+    }
     snap = Snapshot(
-        {"predict_freq": 5135.0, "qfw_factor": None}, modules={"readout": _READOUT}
+        {"predict_freq": 5135.0, "qfw_factor": None},
+        modules={"readout": dependency_readout},
     )
     cfg = builder.make_cfg(env, snap)
     expected_raw = env.schema.lower_raw(ml, md=MetaDict())
     expected_pulse = expected_raw["modules"]["qub_pulse"]
+    expected_readout = expected_raw["modules"]["readout"]
 
     assert cfg.reps == expected_raw["reps"]
     assert cfg.rounds == expected_raw["rounds"]
@@ -1429,6 +1448,24 @@ def test_qubit_freq_make_cfg_uses_schema_defaults():
         float(expected_pulse["gain"])
     )
     assert float(cfg.modules.qub_pulse.freq) == 5135.0  # the injected predict_freq
+    assert isinstance(cfg.modules.readout, PulseReadoutCfg)
+    assert int(cfg.modules.readout.pulse_cfg.ch) == int(
+        expected_readout["pulse_cfg"]["ch"]
+    )
+    assert int(cfg.modules.readout.pulse_cfg.nqz) == int(
+        expected_readout["pulse_cfg"]["nqz"]
+    )
+    assert int(cfg.modules.readout.ro_cfg.ro_ch) == int(
+        expected_readout["ro_cfg"]["ro_ch"]
+    )
+    assert float(cfg.modules.readout.ro_cfg.trig_offset) == pytest.approx(
+        float(expected_readout["ro_cfg"]["trig_offset"])
+    )
+    assert float(cfg.modules.readout.pulse_cfg.freq) == pytest.approx(6200.5)
+    assert float(cfg.modules.readout.pulse_cfg.gain) == pytest.approx(0.73)
+    assert float(cfg.modules.readout.pulse_cfg.waveform.length) == pytest.approx(1.7)
+    assert float(cfg.modules.readout.ro_cfg.ro_freq) == pytest.approx(6200.5)
+    assert float(cfg.modules.readout.ro_cfg.ro_length) == pytest.approx(1.7)
 
 
 def test_qubit_freq_make_cfg_uses_smoothed_qfw_factor_for_drive_gain():
@@ -1774,6 +1811,12 @@ def test_apply_override_patches_copies_base_and_enforces_plan_modes():
                 "drive_gain",
                 "adaptive gain",
             ),
+            OverridePath(
+                "modules.qub_pulse.waveform.length",
+                "fallback",
+                "readout module dependency",
+                "fallback leaves keep the base cfg when absent",
+            ),
         )
     )
     base_cfg = {
@@ -1797,18 +1840,26 @@ def test_apply_override_patches_copies_base_and_enforces_plan_modes():
     first_modules = cast(dict[str, Any], first["modules"])
     first_qub_pulse = cast(dict[str, Any], first_modules["qub_pulse"])
     assert first_qub_pulse["freq"] == 5135.0
+    first_waveform = cast(dict[str, Any], first_qub_pulse["waveform"])
+    assert first_waveform["length"] == 5.0
     assert base_cfg["modules"]["qub_pulse"]["freq"] == 5000.0
 
     second = apply_override_patches(
         base_cfg,
         plan,
-        {"modules.qub_pulse.freq": 5140.0, "modules.qub_pulse.gain": 0.2},
+        {
+            "modules.qub_pulse.freq": 5140.0,
+            "modules.qub_pulse.gain": 0.2,
+            "modules.qub_pulse.waveform.length": 4.0,
+        },
         flux_idx=1,
         node_name="qubit_freq",
     )
     second_modules = cast(dict[str, Any], second["modules"])
     second_qub_pulse = cast(dict[str, Any], second_modules["qub_pulse"])
     assert second_qub_pulse["gain"] == 0.2
+    second_waveform = cast(dict[str, Any], second_qub_pulse["waveform"])
+    assert second_waveform["length"] == 4.0
 
     with pytest.raises(ValueError, match="undeclared override path"):
         apply_override_patches(

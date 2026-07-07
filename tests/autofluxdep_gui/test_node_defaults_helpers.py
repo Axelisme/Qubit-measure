@@ -9,7 +9,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
     PULSE_MODULE_LEAF_PATHS,
-    READOUT_PULSE_MODULE_LEAF_PATHS,
+    READOUT_FALLBACK_LEAF_PATHS,
     logical_generation_field,
     pulse_module_override_paths,
     pulse_module_patches,
@@ -134,9 +134,10 @@ def test_module_override_helpers_preserve_paths_source_and_reason():
         reason="readout module is resolved from workflow/module-library dependency",
     ) == module_override_paths(
         prefix="modules.readout",
-        leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+        leaf_paths=READOUT_FALLBACK_LEAF_PATHS,
         source="opt_readout module dependency",
         reason="readout module is resolved from workflow/module-library dependency",
+        mode="fallback",
     )
 
 
@@ -152,8 +153,15 @@ def test_module_patch_helpers_preserve_leaf_outputs():
     assert readout_module_patches(readout) == module_leaf_patches(
         prefix="modules.readout",
         module=readout,
-        leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+        leaf_paths=READOUT_FALLBACK_LEAF_PATHS,
     )
+    assert readout_module_patches(readout) == {
+        "modules.readout.pulse_cfg.freq": 7444.6,
+        "modules.readout.pulse_cfg.gain": 0.8,
+        "modules.readout.pulse_cfg.waveform.length": 1.0,
+        "modules.readout.ro_cfg.ro_freq": 7444.6,
+        "modules.readout.ro_cfg.ro_length": 0.9,
+    }
 
 
 @pytest.mark.parametrize(

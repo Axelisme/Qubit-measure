@@ -61,17 +61,12 @@ PULSE_MODULE_LEAF_PATHS: tuple[str, ...] = (
     "waveform",
 )
 
-READOUT_PULSE_MODULE_LEAF_PATHS: tuple[str, ...] = (
-    "type",
-    "pulse_cfg.ch",
-    "pulse_cfg.nqz",
+READOUT_FALLBACK_LEAF_PATHS: tuple[str, ...] = (
     "pulse_cfg.freq",
     "pulse_cfg.gain",
-    "pulse_cfg.waveform",
-    "ro_cfg.ro_ch",
+    "pulse_cfg.waveform.length",
     "ro_cfg.ro_freq",
     "ro_cfg.ro_length",
-    "ro_cfg.trig_offset",
 )
 PULSE_READOUT_REF_LABELS: tuple[str, ...] = ("Pulse Readout",)
 
@@ -162,9 +157,10 @@ def readout_module_override_paths(
 ) -> tuple[OverridePath, ...]:
     return module_override_paths(
         prefix="modules.readout",
-        leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+        leaf_paths=READOUT_FALLBACK_LEAF_PATHS,
         source=source,
         reason=reason,
+        mode="fallback",
     )
 
 
@@ -180,7 +176,7 @@ def readout_module_patches(readout: object) -> dict[str, object]:
     return module_leaf_patches(
         prefix="modules.readout",
         module=readout,
-        leaf_paths=READOUT_PULSE_MODULE_LEAF_PATHS,
+        leaf_paths=READOUT_FALLBACK_LEAF_PATHS,
     )
 
 
