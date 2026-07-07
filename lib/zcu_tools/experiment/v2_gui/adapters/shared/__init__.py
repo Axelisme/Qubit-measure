@@ -44,6 +44,7 @@ from .spec_helpers import (
     schema_from_module,
 )
 from .writeback_helpers import (
+    READOUT_DPM_PULSE_TAIL_US,
     readout_dpm_writeback_items,
     readout_rf_writeback_items,
     reset_module_writeback_items,
@@ -98,6 +99,7 @@ __all__ = [
     "declare_sweep_spec",
     "declare_dev_spec",
     # Gated per-experiment module writeback helpers
+    "READOUT_DPM_PULSE_TAIL_US",
     "readout_dpm_writeback_items",
     "readout_rf_writeback_items",
     "reset_module_writeback_items",

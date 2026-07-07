@@ -8,6 +8,7 @@ from typing import Any
 
 import h5py
 import numpy as np
+import pytest
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import (
     QubitFreqResult,
@@ -16,6 +17,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.result import (
 )
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
 from zcu_tools.gui.app.autofluxdep.services import run_store as run_store_module
+from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
+    export_labber_browser_sidecars,
+)
 from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore, load_manifest
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.utils.datasaver import load_labber_data
@@ -246,3 +250,15 @@ def test_run_store_places_autofluxdep_run_under_qubit_database_root_for_dated_da
     manifest = load_manifest(store.manifest_path)
     assert manifest["project"]["database_path"] == str(dated_database_path)
     assert manifest["paths"]["data_root"] == str(store.data_dir)
+
+
+def test_labber_browser_export_rejects_unknown_result_type(tmp_path):
+    node = place(make_builder("lenrabi"))
+
+    with pytest.raises(TypeError, match="unsupported result type object"):
+        export_labber_browser_sidecars(
+            data_root=tmp_path / "20260705-223908_flux-sweep-test",
+            nodes=[node],
+            results={node.name: object()},
+            committed_masks={node.name: np.array([True], dtype=np.bool_)},
+        )

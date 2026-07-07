@@ -53,20 +53,6 @@ class ScheduleAcquireResult:
     stopped: bool = False
 
 
-class CompletedRoundStopCondition:
-    """Data-quality stop condition evaluated after a completed round."""
-
-    def __init__(self, data: Callable[[], bool]) -> None:
-        self._data = data
-        self.data_stop_requested = False
-
-    def __call__(self) -> bool:
-        if self._data():
-            self.data_stop_requested = True
-            return True
-        return False
-
-
 def acquire_retry_generation_field(
     *, group: str = "acquisition", group_label: str | None = None
 ) -> GenerationField:
@@ -314,20 +300,17 @@ def build_stop_condition(
     The runner calls this after the completed round has updated ``SignalBuffer``, so
     the SNR checker sees the same running average that was just painted in Result.
     """
-    data_condition: Callable[[], bool] | None = None
     threshold = earlystop_snr(env.schema, md=env.md)
-    if threshold is not None:
-        check_snr = snr_checker(probe, threshold, signal2real_fn)
-
-        def check_snr_when_ready() -> bool:
-            if probe.value is None:
-                return False
-            return check_snr()
-
-        data_condition = check_snr_when_ready
-    if data_condition is None:
+    if threshold is None:
         return None
-    return CompletedRoundStopCondition(data_condition)
+    check_snr = snr_checker(probe, threshold, signal2real_fn)
+
+    def check_snr_when_ready() -> bool:
+        if probe.value is None:
+            return False
+        return check_snr()
+
+    return check_snr_when_ready
 
 
 def make_signal_update(

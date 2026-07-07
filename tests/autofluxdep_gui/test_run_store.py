@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -326,6 +327,44 @@ def test_run_store_finalize_records_report_failure_after_journal_event(
     assert events[-1]["report_errors"] == ["report boom"]
 
 
+def test_run_store_finalize_skips_report_when_journal_snapshot_unavailable(
+    tmp_path, monkeypatch
+):
+    node, result = _node_and_result()
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=[0.0],
+        flux_device_name=None,
+        nodes=[node],
+        results={"probe": result},
+    )
+
+    def fail_journal_snapshot() -> list[dict[str, Any]]:
+        raise RuntimeError("journal boom")
+
+    monkeypatch.setattr(store, "iter_journal_events", fail_journal_snapshot)
+
+    with pytest.raises(RuntimeError, match="journal boom"):
+        store.finalize("finished")
+
+    manifest = load_manifest(store.manifest_path)
+    assert manifest["terminal"]["status"] == "finished"
+    assert "journal boom" in manifest["terminal"]["error"]
+    assert "journal snapshot unavailable" in manifest["terminal"]["error"]
+    assert manifest["exports"] == {}
+    assert manifest["reports"] == {}
+    assert not (store.run_dir / "report.md").exists()
+    events = load_journal_events(store.run_dir / "journal.jsonl")
+    assert events[-1]["type"] == "run_finalized"
+    assert events[-1]["completed_flux_count"] is None
+    assert events[-1]["exports"] == {}
+    assert events[-1]["reports"] == {}
+    assert events[-1]["export_errors"] == ["journal boom"]
+    assert events[-1]["report_errors"] == [
+        "journal snapshot unavailable; skipped terminal report"
+    ]
+
+
 def test_run_store_finalize_surfaces_writer_finalize_runtime_error(
     tmp_path, monkeypatch
 ):
@@ -456,7 +495,9 @@ def test_qubit_freq_export_excludes_memory_rows_without_journal_commit(tmp_path)
     np.testing.assert_allclose(raw["signals"][1].real, [10.0, 11.0, 12.0])
 
 
-def test_run_store_generate_exports_reuses_one_journal_snapshot(tmp_path, monkeypatch):
+def test_run_store_generate_exports_uses_explicit_journal_snapshot(
+    tmp_path, monkeypatch
+):
     node = place(make_builder("qubit_freq", provides=("qubit_freq",)))
     result = QubitFreqResult.allocate(
         np.array([1.0, 0.0], dtype=float),
@@ -472,19 +513,19 @@ def test_run_store_generate_exports_reuses_one_journal_snapshot(tmp_path, monkey
         results={"qubit_freq": result},
     )
     store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.0}), InfoStore())
-    real_iter_journal_events = store.iter_journal_events
+    journal_events = store.iter_journal_events()
     call_count = 0
 
     def counted_iter_journal_events():
         nonlocal call_count
         call_count += 1
-        return real_iter_journal_events()
+        return []
 
     monkeypatch.setattr(store, "iter_journal_events", counted_iter_journal_events)
 
-    exports = store._generate_exports()
+    exports = store._generate_exports(journal_events)
 
-    assert call_count == 1
+    assert call_count == 0
     assert exports["fluxdep_spectrum"] == "exports/fluxdep/qubit_freq.hdf5"
 
 

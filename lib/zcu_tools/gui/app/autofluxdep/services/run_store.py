@@ -351,10 +351,17 @@ class RunStore:
             "lifecycle": dict(lifecycle),
         }
         reports: dict[str, str] = {}
-        try:
-            reports = self._generate_report(report_manifest, journal_events)
-        except Exception as exc:
-            report_errors.append(str(exc))
+        completed_flux_count: int | None = None
+        if journal_events is None:
+            report_errors.append(
+                "journal snapshot unavailable; skipped terminal report"
+            )
+        else:
+            completed_flux_count = self._completed_flux_count(journal_events)
+            try:
+                reports = self._generate_report(report_manifest, journal_events)
+            except Exception as exc:
+                report_errors.append(str(exc))
 
         terminal_errors = [*writer_errors, *export_errors, *report_errors]
         self._terminal_errors.extend(terminal_errors)
@@ -363,7 +370,7 @@ class RunStore:
             "run_finalized",
             {
                 "terminal_status": status,
-                "completed_flux_count": self._completed_flux_count(journal_events),
+                "completed_flux_count": completed_flux_count,
                 "node_row_count": int(sum(self._row_counts.values())),
                 "skip_count": int(sum(self._skip_counts.values())),
                 "failure_count": int(sum(self._failure_counts.values())),
@@ -562,12 +569,9 @@ class RunStore:
         os.replace(tmp_path, self._manifest_path)
 
     def _generate_exports(
-        self, journal_events: Sequence[Mapping[str, Any]] | None = None
+        self, journal_events: Sequence[Mapping[str, Any]]
     ) -> dict[str, Any]:
-        events = (
-            self.iter_journal_events() if journal_events is None else journal_events
-        )
-        committed_masks = self._committed_node_row_masks(events)
+        committed_masks = self._committed_node_row_masks(journal_events)
         exports: dict[str, Any] = {}
         for node_name, result in self._results.items():
             if not isinstance(result, QubitFreqResult):
@@ -594,35 +598,27 @@ class RunStore:
         return exports
 
     def _committed_node_row_masks(
-        self, journal_events: Sequence[Mapping[str, Any]] | None = None
+        self, journal_events: Sequence[Mapping[str, Any]]
     ) -> dict[str, np.ndarray]:
         masks: dict[str, np.ndarray] = {}
         for node_name, result in self._results.items():
             n_flux = int(getattr(result, "n_flux"))
             masks[node_name] = np.zeros(n_flux, dtype=np.bool_)
-        self._mark_committed_node_rows(
-            masks,
-            self.iter_journal_events() if journal_events is None else journal_events,
-        )
+        self._mark_committed_node_rows(masks, journal_events)
         return masks
 
     def _generate_report(
         self,
         manifest: Mapping[str, Any],
-        journal_events: Sequence[Mapping[str, Any]] | None = None,
+        journal_events: Sequence[Mapping[str, Any]],
     ) -> dict[str, str]:
         relpath = "report.md"
         written = write_markdown_report(
             self.run_dir / relpath,
             manifest,
-            self.iter_journal_events() if journal_events is None else journal_events,
+            journal_events,
         )
         return {"markdown": relative_to_artifact(self.run_dir, written)}
-
-    def _committed_node_row_mask(self, node_name: str, n_flux: int) -> np.ndarray:
-        masks = {node_name: np.zeros(int(n_flux), dtype=np.bool_)}
-        self._mark_committed_node_rows(masks, self.iter_journal_events())
-        return masks[node_name]
 
     @staticmethod
     def _mark_committed_node_rows(
@@ -642,13 +638,10 @@ class RunStore:
             if 0 <= flux_idx < mask.shape[0]:
                 mask[flux_idx] = True
 
-    def _completed_flux_count(
-        self, journal_events: Sequence[Mapping[str, Any]] | None = None
-    ) -> int:
-        events = (
-            self.iter_journal_events() if journal_events is None else journal_events
+    def _completed_flux_count(self, journal_events: Sequence[Mapping[str, Any]]) -> int:
+        return sum(
+            1 for event in journal_events if event.get("type") == "flux_committed"
         )
-        return sum(1 for event in events if event.get("type") == "flux_committed")
 
 
 def load_manifest(path: str | Path) -> dict[str, Any]:

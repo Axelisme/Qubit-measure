@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-05 — predictor dialog state API
+**Last updated:** 2026-07-07 — session review sync
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 

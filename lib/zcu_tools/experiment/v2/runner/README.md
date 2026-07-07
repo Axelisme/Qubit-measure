@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-07 — stop flag failure cause contract
+**Last updated:** 2026-07-07 — external stop flag API
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -173,7 +173,8 @@ executor leaf contract 由 `runner/task.py` 擁有：
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
   stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。
-  `StopSignal` 同時提供 `is_stop` / `set_stop` 與 external flag contract 的 `is_set` / `set`。
+  `StopSignal` 對外只暴露 external cancel flag contract：`is_set()` / `set()`；retry reset
+  仍使用 `clear_stop()` 清除 stop flag 與 transient error cause。
 - `ProgramBuilder` 的 data-driven early stop 走 `stop_condition=`：internal
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`

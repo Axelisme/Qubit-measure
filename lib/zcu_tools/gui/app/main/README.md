@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - balanced sweep editors
+**Last updated:** 2026-07-07 - cfg form typed refresh protocol
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -125,7 +125,11 @@ fields rendered for each selector value. `CfgFormWidget` refreshes only the
 affected section subtree when a selector changes, while hidden inactive fields
 keep their values in the model and lower/persist through the normal section
 path. Decoration-provider changes follow the same section-local refresh path
-instead of reattaching the full LiveModel-backed form.
+instead of reattaching the full LiveModel-backed form. Field widgets expose a
+typed `refresh_section(path) -> bool` surface, and decoration state is consumed
+through the shared `FieldDecoration` surface rather than ad-hoc attribute probing.
+Unknown `ChoiceSectionSpec` selector values fast-fail instead of hiding all
+controlled fields.
 
 ## Operation Model
 

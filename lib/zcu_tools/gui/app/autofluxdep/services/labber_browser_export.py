@@ -15,6 +15,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.result import (
     QubitFreqResult,
     Sweep1DResult,
+    Sweep2DResult,
 )
 from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
     relative_to_artifact,
@@ -270,9 +271,12 @@ def _committed_mask_for(
 
 
 def _result_n_flux(result: object) -> int:
-    if isinstance(result, (QubitFreqResult, Sweep1DResult)):
+    if isinstance(result, (QubitFreqResult, Sweep1DResult, Sweep2DResult)):
         return int(result.n_flux)
-    return int(getattr(result, "n_flux"))
+    raise TypeError(
+        "Labber Browser export cannot derive n_flux from unsupported result type "
+        f"{type(result).__name__}"
+    )
 
 
 def _masked_rows(

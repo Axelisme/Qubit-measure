@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.session.events import MlChangedPayload
 
-from ...adapter import CfgSectionSpec, ChoiceSectionSpec, DirectValue, LiteralSpec
+from ...adapter import ChoiceSectionSpec, DirectValue, LiteralSpec
 from ...live_model import (
     CenteredSweepLiveField,
     DeviceRefLiveField,
@@ -31,7 +31,12 @@ from ...live_model import (
     SweepLiveField,
 )
 from .common import BaseLiveWidget, ElidedLabel, SweepWidget
-from .registry import FieldWidgetProtocol, get_widget_cls, register_widget
+from .registry import (
+    FieldDecorationProtocol,
+    FieldWidgetProtocol,
+    get_widget_cls,
+    register_widget,
+)
 
 _TONE_STYLES = {
     "muted": "color: #6b7280;",
@@ -120,7 +125,8 @@ class SectionWidget(BaseLiveWidget):
         no_header: bool = False,
         field_label_max_width: int | None = None,
         path: str = "",
-        decoration_for_path: Callable[[str, Any], Any] | None = None,
+        decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
+        | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(field, parent)
@@ -152,7 +158,10 @@ class SectionWidget(BaseLiveWidget):
         # collapsed sub-header (e.g. "Advanced"), AFTER the ungrouped fields.
         # This is presentation-only: the value tree is unchanged — a grouped
         # field is still a flat leaf of this section (it lowers at top level).
-        grouped: dict[str, list[tuple[str, str, FieldWidgetProtocol, Any | None]]] = {}
+        grouped: dict[
+            str,
+            list[tuple[str, str, FieldWidgetProtocol, FieldDecorationProtocol | None]],
+        ] = {}
         for key, child_field in field.fields.items():
             if visible_keys is not None and key not in visible_keys:
                 continue
@@ -167,7 +176,9 @@ class SectionWidget(BaseLiveWidget):
             # it has no widget — the GUI decides not to render it (the spec does
             # not carry any "visible" flag). This covers discriminators
             # (type/style) and adapter lock_literal'd fields uniformly.
-            if isinstance(spec, LiteralSpec) and getattr(decoration, "hidden", True):
+            if isinstance(spec, LiteralSpec) and (
+                decoration is None or decoration.hidden
+            ):
                 continue
 
             widget_cls = get_widget_cls(child_field)
@@ -242,14 +253,7 @@ class SectionWidget(BaseLiveWidget):
         child = self._child_widgets.get(key)
         if child is None:
             return False
-        child_path = f"{prefix}{key}" if prefix else key
-        if path == child_path and isinstance(child, SectionWidget):
-            child._rebuild_children()
-            return True
-        refresher = getattr(child, "refresh_section", None)
-        if callable(refresher):
-            return bool(refresher(path))
-        return False
+        return child.refresh_section(path)
 
     def _rebuild_children(self) -> None:
         self._clear_children()
@@ -274,11 +278,11 @@ class SectionWidget(BaseLiveWidget):
         w: FieldWidgetProtocol,
         child_field: Any,
         *,
-        decoration: Any | None = None,
+        decoration: FieldDecorationProtocol | None = None,
     ) -> None:
         if decoration is None and self._decoration_for_path is not None:
             decoration = self._decoration_for_path(path, child_field)
-        if getattr(decoration, "hidden", False):
+        if decoration is not None and decoration.hidden:
             return
         label = _decorated_label_text(child_field.spec.label or key, decoration)
         widget = cast(QWidget, w)
@@ -321,7 +325,15 @@ def _choice_visible_keys(field: SectionLiveField) -> set[str] | None:
         selector = field.fields.get(binding.selector_key)
         value = selector.get_value() if selector is not None else None
         choice = str(value.value) if isinstance(value, DirectValue) else ""
-        active = set(binding.choices.get(choice, CfgSectionSpec()).fields)
+        try:
+            active_spec = binding.choices[choice]
+        except KeyError as exc:
+            expected = ", ".join(sorted(binding.choices))
+            raise ValueError(
+                f"ChoiceSectionSpec selector {binding.selector_key!r} has unknown "
+                f"value {choice!r}; expected one of: {expected}"
+            ) from exc
+        active = set(active_spec.fields)
         visible -= binding.controlled_field_keys() - active
     return visible
 
@@ -332,7 +344,8 @@ class ModuleRefWidget(BaseLiveWidget):
         self,
         field: ModuleRefLiveField,
         path: str = "",
-        decoration_for_path: Callable[[str, Any], Any] | None = None,
+        decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
+        | None = None,
         field_label_max_width: int | None = None,
         parent: QWidget | None = None,
     ):
@@ -569,10 +582,7 @@ class ModuleRefWidget(BaseLiveWidget):
     def refresh_section(self, path: str) -> bool:
         if self._sub_widget is None:
             return False
-        refresher = getattr(self._sub_widget, "refresh_section", None)
-        if callable(refresher):
-            return bool(refresher(path))
-        return False
+        return self._sub_widget.refresh_section(path)
 
     def teardown(self) -> None:
         field = cast(ModuleRefLiveField, self._field)
@@ -599,11 +609,13 @@ class ModuleRefWidget(BaseLiveWidget):
         self._refresh_missing_ref_hint()
 
 
-def _decorated_label_text(label: str, decoration: Any | None) -> str:
+def _decorated_label_text(
+    label: str, decoration: FieldDecorationProtocol | None
+) -> str:
     if decoration is None:
         return label
-    label_suffix = getattr(decoration, "label_suffix", "")
-    badge = getattr(decoration, "badge", "")
+    label_suffix = decoration.label_suffix
+    badge = decoration.badge
     text = f"{label}{label_suffix}"
     if badge:
         text = f"{text} [{badge}]"
@@ -613,7 +625,7 @@ def _decorated_label_text(label: str, decoration: Any | None) -> str:
 def _apply_decoration(
     label_widget: QLabel,
     value_widget: QWidget,
-    decoration: Any | None,
+    decoration: FieldDecorationProtocol | None,
 ) -> None:
     if decoration is None:
         return
@@ -627,7 +639,9 @@ def _apply_decoration(
         label_widget.setStyleSheet(style)
 
 
-def _apply_widget_decoration(value_widget: QWidget, decoration: Any | None) -> None:
+def _apply_widget_decoration(
+    value_widget: QWidget, decoration: FieldDecorationProtocol | None
+) -> None:
     if decoration is None:
         return
     enabled, tooltip, _style = _decoration_widget_state(decoration)
@@ -636,10 +650,12 @@ def _apply_widget_decoration(value_widget: QWidget, decoration: Any | None) -> N
         value_widget.setToolTip(tooltip)
 
 
-def _decoration_widget_state(decoration: Any) -> tuple[bool, str, str]:
-    enabled = bool(getattr(decoration, "enabled", True))
-    tooltip = str(getattr(decoration, "tooltip", "") or "")
-    tone = str(getattr(decoration, "tone", "normal") or "normal")
+def _decoration_widget_state(
+    decoration: FieldDecorationProtocol,
+) -> tuple[bool, str, str]:
+    enabled = decoration.enabled
+    tooltip = decoration.tooltip
+    tone = decoration.tone or "normal"
     style = _TONE_STYLES.get(tone, "")
     return enabled, tooltip, style
 

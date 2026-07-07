@@ -1036,6 +1036,49 @@ def test_choice_section_rejects_unknown_choice_fields():
         )
 
 
+def test_choice_section_unknown_selector_value_fast_fails(qapp, ctrl):
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+
+    fields: dict[str, CfgNodeSpec] = {
+        "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
+        "auto_gain": ScalarSpec(label="Auto gain", type=float),
+        "manual_gain": ScalarSpec(label="Manual gain", type=float),
+    }
+    schema = _schema(
+        {
+            "search": ChoiceSectionSpec(
+                label="Search",
+                fields=fields,
+                bindings=(
+                    ChoiceBinding(
+                        "mode",
+                        {
+                            "auto": CfgSectionSpec(
+                                fields={"auto_gain": fields["auto_gain"]}
+                            ),
+                            "fixed": CfgSectionSpec(
+                                fields={"manual_gain": fields["manual_gain"]}
+                            ),
+                        },
+                    ),
+                ),
+            )
+        },
+        {
+            "search": CfgSectionValue(
+                fields={
+                    "mode": DirectValue("unknown"),
+                    "auto_gain": DirectValue(0.1),
+                    "manual_gain": DirectValue(0.2),
+                }
+            )
+        },
+    )
+
+    with pytest.raises(ValueError, match="unknown value 'unknown'"):
+        _attach(CfgFormWidget(), schema, ctrl)
+
+
 def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
     """All LiteralSpec fields render no widget — discriminators (type/style) and
     adapter lock_literal'd fields (e.g. a sweep-driven freq) alike."""

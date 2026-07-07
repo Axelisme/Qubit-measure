@@ -369,10 +369,33 @@ def calc_floquet_fourier_melem(
     if len(ts) == 0:
         raise ValueError("ts must contain at least one sample of the drive period")
     modes = _sample_floquet_modes(fbasis, ts)
+    phases = _floquet_harmonic_phases(harmonics, ts, omega)
+    return _floquet_fourier_melem_from_modes(
+        modes, n_op, i_from=i_from, i_to=i_to, harmonic_phases=phases
+    )
+
+
+def _floquet_harmonic_phases(
+    harmonics: Sequence[int], ts: NDArray[np.float64], omega: float
+) -> dict[int, NDArray[np.complex128]]:
+    return {
+        k: np.asarray(np.exp(1j * k * omega * ts), dtype=np.complex128)
+        for k in harmonics
+    }
+
+
+def _floquet_fourier_melem_from_modes(
+    modes: NDArray[np.complex128],
+    n_op: NDArray[np.complex128],
+    *,
+    i_from: int,
+    i_to: int,
+    harmonic_phases: dict[int, NDArray[np.complex128]],
+) -> dict[int, complex]:
     ket = modes[:, :, i_from]  # (nt, D)
     bra = modes[:, :, i_to].conj()  # (nt, D)
     mel = np.einsum("ti,ij,tj->t", bra, n_op, ket)  # (nt,)
-    return {k: complex(np.mean(np.exp(1j * k * omega * ts) * mel)) for k in harmonics}
+    return {k: complex(np.mean(phase * mel)) for k, phase in harmonic_phases.items()}
 
 
 def _sample_floquet_modes(
@@ -434,15 +457,20 @@ def calc_tls_resonance_map(
 
     E_tls_axis = np.asarray(E_tls_axis, dtype=np.float64)
     strength = np.zeros((len(E_tls_axis), n_photons))
+    harmonic_phases = _floquet_harmonic_phases(harmonics, ts, r_f)
     for n in tqdm(range(n_photons), desc="TLS resonance map", disable=not progress):
         modes = _sample_floquet_modes(fbasis_n[n], ts)
         for b_from, b_to in branch_pairs:
-            ket = modes[:, :, branch_infos[b_from][n]]
-            bra = modes[:, :, branch_infos[b_to][n]].conj()
-            mel = np.einsum("ti,ij,tj->t", bra, n_op, ket)
+            fourier_melems = _floquet_fourier_melem_from_modes(
+                modes,
+                n_op,
+                i_from=branch_infos[b_from][n],
+                i_to=branch_infos[b_to][n],
+                harmonic_phases=harmonic_phases,
+            )
             dE = branch_energies[b_to][n] - branch_energies[b_from][n]
             for k in harmonics:
-                Mk = np.mean(np.exp(1j * k * r_f * ts) * mel)
+                Mk = fourier_melems[k]
                 det = dE + k * r_f - E_tls_axis  # (nE,)
                 strength[:, n] += (np.abs(g_tls * Mk) ** 2) / (det**2 + gamma**2)
     return strength

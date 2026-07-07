@@ -129,12 +129,6 @@ class StopSignal:
         self._error: ScheduleOutcomeError | None = None
         self._lock = threading.Lock()
 
-    def is_stop(self) -> bool:
-        return self._event.is_set()
-
-    def set_stop(self) -> None:
-        self._event.set()
-
     def is_set(self) -> bool:
         return self._event.is_set()
 
@@ -342,7 +336,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         return self._outcome
 
     def is_stop(self) -> bool:
-        return self._stop.is_stop()
+        return self._stop.is_set()
 
     def set_stop(self) -> None:
         self._mark_stopped("stop requested")
@@ -428,7 +422,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
             )
 
     def _mark_stopped(self, reason: str) -> None:
-        self._stop.set_stop()
+        self._stop.set()
         self._set_outcome("stopped", reason=reason)
 
     def _mark_interrupted(self, exc: BaseException) -> None:
@@ -436,14 +430,14 @@ class Schedule(Generic[T_Cfg, T_Env]):
         if self._set_outcome("interrupted", reason=reason, exception=exc):
             self._stop.set_error("interrupted", reason, exc)
         else:
-            self._stop.set_stop()
+            self._stop.set()
 
     def _mark_failed(self, exc: BaseException) -> None:
         reason = _exception_reason(exc)
         if self._set_outcome("failed", reason=reason, exception=exc):
             self._stop.set_error("failed", reason, exc)
         else:
-            self._stop.set_stop()
+            self._stop.set()
 
     def _set_outcome(
         self,

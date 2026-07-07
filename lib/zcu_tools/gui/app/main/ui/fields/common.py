@@ -38,7 +38,7 @@ from ...live_model import (
     ScalarLiveField,
     SweepLiveField,
 )
-from .registry import register_widget
+from .registry import FieldDecorationProtocol, register_widget
 
 if TYPE_CHECKING:
     from ...adapter import ScalarSpec
@@ -248,40 +248,42 @@ def _edge_decoration(
     path: str,
     edge: str,
     edge_field: LiveField,
-    decoration_for_path: Callable[[str, Any], Any] | None,
-) -> Any | None:
+    decoration_for_path: Callable[[str, Any], FieldDecorationProtocol] | None,
+) -> FieldDecorationProtocol | None:
     if not path or decoration_for_path is None:
         return None
     return decoration_for_path(f"{path}.{edge}", edge_field)
 
 
-def _decorated_label_text(label: str, decoration: Any | None) -> str:
+def _decorated_label_text(
+    label: str, decoration: FieldDecorationProtocol | None
+) -> str:
     if decoration is None:
         return label
-    label_suffix = getattr(decoration, "label_suffix", "")
-    badge = getattr(decoration, "badge", "")
+    label_suffix = decoration.label_suffix
+    badge = decoration.badge
     text = f"{label}{label_suffix}"
     if badge:
         text = f"{text} [{badge}]"
     return text
 
 
-def _decoration_enabled(decoration: Any | None) -> bool:
+def _decoration_enabled(decoration: FieldDecorationProtocol | None) -> bool:
     if decoration is None:
         return True
-    return bool(getattr(decoration, "enabled", True))
+    return decoration.enabled
 
 
 def _apply_edge_decoration(
     label_widget: QLabel,
     value_widget: QWidget,
-    decoration: Any | None,
+    decoration: FieldDecorationProtocol | None,
 ) -> None:
     if decoration is None:
         return
-    enabled = _decoration_enabled(decoration)
-    tooltip = str(getattr(decoration, "tooltip", "") or "")
-    tone = str(getattr(decoration, "tone", "normal") or "normal")
+    enabled = decoration.enabled
+    tooltip = decoration.tooltip
+    tone = decoration.tone or "normal"
     style = _TONE_STYLES.get(tone, "")
     label_widget.setEnabled(enabled)
     value_widget.setEnabled(enabled)
@@ -354,6 +356,10 @@ class BaseLiveWidget(QWidget):
     def teardown(self) -> None:
         pass
 
+    def refresh_section(self, path: str) -> bool:
+        del path
+        return False
+
 
 @register_widget(LiteralLiveField)
 class LiteralWidget(QLineEdit):
@@ -373,6 +379,10 @@ class LiteralWidget(QLineEdit):
 
     def teardown(self) -> None:
         pass
+
+    def refresh_section(self, path: str) -> bool:
+        del path
+        return False
 
 
 @register_widget(ScalarLiveField)
@@ -616,7 +626,8 @@ class SweepWidget(BaseLiveWidget):
         parent: QWidget | None = None,
         *,
         path: str = "",
-        decoration_for_path: Callable[[str, Any], Any] | None = None,
+        decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
+        | None = None,
     ):
         super().__init__(field, parent)
         self._updating = False

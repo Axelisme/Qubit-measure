@@ -10,6 +10,7 @@ being "the last step" — letting any run that has the full calibration emit it.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol
 
@@ -57,6 +58,7 @@ class _HasReadoutModules(Protocol):
 
 
 _READOUT_DPM_KEYS = ("best_ro_freq", "best_ro_gain", "best_ro_length")
+READOUT_DPM_PULSE_TAIL_US = 0.1
 
 
 def _resolve_readout_dpm_values(
@@ -72,6 +74,8 @@ def _resolve_readout_dpm_values(
         values.append(md_get_float(ctx, key, float("nan")))
 
     best_ro_freq, best_ro_gain, best_ro_length = values
+    if not all(math.isfinite(value) for value in values):
+        return None
     return best_ro_freq, best_ro_gain, best_ro_length
 
 
@@ -124,7 +128,10 @@ def readout_dpm_writeback_items(
             ("pulse_cfg.freq", best_ro_freq),
             ("ro_cfg.ro_freq", best_ro_freq),
             ("pulse_cfg.gain", best_ro_gain),
-            ("pulse_cfg.waveform.length", best_ro_length + 0.1),
+            (
+                "pulse_cfg.waveform.length",
+                best_ro_length + READOUT_DPM_PULSE_TAIL_US,
+            ),
             ("ro_cfg.ro_length", best_ro_length),
         ),
     )

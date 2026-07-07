@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-07 — sweep field and pulse defaults
+**Last updated:** 2026-07-07 — run finalize journal snapshot
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
@@ -26,6 +26,12 @@ autofluxdep/
 
 ## 關鍵設計
 
+- **RUN acquire helper contract**：`nodes/acquire.py` 的 SNR early-stop 是
+  completed-round closure；probe 尚未有 signal 時回 False，有 signal 後才交給
+  SNR checker 判斷，不保存額外 data-stop flag。
+- **RunStore terminal finalize**：terminal export、markdown report 與
+  `completed_flux_count` 共用同一份 journal snapshot；helper 不自行 fallback
+  reread journal，避免 finalize/report 看到不同 committed-row 視圖。
 - **複用 session core**：Controller `__init__` 組 `build_session_services`，注入 app-local `OperationGate` + 共用 off-main 執行器 `BackgroundRunner`（`gui/background.py`，`submit(work,*,run_in_pool,on_done,on_error)`；owner 直接持具體 runner 才能呼 `quiesce()`，session service 只認 `BackgroundExecutor` port 的 `submit`，ADR-0026 §2）+ 共用 `OperationHandles`/`ProgressService`(default `QtProgressTransport`)/`OperationRunner`(kind-agnostic 生命週期機制，ADR-0026 §1；SoCConnectionService/DeviceService/autofluxdep RUN 都是 client)/`IOManager`。`build_session_services(..., runner=..., on_project_applied=...)` 接收 runner 與 project hook（device_registry 省略 → production singleton adapter）；hook 讓共用 SetupDialog apply 後回到 autofluxdep 同步 shell `ProjectInfo` 並嘗試讀 `fluxdep_fit` 安裝 predictor。Controller 以 `run_locks.py` guarded wrappers 暴露 `SetupControlPort` / `ContextControlPort` / `DeviceControlPort` / `PredictorControlPort` 給 shared setup/inspect/device/predictor dialog 與 md providers：run/paused 時 read/query 仍可用，但 setup/context/device/predictor mutation Fast Fail；MainWindow 進入 run/pausing/paused 時會關閉已開的 Setup/Devices dialog，避免 timer 或按鈕持續碰 setup/device lifecycle。`ProgressControlPort` 仍直接暴露給 app-local run progress widgets。session 回的 bundle 含 `soc_connection`（SoCConnectionService）+ `predictor`（PredictorService）+ `setup_control`（SetupDialog composition facade）+ `context_control`（context switching/md/ml/value-source/bind-device new-context facet）+ `device_control`（device lifecycle/query/progress/event-subscription facet）+ `predictor_control`（predictor lifecycle/query/compute/event-subscription facet）+ `progress_control`（owner-keyed run progress facet）。run 讀 `exp_context`（soc/soccfg/ml/md/predictor），無自己的 SetupResources/setup()。
 - **inspect dialog**：Inspect button → `MainWindow._on_inspect` 開共用 `InspectDialogBase` 的 app-local read-only-aware instance（measure 才有的 ml create/modify 綁 CfgEditor，刻意排除）。non-modal `open()`（event loop 持續 pump，run worker 不阻塞）+ `WA_DeleteOnClose`，MainWindow 持單一 instance（重開只 raise）。idle 時 md set/delete + ml rename/delete 委派 guarded `ContextControlPort`，落到共用 `ContextService` 並 emit `Md/Ml/ContextSwitched`；running/pausing/paused 時 Inspect button 仍可開來看 live context，但 edit fields 與 Set/Delete/Rename/Delete 按鈕禁用，port wrapper 也拒絕直接 mutation。
 - **State main-thread 不變式 + Qt 需求**：`build_core()` 建 session-service QObject，**需 QApplication 先存在**（測試 conftest `qapp` autouse）；headless 測試經 `connect_mock`（async SoCConnectionService + QEventLoop）建 mock soc，不用真 setup。

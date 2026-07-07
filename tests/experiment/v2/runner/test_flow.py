@@ -450,7 +450,7 @@ class StopBeforeDataProgram:
 
 def test_schedule_stop_scope_supplies_default_stop_signal() -> None:
     stop = StopSignal()
-    stop.set_stop()
+    stop.set()
 
     with schedule_stop_scope(stop):
         with Schedule(_cfg()) as sched:
@@ -822,7 +822,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
             attempts.append(1)
             raw = np.array([float(len(attempts))])
             round_hook(1, raw, cancel_flag)
-            stop.set_stop()
+            stop.set()
             raise RuntimeError("failure with stop")
 
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
@@ -866,7 +866,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
             sweep: list[tuple[str, Any]] | None,
         ) -> None:
             attempts.append(1)
-            stop.set_stop()
+            stop.set()
             raise RuntimeError("build failure with stop")
 
         def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
@@ -1063,7 +1063,7 @@ def test_signal_buffer_write_triggers_update_and_manual_trigger():
 
 def test_schedule_uses_own_stop_signal():
     stop = StopSignal()
-    stop.set_stop()
+    stop.set()
 
     with Schedule(_cfg(), stop=stop) as sched:
         assert sched.is_stop() is True
@@ -1072,7 +1072,7 @@ def test_schedule_uses_own_stop_signal():
     with Schedule(_cfg(), stop=stop) as sched:
         assert sched.is_stop() is False
         sched.set_stop()
-        assert stop.is_stop() is True
+        assert stop.is_set() is True
 
 
 def test_schedule_operations_require_context():

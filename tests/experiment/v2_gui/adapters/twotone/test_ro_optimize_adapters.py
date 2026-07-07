@@ -10,6 +10,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq import FreqCfg
 from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import FreqGainCfg
 from zcu_tools.experiment.v2.twotone.ro_optimize.length import LengthCfg
 from zcu_tools.experiment.v2.twotone.ro_optimize.power import PowerCfg
+from zcu_tools.experiment.v2_gui.adapters.shared import READOUT_DPM_PULSE_TAIL_US
 from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize import (
     RoOptAutoAdapter,
     RoOptFreqAdapter,
@@ -79,7 +80,9 @@ def _make_pulse_readout(
     return PulseReadoutCfg(
         pulse_cfg=PulseCfg(
             type="pulse",
-            waveform=ConstWaveformCfg(style="const", length=length + 0.1),
+            waveform=ConstWaveformCfg(
+                style="const", length=length + READOUT_DPM_PULSE_TAIL_US
+            ),
             ch=0,
             nqz=1,
             freq=freq,
@@ -159,7 +162,9 @@ def _assert_readout_dpm_schema(
     assert _direct_float(pulse_cfg.fields["gain"]) == pytest.approx(gain)
     waveform = pulse_cfg.fields["waveform"]
     assert isinstance(waveform, WaveformRefValue)
-    assert _direct_float(waveform.value.fields["length"]) == pytest.approx(length + 0.1)
+    assert _direct_float(waveform.value.fields["length"]) == pytest.approx(
+        length + READOUT_DPM_PULSE_TAIL_US
+    )
     assert _direct_float(ro_cfg.fields["ro_length"]) == pytest.approx(length)
 
     raw = item.edit_schema.to_raw_dict(MetaDict(), ModuleLibrary())
@@ -169,7 +174,7 @@ def _assert_readout_dpm_schema(
     raw_waveform = cast(dict[str, Any], raw_pulse["waveform"])
     assert raw_pulse["freq"] == pytest.approx(freq)
     assert raw_pulse["gain"] == pytest.approx(gain)
-    assert raw_waveform["length"] == pytest.approx(length + 0.1)
+    assert raw_waveform["length"] == pytest.approx(length + READOUT_DPM_PULSE_TAIL_US)
     assert raw_ro["ro_freq"] == pytest.approx(freq)
     assert raw_ro["ro_length"] == pytest.approx(length)
 
@@ -482,3 +487,36 @@ def test_ro_opt_readout_dpm_not_emitted_until_missing_values_available() -> None
 
     assert _module_item(items) is None
     assert [it.target_name for it in items] == ["best_ro_gain"]
+
+
+@pytest.mark.parametrize(
+    ("adapter", "result_values", "md_values"),
+    [
+        (
+            RoOptFreqAdapter(),
+            {"best_freq": float("nan")},
+            {"best_ro_gain": 0.11, "best_ro_length": 1.4},
+        ),
+        (
+            RoOptPowerAdapter(),
+            {"best_gain": 0.12},
+            {"best_ro_freq": float("inf"), "best_ro_length": 1.4},
+        ),
+    ],
+)
+def test_ro_opt_readout_dpm_not_emitted_for_nonfinite_resolved_values(
+    adapter: Any,
+    result_values: dict[str, float],
+    md_values: dict[str, float],
+) -> None:
+    items = list(
+        adapter.get_writeback_items(
+            _writeback_request(
+                analyze_result=_analysis_result(**result_values),
+                cfg_snapshot=_snapshot_with_readout(_make_pulse_readout()),
+                ctx=_ctx_with_md(**md_values),
+            )
+        )
+    )
+
+    assert _module_item(items) is None

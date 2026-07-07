@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-07-07 — floquet Fourier mode cache 預熱
+**Last updated:** 2026-07-07 — floquet Fourier helper reuse
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -106,7 +106,10 @@ floquet 效能要點(design search 的 snr stage 主成本即在此):
   map 的 argmax 由最強矩陣元的 pair 支配,判讀特定過程(如 e→g+TLS↑ 的 `(1,0)` pair)時
   應限縮 `branch_pairs` 而非直接取全域 argmax。Fourier 取樣會先預熱 requested time 的
   qutip propagator cache,使 cold/warm `FloquetBasis.mode(t)` 呼叫使用同一組 cached propagator；
-  跨呼叫比較矩陣元時仍需保留 qutip solver 容差。
+  跨呼叫比較矩陣元時仍需保留 qutip solver 容差。Fourier matrix element 的
+  mode-stack / `einsum` / mean 邏輯由 shared helper 擁有,單點 `calc_floquet_fourier_melem`
+  與 TLS resonance map 共用同一套 sampled-mode 後處理；TLS map 只在外層預先建立
+  harmonic phase arrays。
 - 結果 **bit-exact deterministic**(同參數重跑 spread=0),golden 測試見
   `tests/simulate/fluxonium/branch/test_floquet.py`；TLS / dual-coupling 路徑也有小維度 characterization 測試。strict path golden 對目前
   Python / numpy / qutip / BLAS 組合敏感；依賴組合改變導致 ULP 級漂移時，重錄 golden 並保留
