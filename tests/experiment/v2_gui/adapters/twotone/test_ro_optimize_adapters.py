@@ -149,6 +149,7 @@ def _assert_readout_dpm_schema(
 ) -> None:
     assert item.target_name == "readout_dpm"
     assert item.description == "Optimized readout (DPM)"
+    assert item.role_id == "readout_dpm"
     assert isinstance(item.edit_schema, CfgSchema)
 
     value = item.edit_schema.value

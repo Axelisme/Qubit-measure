@@ -520,6 +520,7 @@ def test_module_writeback_valid():
     item = ModuleWriteback(target_name="pulse_a", description="d")
     assert item.target_name == "pulse_a"
     assert item.edit_schema is None
+    assert item.role_id is None
     assert item.editor_id is None
     assert item.session_id == ""
 
@@ -528,6 +529,7 @@ def test_waveform_writeback_valid():
     item = WaveformWriteback(target_name="gauss", description="d")
     assert item.target_name == "gauss"
     assert item.edit_schema is None
+    assert item.role_id is None
 
 
 # ---------------------------------------------------------------------------

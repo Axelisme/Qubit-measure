@@ -85,6 +85,7 @@ def _pulse_readout_module_writeback_items(
     target: str,
     desc: str,
     field_updates: Sequence[tuple[str, float]],
+    role_id: str | None = None,
 ) -> list[ModuleWriteback]:
     if cfg_snapshot is None:
         return []
@@ -102,6 +103,7 @@ def _pulse_readout_module_writeback_items(
             target_name=target,
             description=desc,
             edit_schema=CfgSchema(spec=spec, value=value),
+            role_id=role_id,
         )
     ]
 
@@ -134,6 +136,7 @@ def readout_dpm_writeback_items(
             ),
             ("ro_cfg.ro_length", best_ro_length),
         ),
+        role_id="readout_dpm",
     )
 
 
@@ -150,6 +153,7 @@ def readout_rf_writeback_items(
             ("pulse_cfg.freq", float(r_f)),
             ("ro_cfg.ro_freq", float(r_f)),
         ),
+        role_id="readout",
     )
 
 

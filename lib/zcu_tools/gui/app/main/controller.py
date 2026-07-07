@@ -537,6 +537,9 @@ class Controller(SessionControllerMixin):
     def set_active_tab(self, tab_id: str) -> None:
         self._workspace_svc.set_active_tab(tab_id)
 
+    def reorder_tabs(self, tab_ids: list[str]) -> None:
+        self._workspace_svc.reorder_tabs(tab_ids)
+
     def get_active_tab_id(self) -> str | None:
         return self._state.active_tab_id
 

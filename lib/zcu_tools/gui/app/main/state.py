@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
@@ -182,8 +183,21 @@ class State(SessionState):
         return tab_id in self.tabs
 
     def list_tab_ids(self) -> list[str]:
-        """Tab ids in insertion order — callers ask the aggregate, not the dict."""
+        """Tab ids in current display order — callers ask the aggregate, not the dict."""
         return list(self.tabs.keys())
+
+    def reorder_tabs(self, tab_ids: Sequence[str]) -> None:
+        """Replace the tab display order without replacing Session objects."""
+        new_order = list(tab_ids)
+        if len(new_order) != len(set(new_order)):
+            raise ValueError(f"duplicate tab_id in reorder: {new_order!r}")
+        if set(new_order) != set(self.tabs):
+            raise ValueError(
+                "reorder_tabs must contain exactly the current tabs: "
+                f"got {new_order!r}, expected {list(self.tabs)!r}"
+            )
+        logger.debug("reorder_tabs: tab_ids=%r", new_order)
+        self.tabs = {tab_id: self.tabs[tab_id] for tab_id in new_order}
 
     def set_active_tab(self, tab_id: str) -> None:
         if tab_id not in self.tabs:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.events.tab import TabAddedPayload, TabClosedPayload
@@ -48,6 +49,9 @@ class WorkspaceService:
 
     def set_active_tab(self, tab_id: str) -> None:
         self._state.set_active_tab(tab_id)
+
+    def reorder_tabs(self, tab_ids: Sequence[str]) -> None:
+        self._state.reorder_tabs(tab_ids)
 
     def capture_session(self) -> PersistedSession:
         """Snapshot the live tabs into a serializable session memento (no disk).

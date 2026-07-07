@@ -23,10 +23,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "has_draft is false before any analyze produced a draft. Each item: id "
             "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
             "kind (metadict|module|waveform), description, selected; metadict adds "
-            "proposed_value; module/waveform add editor_id + has_edit_schema. A "
-            'complex metadict proposed_value is carried as {"__complex__": [re, im]} '
-            "(JSON has no complex). Edit an item via gui_tab_writeback_set_item; the "
-            "user's Edit dialog renders the same model (WYSIWYG).",
+            "proposed_value; module/waveform add editor_id + has_edit_schema, and "
+            "may include role_id when the proposal corresponds to a ModuleLibrary "
+            "role. A complex metadict proposed_value is carried as "
+            '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
+            "gui_tab_writeback_set_item; the user's Edit dialog renders the same "
+            "model (WYSIWYG).",
             (_str("tab_id"),),
             tool_name="gui_tab_writeback_list",
         ),

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - cfg form editing lock / operation state ports / device setup cancel scope
+**Last updated:** 2026-07-07 - cfg form editing lock / operation state ports / device setup cancel scope / tab lifecycle and writeback role metadata
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -73,6 +73,19 @@ Key ownership rules:
 `tab.load_data` is the analysis-only entry for canonical result files. It installs
 the loaded result into an existing adapter tab, clears stale analysis/writeback
 state, and does not backfill the Config tab.
+
+## Tab Lifecycle And Ordering
+
+New tabs are pure GUI configuration surfaces: creating one builds the adapter's
+default cfg from the current context but does not start hardware work. The toolbar
+therefore stays available while another tab is running; per-tab interaction state
+and `OperationGate` still prevent starting a second run until the active run
+finishes.
+
+Top-level experiment tabs are movable. The visible order is synchronized back to
+`State` through the controller/workspace lifecycle path, so `list_tab_ids()`,
+remote tab views, and captured sessions all use the same tab order as the Qt tab
+bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
 

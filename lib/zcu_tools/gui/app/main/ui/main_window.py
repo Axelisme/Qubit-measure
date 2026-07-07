@@ -174,6 +174,8 @@ class MainWindow(QMainWindow):
         # --- tab widget ---
         self._tabs = QTabWidget()
         self._tabs.setTabsClosable(True)
+        self._tabs.setMovable(True)
+        self._tabs.tabBar().tabMoved.connect(self._on_tab_moved)
         self._tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self._tabs.currentChanged.connect(self._on_current_tab_changed)
         main_layout.addWidget(self._tabs, stretch=1)
@@ -320,7 +322,7 @@ class MainWindow(QMainWindow):
         # sub-view + wire controller signals) — the whole-tab analogue of
         # CfgFormWidget.attach.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        self._new_tab_btn.setEnabled(self._ctrl.get_running_tab_id() is None)
+        self._new_tab_btn.setEnabled(True)
         tab_w.attach(snapshot, self._tab_actions)
 
     def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
@@ -502,7 +504,7 @@ class MainWindow(QMainWindow):
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
-        self._new_tab_btn.setEnabled(running_tab_id is None)
+        self._new_tab_btn.setEnabled(True)
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
@@ -716,6 +718,15 @@ class MainWindow(QMainWindow):
         tab_id = tab_w.tab_id
         logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
         self._ctrl.close_tab(tab_id)
+
+    def _on_tab_moved(self, from_index: int, to_index: int) -> None:
+        logger.debug("_on_tab_moved: from=%d to=%d", from_index, to_index)
+        tab_ids: list[str] = []
+        for index in range(self._tabs.count()):
+            widget = self._tabs.widget(index)
+            if isinstance(widget, ExpTabWidget) and self._ctrl.has_tab(widget.tab_id):
+                tab_ids.append(widget.tab_id)
+        self._ctrl.reorder_tabs(tab_ids)
 
     def _on_current_tab_changed(self, index: int) -> None:
         widget = self._tabs.widget(index)

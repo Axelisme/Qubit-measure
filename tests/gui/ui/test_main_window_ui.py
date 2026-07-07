@@ -654,7 +654,7 @@ def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch)
     assert "bad axes" in message
 
 
-def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
+def test_main_window_run_lock_keeps_new_tab_available(qapp):
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = MagicMock()
@@ -674,9 +674,35 @@ def test_main_window_run_lock_disables_only_new_tab_and_run(qapp):
 
     window.refresh_run_lock("tab-1")
 
-    assert window._new_tab_btn.isEnabled() is False
+    assert window._new_tab_btn.isEnabled() is True
     tab_one.update_interaction_state.assert_called_once()
     tab_two.update_interaction_state.assert_called_once()
+
+
+def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
+    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(_mock_ctrl())
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.has_tab.side_effect = lambda tab_id: tab_id in {"tab-a", "tab-b"}
+    window = MainWindow(ctrl)
+    tab_a = ExpTabWidget("tab-a", ctrl)
+    tab_b = ExpTabWidget("tab-b", ctrl)
+    window._tab_widgets["tab-a"] = tab_a
+    window._tab_widgets["tab-b"] = tab_b
+    window._tabs.addTab(tab_a, "A")
+    window._tabs.addTab(tab_b, "B")
+
+    assert window._tabs.isMovable() is True
+
+    window._tabs.tabBar().moveTab(0, 1)
+    assert window._tabs.widget(1) is tab_a
+    ctrl.reorder_tabs.assert_called_once_with(["tab-b", "tab-a"])
+
+    window._on_tab_close_requested(1)
+
+    ctrl.close_tab.assert_called_once_with("tab-a")
 
 
 def test_main_window_soc_changed_refreshes_run_lock(qapp):

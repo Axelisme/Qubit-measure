@@ -125,8 +125,9 @@ def _module_item(items: Sequence[object]) -> ModuleWriteback | None:
 
 def _direct_float(value: object) -> float:
     assert isinstance(value, DirectValue)
-    assert isinstance(value.value, (int, float))
-    return float(value.value)
+    direct = cast(DirectValue, value)
+    assert isinstance(direct.value, (int, float))
+    return float(direct.value)
 
 
 def _assert_readout_rf_schema(
@@ -143,6 +144,7 @@ def _assert_readout_rf_schema(
 ) -> None:
     assert item.target_name == "readout_rf"
     assert item.description == "Readout at fitted resonator frequency"
+    assert item.role_id == "readout"
     assert isinstance(item.edit_schema, CfgSchema)
 
     value = item.edit_schema.value

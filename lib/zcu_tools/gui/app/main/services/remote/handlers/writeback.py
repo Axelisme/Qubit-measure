@@ -36,6 +36,8 @@ def _writeback_item_wire(item) -> dict[str, object]:
         base["kind"] = "module" if is_module else "waveform"
         base["editor_id"] = item.editor_id
         base["has_edit_schema"] = item.editor_id is not None
+        if item.role_id is not None:
+            base["role_id"] = item.role_id
     else:
         base["kind"] = "unknown"
     return base

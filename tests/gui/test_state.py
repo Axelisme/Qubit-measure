@@ -108,6 +108,46 @@ def test_set_active_tab_unknown_raises():
         state.set_active_tab("nonexistent")
 
 
+def test_reorder_tabs_changes_order_without_replacing_sessions():
+    state = State(_make_ctx())
+    adapter = _make_adapter()
+    _add_tab(state, "t1", adapter)
+    _add_tab(state, "t2", adapter)
+    _add_tab(state, "t3", adapter)
+    t1 = state.get_tab("t1")
+    t2 = state.get_tab("t2")
+    t3 = state.get_tab("t3")
+    state.set_active_tab("t2")
+    state.set_tab_running("t3", True)
+
+    state.reorder_tabs(["t3", "t1", "t2"])
+
+    assert state.list_tab_ids() == ["t3", "t1", "t2"]
+    assert state.get_tab("t1") is t1
+    assert state.get_tab("t2") is t2
+    assert state.get_tab("t3") is t3
+    assert state.active_tab_id == "t2"
+    assert state.running_tab_id == "t3"
+
+
+@pytest.mark.parametrize(
+    "tab_ids",
+    [
+        ["t1", "t1"],
+        ["t1"],
+        ["t1", "ghost"],
+    ],
+)
+def test_reorder_tabs_rejects_non_matching_tab_set(tab_ids: list[str]):
+    state = State(_make_ctx())
+    adapter = _make_adapter()
+    _add_tab(state, "t1", adapter)
+    _add_tab(state, "t2", adapter)
+
+    with pytest.raises(ValueError):
+        state.reorder_tabs(tab_ids)
+
+
 def test_set_tab_running_updates_running_tab_id():
     state = State(_make_ctx())
     adapter = _make_adapter()

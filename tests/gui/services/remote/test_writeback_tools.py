@@ -23,7 +23,10 @@ def _items() -> list:
     )
     md.session_id = "md-1"
     mod = ModuleWriteback(
-        target_name="readout_rf", description="readout module", edit_schema=MagicMock()
+        target_name="readout_rf",
+        description="readout module",
+        edit_schema=MagicMock(),
+        role_id="readout",
     )
     mod.session_id = "ml-1"
     mod.editor_id = "editor-9"
@@ -67,6 +70,7 @@ def test_preview_serializes_metadict_and_module():
     assert mod["target_name"] == "readout_rf"
     assert mod["editor_id"] == "editor-9"
     assert mod["has_edit_schema"] is True
+    assert mod["role_id"] == "readout"
 
 
 def test_apply_reads_persistent_draft():

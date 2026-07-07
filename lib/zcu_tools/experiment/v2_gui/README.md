@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-07 — Reset bath refs and readout DPM writeback
+**Last updated:** 2026-07-07 — Readout module writeback roles
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -109,18 +109,21 @@ twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；
 產生兩層 readout writeback：`best_ro_freq` / `best_ro_gain` / `best_ro_length`
 仍是 MetaDict scalar；當 run result 帶有 `cfg_snapshot` 且三個 best 值可由本次
 analyze result 加上 current MetaDict 補齊且皆為 finite number 時，adapter 同時提出
-ModuleLibrary `readout_dpm`；缺值或 non-finite 值只略過 module writeback。`readout_dpm`
-以 `cfg_snapshot.modules.readout` 作為 template，將 readout pulse/readout 頻率設為
-`best_ro_freq`、pulse gain 設為 `best_ro_gain`、pulse waveform length 設為
-`best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、ADC readout length 設為
-`best_ro_length`。
+ModuleLibrary `readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
+readout role proposal；缺值或 non-finite 值只略過 module writeback。
+`readout_dpm` 以 `cfg_snapshot.modules.readout` 作為 template，將 readout
+pulse/readout 頻率設為 `best_ro_freq`、pulse gain 設為 `best_ro_gain`、pulse
+waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、
+ADC readout length 設為 `best_ro_length`。
 
 `onetone/freq` analyze 仍寫回 MetaDict `r_f` / `rf_w` / `theta0`；當 run result 帶有
 `cfg_snapshot` 且 `cfg_snapshot.modules.readout` 是 pulse readout 時，adapter 也提出
-ModuleLibrary `readout_rf`。`readout_rf` 以該 snapshot readout 作為 template，只用
-fitted `r_f` 覆寫 `pulse_cfg.freq` / `ro_cfg.ro_freq`，gain、waveform length/style、
-channels、ADC readout length、trigger timing 等欄位都沿用 snapshot。`cfg_snapshot is None`
-或 readout 不是 pulse readout 時，module writeback graceful skip，只保留 MetaDict items。
+ModuleLibrary `readout_rf`，並以 writeback `role_id="readout"` 標示它是 Pulse
+readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id。
+`readout_rf` 以該 snapshot readout 作為 template，只用 fitted `r_f` 覆寫
+`pulse_cfg.freq` / `ro_cfg.ro_freq`，gain、waveform length/style、channels、ADC
+readout length、trigger timing 等欄位都沿用 snapshot。`cfg_snapshot is None` 或
+readout 不是 pulse readout 時，module writeback graceful skip，只保留 MetaDict items。
 
 ---
 
