@@ -1,0 +1,67 @@
+    def finish_round(self):
+        """Used with the step_rounds argument to acquire()/acquire_decimated()/run_rounds().
+
+        This runs the round by starting the tProc (if using internal start), then collecting and processing the data.
+
+        Returns
+        -------
+        bool
+            True if more rounds remain to be run. This is meant to be used to control a while loop.
+        """
+        soc = self.acquire_params['soc']
+        total_count = functools.reduce(operator.mul, self.loop_dims)
+        reads_per_shot = [ro['trigs'] for ro in self.ro_chs.values()]
+
+        # if start_src="external", you must pulse the trigger input once for every round
+
+        count = 0
+        if self.acquire_params['type'] == 'decimated':
+            # decimated data
+            dec_buf = []
+
+            soc.start_tproc()
+            while count < total_count:
+                count = soc.get_tproc_counter(addr=self.counter_addr)
+            soc.start_src("internal")
+
+            for ii, (ch, ro) in enumerate(self.ro_chs.items()):
+                dec_buf.append(obtain(soc.get_decimated(ch=ch, address=0, length=ro['length']*ro['trigs']*total_count)))
+                self.acc_buf.append(obtain(soc.get_accumulated(ch=ch, address=0, length=ro['trigs']*total_count).reshape((*self.loop_dims, ro['trigs'], 2))))
+            self.rounds_buf.append(self._process_decimated(dec_buf))
+        elif self.acquire_params['type'] == 'run_rounds':
+            soc.start_tproc()
+            with tqdm(total=total_count, disable=self.acquire_params['hidereps']) as pbar:
+                while count < total_count:
+                    new_count = soc.get_tproc_counter(addr=self.counter_addr)
+                    pbar.update(new_count-count)
+                    count = new_count
+            soc.start_src("internal")
+        else: # accumulated
+            with tqdm(total=total_count, disable=self.acquire_params['hidereps']) as pbar:
+                soc.start_readout(total_count, counter_addr=self.counter_addr,
+                                       ch_list=list(self.ro_chs), reads_per_shot=reads_per_shot)
+                while count<total_count:
+                    new_data = obtain(soc.poll_data())
+                    for new_points, (d, s) in new_data:
+                        for ii, nreads in enumerate(reads_per_shot):
+                            #print(count, new_points, nreads, d[ii].shape, total_count)
+                            if new_points*nreads != d[ii].shape[0]:
+                                logger.error("data size mismatch: new_points=%d, nreads=%d, data shape %s"%(new_points, nreads, d[ii].shape))
+                            if count+new_points > total_count:
+                                logger.error("got too much data: count=%d, new_points=%d, total_count=%d"%(count, new_points, total_count))
+                            # use reshape to view the acc_buf array in a shape that matches the raw data
+                            self.acc_buf[ii].reshape((-1,2))[count*nreads:(count+new_points)*nreads] = d[ii]
+                        count += new_points
+                        self.stats.append(s)
+                        pbar.update(new_points)
+            self.rounds_buf.append(self._process_accumulated(self.acc_buf))
+
+        # do any post-execution cleanup
+        soc.cleanup_round()
+
+        self.rounds_pbar.update()
+        self.acquire_params['rounds_remaining'] -= 1
+        done = (self.acquire_params['rounds_remaining'] <= 0)
+        if done:
+            self.rounds_pbar.close()
+        return not done

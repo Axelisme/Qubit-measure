@@ -8,7 +8,12 @@ from typing import Protocol, TypeAlias, cast, final
 
 import numpy as np
 from numpy.typing import NDArray
-from qick.qick_asm import AcquireMixin, logger, obtain, tqdm
+from qick.qick_asm import (
+    AcquireMixin,
+    logger,
+    obtain,  # pyright: ignore[reportAttributeAccessIssue]
+    tqdm,
+)
 
 
 class CancelFlagProtocol(Protocol):
@@ -135,6 +140,12 @@ class EarlyStopMixin(TypedAcquireMixin):
         return super().finish_acquire()
 
     def _finish_accumulated_round(self, cancel_flag: CancelFlagProtocol) -> bool:
+        # Mirrors the "accumulated" branch of qick's AcquireMixin.finish_round
+        # (qick 0.2.418, qick/qick_asm.py) with cancel_flag checks injected.
+        # qick's loop has no early-exit seam (its `while` only checks
+        # `count < total_count`), so the copy is deliberate. The mirrored
+        # upstream source is pinned by tests/program/test_acquire_qick_drift.py;
+        # when that test fails, re-port the upstream change here.
         assert self.acquire_params is not None
         soc = self.acquire_params["soc"]
         total_count = functools.reduce(operator.mul, self.loop_dims)  # type: ignore[arg-type]
@@ -193,7 +204,9 @@ class EarlyStopMixin(TypedAcquireMixin):
 
         assert self.rounds_buf is not None
         assert self.acc_buf is not None
-        self.rounds_buf.append(self._process_accumulated(self.acc_buf))
+        self.rounds_buf.append(
+            self._process_accumulated(self.acc_buf)  # type: ignore[arg-type]
+        )
 
         soc.cleanup_round()
         if self.rounds_pbar is not None:
