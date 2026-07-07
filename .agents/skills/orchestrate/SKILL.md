@@ -277,6 +277,22 @@ git branch -d agent/<task-id>
 
 用 Agent tool 委派；獨立工作項在同一則訊息一次發多個以並行。
 
+### Codex Sub-Agent Model
+
+在 Codex runtime 生成 sub-agent 時，依 agent role 指定 model；委派 prompt 也要明確寫入對應 model 設定，避免 runtime default 漂移：
+
+- planner 類（`impl-detail-planner`、內建 `Plan`，以及等價的規劃型委派）使用 model `5.5`，reasoning effort 設為 `high`。
+- reviewer 類（`python-module-reviewer`、`mcp-skill-tester` 進行 review / dogfooding 時，以及等價的審查型委派）使用 model `5.5`，reasoning effort 設為 `high`。
+- implementer 類（`plan-item-implementer`，以及等價的落地改碼型委派）使用 model `5.3-codex-spark`。
+
+### Claude Sub-Agent Model
+
+在 Claude runtime 生成 sub-agent 時，依 agent role 指定 model；委派 prompt 也要明確寫入對應 model 設定，避免 runtime default 漂移：
+
+- planner 類（`impl-detail-planner`、內建 `Plan`，以及等價的規劃型委派）使用 model `opus`，reasoning effort 設為 `high`。
+- reviewer 類（`python-module-reviewer`、`mcp-skill-tester` 進行 review / dogfooding 時，以及等價的審查型委派）使用 model `opus`，reasoning effort 設為 `high`。
+- implementer 類（`plan-item-implementer`，以及等價的落地改碼型委派）使用 model `sonnet`，reasoning effort 設為 `high`。
+
 sub-agent 收尾規則：sub-agent 回傳 final / completed 狀態後，orchestrator 先保存 final message 與 report path，確認沒有仍需追問的內容，接著用當前 runtime 可用的 sub-agent close / archive 工具釋放該 agent。已完成的 sub-agent 不保持開啟；需要後續追問時再建立新的具體委派，避免完成的 sub-agent 佔住 agent 數量上限。若當前 runtime 暫時沒有 close / archive tool，記錄已完成 agent id 與狀態並停止對該 agent wait / poll；工具可用時立即關閉。
 
 | 工作性質 | 委派對象 |
