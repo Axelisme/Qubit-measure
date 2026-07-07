@@ -44,6 +44,12 @@ def make_direct_readout_spec() -> CfgSectionSpec:
             "ro_freq": ScalarSpec(label="RO Freq (MHz)", type=float, decimals=2),
             "ro_length": ScalarSpec(label="RO length (us)", type=float, decimals=3),
             "trig_offset": ScalarSpec(label="Trig offset (us)", type=float, decimals=3),
+            "gen_ch": ScalarSpec(
+                label="Gen ch",
+                type=int,
+                optional=True,
+                group="Advanced",
+            ),
         },
     )
 

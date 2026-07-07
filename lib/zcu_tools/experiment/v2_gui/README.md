@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-07 — ro_optimize duration_t0 analyze param
+**Last updated:** 2026-07-07 — onetone readout_rf writeback
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -103,6 +103,13 @@ readout pulse/readout 頻率設為 `best_ro_freq`、pulse gain 設為 `best_ro_g
 pulse waveform length 設為 `best_ro_length + 0.1`、ADC readout length 設為
 `best_ro_length`。
 
+`onetone/freq` analyze 仍寫回 MetaDict `r_f` / `rf_w` / `theta0`；當 run result 帶有
+`cfg_snapshot` 且 `cfg_snapshot.modules.readout` 是 pulse readout 時，adapter 也提出
+ModuleLibrary `readout_rf`。`readout_rf` 以該 snapshot readout 作為 template，只用
+fitted `r_f` 覆寫 `pulse_cfg.freq` / `ro_cfg.ro_freq`，gain、waveform length/style、
+channels、ADC readout length、trigger timing 等欄位都沿用 snapshot。`cfg_snapshot is None`
+或 readout 不是 pulse readout 時，module writeback graceful skip，只保留 MetaDict items。
+
 ---
 
 ## Operator workflow guide 約束
@@ -116,9 +123,9 @@ predictor 輸出取代掃描與看圖判讀。
 在該 flux 重跑 `onetone/freq` → `twotone/freq` 寬掃 → `twotone/freq` 窄掃 →
 agent / user 審核 figure 與 writeback preview → 後續 Rabi / T1 / T2。
 
-`onetone/freq` 第一次通常用 `linear` sampling 建立 `r_f` / `rf_w` / `theta0`；這些 writeback
-齊全後，可切到 `homophasal` sampling，讓同一個 start/stop/expts 掃描在 resonator circle
-phase 上等距。
+`onetone/freq` 第一次通常用 `linear` sampling 建立 `r_f` / `rf_w` / `theta0`，並在有
+pulse-readout snapshot 時提出 `readout_rf`；這些 writeback 齊全後，可切到 `homophasal`
+sampling，讓同一個 start/stop/expts 掃描在 resonator circle phase 上等距。
 
 `twotone/flux_dep` 是 readout 與 `q_f` 可信後的後續 qubit model mapping，不是早期找
 flux 的工具；readout/qubit 參數還沒處理好時通常看不到可用 arc。Writeback 責任留給

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-07 — ro_optimize analyze-param adapter tests
+**Last updated:** 2026-07-07 — onetone readout_rf adapter tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -223,7 +223,9 @@ optimization contract。Segment propagator LRU、單次 signal-grid prefix seque
 
 onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering、md preflight 與 writeback
 contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md fit params，runtime
-取樣公式由 domain-level tests 擁有。
+取樣公式由 domain-level tests 擁有。`onetone/freq` writeback tests 覆蓋 MetaDict
+`r_f` / `rf_w` / `theta0` 與 `readout_rf` ModuleLibrary writeback 的 no-snapshot gate、
+pulse-readout schema、non-pulse skip，以及 default 仍不 adopt library readout。
 
 twotone `ro_optimize` adapter tests 覆蓋 pulse-readout-only spec、GUI analyze-param
 命名、MetaDict scalar writeback 與 `readout_dpm` ModuleLibrary writeback gate /

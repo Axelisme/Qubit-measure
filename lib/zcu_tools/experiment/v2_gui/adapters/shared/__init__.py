@@ -43,7 +43,11 @@ from .spec_helpers import (
     make_two_pulse_reset_module_spec,
     schema_from_module,
 )
-from .writeback_helpers import readout_dpm_writeback_items, reset_module_writeback_items
+from .writeback_helpers import (
+    readout_dpm_writeback_items,
+    readout_rf_writeback_items,
+    reset_module_writeback_items,
+)
 
 __all__ = [
     # value-tree assembly
@@ -95,5 +99,6 @@ __all__ = [
     "declare_dev_spec",
     # Gated per-experiment module writeback helpers
     "readout_dpm_writeback_items",
+    "readout_rf_writeback_items",
     "reset_module_writeback_items",
 ]

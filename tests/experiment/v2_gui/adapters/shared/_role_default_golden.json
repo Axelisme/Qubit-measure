@@ -276,6 +276,9 @@
    "ov": false,
    "ref": "<Custom:Direct Readout>",
    "v": {
+    "gen_ch": {
+     "D": null
+    },
     "ro_ch": {
      "D": 0
     },
@@ -297,6 +300,9 @@
    "ov": false,
    "ref": "<Custom:Direct Readout>",
    "v": {
+    "gen_ch": {
+     "D": null
+    },
     "ro_ch": {
      "E": "ro_ch",
      "r": null
@@ -1001,6 +1007,9 @@
      }
     },
     "ro_cfg": {
+     "gen_ch": {
+      "D": null
+     },
      "ro_ch": {
       "D": 0
      },
@@ -1070,6 +1079,9 @@
      }
     },
     "ro_cfg": {
+     "gen_ch": {
+      "D": null
+     },
      "ro_ch": {
       "E": "ro_ch",
       "r": null
@@ -1140,6 +1152,9 @@
      }
     },
     "ro_cfg": {
+     "gen_ch": {
+      "D": null
+     },
      "ro_ch": {
       "D": 0
      },
@@ -1210,6 +1225,9 @@
      }
     },
     "ro_cfg": {
+     "gen_ch": {
+      "D": null
+     },
      "ro_ch": {
       "E": "ro_ch",
       "r": null
@@ -1283,6 +1301,9 @@
      }
     },
     "ro_cfg": {
+     "gen_ch": {
+      "D": null
+     },
      "ro_ch": {
       "D": 0
      },
@@ -1354,6 +1375,9 @@
      }
     },
     "ro_cfg": {
+     "gen_ch": {
+      "D": null
+     },
      "ro_ch": {
       "E": "ro_ch",
       "r": null

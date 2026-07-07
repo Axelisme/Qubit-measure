@@ -18,6 +18,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_get_float,
     md_has_key,
     proper_res_freq_range,
+    readout_rf_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -91,9 +92,11 @@ class OneToneFreqAdapter(
         ),
         typical_writeback=(
             "Proposes the fitted resonator frequency, linewidth, and phase "
-            "offset into MetaDict 'r_f' / 'rf_w' / 'theta0'. The readout "
-            "module / waveform are left to the user — a frequency fit alone "
-            "does not justify rewriting the whole readout config."
+            "offset into MetaDict 'r_f' / 'rf_w' / 'theta0'. When the run "
+            "result includes a pulse-readout cfg snapshot, it also proposes "
+            "ModuleLibrary 'readout_rf' from that readout template, changing "
+            "only pulse/readout frequency to the fitted 'r_f' while preserving "
+            "gain, lengths, channels, and trigger timing."
         ),
         recommended=(
             "Analysis defaults to the hanger-model fit ('hm') with "
@@ -227,7 +230,7 @@ class OneToneFreqAdapter(
                 "OneToneFreqAnalyzeResult.params must contain numeric 'theta0' "
                 "for writeback"
             )
-        return [
+        items: list[WritebackItem] = [
             MetaDictWriteback(
                 target_name="r_f",
                 description="Resonator frequency (MHz)",
@@ -244,6 +247,13 @@ class OneToneFreqAdapter(
                 proposed_value=float(theta0),
             ),
         ]
+        items.extend(
+            readout_rf_writeback_items(
+                req.run_result.cfg_snapshot,
+                r_f=result.freq,
+            )
+        )
+        return items
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"

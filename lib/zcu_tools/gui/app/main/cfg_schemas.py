@@ -173,6 +173,7 @@ def _direct_readout_to_value(cfg: dict) -> CfgSectionValue:
             "ro_freq": _val(cfg, "ro_freq"),
             "ro_length": _val(cfg, "ro_length"),
             "trig_offset": _val(cfg, "trig_offset"),
+            "gen_ch": _val(cfg, "gen_ch"),
         }
     )
 

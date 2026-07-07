@@ -140,3 +140,36 @@ def test_pulse_with_mixer_freq_lowers_value() -> None:
     val = make_default_value(spec).with_field("mixer_freq", 500.0)
     raw = CfgSchema(spec=spec, value=val).to_raw_dict(None, None)
     assert raw["mixer_freq"] == 500.0
+
+
+# --- direct readout spec integration: gen_ch is an optional "Advanced" field ---
+
+
+def test_make_direct_readout_spec_gen_ch_is_optional_advanced() -> None:
+    from zcu_tools.gui.app.main.specs.readout import make_direct_readout_spec
+
+    gen_ch = make_direct_readout_spec().fields["gen_ch"]
+    assert isinstance(gen_ch, ScalarSpec)
+    assert gen_ch.type is int
+    assert gen_ch.optional is True
+    assert gen_ch.group == "Advanced"
+
+
+def test_direct_readout_default_has_unset_gen_ch_and_lowers_omitted() -> None:
+    from zcu_tools.gui.app.main.specs.readout import make_direct_readout_spec
+
+    spec = make_direct_readout_spec()
+    val = make_default_value(spec)
+    gen_ch = val.fields["gen_ch"]
+    assert isinstance(gen_ch, DirectValue) and gen_ch.value is None
+    raw = CfgSchema(spec=spec, value=val).to_raw_dict(None, None)
+    assert "gen_ch" not in raw
+
+
+def test_direct_readout_with_gen_ch_lowers_value() -> None:
+    from zcu_tools.gui.app.main.specs.readout import make_direct_readout_spec
+
+    spec = make_direct_readout_spec()
+    val = make_default_value(spec).with_field("gen_ch", 9)
+    raw = CfgSchema(spec=spec, value=val).to_raw_dict(None, None)
+    assert raw["gen_ch"] == 9

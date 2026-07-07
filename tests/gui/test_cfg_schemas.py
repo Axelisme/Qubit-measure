@@ -7,6 +7,7 @@ from typing import cast
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (
+    CfgSchema,
     CfgSectionValue,
     DirectValue,
     WaveformRefValue,
@@ -68,6 +69,39 @@ def test_module_cfg_to_value_direct_readout():
     assert cast(DirectValue, val.fields["ro_freq"]).value == 7000.0
     # missing key → unset (value is None, no hard-coded default; ADR-0010)
     assert cast(DirectValue, val.fields["ro_length"]).value is None
+
+
+def test_module_cfg_to_value_direct_readout_preserves_gen_ch_round_trip():
+    cfg = {
+        "type": "readout/direct",
+        "ro_ch": 5,
+        "ro_freq": 7000.0,
+        "ro_length": 2.1,
+        "trig_offset": 0.25,
+        "gen_ch": 9,
+    }
+    spec, val = module_cfg_to_value(cfg)
+
+    assert cast(DirectValue, val.fields["gen_ch"]).value == 9
+
+    raw = CfgSchema(spec=spec, value=val).to_raw_dict(md=None, ml=None)
+    assert raw["gen_ch"] == 9
+
+
+def test_module_cfg_to_value_direct_readout_missing_gen_ch_lowers_omitted():
+    cfg = {
+        "type": "readout/direct",
+        "ro_ch": 5,
+        "ro_freq": 7000.0,
+        "ro_length": 2.1,
+        "trig_offset": 0.25,
+    }
+    spec, val = module_cfg_to_value(cfg)
+
+    assert cast(DirectValue, val.fields["gen_ch"]).value is None
+
+    raw = CfgSchema(spec=spec, value=val).to_raw_dict(md=None, ml=None)
+    assert "gen_ch" not in raw
 
 
 def test_module_cfg_to_value_pulse_reset():
@@ -140,9 +174,6 @@ def test_module_cfg_to_value_pulse_missing_fields():
 
 
 def test_module_cfg_to_value_pulse_round_trip():
-
-    from zcu_tools.gui.app.main.adapter import CfgSchema
-
     cfg = {
         "type": "pulse",
         "ch": 0,

@@ -75,6 +75,33 @@ def _resolve_readout_dpm_values(
     return best_ro_freq, best_ro_gain, best_ro_length
 
 
+def _pulse_readout_module_writeback_items(
+    cfg_snapshot: _HasReadoutModules | None,
+    *,
+    target: str,
+    desc: str,
+    field_updates: Sequence[tuple[str, float]],
+) -> list[ModuleWriteback]:
+    if cfg_snapshot is None:
+        return []
+
+    readout_cfg = cfg_snapshot.modules.readout
+    if not isinstance(readout_cfg, PulseReadoutCfg):
+        return []
+
+    spec, value = module_cfg_to_value(readout_cfg)
+    for field_path, field_value in field_updates:
+        value.with_field(field_path, field_value)
+
+    return [
+        ModuleWriteback(
+            target_name=target,
+            description=desc,
+            edit_schema=CfgSchema(spec=spec, value=value),
+        )
+    ]
+
+
 def readout_dpm_writeback_items(
     ctx: ExpContext,
     cfg_snapshot: _HasReadoutModules | None,
@@ -88,25 +115,35 @@ def readout_dpm_writeback_items(
     if resolved is None:
         return []
 
-    readout_cfg = cfg_snapshot.modules.readout
-    if not isinstance(readout_cfg, PulseReadoutCfg):
-        return []
-
     best_ro_freq, best_ro_gain, best_ro_length = resolved
-    spec, value = module_cfg_to_value(readout_cfg)
-    value.with_field("pulse_cfg.freq", best_ro_freq)
-    value.with_field("ro_cfg.ro_freq", best_ro_freq)
-    value.with_field("pulse_cfg.gain", best_ro_gain)
-    value.with_field("pulse_cfg.waveform.length", best_ro_length + 0.1)
-    value.with_field("ro_cfg.ro_length", best_ro_length)
+    return _pulse_readout_module_writeback_items(
+        cfg_snapshot,
+        target="readout_dpm",
+        desc="Optimized readout (DPM)",
+        field_updates=(
+            ("pulse_cfg.freq", best_ro_freq),
+            ("ro_cfg.ro_freq", best_ro_freq),
+            ("pulse_cfg.gain", best_ro_gain),
+            ("pulse_cfg.waveform.length", best_ro_length + 0.1),
+            ("ro_cfg.ro_length", best_ro_length),
+        ),
+    )
 
-    return [
-        ModuleWriteback(
-            target_name="readout_dpm",
-            description="Optimized readout (DPM)",
-            edit_schema=CfgSchema(spec=spec, value=value),
-        )
-    ]
+
+def readout_rf_writeback_items(
+    cfg_snapshot: _HasReadoutModules | None,
+    *,
+    r_f: float,
+) -> list[ModuleWriteback]:
+    return _pulse_readout_module_writeback_items(
+        cfg_snapshot,
+        target="readout_rf",
+        desc="Readout at fitted resonator frequency",
+        field_updates=(
+            ("pulse_cfg.freq", float(r_f)),
+            ("ro_cfg.ro_freq", float(r_f)),
+        ),
+    )
 
 
 def reset_module_writeback_items(
