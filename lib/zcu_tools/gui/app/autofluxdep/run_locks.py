@@ -29,6 +29,8 @@ if TYPE_CHECKING:
         SetupDeviceRequest,
     )
     from zcu_tools.gui.session.services.predictor import (
+        CalibrateFluxBiasRequest,
+        CalibrateFluxBiasResult,
         LoadPredictorRequest,
         PredictCurveRequest,
         PredictCurveResult,
@@ -298,6 +300,14 @@ class GuardedPredictorControl:
         self._guard("predictor")
         self._inner.set_predictor_model_params(req)
         self._notify_mutated()
+
+    def calibrate_flux_bias(
+        self, req: CalibrateFluxBiasRequest
+    ) -> CalibrateFluxBiasResult:
+        self._guard("predictor")
+        result = self._inner.calibrate_flux_bias(req)
+        self._notify_mutated()
+        return result
 
     def clear_predictor(self) -> None:
         self._guard("predictor")

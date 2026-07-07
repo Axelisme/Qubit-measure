@@ -10,6 +10,8 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.predictor import (
+    CalibrateFluxBiasRequest,
+    CalibrateFluxBiasResult,
     PredictCurveResult,
     PredictMatrixCurveResult,
     PredictorLoadError,
@@ -98,6 +100,7 @@ def _make_ctrl(
     ctrl.predict_freq_curve.side_effect = _freq_side
     ctrl.predict_matrix_element_curve.side_effect = _mat_side
     ctrl.predict_freq.return_value = 1234.5
+    ctrl.calibrate_flux_bias.return_value = CalibrateFluxBiasResult(flux_bias=0.125)
     ctrl.on_predictor_changed.return_value = MagicMock(name="unsubscribe_predictor")
     return ctrl
 
@@ -166,6 +169,9 @@ def test_live_mode_locks_model_marker_and_transition_controls(qapp):
         dialog._add_to_spin,
         dialog._add_btn,
         dialog._remove_btn,
+        dialog._calibration_freq_field,
+        dialog._calibration_transition_combo,
+        dialog._calibrate_btn,
         dialog._device_combo,
         dialog._device_refresh_btn,
         dialog._device_read_btn,
@@ -448,6 +454,53 @@ def test_predictor_dialog_apply_surfaces_service_error(qapp):
     dialog._on_apply_model_params()
 
     assert "bad model" in dialog._status_label.text()
+
+
+# ---------------------------------------------------------------------------
+# Calibration
+# ---------------------------------------------------------------------------
+
+
+def test_predictor_dialog_calibration_defaults_to_q_f_and_f01(qapp):
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl)
+
+    assert dialog._calibration_freq_field._mode == "eval"
+    assert dialog._calibration_freq_field._line_edit.text() == "q_f"
+    assert dialog._calibration_transition_combo.currentText() == "f01"
+    assert dialog._calibration_transition_combo.currentData() == (0, 1)
+
+
+def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.q_f = 4567.0
+
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
+    dialog._predict_value_spin.setValue(0.25)
+
+    dialog._on_calibrate_clicked()
+
+    ctrl.calibrate_flux_bias.assert_called_once()
+    (req,) = ctrl.calibrate_flux_bias.call_args.args
+    assert isinstance(req, CalibrateFluxBiasRequest)
+    assert req.value == pytest.approx(0.25)
+    assert req.frequency_mhz == pytest.approx(4567.0)
+    assert req.transition == (0, 1)
+    assert dialog._flux_bias_spin.value() == pytest.approx(0.125)
+    assert "Calibrated flux_bias" in dialog._status_label.text()
+
+
+def test_predictor_dialog_calibrate_expression_error_fast_fails(qapp):
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+
+    dialog._on_calibrate_clicked()
+
+    ctrl.calibrate_flux_bias.assert_not_called()
+    assert "q_f" in dialog._status_label.text()
 
 
 # ---------------------------------------------------------------------------
@@ -1136,41 +1189,67 @@ def test_predictor_dialog_canvas_lock_immediate_column_update(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_row_select_calls_set_highlight_all_canvases(qapp):
-    """Selecting a table row calls set_highlight on ALL three canvases."""
+def test_predictor_dialog_row_select_calls_set_highlights_all_canvases(qapp):
+    """Selecting a table row calls set_highlights on ALL three canvases."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
     with (
-        patch.object(dialog._freq_canvas, "set_highlight") as freq_hi,
-        patch.object(dialog._mat_n_canvas, "set_highlight") as mat_n_hi,
-        patch.object(dialog._mat_phi_canvas, "set_highlight") as mat_phi_hi,
+        patch.object(dialog._freq_canvas, "set_highlights") as freq_hi,
+        patch.object(dialog._mat_n_canvas, "set_highlights") as mat_n_hi,
+        patch.object(dialog._mat_phi_canvas, "set_highlights") as mat_phi_hi,
     ):
         dialog._table.selectRow(1)
         dialog._on_selection_changed()
 
-    expected = dialog._tracked[1]
+    expected = (dialog._tracked[1],)
     freq_hi.assert_called_with(expected)
     mat_n_hi.assert_called_with(expected)
     mat_phi_hi.assert_called_with(expected)
 
 
-def test_predictor_dialog_no_selection_calls_set_highlight_none_all(qapp):
-    """Clearing selection calls set_highlight(None) on all three canvases."""
+def test_predictor_dialog_multi_select_calls_set_highlights_all_selected(qapp):
+    """Selecting multiple rows highlights every selected transition."""
+    from qtpy.QtWidgets import QTableWidgetSelectionRange  # type: ignore[attr-defined]
+
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
 
     with (
-        patch.object(dialog._freq_canvas, "set_highlight") as freq_hi,
-        patch.object(dialog._mat_n_canvas, "set_highlight") as mat_n_hi,
-        patch.object(dialog._mat_phi_canvas, "set_highlight") as mat_phi_hi,
+        patch.object(dialog._freq_canvas, "set_highlights") as freq_hi,
+        patch.object(dialog._mat_n_canvas, "set_highlights") as mat_n_hi,
+        patch.object(dialog._mat_phi_canvas, "set_highlights") as mat_phi_hi,
+    ):
+        dialog._table.setRangeSelected(
+            QTableWidgetSelectionRange(0, 0, 0, dialog._table.columnCount() - 1), True
+        )
+        dialog._table.setRangeSelected(
+            QTableWidgetSelectionRange(2, 0, 2, dialog._table.columnCount() - 1), True
+        )
+        dialog._on_selection_changed()
+
+    expected = (dialog._tracked[0], dialog._tracked[2])
+    freq_hi.assert_called_with(expected)
+    mat_n_hi.assert_called_with(expected)
+    mat_phi_hi.assert_called_with(expected)
+
+
+def test_predictor_dialog_no_selection_calls_set_highlights_empty_all(qapp):
+    """Clearing selection calls set_highlights(()) on all three canvases."""
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+
+    with (
+        patch.object(dialog._freq_canvas, "set_highlights") as freq_hi,
+        patch.object(dialog._mat_n_canvas, "set_highlights") as mat_n_hi,
+        patch.object(dialog._mat_phi_canvas, "set_highlights") as mat_phi_hi,
     ):
         dialog._table.clearSelection()
         dialog._on_selection_changed()
 
-    freq_hi.assert_called_with(None)
-    mat_n_hi.assert_called_with(None)
-    mat_phi_hi.assert_called_with(None)
+    freq_hi.assert_called_with(())
+    mat_n_hi.assert_called_with(())
+    mat_phi_hi.assert_called_with(())
 
 
 # ---------------------------------------------------------------------------

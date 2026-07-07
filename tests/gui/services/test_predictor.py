@@ -10,6 +10,7 @@ import pytest
 from zcu_tools.gui.app.main.state import ExpContext, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.predictor import (
+    CalibrateFluxBiasRequest,
     PredictCurveRequest,
     PredictFreqRequest,
     PredictMatrixCurveRequest,
@@ -300,6 +301,55 @@ def test_set_model_params_zero_period_raises():
         )
     # Nothing installed on the failure path.
     assert svc.get_predictor() is None
+
+
+def test_calibrate_flux_bias_updates_predictor_and_preserves_path():
+    svc = _make_svc()
+    fake = _inject_fake_predictor(svc)
+    fake.calculate_bias.return_value = 0.123
+    svc._predictor_path = "/fake/path.json"
+
+    result = svc.calibrate_flux_bias(
+        CalibrateFluxBiasRequest(
+            value=0.25,
+            frequency_mhz=4567.0,
+            transition=(0, 1),
+        )
+    )
+
+    fake.calculate_bias.assert_called_once_with(0.25, 4567.0, (0, 1))
+    assert result.flux_bias == pytest.approx(0.123)
+    info = svc.get_predictor_info()
+    assert info is not None
+    assert info["flux_bias"] == pytest.approx(0.123)
+    assert info["path"] == "/fake/path.json"
+
+
+def test_calibrate_flux_bias_no_predictor_raises():
+    svc = _make_svc()
+
+    with pytest.raises(PredictorNotLoaded):
+        svc.calibrate_flux_bias(
+            CalibrateFluxBiasRequest(
+                value=0.25,
+                frequency_mhz=4567.0,
+                transition=(0, 1),
+            )
+        )
+
+
+def test_calibrate_flux_bias_invalid_transition_raises():
+    svc = _make_svc()
+    _inject_fake_predictor(svc)
+
+    with pytest.raises(ValueError, match="from-level"):
+        svc.calibrate_flux_bias(
+            CalibrateFluxBiasRequest(
+                value=0.25,
+                frequency_mhz=4567.0,
+                transition=(1, 1),
+            )
+        )
 
 
 # ---------------------------------------------------------------------------

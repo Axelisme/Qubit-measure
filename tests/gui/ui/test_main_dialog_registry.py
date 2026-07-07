@@ -131,6 +131,7 @@ def test_predictor_dialog_factory_injects_predictor_and_device_facets(qapp) -> N
         ctrl.predictor_control,
         parent=parent,
         device=ctrl.device_control,
+        md_provider=ctrl.context_control.get_current_md,
         persistent_on_close=True,
     )
 

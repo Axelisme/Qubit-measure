@@ -60,6 +60,7 @@ class MainDialogRegistry:
                 self._ctrl.predictor_control,
                 parent=self._parent,
                 device=self._ctrl.device_control,
+                md_provider=self._ctrl.context_control.get_current_md,
                 persistent_on_close=True,
             )
         if name is DialogName.INSPECT:

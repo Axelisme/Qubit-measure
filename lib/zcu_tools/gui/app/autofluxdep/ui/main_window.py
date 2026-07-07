@@ -577,6 +577,7 @@ class MainWindow(QMainWindow):
             self._ctrl.predictor_control,
             self,
             device=self._ctrl.device_control,
+            md_provider=self._ctrl.context_control.get_current_md,
             persistent_on_close=True,
         )
         dlg.restore_state(self._shared_predictor_dialog_state())

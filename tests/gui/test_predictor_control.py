@@ -10,6 +10,8 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.events import PredictorChangedPayload
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.predictor import (
+    CalibrateFluxBiasRequest,
+    CalibrateFluxBiasResult,
     LoadPredictorRequest,
     PredictCurveRequest,
     PredictFreqRequest,
@@ -25,6 +27,7 @@ class RecordingPredictor:
         self._log = log
         self.freq_curve = object()
         self.matrix_curve = object()
+        self.calibration = CalibrateFluxBiasResult(flux_bias=0.125)
         self.info: dict[str, bool] = {"loaded": True}
 
     def load_predictor(self, req: LoadPredictorRequest) -> None:
@@ -32,6 +35,12 @@ class RecordingPredictor:
 
     def set_model_params(self, req: SetModelParamsRequest) -> None:
         self._log.add("predictor", "set_model_params", req)
+
+    def calibrate_flux_bias(
+        self, req: CalibrateFluxBiasRequest
+    ) -> CalibrateFluxBiasResult:
+        self._log.add("predictor", "calibrate_flux_bias", req)
+        return self.calibration
 
     def clear_predictor(self) -> None:
         self._log.add("predictor", "clear_predictor")
@@ -77,6 +86,11 @@ def test_predictor_control_facet_forwards_deliberate_predictor_contract() -> Non
         flux_bias=0.0,
     )
     freq_req = PredictFreqRequest(value=0.5, transition=(0, 1))
+    calibrate_req = CalibrateFluxBiasRequest(
+        value=0.5,
+        frequency_mhz=4567.0,
+        transition=(0, 1),
+    )
     curve_req = PredictCurveRequest(
         values=np.array([0.0, 0.5], dtype=np.float64),
         transitions=((0, 1),),
@@ -105,6 +119,12 @@ def test_predictor_control_facet_forwards_deliberate_predictor_contract() -> Non
             facet.clear_predictor,
             None,
             call("predictor", "clear_predictor"),
+        ),
+        (
+            "calibrate_flux_bias",
+            lambda: facet.calibrate_flux_bias(calibrate_req),
+            predictor.calibration,
+            call("predictor", "calibrate_flux_bias", same(calibrate_req)),
         ),
         (
             "predict_freq",

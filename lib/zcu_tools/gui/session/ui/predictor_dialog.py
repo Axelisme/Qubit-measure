@@ -47,12 +47,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTableWidgetSelectionRange,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from zcu_tools.gui.session.state import DeviceStatus
+from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
@@ -61,6 +63,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.events import DeviceChangedPayload
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
+    from zcu_tools.meta_tool import MetaDict
 
 # Default display window in flux (Φ/Φ₀) units (plan spec).
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
@@ -84,6 +87,8 @@ _DEFAULT_EL: float = 1.0
 _DEFAULT_FLUX_HALF: float = 0.0
 _DEFAULT_FLUX_PERIOD: float = 0.005
 _DEFAULT_FLUX_BIAS: float = 0.0
+_DEFAULT_CALIBRATION_EXPR: str = "q_f"
+_DEFAULT_CALIBRATION_TRANSITION: tuple[int, int] = (0, 1)
 
 # Column indices for the 4-column tracked-transitions table.
 # Both matrix operators (n and phi) are shown side by side — there is no selector.
@@ -123,6 +128,12 @@ def _normalize_tracked_transitions(
     return tuple(normalized)
 
 
+def _empty_md() -> MetaDict:
+    from zcu_tools.meta_tool import MetaDict
+
+    return MetaDict()
+
+
 class PredictorDialog(QDialog):
     """Modal dialog for loading a FluxoniumPredictor and predicting frequencies."""
 
@@ -134,11 +145,13 @@ class PredictorDialog(QDialog):
         parent: QWidget | None = None,
         *,
         device: DeviceControlPort | None = None,
+        md_provider: Callable[[], MetaDict] | None = None,
         persistent_on_close: bool = False,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
         self._dev = device
+        self._md_provider = md_provider or _empty_md
         self._persistent_on_close = persistent_on_close
         self._live_mode = False
         self._suppress_state_changed = False
@@ -188,18 +201,28 @@ class PredictorDialog(QDialog):
         # ranges + many decimals so exploratory inputs are accepted; the only hard
         # guard (flux_period != 0) lives in _on_apply_model_params.
         self._ej_spin = self._make_param_spin(_DEFAULT_EJ)
-        model_form.addRow("EJ (GHz):", self._ej_spin)
         self._ec_spin = self._make_param_spin(_DEFAULT_EC)
-        model_form.addRow("EC (GHz):", self._ec_spin)
         self._el_spin = self._make_param_spin(_DEFAULT_EL)
-        model_form.addRow("EL (GHz):", self._el_spin)
+        model_form.addRow(
+            "Energies:",
+            self._make_param_row(
+                ("EJ", self._ej_spin),
+                ("EC", self._ec_spin),
+                ("EL", self._el_spin),
+            ),
+        )
         self._flux_half_spin = self._make_param_spin(_DEFAULT_FLUX_HALF)
-        model_form.addRow("flux_half:", self._flux_half_spin)
         self._flux_period_spin = self._make_param_spin(_DEFAULT_FLUX_PERIOD)
-        model_form.addRow("flux_period:", self._flux_period_spin)
         # flux_bias lives here (was in the old "Load predictor" group).
         self._flux_bias_spin = self._make_param_spin(_DEFAULT_FLUX_BIAS)
-        model_form.addRow("flux_bias:", self._flux_bias_spin)
+        model_form.addRow(
+            "Flux:",
+            self._make_param_row(
+                ("half", self._flux_half_spin),
+                ("period", self._flux_period_spin),
+                ("bias", self._flux_bias_spin),
+            ),
+        )
 
         model_btn_row = QHBoxLayout()
         self._apply_btn = QPushButton("Apply")
@@ -300,7 +323,32 @@ class PredictorDialog(QDialog):
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         transitions_layout.addWidget(self._table)
 
-        left_layout.addWidget(transitions_group)
+        left_layout.addWidget(transitions_group, stretch=1)
+
+        # ── Calibration: measured frequency -> predictor flux_bias ────────
+        calibration_group = QGroupBox("Calibration")
+        calibration_form = QFormLayout(calibration_group)
+        self._calibration_freq_field = EvalNumericField(
+            minimum=-1e9,
+            maximum=1e9,
+            decimals=6,
+            md_provider=self._md_provider,
+        )
+        self._calibration_freq_field.load_expression(
+            _DEFAULT_CALIBRATION_EXPR, direct_fallback=0.0
+        )
+        calibration_form.addRow("Frequency (MHz):", self._calibration_freq_field)
+
+        self._calibration_transition_combo = QComboBox()
+        self._calibrate_btn = QPushButton("Calibrate")
+        self._calibrate_btn.clicked.connect(self._on_calibrate_clicked)
+        calibration_action_row = QHBoxLayout()
+        calibration_action_row.addWidget(self._calibration_transition_combo, stretch=1)
+        calibration_action_row.addWidget(self._calibrate_btn)
+        calibration_action_holder = QWidget()
+        calibration_action_holder.setLayout(calibration_action_row)
+        calibration_form.addRow("Transition:", calibration_action_holder)
+        left_layout.addWidget(calibration_group)
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
@@ -318,8 +366,6 @@ class PredictorDialog(QDialog):
         close_btn.clicked.connect(self._on_close_requested)
         action_row.addWidget(close_btn)
         left_layout.addLayout(action_row)
-
-        left_layout.addStretch()
 
         # ── Right: QTabWidget with three canvases ─────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
@@ -492,6 +538,9 @@ class PredictorDialog(QDialog):
             self._add_to_spin,
             self._add_btn,
             self._remove_btn,
+            self._calibration_freq_field,
+            self._calibration_transition_combo,
+            self._calibrate_btn,
         ):
             widget.setEnabled(enabled)
         if self._device_combo is not None:
@@ -519,6 +568,17 @@ class PredictorDialog(QDialog):
         spin.setDecimals(6)
         spin.setValue(default)
         return spin
+
+    @staticmethod
+    def _make_param_row(*pairs: tuple[str, TrimDoubleSpinBox]) -> QWidget:
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        for label, spin in pairs:
+            row.addWidget(QLabel(label))
+            row.addWidget(spin, stretch=1)
+        return holder
 
     def _populate_model_fields(
         self, ej: float, ec: float, el: float, flux_half: float, flux_period: float
@@ -777,7 +837,13 @@ class PredictorDialog(QDialog):
         for transition in selected:
             if transition in self._tracked:
                 row = self._tracked.index(transition)
-                self._table.selectRow(row)
+                self._table.setRangeSelected(
+                    QTableWidgetSelectionRange(
+                        row, 0, row, self._table.columnCount() - 1
+                    ),
+                    True,
+                )
+        self._refresh_calibration_transition_options()
 
     def _selected_transitions(self) -> list[tuple[int, int]]:
         """Return the (from, to) tuples for all currently selected table rows."""
@@ -788,13 +854,105 @@ class PredictorDialog(QDialog):
             if 0 <= row < len(self._tracked)
         ]
 
-    def _selected_transition(self) -> tuple[int, int] | None:
-        """Return the (from, to) tuple for the first selected row, or None.
+    def _selected_highlights(self) -> tuple[tuple[int, int], ...]:
+        """Return all currently selected transitions for canvas highlighting."""
+        return tuple(self._selected_transitions())
 
-        Used for single-transition highlight on the canvas.
-        """
-        transitions = self._selected_transitions()
-        return transitions[0] if transitions else None
+    @staticmethod
+    def _transition_option_label(transition: tuple[int, int]) -> str:
+        frm, to = transition
+        if 0 <= frm <= 9 and 0 <= to <= 9:
+            return f"f{frm}{to}"
+        return f"f{frm}→{to}"
+
+    def _refresh_calibration_transition_options(self) -> None:
+        combo = self._calibration_transition_combo
+        current = combo.currentData()
+        if not (
+            isinstance(current, tuple)
+            and len(current) == 2
+            and all(isinstance(v, int) for v in current)
+        ):
+            current = _DEFAULT_CALIBRATION_TRANSITION
+
+        options = list(self._tracked)
+        if _DEFAULT_CALIBRATION_TRANSITION not in options:
+            options.insert(0, _DEFAULT_CALIBRATION_TRANSITION)
+
+        combo.blockSignals(True)
+        combo.clear()
+        for transition in options:
+            combo.addItem(
+                self._transition_option_label(transition), userData=transition
+            )
+        index = combo.findData(current)
+        if index < 0:
+            index = combo.findData(_DEFAULT_CALIBRATION_TRANSITION)
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+
+    def _selected_calibration_transition(self) -> tuple[int, int]:
+        data = self._calibration_transition_combo.currentData()
+        if (
+            isinstance(data, tuple)
+            and len(data) == 2
+            and all(isinstance(v, int) for v in data)
+        ):
+            return data
+        return _DEFAULT_CALIBRATION_TRANSITION
+
+    def _resolve_calibration_frequency_mhz(self) -> float | None:
+        from zcu_tools.gui.session.expression import (
+            EvalRef,
+            coerce_eval_result,
+            evaluate_numeric_expr,
+        )
+
+        raw = self._calibration_freq_field.read_raw()
+        if not isinstance(raw, EvalRef):
+            return float(raw)
+        try:
+            md = self._md_provider()
+            resolved = coerce_eval_result(
+                evaluate_numeric_expr(raw.expr, md), raw.type_
+            )
+        except Exception as exc:
+            self._set_status(f"Calibration frequency: {exc}", error=True)
+            return None
+        if not (raw.minimum <= float(resolved) <= raw.maximum):
+            self._set_status(
+                f"Calibration frequency: value {resolved} out of range",
+                error=True,
+            )
+            return None
+        return float(resolved)
+
+    def _on_calibrate_clicked(self) -> None:
+        if self._live_mode:
+            self._set_status("Live mode keeps calibration read-only.", error=False)
+            return
+        from zcu_tools.gui.session.services.predictor import (
+            CalibrateFluxBiasRequest,
+            PredictorLoadError,
+            PredictorNotLoaded,
+        )
+
+        frequency_mhz = self._resolve_calibration_frequency_mhz()
+        if frequency_mhz is None:
+            return
+        req = CalibrateFluxBiasRequest(
+            value=self._predict_value_spin.value(),
+            frequency_mhz=frequency_mhz,
+            transition=self._selected_calibration_transition(),
+        )
+        try:
+            result = self._pred.calibrate_flux_bias(req)
+        except (PredictorLoadError, PredictorNotLoaded, ValueError) as exc:
+            self._set_status(str(exc), error=True)
+            return
+        self._flux_bias_spin.setValue(result.flux_bias)
+        self._set_status(f"Calibrated flux_bias={result.flux_bias:.6g}", error=False)
+        logger.info("PredictorDialog: calibrated flux bias %r", req)
 
     def _update_value_columns(self) -> None:
         """Fill f / |n| / |phi| columns for every tracked transition at the marker.
@@ -896,7 +1054,7 @@ class PredictorDialog(QDialog):
             v_lo, v_hi = v_hi, v_lo
         grid = np.linspace(v_lo, v_hi, _CURVE_GRID_N, dtype=np.float64)
 
-        highlight = self._selected_transition()
+        highlights = self._selected_highlights()
         marker_value = self._predict_value_spin.value()
 
         # ── Frequency curves ──────────────────────────────────────────────
@@ -910,7 +1068,7 @@ class PredictorDialog(QDialog):
                 labels=freq_result.labels,
                 series=freq_result.freqs_mhz,
                 ylabel="Frequency (MHz)",
-                highlight=highlight,
+                highlights=highlights,
                 marker_value=marker_value,
                 flux_window=_DEFAULT_FLUX_WINDOW,
                 value_to_flux=value_to_flux,
@@ -929,7 +1087,7 @@ class PredictorDialog(QDialog):
             "n",
             self._mat_n_canvas,
             grid,
-            highlight,
+            highlights,
             marker_value,
             flux_to_value,
             value_to_flux,
@@ -939,7 +1097,7 @@ class PredictorDialog(QDialog):
             "phi",
             self._mat_phi_canvas,
             grid,
-            highlight,
+            highlights,
             marker_value,
             flux_to_value,
             value_to_flux,
@@ -954,7 +1112,7 @@ class PredictorDialog(QDialog):
         operator: str,
         canvas: PredictorCurveCanvas,
         grid: np.ndarray,
-        highlight: tuple[int, int] | None,
+        highlights: tuple[tuple[int, int], ...],
         marker_value: float,
         flux_to_value: Callable[[float], float],
         value_to_flux: Callable[[float], float],
@@ -996,7 +1154,7 @@ class PredictorDialog(QDialog):
             labels=mat_result.labels,
             series=mat_result.mags,
             ylabel=f"|<i|{operator}|j>|",
-            highlight=highlight,
+            highlights=highlights,
             marker_value=marker_value,
             flux_window=_DEFAULT_FLUX_WINDOW,
             value_to_flux=value_to_flux,
@@ -1115,9 +1273,9 @@ class PredictorDialog(QDialog):
 
     def _on_selection_changed(self) -> None:
         """Table row selection changed → restyle highlighted curve on all canvases."""
-        transition = self._selected_transition()
+        highlights = self._selected_highlights()
         for canvas in self._all_canvases:
-            canvas.set_highlight(transition)
+            canvas.set_highlights(highlights)
 
     # ------------------------------------------------------------------
     # Browse / Apply handlers

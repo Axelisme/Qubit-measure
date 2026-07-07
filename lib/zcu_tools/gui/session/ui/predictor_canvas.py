@@ -25,7 +25,7 @@ from qtpy.QtWidgets import QVBoxLayout, QWidget  # type: ignore[attr-defined]
 # How close (in axes-width fraction) a click must be to the marker line to grab it.
 _PICK_TOL_FRAC = 0.02
 
-# Highlight style for the selected transition curve.
+# Highlight style for selected transition curves.
 _HIGHLIGHT_LW = 2.5
 _NORMAL_LW = 1.0
 _HIGHLIGHT_ALPHA = 1.0
@@ -105,7 +105,7 @@ class PredictorCurveCanvas(QWidget):
         self._flux_window: tuple[float, float] = (0.4, 1.1)
         # Curve artists keyed by (from, to) transition; populated by render_curves.
         self._curve_lines: dict[tuple[int, int], Line2D] = {}
-        self._current_highlight: tuple[int, int] | None = None
+        self._current_highlights: frozenset[tuple[int, int]] = frozenset()
 
         # Click-follow-click only needs press (toggle) + motion (follow); the
         # button is never held, so no release handler is wired.
@@ -142,7 +142,7 @@ class PredictorCurveCanvas(QWidget):
         labels: tuple[str, ...],
         series: NDArray[np.float64],
         ylabel: str,
-        highlight: tuple[int, int] | None = None,
+        highlights: tuple[tuple[int, int], ...] = (),
         marker_value: float,
         flux_window: tuple[float, float] = (0.4, 1.1),
         value_to_flux: Callable[[float], float],
@@ -156,7 +156,7 @@ class PredictorCurveCanvas(QWidget):
 
         The primary x-axis is device value (no unit).  A secondary top x-axis shows
         flux (Φ/Φ₀) using the affine callables ``value_to_flux`` / ``flux_to_value``.
-        ``highlight=None`` renders all curves in normal style (no curve highlighted).
+        ``highlights=()`` renders all curves in normal style.
         """
         self._flux_window = flux_window
         self._value_to_flux = value_to_flux
@@ -165,19 +165,17 @@ class PredictorCurveCanvas(QWidget):
 
         self.figure.clear()
         self._curve_lines = {}
-        self._current_highlight = highlight
+        highlight_set = frozenset(highlights)
+        self._current_highlights = highlight_set
         ax = self.figure.add_subplot(1, 1, 1)
 
-        # Draw each transition curve; highlight the selected one (if any).
-        # Store each artist in _curve_lines so set_highlight can restyle without recompute.
-        highlight_label = (
-            f"{highlight[0]}→{highlight[1]}" if highlight is not None else None
-        )
+        # Draw each transition curve; highlight selected ones (if any).
+        # Store each artist in _curve_lines so set_highlights can restyle without recompute.
         for i, label in enumerate(labels):
-            is_hi = highlight_label is not None and label == highlight_label
             # Parse "frm→to" back to a key tuple for the artist registry.
             parts = label.split("→")
             key: tuple[int, int] = (int(parts[0]), int(parts[1]))
+            is_hi = key in highlight_set
             (line,) = ax.plot(
                 values,
                 series[i],
@@ -249,24 +247,34 @@ class PredictorCurveCanvas(QWidget):
         self._flux_to_value = None
         self._value_to_flux = None
         self._curve_lines = {}
-        self._current_highlight = None
+        self._current_highlights = frozenset()
         self.canvas.draw_idle()
 
-    def set_highlight(self, transition: tuple[int, int] | None) -> None:
-        """Restyle curve artists to highlight ``transition`` without recomputing data.
+    def set_highlights(
+        self, transitions: tuple[tuple[int, int], ...] | list[tuple[int, int]] | None
+    ) -> None:
+        """Restyle curve artists to highlight ``transitions`` without recomputing data.
 
-        Pass ``None`` (or a transition not in the rendered set) to revert all curves
-        to normal style.  Graceful: never raises if the transition is absent.
+        Pass ``None`` or an empty sequence to revert all curves to normal style.
+        Graceful: never raises if any transition is absent.
         """
         if not self._curve_lines:
             return
-        self._current_highlight = transition
+        highlight_set = frozenset(transitions or ())
+        self._current_highlights = highlight_set
         for key, line in self._curve_lines.items():
-            is_hi = transition is not None and key == transition
+            is_hi = key in highlight_set
             line.set_linewidth(_HIGHLIGHT_LW if is_hi else _NORMAL_LW)
             line.set_alpha(_HIGHLIGHT_ALPHA if is_hi else _NORMAL_ALPHA)
             line.set_zorder(3 if is_hi else 2)
         self.canvas.draw_idle()
+
+    def set_highlight(self, transition: tuple[int, int] | None) -> None:
+        """Compatibility wrapper for single-transition callers."""
+        if transition is None:
+            self.set_highlights(())
+        else:
+            self.set_highlights((transition,))
 
     # ------------------------------------------------------------------
     # Internal helpers

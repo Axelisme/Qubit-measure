@@ -6,8 +6,16 @@ from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.run_locks import GuardedDeviceControl
+from zcu_tools.gui.app.autofluxdep.run_locks import (
+    GuardedDeviceControl,
+    GuardedPredictorControl,
+)
 from zcu_tools.gui.session.device_control import DeviceControlPort
+from zcu_tools.gui.session.predictor_control import PredictorControlPort
+from zcu_tools.gui.session.services.predictor import (
+    CalibrateFluxBiasRequest,
+    CalibrateFluxBiasResult,
+)
 
 
 class _RecordingDeviceControl:
@@ -45,8 +53,24 @@ class _RecordingDeviceControl:
         self.calls.append(("cancel_device_operation", (name,)))
 
 
+class _RecordingPredictorControl:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.result = CalibrateFluxBiasResult(flux_bias=0.125)
+
+    def calibrate_flux_bias(
+        self, req: CalibrateFluxBiasRequest
+    ) -> CalibrateFluxBiasResult:
+        self.calls.append(("calibrate_flux_bias", (req,)))
+        return self.result
+
+
 def _locked_guard(kind: str) -> None:
     raise RuntimeError(f"{kind} is locked while a run is active")
+
+
+def _unlocked_guard(_kind: str) -> None:
+    return
 
 
 @pytest.mark.parametrize(
@@ -89,3 +113,45 @@ def test_guarded_device_try_poll_preserves_inner_skip_result() -> None:
     assert guarded.try_poll_device_info("flux") is False
 
     assert inner.calls == [("try_poll_device_info", ("flux",))]
+
+
+def test_guarded_predictor_calibration_stays_locked() -> None:
+    inner = _RecordingPredictorControl()
+    mutated: list[str] = []
+    guarded = GuardedPredictorControl(
+        cast(PredictorControlPort, inner),
+        _locked_guard,
+        on_mutated=lambda: mutated.append("mutated"),
+    )
+    req = CalibrateFluxBiasRequest(
+        value=0.25,
+        frequency_mhz=4567.0,
+        transition=(0, 1),
+    )
+
+    with pytest.raises(RuntimeError, match="predictor is locked while a run is active"):
+        guarded.calibrate_flux_bias(req)
+
+    assert inner.calls == []
+    assert mutated == []
+
+
+def test_guarded_predictor_calibration_delegates_and_notifies_when_unlocked() -> None:
+    inner = _RecordingPredictorControl()
+    mutated: list[str] = []
+    guarded = GuardedPredictorControl(
+        cast(PredictorControlPort, inner),
+        _unlocked_guard,
+        on_mutated=lambda: mutated.append("mutated"),
+    )
+    req = CalibrateFluxBiasRequest(
+        value=0.25,
+        frequency_mhz=4567.0,
+        transition=(0, 1),
+    )
+
+    result = guarded.calibrate_flux_bias(req)
+
+    assert result == inner.result
+    assert inner.calls == [("calibrate_flux_bias", (req,))]
+    assert mutated == ["mutated"]

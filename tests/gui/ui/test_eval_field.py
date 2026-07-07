@@ -196,6 +196,22 @@ def test_reset_to_direct_from_eval_mode(qapp):
     assert f._ghost.isHidden()
 
 
+def test_load_expression_switches_to_eval_mode(qapp):
+    md = MetaDict()
+    md.q_f = 4567.0
+    f = _field(md)
+
+    f.load_expression("q_f", direct_fallback=1.25)
+
+    assert f._mode == "eval"
+    assert f._line_edit.text() == "q_f"
+    assert not f._line_edit.isHidden()
+    assert f._spin.isHidden()
+    result = f.read_raw()
+    assert isinstance(result, EvalRef)
+    assert result.expr == "q_f"
+
+
 # ---------------------------------------------------------------------------
 # 8. no active context → ghost shows red
 # ---------------------------------------------------------------------------

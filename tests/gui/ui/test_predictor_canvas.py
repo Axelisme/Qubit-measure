@@ -83,7 +83,7 @@ def _make_render_kwargs(n_transitions: int = 4, n: int = 20) -> dict:
         labels=labels,
         series=series,
         ylabel="Frequency (MHz)",
-        highlight=(0, 1),
+        highlights=((0, 1),),
         marker_value=0.5,
         flux_window=(0.4, 1.1),
         value_to_flux=_value_to_flux,
@@ -306,37 +306,49 @@ def test_canvas_leave_event_when_not_following_is_noop(canvas):
 
 
 # ---------------------------------------------------------------------------
-# highlight=None renders all curves in normal style
+# highlights=() renders all curves in normal style
 # ---------------------------------------------------------------------------
 
 
-def test_canvas_render_curves_highlight_none_no_error(canvas):
-    """render_curves with highlight=None must not raise."""
+def test_canvas_render_curves_highlights_empty_no_error(canvas):
+    """render_curves with highlights=() must not raise."""
     kwargs = _make_render_kwargs()
-    kwargs["highlight"] = None
+    kwargs["highlights"] = ()
     canvas.render_curves(**kwargs)
     assert len(canvas.figure.get_axes()) > 0
 
 
-def test_canvas_render_curves_highlight_none_all_normal_lw(canvas):
-    """With highlight=None, all curve lines use the normal (non-highlighted) linewidth."""
+def test_canvas_render_curves_highlights_empty_all_normal_lw(canvas):
+    """With highlights=(), all curve lines use the normal linewidth."""
     from zcu_tools.gui.session.ui.predictor_canvas import _NORMAL_LW
 
     kwargs = _make_render_kwargs()
-    kwargs["highlight"] = None
+    kwargs["highlights"] = ()
     canvas.render_curves(**kwargs)
     for line in canvas._curve_lines.values():
         assert line.get_linewidth() == pytest.approx(_NORMAL_LW)
 
 
-def test_canvas_set_highlight_none_reverts_all_to_normal(canvas):
-    """set_highlight(None) reverts all previously highlighted curves to normal."""
+def test_canvas_set_highlights_empty_reverts_all_to_normal(canvas):
+    """set_highlights(()) reverts all previously highlighted curves to normal."""
     from zcu_tools.gui.session.ui.predictor_canvas import _NORMAL_LW
 
     canvas.render_curves(**_make_render_kwargs(n_transitions=4))
-    canvas.set_highlight(None)
+    canvas.set_highlights(())
     for line in canvas._curve_lines.values():
         assert line.get_linewidth() == pytest.approx(_NORMAL_LW)
+
+
+def test_canvas_set_highlights_marks_multiple_curves(canvas):
+    """set_highlights can mark more than one rendered transition."""
+    from zcu_tools.gui.session.ui.predictor_canvas import _HIGHLIGHT_LW, _NORMAL_LW
+
+    canvas.render_curves(**_make_render_kwargs(n_transitions=4))
+    canvas.set_highlights(((0, 1), (0, 3)))
+
+    assert canvas._curve_lines[(0, 1)].get_linewidth() == pytest.approx(_HIGHLIGHT_LW)
+    assert canvas._curve_lines[(0, 3)].get_linewidth() == pytest.approx(_HIGHLIGHT_LW)
+    assert canvas._curve_lines[(0, 2)].get_linewidth() == pytest.approx(_NORMAL_LW)
 
 
 def test_canvas_render_curves_dynamic_count(canvas):
@@ -350,7 +362,7 @@ def test_canvas_render_curves_dynamic_count(canvas):
             labels=labels,
             series=series,
             ylabel="Frequency (MHz)",
-            highlight=None,
+            highlights=(),
             marker_value=0.5,
             flux_window=(0.4, 1.1),
             value_to_flux=_value_to_flux,
@@ -372,7 +384,7 @@ def test_canvas_render_curves_custom_ylabel(canvas):
         labels=labels,
         series=series,
         ylabel="|<i|n|j>|",
-        highlight=None,
+        highlights=(),
         marker_value=0.5,
         flux_window=(0.4, 1.1),
         value_to_flux=_value_to_flux,

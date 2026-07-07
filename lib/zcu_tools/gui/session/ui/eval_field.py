@@ -121,6 +121,21 @@ class EvalNumericField(QWidget):
         self._line_edit.setVisible(False)
         self._ghost.setVisible(False)
 
+    def load_expression(
+        self, expr: str, *, direct_fallback: float | None = None
+    ) -> None:
+        """Switch to eval mode with ``expr`` without requiring a context-menu action."""
+        if direct_fallback is not None:
+            self._direct_value = float(direct_fallback)
+        elif self._mode == "direct":
+            self._direct_value = self._spin.value()
+        self._mode = "eval"
+        self._line_edit.setText(expr)
+        self._spin.setVisible(False)
+        self._line_edit.setVisible(True)
+        self._ghost.setVisible(True)
+        self._sync_ghost()
+
     def read_raw(self) -> float | EvalRef:
         """Return the current value.
 

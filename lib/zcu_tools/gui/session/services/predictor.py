@@ -62,6 +62,22 @@ class SetModelParamsRequest:
 
 
 @dataclass(frozen=True)
+class CalibrateFluxBiasRequest:
+    """Calibrate predictor flux_bias from one measured transition frequency."""
+
+    value: float
+    frequency_mhz: float
+    transition: tuple[int, int] = (0, 1)
+
+
+@dataclass(frozen=True)
+class CalibrateFluxBiasResult:
+    """Result returned after installing the calibrated predictor."""
+
+    flux_bias: float
+
+
+@dataclass(frozen=True)
 class PredictFreqRequest:
     value: float
     transition: tuple[int, int]
@@ -269,6 +285,44 @@ class PredictorService:
         new_ctx = dataclasses.replace(self._state.exp_context, predictor=None)
         self._state.set_context(new_ctx)
         self._bus.emit(PredictorChangedPayload())
+
+    def calibrate_flux_bias(
+        self, req: CalibrateFluxBiasRequest
+    ) -> CalibrateFluxBiasResult:
+        """Compute and install a flux-bias correction from one measured point."""
+        predictor = self._state.exp_context.predictor
+        if predictor is None:
+            raise PredictorNotLoaded("No predictor loaded — load one first")
+        frm, to = req.transition
+        if frm < 0 or to < 0:
+            raise ValueError(f"Transition levels must be >= 0, got {req.transition}")
+        if frm >= to:
+            raise ValueError(
+                f"Transition from-level must be < to-level, got {req.transition}"
+            )
+
+        flux_bias = float(
+            predictor.calculate_bias(
+                float(req.value), float(req.frequency_mhz), req.transition
+            )
+        )
+        calibrated = FluxoniumPredictor(
+            predictor.params,
+            predictor.flux_half,
+            predictor.flux_period,
+            flux_bias,
+        )
+        new_ctx = dataclasses.replace(self._state.exp_context, predictor=calibrated)
+        self._state.set_context(new_ctx)
+        self._bus.emit(PredictorChangedPayload())
+        logger.info(
+            "calibrate_flux_bias: value=%r frequency_mhz=%r transition=%r flux_bias=%r",
+            req.value,
+            req.frequency_mhz,
+            req.transition,
+            flux_bias,
+        )
+        return CalibrateFluxBiasResult(flux_bias=flux_bias)
 
     # ------------------------------------------------------------------
     # Prediction computation (sync, pure)

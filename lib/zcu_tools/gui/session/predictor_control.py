@@ -10,6 +10,8 @@ from zcu_tools.gui.session.events import PredictorChangedPayload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.predictor import (
+        CalibrateFluxBiasRequest,
+        CalibrateFluxBiasResult,
         LoadPredictorRequest,
         PredictCurveRequest,
         PredictCurveResult,
@@ -30,6 +32,9 @@ class PredictorControlPort(Protocol):
 
     def load_predictor(self, req: LoadPredictorRequest) -> None: ...
     def set_predictor_model_params(self, req: SetModelParamsRequest) -> None: ...
+    def calibrate_flux_bias(
+        self, req: CalibrateFluxBiasRequest
+    ) -> CalibrateFluxBiasResult: ...
     def clear_predictor(self) -> None: ...
 
     def predict_freq(self, req: PredictFreqRequest) -> float: ...
@@ -62,6 +67,11 @@ class PredictorControlFacet:
 
     def set_predictor_model_params(self, req: SetModelParamsRequest) -> None:
         self._predictor.set_model_params(req)
+
+    def calibrate_flux_bias(
+        self, req: CalibrateFluxBiasRequest
+    ) -> CalibrateFluxBiasResult:
+        return self._predictor.calibrate_flux_bias(req)
 
     def clear_predictor(self) -> None:
         self._predictor.clear_predictor()
