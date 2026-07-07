@@ -153,8 +153,8 @@ class StartupService:
         """The current remembered prefs (for the setup dialog's prefill)."""
         return self._project_prefs_to_startup()
 
-    def list_result_scopes(self) -> tuple[ResultScope, ...]:
-        return self._result_scopes.list_scopes()
+    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
+        return self._result_scopes.list_scopes(refresh=refresh)
 
     def list_result_chip_names(self) -> tuple[str, ...]:
         return self._result_scopes.list_chip_names()

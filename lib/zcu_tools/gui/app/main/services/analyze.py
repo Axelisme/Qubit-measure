@@ -19,10 +19,9 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import InteractiveSession
-    from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-    from .ports import WritebackLifecyclePort
+    from .ports import AnalyzeStatePort, WritebackLifecyclePort
 
 
 class AnalyzeService(_StagedAnalyzeService):
@@ -31,7 +30,7 @@ class AnalyzeService(_StagedAnalyzeService):
 
     def __init__(
         self,
-        state: State,
+        state: AnalyzeStatePort,
         runner: OperationRunner,
         bus: EventBus,
         writeback: WritebackLifecyclePort,

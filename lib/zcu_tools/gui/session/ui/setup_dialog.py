@@ -89,7 +89,9 @@ class SetupDialog(QDialog):
         refresh_scopes_btn = QPushButton("↻")
         refresh_scopes_btn.setFixedWidth(28)
         refresh_scopes_btn.setToolTip("Refresh result scopes")
-        refresh_scopes_btn.clicked.connect(self._refresh_result_scopes)
+        refresh_scopes_btn.clicked.connect(
+            lambda checked=False: self._refresh_result_scopes(checked, refresh=True)
+        )
         scope_row.addWidget(refresh_scopes_btn)
         project_form.addRow("Scope:", scope_row)
 
@@ -337,10 +339,14 @@ class SetupDialog(QDialog):
         self._update_scope_options(chip, qub)
 
     def _refresh_result_scopes(
-        self, _checked: bool = False, *, silent: bool = False
+        self,
+        _checked: bool = False,
+        *,
+        silent: bool = False,
+        refresh: bool = False,
     ) -> None:
         try:
-            self._result_scopes = tuple(self._ctrl.list_result_scopes())
+            self._result_scopes = tuple(self._ctrl.list_result_scopes(refresh=refresh))
         except Exception as exc:
             logger.warning("Failed to list result scopes: %s", exc)
             self._result_scopes = ()

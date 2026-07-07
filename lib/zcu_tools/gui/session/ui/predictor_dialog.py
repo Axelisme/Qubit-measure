@@ -677,7 +677,11 @@ class PredictorDialog(QDialog):
         if self._dev is None:
             return
         try:
-            self._dev.poll_device_info(name)
+            if not self._dev.try_poll_device_info(name):
+                self._set_status(
+                    f"Skipped refresh for {name!r}: a run is active.",
+                    error=False,
+                )
         except Exception as exc:
             self._set_status(f"Failed to refresh {name!r}: {exc}", error=True)
 

@@ -13,9 +13,14 @@ from zcu_tools.gui.session.device_control import DeviceControlPort
 class _RecordingDeviceControl:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.try_poll_result = True
 
     def poll_device_info(self, name: str) -> None:
         self.calls.append(("poll_device_info", (name,)))
+
+    def try_poll_device_info(self, name: str) -> bool:
+        self.calls.append(("try_poll_device_info", (name,)))
+        return self.try_poll_result
 
     def start_connect_device(self, req: object) -> int:
         self.calls.append(("start_connect_device", (req,)))
@@ -55,15 +60,32 @@ def _locked_guard(kind: str) -> None:
         lambda dev: dev.cancel_device_operation("flux"),
     ),
 )
-def test_guarded_device_poll_delegates_while_mutations_stay_locked(
+def test_guarded_device_refresh_delegates_while_mutations_stay_locked(
     mutation: Callable[[GuardedDeviceControl], object],
 ) -> None:
     inner = _RecordingDeviceControl()
     guarded = GuardedDeviceControl(cast(DeviceControlPort, inner), _locked_guard)
 
     guarded.poll_device_info("flux")
+    assert guarded.try_poll_device_info("flux") is True
 
-    assert inner.calls == [("poll_device_info", ("flux",))]
+    assert inner.calls == [
+        ("poll_device_info", ("flux",)),
+        ("try_poll_device_info", ("flux",)),
+    ]
     with pytest.raises(RuntimeError, match="device is locked while a run is active"):
         mutation(guarded)
-    assert inner.calls == [("poll_device_info", ("flux",))]
+    assert inner.calls == [
+        ("poll_device_info", ("flux",)),
+        ("try_poll_device_info", ("flux",)),
+    ]
+
+
+def test_guarded_device_try_poll_preserves_inner_skip_result() -> None:
+    inner = _RecordingDeviceControl()
+    inner.try_poll_result = False
+    guarded = GuardedDeviceControl(cast(DeviceControlPort, inner), _locked_guard)
+
+    assert guarded.try_poll_device_info("flux") is False
+
+    assert inner.calls == [("try_poll_device_info", ("flux",))]

@@ -210,6 +210,7 @@ class MainWindow(QMainWindow):
         )
         # per-provider sweep-lived liveplot state: name -> (canvas, plotter)
         self._plots: dict[str, tuple[QWidget, Any]] = {}
+        self._dirty_plot_idx_by_name: dict[str, int] = {}
         self._row_update_perf = PerfStats("main.row_update", logger, slow_ms=30.0)
         self._progress_perf = PerfStats("main.progress_render", logger, slow_ms=20.0)
         self._progress_collect_perf = PerfStats(
@@ -514,6 +515,10 @@ class MainWindow(QMainWindow):
         if node is not None and node.name in self._plots:
             canvas = self._plots[node.name][0]
         self._detail.show_run_canvas(canvas)
+        if node is not None:
+            dirty_idx = self._dirty_plot_idx_by_name.pop(node.name, None)
+            if dirty_idx is not None:
+                self._update_plot(node.name, dirty_idx, queue_ms=None)
         if not self._auto_follow_navigation:
             self._disable_auto_follow_from_user_action()
 
@@ -704,6 +709,7 @@ class MainWindow(QMainWindow):
             canvas.setParent(None)
             canvas.deleteLater()
         self._plots = {}
+        self._dirty_plot_idx_by_name = {}
 
     def _build_plots(self) -> None:
         """Allocate Results + build each provider's Figure / Plotter / canvas.
@@ -918,29 +924,43 @@ class MainWindow(QMainWindow):
         """Main-thread: a Result row was filled → redraw that provider's Plotter."""
         try:
             queue_ms = elapsed_ms(emitted_at)
-            entry = self._plots.get(name)
-            if entry is None:
+            if name != self._selected_plot_name():
+                self._dirty_plot_idx_by_name[name] = idx
                 return
-            plotter = entry[1]
-            result = self._ctrl.state.run_results.get(name)
-            if result is not None and plotter is not None:
-                profile_start = perf_now()
-                try:
-                    plotter.update(result, idx)
-                except Exception:
-                    logger.exception(
-                        "autofluxdep plot update failed: node=%s idx=%d", name, idx
-                    )
-                    canvas, _plotter = entry
-                    self._plots[name] = (canvas, None)
-                    return
-                self._row_update_perf.record(
-                    elapsed_ms(profile_start),
-                    queue_ms=queue_ms,
-                    detail=f"node={name} idx={idx}",
-                )
+            self._update_plot(name, idx, queue_ms=queue_ms)
         finally:
             self._bridge.row_rendered(name, idx)
+
+    def _selected_plot_name(self) -> str | None:
+        nodes = self._ctrl.state.nodes
+        row = self._list.selected_index
+        if 0 <= row < len(nodes):
+            return nodes[row].name
+        return None
+
+    def _update_plot(self, name: str, idx: int, *, queue_ms: float | None) -> None:
+        entry = self._plots.get(name)
+        if entry is None:
+            return
+        plotter = entry[1]
+        result = self._ctrl.state.run_results.get(name)
+        if result is None or plotter is None:
+            return
+        profile_start = perf_now()
+        try:
+            plotter.update(result, idx)
+        except Exception:
+            logger.exception(
+                "autofluxdep plot update failed: node=%s idx=%d", name, idx
+            )
+            canvas, _plotter = entry
+            self._plots[name] = (canvas, None)
+            return
+        self._row_update_perf.record(
+            elapsed_ms(profile_start),
+            queue_ms=queue_ms,
+            detail=f"node={name} idx={idx}",
+        )
 
     def _on_point_done(self, idx: int) -> None:
         self._live_predictor_flux_idx = idx

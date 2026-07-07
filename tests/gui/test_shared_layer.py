@@ -34,6 +34,7 @@ _SHARED_MODULES = [
     "zcu_tools.gui.session.operation_runner",
     "zcu_tools.gui.session.notify_handles",
     "zcu_tools.gui.session.ports",
+    "zcu_tools.gui.session.hardware_gate",
     "zcu_tools.gui.session.state",
     # SetupControlPort is the shared setup-dialog facade: collaborator types are
     # TYPE_CHECKING-only, runtime imports stay Qt/app clean.

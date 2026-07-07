@@ -64,8 +64,8 @@ class GuardedSetupControl:
     def get_persisted_startup(self) -> PersistedStartup:
         return self._inner.get_persisted_startup()
 
-    def list_result_scopes(self) -> tuple[ResultScope, ...]:
-        return self._inner.list_result_scopes()
+    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
+        return self._inner.list_result_scopes(refresh=refresh)
 
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:
         self._guard("setup")
@@ -244,6 +244,9 @@ class GuardedDeviceControl:
 
     def poll_device_info(self, name: str) -> None:
         self._inner.poll_device_info(name)
+
+    def try_poll_device_info(self, name: str) -> bool:
+        return self._inner.try_poll_device_info(name)
 
     def is_memory_device(self, name: str) -> bool:
         return self._inner.is_memory_device(name)

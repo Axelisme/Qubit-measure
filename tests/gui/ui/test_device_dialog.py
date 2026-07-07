@@ -60,6 +60,7 @@ def _make_ctrl() -> MagicMock:
     ctrl.is_memory_device.return_value = False
     ctrl.get_memory_device_address.return_value = None
     ctrl.get_device_snapshot.return_value = None
+    ctrl.try_poll_device_info.return_value = True
     return ctrl
 
 
@@ -330,7 +331,7 @@ def test_poll_tick_polls_selected_device(qapp):
     try:
         dialog._list.setCurrentRow(1)  # select "B"
         dialog._on_poll_tick()
-        ctrl.poll_device_info.assert_called_once_with("B")
+        ctrl.try_poll_device_info.assert_called_once_with("B")
     finally:
         dialog.close()
 
@@ -359,7 +360,7 @@ def test_poll_tick_polls_selected_setting_up_device(qapp):
 
         dialog._on_poll_tick()
 
-        ctrl.poll_device_info.assert_called_once_with("fd")
+        ctrl.try_poll_device_info.assert_called_once_with("fd")
     finally:
         dialog.close()
 
@@ -374,7 +375,7 @@ def test_poll_tick_with_no_selection_stops_timer(qapp):
     try:
         dialog._poll_timer.start()  # force-running with no selection
         dialog._on_poll_tick()
-        ctrl.poll_device_info.assert_not_called()
+        ctrl.try_poll_device_info.assert_not_called()
         assert not dialog._poll_timer.isActive()
     finally:
         dialog.close()

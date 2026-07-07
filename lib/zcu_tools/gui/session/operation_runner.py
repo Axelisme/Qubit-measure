@@ -14,9 +14,9 @@ interpret a cancelled return) lives in the ``OperationSpec`` callbacks supplied
 by the operation's service — the runner never touches State.
 
 The ``settle`` function injected into ``on_terminal`` is call-once (guarded
-internally): a policy calling it twice silently no-ops on the second call.
-Policy correctness is still required — the guard is a safety net, not a licence
-for sloppy policy.
+internally): a policy calling it twice is logged and then no-ops on the second
+call. Policy correctness is still required — the guard is a safety net, not a
+licence for sloppy policy.
 """
 
 from __future__ import annotations
@@ -214,7 +214,7 @@ class OperationRunner:
         2. settle the handle
         3. release the exclusion lease (if applicable)
 
-        A second call is silently ignored (call-once guard). Policy correctness
+        A second call is logged and ignored (call-once guard). Policy correctness
         is still expected — the guard is a safety net, not an invitation.
         """
         done = False
@@ -222,6 +222,11 @@ class OperationRunner:
         def settle(outcome: OperationOutcome) -> None:
             nonlocal done
             if done:
+                logger.error(
+                    "operation settle called more than once: token=%d owner=%s",
+                    token,
+                    spec.owner_id,
+                )
                 return  # call-once: duplicate calls are no-ops
             done = True
             if spec.wants_progress:

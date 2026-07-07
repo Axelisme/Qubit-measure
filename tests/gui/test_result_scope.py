@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+import zcu_tools.gui.result_scope as result_scope_mod
 from zcu_tools.gui.result_scope import (
     ResultScopeError,
     ResultScopeManager,
@@ -31,6 +33,84 @@ def test_result_scope_scans_canonical_params(tmp_path) -> None:
     assert scopes[0].chip_name == "ChipA"
     assert scopes[0].qub_name == "Q1"
     assert scopes[0].result_dir == str(params_path.parent.resolve())
+
+
+def test_list_scopes_uses_snapshot_cache_until_refresh(tmp_path, monkeypatch) -> None:
+    params_path = tmp_path / "result" / "ChipA" / "Q1" / "params.json"
+    params_path.parent.mkdir(parents=True)
+    params_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "project": {"chip_name": "ChipA", "qubit_name": "Q1"},
+            }
+        ),
+        encoding="utf8",
+    )
+    calls: list[str | Path] = []
+    original = result_scope_mod.migrate_params_v0_to_v1_project_info
+
+    def counting_migrate(
+        params_path: str | Path, *, result_root: str | Path
+    ) -> tuple[str, str]:
+        calls.append(params_path)
+        return original(params_path, result_root=result_root)
+
+    monkeypatch.setattr(
+        result_scope_mod, "migrate_params_v0_to_v1_project_info", counting_migrate
+    )
+    manager = ResultScopeManager(tmp_path)
+
+    first = manager.list_scopes()
+    second = manager.list_scopes()
+    refreshed = manager.list_scopes(refresh=True)
+
+    assert first == second == refreshed
+    assert len(calls) == 2
+
+
+def test_ensure_scope_with_cached_scope_does_not_rescan(tmp_path, monkeypatch) -> None:
+    params_path = tmp_path / "result" / "ChipA" / "Q1" / "params.json"
+    params_path.parent.mkdir(parents=True)
+    params_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "project": {"chip_name": "ChipA", "qubit_name": "Q1"},
+            }
+        ),
+        encoding="utf8",
+    )
+    manager = ResultScopeManager(tmp_path)
+    cached_scope = manager.list_scopes()[0]
+
+    def fail_migrate(
+        _params_path: str | Path, *, result_root: str | Path
+    ) -> tuple[str, str]:
+        del result_root
+        raise AssertionError("cached scope apply should not rescan result root")
+
+    monkeypatch.setattr(
+        result_scope_mod, "migrate_params_v0_to_v1_project_info", fail_migrate
+    )
+
+    scope = manager.ensure_scope(
+        chip_name="ChipA", qub_name="Q1", scope_id=cached_scope.scope_id
+    )
+
+    assert scope == cached_scope
+
+
+def test_generated_scope_invalidates_empty_snapshot_cache(tmp_path) -> None:
+    manager = ResultScopeManager(tmp_path)
+    assert manager.list_scopes() == ()
+
+    manager.ensure_scope(chip_name="ChipA", qub_name="Q1")
+
+    scopes = manager.list_scopes()
+    assert len(scopes) == 1
+    assert scopes[0].chip_name == "ChipA"
+    assert scopes[0].qub_name == "Q1"
 
 
 def test_result_scope_reads_legacy_name_in_one_place(tmp_path) -> None:

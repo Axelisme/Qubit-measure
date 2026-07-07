@@ -46,6 +46,10 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
+_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
+_FALSE_STRINGS = frozenset({"0", "false", "no", "off"})
+
+
 def sweepcfg_to_axis(sweep: Any) -> NDArray[np.float64]:
     """The explicit linspace axis a lowered ``SweepCfg`` (start/stop/expts) samples.
 
@@ -56,6 +60,23 @@ def sweepcfg_to_axis(sweep: Any) -> NDArray[np.float64]:
     not free-text ``start,stop,step``).
     """
     return np.linspace(float(sweep.start), float(sweep.stop), int(sweep.expts))
+
+
+def _coerce_bool_text(text: str) -> bool:
+    lowered = text.strip().lower()
+    if lowered in _TRUE_STRINGS:
+        return True
+    if lowered in _FALSE_STRINGS:
+        return False
+    raise ValueError(f"Expected bool, got {text!r}")
+
+
+def _coerce_int_text(text: str) -> int:
+    stripped = text.strip()
+    try:
+        return int(stripped)
+    except ValueError as exc:
+        raise ValueError(f"Expected int, got {text!r}") from exc
 
 
 def _coerce_scalar(value: Any, type_: type) -> Any:
@@ -76,9 +97,11 @@ def _coerce_scalar(value: Any, type_: type) -> Any:
         if type_ is str:
             return value
         if type_ is bool:
-            return value.strip().lower() in ("1", "true", "yes", "on")
-        # int/float: parse, fast-failing a malformed value
-        return type_(float(value)) if type_ is int else type_(value)
+            return _coerce_bool_text(value)
+        if type_ is int:
+            return _coerce_int_text(value)
+        # float: parse, fast-failing a malformed value
+        return type_(value)
     if type_ is str:
         return str(value)
     if type_ is bool:

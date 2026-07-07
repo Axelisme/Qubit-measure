@@ -43,8 +43,9 @@ from zcu_tools.gui.session.operation_runner import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+
+    from .ports import AnalyzeStatePort
 
 
 class _StagedAnalyzeService(QObject):
@@ -61,7 +62,7 @@ class _StagedAnalyzeService(QObject):
 
     def __init__(
         self,
-        state: State,
+        state: AnalyzeStatePort,
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,

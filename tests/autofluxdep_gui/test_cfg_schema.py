@@ -609,6 +609,38 @@ def test_sectioned_schema_set_field_and_with_overrides_write_nested_leaf():
     assert knobs["qub_gain"] == 0.2
 
 
+def test_scalar_raw_text_coercion_fast_fails_malformed_bool_and_int():
+    schema = sectioned_node_schema(
+        (
+            node_section(
+                "flags",
+                "Flags",
+                node_field(
+                    "enabled",
+                    "enabled",
+                    ScalarSpec("Enabled", bool),
+                    True,
+                ),
+                node_field(
+                    "reps",
+                    "reps",
+                    IntSpec("Reps"),
+                    100,
+                ),
+            ),
+        )
+    )
+
+    schema.set_field("enabled", "false")
+    schema.set_field("reps", "250")
+    assert schema.lower(None) == {"enabled": False, "reps": 250}
+
+    with pytest.raises(ValueError, match="Expected bool"):
+        schema.set_field("enabled", "maybe")
+    with pytest.raises(ValueError, match="Expected int"):
+        schema.set_field("reps", "1.2")
+
+
 def test_path_schema_renders_raw_cfg_tree_while_lowering_logical_keys():
     schema = path_node_schema(
         (

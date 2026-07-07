@@ -48,8 +48,8 @@ class RecordingStartup:
         self._log.add("startup", "get_persisted")
         return self.persisted
 
-    def list_result_scopes(self) -> tuple[ResultScope, ...]:
-        self._log.add("startup", "list_result_scopes")
+    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
+        self._log.add("startup", "list_result_scopes", refresh=refresh)
         return (self.scope,)
 
     def apply_project(self, req: StartupProjectRequest) -> ResolvedStartupProject:
@@ -172,7 +172,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
                     source="discovered",
                 ),
             ),
-            call("startup", "list_result_scopes"),
+            call("startup", "list_result_scopes", refresh=False),
         ),
         (
             "apply_startup_project",

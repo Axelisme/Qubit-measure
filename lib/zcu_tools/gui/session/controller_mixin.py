@@ -95,8 +95,8 @@ class SessionControllerMixin:
     def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
         self._startup_svc.remember_connection(req)
 
-    def list_result_scopes(self) -> tuple[ResultScope, ...]:
-        return self._startup_svc.list_result_scopes()
+    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
+        return self._startup_svc.list_result_scopes(refresh=refresh)
 
     def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
         return self._startup_svc.derive_project_paths(chip_name, qub_name)

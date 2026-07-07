@@ -429,7 +429,8 @@ class RemoteControlServiceBase:
                 self._bus_subs.subscribe(bus, key, cb)
             except Exception:  # pragma: no cover — bus.subscribe is straightforward
                 logger.exception("Failed to subscribe %s on EventBus", key)
-                continue
+                self._bus_subs.unsubscribe_all()
+                raise
             subscribed_keys.append(key)
         logger.debug(
             "event-flow: subscribed %d EventBus events for push: %s",

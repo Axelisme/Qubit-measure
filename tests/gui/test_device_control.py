@@ -87,6 +87,10 @@ class RecordingDevice:
     def poll_device_info(self, name: str) -> None:
         self._log.add("device", "poll_device_info", name)
 
+    def try_poll_device_info(self, name: str) -> bool:
+        self._log.add("device", "poll_device_info", name)
+        return True
+
     def is_memory_device(self, name: str) -> bool:
         self._log.add("device", "is_memory_device", name)
         return True
@@ -212,6 +216,12 @@ def test_device_control_facet_forwards_deliberate_device_dialog_contract() -> No
             "poll_device_info",
             lambda: facet.poll_device_info("fd"),
             None,
+            call("device", "poll_device_info", "fd"),
+        ),
+        (
+            "try_poll_device_info",
+            lambda: facet.try_poll_device_info("fd"),
+            True,
             call("device", "poll_device_info", "fd"),
         ),
         (

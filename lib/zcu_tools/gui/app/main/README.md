@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - cfg form editing lock
+**Last updated:** 2026-07-07 - cfg form editing lock / operation state ports
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -48,7 +48,8 @@ Key ownership rules:
 - `State` owns tab/device/result/save-path resource state and resource versions.
 - `GuardService` owns static preconditions and returns typed permits for
   run/save/analyze/writeback.
-- `OperationGate` owns dynamic hardware exclusion.
+- `OperationGate` is the app-local thin wrapper over the shared
+  `RunBlocksHardwareGate` hardware exclusion policy.
 - `OperationHandles` owns async handles, cancellation hooks, and feedback/stop
   channel state.
 - `OperationRunner` owns the generic operation lifecycle; each operation supplies
@@ -64,7 +65,8 @@ Key ownership rules:
    plotting, progress, and `Schedule` cancellation.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
-6. State write ports record run/analyze/post-analyze results and bump versions.
+6. Run/analyze services depend on narrow State ports (`RunStatePort` /
+   `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
 7. Writeback items are generated from analysis results and edited through the same
    cfg-editor machinery before commit.
 

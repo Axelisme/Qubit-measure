@@ -28,10 +28,9 @@ from .scopes import figure_ambient
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-    from .ports import WritebackLifecyclePort
+    from .ports import RunStatePort, WritebackLifecyclePort
 
 
 class RunService(QObject):
@@ -47,7 +46,7 @@ class RunService(QObject):
 
     def __init__(
         self,
-        state: State,
+        state: RunStatePort,
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,

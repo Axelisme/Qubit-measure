@@ -30,7 +30,9 @@ class SetupControlPort(Protocol):
 
     def get_bus(self) -> BaseEventBus: ...
     def get_persisted_startup(self) -> PersistedStartup: ...
-    def list_result_scopes(self) -> tuple[ResultScope, ...]: ...
+    def list_result_scopes(
+        self, *, refresh: bool = False
+    ) -> tuple[ResultScope, ...]: ...
     def apply_startup_project(self, req: StartupProjectRequest) -> bool: ...
 
     def use_context(self, label: str) -> None: ...
@@ -81,8 +83,8 @@ class SetupControlFacet:
     def get_persisted_startup(self) -> PersistedStartup:
         return self._startup.get_persisted()
 
-    def list_result_scopes(self) -> tuple[ResultScope, ...]:
-        return self._startup.list_result_scopes()
+    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
+        return self._startup.list_result_scopes(refresh=refresh)
 
     def apply_startup_project(self, req: StartupProjectRequest) -> bool:
         resolved = self._startup.apply_project(req)

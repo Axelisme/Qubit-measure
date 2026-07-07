@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import socket
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -244,6 +246,43 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
     assert ctrl_mock.set_agent_connected_query.call_args_list[-1].args == (None,)
+
+
+def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscription(
+    qapp,
+) -> None:
+    from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
+    from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+
+    class FailingEventBus(BaseEventBus):
+        def __init__(self) -> None:
+            super().__init__()
+            self.subscribe_count = 0
+
+        def subscribe(self, payload_type: type[Any], cb: Callable[[Any], None]) -> Any:
+            self.subscribe_count += 1
+            if self.subscribe_count == 2:
+                raise RuntimeError("subscribe failed")
+            return super().subscribe(payload_type, cb)
+
+    bus = FailingEventBus()
+    ctrl_mock = MagicMock()
+    ctrl_mock.get_bus.return_value = bus
+    adapter = RemoteControlAdapter(
+        controller=ctrl_mock,
+        opts=ControlOptions(port=0),
+        render_view=MagicMock(),
+    )
+
+    with patch.object(adapter._endpoint, "start") as endpoint_start:
+        with pytest.raises(RuntimeError, match="subscribe failed"):
+            adapter.start()
+
+    endpoint_start.assert_not_called()
+    assert len(adapter._bus_subs) == 0
+    assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
 
 
 def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:

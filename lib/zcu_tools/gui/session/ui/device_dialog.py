@@ -451,7 +451,7 @@ class DeviceDialog(QDialog):
             # Selection vanished between decisions — stop rather than poll None.
             self._poll_timer.stop()
             return
-        self._dev.poll_device_info(name)
+        self._dev.try_poll_device_info(name)
 
     def _refresh_list(self, select_name: str | None = None) -> None:
         # Rebuilding the list clears the selection; preserve the user's current

@@ -6,7 +6,7 @@ Verifies the mechanism contract with fake gate/handles/progress/bg:
   and minted factory is passed to work)
 - submit-fail → settle(failed) does full unwind (discard+settle+release) then raises
 - on_terminal receives correct BgResult (ok/result vs error/NO_RESULT) + usable settle
-- settle call-once (policy calling twice only applies once)
+- settle call-once (policy calling twice logs and only applies once)
 - ensure_can_start raises → no create, no settle, propagates directly
 """
 
@@ -463,7 +463,7 @@ def test_progress_discard_exception_still_settles_and_releases(caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_settle_call_once_second_call_is_noop():
+def test_settle_call_once_second_call_is_logged_noop(caplog):
     runner, gate, handles, progress, bg = _make_runner(gate=_FakeGate())
     excl = ExclusionRequest(kind="run", owner_id="tab1")
 
@@ -485,7 +485,8 @@ def test_settle_call_once_second_call_is_noop():
         on_terminal=on_terminal,
     )
     token = runner.begin(spec)
-    bg.deliver_result()
+    with caplog.at_level("ERROR"):
+        bg.deliver_result()
 
     # release called exactly once despite two settle() calls in on_terminal
     assert gate.release_calls.count(token) == 1
@@ -495,6 +496,9 @@ def test_settle_call_once_second_call_is_noop():
     # the call-once guard prevents the second attempt reaching the handles layer)
     settled = handles.poll(token)
     assert settled is not None and settled.status == "finished"
+    assert "operation settle called more than once" in caplog.text
+    assert f"token={token}" in caplog.text
+    assert "owner=tab1" in caplog.text
 
 
 # ---------------------------------------------------------------------------

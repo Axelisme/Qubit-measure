@@ -14,8 +14,6 @@ from pathlib import Path
 from typing import Literal
 
 from zcu_tools.meta_tool import (
-    PARAMS_SCHEMA_VERSION,
-    UNKNOWN_PROJECT_NAME,
     UNKNOWN_RESONATOR_NAME,
     ParamsProject,
     QubitParams,
@@ -126,6 +124,7 @@ class ResultScopeManager:
 
     def __init__(self, project_root: str | Path) -> None:
         self._project_root = Path(project_root).resolve()
+        self._scope_cache: tuple[ResultScope, ...] | None = None
 
     @property
     def project_root(self) -> Path:
@@ -148,9 +147,12 @@ class ResultScopeManager:
             params_path=str(result_dir / "params.json"),
         )
 
-    def list_scopes(self) -> tuple[ResultScope, ...]:
+    def list_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
+        if self._scope_cache is not None and not refresh:
+            return self._scope_cache
         if not self.result_root.exists():
             logger.debug("result scope list: result_root=%s missing", self.result_root)
+            self._scope_cache = ()
             return ()
         scopes: list[ResultScope] = []
         for params_path in sorted(self.result_root.rglob("params.json")):
@@ -175,7 +177,8 @@ class ResultScopeManager:
         logger.debug(
             "result scope list: result_root=%s count=%d", self.result_root, len(scopes)
         )
-        return tuple(scopes)
+        self._scope_cache = tuple(scopes)
+        return self._scope_cache
 
     def list_chip_names(self) -> tuple[str, ...]:
         return tuple(sorted({scope.chip_name for scope in self.list_scopes()}))
@@ -231,6 +234,7 @@ class ResultScopeManager:
                     reason_code="scope_identity_mismatch",
                 )
         write_params_identity(params_path, chip_name=chip_name, qub_name=qub_name)
+        self._scope_cache = None
         result_dir = Path(paths.result_dir).resolve()
         return ResultScope(
             scope_id=str(result_dir),
@@ -243,9 +247,14 @@ class ResultScopeManager:
 
     def _require_discovered_scope(self, scope_id: str) -> ResultScope:
         wanted = str(Path(scope_id).resolve())
+        had_cache = self._scope_cache is not None
         for scope in self.list_scopes():
             if scope.scope_id == wanted:
                 return scope
+        if had_cache:
+            for scope in self.list_scopes(refresh=True):
+                if scope.scope_id == wanted:
+                    return scope
         raise ResultScopeError(
             f"Unknown result scope id: {scope_id!r}",
             reason_code="scope_not_found",

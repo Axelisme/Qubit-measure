@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-06 (dialog presenter)
+**Last updated:** 2026-07-07 (result scope cache / remote startup)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -13,6 +13,10 @@ treats each hit as a selectable result scope. Measurement-session setup dialogs
 (measure/autofluxdep) use that scope to apply startup context; analysis dialogs
 (fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
 dropdown picker only, leaving typed paths and Browse flows available.
+Measurement-session discovery is snapshot-cached: ordinary dialog reopen/apply
+paths reuse the last scan, while an explicit refresh requests a new scan. Applying
+a previously selected scope validates against the snapshot first and only rescans
+when the selected scope is absent.
 
 ## Dialogs — always non-blocking
 
@@ -71,6 +75,9 @@ idempotent cleanup handle, and long-lived windows / bridges group those handles
 so close/stop tears down callbacks explicitly. Event delivery rules are
 unchanged: callbacks for the concrete payload type run in order, and one
 subscriber raising is logged without aborting later subscribers.
+Remote bridges subscribe their EventBus push callbacks before opening the socket;
+startup subscription failure is fatal and rolls back partial subscriptions, while
+runtime subscriber exceptions remain isolated by the EventBus.
 
 ## Logging (`logging_setup.py`)
 

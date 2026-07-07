@@ -1031,6 +1031,51 @@ def test_row_update_plotter_exception_is_logged_and_coalescing_released(
     canvas.deleteLater()
 
 
+def test_row_update_defers_hidden_plot_until_selected(app, monkeypatch):
+    ctrl, win = app
+    selected_name = ctrl.state.nodes[0].name
+    hidden_row = 1
+    hidden_name = ctrl.state.nodes[hidden_row].name
+    selected_canvas = QWidget()
+    hidden_canvas = QWidget()
+
+    class RecordingPlotter:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, int]] = []
+
+        def update(self, result: object, idx: int) -> None:
+            self.calls.append((result, idx))
+
+    selected_plotter = RecordingPlotter()
+    hidden_plotter = RecordingPlotter()
+    selected_result = object()
+    hidden_result = object()
+    rendered = MagicMock()
+    monkeypatch.setattr(win._bridge, "row_rendered", rendered)
+    win._list.select_index(0)
+    ctrl.state.run_results = {
+        selected_name: selected_result,
+        hidden_name: hidden_result,
+    }
+    win._plots = {
+        selected_name: (selected_canvas, selected_plotter),
+        hidden_name: (hidden_canvas, hidden_plotter),
+    }
+
+    win._on_row_updated(hidden_name, 3, time.monotonic())
+
+    assert hidden_plotter.calls == []
+    assert win._dirty_plot_idx_by_name == {hidden_name: 3}
+    rendered.assert_called_once_with(hidden_name, 3)
+
+    win._on_select(hidden_row)
+
+    assert hidden_plotter.calls == [(hidden_result, 3)]
+    assert win._dirty_plot_idx_by_name == {}
+    selected_canvas.deleteLater()
+    hidden_canvas.deleteLater()
+
+
 def test_run_builds_liveplot_canvas_for_measurement_node(app):
     ctrl, win = app
     win._list.select_index(0)  # qubit_freq has a Result → a canvas is built

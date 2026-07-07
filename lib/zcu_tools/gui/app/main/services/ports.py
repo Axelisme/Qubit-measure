@@ -34,7 +34,8 @@ if TYPE_CHECKING:
         WritebackItem,
     )
     from zcu_tools.gui.app.main.live_model import SectionLiveField
-    from zcu_tools.gui.app.main.state import TabInteractionState
+    from zcu_tools.gui.app.main.state import Session, TabInteractionState
+    from zcu_tools.gui.session.types import ExpContext
 
     from .persistence_types import AppPersistedState
 
@@ -234,8 +235,7 @@ class TabResultWritePort(Protocol):
     Run's lifecycle writes only these three tab-result mutations; depending on
     this port instead of the concrete ``State`` keeps the policy bound to a
     contract, not behaviour (ADR-0005). ``State`` is the only implementer and
-    satisfies it structurally (no inheritance change). Reads (``is_tab_busy``
-    etc.) deliberately stay off the port — only writes are narrowed."""
+    satisfies it structurally (no inheritance change)."""
 
     def clear_tab_results(self, tab_id: str) -> None: ...
     def set_tab_running(self, tab_id: str, running: bool) -> None: ...
@@ -263,3 +263,40 @@ class TabAnalyzeWritePort(Protocol):
         post_analyze_result: object,
         figure: Figure | None,
     ) -> None: ...
+
+
+@runtime_checkable
+class TabBusyQueryPort(Protocol):
+    """Dynamic per-tab busy query shared by run/analyze operation boundaries."""
+
+    def is_tab_busy(self, tab_id: str) -> bool: ...
+
+
+@runtime_checkable
+class TabAnalyzeReadPort(Protocol):
+    """The narrow State-read contract an analyze / post-analyze policy needs.
+
+    Analyze services need the immutable facts required to build request objects
+    at the operation boundary: the current tab and the active experiment context.
+    They do not get the rest of ``State`` through their type contract.
+    """
+
+    @property
+    def exp_context(self) -> ExpContext: ...
+
+    def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]: ...
+
+
+@runtime_checkable
+class RunStatePort(TabBusyQueryPort, TabResultWritePort, Protocol):
+    """Complete State surface consumed by ``RunService``."""
+
+
+@runtime_checkable
+class AnalyzeStatePort(
+    TabBusyQueryPort,
+    TabAnalyzeReadPort,
+    TabAnalyzeWritePort,
+    Protocol,
+):
+    """Complete State surface consumed by analyze and post-analyze services."""

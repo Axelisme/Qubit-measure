@@ -118,6 +118,7 @@ def _make_device_ctrl(
     ctrl.get_device_unit.side_effect = lambda name: unit_map.get(name, "none")
     ctrl.get_device_info.side_effect = lambda name: live_map.get(name)
     ctrl.poll_device_info.return_value = None
+    ctrl.try_poll_device_info.return_value = True
     ctrl.on_device_changed.return_value = MagicMock(name="unsubscribe_device")
     return ctrl
 
@@ -588,13 +589,13 @@ def test_predictor_dialog_show_refreshes_selected_cached_value_and_columns(qapp)
     combo.setCurrentIndex(combo.findData("flux"))
     ctrl.predict_freq.reset_mock()
     ctrl.predict_freq_curve.reset_mock()
-    device.poll_device_info.reset_mock()
+    device.try_poll_device_info.reset_mock()
     cached["flux"] = 0.3
 
     dialog.showEvent(None)
 
     assert dialog._predict_value_spin.value() == pytest.approx(0.3)
-    device.poll_device_info.assert_called_with("flux")
+    device.try_poll_device_info.assert_called_with("flux")
     ctrl.predict_freq.assert_called()
     ctrl.predict_freq_curve.assert_not_called()
 
