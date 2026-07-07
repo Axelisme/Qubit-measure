@@ -488,6 +488,36 @@ def test_node_cfg_form_renders_initial_override_badge(qapp):
         ctrl._background_svc.quiesce()
 
 
+def test_ro_optimize_previous_best_ranges_are_editable_initial_fields(qapp):
+    ctrl = build_core()
+    node = ctrl.add_node_by_type("ro_optimize")
+    index = ctrl.state.nodes.index(node)
+    form = NodeCfgForm(ctrl, node, index)
+    try:
+        freq_decoration = form._default_form.decoration_for_path("sweep.freq")
+        assert freq_decoration.enabled is True
+        assert freq_decoration.badge == "initial"
+        assert "Initial value is used at flux point 0" in freq_decoration.tooltip
+
+        gain_decoration = form._default_form.decoration_for_path("sweep.gain")
+        assert gain_decoration.enabled is True
+        assert gain_decoration.badge == "initial"
+        assert "Initial value is used at flux point 0" in gain_decoration.tooltip
+
+        _generation_group(form, "freq_search").fields["freq_range_mode"].set_value(
+            DirectValue(value="fixed")
+        )
+        assert form._default_form.decoration_for_path("sweep.freq").badge == ""
+
+        _generation_group(form, "gain_search").fields["gain_range_mode"].set_value(
+            DirectValue(value="fixed")
+        )
+        assert form._default_form.decoration_for_path("sweep.gain").badge == ""
+    finally:
+        form.teardown()
+        ctrl._background_svc.quiesce()
+
+
 def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)

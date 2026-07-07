@@ -749,18 +749,18 @@ class RoOptimizeBuilder(Builder):
             paths.append(
                 OverridePath(
                     "sweep.freq",
-                    "all_points",
+                    "after_first_point",
                     "generation.freq_search.freq_range_mode",
-                    "readout frequency window is generated from previous best",
+                    "readout frequency window is generated from previous best after the first point",
                 )
             )
         if knobs.get("gain_range_mode") == _RANGE_MODE_PREVIOUS_BEST:
             paths.append(
                 OverridePath(
                     "sweep.gain",
-                    "all_points",
+                    "after_first_point",
                     "generation.gain_search.gain_range_mode",
-                    "readout gain window is generated from previous best",
+                    "readout gain window is generated from previous best after the first point",
                 )
             )
         return OverridePlan(tuple(paths))
@@ -826,9 +826,15 @@ class RoOptimizeBuilder(Builder):
         patches.update(readout_module_patches(readout))
         if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
             patches["relax_delay"] = relax_delay
-        if str(knobs["freq_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST:
+        if (
+            env.flux_idx > 0
+            and str(knobs["freq_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST
+        ):
             patches["sweep.freq"] = freq_range
-        if str(knobs["gain_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST:
+        if (
+            env.flux_idx > 0
+            and str(knobs["gain_range_mode"]) == _RANGE_MODE_PREVIOUS_BEST
+        ):
             patches["sweep.gain"] = gain_range
         raw_cfg = self.point_cfg(env, patches)
         ranges = pop_sweep_ranges(raw_cfg, ("freq", "gain"), node_name=self.name)

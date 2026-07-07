@@ -518,7 +518,7 @@ def test_ro_optimize_make_cfg_lowers_context():
     )
     env = RunEnv(
         flux=0.0,
-        flux_idx=0,
+        flux_idx=1,
         schema=_schema(
             RoOptimizeBuilder(),
             {
@@ -559,6 +559,41 @@ def test_ro_optimize_make_cfg_lowers_context():
             minimum=None,
         )
     )
+
+
+def test_ro_optimize_first_point_uses_default_search_ranges():
+    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+
+    ml = _ml()
+    pi_pulse = {
+        "type": "pulse",
+        "waveform": ml.get_waveform("qub_flat", {"length": 0.1}),
+        "ch": 3,
+        "nqz": 2,
+        "gain": 0.3,
+        "freq": 5135.0,
+    }
+    snap = Snapshot(
+        {"best_ro_freq": 7444.6, "best_ro_gain": 0.5, "t1": 10.0},
+        modules={"pi_pulse": pi_pulse, "readout": _READOUT},
+    )
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(
+            RoOptimizeBuilder(),
+            {
+                "freq_range": SweepValue(start=5999.0, stop=6001.0, expts=21),
+                "gain_range": SweepValue(start=0.0, stop=0.2, expts=21),
+            },
+        ),
+        ml=ml,
+    )
+
+    cfg = RoOptimizeBuilder().make_cfg(env, snap)
+
+    assert cfg.freq_range == pytest.approx((5999.0, 6001.0))
+    assert cfg.gain_range == pytest.approx((0.0, 0.2))
 
 
 def test_ro_optimize_make_cfg_can_fix_center_and_relax_delay():
