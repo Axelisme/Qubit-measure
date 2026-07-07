@@ -170,7 +170,6 @@ def test_live_mode_locks_model_marker_and_transition_controls(qapp):
         dialog._add_btn,
         dialog._remove_btn,
         dialog._calibration_freq_field,
-        dialog._calibration_transition_combo,
         dialog._calibrate_btn,
         dialog._device_combo,
         dialog._device_refresh_btn,
@@ -461,14 +460,24 @@ def test_predictor_dialog_apply_surfaces_service_error(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_calibration_defaults_to_q_f_and_f01(qapp):
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
+def test_predictor_dialog_calibration_defaults_to_q_f_and_requires_single_selection(
+    qapp,
+):
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.q_f = 4567.0
+
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
 
     assert dialog._calibration_freq_field._mode == "eval"
     assert dialog._calibration_freq_field._line_edit.text() == "q_f"
-    assert dialog._calibration_transition_combo.currentText() == "f01"
-    assert dialog._calibration_transition_combo.currentData() == (0, 1)
+    assert not dialog._calibrate_btn.isEnabled()
+
+    dialog._table.selectRow(0)
+
+    assert dialog._calibrate_btn.isEnabled()
 
 
 def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
@@ -480,6 +489,7 @@ def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl, md_provider=lambda: md)
     dialog._predict_value_spin.setValue(0.25)
+    dialog._table.selectRow(2)
 
     dialog._on_calibrate_clicked()
 
@@ -488,19 +498,64 @@ def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
     assert isinstance(req, CalibrateFluxBiasRequest)
     assert req.value == pytest.approx(0.25)
     assert req.frequency_mhz == pytest.approx(4567.0)
-    assert req.transition == (0, 1)
+    assert req.transition == dialog._tracked[2]
     assert dialog._flux_bias_spin.value() == pytest.approx(0.125)
     assert "Calibrated flux_bias" in dialog._status_label.text()
+
+
+def test_predictor_dialog_calibrate_requires_loaded_predictor(qapp):
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.q_f = 4567.0
+
+    ctrl = _make_ctrl(has_predictor=False)
+    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
+    dialog._table.selectRow(0)
+
+    assert not dialog._calibrate_btn.isEnabled()
+
+    dialog._on_calibrate_clicked()
+
+    ctrl.calibrate_flux_bias.assert_not_called()
+    assert "Load a predictor" in dialog._status_label.text()
+
+
+def test_predictor_dialog_calibrate_requires_single_selected_transition(qapp):
+    from qtpy.QtWidgets import QTableWidgetSelectionRange  # type: ignore[attr-defined]
+    from zcu_tools.meta_tool import MetaDict
+
+    md = MetaDict()
+    md.q_f = 4567.0
+
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
+    dialog._table.setRangeSelected(
+        QTableWidgetSelectionRange(0, 0, 0, dialog._table.columnCount() - 1), True
+    )
+    dialog._table.setRangeSelected(
+        QTableWidgetSelectionRange(2, 0, 2, dialog._table.columnCount() - 1), True
+    )
+
+    assert not dialog._calibrate_btn.isEnabled()
+
+    dialog._on_calibrate_clicked()
+
+    ctrl.calibrate_flux_bias.assert_not_called()
+    assert "exactly one transition" in dialog._status_label.text()
 
 
 def test_predictor_dialog_calibrate_expression_error_fast_fails(qapp):
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     dialog = PredictorDialog(ctrl)
+    dialog._table.selectRow(0)
+
+    assert not dialog._calibrate_btn.isEnabled()
 
     dialog._on_calibrate_clicked()
 
     ctrl.calibrate_flux_bias.assert_not_called()
-    assert "q_f" in dialog._status_label.text()
+    assert "Calibration frequency is unresolved" in dialog._status_label.text()
 
 
 # ---------------------------------------------------------------------------

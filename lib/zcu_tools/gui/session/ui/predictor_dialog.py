@@ -88,7 +88,6 @@ _DEFAULT_FLUX_HALF: float = 0.0
 _DEFAULT_FLUX_PERIOD: float = 0.005
 _DEFAULT_FLUX_BIAS: float = 0.0
 _DEFAULT_CALIBRATION_EXPR: str = "q_f"
-_DEFAULT_CALIBRATION_TRANSITION: tuple[int, int] = (0, 1)
 
 # Column indices for the 4-column tracked-transitions table.
 # Both matrix operators (n and phi) are shown side by side — there is no selector.
@@ -339,15 +338,10 @@ class PredictorDialog(QDialog):
         )
         calibration_form.addRow("Frequency (MHz):", self._calibration_freq_field)
 
-        self._calibration_transition_combo = QComboBox()
         self._calibrate_btn = QPushButton("Calibrate")
         self._calibrate_btn.clicked.connect(self._on_calibrate_clicked)
-        calibration_action_row = QHBoxLayout()
-        calibration_action_row.addWidget(self._calibration_transition_combo, stretch=1)
-        calibration_action_row.addWidget(self._calibrate_btn)
-        calibration_action_holder = QWidget()
-        calibration_action_holder.setLayout(calibration_action_row)
-        calibration_form.addRow("Transition:", calibration_action_holder)
+        self._calibration_freq_field.raw_changed.connect(self._sync_calibration_button)
+        calibration_form.addRow("Selected transition:", self._calibrate_btn)
         left_layout.addWidget(calibration_group)
 
         # ── status label ──────────────────────────────────────────────────
@@ -539,8 +533,6 @@ class PredictorDialog(QDialog):
             self._add_btn,
             self._remove_btn,
             self._calibration_freq_field,
-            self._calibration_transition_combo,
-            self._calibrate_btn,
         ):
             widget.setEnabled(enabled)
         if self._device_combo is not None:
@@ -548,6 +540,7 @@ class PredictorDialog(QDialog):
         if self._device_refresh_btn is not None:
             self._device_refresh_btn.setEnabled(enabled)
         self._update_device_buttons()
+        self._sync_calibration_button()
         for canvas in self._all_canvases:
             canvas.set_interaction_enabled(enabled)
 
@@ -616,6 +609,7 @@ class PredictorDialog(QDialog):
             self._set_status("Not loaded", error=False)
             self._clear_predictor_display()
         self._update_active_label()
+        self._sync_calibration_button()
 
     def _clear_predictor_display(self) -> None:
         for canvas in self._all_canvases:
@@ -843,7 +837,7 @@ class PredictorDialog(QDialog):
                     ),
                     True,
                 )
-        self._refresh_calibration_transition_options()
+        self._sync_calibration_button()
 
     def _selected_transitions(self) -> list[tuple[int, int]]:
         """Return the (from, to) tuples for all currently selected table rows."""
@@ -858,50 +852,9 @@ class PredictorDialog(QDialog):
         """Return all currently selected transitions for canvas highlighting."""
         return tuple(self._selected_transitions())
 
-    @staticmethod
-    def _transition_option_label(transition: tuple[int, int]) -> str:
-        frm, to = transition
-        if 0 <= frm <= 9 and 0 <= to <= 9:
-            return f"f{frm}{to}"
-        return f"f{frm}→{to}"
-
-    def _refresh_calibration_transition_options(self) -> None:
-        combo = self._calibration_transition_combo
-        current = combo.currentData()
-        if not (
-            isinstance(current, tuple)
-            and len(current) == 2
-            and all(isinstance(v, int) for v in current)
-        ):
-            current = _DEFAULT_CALIBRATION_TRANSITION
-
-        options = list(self._tracked)
-        if _DEFAULT_CALIBRATION_TRANSITION not in options:
-            options.insert(0, _DEFAULT_CALIBRATION_TRANSITION)
-
-        combo.blockSignals(True)
-        combo.clear()
-        for transition in options:
-            combo.addItem(
-                self._transition_option_label(transition), userData=transition
-            )
-        index = combo.findData(current)
-        if index < 0:
-            index = combo.findData(_DEFAULT_CALIBRATION_TRANSITION)
-        combo.setCurrentIndex(max(0, index))
-        combo.blockSignals(False)
-
-    def _selected_calibration_transition(self) -> tuple[int, int]:
-        data = self._calibration_transition_combo.currentData()
-        if (
-            isinstance(data, tuple)
-            and len(data) == 2
-            and all(isinstance(v, int) for v in data)
-        ):
-            return data
-        return _DEFAULT_CALIBRATION_TRANSITION
-
-    def _resolve_calibration_frequency_mhz(self) -> float | None:
+    def _resolve_calibration_frequency_mhz(
+        self, *, update_status: bool = True
+    ) -> float | None:
         from zcu_tools.gui.session.expression import (
             EvalRef,
             coerce_eval_result,
@@ -917,19 +870,42 @@ class PredictorDialog(QDialog):
                 evaluate_numeric_expr(raw.expr, md), raw.type_
             )
         except Exception as exc:
-            self._set_status(f"Calibration frequency: {exc}", error=True)
+            if update_status:
+                self._set_status(f"Calibration frequency: {exc}", error=True)
             return None
         if not (raw.minimum <= float(resolved) <= raw.maximum):
-            self._set_status(
-                f"Calibration frequency: value {resolved} out of range",
-                error=True,
-            )
+            if update_status:
+                self._set_status(
+                    f"Calibration frequency: value {resolved} out of range",
+                    error=True,
+                )
             return None
         return float(resolved)
 
-    def _on_calibrate_clicked(self) -> None:
+    def _calibration_block_status(self) -> tuple[str, bool] | None:
         if self._live_mode:
-            self._set_status("Live mode keeps calibration read-only.", error=False)
+            return ("Live mode keeps calibration read-only.", False)
+        if self._pred.get_predictor_info() is None:
+            return ("Load a predictor before calibration.", True)
+        selected = self._selected_transitions()
+        if len(selected) != 1:
+            return ("Select exactly one transition to calibrate.", True)
+        if self._resolve_calibration_frequency_mhz(update_status=False) is None:
+            return ("Calibration frequency is unresolved.", True)
+        return None
+
+    def _sync_calibration_button(self) -> None:
+        status = self._calibration_block_status()
+        reason = status[0] if status is not None else None
+        self._calibrate_btn.setEnabled(reason is None)
+        self._calibrate_btn.setToolTip("" if reason is None else reason)
+
+    def _on_calibrate_clicked(self) -> None:
+        block_status = self._calibration_block_status()
+        if block_status is not None:
+            reason, is_error = block_status
+            self._set_status(reason, error=is_error)
+            self._sync_calibration_button()
             return
         from zcu_tools.gui.session.services.predictor import (
             CalibrateFluxBiasRequest,
@@ -939,11 +915,13 @@ class PredictorDialog(QDialog):
 
         frequency_mhz = self._resolve_calibration_frequency_mhz()
         if frequency_mhz is None:
+            self._sync_calibration_button()
             return
+        selected = self._selected_transitions()
         req = CalibrateFluxBiasRequest(
             value=self._predict_value_spin.value(),
             frequency_mhz=frequency_mhz,
-            transition=self._selected_calibration_transition(),
+            transition=selected[0],
         )
         try:
             result = self._pred.calibrate_flux_bias(req)
@@ -952,6 +930,7 @@ class PredictorDialog(QDialog):
             return
         self._flux_bias_spin.setValue(result.flux_bias)
         self._set_status(f"Calibrated flux_bias={result.flux_bias:.6g}", error=False)
+        self._sync_calibration_button()
         logger.info("PredictorDialog: calibrated flux bias %r", req)
 
     def _update_value_columns(self) -> None:
@@ -1276,6 +1255,7 @@ class PredictorDialog(QDialog):
         highlights = self._selected_highlights()
         for canvas in self._all_canvases:
             canvas.set_highlights(highlights)
+        self._sync_calibration_button()
 
     # ------------------------------------------------------------------
     # Browse / Apply handlers

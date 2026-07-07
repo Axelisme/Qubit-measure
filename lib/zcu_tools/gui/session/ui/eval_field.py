@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QDoubleSpinBox,
     QHBoxLayout,
@@ -43,7 +43,10 @@ class EvalNumericField(QWidget):
 
     R3 compliance: load_direct() in eval mode updates the stored backing value without
     clobbering the user's expression, so 1-second poll repaints do not reset the field.
+    raw_changed emits when the direct value, expression text, or input mode changes.
     """
+
+    raw_changed = Signal()
 
     def __init__(
         self,
@@ -95,7 +98,13 @@ class EvalNumericField(QWidget):
                 self._line_edit, self._line_edit.mapToGlobal(pos)
             )
         )
+        self._spin.valueChanged.connect(  # type: ignore[attr-defined]
+            lambda _value: self.raw_changed.emit()
+        )
         self._line_edit.textChanged.connect(self._sync_ghost)  # type: ignore[attr-defined]
+        self._line_edit.textChanged.connect(  # type: ignore[attr-defined]
+            lambda _text: self.raw_changed.emit()
+        )
 
     def load_direct(self, value: float) -> None:
         """Load a direct float value.
@@ -120,6 +129,7 @@ class EvalNumericField(QWidget):
         self._spin.setVisible(True)
         self._line_edit.setVisible(False)
         self._ghost.setVisible(False)
+        self.raw_changed.emit()
 
     def load_expression(
         self, expr: str, *, direct_fallback: float | None = None
@@ -135,6 +145,7 @@ class EvalNumericField(QWidget):
         self._line_edit.setVisible(True)
         self._ghost.setVisible(True)
         self._sync_ghost()
+        self.raw_changed.emit()
 
     def read_raw(self) -> float | EvalRef:
         """Return the current value.
@@ -165,6 +176,7 @@ class EvalNumericField(QWidget):
         self._line_edit.setVisible(True)
         self._ghost.setVisible(True)
         self._sync_ghost()
+        self.raw_changed.emit()
 
     def _switch_to_direct(self) -> None:
         # Best-effort: carry the live-resolved ghost value into the spinbox.
@@ -184,6 +196,7 @@ class EvalNumericField(QWidget):
         self._spin.setVisible(True)
         self._line_edit.setVisible(False)
         self._ghost.setVisible(False)
+        self.raw_changed.emit()
 
     def _sync_ghost(self) -> None:
         """Update the ghost label with a live resolve attempt against md_provider.
