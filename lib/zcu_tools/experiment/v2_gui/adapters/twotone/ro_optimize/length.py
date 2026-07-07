@@ -47,10 +47,10 @@ class RoOptLengthAnalyzeParams:
         Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
     ] = "wavelet"
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
-    # 't0' is the length-penalty knob of the underlying analyze(): t0=None → raw
-    # SNR max; t0>0 → max snr/sqrt(length+t0), favouring shorter readout. Optional
-    # float — left blank (the "(none)" field) it stays None.
-    t0: Annotated[float | None, ParamMeta(label="t0 length penalty (us)")] = None
+    # GUI-facing name for LengthExp.analyze(t0=...): this is a duration
+    # normalization overhead, not a penalty strength. Small positive values
+    # produce stronger short-readout bias than large positive values.
+    duration_t0: Annotated[float | None, ParamMeta(label="Duration t0 (us)")] = None
 
 
 @dataclass
@@ -102,9 +102,10 @@ class RoOptLengthAdapter(
         ),
         recommended=(
             "Analysis denoises the SNR curve before picking the peak; wavelet "
-            "smoothing is the default. The optional 't0' analyze param is a "
-            "length penalty: leave it blank (None) for the raw max, or set a "
-            "small us value to bias toward shorter readout."
+            "smoothing is the default. The optional 'duration_t0' analyze param "
+            "is the fixed-duration term in SNR/sqrt(length + t0): leave it "
+            "blank (None) for the raw max; a small positive us value applies "
+            "stronger short-readout bias than a large positive value."
         ),
     )
 
@@ -149,7 +150,7 @@ class RoOptLengthAdapter(
         params = req.analyze_params
         best_length, fig = LengthExp().analyze(
             req.run_result,
-            t0=params.t0,
+            t0=params.duration_t0,
             smooth=params.smooth,
             smooth_method=params.smooth_method,
         )

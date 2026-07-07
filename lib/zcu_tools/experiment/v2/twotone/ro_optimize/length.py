@@ -142,7 +142,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
     ) -> tuple[float, Figure]:
         assert result is not None, "no result found"
         if t0 is not None and t0 < 0.0:
-            raise ValueError("t0 length penalty must be non-negative")
+            raise ValueError("t0 duration normalization must be non-negative")
 
         lengths, signals = result.lengths, result.signals
 

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-07 — ro_optimize readout_dpm writeback
+**Last updated:** 2026-07-07 — ro_optimize duration_t0 analyze param
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -90,6 +90,9 @@ GUI / MCP 只呼叫 `guide()`。
 
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。
+twotone `ro_optimize/length` 的 GUI analyze param 對外命名為 `duration_t0`，表示
+`SNR/sqrt(length + t0)` 的 duration-normalization term，不是 penalty strength；
+`None` / `0.0` 是純 SNR peak，較小的正值比大正值更偏好短 readout。
 
 twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；writeback
 產生兩層 readout writeback：`best_ro_freq` / `best_ro_gain` / `best_ro_length`

@@ -30,6 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     WaveformRefValue,
     WritebackRequest,
+    describe_analyze_params,
 )
 from zcu_tools.gui.app.main.adapter import (
     SweepValue as GuiSweepValue,
@@ -332,6 +333,20 @@ def test_ro_opt_readout_spec_is_pulse_only(adapter: Any) -> None:
     type_spec = readout.allowed[0].fields["type"]
     assert isinstance(type_spec, LiteralSpec)
     assert type_spec.value == "readout/pulse"
+
+
+def test_ro_opt_length_analyze_params_use_duration_t0_name() -> None:
+    params = describe_analyze_params(RoOptLengthAdapter.analyze_params_cls())
+
+    duration_t0 = next(param for param in params if param["name"] == "duration_t0")
+    assert duration_t0 == {
+        "name": "duration_t0",
+        "type": "float",
+        "label": "Duration t0 (us)",
+        "optional": True,
+        "default": None,
+    }
+    assert all("penalty" not in param["label"].lower() for param in params)
 
 
 @pytest.mark.parametrize(

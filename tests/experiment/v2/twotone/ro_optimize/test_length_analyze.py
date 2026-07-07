@@ -50,5 +50,7 @@ def test_length_analyze_rejects_negative_t0() -> None:
         signals=np.array([1.0, 2.0], dtype=np.float64),
     )
 
-    with pytest.raises(ValueError, match="t0 length penalty must be non-negative"):
+    with pytest.raises(
+        ValueError, match="t0 duration normalization must be non-negative"
+    ):
         LengthExp().analyze(result, t0=-0.1)
