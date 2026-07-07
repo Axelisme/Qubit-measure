@@ -1829,7 +1829,7 @@ wheels = [
 [[package]]
 name = "qick"
 version = "0.2.418"
-source = { git = "https://github.com/openquantumhardware/qick.git#ba47c4425e105558b8c40afb615398485d264ac4" }
+source = { git = "https://github.com/openquantumhardware/qick.git?rev=ba47c4425e105558b8c40afb615398485d264ac4#ba47c4425e105558b8c40afb615398485d264ac4" }
 dependencies = [
     { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
@@ -2507,6 +2507,7 @@ development = [
     { name = "numba" },
     { name = "pandas" },
     { name = "plotly" },
+    { name = "psutil" },
     { name = "pyqt6" },
     { name = "pyro4" },
     { name = "python-dotenv" },
@@ -2600,7 +2601,7 @@ requires-dist = [
     { name = "pyvisa", marker = "extra == 'client'" },
     { name = "pywavelets", marker = "extra == 'client'" },
     { name = "pyyaml", marker = "extra == 'client'" },
-    { name = "qick", marker = "extra == 'client'", git = "https://github.com/openquantumhardware/qick.git" },
+    { name = "qick", marker = "extra == 'client'", git = "https://github.com/openquantumhardware/qick.git?rev=ba47c4425e105558b8c40afb615398485d264ac4" },
     { name = "qtpy", marker = "extra == 'gui'" },
     { name = "quantum-metal", extras = ["gui", "ansys"], marker = "python_full_version < '3.13' and extra == 'design'", git = "https://github.com/qiskit-community/qiskit-metal.git" },
     { name = "requests", marker = "extra == 'client'" },
