@@ -597,6 +597,67 @@ def test_predictor_dialog_right_side_has_three_tabs(qapp):
     assert dialog._tab_widget.tabText(2) == "|phi|"
 
 
+def test_predictor_dialog_each_plot_tab_has_navigation_toolbar(qapp):
+    """Every plot tab exposes a native Matplotlib toolbar for zoom/pan."""
+    from matplotlib.backends.backend_qt import NavigationToolbar2QT
+
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+
+    assert isinstance(dialog._freq_toolbar, NavigationToolbar2QT)
+    assert isinstance(dialog._mat_n_toolbar, NavigationToolbar2QT)
+    assert isinstance(dialog._mat_phi_toolbar, NavigationToolbar2QT)
+    assert dialog._tab_widget.widget(0) is dialog._freq_tab
+    assert dialog._tab_widget.widget(1) is dialog._mat_n_tab
+    assert dialog._tab_widget.widget(2) is dialog._mat_phi_tab
+
+
+def test_predictor_dialog_xrange_syncs_across_plot_tabs(qapp):
+    """A zoom/pan x-range on one canvas is propagated to the other tabs."""
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    freq_ax = dialog._freq_canvas._get_ax()
+    mat_n_ax = dialog._mat_n_canvas._get_ax()
+    mat_phi_ax = dialog._mat_phi_canvas._get_ax()
+    assert freq_ax is not None
+    assert mat_n_ax is not None
+    assert mat_phi_ax is not None
+
+    freq_ax.set_xlim(-0.2, 0.2)
+
+    assert mat_n_ax.get_xlim() == pytest.approx((-0.2, 0.2))
+    assert mat_phi_ax.get_xlim() == pytest.approx((-0.2, 0.2))
+
+
+def test_predictor_dialog_y_range_is_not_synced_across_plot_tabs(qapp):
+    """Only x-range syncs; y-range remains per tab because units differ."""
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    freq_ax = dialog._freq_canvas._get_ax()
+    mat_n_ax = dialog._mat_n_canvas._get_ax()
+    assert freq_ax is not None
+    assert mat_n_ax is not None
+
+    mat_n_before = mat_n_ax.get_ylim()
+    freq_ax.set_ylim(100.0, 200.0)
+
+    assert mat_n_ax.get_ylim() == pytest.approx(mat_n_before)
+
+
+def test_predictor_dialog_synced_xrange_survives_curve_refresh(qapp):
+    """Refreshing curves preserves the user's synced x-range."""
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    freq_ax = dialog._freq_canvas._get_ax()
+    assert freq_ax is not None
+    freq_ax.set_xlim(-0.2, 0.2)
+
+    dialog._refresh_curves()
+
+    for canvas in dialog._all_canvases:
+        assert canvas.current_xlim() == pytest.approx((-0.2, 0.2))
+
+
 def test_predictor_dialog_device_value_label_no_unit(qapp):
     """The predict-position control is labelled 'Device value' with no unit."""
     from qtpy.QtWidgets import QLabel  # type: ignore[attr-defined]

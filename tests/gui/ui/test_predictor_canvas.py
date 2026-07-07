@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.gui.session.ui.predictor_canvas import _compute_xlim
+from zcu_tools.gui.session.ui.predictor_canvas import (
+    _compute_xlim,
+    _pan_xlim_to_include,
+)
 
 # ---------------------------------------------------------------------------
 # Pure-function: _compute_xlim window-shift logic
@@ -59,6 +62,14 @@ def test_compute_xlim_window_width_preserved_far_outside():
     x_lo, x_hi = _compute_xlim((0.4, 1.1), 5.0, _flux_to_value)
     assert (x_hi - x_lo) == pytest.approx(width)
     assert x_hi == pytest.approx(5.0)
+
+
+def test_pan_xlim_to_include_preserves_zoom_width():
+    """Marker panning preserves a user zoom range instead of restoring defaults."""
+    x_lo, x_hi = _pan_xlim_to_include((0.45, 0.55), 0.8)
+
+    assert x_hi == pytest.approx(0.8)
+    assert (x_hi - x_lo) == pytest.approx(0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +137,37 @@ def test_canvas_set_marker_after_render(canvas):
     assert canvas._marker_value == pytest.approx(0.3)
 
 
+def test_canvas_set_marker_preserves_user_zoom_width(canvas):
+    """set_marker pans the current zoom window rather than resetting to flux_window."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+    ax.set_xlim(0.45, 0.55)
+
+    canvas.set_marker(0.8)
+
+    x_lo, x_hi = ax.get_xlim()
+    assert x_hi == pytest.approx(0.8)
+    assert (x_hi - x_lo) == pytest.approx(0.1)
+
+
+def test_canvas_apply_xlim_notify_contract(canvas):
+    """apply_xlim suppresses synced updates unless notify=True is requested."""
+    canvas.render_curves(**_make_render_kwargs())
+    received: list[tuple[object, tuple[float, float]]] = []
+    canvas.bind_xlim_changed(lambda source, xlim: received.append((source, xlim)))
+
+    canvas.apply_xlim((0.2, 0.3), notify=False)
+
+    assert received == []
+
+    canvas.apply_xlim((0.4, 0.5), notify=True)
+
+    assert len(received) == 1
+    assert received[0][0] is canvas
+    assert received[0][1] == pytest.approx((0.4, 0.5))
+
+
 def test_canvas_clear_no_error(canvas):
     """clear must not raise and must remove the marker state."""
     canvas.render_curves(**_make_render_kwargs())
@@ -154,6 +196,43 @@ def test_canvas_follow_engages_on_first_click(canvas):
     canvas._on_press(_FakeAxesEvent(ax, 0.5))  # click on the marker → engage
     assert canvas._following is True
     assert locks == []  # engaging click does not lock
+
+
+def test_canvas_toolbar_mode_blocks_marker_follow(canvas, monkeypatch):
+    """Native toolbar pan/zoom should own mouse events while active."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+
+    class _Toolbar:
+        mode = "pan/zoom"
+
+    monkeypatch.setattr(canvas.canvas, "toolbar", _Toolbar(), raising=False)
+
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))
+
+    assert canvas._following is False
+
+
+def test_canvas_toolbar_mode_blocks_marker_motion(canvas, monkeypatch):
+    """Active toolbar mode disengages marker follow on motion events too."""
+    canvas.render_curves(**_make_render_kwargs())
+    ax = canvas._get_ax()
+    assert ax is not None
+    locks: list[float] = []
+    canvas.bind_callbacks(on_follow=lambda _v: None, on_lock=locks.append)
+    canvas._on_press(_FakeAxesEvent(ax, 0.5))
+    assert canvas._following is True
+
+    class _Toolbar:
+        mode = "pan/zoom"
+
+    monkeypatch.setattr(canvas.canvas, "toolbar", _Toolbar(), raising=False)
+
+    canvas._on_move(_FakeAxesEvent(ax, 0.6))
+
+    assert canvas._following is False
+    assert locks == pytest.approx([0.5])
 
 
 def test_canvas_follow_callback_fires_on_motion_without_button(canvas):

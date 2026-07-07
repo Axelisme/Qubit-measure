@@ -13,6 +13,7 @@ disengages and locks the marker at its current position.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 import numpy as np
 from matplotlib.backend_bases import Event
@@ -62,6 +63,24 @@ def _compute_xlim(
     return v_lo, v_hi
 
 
+def _pan_xlim_to_include(
+    current_xlim: tuple[float, float],
+    marker_value: float,
+) -> tuple[float, float]:
+    """Pan ``current_xlim`` only if needed so ``marker_value`` remains visible."""
+    x_lo, x_hi = current_xlim
+    if x_lo > x_hi:
+        x_lo, x_hi = x_hi, x_lo
+    width = x_hi - x_lo
+    if marker_value < x_lo:
+        x_lo = marker_value
+        x_hi = x_lo + width
+    elif marker_value > x_hi:
+        x_hi = marker_value
+        x_lo = x_hi - width
+    return x_lo, x_hi
+
+
 class PredictorCurveCanvas(QWidget):
     """QWidget wrapping a matplotlib Figure that shows f_ij curves + marker line.
 
@@ -96,6 +115,10 @@ class PredictorCurveCanvas(QWidget):
         # Injected follow callbacks; set to no-ops so we never check for None.
         self._on_follow: Callable[[float], None] = lambda _v: None
         self._on_lock: Callable[[float], None] = lambda _v: None
+        self._on_xlim_changed: Callable[
+            [PredictorCurveCanvas, tuple[float, float]], None
+        ] = lambda _canvas, _xlim: None
+        self._suppress_xlim_changed = False
 
         # Live rendering state (populated by render_curves / set_marker).
         self._marker_line: Line2D | None = None
@@ -124,6 +147,13 @@ class PredictorCurveCanvas(QWidget):
         """Inject the dialog's follow/lock handlers."""
         self._on_follow = on_follow
         self._on_lock = on_lock
+
+    def bind_xlim_changed(
+        self,
+        on_xlim_changed: Callable[[PredictorCurveCanvas, tuple[float, float]], None],
+    ) -> None:
+        """Inject a callback fired when the primary axes x-limits change."""
+        self._on_xlim_changed = on_xlim_changed
 
     def set_interaction_enabled(self, enabled: bool) -> None:
         """Enable or disable user marker interaction."""
@@ -219,6 +249,8 @@ class PredictorCurveCanvas(QWidget):
 
         self.canvas.draw_idle()
 
+        ax.callbacks.connect("xlim_changed", self._on_xlim_changed_event)
+
     def set_marker(self, value: float) -> None:
         """Move the marker line to ``value`` (device value) and pan the window if needed.
 
@@ -230,13 +262,41 @@ class PredictorCurveCanvas(QWidget):
         if ax is None or self._flux_to_value is None:
             return
 
-        # Pan window if needed.
-        x_lo, x_hi = _compute_xlim(self._flux_window, value, self._flux_to_value)
-        ax.set_xlim(x_lo, x_hi)
+        # Pan window if needed while preserving any user zoom range.
+        current_raw = ax.get_xlim()
+        current_xlim = (float(current_raw[0]), float(current_raw[1]))
+        x_lo, x_hi = _pan_xlim_to_include(current_xlim, value)
+        if (x_lo, x_hi) != current_xlim:
+            ax.set_xlim(x_lo, x_hi)
 
         if self._marker_line is not None:
             self._marker_line.set_xdata([value, value])
 
+        self.canvas.draw_idle()
+
+    def current_xlim(self) -> tuple[float, float] | None:
+        """Return the primary axes x-limits, or None before curves are rendered."""
+        ax = self._get_ax()
+        if ax is None:
+            return None
+        x_lo, x_hi = ax.get_xlim()
+        return float(x_lo), float(x_hi)
+
+    def apply_xlim(self, xlim: tuple[float, float], *, notify: bool = False) -> None:
+        """Apply x-limits to the primary axes.
+
+        ``notify=False`` is used by the dialog when propagating a range from another
+        tab, so synced updates do not recursively trigger more sync events.
+        """
+        ax = self._get_ax()
+        if ax is None:
+            return
+        previous = self._suppress_xlim_changed
+        self._suppress_xlim_changed = previous or not notify
+        try:
+            ax.set_xlim(float(xlim[0]), float(xlim[1]))
+        finally:
+            self._suppress_xlim_changed = previous
         self.canvas.draw_idle()
 
     def clear(self) -> None:
@@ -285,6 +345,20 @@ class PredictorCurveCanvas(QWidget):
         axes = self.figure.get_axes()
         return axes[0] if axes else None
 
+    def _toolbar_mode_active(self) -> bool:
+        toolbar = getattr(self.canvas, "toolbar", None)
+        mode = getattr(toolbar, "mode", "")
+        return bool(str(mode))
+
+    def _on_xlim_changed_event(self, ax: object) -> None:
+        if self._suppress_xlim_changed:
+            return
+        get_xlim = getattr(ax, "get_xlim", None)
+        if not callable(get_xlim):
+            return
+        x_lo, x_hi = cast(tuple[float, float], get_xlim())
+        self._on_xlim_changed(self, (float(x_lo), float(x_hi)))
+
     def _pick_marker(self, x_data: float) -> bool:
         """True if ``x_data`` is within the drag-tolerance of the current marker."""
         if self._marker_value is None:
@@ -329,6 +403,10 @@ class PredictorCurveCanvas(QWidget):
         """
         if not self._interaction_enabled:
             return
+        if self._toolbar_mode_active():
+            if self._following:
+                self._disengage()
+            return
         x = self._event_xdata(event)
         if x is None:
             return
@@ -341,6 +419,10 @@ class PredictorCurveCanvas(QWidget):
 
     def _on_move(self, event: Event) -> None:
         if not self._interaction_enabled:
+            return
+        if self._toolbar_mode_active():
+            if self._following:
+                self._disengage()
             return
         if not self._following:
             return

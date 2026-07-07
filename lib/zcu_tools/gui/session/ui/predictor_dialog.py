@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from matplotlib.backends.backend_qt import NavigationToolbar2QT
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,8 @@ class PredictorDialog(QDialog):
         self._last_freq_result = None
         self._last_mat_n_result = None
         self._last_mat_phi_result = None
+        self._synced_xlim: tuple[float, float] | None = None
+        self._syncing_xlim = False
 
         # Root layout: left controls | right tab widget.
         root_layout = QHBoxLayout(self)
@@ -364,6 +367,8 @@ class PredictorDialog(QDialog):
         # ── Right: QTabWidget with three canvases ─────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
         # follow/lock callbacks, so a click-follow on any tab drives the others.
+        # Each tab owns a native Matplotlib toolbar; x-ranges stay synced across
+        # tabs while y-ranges remain per-tab because their units differ.
         self._tab_widget = QTabWidget()
 
         self._freq_canvas = PredictorCurveCanvas(figsize=(6.0, 4.0))
@@ -381,10 +386,22 @@ class PredictorDialog(QDialog):
                 on_follow=self._on_canvas_follow,
                 on_lock=self._on_canvas_lock,
             )
+            canvas.bind_xlim_changed(self._on_canvas_xlim_changed)
 
-        self._tab_widget.addTab(self._freq_canvas, "Frequency")
-        self._tab_widget.addTab(self._mat_n_canvas, "|n|")
-        self._tab_widget.addTab(self._mat_phi_canvas, "|phi|")
+        self._freq_tab, self._freq_toolbar = self._make_canvas_tab(self._freq_canvas)
+        self._mat_n_tab, self._mat_n_toolbar = self._make_canvas_tab(self._mat_n_canvas)
+        self._mat_phi_tab, self._mat_phi_toolbar = self._make_canvas_tab(
+            self._mat_phi_canvas
+        )
+        self._all_toolbars = (
+            self._freq_toolbar,
+            self._mat_n_toolbar,
+            self._mat_phi_toolbar,
+        )
+
+        self._tab_widget.addTab(self._freq_tab, "Frequency")
+        self._tab_widget.addTab(self._mat_n_tab, "|n|")
+        self._tab_widget.addTab(self._mat_phi_tab, "|phi|")
 
         root_layout.addWidget(left_widget, stretch=0)
         root_layout.addWidget(self._tab_widget, stretch=1)
@@ -573,6 +590,18 @@ class PredictorDialog(QDialog):
             row.addWidget(spin, stretch=1)
         return holder
 
+    @staticmethod
+    def _make_canvas_tab(
+        canvas: PredictorCurveCanvas,
+    ) -> tuple[QWidget, NavigationToolbar2QT]:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        toolbar = NavigationToolbar2QT(canvas.canvas, page)
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas, stretch=1)
+        return page, toolbar
+
     def _populate_model_fields(
         self, ej: float, ec: float, el: float, flux_half: float, flux_period: float
     ) -> None:
@@ -612,6 +641,7 @@ class PredictorDialog(QDialog):
         self._sync_calibration_button()
 
     def _clear_predictor_display(self) -> None:
+        self._synced_xlim = None
         for canvas in self._all_canvases:
             canvas.clear()
         for row_idx in range(self._table.rowCount()):
@@ -1083,6 +1113,8 @@ class PredictorDialog(QDialog):
         ):
             return
 
+        self._apply_synced_xlim_to_all()
+
         # Refresh all value columns for the new marker position.
         self._update_value_columns()
 
@@ -1213,6 +1245,34 @@ class PredictorDialog(QDialog):
         """Move the marker on every canvas to ``value`` (no recompute)."""
         for canvas in self._all_canvases:
             canvas.set_marker(value)
+
+    def _on_canvas_xlim_changed(
+        self,
+        source: PredictorCurveCanvas,
+        xlim: tuple[float, float],
+    ) -> None:
+        """Propagate one canvas' x-range to every predictor tab."""
+        if self._syncing_xlim:
+            return
+        self._synced_xlim = (float(xlim[0]), float(xlim[1]))
+        self._syncing_xlim = True
+        try:
+            for canvas in self._all_canvases:
+                if canvas is source:
+                    continue
+                canvas.apply_xlim(self._synced_xlim, notify=False)
+        finally:
+            self._syncing_xlim = False
+
+    def _apply_synced_xlim_to_all(self) -> None:
+        if self._synced_xlim is None:
+            return
+        self._syncing_xlim = True
+        try:
+            for canvas in self._all_canvases:
+                canvas.apply_xlim(self._synced_xlim, notify=False)
+        finally:
+            self._syncing_xlim = False
 
     def _on_spinbox_changed(self, value: float) -> None:
         """Spinbox changed → move all canvas markers; schedule debounced column update."""
