@@ -83,6 +83,13 @@ def test_timing_defaults_preserve_minimum_and_no_minimum_modes():
         0.05,
         1.0,
     )
+    assert auto_stop_sweep_range(
+        10.0,
+        start=0.05,
+        stop_factor=5.0,
+        stop_min=20.0,
+        stop_max=30.0,
+    ) == (0.05, 30.0)
 
 
 def test_snapshot_and_fixed_sweep_helpers():

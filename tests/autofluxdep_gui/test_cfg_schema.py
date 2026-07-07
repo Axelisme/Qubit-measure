@@ -302,6 +302,7 @@ _EXPECTED_KEYS = {
         "relax_min_us",
         "sweep_stop_factor",
         "sweep_stop_min_us",
+        "max_length",
     },
     "t2ramsey": {
         "sweep_range",
@@ -320,6 +321,7 @@ _EXPECTED_KEYS = {
         "relax_factor",
         "relax_min_us",
         "sweep_stop_factor",
+        "max_length",
     },
     "t2echo": {
         "sweep_range",
@@ -339,6 +341,7 @@ _EXPECTED_KEYS = {
         "relax_factor",
         "relax_min_us",
         "sweep_stop_factor",
+        "max_length",
         "fit_method",
     },
     "mist": {
@@ -447,6 +450,7 @@ _EXPECTED_PATHS = {
         "relax_min_us": "generation.relax.relax_min_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
+        "max_length": "generation.sweep.max_length",
     },
     "t2ramsey": {
         "sweep_range": "sweep.length",
@@ -465,6 +469,7 @@ _EXPECTED_PATHS = {
         "relax_factor": "generation.relax.relax_factor",
         "relax_min_us": "generation.relax.relax_min_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
+        "max_length": "generation.sweep.max_length",
     },
     "t2echo": {
         "sweep_range": "sweep.length",
@@ -484,6 +489,7 @@ _EXPECTED_PATHS = {
         "relax_factor": "generation.relax.relax_factor",
         "relax_min_us": "generation.relax.relax_min_us",
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
+        "max_length": "generation.sweep.max_length",
         "fit_method": "generation.fit.fit_method",
     },
     "mist": {
@@ -798,11 +804,20 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     assert isinstance(pi_strategy, ScalarSpec)
     assert pi_strategy.choices == ["off", "log_step"]
 
+    t1_schema = T1Builder().make_default_schema()
+    assert _scalar_labels(_generation_group_spec(t1_schema, "sweep")) == {
+        "sweep_range_mode": "range_mode",
+        "sweep_stop_factor": "stop_factor",
+        "sweep_stop_min_us": "stop_min_us",
+        "max_length": "max_length",
+    }
+
     ramsey_schema = T2RamseyBuilder().make_default_schema()
     assert _scalar_labels(_generation_group_spec(ramsey_schema, "sweep")) == {
         "sweep_range_mode": "range_mode",
         "t2r_seed_us": "initial_t2r_us",
         "sweep_stop_factor": "stop_factor",
+        "max_length": "max_length",
     }
 
     ro_schema = RoOptimizeBuilder().make_default_schema()
@@ -822,6 +837,7 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
         "sweep_range_mode": "range_mode",
         "t2e_seed_us": "initial_t2e_us",
         "sweep_stop_factor": "stop_factor",
+        "max_length": "max_length",
     }
     assert _scalar_labels(_generation_group_spec(echo_schema, "fit")) == {
         "fit_method": "method"
@@ -1320,6 +1336,9 @@ def test_fresh_node_defaults_seed_from_md_values():
 
     t1 = T1Builder().make_default_schema(ctx).lower(None, md=md)
     assert t1["t1_seed_us"] == 12.0
+    assert t1["max_length"] == pytest.approx(
+        max(t1["sweep_stop_min_us"], md.t1 * t1["sweep_stop_factor"])
+    )
     assert t1["relax_delay"] == pytest.approx(
         auto_relax_delay_from_t1(
             md.t1,
@@ -1334,6 +1353,7 @@ def test_fresh_node_defaults_seed_from_md_values():
             start=t1["sweep_range"].start,
             stop_factor=t1["sweep_stop_factor"],
             stop_min=t1["sweep_stop_min_us"],
+            stop_max=t1["max_length"],
         ),
     )
 
@@ -1341,6 +1361,7 @@ def test_fresh_node_defaults_seed_from_md_values():
     echo = T2EchoBuilder().make_default_schema(ctx).lower(None, md=md)
     assert ramsey["t1_seed_us"] == 12.0
     assert ramsey["t2r_seed_us"] == 8.0
+    assert ramsey["max_length"] == pytest.approx(md.t2r * ramsey["sweep_stop_factor"])
     assert ramsey["relax_delay"] == pytest.approx(
         auto_relax_delay_from_t1(
             md.t1,
@@ -1355,10 +1376,12 @@ def test_fresh_node_defaults_seed_from_md_values():
             start=ramsey["sweep_range"].start,
             stop_factor=ramsey["sweep_stop_factor"],
             stop_min=None,
+            stop_max=ramsey["max_length"],
         ),
     )
     assert echo["t1_seed_us"] == 12.0
     assert echo["t2e_seed_us"] == 9.0
+    assert echo["max_length"] == pytest.approx(md.t2e * echo["sweep_stop_factor"])
     assert echo["relax_delay"] == pytest.approx(
         auto_relax_delay_from_t1(
             md.t1,
@@ -1373,6 +1396,7 @@ def test_fresh_node_defaults_seed_from_md_values():
             start=echo["sweep_range"].start,
             stop_factor=echo["sweep_stop_factor"],
             stop_min=None,
+            stop_max=echo["max_length"],
         ),
     )
 

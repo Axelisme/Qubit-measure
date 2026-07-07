@@ -179,6 +179,7 @@ def _resolve_cfg_sweep_range(
                 smoothed_t1,
                 stop_factor=float(knobs["sweep_stop_factor"]),
                 stop_min=float(knobs["sweep_stop_min_us"]),
+                stop_max=float(knobs["max_length"]),
             ),
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
@@ -303,6 +304,9 @@ class T1Builder(Builder):
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Adapter-backed default cfg plus autofluxdep generation controls."""
         t1_seed = _seed_t1(ctx)
+        max_length_default = max(
+            _DEFAULT_SWEEP_STOP_MIN, t1_seed * _DEFAULT_SWEEP_STOP_FACTOR
+        )
         return adapter_node_schema(
             T1Adapter,
             ctx,
@@ -392,6 +396,15 @@ class T1Builder(Builder):
                     _DEFAULT_SWEEP_STOP_MIN,
                     group="sweep",
                 ),
+                logical_generation_field(
+                    "max_length",
+                    FloatSpec(
+                        label="max_length",
+                        tooltip="Maximum stop value for the auto T1 sweep.",
+                    ),
+                    max_length_default,
+                    group="sweep",
+                ),
             ),
             generation_choices=(
                 generation_choice(
@@ -413,6 +426,7 @@ class T1Builder(Builder):
                         _SWEEP_RANGE_MODE_AUTO_T1: (
                             "sweep_stop_factor",
                             "sweep_stop_min_us",
+                            "max_length",
                         ),
                     },
                 ),
@@ -430,6 +444,7 @@ class T1Builder(Builder):
                         start=_DEFAULT_SWEEP_START,
                         stop_factor=_DEFAULT_SWEEP_STOP_FACTOR,
                         stop_min=_DEFAULT_SWEEP_STOP_MIN,
+                        stop_max=max_length_default,
                     ),
                     expts=101,
                 ),

@@ -790,6 +790,7 @@ def test_t1_make_cfg_lowers_context():
             start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=knobs["sweep_stop_min_us"],
+            stop_max=knobs["max_length"],
         )
     )
     # reps / rounds come from the node params
@@ -910,6 +911,7 @@ def test_t2ramsey_make_cfg_lowers_context():
             start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=None,
+            stop_max=knobs["max_length"],
         )
     )
     assert cfg.relax_delay == pytest.approx(
@@ -1045,6 +1047,7 @@ def test_t2echo_make_cfg_lowers_context():
             start=knobs["sweep_range"].start,
             stop_factor=knobs["sweep_stop_factor"],
             stop_min=None,
+            stop_max=knobs["max_length"],
         )
     )
     # relax_delay = max(1.0, 3 * smoothed_t1)

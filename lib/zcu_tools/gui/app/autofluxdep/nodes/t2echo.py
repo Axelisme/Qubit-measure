@@ -145,6 +145,7 @@ def _resolve_cfg_sweep_range(
                 t2e,
                 stop_factor=float(knobs["sweep_stop_factor"]),
                 stop_min=None,
+                stop_max=float(knobs["max_length"]),
             ),
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
@@ -347,6 +348,7 @@ class T2EchoBuilder(Builder):
         """Adapter-backed default cfg plus autofluxdep generation controls."""
         t1_seed = _seed_t1(ctx)
         t2e_seed = _seed_t2e(ctx)
+        max_length_default = t2e_seed * _T2E_WINDOW_FACTOR
         return adapter_node_schema(
             T2EchoAdapter,
             ctx,
@@ -439,6 +441,15 @@ class T2EchoBuilder(Builder):
                     group="sweep",
                 ),
                 logical_generation_field(
+                    "max_length",
+                    FloatSpec(
+                        label="max_length",
+                        tooltip="Maximum stop value for the auto echo sweep.",
+                    ),
+                    max_length_default,
+                    group="sweep",
+                ),
+                logical_generation_field(
                     "fit_method",
                     str_choice_spec(
                         "method",
@@ -470,6 +481,7 @@ class T2EchoBuilder(Builder):
                         _SWEEP_RANGE_MODE_AUTO_T2E: (
                             "t2e_seed_us",
                             "sweep_stop_factor",
+                            "max_length",
                         ),
                     },
                 ),
@@ -488,6 +500,7 @@ class T2EchoBuilder(Builder):
                         start=_DEFAULT_SWEEP_START,
                         stop_factor=_T2E_WINDOW_FACTOR,
                         stop_min=None,
+                        stop_max=max_length_default,
                     ),
                     expts=101,
                 ),

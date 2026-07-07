@@ -24,11 +24,17 @@ def fixed_sweep_range(sweep: Any) -> tuple[float, float]:
 
 
 def auto_sweep_stop(
-    seed: float, *, stop_factor: float, stop_min: float | None
+    seed: float,
+    *,
+    stop_factor: float,
+    stop_min: float | None,
+    stop_max: float | None = None,
 ) -> float:
     stop = float(stop_factor) * float(seed)
     if stop_min is not None:
         stop = max(float(stop_min), stop)
+    if stop_max is not None:
+        stop = min(float(stop_max), stop)
     return stop
 
 
@@ -42,9 +48,19 @@ def auto_relax_delay_from_t1(
 
 
 def auto_stop_sweep_range(
-    seed: float, *, start: float, stop_factor: float, stop_min: float | None
+    seed: float,
+    *,
+    start: float,
+    stop_factor: float,
+    stop_min: float | None,
+    stop_max: float | None = None,
 ) -> tuple[float, float]:
     return (
         float(start),
-        auto_sweep_stop(seed, stop_factor=stop_factor, stop_min=stop_min),
+        auto_sweep_stop(
+            seed,
+            stop_factor=stop_factor,
+            stop_min=stop_min,
+            stop_max=stop_max,
+        ),
     )

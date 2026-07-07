@@ -170,6 +170,7 @@ def _resolve_cfg_sweep_range(
                 t2r,
                 stop_factor=float(knobs["sweep_stop_factor"]),
                 stop_min=None,
+                stop_max=float(knobs["max_length"]),
             ),
         )
     if mode == _SWEEP_RANGE_MODE_FIXED:
@@ -330,6 +331,7 @@ class T2RamseyBuilder(Builder):
         """Adapter-backed default cfg plus autofluxdep generation controls."""
         t1_seed = _seed_t1(ctx)
         t2r_seed = _seed_t2r(ctx)
+        max_length_default = t2r_seed * _SWEEP_T2R_FACTOR
         return adapter_node_schema(
             T2RamseyAdapter,
             ctx,
@@ -420,6 +422,15 @@ class T2RamseyBuilder(Builder):
                     _SWEEP_T2R_FACTOR,
                     group="sweep",
                 ),
+                logical_generation_field(
+                    "max_length",
+                    FloatSpec(
+                        label="max_length",
+                        tooltip="Maximum stop value for the auto Ramsey sweep.",
+                    ),
+                    max_length_default,
+                    group="sweep",
+                ),
             ),
             generation_choices=(
                 generation_choice(
@@ -442,6 +453,7 @@ class T2RamseyBuilder(Builder):
                         _SWEEP_RANGE_MODE_AUTO_T2R: (
                             "t2r_seed_us",
                             "sweep_stop_factor",
+                            "max_length",
                         ),
                     },
                 ),
@@ -459,6 +471,7 @@ class T2RamseyBuilder(Builder):
                         start=_DEFAULT_SWEEP_START,
                         stop_factor=_SWEEP_T2R_FACTOR,
                         stop_min=None,
+                        stop_max=max_length_default,
                     ),
                     expts=101,
                 ),
