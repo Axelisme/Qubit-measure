@@ -452,6 +452,53 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
     assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
 
+def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
+    from qtpy.QtWidgets import QScrollArea, QSpinBox  # type: ignore[attr-defined]
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+
+    schema = _schema(
+        {"reps": ScalarSpec(label="Reps", type=int)},
+        {"reps": DirectValue(100)},
+    )
+    w = CfgFormWidget()
+    model = _attach(w, schema, ctrl)
+    try:
+        scroll = w.findChild(QScrollArea)
+        assert scroll is not None
+        assert w.isEnabled()
+        assert scroll.isEnabled()
+
+        assert w._root_widget is not None
+        spin = w._root_widget.findChild(QSpinBox)
+        assert spin is not None
+        assert spin.isEnabled()
+
+        w.set_editing_enabled(False)
+
+        assert w.isEnabled()
+        assert scroll.isEnabled()
+        assert w._root_widget is not None and not w._root_widget.isEnabled()
+        assert not spin.isEnabled()
+
+        w.detach()
+        w.attach(model)
+
+        assert w.isEnabled()
+        assert scroll.isEnabled()
+        assert w._root_widget is not None and not w._root_widget.isEnabled()
+        reattached_spin = w._root_widget.findChild(QSpinBox)
+        assert reattached_spin is not None
+        assert not reattached_spin.isEnabled()
+
+        w.set_editing_enabled(True)
+
+        assert w._root_widget.isEnabled()
+        assert reattached_spin.isEnabled()
+    finally:
+        w.detach()
+        model.teardown()
+
+
 def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     """The widget repaints when the (service-owned) model refreshes an EvalValue.
 

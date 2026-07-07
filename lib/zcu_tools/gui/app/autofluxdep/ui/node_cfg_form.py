@@ -16,8 +16,8 @@ through the controller (a main-thread State write that bumps the workflow versio
 inspect / writeback dialogs), not auto-committed by the framework — this widget
 owns the commit.
 
-``set_read_only`` disables the whole form during a run (values stay visible —
-"what this run used"), preserving the prototype's lock-on-run intent.
+``set_read_only`` disables editing during a run while keeping the scrollable form
+shell enabled, preserving the prototype's lock-on-run intent.
 """
 
 from __future__ import annotations
@@ -155,9 +155,9 @@ class NodeCfgForm(QWidget):
 
     def set_read_only(self, read_only: bool) -> None:
         """Lock the form during a run (values stay visible, editing disabled)."""
-        self._default_form.setEnabled(not read_only)
+        self._default_form.set_editing_enabled(not read_only)
         if self._generation_form is not None:
-            self._generation_form.setEnabled(not read_only)
+            self._generation_form.set_editing_enabled(not read_only)
 
     def refresh_external(self, event: object) -> None:
         """Refresh expression/ref snapshots after context, md, ml, or device changes."""

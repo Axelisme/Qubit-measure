@@ -139,6 +139,7 @@ class CfgFormWidget(QWidget):
         self._choice_state: tuple[tuple[str, str], ...] = ()
         self._pending_section_refresh_paths: set[str] = set()
         self._section_refresh_scheduled = False
+        self._editing_enabled = True
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -175,12 +176,18 @@ class CfgFormWidget(QWidget):
             field_label_max_width=self._field_label_max_width,
             decoration_for_path=self._resolve_decoration,
         )
+        self._apply_editing_enabled()
         self._inner_layout.insertWidget(
             self._inner_layout.count() - 1, self._root_widget
         )
 
         self.validity_changed.emit(model.is_valid())
         logger.debug("CfgFormWidget.attach: built reactive form over owned model")
+
+    def set_editing_enabled(self, enabled: bool) -> None:
+        """Enable or disable editing without disabling the scroll container."""
+        self._editing_enabled = bool(enabled)
+        self._apply_editing_enabled()
 
     def detach(self) -> None:
         """Disconnect from the model + drop the widget tree, WITHOUT teardown.
@@ -202,6 +209,11 @@ class CfgFormWidget(QWidget):
         self._choice_state = ()
         self._pending_section_refresh_paths = set()
         self._section_refresh_scheduled = False
+
+    def _apply_editing_enabled(self) -> None:
+        root = self._root_widget
+        if root is not None:
+            root.setEnabled(self._editing_enabled)
 
     def set_decoration_provider(self, provider: FieldDecorationProvider | None) -> None:
         self._decoration_provider = provider

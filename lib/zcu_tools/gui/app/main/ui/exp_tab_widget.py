@@ -743,7 +743,7 @@ class ExpTabWidget(QWidget):
             self.run_btn.setStyleSheet("")
 
         idle = not local_busy
-        self.cfg_form.setEnabled(idle)
+        self.cfg_form.set_editing_enabled(idle)
         self.reset_btn.setEnabled(idle)
 
         # Non-analysis adapters (flux_dep / power_dep) hide only the analysis

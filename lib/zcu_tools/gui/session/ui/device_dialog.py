@@ -55,6 +55,7 @@ class DevicePanelProtocol(Protocol):
     def load(self, info: Any) -> None: ...
     def read(self) -> Any: ...
     def reset_eval_fields(self) -> None: ...
+    def set_editing_enabled(self, enabled: bool) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +111,11 @@ class _FakeDevicePanel(QWidget):
         self._value_field.reset_to_direct()
         self._rampstep_field.reset_to_direct()
 
+    def set_editing_enabled(self, enabled: bool) -> None:
+        self._output_combo.setEnabled(enabled)
+        self._value_field.setEnabled(enabled)
+        self._rampstep_field.setEnabled(enabled)
+
     def read(self) -> Any:
         return {
             "output": self._output_combo.currentText(),
@@ -158,6 +164,10 @@ class _YOKOGS200Panel(QWidget):
     def reset_eval_fields(self) -> None:
         """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
         self._value_field.reset_to_direct()
+
+    def set_editing_enabled(self, enabled: bool) -> None:
+        self._output_combo.setEnabled(enabled)
+        self._value_field.setEnabled(enabled)
 
     def read(self) -> Any:
         return {
@@ -210,6 +220,11 @@ class _SGS100APanel(QWidget):
         self._freq_field.reset_to_direct()
         self._power_field.reset_to_direct()
 
+    def set_editing_enabled(self, enabled: bool) -> None:
+        self._output_combo.setEnabled(enabled)
+        self._freq_field.setEnabled(enabled)
+        self._power_field.setEnabled(enabled)
+
     def read(self) -> Any:
         return {
             "output": self._output_combo.currentText(),
@@ -261,6 +276,7 @@ class DeviceDialog(QDialog):
         super().__init__(parent)
         self._dev = device
         self._md_provider = md_provider
+        self._read_only = False
         self.setWindowTitle("Manage Hardware Devices")
         self.resize(800, 500)
 
@@ -280,8 +296,8 @@ class DeviceDialog(QDialog):
         left_layout.addWidget(self._list, stretch=1)
 
         # Add device form
-        add_box = QGroupBox("Register New Device")
-        add_form = QFormLayout(add_box)
+        self._add_box = QGroupBox("Register New Device")
+        add_form = QFormLayout(self._add_box)
 
         self._type_combo = QComboBox()
         self._type_combo.addItems(list_supported_device_types())
@@ -303,7 +319,7 @@ class DeviceDialog(QDialog):
         self._add_status.setWordWrap(True)
         add_form.addRow(self._add_status)
 
-        left_layout.addWidget(add_box)
+        left_layout.addWidget(self._add_box)
         splitter.addWidget(left_widget)
 
         # --- Right side: Detail Panel Stack ---
@@ -386,6 +402,11 @@ class DeviceDialog(QDialog):
         # Phase C: subscribe progress for every device already setting up (the
         # dialog may open mid-setup, possibly with several concurrent setups).
         self._sync_progress_subscriptions()
+
+    def set_read_only(self, read_only: bool) -> None:
+        """Switch the dialog to inspection mode without blocking read paths."""
+        self._read_only = bool(read_only)
+        self._refresh_button_states(self._selected_device_name())
 
     def _cleanup_event_subscriptions(self, *_args: object) -> None:
         if not self._event_subs_active:
@@ -505,6 +526,7 @@ class DeviceDialog(QDialog):
                 snapshot.type_name, snapshot.name, snapshot.address
             )
             self._stack.setCurrentIndex(4)
+            self._apply_current_panel_editing_state(snapshot)
             return
 
         info = snapshot.info
@@ -525,6 +547,7 @@ class DeviceDialog(QDialog):
                 panel.reset_eval_fields()
             self._last_panel_device_name = name
             panel.load(info)
+            self._apply_current_panel_editing_state(snapshot)
 
     def _setup_device_names(self) -> set[str]:
         """The set of devices currently setting up (Phase C, possibly several).
@@ -571,6 +594,7 @@ class DeviceDialog(QDialog):
             self._apply_btn.setStyleSheet("")
             self._apply_btn.setToolTip("")
             self._set_add_box_enabled(True)
+            self._apply_current_panel_editing_state(None)
             return
 
         if snapshot is None:
@@ -591,7 +615,7 @@ class DeviceDialog(QDialog):
         # Dropping the selected device disconnects it; that conflicts with its
         # OWN in-flight mutation (a busy device, incl. setting up) but not with a
         # different device's setup. So: enable iff the selected device is idle.
-        self._drop_btn.setEnabled(not is_busy)
+        self._drop_btn.setEnabled(not self._read_only and not is_busy)
         self._drop_btn.setText("Forget" if is_memory else "Drop")
 
         # --- Refresh button ---
@@ -604,23 +628,38 @@ class DeviceDialog(QDialog):
         # --- Apply button ---
         if is_setting_up:
             # The selected device is mid-setup: show its red Stop button.
-            self._apply_btn.setEnabled(True)
+            self._apply_btn.setEnabled(not self._read_only)
             self._apply_btn.setText("Stop")
             self._apply_btn.setStyleSheet("color: red;")
             self._apply_btn.setToolTip("Cancel the in-progress setup.")
         else:
             # Idle (or another device setting up — no longer blocks this one):
             # enable Apply based on the selected device's own state.
-            self._apply_btn.setEnabled(not is_busy)
+            self._apply_btn.setEnabled(not self._read_only and not is_busy)
             self._apply_btn.setText("Reconnect" if is_memory else "Apply Changes")
             self._apply_btn.setStyleSheet("")
             self._apply_btn.setToolTip("")
+        self._apply_current_panel_editing_state(snapshot)
 
     def _set_add_box_enabled(self, enabled: bool) -> None:
-        self._type_combo.setEnabled(enabled)
-        self._name_edit.setEnabled(enabled)
-        self._addr_edit.setEnabled(enabled)
-        self._add_btn.setEnabled(enabled)
+        effective = bool(enabled) and not self._read_only
+        self._add_box.setEnabled(effective)
+        self._type_combo.setEnabled(effective)
+        self._name_edit.setEnabled(effective)
+        self._addr_edit.setEnabled(effective)
+        self._add_btn.setEnabled(effective)
+
+    def _apply_current_panel_editing_state(
+        self, snapshot: DeviceSnapshot | None
+    ) -> None:
+        panel = self._stack.currentWidget()
+        if not isinstance(panel, DevicePanelProtocol):
+            return
+        panel.set_editing_enabled(
+            not self._read_only
+            and snapshot is not None
+            and snapshot.status is DeviceStatus.CONNECTED
+        )
 
     @staticmethod
     def _unique_name(base: str, existing: set[str]) -> str:
@@ -636,6 +675,8 @@ class DeviceDialog(QDialog):
         self._name_edit.setText(self._unique_name(dtype.lower(), existing))
 
     def _on_add_clicked(self) -> None:
+        if self._read_only:
+            return
         dtype = self._type_combo.currentText()
         name = self._name_edit.text().strip() or dtype.lower()
         addr = self._addr_edit.text().strip()
@@ -648,6 +689,8 @@ class DeviceDialog(QDialog):
         self._add_status.setText(f"Connecting {name}...")
 
     def _on_forget_clicked(self) -> None:
+        if self._read_only:
+            return
         item = self._list.currentItem()
         if item is None:
             return
@@ -667,6 +710,8 @@ class DeviceDialog(QDialog):
         self._on_selection_changed(self._list.currentRow())
 
     def _on_apply_or_stop_clicked(self) -> None:
+        if self._read_only:
+            return
         item = self._list.currentItem()
         if item is None:
             return

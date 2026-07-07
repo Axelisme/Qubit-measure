@@ -745,19 +745,28 @@ def test_inspect_dialog_is_read_only_while_run_is_paused(app):
     dlg.reject()
 
 
-def test_run_start_closes_open_setup_and_device_dialogs(app):
+def test_run_start_closes_setup_and_keeps_devices_read_only(app):
     _ctrl, win = app
 
     win.open_setup_dialog(startup_mode=False)
     win._on_devices_clicked()
     assert win._dialog_refs.get("setup") is not None
-    assert win._dialog_refs.get("devices") is not None
+    devices = cast(Any, win._dialog_refs.get("devices"))
+    assert devices is not None
 
     win._on_run_started()
     QApplication.processEvents()
 
     assert win._dialog_refs.get("setup") is None
-    assert win._dialog_refs.get("devices") is None
+    assert win._dialog_refs.get("devices") is devices
+    assert devices.isVisible()
+    assert not devices._add_btn.isEnabled()
+    assert win._devices_btn.isEnabled()
+
+    win._on_run_done()
+
+    assert devices._add_btn.isEnabled()
+    devices.reject()
 
 
 # --- selection drives the right pane ---
@@ -874,10 +883,12 @@ def _current_form_node_name(win: MainWindow) -> str:
 def _current_form_editors_enabled(win: MainWindow) -> bool:
     form = win._detail.current_form
     assert form is not None
-    default_enabled = form._default_form.isEnabled()
-    generation_enabled = (
-        True if form._generation_form is None else form._generation_form.isEnabled()
-    )
+    assert form._default_form._root_widget is not None
+    default_enabled = form._default_form._root_widget.isEnabled()
+    if form._generation_form is None:
+        return default_enabled
+    assert form._generation_form._root_widget is not None
+    generation_enabled = form._generation_form._root_widget.isEnabled()
     return default_enabled and generation_enabled
 
 
@@ -1056,7 +1067,7 @@ def test_run_switches_detail_to_run_tab(app):
     assert captured.get("tab") == 1
     assert captured.get("btn") == "⏸ Pause"
     assert captured.get("setup_enabled") is False
-    assert captured.get("devices_enabled") is False
+    assert captured.get("devices_enabled") is True
     assert captured.get("predictor_enabled") is True
     assert captured.get("inspect_enabled") is True
     assert win._setup_btn.isEnabled()
@@ -1193,7 +1204,7 @@ def test_pause_continue_ui_states_lock_workflow_controls(app):
     assert not win._list._add_btn.isEnabled()
     assert not win._list._flux_source.isEnabled()
     assert not win._setup_btn.isEnabled()
-    assert not win._devices_btn.isEnabled()
+    assert win._devices_btn.isEnabled()
     assert not win._predictor_btn.isEnabled()
     assert win._inspect_btn.isEnabled()
 

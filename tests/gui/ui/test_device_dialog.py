@@ -424,6 +424,56 @@ def test_device_dialog_apply_changes(qapp):
     assert isinstance(req.info, FakeDeviceInfo)
 
 
+def test_device_dialog_read_only_blocks_mutations_but_keeps_refresh(qapp):
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fd")]
+    info = FakeDeviceInfo(address="none")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
+    ctrl.get_device_info.return_value = info
+
+    dialog = _make_dialog(ctrl)
+    dialog._list.setCurrentRow(0)
+    panel = dialog._stack.currentWidget()
+    assert isinstance(panel, _FakeDevicePanel)
+
+    dialog.set_read_only(True)
+
+    assert not dialog._add_box.isEnabled()
+    assert not dialog._add_btn.isEnabled()
+    assert not dialog._drop_btn.isEnabled()
+    assert dialog._refresh_btn.isEnabled()
+    assert not dialog._apply_btn.isEnabled()
+    assert not panel._output_combo.isEnabled()
+    assert not panel._value_field.isEnabled()
+
+    dialog._on_add_clicked()
+    dialog._on_forget_clicked()
+    dialog._on_apply_or_stop_clicked()
+
+    ctrl.start_connect_device.assert_not_called()
+    ctrl.start_disconnect_device.assert_not_called()
+    ctrl.forget_device.assert_not_called()
+    ctrl.start_reconnect_device.assert_not_called()
+    ctrl.cancel_device_operation.assert_not_called()
+    ctrl.start_setup_device.assert_not_called()
+
+    dialog._refresh_btn.click()
+
+    ctrl.get_device_info.assert_called_once_with("fd")
+
+    dialog.set_read_only(False)
+
+    assert dialog._add_box.isEnabled()
+    assert dialog._add_btn.isEnabled()
+    assert dialog._drop_btn.isEnabled()
+    assert dialog._refresh_btn.isEnabled()
+    assert dialog._apply_btn.isEnabled()
+    assert panel._output_combo.isEnabled()
+    assert panel._value_field.isEnabled()
+
+
 def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("fd")]

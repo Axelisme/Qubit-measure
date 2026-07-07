@@ -23,7 +23,12 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
-from qtpy.QtWidgets import QGroupBox, QVBoxLayout  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QAbstractSpinBox,
+    QGroupBox,
+    QScrollArea,
+    QVBoxLayout,
+)
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CenteredSweepValue,
@@ -751,15 +756,39 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
     form = NodeCfgForm(ctrl, node, index)
     try:
         form.set_read_only(True)
-        assert not form._default_form.isEnabled()  # editing disabled
+        assert form._default_form.isEnabled()
+        default_scroll = form._default_form.findChild(QScrollArea)
+        assert default_scroll is not None and default_scroll.isEnabled()
         assert (
-            form._generation_form is not None and not form._generation_form.isEnabled()
+            form._default_form._root_widget is not None
+            and not form._default_form._root_widget.isEnabled()
         )
+        default_editor = form._default_form._root_widget.findChild(QAbstractSpinBox)
+        assert default_editor is not None and not default_editor.isEnabled()
+
+        assert form._generation_form is not None
+        assert form._generation_form.isEnabled()
+        generation_scroll = form._generation_form.findChild(QScrollArea)
+        assert generation_scroll is not None and generation_scroll.isEnabled()
+        assert (
+            form._generation_form._root_widget is not None
+            and not form._generation_form._root_widget.isEnabled()
+        )
+        generation_editor = form._generation_form._root_widget.findChild(
+            QAbstractSpinBox
+        )
+        assert generation_editor is not None and not generation_editor.isEnabled()
         # the model (values) is untouched — "what this run used" stays visible
         reps_value = form._default_model.fields["reps"].get_value()
         assert isinstance(reps_value, DirectValue) and reps_value.value == expected_reps
         form.set_read_only(False)
         assert form._default_form.isEnabled()
         assert form._generation_form is not None and form._generation_form.isEnabled()
+        assert form._default_form._root_widget is not None
+        assert form._default_form._root_widget.isEnabled()
+        assert default_editor.isEnabled()
+        assert form._generation_form._root_widget is not None
+        assert form._generation_form._root_widget.isEnabled()
+        assert generation_editor.isEnabled()
     finally:
         form.teardown()

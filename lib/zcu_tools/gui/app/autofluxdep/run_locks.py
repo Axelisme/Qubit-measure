@@ -243,10 +243,6 @@ class GuardedDeviceControl:
         return self._inner.get_cached_device_value(name)
 
     def poll_device_info(self, name: str) -> None:
-        try:
-            self._guard("device")
-        except RuntimeError:
-            return
         self._inner.poll_device_info(name)
 
     def is_memory_device(self, name: str) -> bool:

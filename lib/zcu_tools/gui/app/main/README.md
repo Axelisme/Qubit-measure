@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - cfg form typed refresh protocol
+**Last updated:** 2026-07-07 - cfg form editing lock
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -111,6 +111,11 @@ the caller. `LiteralSpec` fields stay hidden by default, but a decoration provid
 can explicitly reveal them as framed read-only values for generated or locked
 review fields. Decoration is a view contract only: domain enforcement remains in
 the owning controller/runtime.
+
+`CfgFormWidget.set_editing_enabled()` locks only the rendered form content, not
+the widget shell or its `QScrollArea`. Busy/read-only hosts keep the cfg pane
+scrollable while child editor controls are disabled, and the desired editing
+state persists across `detach()` / `attach()` swaps of the service-owned model.
 
 Nested `CfgSectionSpec` fields render as full-width collapsible sections and do
 not get an additional parent-row label. The section header is the label, which

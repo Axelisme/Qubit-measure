@@ -542,6 +542,7 @@ class MainWindow(QMainWindow):
         from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
         if self._raise_existing_dialog("devices") is not None:
+            self._sync_devices_dialog_read_only()
             return
 
         # The shared device dialog manages instruments through the narrow device
@@ -551,6 +552,7 @@ class MainWindow(QMainWindow):
             md_provider=self._ctrl.context_control.get_current_md,
             parent=self,
         )
+        dlg.set_read_only(self._session_mutation_read_only())
 
         def _on_finished(_status: int) -> None:
             self._refresh_session_dependents()
@@ -829,11 +831,13 @@ class MainWindow(QMainWindow):
         self._refresh_toolbar_buttons()
         self._sync_predictor_dialog_live_state()
         self._sync_inspect_dialog_read_only()
+        self._sync_devices_dialog_read_only()
 
     def _on_run_pause_requested(self) -> None:
         self._close_mutation_dialogs()
         self._list.set_run_state("pausing")
         self._sync_inspect_dialog_read_only()
+        self._sync_devices_dialog_read_only()
 
     def _on_run_paused(self, next_flux_idx: int) -> None:
         self._close_mutation_dialogs()
@@ -846,12 +850,12 @@ class MainWindow(QMainWindow):
         self._refresh_toolbar_buttons()
         self._sync_predictor_dialog_live_state()
         self._sync_inspect_dialog_read_only()
+        self._sync_devices_dialog_read_only()
 
     def _close_mutation_dialogs(self) -> None:
-        for key in ("setup", "devices"):
-            dialog = self._dialog_refs.get(key)
-            if dialog is not None:
-                dialog.close()
+        dialog = self._dialog_refs.get("setup")
+        if dialog is not None:
+            dialog.close()
 
     def _on_node_entered(self, name: str, idx: int) -> None:
         """Auto-follow: a provider started → select it + show its run tab/plot.
@@ -1031,6 +1035,7 @@ class MainWindow(QMainWindow):
         self._refresh_toolbar_buttons()
         self._sync_predictor_dialog_live_state()
         self._sync_inspect_dialog_read_only()
+        self._sync_devices_dialog_read_only()
 
     def _on_run_failed(self, message: str) -> None:
         """A Node's produce raised mid-sweep → unlock the UI + surface the error.
@@ -1108,7 +1113,19 @@ class MainWindow(QMainWindow):
         set_read_only = getattr(dlg, "set_read_only", None)
         if not callable(set_read_only):
             return
-        set_read_only(self._run_active or self._ctrl.is_running or self._ctrl.is_paused)
+        set_read_only(self._session_mutation_read_only())
+
+    def _sync_devices_dialog_read_only(self) -> None:
+        dlg = self._dialog_refs.get("devices")
+        if dlg is None:
+            return
+        set_read_only = getattr(dlg, "set_read_only", None)
+        if not callable(set_read_only):
+            return
+        set_read_only(self._session_mutation_read_only())
+
+    def _session_mutation_read_only(self) -> bool:
+        return self._run_active or self._ctrl.is_running or self._ctrl.is_paused
 
     def _on_context_switched(self, _payload: ContextSwitchedPayload) -> None:
         self._refresh_session_dependents()
@@ -1124,15 +1141,14 @@ class MainWindow(QMainWindow):
         self._detail.refresh_cfg_editor(payload.EVENT)
 
     def _refresh_toolbar_buttons(self) -> None:
-        editing = not (
-            self._ctrl.is_running or self._ctrl.is_paused or self._run_paused
-        )
+        editing = not self._session_mutation_read_only()
         self._setup_btn.setEnabled(editing)
-        self._devices_btn.setEnabled(editing)
+        self._devices_btn.setEnabled(True)
         self._predictor_btn.setEnabled(editing or self._ctrl.is_running)
         # Inspect stays enabled during a run: the inspector reflects the live
         # context and is non-modal, so it never blocks the event loop.
         self._inspect_btn.setEnabled(True)
+        self._sync_devices_dialog_read_only()
 
     def _refresh_session_status(self) -> None:
         ctx = self._ctrl.state.exp_context
