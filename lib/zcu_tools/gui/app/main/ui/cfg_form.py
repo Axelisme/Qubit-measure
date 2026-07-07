@@ -406,7 +406,7 @@ def default_decoration_for_spec(spec: CfgNodeSpec) -> FieldDecoration:
     if isinstance(spec, LiteralSpec):
         return FieldDecoration(hidden=True, enabled=False)
     if isinstance(spec, (ScalarSpec, SweepSpec)):
-        return FieldDecoration(enabled=bool(spec.editable))
+        return FieldDecoration(enabled=bool(spec.editable), tooltip=spec.tooltip)
     if isinstance(
         spec, (ModuleRefSpec, WaveformRefSpec, DeviceRefSpec, CfgSectionSpec)
     ):

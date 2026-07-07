@@ -342,7 +342,11 @@ class T2RamseyBuilder(Builder):
             generation_fields=(
                 logical_generation_field(
                     "earlystop_snr",
-                    FloatSpec(label="earlystop_snr", optional=True),
+                    FloatSpec(
+                        label="earlystop_snr",
+                        optional=True,
+                        tooltip="Stop averaging once completed-round SNR reaches this value.",
+                    ),
                     _DEFAULT_EARLYSTOP_SNR,
                     group="acquisition",
                 ),
@@ -352,25 +356,32 @@ class T2RamseyBuilder(Builder):
                     str_choice_spec(
                         "delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                        tooltip="Auto derives relax delay from T1; fixed keeps Default cfg delay.",
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                     group="relax",
                 ),
                 logical_generation_field(
                     "t1_seed_us",
-                    FloatSpec(label="t1_seed_us"),
+                    FloatSpec(
+                        label="initial_t1_us",
+                        tooltip="Initial T1 before measured feedback exists.",
+                    ),
                     t1_seed,
                     group="relax",
                 ),
                 logical_generation_field(
                     "relax_factor",
-                    FloatSpec(label="factor"),
+                    FloatSpec(
+                        label="factor",
+                        tooltip="Multiplier applied to T1 for auto relax delay.",
+                    ),
                     _DEFAULT_RELAX_FACTOR,
                     group="relax",
                 ),
                 logical_generation_field(
                     "relax_min_us",
-                    FloatSpec(label="min_us"),
+                    FloatSpec(label="min_us", tooltip="Minimum auto relax delay."),
                     _DEFAULT_RELAX_MIN,
                     group="relax",
                 ),
@@ -379,6 +390,7 @@ class T2RamseyBuilder(Builder):
                     str_choice_spec(
                         "range_mode",
                         (_SWEEP_RANGE_MODE_AUTO_T2R, _SWEEP_RANGE_MODE_FIXED),
+                        tooltip="Auto derives the Ramsey sweep from latest trusted T2R.",
                     ),
                     _SWEEP_RANGE_MODE_AUTO_T2R,
                     group="sweep",
@@ -386,19 +398,28 @@ class T2RamseyBuilder(Builder):
                 ),
                 logical_generation_field(
                     "t2r_seed_us",
-                    FloatSpec(label="seed_us"),
+                    FloatSpec(
+                        label="initial_t2r_us",
+                        tooltip="Initial T2R before measured feedback exists.",
+                    ),
                     t2r_seed,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_start_us",
-                    FloatSpec(label="start_us"),
+                    FloatSpec(
+                        label="start_us",
+                        tooltip="Lower bound for the auto Ramsey sweep.",
+                    ),
                     _DEFAULT_SWEEP_START,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_stop_factor",
-                    FloatSpec(label="stop_factor"),
+                    FloatSpec(
+                        label="stop_factor",
+                        tooltip="T2R multiplier for the auto sweep stop.",
+                    ),
                     _SWEEP_T2R_FACTOR,
                     group="sweep",
                 ),

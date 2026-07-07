@@ -849,6 +849,57 @@ def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
     assert w.decoration_for_path("group.value").badge == "generated"
 
 
+def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl):
+    from qtpy.QtWidgets import QWidget
+    from zcu_tools.gui.app.main.ui.cfg_form import (
+        CfgFormWidget,
+        FieldDecorationPatch,
+    )
+    from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
+
+    class TooltipProvider:
+        def decoration_for(
+            self, path: str, spec: object, value: object
+        ) -> FieldDecorationPatch | None:
+            del spec, value
+            if path == "gain":
+                return FieldDecorationPatch(tooltip="Provider tooltip")
+            return None
+
+    schema = _schema(
+        {
+            "gain": ScalarSpec(
+                label="Gain",
+                type=float,
+                tooltip="Spec tooltip",
+            ),
+            "window": SweepSpec(label="Window", tooltip="Sweep tooltip"),
+        },
+        {
+            "gain": DirectValue(1.0),
+            "window": SweepValue(start=0.0, stop=1.0, expts=11),
+        },
+    )
+    w = CfgFormWidget(decoration_provider=TooltipProvider())
+    _attach(w, schema, ctrl)
+
+    assert w.decoration_for_path("gain").tooltip == "Provider tooltip"
+    assert w.decoration_for_path("window").tooltip == "Sweep tooltip"
+    labels = {
+        getattr(label, "_full_text"): label.toolTip()
+        for label in w.findChildren(ElidedLabel)
+    }
+    assert labels["Gain:"] == "Provider tooltip"
+    assert labels["Window:"] == "Sweep tooltip"
+    value_tooltips = {
+        child.toolTip()
+        for child in w.findChildren(QWidget)
+        if child.toolTip() and not isinstance(child, ElidedLabel)
+    }
+    assert "Provider tooltip" in value_tooltips
+    assert "Sweep tooltip" in value_tooltips
+
+
 def test_choice_section_rejects_unknown_choice_fields():
     fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto"]),

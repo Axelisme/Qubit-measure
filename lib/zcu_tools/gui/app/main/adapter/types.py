@@ -402,6 +402,7 @@ class ScalarSpec:
     # render together under a collapsible sub-header (e.g. "Advanced"). It does
     # NOT nest the value tree; the field stays a flat leaf of its section.
     group: str = ""
+    tooltip: str = ""
 
     def __post_init__(self) -> None:
         if self.required and self.optional:
@@ -419,6 +420,7 @@ def IntSpec(
     required: bool = False,
     optional: bool = False,
     group: str = "",
+    tooltip: str = "",
 ) -> ScalarSpec:
     """Sugar for ``ScalarSpec(label=..., type=int)`` — an integer field.
 
@@ -434,6 +436,7 @@ def IntSpec(
         required=required,
         optional=optional,
         group=group,
+        tooltip=tooltip,
     )
 
 
@@ -446,6 +449,7 @@ def FloatSpec(
     required: bool = False,
     optional: bool = False,
     group: str = "",
+    tooltip: str = "",
 ) -> ScalarSpec:
     """Sugar for ``ScalarSpec(label=..., type=float)`` — a float field.
 
@@ -460,6 +464,7 @@ def FloatSpec(
         required=required,
         optional=optional,
         group=group,
+        tooltip=tooltip,
     )
 
 
@@ -476,6 +481,7 @@ class SweepSpec:
     label: str = "Sweep"
     editable: bool = True
     decimals: int | None = None
+    tooltip: str = ""
 
 
 @dataclass(frozen=True)

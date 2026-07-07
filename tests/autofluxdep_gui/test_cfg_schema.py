@@ -226,10 +226,6 @@ _EXPECTED_KEYS = {
         "target_kappa",
         "qf_width_seed",
         "physical_recovery_mode",
-        "physical_recovery_min_points",
-        "physical_recovery_max_points",
-        "physical_recovery_max_center_shift_mhz",
-        "physical_recovery_max_rms_mhz",
         "pred_freq_correction_strategy",
         "pred_freq_correction_idw_k",
         "pred_freq_correction_idw_epsilon",
@@ -258,10 +254,7 @@ _EXPECTED_KEYS = {
         "sweep_stop_min_us",
         "drive_gain_mode",
         "pi_product_seed",
-        "pi_product_factor",
         "pi_gain_feedback_strategy",
-        "pi_gain_feedback_step_gain",
-        "pi_gain_feedback_decay_points",
     },
     "ro_optimize": {
         "freq_range",
@@ -376,18 +369,6 @@ _EXPECTED_PATHS = {
         "target_kappa": "generation.drive_gain.target_kappa",
         "qf_width_seed": "generation.drive_gain.qf_width_seed",
         "physical_recovery_mode": "generation.freq_recovery.physical_recovery_mode",
-        "physical_recovery_min_points": (
-            "generation.freq_recovery.physical_recovery_min_points"
-        ),
-        "physical_recovery_max_points": (
-            "generation.freq_recovery.physical_recovery_max_points"
-        ),
-        "physical_recovery_max_center_shift_mhz": (
-            "generation.freq_recovery.physical_recovery_max_center_shift_mhz"
-        ),
-        "physical_recovery_max_rms_mhz": (
-            "generation.freq_recovery.physical_recovery_max_rms_mhz"
-        ),
         "pred_freq_correction_strategy": (
             "generation.predictor_correction.pred_freq_correction_strategy"
         ),
@@ -424,14 +405,7 @@ _EXPECTED_PATHS = {
         "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
         "drive_gain_mode": "generation.drive_gain.drive_gain_mode",
         "pi_product_seed": "generation.drive_gain.pi_product_seed",
-        "pi_product_factor": "generation.drive_gain.pi_product_factor",
         "pi_gain_feedback_strategy": "generation.pi_feedback.pi_gain_feedback_strategy",
-        "pi_gain_feedback_step_gain": (
-            "generation.pi_feedback.pi_gain_feedback_step_gain"
-        ),
-        "pi_gain_feedback_decay_points": (
-            "generation.pi_feedback.pi_gain_feedback_decay_points"
-        ),
     },
     "ro_optimize": {
         "freq_range": "sweep.freq",
@@ -747,10 +721,11 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     qf_schema = QubitFreqBuilder().make_default_schema()
     assert _scalar_labels(_generation_group_spec(qf_schema, "freq_recovery")) == {
         "physical_recovery_mode": "mode",
-        "physical_recovery_min_points": "min_points",
-        "physical_recovery_max_points": "max_points",
-        "physical_recovery_max_center_shift_mhz": "max_center_shift_mhz",
-        "physical_recovery_max_rms_mhz": "max_rms_mhz",
+    }
+    assert _scalar_labels(_generation_group_spec(qf_schema, "drive_gain")) == {
+        "drive_gain_mode": "mode",
+        "target_kappa": "target_kappa",
+        "qf_width_seed": "initial_linewidth_mhz",
     }
     assert _scalar_labels(
         _generation_group_spec(qf_schema, "predictor_correction")
@@ -769,27 +744,37 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     lenrabi_schema = LenRabiBuilder().make_default_schema()
     assert _scalar_labels(_generation_group_spec(lenrabi_schema, "relax")) == {
         "relax_delay_mode": "delay_mode",
-        "t1_seed_us": "t1_seed_us",
+        "t1_seed_us": "initial_t1_us",
         "relax_factor": "factor",
         "relax_min_us": "min_us",
     }
     assert _scalar_labels(_generation_group_spec(lenrabi_schema, "sweep")) == {
         "sweep_range_mode": "range_mode",
-        "expected_pi_length": "expected_pi_length",
+        "expected_pi_length": "target_pi_length_us",
         "sweep_start_us": "start_us",
         "sweep_stop_factor": "stop_factor",
         "sweep_stop_min_us": "stop_min_us",
     }
+    assert _scalar_labels(_generation_group_spec(lenrabi_schema, "drive_gain")) == {
+        "drive_gain_mode": "mode",
+        "pi_product_seed": "initial_pi_product",
+    }
     assert _scalar_labels(_generation_group_spec(lenrabi_schema, "pi_feedback")) == {
         "pi_gain_feedback_strategy": "strategy",
-        "pi_gain_feedback_step_gain": "step_gain",
-        "pi_gain_feedback_decay_points": "decay_points",
     }
     pi_strategy = _generation_group_spec(lenrabi_schema, "pi_feedback").fields[
         "pi_gain_feedback_strategy"
     ]
     assert isinstance(pi_strategy, ScalarSpec)
     assert pi_strategy.choices == ["off", "log_step"]
+
+    ramsey_schema = T2RamseyBuilder().make_default_schema()
+    assert _scalar_labels(_generation_group_spec(ramsey_schema, "sweep")) == {
+        "sweep_range_mode": "range_mode",
+        "t2r_seed_us": "initial_t2r_us",
+        "sweep_start_us": "start_us",
+        "sweep_stop_factor": "stop_factor",
+    }
 
     ro_schema = RoOptimizeBuilder().make_default_schema()
     assert _scalar_labels(_generation_group_spec(ro_schema, "freq_search")) == {
@@ -806,7 +791,7 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     echo_schema = T2EchoBuilder().make_default_schema()
     assert _scalar_labels(_generation_group_spec(echo_schema, "sweep")) == {
         "sweep_range_mode": "range_mode",
-        "t2e_seed_us": "seed_us",
+        "t2e_seed_us": "initial_t2e_us",
         "sweep_start_us": "start_us",
         "sweep_stop_factor": "stop_factor",
     }
@@ -819,7 +804,6 @@ def test_generation_persistence_uses_flat_logical_keys():
     schema = QubitFreqBuilder().make_default_schema()
     schema.set_field("drive_gain_mode", "fixed")
     schema.set_field("physical_recovery_mode", "fail_triggered_fit")
-    schema.set_field("physical_recovery_max_center_shift_mhz", 120.0)
     schema.set_field("earlystop_snr", 12.5)
     schema.set_field("acquire_retry", 2)
 
@@ -834,10 +818,7 @@ def test_generation_persistence_uses_flat_logical_keys():
         "__kind": "direct",
         "value": "fail_triggered_fit",
     }
-    assert generation["physical_recovery_max_center_shift_mhz"] == {
-        "__kind": "direct",
-        "value": 120.0,
-    }
+    assert "physical_recovery_max_center_shift_mhz" not in generation
     assert generation["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
     assert generation["acquire_retry"] == {"__kind": "direct", "value": 2}
 
@@ -847,7 +828,7 @@ def test_generation_persistence_uses_flat_logical_keys():
     knobs = restored.read_knobs()
     assert knobs["drive_gain_mode"] == "fixed"
     assert knobs["physical_recovery_mode"] == "fail_triggered_fit"
-    assert knobs["physical_recovery_max_center_shift_mhz"] == pytest.approx(120.0)
+    assert "physical_recovery_max_center_shift_mhz" not in knobs
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
     assert knobs["acquire_retry"] == 2
     assert read_value_tree(restored)["generation"]["drive_gain"]["drive_gain_mode"] == (
@@ -881,6 +862,33 @@ def test_generation_restore_rejects_removed_feedback_enabled_key():
         match=r"Unknown persisted generation key\(s\): pred_freq_correction_enabled",
     ):
         QubitFreqBuilder().make_default_schema().restore_persisted_raw(raw)
+
+
+@pytest.mark.parametrize(
+    ("builder", "removed_key"),
+    (
+        (QubitFreqBuilder(), "physical_recovery_min_points"),
+        (QubitFreqBuilder(), "physical_recovery_max_points"),
+        (QubitFreqBuilder(), "physical_recovery_max_center_shift_mhz"),
+        (QubitFreqBuilder(), "physical_recovery_max_rms_mhz"),
+        (LenRabiBuilder(), "pi_product_factor"),
+        (LenRabiBuilder(), "pi_gain_feedback_step_gain"),
+        (LenRabiBuilder(), "pi_gain_feedback_decay_points"),
+    ),
+)
+def test_generation_restore_rejects_removed_hard_coded_keys(
+    builder: Builder, removed_key: str
+):
+    raw = builder.make_default_schema().to_persisted_raw()
+    generation = raw["generation"]
+    assert isinstance(generation, dict)
+    generation[removed_key] = {"__kind": "direct", "value": 1}
+
+    with pytest.raises(
+        NodeCfgPersistenceError,
+        match=rf"Unknown persisted generation key\(s\): {removed_key}",
+    ):
+        builder.make_default_schema().restore_persisted_raw(raw)
 
 
 def test_grouped_generation_section_is_removed_from_lower_raw():
@@ -1104,10 +1112,10 @@ def test_qubit_freq_recovery_default_knobs():
     knobs = QubitFreqBuilder().make_default_schema().lower(None)
 
     assert knobs["physical_recovery_mode"] == "fail_triggered_fit"
-    assert knobs["physical_recovery_min_points"] == 10
-    assert knobs["physical_recovery_max_points"] == 30
-    assert knobs["physical_recovery_max_center_shift_mhz"] == 150.0
-    assert knobs["physical_recovery_max_rms_mhz"] == 50.0
+    assert "physical_recovery_min_points" not in knobs
+    assert "physical_recovery_max_points" not in knobs
+    assert "physical_recovery_max_center_shift_mhz" not in knobs
+    assert "physical_recovery_max_rms_mhz" not in knobs
     assert knobs["pred_freq_correction_idw_k"] == 10
     assert knobs["pred_freq_correction_idw_epsilon"] == pytest.approx(1e-4)
     assert knobs["pred_freq_correction_decay_points"] == 4.0
@@ -1181,10 +1189,10 @@ def test_operator_facing_defaults_golden_subset():
 
     assert qf["acquire_retry"] == 3
     assert qf["physical_recovery_mode"] == "fail_triggered_fit"
-    assert qf["physical_recovery_min_points"] == 10
-    assert qf["physical_recovery_max_points"] == 30
-    assert qf["physical_recovery_max_center_shift_mhz"] == pytest.approx(150.0)
-    assert qf["physical_recovery_max_rms_mhz"] == pytest.approx(50.0)
+    assert "physical_recovery_min_points" not in qf
+    assert "physical_recovery_max_points" not in qf
+    assert "physical_recovery_max_center_shift_mhz" not in qf
+    assert "physical_recovery_max_rms_mhz" not in qf
     assert qf["drive_gain_mode"] == "adaptive"
 
     assert ro["gain_half_width"] == pytest.approx(0.1)

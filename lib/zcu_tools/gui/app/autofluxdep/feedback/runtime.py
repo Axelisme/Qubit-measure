@@ -122,7 +122,11 @@ def feedback_generation_fields(
                 generation_field(
                     slot.field_name("strategy"),
                     slot.field_name("strategy"),
-                    str_choice_spec("strategy", (STRATEGY_OFF, "idw", "last_good")),
+                    str_choice_spec(
+                        "strategy",
+                        (STRATEGY_OFF, "idw", "last_good"),
+                        tooltip="Select how trusted samples estimate the next value.",
+                    ),
                     str(slot.default_strategy),
                     group=group,
                     group_label=group_label,
@@ -130,7 +134,10 @@ def feedback_generation_fields(
                 generation_field(
                     slot.field_name("idw_k"),
                     slot.field_name("idw_k"),
-                    IntSpec(label="idw_k"),
+                    IntSpec(
+                        label="idw_k",
+                        tooltip="Nearest trusted samples used by IDW estimation.",
+                    ),
                     slot.default_idw_k,
                     group=group,
                     group_label=group_label,
@@ -138,7 +145,10 @@ def feedback_generation_fields(
                 generation_field(
                     slot.field_name("idw_epsilon"),
                     slot.field_name("idw_epsilon"),
-                    FloatSpec(label="idw_epsilon"),
+                    FloatSpec(
+                        label="idw_epsilon",
+                        tooltip="Small distance floor for IDW weighting.",
+                    ),
                     slot.default_idw_epsilon,
                     group=group,
                     group_label=group_label,
@@ -146,7 +156,10 @@ def feedback_generation_fields(
                 generation_field(
                     slot.field_name("decay_points"),
                     slot.field_name("decay_points"),
-                    FloatSpec(label="decay_points"),
+                    FloatSpec(
+                        label="decay_points",
+                        tooltip="Flux queries before stale estimates fade out.",
+                    ),
                     slot.default_decay_points,
                     group=group,
                     group_label=group_label,
@@ -154,32 +167,18 @@ def feedback_generation_fields(
             )
         )
     else:
-        fields.extend(
-            (
-                generation_field(
-                    slot.field_name("strategy"),
-                    slot.field_name("strategy"),
-                    str_choice_spec("strategy", (STRATEGY_OFF, "log_step")),
-                    str(slot.default_strategy),
-                    group=group,
-                    group_label=group_label,
+        fields.append(
+            generation_field(
+                slot.field_name("strategy"),
+                slot.field_name("strategy"),
+                str_choice_spec(
+                    "strategy",
+                    (STRATEGY_OFF, "log_step"),
+                    tooltip="Select whether controller feedback adjusts the next value.",
                 ),
-                generation_field(
-                    slot.field_name("step_gain"),
-                    slot.field_name("step_gain"),
-                    FloatSpec(label="step_gain"),
-                    slot.default_step_gain,
-                    group=group,
-                    group_label=group_label,
-                ),
-                generation_field(
-                    slot.field_name("decay_points"),
-                    slot.field_name("decay_points"),
-                    FloatSpec(label="decay_points"),
-                    slot.default_decay_points,
-                    group=group,
-                    group_label=group_label,
-                ),
+                str(slot.default_strategy),
+                group=group,
+                group_label=group_label,
             )
         )
     return tuple(fields)
@@ -209,10 +208,7 @@ def feedback_generation_choice(
         slot.field_name("strategy"),
         {
             STRATEGY_OFF: (),
-            "log_step": (
-                slot.field_name("step_gain"),
-                slot.field_name("decay_points"),
-            ),
+            "log_step": (),
         },
     )
 
@@ -466,11 +462,12 @@ def _build_capability(
     if strategy == "log_step":
         return LogStepController(
             step_gain=_positive_finite(
-                slot.field_name("step_gain"), knobs[slot.field_name("step_gain")]
+                slot.field_name("step_gain"),
+                slot.default_step_gain,
             ),
             decay_points=_positive_finite(
                 slot.field_name("decay_points"),
-                knobs[slot.field_name("decay_points")],
+                slot.default_decay_points,
             ),
         )
     raise RuntimeError(f"unsupported controller feedback strategy: {strategy!r}")

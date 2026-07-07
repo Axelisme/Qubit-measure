@@ -525,19 +525,26 @@ class RoOptimizeBuilder(Builder):
                     str_choice_spec(
                         "delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                        tooltip="Auto derives relax delay from T1; fixed keeps Default cfg delay.",
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                     group="relax",
                 ),
                 logical_generation_field(
                     "t1_seed_us",
-                    FloatSpec(label="t1_seed_us"),
+                    FloatSpec(
+                        label="initial_t1_us",
+                        tooltip="Initial T1 before measured feedback exists.",
+                    ),
                     t1_seed,
                     group="relax",
                 ),
                 logical_generation_field(
                     "relax_factor",
-                    FloatSpec(label="factor"),
+                    FloatSpec(
+                        label="factor",
+                        tooltip="Multiplier applied to T1 for auto relax delay.",
+                    ),
                     _DEFAULT_RELAX_FACTOR,
                     group="relax",
                 ),
@@ -546,6 +553,7 @@ class RoOptimizeBuilder(Builder):
                     str_choice_spec(
                         "freq_mode",
                         (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
+                        tooltip="Previous-best recenters readout frequency search each flux.",
                     ),
                     _RANGE_MODE_PREVIOUS_BEST,
                     group="freq_search",
@@ -555,6 +563,7 @@ class RoOptimizeBuilder(Builder):
                     str_choice_spec(
                         "gain_mode",
                         (_RANGE_MODE_PREVIOUS_BEST, _RANGE_MODE_FIXED),
+                        tooltip="Previous-best recenters readout gain search each flux.",
                     ),
                     _RANGE_MODE_PREVIOUS_BEST,
                     group="gain_search",
@@ -564,13 +573,17 @@ class RoOptimizeBuilder(Builder):
                     str_choice_spec(
                         "freq_mode",
                         (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
+                        tooltip="Choose fixed half-width or the Default cfg frequency sweep.",
                     ),
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
                     group="freq_search",
                 ),
                 logical_generation_field(
                     "freq_half_width_mhz",
-                    FloatSpec(label="freq_half_width_mhz"),
+                    FloatSpec(
+                        label="freq_half_width_mhz",
+                        tooltip="Frequency half-width around the readout search center.",
+                    ),
                     _DEFAULT_FREQ_HALF_WIDTH,
                     group="freq_search",
                 ),
@@ -579,13 +592,17 @@ class RoOptimizeBuilder(Builder):
                     str_choice_spec(
                         "gain_mode",
                         (_WINDOW_MODE_FIXED_HALF_WIDTH, _WINDOW_MODE_DEFAULT_SWEEP),
+                        tooltip="Choose fixed half-width or the Default cfg gain sweep.",
                     ),
                     _WINDOW_MODE_FIXED_HALF_WIDTH,
                     group="gain_search",
                 ),
                 logical_generation_field(
                     "gain_half_width",
-                    FloatSpec(label="gain_half_width"),
+                    FloatSpec(
+                        label="gain_half_width",
+                        tooltip="Gain half-width around the readout search center.",
+                    ),
                     _DEFAULT_GAIN_HALF_WIDTH,
                     group="gain_search",
                 ),

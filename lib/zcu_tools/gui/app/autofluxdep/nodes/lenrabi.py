@@ -243,13 +243,12 @@ def _resolve_drive_gain(
     pi_product: float,
     target_pi_length: float,
     fixed: float,
-    knobs: dict[str, Any],
 ) -> float:
     if mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
         return _drive_gain_from_pi_product(
             pi_product,
             target_pi_length,
-            factor=float(knobs["pi_product_factor"]),
+            factor=_DEFAULT_PI_PRODUCT_FACTOR,
             drive_gain_cap=_DRIVE_GAIN_CAP,
         )
     if mode == _DRIVE_GAIN_MODE_FIXED:
@@ -570,7 +569,11 @@ class LenRabiBuilder(Builder):
             generation_fields=(
                 logical_generation_field(
                     "earlystop_snr",
-                    FloatSpec(label="earlystop_snr", optional=True),
+                    FloatSpec(
+                        label="earlystop_snr",
+                        optional=True,
+                        tooltip="Stop averaging once completed-round SNR reaches this value.",
+                    ),
                     _DEFAULT_EARLYSTOP_SNR,
                     group="acquisition",
                 ),
@@ -580,25 +583,35 @@ class LenRabiBuilder(Builder):
                     str_choice_spec(
                         "delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                        tooltip="Auto derives relax delay from T1; fixed keeps Default cfg delay.",
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                     group="relax",
                 ),
                 logical_generation_field(
                     "t1_seed_us",
-                    FloatSpec(label="t1_seed_us"),
+                    FloatSpec(
+                        label="initial_t1_us",
+                        tooltip="Initial T1 before measured feedback exists.",
+                    ),
                     t1_seed,
                     group="relax",
                 ),
                 logical_generation_field(
                     "relax_factor",
-                    FloatSpec(label="factor"),
+                    FloatSpec(
+                        label="factor",
+                        tooltip="Multiplier applied to T1 for auto relax delay.",
+                    ),
                     _DEFAULT_RELAX_FACTOR,
                     group="relax",
                 ),
                 logical_generation_field(
                     "relax_min_us",
-                    FloatSpec(label="min_us"),
+                    FloatSpec(
+                        label="min_us",
+                        tooltip="Minimum auto relax delay.",
+                    ),
                     _DEFAULT_RELAX_MIN,
                     group="relax",
                 ),
@@ -607,6 +620,7 @@ class LenRabiBuilder(Builder):
                     str_choice_spec(
                         "range_mode",
                         (_SWEEP_RANGE_MODE_AUTO_PI_LENGTH, _SWEEP_RANGE_MODE_FIXED),
+                        tooltip="Auto derives the Rabi sweep from pi-length feedback.",
                     ),
                     _SWEEP_RANGE_MODE_AUTO_PI_LENGTH,
                     group="sweep",
@@ -614,25 +628,37 @@ class LenRabiBuilder(Builder):
                 ),
                 logical_generation_field(
                     "expected_pi_length",
-                    FloatSpec(label="expected_pi_length"),
+                    FloatSpec(
+                        label="target_pi_length_us",
+                        tooltip="Pi-length setpoint for drive gain feedback.",
+                    ),
                     pi_len_seed,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_start_us",
-                    FloatSpec(label="start_us"),
+                    FloatSpec(
+                        label="start_us",
+                        tooltip="Lower bound for the auto Rabi sweep.",
+                    ),
                     _DEFAULT_SWEEP_START,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_stop_factor",
-                    FloatSpec(label="stop_factor"),
+                    FloatSpec(
+                        label="stop_factor",
+                        tooltip="Pi-length multiplier for the auto sweep stop.",
+                    ),
                     _DEFAULT_SWEEP_STOP_FACTOR,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_stop_min_us",
-                    FloatSpec(label="stop_min_us"),
+                    FloatSpec(
+                        label="stop_min_us",
+                        tooltip="Minimum stop value for the auto Rabi sweep.",
+                    ),
                     _DEFAULT_SWEEP_STOP_MIN,
                     group="sweep",
                 ),
@@ -641,6 +667,7 @@ class LenRabiBuilder(Builder):
                     str_choice_spec(
                         "mode",
                         (_DRIVE_GAIN_MODE_AUTO_PI_PRODUCT, _DRIVE_GAIN_MODE_FIXED),
+                        tooltip="Auto uses pi-product history; fixed keeps Default cfg gain.",
                     ),
                     _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT,
                     group="drive_gain",
@@ -648,14 +675,11 @@ class LenRabiBuilder(Builder):
                 ),
                 logical_generation_field(
                     "pi_product_seed",
-                    FloatSpec(label="product_seed"),
+                    FloatSpec(
+                        label="initial_pi_product",
+                        tooltip="Initial pi-length times gain before feedback exists.",
+                    ),
                     _seed_pi_product(ctx),
-                    group="drive_gain",
-                ),
-                logical_generation_field(
-                    "pi_product_factor",
-                    FloatSpec(label="product_factor"),
-                    _DEFAULT_PI_PRODUCT_FACTOR,
                     group="drive_gain",
                 ),
                 *feedback_generation_fields(_DRIVE_GAIN_SLOT, group="pi_feedback"),
@@ -690,10 +714,7 @@ class LenRabiBuilder(Builder):
                     "drive_gain_mode",
                     {
                         _DRIVE_GAIN_MODE_FIXED: (),
-                        _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT: (
-                            "pi_product_seed",
-                            "pi_product_factor",
-                        ),
+                        _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT: ("pi_product_seed",),
                     },
                 ),
                 feedback_generation_choice(_DRIVE_GAIN_SLOT, group="pi_feedback"),
@@ -819,7 +840,6 @@ class LenRabiBuilder(Builder):
             pi_product=feedback.feedback_pi_product,
             target_pi_length=feedback.target_pi_length,
             fixed=float(knobs["qub_gain"]),
-            knobs=knobs,
         )
         if (
             env.feedback is not None

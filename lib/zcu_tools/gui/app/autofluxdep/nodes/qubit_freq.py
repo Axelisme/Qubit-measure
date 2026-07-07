@@ -29,7 +29,6 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
 from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
-    IntSpec,
     OverridePath,
     OverridePlan,
     SweepValue,
@@ -70,10 +69,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import title_with_snr
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
-    DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
-    DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
-    DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
-    DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
     PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
     PHYSICAL_RECOVERY_MODE_OFF,
     on_fit_failed,
@@ -513,7 +508,11 @@ class QubitFreqBuilder(Builder):
             generation_fields=(
                 logical_generation_field(
                     "earlystop_snr",
-                    FloatSpec(label="earlystop_snr", optional=True),
+                    FloatSpec(
+                        label="earlystop_snr",
+                        optional=True,
+                        tooltip="Stop averaging once completed-round SNR reaches this value.",
+                    ),
                     _DEFAULT_EARLYSTOP_SNR,
                     group="acquisition",
                 ),
@@ -526,32 +525,9 @@ class QubitFreqBuilder(Builder):
                             PHYSICAL_RECOVERY_MODE_OFF,
                             PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
                         ),
+                        tooltip="Run-local physical-model recovery after trusted frequency fits fail.",
                     ),
                     PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
-                    group="freq_recovery",
-                ),
-                logical_generation_field(
-                    "physical_recovery_min_points",
-                    IntSpec(label="min_points"),
-                    DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
-                    group="freq_recovery",
-                ),
-                logical_generation_field(
-                    "physical_recovery_max_points",
-                    IntSpec(label="max_points"),
-                    DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
-                    group="freq_recovery",
-                ),
-                logical_generation_field(
-                    "physical_recovery_max_center_shift_mhz",
-                    FloatSpec(label="max_center_shift_mhz"),
-                    DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
-                    group="freq_recovery",
-                ),
-                logical_generation_field(
-                    "physical_recovery_max_rms_mhz",
-                    FloatSpec(label="max_rms_mhz"),
-                    DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
                     group="freq_recovery",
                 ),
                 logical_generation_field(
@@ -562,19 +538,27 @@ class QubitFreqBuilder(Builder):
                             _DRIVE_GAIN_MODE_ADAPTIVE,
                             _DRIVE_GAIN_MODE_FIXED,
                         ),
+                        tooltip="Adaptive uses linewidth feedback; fixed keeps Default cfg gain.",
                     ),
                     _DRIVE_GAIN_MODE_ADAPTIVE,
                     group="drive_gain",
                 ),
                 logical_generation_field(
                     "target_kappa",
-                    FloatSpec(label="target_kappa"),
+                    FloatSpec(
+                        label="target_kappa",
+                        tooltip="Target linewidth in MHz for adaptive drive gain.",
+                    ),
                     _QFW_TARGET_KAPPA,
                     group="drive_gain",
                 ),
                 logical_generation_field(
                     "qf_width_seed",
-                    FloatSpec(label="qf_width_seed", optional=True),
+                    FloatSpec(
+                        label="initial_linewidth_mhz",
+                        optional=True,
+                        tooltip="Initial linewidth before measured feedback exists.",
+                    ),
                     _qf_width_seed(ctx),
                     group="drive_gain",
                 ),
@@ -584,19 +568,6 @@ class QubitFreqBuilder(Builder):
                 ),
             ),
             generation_choices=(
-                generation_choice(
-                    "freq_recovery",
-                    "physical_recovery_mode",
-                    {
-                        PHYSICAL_RECOVERY_MODE_OFF: (),
-                        PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT: (
-                            "physical_recovery_min_points",
-                            "physical_recovery_max_points",
-                            "physical_recovery_max_center_shift_mhz",
-                            "physical_recovery_max_rms_mhz",
-                        ),
-                    },
-                ),
                 generation_choice(
                     "drive_gain",
                     "drive_gain_mode",

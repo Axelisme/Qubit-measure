@@ -231,10 +231,6 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         }
         assert set(_generation_group(form, "freq_recovery").fields.keys()) == {
             "physical_recovery_mode",
-            "physical_recovery_min_points",
-            "physical_recovery_max_points",
-            "physical_recovery_max_center_shift_mhz",
-            "physical_recovery_max_rms_mhz",
         }
         assert set(_generation_group(form, "predictor_correction").fields.keys()) == {
             "pred_freq_correction_strategy",
@@ -249,14 +245,10 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert _field_labels(_generation_group(form, "drive_gain")) == {
             "drive_gain_mode": "mode",
             "target_kappa": "target_kappa",
-            "qf_width_seed": "qf_width_seed",
+            "qf_width_seed": "initial_linewidth_mhz",
         }
         assert _field_labels(_generation_group(form, "freq_recovery")) == {
             "physical_recovery_mode": "mode",
-            "physical_recovery_min_points": "min_points",
-            "physical_recovery_max_points": "max_points",
-            "physical_recovery_max_center_shift_mhz": "max_center_shift_mhz",
-            "physical_recovery_max_rms_mhz": "max_rms_mhz",
         }
         assert _field_labels(_generation_group(form, "predictor_correction")) == {
             "pred_freq_correction_strategy": "strategy",
@@ -264,6 +256,12 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "pred_freq_correction_idw_epsilon": "idw_epsilon",
             "pred_freq_correction_decay_points": "decay_points",
         }
+        generation_form = form._generation_form
+        assert generation_form is not None
+        assert (
+            generation_form.decoration_for_path("drive_gain.qf_width_seed").tooltip
+            == "Initial linewidth before measured feedback exists."
+        )
         assert set(node.schema.keys) == {
             "detune_sweep",
             "reps",
@@ -281,10 +279,6 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
             "target_kappa",
             "qf_width_seed",
             "physical_recovery_mode",
-            "physical_recovery_min_points",
-            "physical_recovery_max_points",
-            "physical_recovery_max_center_shift_mhz",
-            "physical_recovery_max_rms_mhz",
             "pred_freq_correction_strategy",
             "pred_freq_correction_idw_k",
             "pred_freq_correction_idw_epsilon",
@@ -304,7 +298,7 @@ def test_generation_choices_render_only_active_strategy_fields(ctrl_node, qapp):
         assert "predictor_correction.pred_freq_correction_idw_k" in paths
         assert "predictor_correction.pred_freq_correction_idw_epsilon" in paths
         assert "predictor_correction.pred_freq_correction_decay_points" in paths
-        assert "freq_recovery.physical_recovery_min_points" in paths
+        assert "freq_recovery.physical_recovery_mode" in paths
         assert "drive_gain.target_kappa" in paths
 
         strategy = _generation_group(form, "predictor_correction").fields[
@@ -332,8 +326,6 @@ def test_generation_choices_render_only_active_strategy_fields(ctrl_node, qapp):
 
         paths = _rendered_generation_paths(form)
         assert "freq_recovery.physical_recovery_mode" in paths
-        assert "freq_recovery.physical_recovery_min_points" not in paths
-        assert "freq_recovery.physical_recovery_max_rms_mhz" not in paths
 
         drive_gain_mode = _generation_group(form, "drive_gain").fields[
             "drive_gain_mode"
@@ -508,7 +500,11 @@ def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
             if label.maximumWidth() == NODE_FIELD_LABEL_MAX_WIDTH
         ]
         assert constrained
-        assert any(label.toolTip() == "earlystop_snr:" for label in constrained)
+        assert any(
+            getattr(label, "_full_text") == "earlystop_snr:"
+            and "completed-round SNR" in label.toolTip()
+            for label in constrained
+        )
     finally:
         form.teardown()
 

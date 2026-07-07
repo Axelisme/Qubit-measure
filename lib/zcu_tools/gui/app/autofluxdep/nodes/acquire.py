@@ -73,7 +73,10 @@ def acquire_retry_generation_field(
     """Return the common node-level acquire retry generation knob."""
     return logical_generation_field(
         "acquire_retry",
-        IntSpec(label="retry"),
+        IntSpec(
+            label="retry",
+            tooltip="Retries for transient program build or acquire failures.",
+        ),
         DEFAULT_ACQUIRE_RETRY,
         group=group,
         group_label=group_label,

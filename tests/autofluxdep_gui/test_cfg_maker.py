@@ -302,7 +302,6 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
             "qub_ch": 4,
             "qub_nqz": 2,
             "expected_pi_length": 0.25,
-            "pi_gain_feedback_step_gain": 1.0,
             "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         },
     )
@@ -311,7 +310,7 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
     controller = view.controller("drive_gain")
     assert controller is not None
     proposal = controller.propose(0.6, math.log(4.0))
-    assert proposal.value == pytest.approx(2.4)
+    assert proposal.value == pytest.approx(1.2)
     env = RunEnv(flux=0.0, flux_idx=0, schema=schema, ml=ml, feedback=view)
     snap = Snapshot({"qubit_freq": 5135.0}, modules={"opt_readout": _READOUT})
 
@@ -332,7 +331,6 @@ def test_lenrabi_controller_proposal_smoothly_reverts_to_open_loop_gain():
             "qub_nqz": 2,
             "expected_pi_length": 0.25,
             "pi_product_seed": 0.3,
-            "pi_product_factor": 1.2,
             "sweep_range": SweepValue(start=0.05, stop=2.5, expts=61),
         },
     )

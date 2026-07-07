@@ -84,35 +84,12 @@ def recovery_config_from_knobs(knobs: Mapping[str, Any]) -> PhysicalRecoveryConf
     ):
         raise RuntimeError(f"unsupported qubit_freq physical_recovery_mode: {mode!r}")
 
-    min_points = _int(
-        "physical_recovery_min_points", knobs["physical_recovery_min_points"]
-    )
-    max_points = _int(
-        "physical_recovery_max_points", knobs["physical_recovery_max_points"]
-    )
-    if not (
-        DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS
-        <= min_points
-        <= max_points
-        <= DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS
-    ):
-        raise RuntimeError(
-            "qubit_freq physical recovery fit points must satisfy "
-            "10 <= min_points <= max_points <= 30"
-        )
-
     return PhysicalRecoveryConfig(
         mode=cast(PhysicalRecoveryMode, mode),
-        min_points=min_points,
-        max_points=max_points,
-        max_center_shift_mhz=_positive_finite(
-            "physical_recovery_max_center_shift_mhz",
-            knobs["physical_recovery_max_center_shift_mhz"],
-        ),
-        max_rms_mhz=_positive_finite(
-            "physical_recovery_max_rms_mhz",
-            knobs["physical_recovery_max_rms_mhz"],
-        ),
+        min_points=DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
+        max_points=DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
+        max_center_shift_mhz=DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
+        max_rms_mhz=DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
     )
 
 
@@ -582,16 +559,3 @@ def _finite(name: str, value: Any) -> float:
     if not math.isfinite(out):
         raise RuntimeError(f"qubit_freq {name} must be finite")
     return out
-
-
-def _positive_finite(name: str, value: Any) -> float:
-    out = _finite(name, value)
-    if out <= 0.0:
-        raise RuntimeError(f"qubit_freq {name} must be positive")
-    return out
-
-
-def _int(name: str, value: Any) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise RuntimeError(f"qubit_freq {name} must be an integer")
-    return value

@@ -10,11 +10,16 @@ from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq_recovery as recovery_
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+    DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
+    DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
+    DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
+    DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
     PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
     QubitFreqRecoveryState,
     TrustedFrequencyPoint,
     on_fit_failed,
     on_fit_succeeded,
+    recovery_config_from_knobs,
     select_fit_points,
 )
 from zcu_tools.gui.app.autofluxdep.tools import FluxoniumPredictorAdapter, Tools
@@ -63,7 +68,6 @@ def _schema():
         .with_overrides(
             {
                 "physical_recovery_mode": PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
-                "physical_recovery_max_rms_mhz": 20.0,
             }
         )
     )
@@ -130,6 +134,19 @@ def test_select_fit_points_returns_empty_until_minimum_history():
     )
 
     assert select_fit_points(history, min_points=10, max_points=30) == ()
+
+
+def test_recovery_config_uses_hard_coded_guardrails_without_knobs():
+    cfg = recovery_config_from_knobs(
+        {"physical_recovery_mode": PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT}
+    )
+
+    assert cfg.min_points == DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS
+    assert cfg.max_points == DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS
+    assert cfg.max_center_shift_mhz == pytest.approx(
+        DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ
+    )
+    assert cfg.max_rms_mhz == pytest.approx(DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ)
 
 
 def test_fluxonium_predictor_adapter_overlay_does_not_mutate_raw_predictor():

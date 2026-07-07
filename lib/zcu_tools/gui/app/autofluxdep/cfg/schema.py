@@ -83,11 +83,13 @@ def _coerce_scalar(value: Any, type_: type) -> Any:
     return type_(value)
 
 
-def str_choice_spec(label: str, choices: tuple[str, ...]) -> ScalarSpec:
+def str_choice_spec(
+    label: str, choices: tuple[str, ...], *, tooltip: str = ""
+) -> ScalarSpec:
     """A required string choice field rendered as the cfg editor's combo box."""
     if not choices:
         raise ValueError("str_choice_spec needs at least one choice")
-    return ScalarSpec(label=label, type=str, choices=list(choices))
+    return ScalarSpec(label=label, type=str, choices=list(choices), tooltip=tooltip)
 
 
 class NodeCfgPersistenceError(RuntimeError):

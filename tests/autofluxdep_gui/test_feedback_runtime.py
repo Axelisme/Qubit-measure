@@ -138,6 +138,15 @@ class _Provider:
     schema: Any
 
 
+@dataclass
+class _RawSchema:
+    knobs: dict[str, Any]
+
+    def lower(self, ml: Any, md: Any = None) -> dict[str, Any]:
+        del ml, md
+        return dict(self.knobs)
+
+
 def test_disabled_slot_returns_none_and_undeclared_slot_fast_fails():
     builder = QubitFreqBuilder()
     schema = builder.make_default_schema()
@@ -235,8 +244,6 @@ def test_feedback_policy_strategy_and_full_values_persist_flat():
 def test_controller_feedback_policy_values_persist_flat():
     schema = LenRabiBuilder().make_default_schema()
     schema.set_field("pi_gain_feedback_strategy", "off")
-    schema.set_field("pi_gain_feedback_step_gain", 0.25)
-    schema.set_field("pi_gain_feedback_decay_points", 6.0)
 
     raw = schema.to_persisted_raw()
 
@@ -247,22 +254,46 @@ def test_controller_feedback_policy_values_persist_flat():
         "__kind": "direct",
         "value": "off",
     }
-    assert generation["pi_gain_feedback_step_gain"] == {
-        "__kind": "direct",
-        "value": 0.25,
-    }
-    assert generation["pi_gain_feedback_decay_points"] == {
-        "__kind": "direct",
-        "value": 6.0,
-    }
+    assert "pi_gain_feedback_step_gain" not in generation
+    assert "pi_gain_feedback_decay_points" not in generation
 
     restored = LenRabiBuilder().make_default_schema()
     restored.restore_persisted_raw(raw)
 
     knobs = restored.lower(None)
     assert knobs["pi_gain_feedback_strategy"] == "off"
-    assert knobs["pi_gain_feedback_step_gain"] == pytest.approx(0.25)
-    assert knobs["pi_gain_feedback_decay_points"] == pytest.approx(6.0)
+    assert "pi_gain_feedback_step_gain" not in knobs
+    assert "pi_gain_feedback_decay_points" not in knobs
 
     runtime = build_feedback_runtime([_Provider("lenrabi", LenRabiBuilder(), restored)])
     assert runtime.view_for("lenrabi").controller("drive_gain") is None
+
+
+def test_controller_feedback_uses_declared_defaults_for_hidden_tuning():
+    schema = LenRabiBuilder().make_default_schema()
+
+    runtime = build_feedback_runtime([_Provider("lenrabi", LenRabiBuilder(), schema)])
+    controller = runtime.view_for("lenrabi").controller("drive_gain")
+
+    assert isinstance(controller, LogStepController)
+    assert controller.step_gain == pytest.approx(0.5)
+    assert controller.decay_points == pytest.approx(3.0)
+
+
+def test_controller_feedback_ignores_removed_legacy_tuning_keys():
+    builder = LenRabiBuilder()
+    slot = builder.feedback_slots[0]
+    schema = _RawSchema(
+        {
+            "pi_gain_feedback_strategy": "log_step",
+            "pi_gain_feedback_step_gain": 99.0,
+            "pi_gain_feedback_decay_points": 99.0,
+        }
+    )
+
+    runtime = build_feedback_runtime([_Provider("lenrabi", builder, schema)])
+    controller = runtime.view_for("lenrabi").controller("drive_gain")
+
+    assert isinstance(controller, LogStepController)
+    assert controller.step_gain == pytest.approx(slot.default_step_gain)
+    assert controller.decay_points == pytest.approx(slot.default_decay_points)

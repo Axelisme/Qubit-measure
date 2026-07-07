@@ -314,7 +314,11 @@ class T1Builder(Builder):
             generation_fields=(
                 logical_generation_field(
                     "earlystop_snr",
-                    FloatSpec(label="earlystop_snr", optional=True),
+                    FloatSpec(
+                        label="earlystop_snr",
+                        optional=True,
+                        tooltip="Stop averaging once completed-round SNR reaches this value.",
+                    ),
                     _DEFAULT_EARLYSTOP_SNR,
                     group="acquisition",
                 ),
@@ -324,25 +328,32 @@ class T1Builder(Builder):
                     str_choice_spec(
                         "delay_mode",
                         (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
+                        tooltip="Auto derives relax delay from T1; fixed keeps Default cfg delay.",
                     ),
                     _RELAX_DELAY_MODE_AUTO_T1,
                     group="relax",
                 ),
                 logical_generation_field(
                     "t1_seed_us",
-                    FloatSpec(label="t1_seed_us"),
+                    FloatSpec(
+                        label="initial_t1_us",
+                        tooltip="Initial T1 before measured feedback exists.",
+                    ),
                     t1_seed,
                     group="relax",
                 ),
                 logical_generation_field(
                     "relax_factor",
-                    FloatSpec(label="factor"),
+                    FloatSpec(
+                        label="factor",
+                        tooltip="Multiplier applied to T1 for auto relax delay.",
+                    ),
                     _DEFAULT_RELAX_FACTOR,
                     group="relax",
                 ),
                 logical_generation_field(
                     "relax_min_us",
-                    FloatSpec(label="min_us"),
+                    FloatSpec(label="min_us", tooltip="Minimum auto relax delay."),
                     _DEFAULT_RELAX_MIN,
                     group="relax",
                 ),
@@ -351,6 +362,7 @@ class T1Builder(Builder):
                     str_choice_spec(
                         "range_mode",
                         (_SWEEP_RANGE_MODE_AUTO_T1, _SWEEP_RANGE_MODE_FIXED),
+                        tooltip="Auto derives the sweep window from latest trusted T1.",
                     ),
                     _SWEEP_RANGE_MODE_AUTO_T1,
                     group="sweep",
@@ -358,19 +370,28 @@ class T1Builder(Builder):
                 ),
                 logical_generation_field(
                     "sweep_start_us",
-                    FloatSpec(label="start_us"),
+                    FloatSpec(
+                        label="start_us",
+                        tooltip="Lower bound for the auto T1 sweep.",
+                    ),
                     _DEFAULT_SWEEP_START,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_stop_factor",
-                    FloatSpec(label="stop_factor"),
+                    FloatSpec(
+                        label="stop_factor",
+                        tooltip="T1 multiplier for the auto sweep stop.",
+                    ),
                     _DEFAULT_SWEEP_STOP_FACTOR,
                     group="sweep",
                 ),
                 logical_generation_field(
                     "sweep_stop_min_us",
-                    FloatSpec(label="stop_min_us"),
+                    FloatSpec(
+                        label="stop_min_us",
+                        tooltip="Minimum stop value for the auto T1 sweep.",
+                    ),
                     _DEFAULT_SWEEP_STOP_MIN,
                     group="sweep",
                 ),

@@ -59,8 +59,6 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
         {
             "qub_gain": "0.2",
             "drive_gain_mode": "fixed",
-            "physical_recovery_min_points": "12",
-            "physical_recovery_max_rms_mhz": "40.0",
             "earlystop_snr": "12.5",
             "acquire_retry": "2",
         },
@@ -82,14 +80,8 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
         "__kind": "direct",
         "value": "fixed",
     }
-    assert generation_raw["physical_recovery_min_points"] == {
-        "__kind": "direct",
-        "value": 12,
-    }
-    assert generation_raw["physical_recovery_max_rms_mhz"] == {
-        "__kind": "direct",
-        "value": 40.0,
-    }
+    assert "physical_recovery_min_points" not in generation_raw
+    assert "physical_recovery_max_rms_mhz" not in generation_raw
     assert generation_raw["earlystop_snr"] == {"__kind": "direct", "value": 12.5}
     assert generation_raw["acquire_retry"] == {"__kind": "direct", "value": 2}
     assert "feedback" not in generation_raw
@@ -110,8 +102,8 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     knobs = restored.state.nodes[0].schema.read_knobs()
     assert knobs["qub_gain"] == pytest.approx(0.2)
     assert knobs["drive_gain_mode"] == "fixed"
-    assert knobs["physical_recovery_min_points"] == 12
-    assert knobs["physical_recovery_max_rms_mhz"] == pytest.approx(40.0)
+    assert "physical_recovery_min_points" not in knobs
+    assert "physical_recovery_max_rms_mhz" not in knobs
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
     assert knobs["acquire_retry"] == 2
     assert restored.get_flux_sweep_expressions() == (
@@ -396,6 +388,33 @@ def test_restore_rejects_invalid_node_and_keeps_valid_nodes():
     assert len(report.rejected_nodes) == 1
     assert "bad" in report.rejected_nodes[0].subject
     assert ctrl.state.node_names() == ["freq_scan"]
+
+
+def test_restore_rejects_node_with_removed_generation_key():
+    ctrl = build_core()
+    node = ctrl.add_node_by_type("qubit_freq")
+    cfg_raw = node.schema.to_persisted_raw()
+    generation = cfg_raw["generation"]
+    assert isinstance(generation, dict)
+    generation["physical_recovery_min_points"] = {"__kind": "direct", "value": 12}
+    state = AppPersistedState(
+        workflow=PersistedWorkflow(
+            nodes=(
+                PersistedNode(
+                    type_name="qubit_freq",
+                    name="freq_scan",
+                    cfg_raw=cfg_raw,
+                ),
+            )
+        )
+    )
+
+    report = ctrl.restore_persisted_state(state)
+
+    assert report.restored_nodes == 0
+    assert len(report.rejected_nodes) == 1
+    assert "physical_recovery_min_points" in report.rejected_nodes[0].message
+    assert ctrl.state.node_names() == []
 
 
 def test_window_restore_workflow_view_updates_list_and_flux_fields(qapp):  # noqa: ARG001
