@@ -28,8 +28,7 @@ _QUB_DIM = 8
 _PHOTONS = np.array([0.0, 5.0, 10.0, 20.0])
 
 
-@pytest.fixture(scope="module")
-def floquet_setup() -> dict:
+def _build_floquet_setup() -> dict:
     from scqubits.core.fluxonium import Fluxonium
 
     fluxonium = Fluxonium(*_PARAMS, flux=_FLUX, cutoff=40, truncated_dim=_QUB_DIM)
@@ -64,12 +63,15 @@ def floquet_setup() -> dict:
     )
 
 
+@pytest.fixture(scope="module")
+def floquet_setup() -> dict:
+    return _build_floquet_setup()
+
+
 def test_fourier_melem_hermiticity(floquet_setup: dict) -> None:
     # n̂ is hermitian, so M_{i->j}^{(k)} == conj(M_{j->i}^{(-k)}). The relation is
-    # exact for a fixed modes evaluation, but qutip's FloquetBasis.mode(t)
-    # re-integrates on every call with ~1e-10 solver noise, so the two calls see
-    # slightly different modes; 1e-8 sits well above that noise and well below
-    # the dominant |M| components (~5e-2 and ~3e-4 here).
+    # exact for a fixed modes evaluation; 1e-8 sits well above qutip solver noise
+    # and well below the dominant |M| components (~5e-2 and ~3e-4 here).
     fbasis = floquet_setup["fbasis_n"][1]
     n_op, ts = floquet_setup["n_op"], floquet_setup["ts"]
     # Raw mode columns 0/1: the invariant holds for any index pair, and this
@@ -80,6 +82,21 @@ def test_fourier_melem_hermiticity(floquet_setup: dict) -> None:
     assert abs(fwd[-1]) > 1e-3  # the invariant is checked on non-trivial components
     for k in (-1, 0, 1):
         assert fwd[k] == pytest.approx(np.conj(bwd[-k]), abs=1e-8)
+
+
+def test_fourier_melem_cold_cache_is_repeatable() -> None:
+    # qutip's Propagator mutates its memoized time grid when a new t is requested.
+    # The Fourier helper must hide that cold-cache detail from callers.
+    setup = _build_floquet_setup()
+    fbasis = setup["fbasis_n"][1]
+    n_op, ts = setup["n_op"], setup["ts"]
+    i_from = setup["branch_infos"][1][1]
+    i_to = setup["branch_infos"][0][1]
+
+    first = calc_floquet_fourier_melem(fbasis, n_op, i_from, i_to, [1], ts, _R_F)
+    second = calc_floquet_fourier_melem(fbasis, n_op, i_from, i_to, [1], ts, _R_F)
+
+    np.testing.assert_allclose(first[1], second[1], rtol=0.0, atol=0.0)
 
 
 def test_resonance_map_peaks_at_quasi_energy_difference(floquet_setup: dict) -> None:

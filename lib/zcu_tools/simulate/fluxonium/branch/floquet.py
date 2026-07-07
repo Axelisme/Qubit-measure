@@ -368,11 +368,20 @@ def calc_floquet_fourier_melem(
     """
     if len(ts) == 0:
         raise ValueError("ts must contain at least one sample of the drive period")
-    modes = np.stack([fbasis.mode(t=t, data=True).to_array() for t in ts])  # (nt,D,D)
+    modes = _sample_floquet_modes(fbasis, ts)
     ket = modes[:, :, i_from]  # (nt, D)
     bra = modes[:, :, i_to].conj()  # (nt, D)
     mel = np.einsum("ti,ij,tj->t", bra, n_op, ket)  # (nt,)
     return {k: complex(np.mean(np.exp(1j * k * omega * ts) * mel)) for k in harmonics}
+
+
+def _sample_floquet_modes(
+    fbasis: qt.FloquetBasis, ts: NDArray[np.float64]
+) -> NDArray[np.complex128]:
+    """Sample periodic Floquet modes after priming qutip's propagator cache."""
+    for t in ts:
+        fbasis.U(float(t % fbasis.T))
+    return np.stack([fbasis.mode(t=float(t), data=True).to_array() for t in ts])
 
 
 def calc_tls_resonance_map(
@@ -426,7 +435,7 @@ def calc_tls_resonance_map(
     E_tls_axis = np.asarray(E_tls_axis, dtype=np.float64)
     strength = np.zeros((len(E_tls_axis), n_photons))
     for n in tqdm(range(n_photons), desc="TLS resonance map", disable=not progress):
-        modes = np.stack([fbasis_n[n].mode(t=t, data=True).to_array() for t in ts])
+        modes = _sample_floquet_modes(fbasis_n[n], ts)
         for b_from, b_to in branch_pairs:
             ket = modes[:, :, branch_infos[b_from][n]]
             bra = modes[:, :, branch_infos[b_to][n]].conj()
