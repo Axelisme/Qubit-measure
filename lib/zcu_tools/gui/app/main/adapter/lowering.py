@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
+_LOCKED_CENTER_ABS_TOL = 1e-12
+
 from .types import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
@@ -106,6 +111,56 @@ def _resolve_sweep_edge(
     raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
 
 
+def _static_center_value(value: object, *, path: str) -> float | None:
+    """Return a direct/resolved center for validation, or None if it needs md."""
+    raw = value.resolved if isinstance(value, EvalValue) else value
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise RuntimeError(
+            f"Config field '{path}.center' (Sweep center) must be numeric"
+        )
+    center = float(raw)
+    if not math.isfinite(center):
+        raise RuntimeError(
+            f"Config field '{path}.center' (Sweep center) must be finite"
+        )
+    return center
+
+
+def _validate_centered_sweep_contract(
+    spec: CenteredSweepSpec,
+    value: CenteredSweepValue,
+    full_path: str,
+    *,
+    center: float | None = None,
+) -> None:
+    if value.expts > 1 and value.span <= 0.0:
+        raise RuntimeError(
+            f"Config field '{full_path}' ({spec.label}) centered sweep span must be "
+            "greater than 0 when expts > 1"
+        )
+    if spec.locked_center is None:
+        return
+    center_value = (
+        _static_center_value(value.center, path=full_path)
+        if center is None
+        else float(center)
+    )
+    if center_value is None:
+        return
+    if not math.isclose(
+        center_value,
+        float(spec.locked_center),
+        rel_tol=0.0,
+        abs_tol=_LOCKED_CENTER_ABS_TOL,
+    ):
+        raise RuntimeError(
+            f"Config field '{full_path}.center' (Sweep center) is locked to "
+            f"{float(spec.locked_center)!r}, got {center_value!r}"
+        )
+
+
 def _section_to_dict_inner(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
@@ -177,6 +232,30 @@ def _section_to_dict_inner(
                 label="Sweep stop",
             )
             result[key] = make_sweep(start, stop, expts=node_val.expts)
+
+        elif isinstance(node_spec, CenteredSweepSpec):
+            assert isinstance(node_val, CenteredSweepValue)
+            from zcu_tools.notebook.utils import make_sweep
+
+            full_path = ".".join([*path, key])
+            center = _resolve_sweep_edge(
+                node_val.center,
+                md,
+                path=f"{full_path}.center",
+                label="Sweep center",
+            )
+            _validate_centered_sweep_contract(
+                node_spec, node_val, full_path, center=center
+            )
+            if node_val.expts == 1:
+                result[key] = make_sweep(center, center, expts=1)
+                continue
+            half_span = float(node_val.span) / 2.0
+            result[key] = make_sweep(
+                center - half_span,
+                center + half_span,
+                expts=node_val.expts,
+            )
 
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             assert isinstance(node_val, (ModuleRefValue, WaveformRefValue))
@@ -340,6 +419,15 @@ def _validate_node(
             )
         return
 
+    if isinstance(spec, CenteredSweepSpec):
+        if not isinstance(node_val, CenteredSweepValue):
+            raise RuntimeError(
+                f"Config field '{full_path}' must be a CenteredSweepValue, "
+                f"got {type(node_val).__name__}"
+            )
+        _validate_centered_sweep_contract(spec, node_val, full_path)
+        return
+
     if isinstance(spec, DeviceRefSpec):
         if not isinstance(node_val, DirectValue):
             raise RuntimeError(
@@ -488,6 +576,25 @@ def _validate_dynamic_node(
             if isinstance(node_val.stop, EvalValue):
                 _validate_eval(
                     node_val.stop, md, float, f"{full_path}.stop", "Sweep stop"
+                )
+        return
+
+    if isinstance(spec, CenteredSweepSpec):
+        if isinstance(node_val, CenteredSweepValue):
+            _validate_centered_sweep_contract(spec, node_val, full_path)
+            if isinstance(node_val.center, EvalValue):
+                _validate_eval(
+                    node_val.center, md, float, f"{full_path}.center", "Sweep center"
+                )
+            if spec.locked_center is not None:
+                center = _resolve_sweep_edge(
+                    node_val.center,
+                    md,
+                    path=f"{full_path}.center",
+                    label="Sweep center",
+                )
+                _validate_centered_sweep_contract(
+                    spec, node_val, full_path, center=center
                 )
         return
 

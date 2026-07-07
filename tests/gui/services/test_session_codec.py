@@ -9,6 +9,8 @@ from typing import cast
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -98,6 +100,37 @@ def test_roundtrip_preserves_eval_values():
     assert isinstance(sweep.stop, EvalValue)
     assert sweep.start.expr == "r_f - rf_w"
     assert sweep.stop.expr == "r_f + rf_w"
+
+
+def test_centered_sweep_roundtrip_preserves_center_shape():
+    schema = CfgSchema(
+        spec=CfgSectionSpec(fields={"sweep": CenteredSweepSpec(label="Sweep")}),
+        value=CfgSectionValue(
+            fields={
+                "sweep": CenteredSweepValue(
+                    center=EvalValue(expr="r_f", resolved=6000.0, error=None),
+                    span=100.0,
+                    expts=201,
+                ),
+            }
+        ),
+    )
+
+    raw = schema_to_raw(schema)
+    assert set(cast(dict[str, object], raw["sweep"])) == {
+        "center",
+        "span",
+        "expts",
+        "step",
+    }
+
+    restored = raw_to_schema(_empty(schema.spec), raw)
+    sweep = restored.value.fields["sweep"]
+    assert isinstance(sweep, CenteredSweepValue)
+    assert isinstance(sweep.center, EvalValue)
+    assert sweep.center.expr == "r_f"
+    assert sweep.span == pytest.approx(100.0)
+    assert sweep.expts == 201
 
 
 def test_waveform_ref_roundtrip():

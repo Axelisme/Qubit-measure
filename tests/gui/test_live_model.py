@@ -7,6 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -24,6 +26,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.live_model import (
     CallbackList,
+    CenteredSweepLiveField,
     LibraryBindingState,
     LiveModelEnv,
     ModuleRefLiveField,
@@ -244,6 +247,93 @@ def test_sweep_live_field_updates_step_through_pure_model(env):
 
     assert field.get_value().expts == 6
     assert field.get_value().step == pytest.approx(0.2)
+
+
+def test_centered_sweep_live_field_rejects_wrong_value_type(env):
+    field = CenteredSweepLiveField(
+        CenteredSweepSpec(), env, initial_val=CenteredSweepValue(0.0, 1.0, 11)
+    )
+
+    with pytest.raises(TypeError, match="CenteredSweepValue"):
+        field.set_value(DirectValue(1))
+
+
+def test_centered_sweep_live_field_canonicalizes_stale_initial_step(env):
+    field = CenteredSweepLiveField(
+        CenteredSweepSpec(),
+        env,
+        initial_val=CenteredSweepValue(0.0, 10.0, 5, step=999.0),
+    )
+
+    assert field.get_value().step == pytest.approx(2.5)
+
+
+def test_centered_sweep_live_field_updates_step_through_pure_model(env):
+    field = CenteredSweepLiveField(
+        CenteredSweepSpec(),
+        env,
+        initial_val=CenteredSweepValue(0.0, 10.0, 11, step=1.0),
+    )
+
+    field.update_step(2.0)
+
+    assert field.get_value().expts == 6
+    assert field.get_value().span == pytest.approx(10.0)
+    assert field.get_value().step == pytest.approx(2.0)
+
+
+def test_centered_sweep_live_field_rejects_locked_center_mismatch(env):
+    field = CenteredSweepLiveField(
+        CenteredSweepSpec(center_editable=False, locked_center=0.0),
+        env,
+        initial_val=CenteredSweepValue(0.0, 10.0, 11),
+    )
+
+    with pytest.raises(ValueError, match="locked to 0.0"):
+        field.set_value(CenteredSweepValue(5.0, 10.0, 11))
+
+    assert field.get_value().center == pytest.approx(0.0)
+    assert field.get_value().span == pytest.approx(10.0)
+
+
+def test_centered_sweep_live_field_rejects_zero_span_multi_point(env):
+    field = CenteredSweepLiveField(
+        CenteredSweepSpec(),
+        env,
+        initial_val=CenteredSweepValue(0.0, 10.0, 11),
+    )
+
+    with pytest.raises(ValueError, match="span must be > 0"):
+        field.update_span(0.0)
+
+    assert field.get_value().span == pytest.approx(10.0)
+
+
+def test_centered_sweep_live_field_rejects_promoting_zero_span_to_multi_point(env):
+    field = CenteredSweepLiveField(
+        CenteredSweepSpec(),
+        env,
+        initial_val=CenteredSweepValue(0.0, 0.0, 1),
+    )
+
+    with pytest.raises(ValueError, match="span must be > 0"):
+        field.update_expts(2)
+
+    assert field.get_value().span == pytest.approx(0.0)
+    assert field.get_value().expts == 1
+
+
+def test_centered_sweep_live_field_can_lock_center_only(env):
+    field = CenteredSweepLiveField(
+        CenteredSweepSpec(center_editable=False),
+        env,
+        initial_val=CenteredSweepValue(0.0, 10.0, 11),
+    )
+
+    assert field.center_field.spec.editable is False
+    field.update_span(20.0)
+    assert field.get_value().center == pytest.approx(0.0)
+    assert field.get_value().span == pytest.approx(20.0)
 
 
 # ---------------------------------------------------------------------------

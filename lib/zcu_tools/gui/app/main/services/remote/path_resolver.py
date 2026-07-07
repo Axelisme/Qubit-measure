@@ -30,6 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
     EvalValue,
 )
 from zcu_tools.gui.app.main.live_model import (
+    CenteredSweepLiveField,
     DeviceRefLiveField,
     LiteralLiveField,
     ModuleRefLiveField,
@@ -37,13 +38,14 @@ from zcu_tools.gui.app.main.live_model import (
     SectionLiveField,
     SweepLiveField,
 )
-from zcu_tools.gui.app.main.sweep_model import SweepEditor
+from zcu_tools.gui.app.main.sweep_model import CenteredSweepEditor, SweepEditor
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.live_model import LiveField
 
 _SWEEP_EDGES = {"start", "stop", "expts", "step"}
+_CENTERED_SWEEP_EDGES = {"center", "span", "expts", "step"}
 _MAX_UNKNOWN_FIELD_SUGGESTIONS = 3
 
 
@@ -81,6 +83,10 @@ def _set_recursive(
     # Reached a non-section field but still have segments to consume.
     if isinstance(field, SweepLiveField):
         _set_sweep_edge(field, head, rest, full_path, value)
+        return
+
+    if isinstance(field, CenteredSweepLiveField):
+        _set_centered_sweep_edge(field, head, rest, full_path, value)
         return
 
     if isinstance(field, ModuleRefLiveField):
@@ -155,6 +161,12 @@ def _set_leaf(field: LiveField, full_path: str, value: object) -> None:
             f"path {full_path!r} targets a sweep; set "
             f"'{full_path}.start|stop|expts|step' instead",
         )
+    if isinstance(field, CenteredSweepLiveField):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} targets a centered sweep; set "
+            f"'{full_path}.center|span|expts|step' instead",
+        )
     if isinstance(field, SectionLiveField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
@@ -194,20 +206,94 @@ def _set_sweep_edge(
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, "sweep 'expts' must be an integer"
             )
-        sweep.set_value(SweepEditor.update_expts(current, value))
+        try:
+            updated = SweepEditor.update_expts(current, value)
+            sweep.set_value(updated)
+        except ValueError as exc:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
         return
     if edge == "step":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise RemoteError(ErrorCode.INVALID_PARAMS, "sweep 'step' must be a number")
-        sweep.set_value(SweepEditor.update_step(current, float(value)))
+        try:
+            updated = SweepEditor.update_step(current, float(value))
+            sweep.set_value(updated)
+        except ValueError as exc:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
         return
     # start / stop accept a number (EvalValue editing is out of scope here).
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"sweep '{edge}' must be a number")
-    if edge == "start":
-        sweep.set_value(SweepEditor.update_start(current, float(value)))
-    else:
-        sweep.set_value(SweepEditor.update_stop(current, float(value)))
+    try:
+        updated = (
+            SweepEditor.update_start(current, float(value))
+            if edge == "start"
+            else SweepEditor.update_stop(current, float(value))
+        )
+        sweep.set_value(updated)
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+
+
+def _set_centered_sweep_edge(
+    sweep: CenteredSweepLiveField,
+    edge: str,
+    rest: list[str],
+    full_path: str,
+    value: object,
+) -> None:
+    if edge == "sweep" and rest:
+        edge = rest[0]
+        rest = rest[1:]
+    if rest:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"path {full_path!r} has trailing segments after centered sweep edge",
+        )
+    if edge not in _CENTERED_SWEEP_EDGES:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "centered sweep edge must be one of "
+            f"{sorted(_CENTERED_SWEEP_EDGES)}, got {edge!r}",
+        )
+    current = sweep.get_value()
+    if edge == "expts":
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "centered sweep 'expts' must be an integer",
+            )
+        try:
+            updated = CenteredSweepEditor.update_expts(current, value)
+            sweep.set_value(updated)
+        except ValueError as exc:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+        return
+    if edge == "step":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "centered sweep 'step' must be a number",
+            )
+        try:
+            updated = CenteredSweepEditor.update_step(current, float(value))
+            sweep.set_value(updated)
+        except ValueError as exc:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"centered sweep '{edge}' must be a number"
+        )
+    try:
+        updated = (
+            CenteredSweepEditor.update_center(current, float(value))
+            if edge == "center"
+            else CenteredSweepEditor.update_span(current, float(value))
+        )
+        sweep.set_value(updated)
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
 
 
 def _set_moduleref(
@@ -342,6 +428,30 @@ def _sweep_entries(path: str, field: SweepLiveField) -> list[dict[str, object]]:
     return out
 
 
+def _centered_sweep_entries(
+    path: str, field: CenteredSweepLiveField
+) -> list[dict[str, object]]:
+    sweep = field.get_value()
+    edges = {
+        "center": sweep.center,
+        "span": sweep.span,
+        "expts": sweep.expts,
+        "step": sweep.step,
+    }
+    out: list[dict[str, object]] = []
+    for edge, raw in edges.items():
+        value: object = raw.expr if isinstance(raw, EvalValue) else raw
+        out.append(
+            {
+                "path": f"{path}.{edge}",
+                "kind": "sweep_edge",
+                "value": value,
+                "type": "integer" if edge == "expts" else "number",
+            }
+        )
+    return out
+
+
 def _list_field(path: str, field: LiveField) -> list[dict[str, object]]:
     """Recurse one LiveField, returning the settable leaves beneath it."""
     if isinstance(field, LiteralLiveField):
@@ -350,6 +460,8 @@ def _list_field(path: str, field: LiveField) -> list[dict[str, object]]:
         return [_scalar_entry(path, field)]
     if isinstance(field, SweepLiveField):
         return _sweep_entries(path, field)
+    if isinstance(field, CenteredSweepLiveField):
+        return _centered_sweep_entries(path, field)
     if isinstance(field, DeviceRefLiveField):
         return [
             {
@@ -478,6 +590,21 @@ def _tree_sweep(field: SweepLiveField) -> dict[str, object]:
     }
 
 
+def _tree_centered_sweep(field: CenteredSweepLiveField) -> dict[str, object]:
+    """A centered sweep node as bare scalar edges (center/span/expts/step)."""
+    sweep = field.get_value()
+    edges = {
+        "center": sweep.center,
+        "span": sweep.span,
+        "expts": sweep.expts,
+        "step": sweep.step,
+    }
+    return {
+        edge: (raw.expr if isinstance(raw, EvalValue) else raw)
+        for edge, raw in edges.items()
+    }
+
+
 # Sentinel: a field that has no settable tree node (a literal / unsupported
 # field). Section/ref recursion drops such children, mirroring the flat lister
 # which omits immutable leaves entirely — so the tree shows only what set_field
@@ -503,6 +630,8 @@ def _tree_field(field: LiveField) -> object:
         return value
     if isinstance(field, SweepLiveField):
         return _tree_sweep(field)
+    if isinstance(field, CenteredSweepLiveField):
+        return _tree_centered_sweep(field)
     if isinstance(field, DeviceRefLiveField):
         # A device ref is a leaf selector (no settable sub-tree); ``options`` is
         # the live registered-device list, not a static spec list.

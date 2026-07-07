@@ -10,6 +10,8 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -313,6 +315,87 @@ def test_sweep_eval_edges_resolve_against_md_when_no_snapshot():
     assert isinstance(sweep, SweepCfg)
     assert sweep.start == pytest.approx(5990.0)
     assert sweep.stop == pytest.approx(6010.0)
+
+
+# ---------------------------------------------------------------------------
+# CenteredSweepSpec / CenteredSweepValue
+# ---------------------------------------------------------------------------
+
+
+def test_centered_sweepvalue_auto_norm_derives_step_from_span():
+    v = CenteredSweepValue(center=0.0, span=100.0, expts=201)
+    assert v.step == pytest.approx(0.5)
+
+
+def test_centered_sweep_produces_sweep_cfg():
+    from zcu_tools.program.v2 import SweepCfg
+
+    s = _schema(
+        {"sweep": CenteredSweepSpec(label="Freq")},
+        {"sweep": CenteredSweepValue(center=10.0, span=4.0, expts=5)},
+    )
+    result = s.to_raw_dict(None, _make_ml())
+    sweep = result["sweep"]
+    assert isinstance(sweep, SweepCfg)
+    assert sweep.start == pytest.approx(8.0)
+    assert sweep.stop == pytest.approx(12.0)
+    assert sweep.expts == 5
+
+
+def test_centered_sweep_single_point_lowers_to_center():
+    from zcu_tools.program.v2 import SweepCfg
+
+    s = _schema(
+        {"sweep": CenteredSweepSpec(label="Freq")},
+        {"sweep": CenteredSweepValue(center=10.0, span=4.0, expts=1)},
+    )
+    result = s.to_raw_dict(None, _make_ml())
+    sweep = result["sweep"]
+    assert isinstance(sweep, SweepCfg)
+    assert sweep.start == pytest.approx(10.0)
+    assert sweep.stop == pytest.approx(10.0)
+    assert sweep.expts == 1
+
+
+def test_centered_sweep_rejects_zero_span_multi_point():
+    s = _schema(
+        {"sweep": CenteredSweepSpec(label="Freq")},
+        {"sweep": CenteredSweepValue(center=10.0, span=0.0, expts=5)},
+    )
+
+    with pytest.raises(RuntimeError, match="span must be greater than 0"):
+        s.to_raw_dict(None, _make_ml())
+
+
+def test_centered_sweep_locked_center_rejects_mismatch():
+    s = _schema(
+        {"sweep": CenteredSweepSpec(label="Freq", locked_center=0.0)},
+        {"sweep": CenteredSweepValue(center=5.0, span=10.0, expts=11)},
+    )
+
+    with pytest.raises(RuntimeError, match="locked to 0.0"):
+        s.to_raw_dict(None, _make_ml())
+
+
+def test_centered_sweep_eval_center_resolves_against_md_when_no_snapshot():
+    from zcu_tools.program.v2 import SweepCfg
+
+    s = _schema(
+        {"sweep": CenteredSweepSpec()},
+        {
+            "sweep": CenteredSweepValue(
+                center=EvalValue(expr="r_f"),
+                span=4.0,
+                expts=5,
+            )
+        },
+    )
+    md = MetaDict()
+    md.r_f = 6000.0
+    sweep = s.to_raw_dict(md, _make_ml())["sweep"]
+    assert isinstance(sweep, SweepCfg)
+    assert sweep.start == pytest.approx(5998.0)
+    assert sweep.stop == pytest.approx(6002.0)
 
 
 # ---------------------------------------------------------------------------

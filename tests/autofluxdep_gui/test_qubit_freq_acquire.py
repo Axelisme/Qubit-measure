@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
+from zcu_tools.gui.app.autofluxdep.cfg import CenteredSweepValue
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
@@ -158,7 +158,7 @@ def test_qubit_freq_acquire_fit_varies_with_flux():
             "rounds": 1,
             "relax_delay": 0.0,
             # wide detune window around the predicted centre so the dip is caught.
-            "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
+            "detune_sweep": CenteredSweepValue(center=0.0, span=120.0, expts=121),
         }
     )
 
@@ -207,7 +207,7 @@ def test_plotter_update_runs_after_a_real_produce():
         "reps": 100,
         "rounds": 1,
         "relax_delay": 0.0,
-        "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
+        "detune_sweep": CenteredSweepValue(center=0.0, span=120.0, expts=121),
     }
     schema = builder.make_default_schema().with_overrides(params)
     result = builder.make_init_result(schema, flux)
@@ -257,7 +257,7 @@ def test_good_fit_observes_prediction_residual_by_default():
         "earlystop_snr": None,
         "drive_gain_mode": "fixed",
         "relax_delay": 0.0,
-        "detune_sweep": SweepValue(start=-60.0, stop=60.0, expts=121),
+        "detune_sweep": CenteredSweepValue(center=0.0, span=120.0, expts=121),
     }
     schema = builder.make_default_schema().with_overrides(params)
     result = builder.make_init_result(schema, np.array([0.0]))
@@ -332,7 +332,7 @@ def _mocked_qubit_freq_produce_env(
         "reps": 1,
         "rounds": 1,
         "relax_delay": 0.0,
-        "detune_sweep": SweepValue(start=-5.0, stop=5.0, expts=11),
+        "detune_sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11),
     }
     if schema_overrides is not None:
         overrides.update(schema_overrides)

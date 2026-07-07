@@ -53,10 +53,11 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize.freq_gain import (
     RoOptFreqGainAdapter,
 )
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     FloatSpec,
     OverridePath,
     OverridePlan,
-    SweepValue,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
@@ -220,12 +221,6 @@ def _accepted_ro_optimum(
     )
 
 
-# Default axis specs: (start, stop, npts). The readout-frequency fallback follows
-# the notebook raw cfg shape: previous-best center ± a small range. A calibrated
-# readout or previous ro_optimize result recenters the real run.
-_DEFAULT_FREQ_RANGE: tuple[float, float, int] = (5999.0, 6001.0, 21)
-_DEFAULT_GAIN_RANGE: tuple[float, float, int] = (0.0, 0.2, 21)
-
 _DEFAULT_CENTER_FREQ = 6000.0  # MHz — baseline readout resonance fallback
 _DEFAULT_CENTER_GAIN = 0.1
 
@@ -285,6 +280,12 @@ def _seed_t1(ctx: Any | None) -> float:
 
 def _center_of(sweep: Any) -> float:
     return 0.5 * (float(sweep.start) + float(sweep.stop))
+
+
+def _centered_window(start: float, stop: float, *, expts: int) -> CenteredSweepValue:
+    lo = float(start)
+    hi = float(stop)
+    return CenteredSweepValue(center=0.5 * (lo + hi), span=abs(hi - lo), expts=expts)
 
 
 def _resolve_range(
@@ -658,6 +659,16 @@ class RoOptimizeBuilder(Builder):
                     },
                 ),
             ),
+            spec_overrides={
+                "sweep.freq": CenteredSweepSpec(
+                    label="Freq (MHz)",
+                    tooltip="Readout frequency search window; stored as center/span and lowered to start/stop for the program.",
+                ),
+                "sweep.gain": CenteredSweepSpec(
+                    label="Gain",
+                    tooltip="Readout gain search window; stored as center/span and lowered to start/stop for the program.",
+                ),
+            },
             default_overrides={
                 "reps": 1000,
                 "rounds": 10,
@@ -666,12 +677,12 @@ class RoOptimizeBuilder(Builder):
                     factor=_DEFAULT_RELAX_FACTOR,
                     minimum=None,
                 ),
-                "freq_range": SweepValue(
+                "freq_range": _centered_window(
                     freq_seed - _DEFAULT_FREQ_HALF_WIDTH,
                     freq_seed + _DEFAULT_FREQ_HALF_WIDTH,
                     expts=31,
                 ),
-                "gain_range": SweepValue(
+                "gain_range": _centered_window(
                     max(0.0, gain_seed - _DEFAULT_GAIN_HALF_WIDTH),
                     min(1.0, gain_seed + _DEFAULT_GAIN_HALF_WIDTH),
                     expts=31,

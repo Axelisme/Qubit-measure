@@ -21,6 +21,8 @@ from typing import Any, cast
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -194,7 +196,9 @@ def _sectioned_test_schema() -> NodeCfgSchema:
 
 
 def _assert_no_value_objects(value: object) -> None:
-    assert not isinstance(value, (CfgSectionValue, DirectValue, EvalValue, SweepValue))
+    assert not isinstance(
+        value, (CfgSectionValue, DirectValue, EvalValue, SweepValue, CenteredSweepValue)
+    )
     if isinstance(value, dict):
         for child in value.values():
             _assert_no_value_objects(child)
@@ -1123,7 +1127,19 @@ def test_qubit_freq_recovery_default_knobs():
 
 
 def test_qubit_freq_default_detune_sweep_is_symmetric_100mhz_window():
-    detune = QubitFreqBuilder().make_default_schema().lower(None)["detune_sweep"]
+    schema = QubitFreqBuilder().make_default_schema()
+    sweep_section = schema.schema.spec.fields["sweep"]
+    assert isinstance(sweep_section, CfgSectionSpec)
+    freq_spec = sweep_section.fields["freq"]
+    assert isinstance(freq_spec, CenteredSweepSpec)
+    assert freq_spec.center_badge == "generated"
+    assert freq_spec.center_editable is False
+    assert freq_spec.locked_center == 0.0
+
+    knob = schema.read_knobs()["detune_sweep"]
+    assert knob == {"center": 0.0, "span": 100.0, "expts": 201, "step": 0.5}
+
+    detune = schema.lower(None)["detune_sweep"]
 
     assert float(detune.start) == pytest.approx(-50.0)
     assert float(detune.stop) == pytest.approx(50.0)
@@ -1160,13 +1176,27 @@ def test_default_required_routing_fields_fast_fail(
         schema.lower(None)
 
 
-def test_ro_optimize_default_sweep_specs_are_user_facing_ranges():
-    spec = RoOptimizeBuilder().make_default_schema().schema.spec
+def test_ro_optimize_default_sweep_specs_are_user_facing_centered_ranges():
+    schema = RoOptimizeBuilder().make_default_schema()
+    spec = schema.schema.spec
     sweep = spec.fields["sweep"]
 
     assert isinstance(sweep, CfgSectionSpec)
-    assert isinstance(sweep.fields["freq"], SweepSpec)
-    assert isinstance(sweep.fields["gain"], SweepSpec)
+    assert isinstance(sweep.fields["freq"], CenteredSweepSpec)
+    assert isinstance(sweep.fields["gain"], CenteredSweepSpec)
+    knobs = schema.read_knobs()
+    assert knobs["freq_range"] == {
+        "center": 6000.0,
+        "span": 2.0,
+        "expts": 31,
+        "step": 2.0 / 30,
+    }
+    assert knobs["gain_range"] == {
+        "center": 0.1,
+        "span": 0.2,
+        "expts": 31,
+        "step": 0.2 / 30,
+    }
 
 
 def test_ro_optimize_fresh_gain_fallback_is_low_power_window():
@@ -1660,13 +1690,22 @@ def test_scalar_eval_value_lowers_against_md():
 def test_sweep_eval_edges_lower_against_md():
     md = MetaDict()
     md.center = 10.0
-    schema = QubitFreqBuilder().make_default_schema()
+    schema = path_node_schema(
+        (
+            node_path(
+                "detune_sweep",
+                "sweep.freq",
+                CenteredSweepSpec(),
+                CenteredSweepValue(center=0.0, span=10.0, expts=11),
+            ),
+        )
+    )
 
     schema.set_field(
         "detune_sweep",
-        SweepValue(
-            start=EvalValue("center - 2"),
-            stop=EvalValue("center + 2"),
+        CenteredSweepValue(
+            center=EvalValue("center"),
+            span=4.0,
             expts=5,
         ),
     )
@@ -1677,13 +1716,13 @@ def test_sweep_eval_edges_lower_against_md():
         12.0,
         5,
     )
-    assert schema.read_knobs()["detune_sweep"]["start"] == {
+    assert schema.read_knobs()["detune_sweep"]["center"] == {
         "__kind": "eval",
-        "expr": "center - 2",
+        "expr": "center",
     }
-    assert read_value_tree(schema)["sweep"]["freq"]["start"] == {
+    assert read_value_tree(schema)["sweep"]["freq"]["center"] == {
         "__kind": "eval",
-        "expr": "center - 2",
+        "expr": "center",
     }
 
 
@@ -1704,7 +1743,6 @@ def test_with_overrides_unknown_key_fast_fails():
 
 def test_set_node_params_types_and_fast_fails():
     from zcu_tools.gui.app.autofluxdep.app import build_core
-    from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 
     ctrl = build_core()
     node = ctrl.add_node_by_type("qubit_freq")
@@ -1718,16 +1756,22 @@ def test_set_node_params_types_and_fast_fails():
     assert knobs["qub_gain"] == 0.2
     assert knobs["qub_ch"] == 3
 
-    # a sweep knob now accepts a SweepValue (the 160b typed sweep widget edits it)
+    # qubit_freq detune sweep accepts the centered value model the widget edits,
+    # but its generated center is locked to the relative detune origin.
     ctrl.set_node_params(
-        index, {"detune_sweep": SweepValue(start=-30.0, stop=40.0, expts=71)}
+        index, {"detune_sweep": CenteredSweepValue(center=0.0, span=70.0, expts=71)}
     )
     detune = node.schema.lower(None)["detune_sweep"]
     assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
-        -30.0,
-        40.0,
+        -35.0,
+        35.0,
         71,
     )
+    with pytest.raises(ValueError, match="locked to 0.0"):
+        ctrl.set_node_params(
+            index,
+            {"detune_sweep": CenteredSweepValue(center=5.0, span=70.0, expts=71)},
+        )
 
     # an unknown key fast-fails (a real typo — the form only renders declared knobs)
     with pytest.raises(KeyError, match="Unknown node param"):

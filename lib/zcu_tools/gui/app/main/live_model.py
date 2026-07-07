@@ -26,6 +26,7 @@ controller boundary, and tracks unset Scalar fields explicitly.
 from __future__ import annotations
 
 import logging
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ from typing import TYPE_CHECKING, Protocol, cast
 from zcu_tools.gui.session.value_lookup import ValueRef, ValueTypeError
 
 from .adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeSpec,
     CfgNodeValue,
     CfgSectionSpec,
@@ -52,7 +55,7 @@ from .adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from .sweep_model import SweepEditor
+from .sweep_model import CenteredSweepEditor, SweepEditor
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -65,6 +68,8 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
+
+_CENTERED_SWEEP_LOCKED_CENTER_ABS_TOL = 1e-12
 
 
 class ControllerProtocol(Protocol):
@@ -406,6 +411,145 @@ class SweepLiveField(LiveField):
 
     def _refresh_validity(self) -> None:
         self._set_valid(self.start_field.is_valid() and self.stop_field.is_valid())
+
+
+class CenteredSweepLiveField(LiveField):
+    spec: CenteredSweepSpec
+
+    def __init__(
+        self, spec: CenteredSweepSpec, env: LiveModelEnv, initial_val: object = None
+    ) -> None:
+        super().__init__(spec, env)
+        self._updating = False
+        if isinstance(initial_val, CenteredSweepValue):
+            initial = CenteredSweepEditor.canonicalize(initial_val)
+        else:
+            initial = CenteredSweepValue(center=0.5, span=1.0, expts=11, step=0.1)
+        self._span = initial.span
+        self._expts = initial.expts
+        self._step = initial.step
+
+        center_spec = ScalarSpec(
+            label=spec.label,
+            type=float,
+            decimals=spec.decimals,
+            editable=spec.editable and spec.center_editable,
+        )
+        self.center_field = ScalarLiveField(
+            center_spec, env, initial_val=self._coerce_center(initial.center)
+        )
+        self.center_field.on_change.connect(self._on_child_change)
+        self.center_field.on_validity_changed.connect(self._on_child_validity_changed)
+        self._refresh_validity()
+
+    def get_value(self) -> CenteredSweepValue:
+        return CenteredSweepValue(
+            center=self._center_value(self.center_field.get_value()),
+            span=self._span,
+            expts=self._expts,
+            step=self._step,
+        )
+
+    def set_value(self, val: object) -> None:
+        if isinstance(val, CenteredSweepValue):
+            canonical = CenteredSweepEditor.canonicalize(val)
+            self._validate_value(canonical)
+            self._updating = True
+            try:
+                self.center_field.set_value(self._coerce_center(canonical.center))
+                self._span = canonical.span
+                self._expts = canonical.expts
+                self._step = canonical.step
+            finally:
+                self._updating = False
+            self._refresh_validity()
+            self.on_change.emit(self.get_value())
+            return
+        raise TypeError(
+            "CenteredSweepLiveField expects CenteredSweepValue, "
+            f"got {type(val).__name__}"
+        )
+
+    def update_span(self, span: float) -> None:
+        self.set_value(CenteredSweepEditor.update_span(self.get_value(), span))
+
+    def update_expts(self, expts: int) -> None:
+        self.set_value(CenteredSweepEditor.update_expts(self.get_value(), expts))
+
+    def update_step(self, step: float) -> None:
+        self.set_value(CenteredSweepEditor.update_step(self.get_value(), step))
+
+    def teardown(self) -> None:
+        self.center_field.teardown()
+
+    def refresh_external(self, event: object) -> None:
+        self.center_field.refresh_external(event)
+        self._refresh_validity()
+
+    def _coerce_center(self, value: object) -> ScalarValue:
+        if isinstance(value, EvalValue):
+            return value
+        if isinstance(value, (int, float)):
+            return DirectValue(value=float(value))
+        raise TypeError(
+            f"Centered sweep center expects float or EvalValue, got {type(value).__name__}"
+        )
+
+    def _center_value(self, value: ScalarValue) -> float | EvalValue:
+        if isinstance(value, EvalValue):
+            return value
+        if value.value is None:
+            raise TypeError("Centered sweep center DirectValue is unset (None)")
+        return float(value.value)
+
+    def _validate_value(self, value: CenteredSweepValue) -> None:
+        if value.expts > 1 and value.span <= 0.0:
+            raise ValueError("Centered sweep span must be > 0 when expts > 1")
+        if self.spec.locked_center is None:
+            return
+        center = self._resolved_center(value.center)
+        if center is None:
+            raise ValueError(
+                "Centered sweep center is locked to "
+                f"{float(self.spec.locked_center)!r}; unresolved EvalValue is not allowed"
+            )
+        if not math.isclose(
+            center,
+            float(self.spec.locked_center),
+            rel_tol=0.0,
+            abs_tol=_CENTERED_SWEEP_LOCKED_CENTER_ABS_TOL,
+        ):
+            raise ValueError(
+                "Centered sweep center is locked to "
+                f"{float(self.spec.locked_center)!r}, got {center!r}"
+            )
+
+    def _resolved_center(self, value: float | EvalValue) -> float | None:
+        raw: object = value.resolved if isinstance(value, EvalValue) else value
+        if raw is None:
+            return None
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ValueError("Centered sweep center must be numeric")
+        center = float(raw)
+        if not math.isfinite(center):
+            raise ValueError("Centered sweep center must be finite")
+        return center
+
+    def _on_child_change(self, *_: object) -> None:
+        if self._updating:
+            return
+        canonical = CenteredSweepEditor.canonicalize(self.get_value())
+        self._span = canonical.span
+        self._expts = canonical.expts
+        self._step = canonical.step
+        self._refresh_validity()
+        self.on_change.emit(canonical)
+
+    def _on_child_validity_changed(self, *_: object) -> None:
+        self._refresh_validity()
+
+    def _refresh_validity(self) -> None:
+        self._set_valid(self.center_field.is_valid())
 
 
 class SectionLiveField(LiveField):
@@ -894,6 +1038,8 @@ def create_live_field(
         return LiteralLiveField(spec, env, initial_val)
     if isinstance(spec, SweepSpec):
         return SweepLiveField(spec, env, initial_val)
+    if isinstance(spec, CenteredSweepSpec):
+        return CenteredSweepLiveField(spec, env, initial_val)
     if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
         return ModuleRefLiveField(spec, env, initial_val)
     if isinstance(spec, DeviceRefSpec):

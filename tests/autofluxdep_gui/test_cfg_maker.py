@@ -12,7 +12,11 @@ import math
 from typing import Any
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema, SweepValue
+from zcu_tools.gui.app.autofluxdep.cfg import (
+    CenteredSweepValue,
+    NodeCfgSchema,
+    SweepValue,
+)
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -228,7 +232,8 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
     builder = QubitFreqBuilder()
     result = builder.make_init_result(
         _schema(
-            builder, {"detune_sweep": SweepValue(start=-50.0, stop=50.0, expts=201)}
+            builder,
+            {"detune_sweep": CenteredSweepValue(center=0.0, span=100.0, expts=201)},
         ),
         np.array([0.0]),
     )
@@ -524,8 +529,8 @@ def test_ro_optimize_make_cfg_lowers_context():
             {
                 "reps": 1000,
                 "rounds": 10,
-                "freq_range": SweepValue(start=5999.0, stop=6001.0, expts=21),
-                "gain_range": SweepValue(start=0.0, stop=0.2, expts=21),
+                "freq_range": CenteredSweepValue(center=6000.0, span=2.0, expts=21),
+                "gain_range": CenteredSweepValue(center=0.1, span=0.2, expts=21),
                 "skew_penalty": 0.25,
             },
         ),
@@ -583,8 +588,8 @@ def test_ro_optimize_first_point_uses_default_search_ranges():
         schema=_schema(
             RoOptimizeBuilder(),
             {
-                "freq_range": SweepValue(start=5999.0, stop=6001.0, expts=21),
-                "gain_range": SweepValue(start=0.0, stop=0.2, expts=21),
+                "freq_range": CenteredSweepValue(center=6000.0, span=2.0, expts=21),
+                "gain_range": CenteredSweepValue(center=0.1, span=0.2, expts=21),
             },
         ),
         ml=ml,
@@ -619,8 +624,8 @@ def test_ro_optimize_make_cfg_can_fix_center_and_relax_delay():
         schema=_schema(
             RoOptimizeBuilder(),
             {
-                "freq_range": SweepValue(start=7000.75, stop=7001.25, expts=11),
-                "gain_range": SweepValue(start=0.7, stop=0.9, expts=11),
+                "freq_range": CenteredSweepValue(center=7001.0, span=0.5, expts=11),
+                "gain_range": CenteredSweepValue(center=0.8, span=0.2, expts=11),
                 "freq_range_mode": "fixed",
                 "gain_range_mode": "fixed",
                 "relax_delay_mode": "fixed",
@@ -645,8 +650,8 @@ def test_ro_optimize_init_result_uses_window_params():
     schema = _schema(
         builder,
         {
-            "freq_range": SweepValue(start=5950.0, stop=6050.0, expts=31),
-            "gain_range": SweepValue(start=-0.5, stop=1.5, expts=31),
+            "freq_range": CenteredSweepValue(center=6000.0, span=100.0, expts=31),
+            "gain_range": CenteredSweepValue(center=0.5, span=2.0, expts=31),
         },
     )
     result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 3))
@@ -667,8 +672,8 @@ def test_ro_optimize_init_result_can_use_default_sweep_width():
     schema = _schema(
         builder,
         {
-            "freq_range": SweepValue(start=5950.0, stop=6050.0, expts=31),
-            "gain_range": SweepValue(start=-0.5, stop=1.5, expts=31),
+            "freq_range": CenteredSweepValue(center=6000.0, span=100.0, expts=31),
+            "gain_range": CenteredSweepValue(center=0.5, span=2.0, expts=31),
             "freq_window_mode": "from_default_sweep",
             "gain_window_mode": "from_default_sweep",
         },
@@ -693,8 +698,8 @@ def test_ro_optimize_init_result_uses_fixed_center_params():
     schema = _schema(
         builder,
         {
-            "freq_range": SweepValue(start=7000.75, stop=7001.25, expts=11),
-            "gain_range": SweepValue(start=0.7, stop=0.9, expts=11),
+            "freq_range": CenteredSweepValue(center=7001.0, span=0.5, expts=11),
+            "gain_range": CenteredSweepValue(center=0.8, span=0.2, expts=11),
             "freq_range_mode": "fixed",
             "gain_range_mode": "fixed",
         },
@@ -717,8 +722,8 @@ def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
 
     builder = RoOptimizeBuilder()
     params = {
-        "freq_range": SweepValue(start=5999.0, stop=6001.0, expts=21),
-        "gain_range": SweepValue(start=0.0, stop=0.2, expts=21),
+        "freq_range": CenteredSweepValue(center=6000.0, span=2.0, expts=21),
+        "gain_range": CenteredSweepValue(center=0.1, span=0.2, expts=21),
     }
     schema = _schema(builder, params)
     result = builder.make_init_result(schema, np.linspace(0.0, 1.0, 11))

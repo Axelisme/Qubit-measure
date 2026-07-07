@@ -5,6 +5,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .types import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
@@ -47,6 +49,8 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 fields[key] = DirectValue(default_value_for_type(node_spec.type))
         elif isinstance(node_spec, SweepSpec):
             fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
+        elif isinstance(node_spec, CenteredSweepSpec):
+            fields[key] = CenteredSweepValue(center=0.5, span=1.0, expts=11, step=0.1)
         elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
             if node_spec.optional:
                 fields[key] = None  # optional ref defaults to disabled (ADR-0010)
@@ -207,6 +211,22 @@ def inherit_from(
                 )
             else:
                 new_fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
+            continue
+
+        if isinstance(new_node_spec, CenteredSweepSpec):
+            if isinstance(old_node_spec, CenteredSweepSpec) and isinstance(
+                old_node_val, CenteredSweepValue
+            ):
+                new_fields[key] = CenteredSweepValue(
+                    old_node_val.center,
+                    old_node_val.span,
+                    old_node_val.expts,
+                    old_node_val.step,
+                )
+            else:
+                new_fields[key] = CenteredSweepValue(
+                    center=0.5, span=1.0, expts=11, step=0.1
+                )
             continue
 
         if isinstance(new_node_spec, ModuleRefSpec):

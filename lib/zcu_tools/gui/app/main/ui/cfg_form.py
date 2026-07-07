@@ -18,6 +18,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
     CfgNodeSpec,
     CfgNodeValue,
     CfgSectionSpec,
@@ -33,6 +34,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 
 from ..live_model import (
+    CenteredSweepLiveField,
     LiveField,
     ModuleRefLiveField,
     ScalarLiveField,
@@ -373,6 +375,14 @@ class CfgFormWidget(QWidget):
                 path=f"{path}.stop" if path else "sweep.stop",
             )
 
+        if isinstance(field, CenteredSweepLiveField):
+            if field.center_field.is_valid():
+                return None
+            return self._find_first_invalid(
+                field.center_field,
+                path=f"{path}.center" if path else "sweep.center",
+            )
+
         if isinstance(field, ModuleRefLiveField):
             if field.is_valid():
                 return None
@@ -405,7 +415,7 @@ def default_decoration_for_spec(spec: CfgNodeSpec) -> FieldDecoration:
     """Return the generic decoration implied by a pure cfg spec."""
     if isinstance(spec, LiteralSpec):
         return FieldDecoration(hidden=True, enabled=False)
-    if isinstance(spec, (ScalarSpec, SweepSpec)):
+    if isinstance(spec, (ScalarSpec, SweepSpec, CenteredSweepSpec)):
         return FieldDecoration(enabled=bool(spec.editable), tooltip=spec.tooltip)
     if isinstance(
         spec, (ModuleRefSpec, WaveformRefSpec, DeviceRefSpec, CfgSectionSpec)

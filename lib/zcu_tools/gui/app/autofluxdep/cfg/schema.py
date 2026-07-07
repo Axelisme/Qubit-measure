@@ -10,6 +10,7 @@ UI stays cfg-shaped while builder code keeps stable keys.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -19,6 +20,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeSpec,
     CfgSchema,
     CfgSectionSpec,
@@ -81,6 +84,51 @@ def _coerce_scalar(value: Any, type_: type) -> Any:
     if type_ is bool:
         return bool(value)
     return type_(value)
+
+
+def _centered_sweep_center_for_assignment(
+    key: str, value: CenteredSweepValue
+) -> float | None:
+    center = value.center
+    if isinstance(center, EvalValue):
+        if center.resolved is None:
+            return None
+        center = center.resolved
+    if isinstance(center, bool) or not isinstance(center, (int, float)):
+        raise ValueError(f"Param {key!r} centered sweep center must be numeric")
+    numeric = float(center)
+    if not math.isfinite(numeric):
+        raise ValueError(f"Param {key!r} centered sweep center must be finite")
+    return numeric
+
+
+def _ensure_centered_sweep_assignment(
+    key: str,
+    spec: CenteredSweepSpec,
+    value: CenteredSweepValue,
+) -> None:
+    if value.expts > 1 and value.span <= 0.0:
+        raise ValueError(
+            f"Param {key!r} centered sweep span must be greater than 0 when expts > 1"
+        )
+    if spec.locked_center is None:
+        return
+    center = _centered_sweep_center_for_assignment(key, value)
+    if center is None:
+        raise ValueError(
+            f"Param {key!r} centered sweep center is locked to "
+            f"{float(spec.locked_center)!r}; unresolved EvalValue is not allowed"
+        )
+    if not math.isclose(
+        center,
+        float(spec.locked_center),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError(
+            f"Param {key!r} centered sweep center is locked to "
+            f"{float(spec.locked_center)!r}, got {center!r}"
+        )
 
 
 def str_choice_spec(
@@ -176,6 +224,15 @@ class NodeCfgSchema:
                 )
             _assign_value_at_path(self.schema.value, path, value)
             return
+        if isinstance(spec, CenteredSweepSpec):
+            if not isinstance(value, CenteredSweepValue):
+                raise TypeError(
+                    f"Param {key!r} is a centered sweep; expected a "
+                    f"CenteredSweepValue, got {type(value).__name__}"
+                )
+            _ensure_centered_sweep_assignment(key, spec, value)
+            _assign_value_at_path(self.schema.value, path, value)
+            return
         if isinstance(spec, ModuleRefSpec):
             if value is None and spec.optional:
                 _assign_value_at_path(self.schema.value, path, None)
@@ -258,8 +315,9 @@ class NodeCfgSchema:
 
         Read-only projection of the value tree for an observer (the remote
         bridge's ``node.cfg``): keys are stable logical knob names, a scalar knob
-        reads to its plain value (or an eval marker), and a sweep knob reads to
-        ``{start, stop, expts}``. Unlike ``lower``, this does NOT build a
+        reads to its plain value (or an eval marker), and sweep-like knobs keep
+        their user-facing shape (``{start, stop, expts}`` or
+        ``{center, span, expts, step}``). Unlike ``lower``, this does NOT build a
         ``SweepCfg`` (whose internal axis object is not JSON-serialisable) and
         needs no ``ModuleLibrary`` — it reports exactly what the user set, not
         the lowered run cfg.
@@ -313,12 +371,19 @@ def _validate_logical_paths(spec: CfgSectionSpec, paths: Mapping[str, str]) -> N
         _validate_path_part("logical key", logical_key)
         leaf_spec = _resolve_spec_at_path(spec, path)
         if not isinstance(
-            leaf_spec, (ScalarSpec, SweepSpec, ModuleRefSpec, WaveformRefSpec)
+            leaf_spec,
+            (
+                ScalarSpec,
+                SweepSpec,
+                CenteredSweepSpec,
+                ModuleRefSpec,
+                WaveformRefSpec,
+            ),
         ):
             raise TypeError(
                 f"Logical node param {logical_key!r} maps to unsupported spec "
                 f"{type(leaf_spec).__name__}; only ScalarSpec, SweepSpec, "
-                "ModuleRefSpec, and WaveformRefSpec are supported"
+                "CenteredSweepSpec, ModuleRefSpec, and WaveformRefSpec are supported"
             )
 
 
@@ -545,7 +610,9 @@ def _lower_value_at_path(
 
 def _rewrite_single_value_lower_error(message: str, path: str) -> str:
     """Preserve the node cfg path when lowering an isolated logical leaf."""
-    return message.replace("Config field 'value'", f"Config field '{path}'")
+    return message.replace("Config field 'value.", f"Config field '{path}.").replace(
+        "Config field 'value'", f"Config field '{path}'"
+    )
 
 
 def _jsonify_value_node(value: Any) -> Any:
@@ -573,13 +640,21 @@ def _jsonify_value_node(value: Any) -> Any:
             "stop": _knob_scalar_value(value.stop),
             "expts": int(value.expts),
         }
+    if isinstance(value, CenteredSweepValue):
+        return {
+            "center": _knob_scalar_value(value.center),
+            "span": float(value.span),
+            "expts": int(value.expts),
+            "step": float(value.step),
+        }
     if isinstance(value, DirectValue):
         return _knob_scalar_value(value.value)
     if isinstance(value, EvalValue):
         return _knob_eval_value(value)
     raise TypeError(
         f"Unexpected node cfg value-tree leaf {type(value).__name__}; "
-        "expected CfgSectionValue, DirectValue, EvalValue, or SweepValue"
+        "expected CfgSectionValue, DirectValue, EvalValue, SweepValue, "
+        "or CenteredSweepValue"
     )
 
 

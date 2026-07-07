@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QLabel,
     QLineEdit,
     QMenu,
+    QSizePolicy,
+    QSpacerItem,
     QSpinBox,
     QWidget,
 )
@@ -30,6 +33,7 @@ from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 from ...adapter import DirectValue, EvalValue, default_value_for_type
 from ...live_model import (
+    CenteredSweepLiveField,
     LiteralLiveField,
     LiveField,
     ScalarLiveField,
@@ -43,6 +47,7 @@ if TYPE_CHECKING:
 
 FIELD_INPUT_MIN_WIDTH = 20
 FIELD_LABEL_MAX_WIDTH = 80
+SWEEP_INPUT_MAX_WIDTH = 180
 
 
 class ElidedLabel(QLabel):
@@ -168,6 +173,26 @@ def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     """Build an input widget from a ScalarSpec and initial value."""
     return make_value_widget(
         spec.type, value, spec.choices, spec.editable, spec.decimals, spec.optional
+    )
+
+
+def _keep_sweep_input_compact(widget: QWidget) -> None:
+    widget.setMaximumWidth(SWEEP_INPUT_MAX_WIDTH)
+
+
+def _add_sweep_spacer(layout: QGridLayout) -> None:
+    layout.setColumnStretch(4, 1)
+    layout.addItem(
+        QSpacerItem(
+            0,
+            0,
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        ),
+        0,
+        4,
+        2,
+        1,
     )
 
 
@@ -503,12 +528,15 @@ class SweepWidget(BaseLiveWidget):
 
         self._start_widget = ScalarWidget(field.start_field, self)
         self._stop_widget = ScalarWidget(field.stop_field, self)
+        _keep_sweep_input_compact(self._start_widget)
+        _keep_sweep_input_compact(self._stop_widget)
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
         self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
         self._expts.setValue(sv.expts)
         self._expts.valueChanged.connect(self._on_expts_changed)
+        _keep_sweep_input_compact(self._expts)
 
         self._step = TrimDoubleSpinBox()
         self._step.setRange(-1e12, 1e12)
@@ -516,6 +544,7 @@ class SweepWidget(BaseLiveWidget):
         self._step.setDecimals(decimals if decimals is not None else 6)
         self._step.setValue(sv.step)
         self._step.valueChanged.connect(self._on_step_changed)
+        _keep_sweep_input_compact(self._step)
 
         enabled = field.spec.editable
         self._start_widget.setEnabled(enabled)
@@ -531,6 +560,7 @@ class SweepWidget(BaseLiveWidget):
         layout.addWidget(self._expts, 1, 1)
         layout.addWidget(QLabel("step"), 1, 2)
         layout.addWidget(self._step, 1, 3)
+        _add_sweep_spacer(layout)
 
         field.on_change.connect(self._on_model_changed)
 
@@ -564,3 +594,124 @@ class SweepWidget(BaseLiveWidget):
             self._step.setValue(val.step)
         finally:
             self._updating = False
+
+
+@register_widget(CenteredSweepLiveField)
+class CenteredSweepWidget(BaseLiveWidget):
+    """Inline 2x2 input for center/span/expts/step with synchronized updates."""
+
+    def __init__(self, field: CenteredSweepLiveField, parent: QWidget | None = None):
+        super().__init__(field, parent)
+        self._updating = False
+
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        sv = field.get_value()
+        decimals = field.spec.decimals
+
+        self._center_widget = ScalarWidget(field.center_field, self)
+        _keep_sweep_input_compact(self._center_widget)
+
+        self._span = TrimDoubleSpinBox()
+        self._span.setRange(0.0, 1e12)
+        self._span.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        self._span.setDecimals(decimals if decimals is not None else 6)
+        self._span.setValue(sv.span)
+        self._span.valueChanged.connect(self._on_span_changed)
+        _keep_sweep_input_compact(self._span)
+
+        self._expts = QSpinBox()
+        self._expts.setRange(1, 2**31 - 1)
+        self._expts.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        self._expts.setValue(sv.expts)
+        self._expts.valueChanged.connect(self._on_expts_changed)
+        _keep_sweep_input_compact(self._expts)
+
+        self._step = TrimDoubleSpinBox()
+        self._step.setRange(0.0, 1e12)
+        self._step.setButtonSymbols(QAbstractSpinBox.NoButtons)  # type: ignore[attr-defined]
+        self._step.setDecimals(decimals if decimals is not None else 6)
+        self._step.setValue(sv.step)
+        self._step.valueChanged.connect(self._on_step_changed)
+        _keep_sweep_input_compact(self._step)
+
+        enabled = field.spec.editable
+        self._center_widget.setEnabled(enabled and field.spec.center_editable)
+        self._span.setEnabled(enabled)
+        self._expts.setEnabled(enabled)
+        self._step.setEnabled(enabled)
+
+        center_label = QLabel(_centered_sweep_label("center", field.spec.center_badge))
+        center_tooltip = field.spec.center_tooltip or field.spec.tooltip
+        if center_tooltip:
+            center_label.setToolTip(center_tooltip)
+            self._center_widget.setToolTip(center_tooltip)
+
+        layout.addWidget(center_label, 0, 0)
+        layout.addWidget(self._center_widget, 0, 1)
+        layout.addWidget(QLabel("span"), 0, 2)
+        layout.addWidget(self._span, 0, 3)
+        layout.addWidget(QLabel("expts"), 1, 0)
+        layout.addWidget(self._expts, 1, 1)
+        layout.addWidget(QLabel("step"), 1, 2)
+        layout.addWidget(self._step, 1, 3)
+        _add_sweep_spacer(layout)
+
+        field.on_change.connect(self._on_model_changed)
+
+    def teardown(self) -> None:
+        field = cast(CenteredSweepLiveField, self._field)
+        field.on_change.disconnect(self._on_model_changed)
+        self._center_widget.teardown()
+
+    def _on_span_changed(self, span: float) -> None:
+        if self._updating:
+            return
+        self._try_update(
+            lambda: cast(CenteredSweepLiveField, self._field).update_span(span)
+        )
+
+    def _on_expts_changed(self, expts: int) -> None:
+        if self._updating:
+            return
+        self._try_update(
+            lambda: cast(CenteredSweepLiveField, self._field).update_expts(expts)
+        )
+
+    def _on_step_changed(self, step: float) -> None:
+        if self._updating:
+            return
+        self._try_update(
+            lambda: cast(CenteredSweepLiveField, self._field).update_step(step)
+        )
+
+    def _try_update(self, update: Callable[[], None]) -> None:
+        try:
+            update()
+        except ValueError:
+            self._on_model_changed(
+                cast(CenteredSweepLiveField, self._field).get_value()
+            )
+
+    def _on_model_changed(self, val: Any) -> None:
+        if self._updating:
+            return
+        self._updating = True
+        try:
+            if not (
+                self._span.minimum() <= val.span <= self._span.maximum()
+                and self._expts.minimum() <= val.expts <= self._expts.maximum()
+                and self._step.minimum() <= val.step <= self._step.maximum()
+            ):
+                raise RuntimeError("CenteredSweepValue is outside widget range")
+            self._span.setValue(val.span)
+            self._expts.setValue(val.expts)
+            self._step.setValue(val.step)
+        finally:
+            self._updating = False
+
+
+def _centered_sweep_label(text: str, badge: str) -> str:
+    return f"{text} [{badge}]" if badge else text

@@ -11,6 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -270,5 +272,14 @@ def test_sweep_value_passes():
     schema = CfgSchema(
         spec=spec,
         value=CfgSectionValue(fields={"s": SweepValue(0.0, 1.0, 11)}),
+    )
+    schema.validate(_ml())
+
+
+def test_centered_sweep_value_passes():
+    spec = CfgSectionSpec(fields={"s": CenteredSweepSpec(label="S")})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(fields={"s": CenteredSweepValue(0.0, 1.0, 11)}),
     )
     schema.validate(_ml())

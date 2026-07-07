@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - run failure/cancel outcome split
+**Last updated:** 2026-07-07 - compact centered sweep editor
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -83,6 +83,15 @@ The GUI uses a two-tree model:
 against current `MetaDict` when a field is set or lowered. `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
+
+Sweep-like fields keep their UI value model until this lowering boundary:
+`SweepSpec` stores `start` / `stop` / `expts`, while `CenteredSweepSpec` stores
+`center` / `span` / `expts` and lowers to a program sweep only when building the
+raw experiment cfg. Centered sweep centers may be locked independently from the
+span/expts controls, which lets callers expose generated centers while keeping
+the search window editable. Sweep editors use compact input columns with trailing
+empty stretch, so full-width form rows do not make numeric center/start fields
+consume the whole row.
 
 Linked `ModuleRef` / `WaveformRef` fields preserve their embedded value snapshot
 when the library key is missing. The field stays library-keyed and invalid so

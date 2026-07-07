@@ -14,6 +14,9 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
+    CfgNodeSpec,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -75,7 +78,7 @@ PULSE_READOUT_REF_LABELS: tuple[str, ...] = ("Pulse Readout",)
 class GenerationField:
     logical_key: str
     field_key: str
-    spec: ScalarSpec | SweepSpec
+    spec: ScalarSpec | SweepSpec | CenteredSweepSpec
     default: Any
     group_key: str
     group_label: str
@@ -91,7 +94,7 @@ class GenerationChoice:
 def generation_field(
     logical_key: str,
     field_key: str,
-    spec: ScalarSpec | SweepSpec,
+    spec: ScalarSpec | SweepSpec | CenteredSweepSpec,
     default: Any,
     *,
     group: str,
@@ -111,7 +114,7 @@ def generation_field(
 
 def logical_generation_field(
     key: str,
-    spec: ScalarSpec | SweepSpec,
+    spec: ScalarSpec | SweepSpec | CenteredSweepSpec,
     default: Any,
     *,
     group: str,
@@ -186,6 +189,7 @@ def adapter_node_schema(
     *,
     logical_paths: Mapping[str, str],
     generation_fields: tuple[GenerationField, ...] = (),
+    spec_overrides: Mapping[str, CfgNodeSpec] | None = None,
     default_overrides: Mapping[str, Any] | None = None,
     path_renames: Mapping[str, str] | None = None,
     duplicate_paths: Mapping[str, str] | None = None,
@@ -212,6 +216,8 @@ def adapter_node_schema(
         _drop_cfg_path(root_spec, root_value, path)
     for path, labels in (module_ref_labels or {}).items():
         _restrict_module_ref_labels(root_spec, path, labels)
+    for path, spec_node in (spec_overrides or {}).items():
+        _replace_cfg_node(root_spec, path, spec_node)
     _prune_empty_sections(root_spec, root_value)
 
     projection = dict(logical_paths)
@@ -406,11 +412,20 @@ def _ensure_context(ctx: Any | None) -> ExpContext:
     return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 
 
-def _default_value(spec: ScalarSpec | SweepSpec, default: Any) -> Any:
+def _default_value(
+    spec: ScalarSpec | SweepSpec | CenteredSweepSpec, default: Any
+) -> Any:
     if isinstance(spec, SweepSpec):
         if not isinstance(default, SweepValue):
             raise TypeError(
                 f"SweepSpec generation default must be SweepValue, "
+                f"got {type(default).__name__}"
+            )
+        return default
+    if isinstance(spec, CenteredSweepSpec):
+        if not isinstance(default, CenteredSweepValue):
+            raise TypeError(
+                "CenteredSweepSpec generation default must be CenteredSweepValue, "
                 f"got {type(default).__name__}"
             )
         return default

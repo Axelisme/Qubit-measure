@@ -28,10 +28,11 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     FloatSpec,
     OverridePath,
     OverridePlan,
-    SweepValue,
     str_choice_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -91,7 +92,7 @@ from zcu_tools.utils.process import rotate2real
 logger = logging.getLogger(__name__)
 
 _DEFAULT_EARLYSTOP_SNR = 50.0
-_DEFAULT_DETUNE_SWEEP = SweepValue(start=-50.0, stop=50.0, expts=201)
+_DEFAULT_DETUNE_SWEEP = CenteredSweepValue(center=0.0, span=100.0, expts=201)
 _QFW_TARGET_KAPPA = 6.5
 _DRIVE_GAIN_CAP = 1.0
 _FREQ_FIT_RESIDUAL_RATIO = 0.2
@@ -581,6 +582,21 @@ class QubitFreqBuilder(Builder):
                     group="predictor_correction",
                 ),
             ),
+            spec_overrides={
+                "sweep.freq": CenteredSweepSpec(
+                    label="Freq (MHz)",
+                    center_editable=False,
+                    center_badge="generated",
+                    locked_center=0.0,
+                    center_tooltip=(
+                        "Detune-window center is fixed to the generated drive center; "
+                        "edit span/expts to control the search window."
+                    ),
+                    tooltip=(
+                        "Detune search window around the generated qubit drive center."
+                    ),
+                )
+            },
             default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP, "rounds": 10},
             drop_paths=("modules.reset",),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},

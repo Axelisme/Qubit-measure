@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-02 - remote method entries, MCP exposure policy, context-control facet
+**Last updated:** 2026-07-07 - centered sweep cfg paths
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -144,6 +144,11 @@ dotted paths through `tab.set_cfg` or `editor.set_field`.
 Scalar values may be direct values, tagged eval values, or tagged value refs.
 Eval values store a resolved snapshot at set/lower time. Value refs resolve once
 through the session value lookup and then become direct scalars.
+
+Sweep nodes appear as editable subtrees, not as lowered `SweepCfg` objects.
+`SweepSpec` exposes `start` / `stop` / `expts` / `step`; `CenteredSweepSpec`
+exposes `center` / `span` / `expts` / `step`. `editor.set_field` accepts the same
+dotted edge paths that `tab.get_cfg` reports.
 
 Headless editor sessions are owned by `CfgEditorService`. Agent-created sessions
 are garbage-collected on commit/discard/client drop; UI-owned sessions are tied

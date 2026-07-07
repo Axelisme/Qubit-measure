@@ -151,6 +151,180 @@ def test_set_field_sweep_expts_non_integer_rejected(lf):
         sock.close()
 
 
+def _centered_sweep_root():
+    from unittest.mock import MagicMock
+
+    from zcu_tools.gui.app.main.adapter import (
+        CenteredSweepSpec,
+        CenteredSweepValue,
+        CfgSectionSpec,
+        CfgSectionValue,
+    )
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+
+    ctrl = MagicMock()
+    spec = CfgSectionSpec(fields={"sweep": CenteredSweepSpec(label="Freq")})
+    value = CfgSectionValue(
+        fields={"sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11)}
+    )
+    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+
+
+def _locked_centered_sweep_root():
+    from unittest.mock import MagicMock
+
+    from zcu_tools.gui.app.main.adapter import (
+        CenteredSweepSpec,
+        CenteredSweepValue,
+        CfgSectionSpec,
+        CfgSectionValue,
+    )
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+
+    ctrl = MagicMock()
+    spec = CfgSectionSpec(
+        fields={
+            "sweep": CenteredSweepSpec(
+                label="Freq", center_editable=False, locked_center=0.0
+            )
+        }
+    )
+    value = CfgSectionValue(
+        fields={"sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11)}
+    )
+    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+
+
+def _single_point_centered_sweep_root():
+    from unittest.mock import MagicMock
+
+    from zcu_tools.gui.app.main.adapter import (
+        CenteredSweepSpec,
+        CenteredSweepValue,
+        CfgSectionSpec,
+        CfgSectionValue,
+    )
+    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+
+    ctrl = MagicMock()
+    spec = CfgSectionSpec(fields={"sweep": CenteredSweepSpec(label="Freq")})
+    value = CfgSectionValue(
+        fields={"sweep": CenteredSweepValue(center=0.0, span=0.0, expts=1)}
+    )
+    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+
+
+def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
+        build_settable_tree,
+        list_settable_paths_full,
+        resolve_and_set,
+    )
+
+    root = _centered_sweep_root()
+
+    resolve_and_set(root, "sweep.center", 5.0)
+    resolve_and_set(root, "sweep.span", 20.0)
+    resolve_and_set(root, "sweep.sweep.expts", 5)
+
+    entries = {
+        entry["path"]: entry["value"] for entry in list_settable_paths_full(root)
+    }
+    assert entries["sweep.center"] == 5.0
+    assert entries["sweep.span"] == 20.0
+    assert entries["sweep.expts"] == 5
+    assert entries["sweep.step"] == pytest.approx(5.0)
+    assert build_settable_tree(root)["sweep"] == {
+        "center": 5.0,
+        "span": 20.0,
+        "expts": 5,
+        "step": 5.0,
+    }
+
+
+def test_resolver_centered_sweep_rejects_start_stop_edges(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    root = _centered_sweep_root()
+
+    with pytest.raises(RemoteError) as exc:
+        resolve_and_set(root, "sweep.start", 1.0)
+
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+    assert "centered sweep edge" in exc.value.message
+
+
+def test_resolver_centered_sweep_rejects_locked_center_mismatch(qapp):  # noqa: ARG001
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
+        build_settable_tree,
+        resolve_and_set,
+    )
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    root = _locked_centered_sweep_root()
+
+    with pytest.raises(RemoteError) as exc:
+        resolve_and_set(root, "sweep.center", 5.0)
+
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+    assert "locked to 0.0" in exc.value.message
+    sweep = build_settable_tree(root)["sweep"]
+    assert isinstance(sweep, dict)
+    assert sweep["center"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    (
+        ("sweep.span", -1.0, "span"),
+        ("sweep.span", 0.0, "span"),
+        ("sweep.sweep.expts", 0, "expts"),
+        ("sweep.step", -0.5, "step"),
+    ),
+)
+def test_resolver_centered_sweep_value_errors_are_remote_errors(
+    qapp,
+    path: str,
+    value: object,
+    match: str,  # noqa: ARG001
+):
+    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    root = _centered_sweep_root()
+
+    with pytest.raises(RemoteError) as exc:
+        resolve_and_set(root, path, value)
+
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+    assert match in exc.value.message
+
+
+def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
+    qapp,  # noqa: ARG001
+):
+    from zcu_tools.gui.app.main.services.remote.path_resolver import (
+        build_settable_tree,
+        resolve_and_set,
+    )
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    root = _single_point_centered_sweep_root()
+
+    with pytest.raises(RemoteError) as exc:
+        resolve_and_set(root, "sweep.expts", 2)
+
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+    assert "span" in exc.value.message
+    assert build_settable_tree(root)["sweep"] == {
+        "center": 0.0,
+        "span": 0.0,
+        "expts": 1,
+        "step": 0.0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Error paths
 # ---------------------------------------------------------------------------

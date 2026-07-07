@@ -284,8 +284,8 @@ def test_node_cfg_reports_knobs():
     # the edited scalar is reflected
     assert knobs["reps"] == 512
     assert knobs["acquire_retry"] == 3
-    # a sweep knob serialises to {start, stop, expts}, not a SweepCfg
-    assert set(knobs["detune_sweep"]) == {"start", "stop", "expts"}
+    # qubit_freq's centered sweep serialises to the UI value model, not a SweepCfg.
+    assert set(knobs["detune_sweep"]) == {"center", "span", "expts", "step"}
     override_paths = {entry["path"] for entry in cfg["override_plan"]}
     assert "modules.qub_pulse.freq" in override_paths
     assert "modules.readout.pulse_cfg.freq" in override_paths

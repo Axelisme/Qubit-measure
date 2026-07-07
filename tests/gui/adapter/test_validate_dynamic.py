@@ -11,6 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -118,6 +120,37 @@ def test_sweep_eval_edge_fails():
         value=CfgSectionValue(
             fields={
                 "s": SweepValue(start=EvalValue(expr="missing"), stop=1.0, expts=11)
+            }
+        ),
+    )
+    with pytest.raises(RuntimeError, match="failed"):
+        schema.validate_dynamic(_md(), _ml())
+
+
+def test_centered_sweep_eval_center_passes():
+    spec = CfgSectionSpec(fields={"s": CenteredSweepSpec(label="S")})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "s": CenteredSweepValue(center=EvalValue(expr="x"), span=1.0, expts=11)
+            }
+        ),
+    )
+    schema.validate_dynamic(_md(x=0.0), _ml())
+
+
+def test_centered_sweep_eval_center_fails():
+    spec = CfgSectionSpec(fields={"s": CenteredSweepSpec(label="S")})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "s": CenteredSweepValue(
+                    center=EvalValue(expr="missing"),
+                    span=1.0,
+                    expts=11,
+                )
             }
         ),
     )

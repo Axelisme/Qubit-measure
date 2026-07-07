@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from .adapter.types import EvalValue, SweepValue
+from .adapter.types import CenteredSweepValue, EvalValue, SweepValue
 
 
 class SweepEditor:
@@ -102,3 +102,74 @@ class SweepEditor:
     @staticmethod
     def _step_from_expts(start: float, stop: float, expts: int) -> float:
         return 0.0 if expts == 1 else (stop - start) / (expts - 1)
+
+
+class CenteredSweepEditor:
+    """Pure canonical transformation rules for a center/span sweep axis."""
+
+    @staticmethod
+    def canonicalize(value: CenteredSweepValue) -> CenteredSweepValue:
+        return CenteredSweepValue(
+            center=value.center,
+            span=value.span,
+            expts=value.expts,
+            step=CenteredSweepEditor._step_from_expts(value.span, value.expts),
+            auto_norm=False,
+        )
+
+    @staticmethod
+    def update_center(
+        value: CenteredSweepValue, center: float | EvalValue
+    ) -> CenteredSweepValue:
+        return CenteredSweepEditor.canonicalize(
+            CenteredSweepValue(
+                center=center,
+                span=value.span,
+                expts=value.expts,
+                step=value.step,
+                auto_norm=False,
+            )
+        )
+
+    @staticmethod
+    def update_span(value: CenteredSweepValue, span: float) -> CenteredSweepValue:
+        return CenteredSweepEditor.canonicalize(
+            CenteredSweepValue(
+                center=value.center,
+                span=span,
+                expts=value.expts,
+                step=value.step,
+                auto_norm=False,
+            )
+        )
+
+    @staticmethod
+    def update_expts(value: CenteredSweepValue, expts: int) -> CenteredSweepValue:
+        return CenteredSweepEditor.canonicalize(
+            CenteredSweepValue(
+                center=value.center,
+                span=value.span,
+                expts=expts,
+                step=value.step,
+                auto_norm=False,
+            )
+        )
+
+    @staticmethod
+    def update_step(value: CenteredSweepValue, step: float) -> CenteredSweepValue:
+        if not math.isfinite(step) or step < 0.0:
+            raise ValueError("Centered sweep step must be finite and >= 0")
+        expts = 1 if step == 0.0 else max(1, round(value.span / step + 1))
+        return CenteredSweepEditor.canonicalize(
+            CenteredSweepValue(
+                center=value.center,
+                span=value.span,
+                expts=expts,
+                step=step,
+                auto_norm=False,
+            )
+        )
+
+    @staticmethod
+    def _step_from_expts(span: float, expts: int) -> float:
+        return 0.0 if expts == 1 else span / (expts - 1)

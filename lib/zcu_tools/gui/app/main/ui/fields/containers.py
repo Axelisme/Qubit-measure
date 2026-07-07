@@ -24,6 +24,7 @@ from zcu_tools.gui.session.events import MlChangedPayload
 
 from ...adapter import CfgSectionSpec, ChoiceSectionSpec, DirectValue, LiteralSpec
 from ...live_model import (
+    CenteredSweepLiveField,
     DeviceRefLiveField,
     ModuleRefLiveField,
     SectionLiveField,
@@ -279,7 +280,7 @@ class SectionWidget(BaseLiveWidget):
             _apply_widget_decoration(widget, decoration)
             form.addRow(widget)
             return
-        if isinstance(child_field, SweepLiveField):
+        if isinstance(child_field, (SweepLiveField, CenteredSweepLiveField)):
             # Sweep widgets get their own full-width row; label goes on the line above
             label_widget = ElidedLabel(
                 f"{label}:",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from .adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeSpec,
     CfgNodeValue,
     CfgSchema,
@@ -29,7 +31,7 @@ from .adapter import (
 )
 from .registry import Registry
 from .state import Session, State
-from .sweep_model import SweepEditor
+from .sweep_model import CenteredSweepEditor, SweepEditor
 
 __all__ = [
     "CfgNodeSpec",
@@ -37,6 +39,9 @@ __all__ = [
     "CfgSchema",
     "CfgSectionSpec",
     "CfgSectionValue",
+    "CenteredSweepEditor",
+    "CenteredSweepSpec",
+    "CenteredSweepValue",
     "DirectValue",
     "EvalValue",
     "ExpAdapterProtocol",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from abc import ABC
 from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field, replace
@@ -485,6 +486,24 @@ class SweepSpec:
 
 
 @dataclass(frozen=True)
+class CenteredSweepSpec:
+    label: str = "Sweep"
+    editable: bool = True
+    decimals: int | None = None
+    tooltip: str = ""
+    center_editable: bool = True
+    center_badge: str = ""
+    center_tooltip: str = ""
+    locked_center: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.locked_center is not None and not math.isfinite(
+            float(self.locked_center)
+        ):
+            raise RuntimeError("CenteredSweepSpec.locked_center must be finite")
+
+
+@dataclass(frozen=True)
 class ModuleRefSpec:
     allowed: list[CfgSectionSpec]
     label: str = "Module"
@@ -678,6 +697,7 @@ CfgNodeSpec = (
     ScalarSpec
     | LiteralSpec
     | SweepSpec
+    | CenteredSweepSpec
     | ModuleRefSpec
     | WaveformRefSpec
     | CfgSectionSpec
@@ -747,6 +767,25 @@ class SweepValue:
                 if self.expts == 1
                 else (float(self.stop) - float(self.start)) / (self.expts - 1)
             )
+
+
+@dataclass
+class CenteredSweepValue:
+    center: float | EvalValue
+    span: float
+    expts: int
+    step: float = 0.1
+    auto_norm: InitVar[bool] = True
+
+    def __post_init__(self, auto_norm: bool) -> None:
+        if self.expts < 1:
+            raise ValueError("CenteredSweepValue.expts must be >= 1")
+        span = float(self.span)
+        if not math.isfinite(span) or span < 0.0:
+            raise ValueError("CenteredSweepValue.span must be finite and >= 0")
+        self.span = span
+        if auto_norm:
+            self.step = 0.0 if self.expts == 1 else span / (self.expts - 1)
 
 
 @dataclass
@@ -820,7 +859,12 @@ class CfgSectionValue:
 
 
 CfgNodeValue = (
-    ScalarValue | SweepValue | ModuleRefValue | WaveformRefValue | CfgSectionValue
+    ScalarValue
+    | SweepValue
+    | CenteredSweepValue
+    | ModuleRefValue
+    | WaveformRefValue
+    | CfgSectionValue
 )
 
 

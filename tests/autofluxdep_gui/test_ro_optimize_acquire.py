@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
+from zcu_tools.gui.app.autofluxdep.cfg import CenteredSweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
 
@@ -40,8 +40,8 @@ _READOUT = {
 _PARAMS = {
     "reps": 2000,
     "rounds": 8,
-    "freq_range": SweepValue(start=5995.0, stop=6005.0, expts=11),
-    "gain_range": SweepValue(start=0.2, stop=0.8, expts=11),
+    "freq_range": CenteredSweepValue(center=6000.0, span=10.0, expts=11),
+    "gain_range": CenteredSweepValue(center=0.5, span=0.6, expts=11),
     "relax_delay_mode": "fixed",
     "relax_delay": 60.0,
     "skew_penalty": 0.0,
@@ -77,10 +77,12 @@ def test_ro_optimize_acquire_finds_best_point():
         best_freq = patch.values()["best_ro_freq"]
         best_gain = patch.values()["best_ro_gain"]
         # produce derives the actual swept axes from make_cfg(), not from stale
-        # allocation defaults. These use the md-like generation window around
-        # the previous best in snap.
-        np.testing.assert_allclose(result.freq[[0, -1]], [5999.0, 6001.0])
-        np.testing.assert_allclose(result.gain[[0, -1]], [0.4, 0.6])
+        # allocation defaults. Flux point 0 uses the editable initial window;
+        # later points use the generated previous-best window around snap.
+        expected_freq_edges = [5995.0, 6005.0] if idx == 0 else [5999.0, 6001.0]
+        expected_gain_edges = [0.2, 0.8] if idx == 0 else [0.4, 0.6]
+        np.testing.assert_allclose(result.freq[[0, -1]], expected_freq_edges)
+        np.testing.assert_allclose(result.gain[[0, -1]], expected_gain_edges)
         # finite best point inside the swept window
         assert np.isfinite(best_freq) and np.isfinite(best_gain)
         assert result.freq[0] <= best_freq <= result.freq[-1]

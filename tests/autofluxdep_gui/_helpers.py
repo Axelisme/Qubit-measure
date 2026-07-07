@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -225,6 +227,13 @@ def read_value_tree(schema: NodeCfgSchema) -> dict[str, Any]:
 
 
 def _default_value_for(spec: CfgNodeSpec, default: Any) -> Any:
+    if isinstance(spec, CenteredSweepSpec):
+        if not isinstance(default, CenteredSweepValue):
+            raise TypeError(
+                "CenteredSweepSpec default must be a CenteredSweepValue, "
+                f"got {type(default).__name__}"
+            )
+        return default
     if isinstance(spec, SweepSpec):
         if not isinstance(default, SweepValue):
             raise TypeError(
@@ -246,11 +255,11 @@ def _validate_node_field_spec(section_key: str, field_spec: NodeFieldSpec) -> No
             f"Node field {field_spec.logical_key!r} declares section "
             f"{field_spec.section_key!r}, but is mounted under {section_key!r}"
         )
-    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec)):
+    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec, CenteredSweepSpec)):
         raise TypeError(
             f"Unsupported node field spec for {field_spec.logical_key!r}: "
-            f"{type(field_spec.spec).__name__}; only ScalarSpec and SweepSpec "
-            "are supported"
+            f"{type(field_spec.spec).__name__}; only ScalarSpec, SweepSpec, and "
+            "CenteredSweepSpec are supported"
         )
 
 
@@ -258,11 +267,11 @@ def _validate_node_path_spec(field_spec: NodePathSpec) -> None:
     _validate_path_part("logical key", field_spec.logical_key)
     for part in field_spec.path.split("."):
         _validate_path_part("path part", part)
-    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec)):
+    if not isinstance(field_spec.spec, (ScalarSpec, SweepSpec, CenteredSweepSpec)):
         raise TypeError(
             f"Unsupported node field spec for {field_spec.logical_key!r}: "
-            f"{type(field_spec.spec).__name__}; only ScalarSpec and SweepSpec "
-            "are supported"
+            f"{type(field_spec.spec).__name__}; only ScalarSpec, SweepSpec, and "
+            "CenteredSweepSpec are supported"
         )
 
 
@@ -348,13 +357,20 @@ def _jsonify_value_node(value: Any) -> Any:
             "stop": _knob_scalar_value(value.stop),
             "expts": int(value.expts),
         }
+    if isinstance(value, CenteredSweepValue):
+        return {
+            "center": _knob_scalar_value(value.center),
+            "span": float(value.span),
+            "expts": int(value.expts),
+        }
     if isinstance(value, DirectValue):
         return _knob_scalar_value(value.value)
     if isinstance(value, EvalValue):
         return _knob_eval_value(value)
     raise TypeError(
         f"Unexpected node cfg value-tree leaf {type(value).__name__}; "
-        "expected CfgSectionValue, DirectValue, EvalValue, or SweepValue"
+        "expected CfgSectionValue, DirectValue, EvalValue, SweepValue, or "
+        "CenteredSweepValue"
     )
 
 

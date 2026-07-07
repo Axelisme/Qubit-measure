@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeSpec,
     CfgNodeValue,
     CfgSchema,
@@ -127,6 +129,14 @@ def _node_value_to_raw(
             "expts": value.expts,
             "step": value.step,
         }
+    if isinstance(spec, CenteredSweepSpec):
+        assert isinstance(value, CenteredSweepValue)
+        return {
+            "center": _sweep_edge_to_raw(value.center),
+            "span": value.span,
+            "expts": value.expts,
+            "step": value.step,
+        }
     if isinstance(spec, DeviceRefSpec):
         assert isinstance(value, DirectValue)
         return {"__kind": "direct", "value": _to_json_compatible(value.value)}
@@ -232,6 +242,22 @@ def _node_value_from_raw(
             step = float(step_raw)
             return SweepValue(start=start, stop=stop, expts=expts, step=step)
         raise RuntimeError("Sweep payload must be an object")
+    if isinstance(spec, CenteredSweepSpec):
+        if isinstance(raw, dict):
+            center = _parse_sweep_edge(raw["center"])
+            span = float(raw["span"])
+            expts = int(raw["expts"])
+            step_raw = raw.get("step")
+            if step_raw is None:
+                raise RuntimeError("Centered sweep step is required in session payload")
+            step = float(step_raw)
+            return CenteredSweepValue(
+                center=center,
+                span=span,
+                expts=expts,
+                step=step,
+            )
+        raise RuntimeError("Centered sweep payload must be an object")
     if isinstance(spec, DeviceRefSpec):
         if isinstance(raw, dict) and raw.get("__kind") == "direct":
             value = raw.get("value")

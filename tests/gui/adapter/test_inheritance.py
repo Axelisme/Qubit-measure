@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -130,6 +132,34 @@ def test_sweep_type_mismatch_uses_default():
     sv = result.fields["s"]
     assert isinstance(sv, SweepValue)
     assert sv.start == 0.0
+
+
+def test_centered_sweep_inherits_whole_value():
+    old_spec = _section({"s": CenteredSweepSpec()})
+    new_spec = _section({"s": CenteredSweepSpec()})
+    old_val = _val({"s": CenteredSweepValue(center=5.0, span=20.0, expts=21)})
+
+    result = inherit_from(old_val, old_spec, new_spec)
+
+    sv = result.fields["s"]
+    assert isinstance(sv, CenteredSweepValue)
+    assert sv.center == 5.0
+    assert sv.span == 20.0
+    assert sv.expts == 21
+    assert sv.step == 1.0
+
+
+def test_centered_sweep_type_mismatch_uses_default():
+    old_spec = _section({"s": SweepSpec()})
+    new_spec = _section({"s": CenteredSweepSpec()})
+    old_val = _val({"s": SweepValue(start=1.0, stop=5.0, expts=21)})
+
+    result = inherit_from(old_val, old_spec, new_spec)
+
+    sv = result.fields["s"]
+    assert isinstance(sv, CenteredSweepValue)
+    assert sv.center == 0.5
+    assert sv.span == 1.0
 
 
 # ---------------------------------------------------------------------------

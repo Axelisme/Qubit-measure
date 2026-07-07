@@ -26,6 +26,7 @@ import pytest
 from qtpy.QtWidgets import QGroupBox, QVBoxLayout  # type: ignore[attr-defined]
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CenteredSweepValue,
     DirectValue,
     FloatSpec,
     IntSpec,
@@ -33,7 +34,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePath,
     OverridePlan,
     ScalarSpec,
-    SweepValue,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.form import (
     CfgFormWidget,
@@ -631,12 +631,12 @@ def test_edit_sweep_writes_back_to_schema(ctrl_node, qapp):
     form = NodeCfgForm(ctrl, node, index)
     try:
         _section(form, "sweep").fields["freq"].set_value(
-            SweepValue(start=-15.0, stop=25.0, expts=41)
+            CenteredSweepValue(center=0.0, span=40.0, expts=41)
         )
         detune = node.schema.lower(None)["detune_sweep"]
         assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
-            -15.0,
-            25.0,
+            -20.0,
+            20.0,
             41,
         )
     finally:

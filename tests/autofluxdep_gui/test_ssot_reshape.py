@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
+from zcu_tools.gui.app.autofluxdep.cfg import CenteredSweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 
@@ -82,7 +82,7 @@ def test_set_node_params_accepts_sweep_value():
     index = ctrl.state.nodes.index(node)
 
     ctrl.set_node_params(
-        index, {"detune_sweep": SweepValue(start=-5.0, stop=5.0, expts=11)}
+        index, {"detune_sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11)}
     )
     detune = node.schema.lower(None)["detune_sweep"]
     assert (float(detune.start), float(detune.stop), int(detune.expts)) == (

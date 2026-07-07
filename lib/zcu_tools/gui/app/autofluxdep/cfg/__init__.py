@@ -18,6 +18,9 @@ from __future__ import annotations
 
 # re-exported framework spec/value model — pure data, no experiment knowledge
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
+    CfgNodeSpec,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -52,8 +55,11 @@ from .schema import (
 
 __all__ = [
     "CfgSchema",
+    "CfgNodeSpec",
     "CfgSectionSpec",
     "CfgSectionValue",
+    "CenteredSweepSpec",
+    "CenteredSweepValue",
     "ChoiceBinding",
     "ChoiceSectionSpec",
     "DirectValue",

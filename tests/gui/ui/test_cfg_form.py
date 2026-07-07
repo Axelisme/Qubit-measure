@@ -7,6 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeSpec,
     CfgSchema,
     CfgSectionSpec,
@@ -24,7 +26,11 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
-from zcu_tools.gui.app.main.live_model import SectionLiveField, SweepLiveField
+from zcu_tools.gui.app.main.live_model import (
+    CenteredSweepLiveField,
+    SectionLiveField,
+    SweepLiveField,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 # ---------------------------------------------------------------------------
@@ -547,6 +553,61 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
     assert sv.stop == pytest.approx(6.2)
     assert sv.expts == 201
     assert sv.step == pytest.approx(0.002)
+
+
+def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.app.main.ui.fields.common import (
+        SWEEP_INPUT_MAX_WIDTH,
+        CenteredSweepWidget,
+    )
+
+    schema = _schema(
+        {
+            "f": CenteredSweepSpec(
+                label="Freq",
+                center_editable=False,
+                center_badge="generated",
+                center_tooltip="Generated center",
+            )
+        },
+        {"f": CenteredSweepValue(center=0.0, span=100.0, expts=201)},
+    )
+    w = CfgFormWidget()
+    model = _attach(w, schema, ctrl)
+    sweep_widget = w.findChild(CenteredSweepWidget)
+    assert sweep_widget is not None
+
+    field = cast(CenteredSweepLiveField, model.fields["f"])
+    assert field.center_field.spec.editable is False
+    assert sweep_widget._center_widget.isEnabled() is False
+    assert sweep_widget._center_widget.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
+    assert sweep_widget._span.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
+    assert sweep_widget._expts.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
+    assert sweep_widget._step.maximumWidth() == SWEEP_INPUT_MAX_WIDTH
+    labels = {
+        label.text(): label.toolTip() for label in sweep_widget.findChildren(QLabel)
+    }
+    assert labels["center [generated]"] == "Generated center"
+
+    sweep_widget._span.setValue(120.0)
+    sweep_widget._expts.setValue(121)
+    out = w.read_values()
+
+    sv = out.fields["f"]
+    assert isinstance(sv, CenteredSweepValue)
+    assert sv.center == pytest.approx(0.0)
+    assert sv.span == pytest.approx(120.0)
+    assert sv.expts == 121
+    assert sv.step == pytest.approx(1.0)
+
+    sweep_widget._span.setValue(0.0)
+    out = w.read_values()
+    sv = out.fields["f"]
+    assert isinstance(sv, CenteredSweepValue)
+    assert sv.span == pytest.approx(120.0)
+    assert sweep_widget._span.value() == pytest.approx(120.0)
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):
