@@ -696,7 +696,9 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
 
     assert window._tabs.isMovable() is True
 
-    window._tabs.tabBar().moveTab(0, 1)
+    tab_bar = window._tabs.tabBar()
+    assert tab_bar is not None
+    tab_bar.moveTab(0, 1)
     assert window._tabs.widget(1) is tab_a
     ctrl.reorder_tabs.assert_called_once_with(["tab-b", "tab-a"])
 

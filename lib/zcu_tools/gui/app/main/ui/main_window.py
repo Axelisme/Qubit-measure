@@ -175,7 +175,9 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.setTabsClosable(True)
         self._tabs.setMovable(True)
-        self._tabs.tabBar().tabMoved.connect(self._on_tab_moved)
+        tab_bar = self._tabs.tabBar()
+        assert tab_bar is not None
+        tab_bar.tabMoved.connect(self._on_tab_moved)
         self._tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self._tabs.currentChanged.connect(self._on_current_tab_changed)
         main_layout.addWidget(self._tabs, stretch=1)
