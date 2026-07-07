@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runner` — experiment runtime
 
-**Last updated:** 2026-07-07 — stop flag acquire contract
+**Last updated:** 2026-07-07 — stop flag failure cause contract
 
 `runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -183,6 +183,11 @@ executor leaf contract 由 `runner/task.py` 擁有：
   並保留目前已寫入 buffer / result tree 的 partial result；已寫入的 slot 保留，
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
   以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
+- `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。這不改
+  `ProgramBuilder` 的 partial-result contract；它提供給 ambient consumer（例如
+  measure-gui run policy）在 experiment adapter 回傳後呼叫 `raise_if_error()`，把
+  runner 內部錯誤轉成 operation failure。`stopped` 不記錄 error cause；retry reset 會同時
+  清掉 stop flag 與 transient error cause。
 - `ProgramBuilder.build_and_acquire(..., retry=N)` /
   `run_program(..., retry=N)` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。

@@ -17,7 +17,9 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer, current_stop_signal
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     CfgSchema,
@@ -35,6 +37,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from ._progress_fakes import DirectProgressTransport
 
@@ -105,6 +108,35 @@ class _FakeBg:
             except Exception as exc:
                 assert self.last_on_error is not None
                 self.last_on_error(exc)
+
+
+class _ConstructorFailingProgram:
+    def __init__(
+        self,
+        soccfg: Any,
+        cfg: ProgramV2Cfg,
+        *,
+        modules: list[Any],
+        sweep: list[tuple[str, Any]] | None,
+    ) -> None:
+        raise RuntimeError("builder boom")
+
+    def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
+        raise NotImplementedError
+
+    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+        raise NotImplementedError
+
+
+class _NoopModule(Module):
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def init(self, prog: Any) -> None:
+        pass
+
+    def run(self, prog: Any, t: Any = 0.0) -> Any:
+        return t
 
 
 def _make_run_service(
@@ -207,6 +239,39 @@ def test_run_failed_emits_outcome_failed_with_message():
     assert payload.error_message == "boom"
 
 
+def test_schedule_failure_reports_failed_not_cancelled():
+    state, tab_id, adapter = _make_state()
+
+    def run_with_schedule_failure(*_args: Any) -> object:
+        with Schedule(ProgramV2Cfg(), SignalBuffer((1,), dtype=np.float64)) as sched:
+            _ = (
+                sched.prog_builder(
+                    "soc",
+                    "soccfg",
+                    program_cls=_ConstructorFailingProgram,
+                )
+                .add(_NoopModule("readout"))
+                .build_and_acquire()
+            )
+        return object()
+
+    adapter.run.side_effect = run_with_schedule_failure
+    svc, _gate, bg, handles = _make_run_service(state)
+    token = svc.start_run(_make_permit(state, tab_id, adapter))
+
+    bg.run_work()
+
+    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    assert payload.outcome == "failed"
+    assert payload.error_message == "RuntimeError: builder boom"
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.status == "failed"
+    assert outcome.error == "RuntimeError: builder boom"
+    assert state.get_tab(tab_id).run_result is None
+    assert not state.is_tab_running(tab_id)
+
+
 def test_cancel_run_sets_operation_stop_event():
     state, tab_id, adapter = _make_state()
     svc, gate, bg, handles = _make_run_service(state)
@@ -279,6 +344,31 @@ def test_bg_done_after_cancel_reports_cancelled_with_partial():
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run_result is partial
+
+
+def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
+    state, tab_id, adapter = _make_state()
+    partial = object()
+
+    def run_after_retry_reset(*_args: Any) -> object:
+        stop = current_stop_signal()
+        assert stop is not None
+        stop.clear_stop()
+        return partial
+
+    adapter.run.side_effect = run_after_retry_reset
+    svc, _gate, bg, handles = _make_run_service(state)
+    token = svc.start_run(_make_permit(state, tab_id, adapter))
+
+    svc.cancel_run()
+    bg.run_work()
+
+    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    assert payload.outcome == "cancelled"
+    assert state.get_tab(tab_id).run_result is partial
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.status == "cancelled"
 
 
 def test_bg_error_without_cancel_reports_failed():

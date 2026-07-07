@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import pytest
 from pydantic import ConfigDict
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.v2.runner import (
     Schedule,
+    ScheduleOutcomeError,
     ScheduleStep,
     SignalBuffer,
     StopSignal,
@@ -638,6 +640,8 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
             )
             assert sched.outcome.status == "completed"
             assert ambient_stop.is_set() is False
+            assert ambient_stop.error is None
+            ambient_stop.raise_if_error()
 
     np.testing.assert_allclose(result, np.array([2.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
@@ -687,6 +691,25 @@ def test_build_and_acquire_rebuilds_program_on_retry():
     assert len(FlakyBuildProgram.instances) == 2
     assert FlakyBuildProgram.instances[0].acquire_count == 1
     assert FlakyBuildProgram.instances[1].acquire_count == 1
+
+
+def test_build_and_acquire_retry_clears_ambient_failure_cause():
+    FlakyBuildProgram.instances.clear()
+    ambient_stop = StopSignal()
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+
+    with schedule_stop_scope(ambient_stop):
+        with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+            result = (
+                sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
+                .add(FakeModule("readout"))
+                .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
+            )
+            assert sched.outcome.status == "completed"
+            assert ambient_stop.error is None
+            ambient_stop.raise_if_error()
+
+    np.testing.assert_allclose(result, np.array([4.0]))
 
 
 def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retrying():
@@ -750,6 +773,31 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
     assert AlwaysFailingProgram.instances[1].acquire_count == 1
 
 
+def test_build_and_acquire_records_failed_outcome_on_ambient_stop_signal():
+    AlwaysFailingProgram.instances.clear()
+    ambient_stop = StopSignal()
+    signals_buffer = SignalBuffer((1,), dtype=np.float64)
+
+    with schedule_stop_scope(ambient_stop):
+        with Schedule(_cfg(rounds=1), signals_buffer) as sched:
+            result = (
+                sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
+                .add(FakeModule("readout"))
+                .build_and_acquire(raw2signal_fn=_identity_array, retry=1)
+            )
+            assert sched.outcome.status == "failed"
+            assert ambient_stop.error is not None
+            assert ambient_stop.error.status == "failed"
+
+        with pytest.raises(
+            ScheduleOutcomeError, match="RuntimeError: permanent failure"
+        ) as exc_info:
+            ambient_stop.raise_if_error()
+
+    assert exc_info.value.exception is sched.outcome.exception
+    np.testing.assert_allclose(result, np.array([2.0]))
+
+
 def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
     stop = StopSignal()
     attempts: list[int] = []
@@ -792,6 +840,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
         )
         assert sched.outcome.status == "stopped"
         assert sched.outcome.reason == "stop requested"
+        assert stop.error is None
 
     assert attempts == [1]
     np.testing.assert_allclose(result, np.array([1.0]))
@@ -838,6 +887,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
         )
         assert sched.outcome.status == "stopped"
         assert sched.outcome.reason == "stop requested"
+        assert stop.error is None
 
     assert attempts == [1]
     np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)

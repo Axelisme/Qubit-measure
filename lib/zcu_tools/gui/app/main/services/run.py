@@ -87,12 +87,19 @@ class RunService(QObject):
         self._writeback.teardown_tab_items(tab_id)
         self._state.clear_tab_results(tab_id)
 
-        # A single stop_event owns the cancellation flag for this run (ADR-0019).
-        # Created here (closure owner) so work and on_terminal share the same flag.
+        # A single StopSignal owns the Schedule-visible stop flag for this run.
+        # ``cancel_requested`` is separate: Schedule failures also set the stop
+        # flag to halt host loops, but they are not user cancellations.
         stop_event = threading.Event()
+        stop_signal = StopSignal(stop_event)
+        cancel_requested = threading.Event()
         adapter = permit.adapter
         request = permit.request
         schema = permit.schema
+
+        def request_cancel() -> None:
+            cancel_requested.set()
+            stop_event.set()
 
         def work(factory: Any) -> Any:
             # Run is the OffMain-thread strategy with all three scopes (ADR-0026 §2):
@@ -100,21 +107,23 @@ class RunService(QObject):
             # (progress_ambient, session layer), and cancel (Schedule StopSignal).
             with figure_ambient(live_container):
                 with progress_ambient(factory):
-                    with schedule_stop_scope(StopSignal(stop_event)):
-                        return adapter.run(request, schema)
+                    with schedule_stop_scope(stop_signal):
+                        result = adapter.run(request, schema)
+                        stop_signal.raise_if_error()
+                        return result
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # Interpret bg outcome: we own stop_event, so we decide cancelled vs
             # finished/failed (ADR-0019). Mirrors the old _on_bg_done/_on_bg_error
             # → _on_run_finished/_on_run_cancelled/_on_run_failed logic exactly.
             if bg.ok:
-                if stop_event.is_set():
+                if cancel_requested.is_set() or stop_event.is_set():
                     _on_run_cancelled(bg.result, settle)
                 else:
                     _on_run_finished(bg.result, settle)
             else:
                 assert bg.error is not None
-                if stop_event.is_set():
+                if cancel_requested.is_set() and stop_signal.error is None:
                     _on_run_cancelled(NO_RESULT, settle)
                 else:
                     _on_run_failed(bg.error, settle)
@@ -177,7 +186,7 @@ class RunService(QObject):
             ),
             owner_id=tab_id,
             wants_progress=True,
-            cancel_hook=stop_event.set,
+            cancel_hook=request_cancel,
             work=work,
             run_in_pool=False,
             on_terminal=on_terminal,

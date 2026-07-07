@@ -53,6 +53,22 @@ T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
 RunStatus: TypeAlias = Literal["completed", "stopped", "interrupted", "failed"]
 StopCondition: TypeAlias = Callable[[], bool]
+ErrorStatus: TypeAlias = Literal["interrupted", "failed"]
+
+
+class ScheduleOutcomeError(RuntimeError):
+    """Exception wrapper for a Schedule failure that returned partial data."""
+
+    def __init__(
+        self,
+        status: ErrorStatus,
+        reason: str,
+        exception: BaseException | None,
+    ) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+        self.exception = exception
 
 
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
@@ -110,6 +126,8 @@ class StopSignal:
 
     def __init__(self, event: threading.Event | None = None) -> None:
         self._event = event if event is not None else threading.Event()
+        self._error: ScheduleOutcomeError | None = None
+        self._lock = threading.Lock()
 
     def is_stop(self) -> bool:
         return self._event.is_set()
@@ -124,11 +142,38 @@ class StopSignal:
         self._event.set()
 
     def clear_stop(self) -> None:
+        with self._lock:
+            self._error = None
         self._event.clear()
 
     @property
     def event(self) -> threading.Event:
         return self._event
+
+    @property
+    def error(self) -> ScheduleOutcomeError | None:
+        with self._lock:
+            return self._error
+
+    def set_error(
+        self,
+        status: ErrorStatus,
+        reason: str,
+        exception: BaseException | None,
+    ) -> None:
+        error = ScheduleOutcomeError(status, reason, exception)
+        with self._lock:
+            if self._error is None:
+                self._error = error
+        self._event.set()
+
+    def raise_if_error(self) -> None:
+        error = self.error
+        if error is None:
+            return
+        if error.exception is not None:
+            raise error from error.exception
+        raise error
 
 
 class _AcquireCancelFlag:
@@ -387,12 +432,18 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._set_outcome("stopped", reason=reason)
 
     def _mark_interrupted(self, exc: BaseException) -> None:
-        self._stop.set_stop()
-        self._set_outcome("interrupted", reason=_exception_reason(exc), exception=exc)
+        reason = _exception_reason(exc)
+        if self._set_outcome("interrupted", reason=reason, exception=exc):
+            self._stop.set_error("interrupted", reason, exc)
+        else:
+            self._stop.set_stop()
 
     def _mark_failed(self, exc: BaseException) -> None:
-        self._stop.set_stop()
-        self._set_outcome("failed", reason=_exception_reason(exc), exception=exc)
+        reason = _exception_reason(exc)
+        if self._set_outcome("failed", reason=reason, exception=exc):
+            self._stop.set_error("failed", reason, exc)
+        else:
+            self._stop.set_stop()
 
     def _set_outcome(
         self,
@@ -400,11 +451,13 @@ class Schedule(Generic[T_Cfg, T_Env]):
         *,
         reason: str | None = None,
         exception: BaseException | None = None,
-    ) -> None:
+    ) -> bool:
         if self._outcome.status == "completed":
             self._outcome = ScheduleOutcome(
                 status=status, reason=reason, exception=exception
             )
+            return True
+        return False
 
     def _reset_outcome_for_retry(self) -> None:
         self._outcome = ScheduleOutcome()

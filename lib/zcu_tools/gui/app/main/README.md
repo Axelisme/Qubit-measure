@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - analyze figure refresh
+**Last updated:** 2026-07-07 - run failure/cancel outcome split
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -136,7 +136,10 @@ cancellation sets the operation `stop_event`; worker thunks expose it to
 Schedule-based experiments and executors through
 `schedule_stop_scope(StopSignal(stop_event))`, so `ProgramBuilder`,
 `Schedule.repeat/scan/batch`, and executor root schedules observe Stop without a
-global task runner context.
+global task runner context. Run terminal policy treats the cancel hook as the
+source of user cancellation intent; `Schedule` may also set the same stop flag for
+internal failed/interrupted outcomes, and those are surfaced as failed operation
+outcomes instead of cancelled.
 
 ## Progress And Plotting
 
