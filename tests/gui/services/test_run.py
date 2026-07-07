@@ -114,6 +114,10 @@ class _FakeBg:
 
 
 class _ConstructorFailingProgram:
+    @property
+    def cfg_model(self) -> ProgramV2Cfg:
+        raise NotImplementedError
+
     def __init__(
         self,
         soccfg: Any,

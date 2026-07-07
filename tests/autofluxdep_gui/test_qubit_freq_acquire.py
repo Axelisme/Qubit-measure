@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import CenteredSweepValue
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
@@ -140,6 +141,9 @@ def _configure_context(ctrl) -> None:
     ml.register_module(readout=_READOUT)
 
 
+@pytest.mark.filterwarnings(
+    "ignore:fit_func failed; returning init_p fallback with infinite covariance:RuntimeWarning"
+)
 def test_qubit_freq_acquire_fit_varies_with_flux():
     ctrl = build_core()
     sim_params = high_snr_simparams()

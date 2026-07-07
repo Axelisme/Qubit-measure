@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-07 — device setup cancel scope tests
+**Last updated:** 2026-07-07 — pyright clean / pytest warning policy
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -19,6 +19,11 @@
 CI / agent 品質門檻使用 `uv run pytest -n auto`。`dev` dependency group 會同步安裝
 `zcu-tools[gui]`，因此 bare full-suite pytest 具備 GUI/client 測試需要的 optional dependency；
 若直接呼叫 `.venv/bin/python -m pytest`，先確認 venv 是透過 `uv` 的 dev group 同步。
+
+pytest 全域 warning filter 只放第三方 noise（例如 `qick` / `scqubits` 在 Python 3.13
+import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warning 不應全域 suppress；
+若 integration test 允許某個 fit fallback warning，使用 test-local `filterwarnings` marker
+標註該測試的預期退化。
 
 `-n auto` 啟動 pytest-xdist 多進程平行化。`tests/conftest.py` 在每個 worker 進程啟動時
 （偵測到 `PYTEST_XDIST_WORKER`）自動把 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS`

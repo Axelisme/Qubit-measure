@@ -102,7 +102,11 @@ reportIncompatibleVariableOverride = "none"
 # pytest from walking into scratch/ helper scripts (named test_*.py with plain
 # helper functions like test(label, ...) that pytest would mis-collect as cases).
 testpaths = ["tests"]
-filterwarnings = ["ignore::DeprecationWarning:matplotlib.*"]
+filterwarnings = [
+  "ignore::DeprecationWarning:matplotlib.*",
+  "ignore:invalid escape sequence.*:SyntaxWarning:qick\\..*",
+  "ignore:invalid escape sequence.*:SyntaxWarning:scqubits\\..*",
+]
 markers = [
   "slow: slow tests (e.g. qutip cross-validation)",
 ]

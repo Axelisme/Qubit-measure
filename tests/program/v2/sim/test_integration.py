@@ -195,6 +195,9 @@ def _sim_dephasing(*, T2: float, T2_star: float) -> SimParams:
 # --------------------------------------------------------------- twotone freq
 
 
+@pytest.mark.filterwarnings(
+    "ignore:fit_func failed; returning init_p fallback with infinite covariance:RuntimeWarning"
+)
 def test_freq_recovers_f_qubit() -> None:
     """twotone freq fit recovers the injected absolute f_qubit.
 
