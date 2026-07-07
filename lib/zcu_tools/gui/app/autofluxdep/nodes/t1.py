@@ -54,6 +54,7 @@ from collections.abc import MutableMapping
 from typing import Any, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -63,10 +64,11 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     FloatSpec,
     OverridePath,
     OverridePlan,
+    ScalarSpec,
     SweepValue,
     str_choice_spec,
 )
-from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     SnrProbe,
     acquire_retry_generation_field,
@@ -114,6 +116,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
 )
 from zcu_tools.program.v2 import (
     Delay,
+    DelayAuto,
+    LoadValue,
     ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
@@ -133,6 +137,7 @@ _DEFAULT_RELAX_MIN = 1.0
 _DEFAULT_SWEEP_START = 0.5
 _DEFAULT_SWEEP_STOP_FACTOR = 5.0
 _DEFAULT_SWEEP_STOP_MIN = 1.0
+_DEFAULT_UNIFORM = True
 _SWEEP_RANGE_MODE_AUTO_T1 = "auto_t1"
 _SWEEP_RANGE_MODE_FIXED = "fixed"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
@@ -201,6 +206,52 @@ def _resolve_cfg_relax_delay(
     raise RuntimeError(f"unsupported t1 relax_delay_mode: {mode!r}")
 
 
+def _resolve_uniform(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"t1 uniform must be a bool, got {type(value).__name__}")
+    return value
+
+
+def t1_delay_axis(
+    *, start: float, stop: float, expts: int, uniform: bool
+) -> NDArray[np.float64]:
+    """Return the T1 delay axis requested by the generation mode."""
+    start = float(start)
+    stop = float(stop)
+    expts = int(expts)
+    if expts <= 0:
+        raise ValueError(f"t1 sweep expts must be positive, got {expts}")
+    if not np.isfinite(start) or not np.isfinite(stop):
+        raise ValueError("t1 sweep start/stop must be finite")
+    if uniform or expts == 1:
+        return np.linspace(start, stop, expts, dtype=np.float64)
+
+    expected_t1 = 0.2 * stop
+    if not np.isfinite(expected_t1) or expected_t1 <= 0.0:
+        raise ValueError(
+            f"t1 non-uniform sweep requires a positive finite stop value, got {stop!r}"
+        )
+    y0 = np.exp(-start / expected_t1)
+    yN = np.exp(-stop / expected_t1)
+    y_seq = np.linspace(y0, yN, expts, endpoint=True, dtype=np.float64)
+    return np.asarray(-expected_t1 * np.log(y_seq), dtype=np.float64)
+
+
+def _times_to_cycles_and_axis(
+    soccfg: Any, times: NDArray[np.float64]
+) -> tuple[list[int], NDArray[np.float64]]:
+    cycles = [int(soccfg.us2cycles(float(time))) for time in times]
+    if any(right <= left for left, right in zip(cycles, cycles[1:], strict=False)):
+        raise ValueError(
+            "t1 non-uniform sweep collapsed after cycle quantization; "
+            "reduce expts or widen the delay sweep"
+        )
+    actual_times = np.asarray(
+        [soccfg.cycles2us(int(cycle)) for cycle in cycles], dtype=np.float64
+    )
+    return cycles, actual_times
+
+
 class T1Node(Node):
     """One flux point's t1: set flux → real acquire → fit_decay → fill row → Patch.
 
@@ -226,7 +277,14 @@ class T1Node(Node):
         # the Plotter + the fit share one axis.
         cfg = self._builder.make_cfg(env, snapshot)
         lo, hi = cfg.sweep_range
-        times = np.linspace(float(lo), float(hi), result.n_x)
+        knobs = env.knobs()
+        uniform = _resolve_uniform(knobs.get("uniform", _DEFAULT_UNIFORM))
+        times = t1_delay_axis(
+            start=float(lo), stop=float(hi), expts=result.n_x, uniform=uniform
+        )
+        length_cycles: list[int] | None = None
+        if not uniform:
+            length_cycles, times = _times_to_cycles_and_axis(env.soccfg, times)
         result.x[:] = times
 
         flux_device = require_flux_device(env, "t1")
@@ -235,10 +293,40 @@ class T1Node(Node):
         )
         setup_devices(cfg, progress=False)
 
-        # Sweep the relax delay over the relax-time axis (lower layer feeds
-        # sweep2param("length") to the Delay module).
-        length_sweep = axis_to_sweep(times)
-        length_param = sweep2param("length", length_sweep)
+        # Sweep the relax delay over the relax-time axis. Uniform mode uses the
+        # program sweep; non-uniform mode loads one delay cycle per point.
+        if uniform:
+            length_sweep = axis_to_sweep(times)
+            length_param = sweep2param("length", length_sweep)
+
+            def configure_builder(builder: Any) -> Any:
+                return builder.add(
+                    [
+                        Pulse("pi_pulse", cfg.modules.pi_pulse),
+                        Delay("t1_delay", delay=length_param),
+                        Readout("readout", cfg.modules.readout),
+                    ]
+                ).declare_sweep("length", length_sweep)
+
+        else:
+            if length_cycles is None:
+                raise RuntimeError("t1 non-uniform sweep did not compute delay cycles")
+
+            def configure_builder(builder: Any) -> Any:
+                return builder.add(
+                    [
+                        LoadValue(
+                            "load_t1_delay",
+                            length_cycles,
+                            idx_reg="length_idx",
+                            val_reg="t1_delay_cycle",
+                            auto_compress=False,
+                        ),
+                        Pulse("pi_pulse", cfg.modules.pi_pulse),
+                        DelayAuto("t1_delay", t="t1_delay_cycle"),
+                        Readout("readout", cfg.modules.readout),
+                    ]
+                ).declare_sweep("length_idx", len(length_cycles))
 
         result.flux[idx] = env.flux
 
@@ -249,13 +337,7 @@ class T1Node(Node):
             cfg=cfg,
             signal_shape=result.signal[idx].shape,
             dtype=np.complex128,
-            configure_builder=lambda builder: builder.add(
-                [
-                    Pulse("pi_pulse", cfg.modules.pi_pulse),
-                    Delay("t1_delay", delay=length_param),
-                    Readout("readout", cfg.modules.readout),
-                ]
-            ).declare_sweep("length", length_sweep),
+            configure_builder=configure_builder,
             raw2signal_fn=acquire_to_complex,
             on_update=make_signal_update(
                 result,
@@ -405,6 +487,19 @@ class T1Builder(Builder):
                     max_length_default,
                     group="sweep",
                 ),
+                logical_generation_field(
+                    "uniform",
+                    ScalarSpec(
+                        label="uniform",
+                        type=bool,
+                        tooltip=(
+                            "Use a linear hardware sweep; disable for a "
+                            "non-uniform delay table clustered around the decay."
+                        ),
+                    ),
+                    _DEFAULT_UNIFORM,
+                    group="sweep",
+                ),
             ),
             generation_choices=(
                 generation_choice(
@@ -449,7 +544,7 @@ class T1Builder(Builder):
                     expts=101,
                 ),
             },
-            drop_paths=("modules.reset",),
+            drop_paths=("modules.reset", "uniform"),
             module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
         )
 
@@ -457,7 +552,14 @@ class T1Builder(Builder):
         self, schema: NodeCfgSchema, flux: Any, md: Any = None
     ) -> Sweep1DResult:
         knobs = schema.lower(None, md=md)
-        times = sweepcfg_to_axis(knobs["sweep_range"])
+        sweep = knobs["sweep_range"]
+        uniform = _resolve_uniform(knobs.get("uniform", _DEFAULT_UNIFORM))
+        times = t1_delay_axis(
+            start=float(sweep.start),
+            stop=float(sweep.stop),
+            expts=int(sweep.expts),
+            uniform=uniform,
+        )
         return Sweep1DResult.allocate(flux, times, x_label="relax time (us)")
 
     def make_plotter(self, figure: Any) -> Decay1DPlotter:

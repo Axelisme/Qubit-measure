@@ -23,15 +23,19 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
+    RunRequest,
+    ScalarSpec,
     SweepSpec,
     SweepValue,
     WritebackItem,
     WritebackRequest,
+    require_soc_handles,
 )
 
 T1RunResult: TypeAlias = T1Result
@@ -86,7 +90,9 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             "dual-exponential only when the decay clearly shows two timescales "
             "(a fast component on top of the slow relaxation). A delay sweep "
             "reaching ~5*T1 lets the decay flatten so the fit is "
-            "well-constrained; with no prior 't1' it spans 0–100 us."
+            "well-constrained; with no prior 't1' it spans 0–100 us. "
+            "Set 'uniform=False' to cluster more points on the exponential "
+            "decay while keeping the configured start/stop window."
         ),
     )
 
@@ -99,12 +105,18 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
                 "readout": make_readout_module_spec(),
             },
             sweep={"length": SweepSpec(label="Delay (us)")},
+            extra={"uniform": ScalarSpec(label="Uniform (linear) sweep", type=bool)},
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
         return (
             CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=proper_relax(ctx))
+            .scalars(
+                reps=1000,
+                rounds=100,
+                relax_delay=proper_relax(ctx),
+                uniform=True,
+            )
             .role("modules.pi_pulse", "pi_pulse")
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library reset (ADR-0010)
@@ -119,6 +131,23 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             )
             .build()
         )
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T1Cfg:
+        cfg_raw = dict(raw_cfg)
+        cfg_raw.pop("uniform", None)
+        return super().build_exp_cfg(cfg_raw, req)
+
+    def _uniform(self, raw_cfg: dict[str, object]) -> bool:
+        value = raw_cfg.get("uniform", True)
+        if not isinstance(value, bool):
+            raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
+        return value
+
+    def run(self, req: RunRequest, schema: CfgSchema) -> T1RunResult:
+        soc, soccfg = require_soc_handles(req)
+        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        return T1Exp().run(soc, soccfg, cfg, uniform=self._uniform(raw_cfg))
 
     def analyze(
         self, req: AnalyzeRequest[T1RunResult, T1AnalyzeParams]

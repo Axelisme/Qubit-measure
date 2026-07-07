@@ -9,7 +9,7 @@ from zcu_tools.experiment.v2.twotone.freq import FreqCfg
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import AmpRabiCfg
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import LenRabiCfg
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg
+from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Exp
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import T2EchoCfg
 from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import T2RamseyCfg
 from zcu_tools.experiment.v2_gui.adapters.twotone import (
@@ -90,6 +90,86 @@ def test_twotone_build_exp_cfg_uses_cfg_assembler(
 
     cfg = adapter.build_exp_cfg(raw, _make_req(ml))
     assert isinstance(cfg, cfg_model)
+
+
+def test_t1_build_exp_cfg_strips_uniform(monkeypatch: pytest.MonkeyPatch) -> None:
+    import zcu_tools.experiment.v2_gui.adapters.base as base_mod
+    from zcu_tools.experiment.cfg_assembler import make_cfg as real_make_cfg
+
+    ml = _make_ml()
+    adapter = T1Adapter()
+    raw = _lower(adapter.make_default_cfg(_make_ctx(ml)), _make_req(ml))
+    assert raw["uniform"] is True
+    captured: dict[str, object] = {}
+
+    def fake_make_cfg(
+        raw_cfg: dict[str, object], cfg_cls: type, *, ml: object | None = None
+    ) -> object:
+        captured["raw"] = raw_cfg
+        captured["cfg_cls"] = cfg_cls
+        return real_make_cfg(raw_cfg, cfg_cls, ml=cast(Any, ml))
+
+    monkeypatch.setattr(base_mod, "make_cfg", fake_make_cfg)
+
+    cfg = adapter.build_exp_cfg(raw, _make_req(ml))
+
+    assert isinstance(cfg, T1Cfg)
+    assert "uniform" not in cast(dict[str, object], captured["raw"])
+    assert captured["cfg_cls"] is T1Cfg
+
+
+@pytest.mark.parametrize("uniform", [False, True])
+def test_t1_run_forwards_uniform(
+    uniform: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ml = _make_ml()
+    req = RunRequest(
+        md=MagicMock(),
+        ml=ml,
+        soc=MagicMock(name="soc"),
+        soccfg=MagicMock(name="soccfg"),
+    )
+    schema = T1Adapter().make_default_cfg(_make_ctx(ml))
+    schema.value.with_field("uniform", uniform)
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        self: T1Exp,
+        soc: object,
+        soccfg: object,
+        run_cfg: object,
+        *,
+        uniform: bool = True,
+        acquire_kwargs: dict[str, Any] | None = None,
+    ) -> object:
+        del self, acquire_kwargs
+        captured.update(soc=soc, soccfg=soccfg, cfg=run_cfg, uniform=uniform)
+        return object()
+
+    monkeypatch.setattr(T1Exp, "run", fake_run, raising=True)
+
+    result = T1Adapter().run(req, schema)
+
+    assert result is not None
+    assert captured["soc"] is req.soc
+    assert captured["soccfg"] is req.soccfg
+    assert isinstance(captured["cfg"], T1Cfg)
+    assert captured["uniform"] is uniform
+
+
+def test_t1_run_rejects_non_bool_uniform() -> None:
+    ml = _make_ml()
+    req = RunRequest(
+        md=MagicMock(),
+        ml=ml,
+        soc=MagicMock(name="soc"),
+        soccfg=MagicMock(name="soccfg"),
+    )
+    schema = T1Adapter().make_default_cfg(_make_ctx(ml))
+    schema.value.with_field("uniform", "false")
+
+    with pytest.raises(RuntimeError, match="where a bool was expected"):
+        T1Adapter().run(req, schema)
 
 
 @pytest.mark.parametrize(

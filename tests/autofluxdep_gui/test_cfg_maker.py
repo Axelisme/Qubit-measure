@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CenteredSweepValue,
@@ -797,6 +798,39 @@ def test_t1_make_cfg_lowers_context():
     assert cfg.reps == 100 and cfg.rounds == 2
 
 
+def test_t1_nonuniform_axis_preserves_window_and_clusters_points():
+    from zcu_tools.gui.app.autofluxdep.nodes.t1 import t1_delay_axis
+
+    axis = t1_delay_axis(start=0.5, stop=60.0, expts=11, uniform=False)
+
+    assert axis[0] == pytest.approx(0.5)
+    assert axis[-1] == pytest.approx(60.0)
+    assert np.all(np.diff(axis) > 0.0)
+    assert not np.allclose(np.diff(axis), np.diff(axis)[0])
+    assert np.diff(axis)[0] < np.diff(axis)[-1]
+
+
+def test_t1_make_init_result_uses_nonuniform_axis():
+    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder, t1_delay_axis
+
+    builder = T1Builder()
+    schema = _schema(
+        builder,
+        {
+            "sweep_range": SweepValue(start=0.5, stop=60.0, expts=11),
+            "uniform": False,
+        },
+    )
+
+    result = builder.make_init_result(schema, np.array([0.0, 0.1]))
+
+    np.testing.assert_allclose(
+        result.x,
+        t1_delay_axis(start=0.5, stop=60.0, expts=11, uniform=False),
+    )
+    assert result.signal.shape == (2, 11)
+
+
 def test_t1_make_cfg_can_fix_sweep_range_and_relax_delay():
     from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
     from zcu_tools.meta_tool import ModuleLibrary
@@ -823,6 +857,202 @@ def test_t1_make_cfg_can_fix_sweep_range_and_relax_delay():
 
     assert cfg.sweep_range == (2.0, 4.0)
     assert cfg.relax_delay == 9.0
+
+
+class _T1SocCfg:
+    def __init__(self, *, cycles_per_us: float = 10.0) -> None:
+        self.cycles_per_us = float(cycles_per_us)
+
+    def us2cycles(self, value: float) -> int:
+        return int(round(value * self.cycles_per_us))
+
+    def cycles2us(self, value: int) -> float:
+        return float(value) / self.cycles_per_us
+
+
+class _ProgramBuilderProbe:
+    def __init__(self) -> None:
+        self.modules: list[object] = []
+        self.sweep: tuple[str, object] | None = None
+
+    def add(self, modules: list[object]) -> _ProgramBuilderProbe:
+        self.modules.extend(modules)
+        return self
+
+    def declare_sweep(self, name: str, sweep: object) -> _ProgramBuilderProbe:
+        self.sweep = (name, sweep)
+        return self
+
+
+def _patch_t1_fast_produce(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+    from types import SimpleNamespace
+
+    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_run_schedule_acquire(**kwargs: object) -> object:
+        probe = _ProgramBuilderProbe()
+        configure_builder = kwargs["configure_builder"]
+        assert callable(configure_builder)
+        configure_builder(probe)
+        captured["modules"] = probe.modules
+        captured["sweep"] = probe.sweep
+        signal_shape = kwargs["signal_shape"]
+        assert isinstance(signal_shape, (int, tuple))
+        n_points = signal_shape[0] if isinstance(signal_shape, tuple) else signal_shape
+        assert isinstance(n_points, int)
+        signal = np.linspace(1.0, 0.2, int(n_points), dtype=np.float64)
+        return SimpleNamespace(signal=signal.astype(np.complex128), stopped=False)
+
+    monkeypatch.setattr(t1_mod, "require_flux_device", lambda env, name: "flux")
+    monkeypatch.setattr(t1_mod, "set_flux_by_name", lambda cfg_dev, name, value: None)
+    monkeypatch.setattr(t1_mod, "setup_devices", lambda cfg, progress=False: None)
+    monkeypatch.setattr(t1_mod, "run_schedule_acquire", fake_run_schedule_acquire)
+    monkeypatch.setattr(
+        t1_mod,
+        "fit_decay",
+        lambda times, real: (12.0, 0.1, np.asarray(real, dtype=np.float64), None),
+    )
+    monkeypatch.setattr(t1_mod, "fill_decay_fit_or_skip", lambda *args, **kwargs: True)
+    return captured
+
+
+def test_t1_nonuniform_produce_uses_delay_table(monkeypatch: pytest.MonkeyPatch):
+    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+    from zcu_tools.program.v2 import DelayAuto, LoadValue
+
+    captured = _patch_t1_fast_produce(monkeypatch)
+
+    builder = t1_mod.T1Builder()
+    schema = _schema(
+        builder,
+        {
+            "sweep_range": SweepValue(start=0.5, stop=60.0, expts=9),
+            "sweep_range_mode": "fixed",
+            "relax_delay_mode": "fixed",
+            "relax_delay": 60.0,
+            "uniform": False,
+        },
+    )
+    result = builder.make_init_result(schema, np.array([0.0]))
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        soccfg=_T1SocCfg(),
+        ml=ModuleLibrary(),
+        result=result,
+    )
+    snap = Snapshot(
+        {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
+    )
+
+    patch = builder.build_node(env).produce(snap)
+
+    modules = captured["modules"]
+    assert isinstance(modules, list)
+    load = next(module for module in modules if isinstance(module, LoadValue))
+    delay = next(module for module in modules if isinstance(module, DelayAuto))
+    assert delay.t == "t1_delay_cycle"
+    expected_axis = t1_mod.t1_delay_axis(start=0.5, stop=60.0, expts=9, uniform=False)
+    expected_cycles = [int(round(float(value) * 10.0)) for value in expected_axis]
+    assert load.values == expected_cycles
+    assert load.auto_compress is False
+    assert captured["sweep"] == ("length_idx", len(expected_cycles))
+    np.testing.assert_allclose(result.x, np.asarray(expected_cycles) / 10.0)
+    assert patch.values()["t1"] == 12.0
+
+
+def test_t1_nonuniform_produce_auto_mode_honors_max_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+    from zcu_tools.program.v2 import DelayAuto, LoadValue
+
+    captured = _patch_t1_fast_produce(monkeypatch)
+
+    builder = t1_mod.T1Builder()
+    schema = _schema(
+        builder,
+        {
+            "sweep_range": SweepValue(start=0.5, stop=200.0, expts=9),
+            "sweep_range_mode": "auto_t1",
+            "sweep_stop_factor": 5.0,
+            "sweep_stop_min_us": 1.0,
+            "max_length": 40.0,
+            "relax_delay_mode": "fixed",
+            "relax_delay": 60.0,
+            "uniform": False,
+        },
+    )
+    result = builder.make_init_result(schema, np.array([0.0]))
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        soccfg=_T1SocCfg(),
+        ml=ModuleLibrary(),
+        result=result,
+    )
+    snap = Snapshot(
+        {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
+    )
+
+    patch = builder.build_node(env).produce(snap)
+
+    modules = captured["modules"]
+    assert isinstance(modules, list)
+    assert any(isinstance(module, LoadValue) for module in modules)
+    assert any(isinstance(module, DelayAuto) for module in modules)
+    assert captured["sweep"] == ("length_idx", 9)
+    assert result.x.shape == (9,)
+    assert result.x[0] == pytest.approx(0.5)
+    assert result.x[-1] == pytest.approx(40.0)
+    assert patch.values()["t1"] == 12.0
+
+
+def test_t1_nonuniform_produce_rejects_collapsed_cycles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
+
+    _patch_t1_fast_produce(monkeypatch)
+
+    builder = t1_mod.T1Builder()
+    schema = _schema(
+        builder,
+        {
+            "sweep_range": SweepValue(start=0.001, stop=0.002, expts=5),
+            "sweep_range_mode": "fixed",
+            "relax_delay_mode": "fixed",
+            "relax_delay": 60.0,
+            "uniform": False,
+        },
+    )
+    result = builder.make_init_result(schema, np.array([0.0]))
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=schema,
+        soccfg=_T1SocCfg(cycles_per_us=1.0),
+        ml=ModuleLibrary(),
+        result=result,
+    )
+    snap = Snapshot(
+        {"t1": 12.0}, modules={"pi_pulse": _T1_PI_PULSE, "opt_readout": _READOUT}
+    )
+
+    with pytest.raises(ValueError, match="collapsed after cycle quantization"):
+        builder.build_node(env).produce(snap)
 
 
 def test_t1_produce_fast_fails_when_context_unconfigured():

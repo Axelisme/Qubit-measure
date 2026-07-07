@@ -303,6 +303,7 @@ _EXPECTED_KEYS = {
         "sweep_stop_factor",
         "sweep_stop_min_us",
         "max_length",
+        "uniform",
     },
     "t2ramsey": {
         "sweep_range",
@@ -451,6 +452,7 @@ _EXPECTED_PATHS = {
         "sweep_stop_factor": "generation.sweep.sweep_stop_factor",
         "sweep_stop_min_us": "generation.sweep.sweep_stop_min_us",
         "max_length": "generation.sweep.max_length",
+        "uniform": "generation.sweep.uniform",
     },
     "t2ramsey": {
         "sweep_range": "sweep.length",
@@ -810,6 +812,7 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
         "sweep_stop_factor": "stop_factor",
         "sweep_stop_min_us": "stop_min_us",
         "max_length": "max_length",
+        "uniform": "uniform",
     }
 
     ramsey_schema = T2RamseyBuilder().make_default_schema()
@@ -1336,6 +1339,7 @@ def test_fresh_node_defaults_seed_from_md_values():
 
     t1 = T1Builder().make_default_schema(ctx).lower(None, md=md)
     assert t1["t1_seed_us"] == 12.0
+    assert t1["uniform"] is True
     assert t1["max_length"] == pytest.approx(
         max(t1["sweep_stop_min_us"], md.t1 * t1["sweep_stop_factor"])
     )
@@ -1402,6 +1406,11 @@ def test_fresh_node_defaults_seed_from_md_values():
 
     mist = MistBuilder().make_default_schema(ctx).lower(None, md=md)
     assert mist["mist_freq"] == seed_readout_freq(ctx, fallback=0.0)
+
+
+def test_t1_uniform_rejects_invalid_bool_text() -> None:
+    with pytest.raises(ValueError, match="Expected bool"):
+        T1Builder().make_default_schema().with_overrides({"uniform": "maybe"})
 
 
 @pytest.mark.parametrize(
