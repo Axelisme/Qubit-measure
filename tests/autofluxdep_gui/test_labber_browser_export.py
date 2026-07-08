@@ -20,7 +20,11 @@ from zcu_tools.gui.app.autofluxdep.services import run_store as run_store_module
 from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
     export_labber_browser_sidecars,
 )
-from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore, load_manifest
+from zcu_tools.gui.app.autofluxdep.services.run_store import (
+    RunStore,
+    load_journal_events,
+    load_manifest,
+)
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.utils.datasaver import load_labber_data
 
@@ -224,6 +228,88 @@ def test_run_store_finalizes_labber_browser_sidecars_from_committed_rows(
     assert (
         "- Export labber_browser_sidecar t1/t1: labber/2026/07/Data_0705/003-t1_t1.hdf5"
     ) in report
+
+
+def test_run_store_streams_labber_browser_sidecar_rows_before_finalize(
+    tmp_path, monkeypatch
+):
+    _fixed_run_datetime(monkeypatch)
+    flux = np.array([0.0, 0.5, 1.0], dtype=float)
+    node = place(make_builder("t1"))
+    result = _sweep1d_result(flux, x_label="relax time (us)", offset=100.0)
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=flux.tolist(),
+        flux_device_name="fake_flux",
+        nodes=[node],
+        results={"t1": result},
+    )
+
+    manifest = load_manifest(store.manifest_path)
+    exports = manifest["exports"]
+    assert exports["labber_browser_root"] == "labber/2026/07/Data_0705"
+    sidecars = exports["labber_browser_sidecars"]
+    assert {entry["role"] for entry in sidecars} == {"signal", "t1"}
+
+    store.write_node_row(node.name, 1, Patch(), InfoStore(point={"flux_idx": 1}))
+
+    signal_entry = _entry_by_node_role(sidecars, "t1", "signal")
+    signal_path = store.data_dir / signal_entry["path"]
+    signal = load_labber_data(str(signal_path))
+    np.testing.assert_allclose(signal.z.real[1], result.signal[1])
+    assert np.isnan(signal.z.real[0]).all()
+    assert np.isnan(signal.z.real[2]).all()
+
+    scalar_entry = _entry_by_node_role(sidecars, "t1", "t1")
+    scalar_path = store.data_dir / scalar_entry["path"]
+    scalar = load_labber_data(str(scalar_path))
+    assert scalar.z.real[1] == result.fit_value[1]
+    assert np.isnan(scalar.z.real[0])
+    assert np.isnan(scalar.z.real[2])
+
+    with h5py.File(signal_path, "r") as handle:
+        assert bool(handle.attrs["zcu_tools.streaming_finalized"]) is False
+
+    store.finalize("stopped", next_flux_idx=2)
+
+    with h5py.File(signal_path, "r") as handle:
+        assert bool(handle.attrs["zcu_tools.streaming_finalized"]) is True
+
+
+def test_run_store_sidecar_write_failure_does_not_append_row_journal(
+    tmp_path, monkeypatch
+):
+    _fixed_run_datetime(monkeypatch)
+    flux = np.array([0.0, 0.5, 1.0], dtype=float)
+    node = place(make_builder("t1"))
+    result = _sweep1d_result(flux, x_label="relax time (us)", offset=100.0)
+    store = RunStore.create(
+        project=_project(tmp_path),
+        flux_values=flux.tolist(),
+        flux_device_name="fake_flux",
+        nodes=[node],
+        results={"t1": result},
+    )
+
+    def fail_sidecar(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("sidecar boom")
+
+    monkeypatch.setattr(store, "_write_labber_browser_row", fail_sidecar)
+
+    with pytest.raises(RuntimeError, match="sidecar boom"):
+        store.write_node_row(node.name, 0, Patch(), InfoStore(point={"flux_idx": 0}))
+
+    assert load_journal_events(store.run_dir / "journal.jsonl") == []
+    assert store._row_counts[node.name] == 0
+
+    manifest = load_manifest(store.manifest_path)
+    signal_entry = _entry_by_node_role(
+        manifest["exports"]["labber_browser_sidecars"], "t1", "signal"
+    )
+    signal = load_labber_data(str(store.data_dir / signal_entry["path"]))
+    assert np.isnan(signal.z.real).all()
+
+    store.close_writers(finalize=True)
 
 
 def test_run_store_places_autofluxdep_run_under_qubit_database_root_for_dated_database_path(

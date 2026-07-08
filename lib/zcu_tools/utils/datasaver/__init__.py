@@ -26,7 +26,9 @@ from .paths import (
 from .streaming import (
     StreamingGroupedLabberWriter,
     StreamingLabberRoleSpec,
+    StreamingLabberWriter,
     open_streaming_grouped_labber_data,
+    open_streaming_labber_data,
 )
 from .transport import download_from_server, upload_to_server
 
@@ -43,6 +45,8 @@ __all__ = [
     "load_grouped_labber_data",
     "StreamingLabberRoleSpec",
     "StreamingGroupedLabberWriter",
+    "StreamingLabberWriter",
+    "open_streaming_labber_data",
     "open_streaming_grouped_labber_data",
     "save_labber_trace_data",
     "format_ext",

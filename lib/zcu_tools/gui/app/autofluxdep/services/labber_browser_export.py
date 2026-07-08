@@ -24,7 +24,13 @@ from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
 from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )
-from zcu_tools.utils.datasaver import save_labber_data
+from zcu_tools.utils.datasaver import (
+    LabberMetadata,
+    StreamingLabberRoleSpec,
+    StreamingLabberWriter,
+    open_streaming_labber_data,
+    save_labber_data,
+)
 
 LABBER_BROWSER_ROOT_EXPORT_KEY = "labber_browser_root"
 LABBER_BROWSER_SIDECARS_EXPORT_KEY = "labber_browser_sidecars"
@@ -68,6 +74,142 @@ class LabberBrowserExport:
         }
 
 
+@dataclass(frozen=True)
+class _StreamingSidecarSpec:
+    sidecar: LabberBrowserSidecar
+    spec: StreamingLabberRoleSpec
+
+
+@dataclass(slots=True)
+class _StreamingSidecarHandle:
+    sidecar: LabberBrowserSidecar
+    writer: StreamingLabberWriter
+
+
+class LabberBrowserSidecarWriters:
+    """Open live writers for Labber Browser single-log sidecars."""
+
+    def __init__(
+        self,
+        *,
+        data_root: Path,
+        root_path: Path,
+        handles_by_node: Mapping[str, Sequence[_StreamingSidecarHandle]],
+        sidecars: Sequence[LabberBrowserSidecar],
+    ) -> None:
+        self._data_root = data_root
+        self._root_path = root_path
+        self._handles_by_node = {
+            str(node): tuple(handles) for node, handles in handles_by_node.items()
+        }
+        self._sidecars = tuple(sidecars)
+        self._closed = False
+
+    @property
+    def sidecars(self) -> tuple[LabberBrowserSidecar, ...]:
+        return self._sidecars
+
+    def to_manifest_export(self) -> LabberBrowserExport:
+        return LabberBrowserExport(
+            root=relative_to_artifact(self._data_root, self._root_path),
+            sidecars=self._sidecars,
+        )
+
+    def write_node_row(
+        self,
+        node_name: str,
+        node_type: str,
+        result: object,
+        flux_idx: int,
+        *,
+        timestamp: float | None = None,
+    ) -> None:
+        self._ensure_open()
+        handles = self._handles_by_node.get(node_name, ())
+        if not handles:
+            return
+        for handle in handles:
+            row = _streaming_row_value(
+                node_name, node_type, result, handle.sidecar.role, flux_idx
+            )
+            handle.writer.write_outer_slice(flux_idx, row, timestamp=timestamp)
+        self.flush()
+
+    def flush(self) -> None:
+        self._ensure_open()
+        for handles in self._handles_by_node.values():
+            for handle in handles:
+                handle.writer.flush()
+
+    def finalize(self) -> None:
+        self._ensure_open()
+        for handles in self._handles_by_node.values():
+            for handle in handles:
+                handle.writer.finalize()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        for handles in self._handles_by_node.values():
+            for handle in handles:
+                handle.writer.close()
+        self._closed = True
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Labber Browser sidecar writers are closed")
+
+
+def open_streaming_labber_browser_sidecars(
+    *,
+    data_root: str | Path,
+    nodes: Sequence[PlacedNode],
+    results: Mapping[str, object],
+    metadata: LabberMetadata | None = None,
+) -> LabberBrowserSidecarWriters:
+    """Open live Labber Browser sidecar writers for supported fixed-axis Results."""
+    data_root_path = Path(data_root)
+    root_path = labber_browser_root(data_root_path)
+    handles_by_node: dict[str, list[_StreamingSidecarHandle]] = {}
+    sidecars: list[LabberBrowserSidecar] = []
+    opened: list[StreamingLabberWriter] = []
+    try:
+        for index, node in enumerate(nodes):
+            result = results.get(node.name)
+            if result is None:
+                continue
+            for sidecar_spec in _streaming_node_sidecar_specs(
+                data_root=data_root_path,
+                root_path=root_path,
+                index=index,
+                node_name=node.name,
+                node_type=node.type_name,
+                result=result,
+            ):
+                path = data_root_path / sidecar_spec.sidecar.path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                writer = open_streaming_labber_data(
+                    str(path),
+                    sidecar_spec.spec,
+                    metadata=metadata,
+                )
+                opened.append(writer)
+                handles_by_node.setdefault(node.name, []).append(
+                    _StreamingSidecarHandle(sidecar_spec.sidecar, writer)
+                )
+                sidecars.append(sidecar_spec.sidecar)
+    except Exception:
+        for writer in opened:
+            writer.close()
+        raise
+    return LabberBrowserSidecarWriters(
+        data_root=data_root_path,
+        root_path=root_path,
+        handles_by_node=handles_by_node,
+        sidecars=tuple(sidecars),
+    )
+
+
 def export_labber_browser_sidecars(
     *,
     data_root: str | Path,
@@ -99,6 +241,27 @@ def export_labber_browser_sidecars(
     return LabberBrowserExport(
         root=relative_to_artifact(data_root_path, root_path),
         sidecars=tuple(entries),
+    )
+
+
+def export_qubit_freq_labber_browser_sidecar(
+    *,
+    data_root: str | Path,
+    index: int,
+    node_name: str,
+    node_type: str,
+    result: QubitFreqResult,
+    committed_mask: NDArray[np.bool_],
+) -> LabberBrowserSidecar:
+    """Write the qubit_freq Labber Browser sidecar once its frequency grid is known."""
+    return _export_qubit_freq(
+        Path(data_root),
+        labber_browser_root(data_root),
+        index,
+        node_name,
+        node_type,
+        result,
+        committed_mask,
     )
 
 
@@ -178,6 +341,117 @@ def _export_node_sidecars(
             ),
         )
     return ()
+
+
+def _streaming_node_sidecar_specs(
+    *,
+    data_root: Path,
+    root_path: Path,
+    index: int,
+    node_name: str,
+    node_type: str,
+    result: object,
+) -> tuple[_StreamingSidecarSpec, ...]:
+    if node_type in {"qubit_freq", "ro_optimize"}:
+        return ()
+    if node_type in {"lenrabi", "mist"}:
+        sweep = _require_result(node_name, result, Sweep1DResult)
+        return (
+            _streaming_sweep1d_signal_spec(
+                data_root, root_path, index, node_name, node_type, sweep
+            ),
+        )
+    if node_type in _SWEEP1D_SCALAR_ROLES:
+        sweep = _require_result(node_name, result, Sweep1DResult)
+        return (
+            _streaming_sweep1d_signal_spec(
+                data_root, root_path, index, node_name, node_type, sweep
+            ),
+            _streaming_sweep1d_scalar_spec(
+                data_root, root_path, index, node_name, node_type, sweep
+            ),
+        )
+    return ()
+
+
+def _streaming_sweep1d_signal_spec(
+    data_root: Path,
+    root_path: Path,
+    index: int,
+    node_name: str,
+    node_type: str,
+    result: Sweep1DResult,
+) -> _StreamingSidecarSpec:
+    role = "signal"
+    sidecar = _sidecar(
+        index,
+        node_name,
+        node_type,
+        role,
+        data_root,
+        root_path / _filename(index, node_type, role),
+    )
+    spec = StreamingLabberRoleSpec(
+        role,
+        "Signal",
+        "a.u.",
+        axes=[
+            (result.x_label, "", result.x),
+            ("Flux device value", "", result.flux),
+        ],
+        shape=result.signal.shape,
+        attrs=_streaming_attrs(node_name, node_type, role),
+    )
+    return _StreamingSidecarSpec(sidecar, spec)
+
+
+def _streaming_sweep1d_scalar_spec(
+    data_root: Path,
+    root_path: Path,
+    index: int,
+    node_name: str,
+    node_type: str,
+    result: Sweep1DResult,
+) -> _StreamingSidecarSpec:
+    role, label, unit = _SWEEP1D_SCALAR_ROLES[node_type]
+    sidecar = _sidecar(
+        index,
+        node_name,
+        node_type,
+        role,
+        data_root,
+        root_path / _filename(index, node_type, role),
+    )
+    spec = StreamingLabberRoleSpec(
+        role,
+        label,
+        unit,
+        axes=[("Flux device value", "", result.flux)],
+        shape=result.fit_value.shape,
+        attrs=_streaming_attrs(node_name, node_type, role),
+    )
+    return _StreamingSidecarSpec(sidecar, spec)
+
+
+def _streaming_row_value(
+    node_name: str,
+    node_type: str,
+    result: object,
+    role: str,
+    flux_idx: int,
+) -> NDArray[np.float64] | float:
+    sweep = _require_result(node_name, result, Sweep1DResult)
+    if role == "signal":
+        return sweep.signal[int(flux_idx)]
+    if (
+        node_type in _SWEEP1D_SCALAR_ROLES
+        and role == _SWEEP1D_SCALAR_ROLES[node_type][0]
+    ):
+        return float(sweep.fit_value[int(flux_idx)])
+    raise ValueError(
+        f"unsupported Labber Browser streaming role {role!r} for node "
+        f"{node_name!r} ({node_type})"
+    )
 
 
 def _export_qubit_freq(
@@ -347,11 +621,23 @@ def _sidecar(
     )
 
 
+def _streaming_attrs(node_name: str, node_type: str, role: str) -> dict[str, str]:
+    return {
+        "zcu_tools.autofluxdep.node_name": node_name,
+        "zcu_tools.autofluxdep.node_type": node_type,
+        "zcu_tools.autofluxdep.result_role": role,
+        "zcu_tools.autofluxdep.sidecar_kind": "labber_browser",
+    }
+
+
 __all__ = [
     "LABBER_BROWSER_ROOT_EXPORT_KEY",
     "LABBER_BROWSER_SIDECARS_EXPORT_KEY",
     "LabberBrowserExport",
     "LabberBrowserSidecar",
+    "LabberBrowserSidecarWriters",
     "export_labber_browser_sidecars",
+    "export_qubit_freq_labber_browser_sidecar",
     "labber_browser_root",
+    "open_streaming_labber_browser_sidecars",
 ]

@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-05 — Lorentzian edge peak fitting
+**Last updated:** 2026-07-08 — Labber streaming single-log writer
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -21,8 +21,9 @@ import。
   experiment loader 傳 required roles，省略 required roles 只用於 diagnostic
   與 migration tooling。
 - `StreamingLabberRoleSpec` / `open_streaming_grouped_labber_data` 處理
-  grouped Labber file 的 partial-write use case：caller 先宣告 full-shape
-  role schema，writer 預建 nan-filled datasets，之後以 outer row slice 寫入並
+  grouped Labber file 的 partial-write use case；`open_streaming_labber_data`
+  是 single-log `save_labber_data` 的 streaming 對偶。caller 先宣告 full-shape
+  schema，writer 預建 nan-filled datasets，之後以 outer row slice 寫入並
   flush。它是長掃 workflow 的 streaming primitive，不改變 one-shot save helper
   的 complete-file 語意。
 - Streaming writer 對自己建立的 Labber `Data` layout 採 hard invariant：若

@@ -28,7 +28,12 @@ from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )
 from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
-    export_labber_browser_sidecars,
+    LabberBrowserExport,
+    LabberBrowserSidecar,
+    LabberBrowserSidecarWriters,
+    export_qubit_freq_labber_browser_sidecar,
+    labber_browser_root,
+    open_streaming_labber_browser_sidecars,
 )
 from zcu_tools.gui.app.autofluxdep.services.result_io import (
     result_role_specs,
@@ -80,6 +85,8 @@ class RunStore:
             for name, snapshot in (cfg_snapshots or {}).items()
         }
         self._writers: dict[str, StreamingGroupedLabberWriter] = {}
+        self._labber_browser_writers: LabberBrowserSidecarWriters | None = None
+        self._labber_browser_export: LabberBrowserExport | None = None
         self._node_file_by_name: dict[str, str] = {}
         self._node_type_by_name = {node.name: node.type_name for node in self._nodes}
         self._seq = 0
@@ -135,6 +142,7 @@ class RunStore:
         try:
             store._journal_path.write_text("", encoding="utf-8")
             store._open_node_writers()
+            store._open_labber_browser_writers()
             store._write_manifest()
         except Exception:
             store.close_writers()
@@ -184,6 +192,7 @@ class RunStore:
             subject="node_row_written payload",
             nonfinite_to_none=False,
         )
+        timestamp = time.time()
         if result is not None:
             writer = self._writers[provider_name]
             roles_written = write_result_row(
@@ -192,11 +201,12 @@ class RunStore:
                 self._node_type_by_name.get(provider_name, provider_name),
                 result,
                 flux_idx,
-                timestamp=time.time(),
+                timestamp=timestamp,
             )
             writer.flush()
-        self._row_counts[provider_name] += 1
+            self._write_labber_browser_row(provider_name, result, flux_idx, timestamp)
         self._append_event("node_row_written", payload)
+        self._row_counts[provider_name] += 1
 
     def record_node_skipped(
         self,
@@ -283,6 +293,8 @@ class RunStore:
         """Flush live journal/HDF5/manifest state without terminal finalization."""
         for writer in self._writers.values():
             writer.flush()
+        if self._labber_browser_writers is not None:
+            self._labber_browser_writers.flush()
         self._manifest["updated_at"] = _utc_now()
         self._write_manifest()
 
@@ -406,6 +418,19 @@ class RunStore:
             except RuntimeError as exc:
                 if not _is_already_closed_writer_error(exc):
                     errors.append(f"{node_name}: {exc}")
+        sidecar_writers = self._labber_browser_writers
+        if sidecar_writers is not None:
+            if finalize:
+                try:
+                    sidecar_writers.finalize()
+                except RuntimeError as exc:
+                    if not _is_already_closed_labber_browser_writer_error(exc):
+                        errors.append(f"labber_browser: {exc}")
+            try:
+                sidecar_writers.close()
+            except RuntimeError as exc:
+                if not _is_already_closed_labber_browser_writer_error(exc):
+                    errors.append(f"labber_browser: {exc}")
         if errors:
             raise RuntimeError("; ".join(errors))
 
@@ -446,6 +471,43 @@ class RunStore:
                 }
             )
         self._manifest["files"]["nodes"] = node_files
+
+    def _open_labber_browser_writers(self) -> None:
+        writers = open_streaming_labber_browser_sidecars(
+            data_root=self.data_dir,
+            nodes=self._nodes,
+            results=self._results,
+            metadata=LabberMetadata(
+                comment=f"autofluxdep run {self.run_id} Labber Browser sidecars",
+                project=f"{self._project.chip_name}/{self._project.qub_name}",
+            ),
+        )
+        if not writers.sidecars:
+            writers.close()
+            return
+        self._labber_browser_writers = writers
+        self._labber_browser_export = writers.to_manifest_export()
+        self._manifest["exports"].update(
+            self._labber_browser_export.to_manifest_exports()
+        )
+        self._exports = dict(self._manifest["exports"])
+
+    def _write_labber_browser_row(
+        self,
+        provider_name: str,
+        result: object,
+        flux_idx: int,
+        timestamp: float,
+    ) -> None:
+        if self._labber_browser_writers is None:
+            return
+        self._labber_browser_writers.write_node_row(
+            provider_name,
+            self._node_type_by_name.get(provider_name, provider_name),
+            result,
+            flux_idx,
+            timestamp=timestamp,
+        )
 
     def _initial_manifest(self, flux_device_name: str | None) -> dict[str, Any]:
         nodes = []
@@ -587,15 +649,43 @@ class RunStore:
             )
             exports["fluxdep_spectrum"] = relative_to_artifact(self.data_dir, written)
             break
-        labber_browser = export_labber_browser_sidecars(
-            data_root=self.data_dir,
-            nodes=self._nodes,
-            results=self._results,
-            committed_masks=committed_masks,
-        )
-        if labber_browser.sidecars:
+        labber_browser = self._generate_labber_browser_exports(committed_masks)
+        if labber_browser is not None and labber_browser.sidecars:
             exports.update(labber_browser.to_manifest_exports())
         return exports
+
+    def _generate_labber_browser_exports(
+        self,
+        committed_masks: Mapping[str, np.ndarray],
+    ) -> LabberBrowserExport | None:
+        sidecars: list[LabberBrowserSidecar] = []
+        if self._labber_browser_export is not None:
+            sidecars.extend(self._labber_browser_export.sidecars)
+        for index, node in enumerate(self._nodes):
+            result = self._results.get(node.name)
+            if not isinstance(result, QubitFreqResult):
+                continue
+            committed_mask = committed_masks[node.name]
+            if not committed_mask.any():
+                continue
+            sidecars.append(
+                export_qubit_freq_labber_browser_sidecar(
+                    data_root=self.data_dir,
+                    index=index,
+                    node_name=node.name,
+                    node_type=node.type_name,
+                    result=result,
+                    committed_mask=committed_mask,
+                )
+            )
+        if not sidecars:
+            return None
+        return LabberBrowserExport(
+            root=relative_to_artifact(
+                self.data_dir, labber_browser_root(self.data_dir)
+            ),
+            sidecars=tuple(sidecars),
+        )
 
     def _committed_node_row_masks(
         self, journal_events: Sequence[Mapping[str, Any]]
@@ -747,6 +837,13 @@ def _terminal_error_message(
 
 def _is_already_closed_writer_error(exc: RuntimeError) -> bool:
     return str(exc) == "streaming Labber writer is closed"
+
+
+def _is_already_closed_labber_browser_writer_error(exc: RuntimeError) -> bool:
+    return str(exc) in {
+        "Labber Browser sidecar writers are closed",
+        "streaming Labber writer is closed",
+    }
 
 
 def _autofluxdep_database_root(database_path: str | Path) -> Path:

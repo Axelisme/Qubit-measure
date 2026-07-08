@@ -191,46 +191,9 @@ class StreamingGroupedLabberWriter:
         """Write one workflow row along the first data dimension."""
         self._ensure_open()
         role_key = DatasetRole(role)
-        handle = self._handles[role_key]
-        spec = handle.spec
-        idx = int(outer_index)
-        if idx < 0 or idx >= spec.shape[0]:
-            raise IndexError(
-                f"outer_index {idx} out of range for role {role_key!r} "
-                f"with {spec.shape[0]} row(s)"
-            )
-
-        if len(spec.shape) == 1:
-            arr = np.asarray(values, dtype=complex)
-            if arr.shape not in {(), (1,)}:
-                raise ValueError(
-                    f"role {role_key!r} expects a scalar row, got shape {arr.shape}"
-                )
-            scalar = complex(arr.reshape(-1)[0])
-            handle.data[idx, -2, 0] = scalar.real
-            handle.data[idx, -1, 0] = scalar.imag
-            if timestamp is not None:
-                handle.timestamps[0] = float(timestamp) - self._creation_time(handle)
-            return
-
-        expected_shape = spec.shape[1:]
-        arr = np.asarray(values, dtype=complex)
-        if arr.shape != expected_shape:
-            raise ValueError(
-                f"role {role_key!r} row shape {arr.shape} != expected {expected_shape}"
-            )
-
-        n_x = spec.shape[-1]
-        block_entries = int(np.prod(spec.shape[1:-1])) if len(spec.shape) > 2 else 1
-        start = idx * block_entries
-        stop = start + block_entries
-        zf = arr.reshape(block_entries, n_x)
-        handle.data[:, -2, start:stop] = np.real(zf).T
-        handle.data[:, -1, start:stop] = np.imag(zf).T
-        if timestamp is not None:
-            handle.timestamps[start:stop] = float(timestamp) - self._creation_time(
-                handle
-            )
+        _write_outer_slice(
+            self._handles[role_key], role_key, outer_index, values, timestamp
+        )
 
     def flush(self) -> None:
         self._ensure_open()
@@ -244,8 +207,10 @@ class StreamingGroupedLabberWriter:
     def close(self) -> None:
         if self._closed:
             return
-        self._file.close()
-        self._closed = True
+        try:
+            self._file.close()
+        finally:
+            self._closed = True
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -256,6 +221,113 @@ class StreamingGroupedLabberWriter:
         return float(handle.target.attrs.get("creation_time", 0.0) or 0.0)
 
 
+class StreamingLabberWriter:
+    """Open writer for a partial single-log Labber dataset."""
+
+    def __init__(
+        self,
+        path: str,
+        spec: StreamingLabberRoleSpec,
+        *,
+        metadata: LabberMetadata | None = None,
+    ) -> None:
+        self.path = format_ext(path)
+        self._closed = False
+        raw_metadata = metadata if metadata is not None else LabberMetadata()
+        creation_time = (
+            time.time()
+            if raw_metadata.creation_time is None
+            else float(raw_metadata.creation_time)
+        )
+        effective_metadata = LabberMetadata(
+            comment=raw_metadata.comment,
+            tags=raw_metadata.tags,
+            project=raw_metadata.project,
+            user=raw_metadata.user,
+            creation_time=creation_time,
+        )
+        log_name = os.path.splitext(os.path.basename(self.path))[0]
+
+        self._file = h5py.File(self.path, "x")
+        try:
+            payload = LabberPayload(
+                Axis(
+                    spec.data_name,
+                    spec.data_unit,
+                    np.full(spec.shape, spec.fill_value, dtype=complex),
+                ),
+                spec.axes,
+                timestamps=np.full(_entry_count(spec.shape), creation_time),
+            )
+            _write_payload_to_log(
+                self._file,
+                payload,
+                effective_metadata,
+                log_name=log_name,
+                creation_time=creation_time,
+                write_tags=True,
+            )
+            for key, value in spec.attrs.items():
+                self._file.attrs[str(key)] = _attr_value(value)
+            data_group = _require_group(self._file, "Data")
+            self._handle = _RoleHandle(
+                spec=spec,
+                target=self._file,
+                data=_require_dataset(data_group, "Data"),
+                timestamps=_require_dataset(data_group, "Time stamp"),
+            )
+            self._file.attrs[STREAMING_VERSION_ATTR] = STREAMING_DATASET_VERSION
+            self._file.attrs[STREAMING_FINALIZED_ATTR] = False
+            self.flush()
+        except Exception:
+            self.close()
+            raise
+
+    def __enter__(self) -> StreamingLabberWriter:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.close()
+
+    def write_outer_slice(
+        self,
+        outer_index: int,
+        values: Any,
+        *,
+        timestamp: float | None = None,
+    ) -> None:
+        """Write one workflow row along the first data dimension."""
+        self._ensure_open()
+        _write_outer_slice(
+            self._handle,
+            self._handle.spec.role,
+            outer_index,
+            values,
+            timestamp,
+        )
+
+    def flush(self) -> None:
+        self._ensure_open()
+        self._file.flush()
+
+    def finalize(self) -> None:
+        self._ensure_open()
+        self._file.attrs[STREAMING_FINALIZED_ATTR] = True
+        self.flush()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            self._file.close()
+        finally:
+            self._closed = True
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("streaming Labber writer is closed")
+
+
 def open_streaming_grouped_labber_data(
     path: str,
     roles: Sequence[StreamingLabberRoleSpec],
@@ -264,6 +336,66 @@ def open_streaming_grouped_labber_data(
 ) -> StreamingGroupedLabberWriter:
     """Open a new exact-path streaming grouped Labber writer."""
     return StreamingGroupedLabberWriter(path, roles, metadata=metadata)
+
+
+def open_streaming_labber_data(
+    path: str,
+    spec: StreamingLabberRoleSpec,
+    *,
+    metadata: LabberMetadata | None = None,
+) -> StreamingLabberWriter:
+    """Open a new exact-path streaming single-log Labber writer."""
+    return StreamingLabberWriter(path, spec, metadata=metadata)
+
+
+def _write_outer_slice(
+    handle: _RoleHandle,
+    role: DatasetRole,
+    outer_index: int,
+    values: Any,
+    timestamp: float | None,
+) -> None:
+    spec = handle.spec
+    idx = int(outer_index)
+    if idx < 0 or idx >= spec.shape[0]:
+        raise IndexError(
+            f"outer_index {idx} out of range for role {role!r} "
+            f"with {spec.shape[0]} row(s)"
+        )
+
+    if len(spec.shape) == 1:
+        arr = np.asarray(values, dtype=complex)
+        if arr.shape not in {(), (1,)}:
+            raise ValueError(
+                f"role {role!r} expects a scalar row, got shape {arr.shape}"
+            )
+        scalar = complex(arr.reshape(-1)[0])
+        handle.data[idx, -2, 0] = scalar.real
+        handle.data[idx, -1, 0] = scalar.imag
+        if timestamp is not None:
+            handle.timestamps[0] = float(timestamp) - _creation_time(handle)
+        return
+
+    expected_shape = spec.shape[1:]
+    arr = np.asarray(values, dtype=complex)
+    if arr.shape != expected_shape:
+        raise ValueError(
+            f"role {role!r} row shape {arr.shape} != expected {expected_shape}"
+        )
+
+    n_x = spec.shape[-1]
+    block_entries = int(np.prod(spec.shape[1:-1])) if len(spec.shape) > 2 else 1
+    start = idx * block_entries
+    stop = start + block_entries
+    zf = arr.reshape(block_entries, n_x)
+    handle.data[:, -2, start:stop] = np.real(zf).T
+    handle.data[:, -1, start:stop] = np.imag(zf).T
+    if timestamp is not None:
+        handle.timestamps[start:stop] = float(timestamp) - _creation_time(handle)
+
+
+def _creation_time(handle: _RoleHandle) -> float:
+    return float(handle.target.attrs.get("creation_time", 0.0) or 0.0)
 
 
 def _entry_count(shape: tuple[int, ...]) -> int:
@@ -299,6 +431,8 @@ __all__ = [
     "STREAMING_VERSION_ATTR",
     "STREAMING_FINALIZED_ATTR",
     "StreamingGroupedLabberWriter",
+    "StreamingLabberWriter",
     "StreamingLabberRoleSpec",
+    "open_streaming_labber_data",
     "open_streaming_grouped_labber_data",
 ]
