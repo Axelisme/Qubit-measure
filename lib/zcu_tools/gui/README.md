@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-08 (runtime migration)
+**Last updated:** 2026-07-08 (runtime launcher seam)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -22,6 +22,12 @@ The runtime seam deliberately stops above remote method/domain/session policy:
 launchers (`measure`, `autofluxdep`, `fluxdep`, `dispersive`) use this runtime
 directly; measurement-session apps keep their domain composition in app behavior
 classes and launcher-provided factories.
+
+`gui.launcher` is the import-light CLI edge companion for runtime launchers. It
+declares shared logging/control/project flags and converts parser output into
+`GuiLaunchOptions` / `ProjectInfo`. It deliberately avoids importing Qt or
+matplotlib at module import time, so scripts can import it before runtime applies
+plot policy.
 
 ## Project / Result Scope
 

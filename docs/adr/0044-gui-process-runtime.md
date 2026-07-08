@@ -42,6 +42,11 @@ The runtime owns:
 Launcher scripts parse CLI flags and call `sys.exit(main(argv))`. Runtime and app
 composition functions return `int` and do not call `sys.exit`.
 
+Launcher scripts share their process-runtime CLI edge through `gui.launcher`.
+That module only declares common CLI flags and converts parser output into
+`GuiLaunchOptions` / `ProjectInfo`; it does not import Qt or matplotlib at module
+import time and does not own app assembly.
+
 ## Boundaries
 
 Runtime does not own remote method sets, handler policy, operation guards,
