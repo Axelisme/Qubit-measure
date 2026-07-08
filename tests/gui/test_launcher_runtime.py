@@ -108,7 +108,12 @@ def test_launcher_main_delegates_to_gui_runtime(
 
 @pytest.mark.parametrize(
     "module_name",
-    ["script.run_fluxdep_gui", "script.run_dispersive_gui"],
+    [
+        "script.run_fluxdep_gui",
+        "script.run_dispersive_gui",
+        "script.run_measure_gui",
+        "script.run_autofluxdep_gui",
+    ],
 )
 def test_launcher_main_preserves_no_control_override(
     monkeypatch: pytest.MonkeyPatch,
