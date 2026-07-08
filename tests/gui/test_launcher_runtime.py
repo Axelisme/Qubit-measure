@@ -57,6 +57,14 @@ def test_runtime_options_from_args_preserves_common_cli_contract() -> None:
     )
 
 
+def test_runtime_options_from_args_has_safe_defaults() -> None:
+    options = runtime_options_from_args(
+        argparse.Namespace(), log_root=Path("/tmp/root")
+    )
+
+    assert options == GuiLaunchOptions(log_root=Path("/tmp/root"))
+
+
 def test_project_info_from_args_preserves_omitted_defaults() -> None:
     parser = argparse.ArgumentParser()
     add_analysis_project_cli_options(parser, database_path_help="database help")

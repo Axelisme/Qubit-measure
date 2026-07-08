@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     project_root = str(PROJECT_ROOT)
 
     from zcu_tools.gui.app.autofluxdep.app import AutoFluxDepGuiBehavior
-    from zcu_tools.gui.runtime import GuiLaunchOptions, launch_gui_runtime
+    from zcu_tools.gui.runtime import launch_gui_runtime
 
     return launch_gui_runtime(
         AutoFluxDepGuiBehavior,

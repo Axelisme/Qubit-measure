@@ -75,12 +75,12 @@ def runtime_options_from_args(
     log_file = getattr(args, "log_file", None)
     return GuiLaunchOptions(
         log_root=log_root,
-        to_file=not bool(getattr(args, "no_log")),
+        to_file=not bool(getattr(args, "no_log", False)),
         log_file=Path(log_file) if log_file else None,
         control_port=getattr(args, "control_port", None),
         control_token=getattr(args, "control_token", None),
         control_allow_external=bool(getattr(args, "control_allow_external", False)),
-        no_control=bool(getattr(args, "no_control")),
+        no_control=bool(getattr(args, "no_control", False)),
     )
 
 
