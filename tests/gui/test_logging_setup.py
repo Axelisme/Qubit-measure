@@ -132,6 +132,53 @@ def test_no_file_when_to_file_false(tmp_path: Path) -> None:
         _detach(snap)
 
 
+def test_setup_replaces_managed_handlers_instead_of_stacking(
+    tmp_path: Path,
+) -> None:
+    snap = _snapshot(_WATCHED)
+    first = tmp_path / "first.log"
+    second = tmp_path / "second.log"
+    try:
+        setup_gui_logging(
+            app_name="measure",
+            log_root=tmp_path,
+            log_file=first,
+            extra_namespaces=("zcu_tools.program.v2",),
+        )
+        setup_gui_logging(app_name="measure", log_root=tmp_path, log_file=second)
+
+        root_new = [
+            h
+            for h in logging.getLogger().handlers
+            if h not in snap[""]
+            and isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.FileHandler)
+        ]
+        gui_new = [
+            h
+            for h in logging.getLogger("zcu_tools.gui").handlers
+            if h not in snap["zcu_tools.gui"] and isinstance(h, logging.FileHandler)
+        ]
+        old_extra_new = [
+            h
+            for h in logging.getLogger("zcu_tools.program.v2").handlers
+            if h not in snap["zcu_tools.program.v2"]
+            and isinstance(h, logging.FileHandler)
+        ]
+
+        assert len(root_new) == 1
+        assert len(gui_new) == 1
+        assert old_extra_new == []
+
+        logging.getLogger("zcu_tools.gui.runtime").error("single-marker")
+        for handler in logging.getLogger("zcu_tools.gui").handlers:
+            handler.flush()
+        contents = second.read_text(encoding="utf-8")
+        assert contents.count("single-marker") == 1
+    finally:
+        _detach(snap)
+
+
 def test_explicit_log_file_override_wins_and_skips_purge(tmp_path: Path) -> None:
     snap = _snapshot(_WATCHED)
     explicit = tmp_path / "custom" / "my.log"

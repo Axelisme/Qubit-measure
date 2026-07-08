@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import importlib
+from collections.abc import Callable
+from pathlib import Path
+from types import ModuleType
+from typing import cast
+
+import pytest
+from zcu_tools.gui import runtime
+from zcu_tools.gui.runtime import GuiLaunchOptions, GuiRuntimeBehavior
+
+
+def _load_launcher(module_name: str) -> ModuleType:
+    return importlib.import_module(module_name)
+
+
+@pytest.mark.parametrize(
+    ("module_name", "behavior_name", "app_slug", "default_port", "return_code"),
+    [
+        ("script.run_fluxdep_gui", "FluxDepGuiBehavior", "fluxdep", 8766, 41),
+        (
+            "script.run_dispersive_gui",
+            "DispersiveGuiBehavior",
+            "dispersive",
+            8767,
+            42,
+        ),
+    ],
+)
+def test_launcher_main_delegates_to_gui_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+    behavior_name: str,
+    app_slug: str,
+    default_port: int,
+    return_code: int,
+) -> None:
+    calls: list[
+        tuple[
+            type[GuiRuntimeBehavior],
+            GuiLaunchOptions,
+            tuple[object, ...],
+            dict[str, object],
+        ]
+    ] = []
+
+    def fake_launch_gui_runtime(
+        behavior_cls: type[GuiRuntimeBehavior],
+        options: GuiLaunchOptions,
+        *args: object,
+        **kwargs: object,
+    ) -> int:
+        calls.append((behavior_cls, options, args, kwargs))
+        return return_code
+
+    monkeypatch.setattr(runtime, "launch_gui_runtime", fake_launch_gui_runtime)
+
+    launcher = _load_launcher(module_name)
+    main = cast(Callable[[list[str] | None], int], getattr(launcher, "main"))
+    project_root = cast(Path, getattr(launcher, "PROJECT_ROOT"))
+    log_file = project_root / "launcher-test.log"
+
+    code = main(
+        [
+            "--no-log",
+            "--chip",
+            "Q_TEST",
+            "--qub",
+            "Q1",
+            "--result-dir",
+            "result/Q_TEST/Q1",
+            "--database-path",
+            "database",
+            "--control-port",
+            "9001",
+            "--control-token",
+            "secret",
+            "--log-file",
+            str(log_file),
+        ]
+    )
+
+    assert code == return_code
+    assert len(calls) == 1
+
+    behavior_cls, options, args, kwargs = calls[0]
+    assert args == ()
+    assert behavior_cls.__name__ == behavior_name
+    assert behavior_cls.spec.app_slug == app_slug
+    assert behavior_cls.spec.default_control_port == default_port
+
+    assert options.log_root == project_root
+    assert options.to_file is False
+    assert options.log_file == log_file
+    assert options.control_port == 9001
+    assert options.control_token == "secret"
+    assert options.no_control is False
+
+    assert kwargs["project_root"] == str(project_root)
+    project = kwargs["project"]
+    assert getattr(project, "root_dir") == str(project_root)
+    assert getattr(project, "chip_name") == "Q_TEST"
+    assert getattr(project, "qub_name") == "Q1"
+    assert getattr(project, "result_dir") == "result/Q_TEST/Q1"
+    assert getattr(project, "database_path") == "database"
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["script.run_fluxdep_gui", "script.run_dispersive_gui"],
+)
+def test_launcher_main_preserves_no_control_override(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+) -> None:
+    calls: list[GuiLaunchOptions] = []
+
+    def fake_launch_gui_runtime(
+        behavior_cls: type[GuiRuntimeBehavior],
+        options: GuiLaunchOptions,
+        *args: object,
+        **kwargs: object,
+    ) -> int:
+        del behavior_cls, args, kwargs
+        calls.append(options)
+        return 0
+
+    monkeypatch.setattr(runtime, "launch_gui_runtime", fake_launch_gui_runtime)
+
+    launcher = _load_launcher(module_name)
+    main = cast(Callable[[list[str] | None], int], getattr(launcher, "main"))
+
+    assert main(["--no-control", "--control-port", "9001"]) == 0
+
+    assert len(calls) == 1
+    assert calls[0].no_control is True
+    assert calls[0].control_port == 9001

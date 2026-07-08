@@ -71,7 +71,8 @@ def run_app(
     # Serialize matplotlib mathtext parsing across threads and prewarm it on this
     # (main) thread, so off-main worker $...$ title parsing never races the
     # singleton parser (BUG-1 / ADR-0017). autofluxdep uses Agg and does not run
-    # through run_qt_app, so it installs the lock here itself (defense-in-depth).
+    # Autofluxdep does not use the shared process runtime yet, so it installs
+    # the lock here itself (defense-in-depth).
     from zcu_tools.gui.plotting import install_mathtext_lock, prewarm_mathtext
 
     install_mathtext_lock()
@@ -87,12 +88,10 @@ def run_app(
     window.restore_workflow_view()
     window.show()
 
-    # Start the read-only remote-control adapter in-place (decision 6: app-local
-    # start/stop, mirroring the shared run_qt_app's three lines, rather than
-    # routing through run_qt_app — autofluxdep owns its own startup-dialog loop and
-    # uses Agg, so it does not run through that shared helper). Inert until the
-    # GUI is up; stop() unsubscribes the EventBus synchronously, so it must run on
-    # the Qt main thread — aboutToQuit fires there.
+    # Start the read-only remote-control adapter in-place. Autofluxdep still owns
+    # its startup-dialog loop and Agg-only plotting policy until a later runtime
+    # migration phase. Inert until the GUI is up; stop() unsubscribes the EventBus
+    # synchronously, so it must run on the Qt main thread — aboutToQuit fires there.
     if control is not None:
         from zcu_tools.gui.app.autofluxdep.services.remote.service import (
             RemoteControlAdapter,

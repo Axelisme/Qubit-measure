@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-03 — project scope picker and search status sizing
+**Last updated:** 2026-07-08 — GUI process runtime
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -105,8 +105,11 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   `GuiFigureCanvas.draw_idle` 吃跨線程。
 - `plotting/host.py`：單一主線程 bridge QObject（訊號在 host）+ figure registry + lifecycle。
 - `plotting/routing.py`：task-local `ContextVar`（共用版統一用此，fluxdep 單槽是退化用法）。
-- `plotting/setup.py`：`configure_matplotlib_backend()`（pyplot import 前呼，import-clean）；
-  `run_fluxdep_gui.py` 入口呼叫；QApplication/`ensure_host()`/`aboutToQuit→set_shutting_down(True)`/建窗/起 adapter 這段 bootstrap 由共用 `run_qt_app`（`gui/run_app`）負責，`app.py` 的 `run_app` 只做 factory 接線（controller/window/adapter factory）。
+- `runtime.py`：`FluxDepGuiBehavior.spec` 宣告 app slug、default control port
+  與 embedded plot policy；`gui.runtime` 在 behavior 建立前設定 logging 與
+  matplotlib backend，建立 `QApplication` 後處理 `ensure_host()` /
+  `aboutToQuit→set_shutting_down(True)` / adapter start-stop。`app.py` 的
+  behavior 只做 controller/window/adapter wiring。
 - **FitPanel R4**：DB 搜尋經共用 `gui/background.py` `BackgroundRunner`（per-panel）提交，
   `enter=` CM 組合 `routing_scope(diag_container)` + `use_pbar_factory(factory)`，由 runner
   在 worker 執行緒**於 thunk 內**進入（ContextVar 在 QThreadPool worker 裡看不到主執行緒的

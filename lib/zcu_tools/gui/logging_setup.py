@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +37,9 @@ LOG_DATE = "%H:%M:%S"
 _SESSION_STAMP = "%Y-%m-%d_%H%M%S"
 
 _DEFAULT_RETAIN = 10
+
+_MANAGED_ATTR = "_zcu_tools_gui_logging_managed"
+_MANAGED_KIND_ATTR = "_zcu_tools_gui_logging_kind"
 
 
 def session_log_path(log_root: Path, group: str, app_name: str) -> Path:
@@ -73,6 +77,33 @@ def purge_old_logs(log_dir: Path, retain: int) -> None:
             pass
 
 
+def _iter_configured_loggers() -> Iterator[logging.Logger]:
+    yield logging.getLogger()
+    for logger in logging.Logger.manager.loggerDict.values():
+        if isinstance(logger, logging.Logger):
+            yield logger
+
+
+def _mark_managed(handler: logging.Handler, kind: str) -> None:
+    setattr(handler, _MANAGED_ATTR, True)
+    setattr(handler, _MANAGED_KIND_ATTR, kind)
+
+
+def _remove_managed_handlers(kind: str | None = None) -> None:
+    closed: set[int] = set()
+    for logger in _iter_configured_loggers():
+        for handler in list(logger.handlers):
+            if not getattr(handler, _MANAGED_ATTR, False):
+                continue
+            if kind is not None and getattr(handler, _MANAGED_KIND_ATTR, None) != kind:
+                continue
+            logger.removeHandler(handler)
+            ident = id(handler)
+            if ident not in closed:
+                handler.close()
+                closed.add(ident)
+
+
 def setup_gui_logging(
     *,
     app_name: str,
@@ -96,12 +127,15 @@ def setup_gui_logging(
     ``extra_namespaces``. Returns the resolved log file path, or ``None`` when
     ``to_file`` is False.
     """
+    _remove_managed_handlers()
+
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
     stderr_handler = logging.StreamHandler(sys.stderr)
     stderr_handler.setLevel(logging.WARNING)
     stderr_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
+    _mark_managed(stderr_handler, "stderr")
     root.addHandler(stderr_handler)
 
     if not to_file:
@@ -117,6 +151,7 @@ def setup_gui_logging(
     file_handler = logging.FileHandler(target, mode="w", encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE))
+    _mark_managed(file_handler, "file")
 
     for name in ("zcu_tools.gui", *extra_namespaces):
         log = logging.getLogger(name)

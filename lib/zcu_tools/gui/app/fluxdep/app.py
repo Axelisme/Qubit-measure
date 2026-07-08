@@ -1,32 +1,69 @@
 """Composition root — assemble and launch the fluxdep-gui.
 
-Wires State + Controller + MainWindow and runs the Qt event loop. Unlike
-measure-gui there is no registry/role-catalog (no experiment adapters) and no
-session-restore caretaker (v1 does not persist a session — the analysis tool
-starts fresh by loading an hdf5; exported spectrums.hdf5 / params.json are the
-only persisted artifacts).
+Wires State + Controller + MainWindow behind the shared GUI process runtime.
+Unlike measure-gui there is no registry/role-catalog (no experiment adapters)
+and no session-restore caretaker (v1 does not persist a session — the analysis
+tool starts fresh by loading an hdf5; exported spectrums.hdf5 / params.json are
+the only persisted artifacts).
 """
 
 from __future__ import annotations
 
-import sys
+from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.event_bus import EventBus
-from zcu_tools.gui.app.fluxdep.services.remote.service import (
-    ControlOptions,
-    RemoteControlAdapter,
+from zcu_tools.gui.runtime import (
+    GuiAssembly,
+    GuiRuntimeBehavior,
+    GuiRuntimeSpec,
+    PlotPolicy,
+    run_gui_runtime,
 )
-from zcu_tools.gui.app.fluxdep.state import FluxDepState
-from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.gui.run_app import run_qt_app
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.project import ProjectInfo
+    from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+
+
+class FluxDepGuiBehavior(GuiRuntimeBehavior):
+    spec = GuiRuntimeSpec(
+        app_name="fluxdep",
+        app_slug="fluxdep",
+        plot_policy=PlotPolicy.EMBEDDED_BACKEND,
+        default_control_port=8766,
+    )
+
+    def __init__(
+        self,
+        project: ProjectInfo | None = None,
+        project_root: str | None = None,
+    ) -> None:
+        self._project = project
+        self._project_root = project_root
+
+    def assemble(self, control: ControlOptions | None) -> GuiAssembly:
+        from zcu_tools.gui.app.fluxdep.controller import Controller
+        from zcu_tools.gui.app.fluxdep.event_bus import EventBus
+        from zcu_tools.gui.app.fluxdep.services.remote.service import (
+            RemoteControlAdapter,
+        )
+        from zcu_tools.gui.app.fluxdep.state import FluxDepState
+        from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+
+        ctrl = Controller(
+            FluxDepState(self._project),
+            EventBus(),
+            project_root=self._project_root,
+        )
+        window = MainWindow(ctrl)
+        adapter = RemoteControlAdapter(ctrl, control) if control is not None else None
+        return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
 
 def run_app(
     project: ProjectInfo | None = None,
     control: ControlOptions | None = None,
     project_root: str | None = None,
-) -> None:
+) -> int:
     """Build and launch the fluxdep-gui. Blocks until the window is closed.
 
     When ``control`` is given, a ``RemoteControlAdapter`` is started so an
@@ -37,16 +74,10 @@ def run_app(
     under; the entry script passes the repo root so a .bat launcher that cd's
     into script/ does not scope defaults under script/. None falls back to cwd.
     """
-    from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
-
-    def controller_factory() -> Controller:
-        return Controller(FluxDepState(project), EventBus(), project_root=project_root)
-
-    sys.exit(
-        run_qt_app(
-            controller_factory=controller_factory,
-            window_factory=MainWindow,
-            control=control,
-            adapter_factory=RemoteControlAdapter,
-        )
+    return run_gui_runtime(
+        FluxDepGuiBehavior(project=project, project_root=project_root),
+        control,
     )
+
+
+__all__ = ["FluxDepGuiBehavior", "run_app"]

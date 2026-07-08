@@ -12,8 +12,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from zcu_tools.gui.logging_setup import setup_gui_logging
-
 # Repo root: this script lives in script/, so its parent is the root.
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -62,40 +60,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-if __name__ == "__main__":
-    args = _parse_args(sys.argv[1:])
-    setup_gui_logging(
-        app_name="dispersive",
-        log_root=PROJECT_ROOT,
-        to_file=not args.no_log,
-        log_file=Path(args.log_file) if args.log_file else None,
-    )
-
-    # Select the embedded matplotlib backend BEFORE importing anything that uses
-    # matplotlib (the "configure backend before pyplot" invariant) — preprocessing
-    # / auto-fit may touch pyplot via notebook helpers. The setup module is
-    # import-clean (pulls in no matplotlib).
-    from zcu_tools.gui.plotting.setup import configure_matplotlib_backend
-
-    configure_matplotlib_backend()
-
-    from zcu_tools.gui.app.dispersive.app import run_app
-    from zcu_tools.gui.app.dispersive.state import ProjectInfo
-
-    control = None
-    if not args.no_control:
-        from zcu_tools.gui.app.dispersive.services.remote.service import ControlOptions
-
-        # Omitting --control-port uses the agreed-upon port and allows ephemeral
-        # fallback; pinning a port disables fallback (the user wants *that* port).
-        explicit_port = args.control_port is not None
-        control = ControlOptions(
-            port=args.control_port if explicit_port else 8767,
-            token=args.control_token,
-            allow_port_fallback=not explicit_port,
-            app_slug="dispersive",
-        )
-
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
     # Anchor default result/database paths at the repo root (this script lives in
     # script/, so its parent is the repo root) rather than cwd — a .bat launcher
     # does `cd /d "%~dp0"` into script/, which would otherwise scope defaults
@@ -115,8 +81,25 @@ if __name__ == "__main__":
         )
         if v
     }
-    run_app(
-        ProjectInfo(root_dir=project_root, **project_kwargs),
-        control=control,
+
+    from zcu_tools.gui.app.dispersive.app import DispersiveGuiBehavior
+    from zcu_tools.gui.project import ProjectInfo
+    from zcu_tools.gui.runtime import GuiLaunchOptions, launch_gui_runtime
+
+    return launch_gui_runtime(
+        DispersiveGuiBehavior,
+        GuiLaunchOptions(
+            log_root=PROJECT_ROOT,
+            to_file=not args.no_log,
+            log_file=Path(args.log_file) if args.log_file else None,
+            control_port=args.control_port,
+            control_token=args.control_token,
+            no_control=args.no_control,
+        ),
+        project=ProjectInfo(root_dir=project_root, **project_kwargs),
         project_root=project_root,
     )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
