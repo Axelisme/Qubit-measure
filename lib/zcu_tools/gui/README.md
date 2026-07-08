@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-08 (process runtime)
+**Last updated:** 2026-07-08 (runtime migration)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -18,8 +18,10 @@ controller/window/adapter wiring. Launch-time CLI values stay in
 
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
-`gui.session` owns measurement-session primitives. `fluxdep` and `dispersive`
-use this runtime directly; measurement-session apps migrate in later phases.
+`gui.session` owns measurement-session primitives. All four standalone GUI
+launchers (`measure`, `autofluxdep`, `fluxdep`, `dispersive`) use this runtime
+directly; measurement-session apps keep their domain composition in app behavior
+classes and launcher-provided factories.
 
 ## Project / Result Scope
 

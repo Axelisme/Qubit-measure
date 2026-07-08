@@ -1,7 +1,8 @@
 """Composition root for autofluxdep-gui.
 
 ``build_core`` assembles State + EventBus + Controller (the testable domain
-core). ``run_app`` adds the Qt MainWindow and runs the event loop.
+core). ``AutoFluxDepGuiBehavior`` adds the Qt MainWindow behind the shared
+process runtime.
 
 The app composes the shared session services (connection / context / device /
 startup) and uses the shared setup / device / predictor dialogs; the run drives
@@ -11,15 +12,21 @@ active context and acquiring through either the selected hardware path or MockSo
 
 from __future__ import annotations
 
-import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar, TypeGuard
 
-from zcu_tools.gui.app.autofluxdep.controller import Controller
-from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState, ProjectInfo
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+from zcu_tools.gui.runtime import (
+    GuiAssembly,
+    GuiRuntimeBehavior,
+    GuiRuntimeSpec,
+    PlotPolicy,
+    run_gui_runtime,
+)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.autofluxdep.services.remote.service import ControlOptions
+    from zcu_tools.gui.app.autofluxdep.controller import Controller
+    from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
     from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
 
@@ -42,87 +49,84 @@ def build_core(
     fine for tests / a ``python -m`` run from the repo root; ``run_app`` injects
     the repo root so the defaults are correct regardless of the working directory.
     """
+    from zcu_tools.gui.app.autofluxdep.controller import Controller
+    from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+
     state = AutoFluxDepState(_make_empty_ctx(), project=project)
     return Controller(state, EventBus(), project_root=project_root)
+
+
+class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
+    """autofluxdep-gui app wiring behind the shared GUI runtime."""
+
+    spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
+        app_name="autofluxdep",
+        app_slug="autofluxdep",
+        plot_policy=PlotPolicy.AGG_ONLY,
+        default_control_port=8768,
+        logging_extra_namespaces=("zcu_tools.program.v2",),
+    )
+
+    def __init__(
+        self,
+        project: ProjectInfo | None = None,
+        *,
+        project_root: str | None = None,
+    ) -> None:
+        self._project = project
+        self._project_root = project_root or _repo_root()
+
+    def assemble(self, control: ControlOptions | None) -> GuiAssembly:
+        from zcu_tools.gui.app.autofluxdep.services import PersistenceCaretaker
+        from zcu_tools.gui.app.autofluxdep.services.remote.service import (
+            RemoteControlAdapter,
+        )
+        from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
+
+        ctrl = build_core(self._project, project_root=self._project_root)
+        window = MainWindow(ctrl)
+
+        caretaker = PersistenceCaretaker(ctrl)
+        ctrl.attach_caretaker(caretaker)
+        ctrl.restore_all()
+        window.restore_workflow_view()
+
+        adapter = (
+            RemoteControlAdapter(ctrl, control, view=window)
+            if control is not None
+            else None
+        )
+        return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
+
+    def after_show(self, assembly: GuiAssembly) -> None:
+        parent = assembly.window
+        assert _is_main_window(parent)
+        _show_startup_dialog(parent=parent)
 
 
 def run_app(
     project: ProjectInfo | None = None,
     control: ControlOptions | None = None,
-) -> None:
+) -> int:
     """Build and launch the autofluxdep-gui. Blocks until the window closes.
 
     ``control`` (a ``ControlOptions`` with a TCP port/token) opts the run into the
     read-only remote-control bridge — the RPC face an agent/MCP observes the
     workflow through. None (the default) leaves the GUI un-instrumented.
     """
-    from pathlib import Path
+    return run_gui_runtime(AutoFluxDepGuiBehavior(project), control)
 
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 
+def _repo_root() -> str:
+    # This file is at <repo>/lib/zcu_tools/gui/app/autofluxdep/app.py.
+    return str(Path(__file__).resolve().parents[5])
+
+
+def _is_main_window(value: object) -> TypeGuard[MainWindow]:
     from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 
-    # Anchor default paths under the repo root (this file is at
-    # <repo>/lib/zcu_tools/gui/app/autofluxdep/app.py), not the launch cwd.
-    repo_root = str(Path(__file__).resolve().parents[5])
-
-    app = QApplication.instance() or QApplication(sys.argv)
-
-    # Serialize matplotlib mathtext parsing across threads and prewarm it on this
-    # (main) thread, so off-main worker $...$ title parsing never races the
-    # singleton parser (BUG-1 / ADR-0017). autofluxdep uses Agg and does not run
-    # Autofluxdep does not use the shared process runtime yet, so it installs
-    # the lock here itself (defense-in-depth).
-    from zcu_tools.gui.plotting import install_mathtext_lock, prewarm_mathtext
-
-    install_mathtext_lock()
-    prewarm_mathtext()
-
-    ctrl = build_core(project, project_root=repo_root)
-    window = MainWindow(ctrl)
-    from zcu_tools.gui.app.autofluxdep.services import PersistenceCaretaker
-
-    caretaker = PersistenceCaretaker(ctrl)
-    ctrl.attach_caretaker(caretaker)
-    ctrl.restore_all()
-    window.restore_workflow_view()
-    window.show()
-
-    # Start the read-only remote-control adapter in-place. Autofluxdep still owns
-    # its startup-dialog loop and Agg-only plotting policy until a later runtime
-    # migration phase. Inert until the GUI is up; stop() unsubscribes the EventBus
-    # synchronously, so it must run on the Qt main thread — aboutToQuit fires there.
-    if control is not None:
-        from zcu_tools.gui.app.autofluxdep.services.remote.service import (
-            RemoteControlAdapter,
-        )
-
-        adapter = RemoteControlAdapter(ctrl, control, view=window)
-        try:
-            adapter.start()
-        except RuntimeError as exc:
-            # With the default port, a busy port already fell back to an ephemeral
-            # one inside start(); reaching here means either an explicitly-pinned
-            # port is taken or even the ephemeral bind failed.
-            port = control.port
-            print(
-                f"\nERROR: cannot open control socket on port {port}.\n"
-                f"  {exc}\n\n"
-                f"  That port is pinned and already in use.\n"
-                f"  Pass a different --control-port <N>, omit it to auto-pick a\n"
-                f"  free port, or --no-control to disable the remote-control socket.\n",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        app.aboutToQuit.connect(adapter.stop)
-
-    # Mirror measure-gui: open the setup dialog non-modally on startup so the
-    # user can configure the project (chip/qub names, connection) immediately.
-    # Non-modal keeps the Qt event loop pumping (required for the run worker and
-    # any background operations) while the dialog is visible (ADR mirrors main/app.py).
-    _show_startup_dialog(parent=window)
-
-    sys.exit(app.exec())
+    return isinstance(value, MainWindow)
 
 
 def _show_startup_dialog(parent: MainWindow) -> None:

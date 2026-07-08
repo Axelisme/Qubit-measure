@@ -21,8 +21,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from zcu_tools.gui.logging_setup import setup_gui_logging
-
 # Repo root: this script lives in script/, so its parent is the root.
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -65,44 +63,26 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    project_root = str(PROJECT_ROOT)
+
+    from zcu_tools.gui.app.autofluxdep.app import AutoFluxDepGuiBehavior
+    from zcu_tools.gui.runtime import GuiLaunchOptions, launch_gui_runtime
+
+    return launch_gui_runtime(
+        AutoFluxDepGuiBehavior,
+        GuiLaunchOptions(
+            log_root=PROJECT_ROOT,
+            to_file=not args.no_log,
+            log_file=Path(args.log_file) if args.log_file else None,
+            control_port=args.control_port,
+            control_token=args.control_token,
+            no_control=args.no_control,
+        ),
+        project_root=project_root,
+    )
+
+
 if __name__ == "__main__":
-    args = _parse_args(sys.argv[1:])
-    setup_gui_logging(
-        app_name="autofluxdep",
-        log_root=PROJECT_ROOT,
-        to_file=not args.no_log,
-        log_file=Path(args.log_file) if args.log_file else None,
-        extra_namespaces=("zcu_tools.program.v2",),
-    )
-
-    # Force a NON-interactive backend BEFORE any pyplot import. Unlike
-    # measure-gui / fluxdep, autofluxdep does NOT use the custom
-    # ``module://zcu_tools.gui.plotting.backend`` (that backend is for the
-    # worker-draws-then-marshals model — ADR-0017). autofluxdep's worker never
-    # touches matplotlib; the main thread embeds each Node's figure with a bare
-    # ``FigureCanvasQTAgg`` (ADR-0017). With ``Agg`` selected, pyplot can never
-    # pop a detached window, while the directly-constructed embed canvases work
-    # as normal. (Selecting the custom pyplot backend here would route stray
-    # pyplot figures to detached windows — the bug this avoids.)
-    import matplotlib
-
-    matplotlib.use("Agg")
-
-    from zcu_tools.gui.app.autofluxdep.app import run_app
-    from zcu_tools.gui.app.autofluxdep.services.remote.service import ControlOptions
-
-    # Omitting --control-port uses the agreed-upon port and allows ephemeral
-    # fallback; pinning a port disables fallback (the user wants *that* port).
-    explicit_port = args.control_port is not None
-    control = (
-        None
-        if args.no_control
-        else ControlOptions(
-            port=args.control_port if explicit_port else 8768,
-            token=args.control_token,
-            allow_port_fallback=not explicit_port,
-            app_slug="autofluxdep",
-        )
-    )
-
-    run_app(control=control)
+    sys.exit(main())

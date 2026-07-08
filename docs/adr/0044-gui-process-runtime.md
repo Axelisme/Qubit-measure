@@ -51,6 +51,7 @@ policy remains in each app and in the existing shared layers.
 ## Consequences
 
 `run_qt_app` is retired. New GUI apps implement `GuiRuntimeBehavior` instead of
-passing callback factories to a helper. The first migration covers `fluxdep` and
-`dispersive`; `main` and `autofluxdep` keep their app-local launch paths until a
-later phase migrates their persistence and startup-dialog lifecycle.
+passing callback factories to a helper. The standalone launchers for `measure`,
+`autofluxdep`, `fluxdep`, and `dispersive` all use the runtime; apps with richer
+persistence and startup-dialog lifecycle express that work through behavior
+assembly and lifecycle hooks.

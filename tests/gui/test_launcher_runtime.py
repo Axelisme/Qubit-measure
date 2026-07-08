@@ -136,3 +136,130 @@ def test_launcher_main_preserves_no_control_override(
     assert len(calls) == 1
     assert calls[0].no_control is True
     assert calls[0].control_port == 9001
+
+
+def test_measure_launcher_main_delegates_to_gui_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[
+        tuple[
+            type[GuiRuntimeBehavior],
+            GuiLaunchOptions,
+            tuple[object, ...],
+            dict[str, object],
+        ]
+    ] = []
+
+    def fake_launch_gui_runtime(
+        behavior_cls: type[GuiRuntimeBehavior],
+        options: GuiLaunchOptions,
+        *args: object,
+        **kwargs: object,
+    ) -> int:
+        calls.append((behavior_cls, options, args, kwargs))
+        return 43
+
+    monkeypatch.setattr(runtime, "launch_gui_runtime", fake_launch_gui_runtime)
+
+    launcher = _load_launcher("script.run_measure_gui")
+    main = cast(Callable[[list[str] | None], int], getattr(launcher, "main"))
+    project_root = cast(Path, getattr(launcher, "PROJECT_ROOT"))
+    log_file = project_root / "measure-launcher-test.log"
+
+    code = main(
+        [
+            "--no-log",
+            "--clean",
+            "--control-port",
+            "9002",
+            "--control-token",
+            "secret",
+            "--control-allow-external",
+            "--log-file",
+            str(log_file),
+        ]
+    )
+
+    assert code == 43
+    assert len(calls) == 1
+
+    behavior_cls, options, args, kwargs = calls[0]
+    assert args == ()
+    assert behavior_cls.__name__ == "MeasureGuiBehavior"
+    assert behavior_cls.spec.app_slug == "measure"
+    assert behavior_cls.spec.default_control_port == 8765
+    assert behavior_cls.spec.logging_extra_namespaces == (
+        "zcu_tools.experiment.v2_gui",
+    )
+
+    assert options.log_root == project_root
+    assert options.to_file is False
+    assert options.log_file == log_file
+    assert options.control_port == 9002
+    assert options.control_token == "secret"
+    assert options.control_allow_external is True
+    assert options.no_control is False
+
+    assert callable(kwargs["registry_factory"])
+    assert kwargs["clean"] is True
+    assert kwargs["project_root"] == str(project_root)
+
+
+def test_autofluxdep_launcher_main_delegates_to_gui_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[
+        tuple[
+            type[GuiRuntimeBehavior],
+            GuiLaunchOptions,
+            tuple[object, ...],
+            dict[str, object],
+        ]
+    ] = []
+
+    def fake_launch_gui_runtime(
+        behavior_cls: type[GuiRuntimeBehavior],
+        options: GuiLaunchOptions,
+        *args: object,
+        **kwargs: object,
+    ) -> int:
+        calls.append((behavior_cls, options, args, kwargs))
+        return 44
+
+    monkeypatch.setattr(runtime, "launch_gui_runtime", fake_launch_gui_runtime)
+
+    launcher = _load_launcher("script.run_autofluxdep_gui")
+    main = cast(Callable[[list[str] | None], int], getattr(launcher, "main"))
+    project_root = cast(Path, getattr(launcher, "PROJECT_ROOT"))
+    log_file = project_root / "autofluxdep-launcher-test.log"
+
+    code = main(
+        [
+            "--no-log",
+            "--control-port",
+            "9003",
+            "--control-token",
+            "secret",
+            "--log-file",
+            str(log_file),
+        ]
+    )
+
+    assert code == 44
+    assert len(calls) == 1
+
+    behavior_cls, options, args, kwargs = calls[0]
+    assert args == ()
+    assert behavior_cls.__name__ == "AutoFluxDepGuiBehavior"
+    assert behavior_cls.spec.app_slug == "autofluxdep"
+    assert behavior_cls.spec.default_control_port == 8768
+    assert behavior_cls.spec.logging_extra_namespaces == ("zcu_tools.program.v2",)
+
+    assert options.log_root == project_root
+    assert options.to_file is False
+    assert options.log_file == log_file
+    assert options.control_port == 9003
+    assert options.control_token == "secret"
+    assert options.no_control is False
+
+    assert kwargs["project_root"] == str(project_root)

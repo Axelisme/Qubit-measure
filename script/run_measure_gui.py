@@ -15,8 +15,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from zcu_tools.gui.logging_setup import setup_gui_logging
-
 # Repo root: this script lives in script/, so its parent is the root.
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -78,29 +76,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-if __name__ == "__main__":
-    args = _parse_args(sys.argv[1:])
-    setup_gui_logging(
-        app_name="measure",
-        log_root=PROJECT_ROOT,
-        to_file=not args.no_log,
-        log_file=Path(args.log_file) if args.log_file else None,
-        extra_namespaces=("zcu_tools.experiment.v2_gui",),
-    )
-
-    # Configure the matplotlib backend before importing anything that uses
-    # matplotlib. ``zcu_tools.gui.plotting.setup`` is import-clean (it does not
-    # pull in matplotlib), so this import cannot load pyplot too early.
-    from zcu_tools.gui.plotting.setup import configure_matplotlib_backend
-
-    configure_matplotlib_backend()
-
+def _build_measure_catalogs():
+    """Build measure-gui's experiment catalogs after runtime pre-Qt setup."""
     from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
-    from zcu_tools.gui.app.main.app import run_app
 
     # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
-    # into the GUI framework. run_app receives the populated registry/catalog,
-    # so the GUI framework itself never imports the experiment layer.
+    # into the GUI framework. The behavior receives a factory, so these imports
+    # happen after runtime logging and matplotlib policy setup.
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 
@@ -109,21 +91,11 @@ if __name__ == "__main__":
 
     role_catalog = RoleCatalog()
     register_all_roles(role_catalog)
+    return registry, role_catalog
 
-    control_opts = None
-    if not args.no_control:
-        from zcu_tools.gui.app.main.services.remote import ControlOptions
 
-        # Omitting --control-port uses the agreed-upon port and allows ephemeral
-        # fallback; pinning a port disables fallback (the user wants *that* port).
-        explicit_port = args.control_port is not None
-        control_opts = ControlOptions(
-            port=args.control_port if explicit_port else 8765,
-            token=args.control_token,
-            allow_external=args.control_allow_external,
-            allow_port_fallback=not explicit_port,
-            app_slug="measure",
-        )
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     # Anchor default result/database paths at the repo root (this script lives in
     # script/, so its parent is the repo root) rather than cwd — a .bat launcher
@@ -131,10 +103,25 @@ if __name__ == "__main__":
     # under script/.
     project_root = str(PROJECT_ROOT)
 
-    run_app(
-        registry,
-        role_catalog,
-        control_opts=control_opts,
+    from zcu_tools.gui.app.main.app import MeasureGuiBehavior
+    from zcu_tools.gui.runtime import GuiLaunchOptions, launch_gui_runtime
+
+    return launch_gui_runtime(
+        MeasureGuiBehavior,
+        GuiLaunchOptions(
+            log_root=PROJECT_ROOT,
+            to_file=not args.no_log,
+            log_file=Path(args.log_file) if args.log_file else None,
+            control_port=args.control_port,
+            control_token=args.control_token,
+            control_allow_external=args.control_allow_external,
+            no_control=args.no_control,
+        ),
+        registry_factory=_build_measure_catalogs,
         clean=args.clean,
         project_root=project_root,
     )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

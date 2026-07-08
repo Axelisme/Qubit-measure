@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - cfg form editing lock / operation state ports / device setup cancel scope / tab lifecycle and writeback role metadata
+**Last updated:** 2026-07-08 - process runtime behavior
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -35,6 +35,17 @@ Shared layers:
 - `zcu_tools.mcp.measure`：agent-facing MCP policy layer and tool surface。
 
 ## Composition Root
+
+`MeasureGuiBehavior` is the process-runtime behavior for the shared
+`gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
+persistence caretaker, startup dialog, and the app-local `RemoteControlAdapter`
+without owning process policy such as logging, matplotlib backend selection,
+`QApplication`, control option construction, or exit-code handling.
+
+The launcher still owns the experiment-adapter composition boundary by passing a
+registry factory into `MeasureGuiBehavior`; the factory imports
+`experiment.v2_gui` only after `gui.runtime` has configured logging and the
+pre-Qt plotting policy.
 
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
