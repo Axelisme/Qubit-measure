@@ -10,27 +10,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
-from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
-from zcu_tools.gui.app.main.events.tab import (
-    TabAddedPayload,
-    TabClosedPayload,
-    TabContentChangedPayload,
-    TabInteractionChangedPayload,
-)
 from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
-from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import set_shutting_down
 from zcu_tools.gui.project import nearest_existing
-from zcu_tools.gui.session.events import (
-    ContextSwitchedPayload,
-    DeviceChangedPayload,
-    DeviceSetupFinishedPayload,
-    DeviceSetupStartedPayload,
-    MlChangedPayload,
-    PredictorChangedPayload,
-    SocChangedPayload,
-)
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
@@ -53,6 +36,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from .exp_tab_widget import ExpTabWidget, TabActions
 from .feedback_dock import FeedbackDockController
 from .main_dialog_registry import MainDialogRegistry
+from .main_window_events import MainWindowEventCoordinator
 
 if TYPE_CHECKING:
     from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
@@ -121,7 +105,7 @@ class MainWindow(QMainWindow):
             self._dialog_refs
         )
         self._dialog_registry = MainDialogRegistry(self._ctrl, parent=self)
-        self._bus_subs = EventSubscriptions()
+        self._events = MainWindowEventCoordinator(self._ctrl, host=self)
         # True once _perform_close has begun the actual teardown, so the second
         # closeEvent (triggered by _perform_close's self.close()) passes straight
         # through instead of re-entering the cancel-and-wait coordination.
@@ -187,38 +171,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("Ready")
 
-        # EventBus subscriptions
-        bus = self._ctrl.get_bus()
-        self._bus_subs.subscribe(
-            bus, TabInteractionChangedPayload, self._on_bus_tab_interaction_changed
-        )
-        self._bus_subs.subscribe(bus, RunStartedPayload, self._on_bus_run_started)
-        self._bus_subs.subscribe(bus, RunFinishedPayload, self._on_bus_run_finished)
-        self._bus_subs.subscribe(
-            bus, ContextSwitchedPayload, self._on_bus_context_switched
-        )
-        self._bus_subs.subscribe(bus, MlChangedPayload, self._on_bus_ml_changed)
-        self._bus_subs.subscribe(bus, TabAddedPayload, self._on_bus_tab_added)
-        self._bus_subs.subscribe(bus, TabClosedPayload, self._on_bus_tab_closed)
-        self._bus_subs.subscribe(
-            bus, TabContentChangedPayload, self._on_bus_tab_content_changed
-        )
-        self._bus_subs.subscribe(
-            bus, PredictorChangedPayload, self._on_bus_predictor_changed
-        )
-        self._bus_subs.subscribe(bus, SocChangedPayload, self._on_bus_soc_changed)
-        # Device setup ops: bus events let us track op start/finish for the
-        # feedback widget (B1 approach — refresh at every op count change).
-        self._bus_subs.subscribe(
-            bus, DeviceSetupStartedPayload, self._on_bus_device_setup_started
-        )
-        self._bus_subs.subscribe(
-            bus, DeviceSetupFinishedPayload, self._on_bus_device_setup_finished
-        )
-        # Device connect/disconnect ops: DeviceChangedPayload fires when the
-        # device state changes (after op start and after op finish), covering
-        # both starts and completions of connect/disconnect ops.
-        self._bus_subs.subscribe(bus, DeviceChangedPayload, self._on_bus_device_changed)
+        self._events.bind(self._ctrl.get_bus())
 
         # Docked feedback panel (built after bus wiring; mounted under the
         # target tab's figure only while the C3 gate holds).
@@ -234,80 +187,9 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
-        self._bus_subs.unsubscribe_all()
+        self._events.close()
 
-    def _on_bus_tab_interaction_changed(
-        self, payload: TabInteractionChangedPayload
-    ) -> None:
-        tab_id = payload.tab_id
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        self.refresh_tab_writeback(tab_id, snapshot)
-        self.refresh_tab_interaction(tab_id, snapshot)
-        interaction = snapshot.interaction
-        if interaction is not None and not (
-            interaction.is_running
-            or interaction.is_analyzing
-            or interaction.is_saving_data
-        ):
-            if interaction.has_analyze_result:
-                self.refresh_tab_figure(tab_id, snapshot)
-            if interaction.has_post_analyze_result:
-                self.refresh_tab_post_figure(tab_id, snapshot)
-        # Interactive analyze start/finish both emit TabInteractionChangedPayload;
-        # refresh widget visibility and stop-gating on every change.
-        self._refresh_feedback_widget()
-
-    def _on_bus_run_started(self, payload: RunStartedPayload) -> None:
-        # Run lock now held by this tab.
-        self.refresh_run_lock(payload.tab_id)
-        self._refresh_feedback_widget()
-
-    def _on_bus_run_finished(self, payload: RunFinishedPayload) -> None:
-        # Run lock released.
-        self.refresh_run_lock(None)
-        self._refresh_feedback_widget()
-        # Auto-switch to the second tab on a normal finish — RUN_FINISHED carries
-        # the outcome directly, so the decision lives here. A stopped run
-        # (outcome=cancelled) may leave a partial result, but the user interrupted
-        # it on purpose; don't yank them away. RunService writes the result to
-        # State before emitting RUN_FINISHED, so has_run_result is already set.
-        # The second tab holds analysis widgets AND the Save section; for a
-        # non-analysis adapter (flux_dep / power_dep) the analysis widgets are
-        # hidden but Save stays — switching there lands the user on Save, which is
-        # exactly what they want after a 2D sweep.
-        if payload.outcome != "finished":
-            return
-        tab_w = self._tab_widgets.get(payload.tab_id)
-        if tab_w is None:
-            return
-        snapshot = self._ctrl.get_tab_snapshot(payload.tab_id)
-        assert snapshot.interaction is not None  # render snapshot fills live fields
-        if snapshot.interaction.has_run_result:
-            tab_w._left_tabs.setCurrentIndex(1)
-
-    def _on_bus_context_switched(self, payload: ContextSwitchedPayload) -> None:
-        del payload
-        # cfg EvalValue refresh is the CfgEditorService's job now (it owns the
-        # models — ADR-0008); here we only refresh the surrounding tab panels.
-        self.refresh_context_panel()
-        for tab_id in list(self._tab_widgets):
-            snapshot = self._ctrl.get_tab_snapshot(tab_id)
-            self.refresh_tab_writeback(tab_id, snapshot)
-            self.refresh_tab_save_paths(tab_id, snapshot)
-            self.refresh_tab_interaction(tab_id, snapshot)
-
-    def _on_bus_ml_changed(self, payload: MlChangedPayload) -> None:
-        del payload
-        # cfg EvalValue refresh is the CfgEditorService's job now (ADR-0008);
-        # here we only refresh the surrounding tab panels.
-        for tab_id in list(self._tab_widgets):
-            snapshot = self._ctrl.get_tab_snapshot(tab_id)
-            self.refresh_tab_writeback(tab_id, snapshot)
-            self.refresh_tab_interaction(tab_id, snapshot)
-
-    def _on_bus_tab_added(self, payload: TabAddedPayload) -> None:
-        tab_id = payload.tab_id
-        adapter_name = payload.adapter_name
+    def add_tab_widget(self, tab_id: str, adapter_name: str) -> None:
         logger.info("_on_bus_tab_added: tab_id=%r adapter=%r", tab_id, adapter_name)
         if tab_id in self._tab_widgets:
             return
@@ -327,8 +209,7 @@ class MainWindow(QMainWindow):
         self._new_tab_btn.setEnabled(True)
         tab_w.attach(snapshot, self._tab_actions)
 
-    def _on_bus_tab_closed(self, payload: TabClosedPayload) -> None:
-        tab_id = payload.tab_id
+    def remove_tab_widget(self, tab_id: str) -> None:
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
@@ -338,51 +219,17 @@ class MainWindow(QMainWindow):
                 self._tabs.removeTab(index)
             tab_w.deleteLater()
 
-        self.refresh_run_lock(self._ctrl.get_running_tab_id())
+    def view_tab_ids(self) -> list[str]:
+        return list(self._tab_widgets)
 
-    def _on_bus_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
-        tab_id = payload.tab_id
+    def focus_run_result_panel(self, tab_id: str) -> None:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        self.refresh_tab_analyze_form(tab_id, snapshot)
-        self.refresh_tab_post_analyze_form(tab_id, snapshot)
-        self.refresh_tab_writeback(tab_id, snapshot)
-        self.refresh_tab_save_paths(tab_id, snapshot)
-        self.refresh_tab_figure(tab_id, snapshot)
-        self.refresh_tab_post_figure(tab_id, snapshot)
-        # The auto-switch to Analysis lives in _on_bus_run_finished (it needs the
-        # run outcome); content refresh here is outcome-agnostic.
-        self.refresh_tab_interaction(tab_id, snapshot)
-        # FIT analyze finish emits TabContentChangedPayload; refresh widget.
-        self._refresh_feedback_widget()
-
-    def _on_bus_predictor_changed(self, payload: PredictorChangedPayload) -> None:
-        del payload
-        self.refresh_predictor_panel()
-
-    def _on_bus_soc_changed(self, payload: SocChangedPayload) -> None:
-        del payload
-        self.refresh_run_lock(self._ctrl.get_running_tab_id())
-        # SoC connect succeeds → op count drops; refresh widget visibility.
-        self._refresh_feedback_widget()
-
-    def _on_bus_device_setup_started(self, payload: DeviceSetupStartedPayload) -> None:
-        del payload
-        self._refresh_feedback_widget()
-
-    def _on_bus_device_setup_finished(
-        self, payload: DeviceSetupFinishedPayload
-    ) -> None:
-        del payload
-        self._refresh_feedback_widget()
-
-    def _on_bus_device_changed(self, payload: DeviceChangedPayload) -> None:
-        # Fires on device connect/disconnect start and on completion (state
-        # change after op finish). Refreshes the widget on every op boundary.
-        del payload
-        self._refresh_feedback_widget()
+        assert snapshot.interaction is not None  # render snapshot fills live fields
+        if snapshot.interaction.has_run_result:
+            tab_w._left_tabs.setCurrentIndex(1)
 
     # ------------------------------------------------------------------
     # Docked feedback panel (ADR-0025 C3)

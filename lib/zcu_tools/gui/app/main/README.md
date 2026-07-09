@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-09 - app-local tab control facet
+**Last updated:** 2026-07-09 - main-window event coordinator
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -62,6 +62,12 @@ tab handlers use this facet instead of the giant `Controller` surface.
 Run/analyze/save/writeback/cfg-editor path mutation remain separate domains, and
 `Controller` keeps thin compatibility forwards for UI surfaces that have not
 migrated yet.
+
+Inside the Qt view, `MainWindow` remains the top-level View / RenderHost facade
+while `MainWindowEventCoordinator` owns EventBus subscription and payload routing.
+The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
+which refresh sequence a payload requires, but the window keeps widget ownership
+and concrete rendering methods.
 
 Key ownership rules:
 
