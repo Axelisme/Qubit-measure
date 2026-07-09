@@ -30,6 +30,8 @@ class F01FluxCorrectionResult:
 
 
 def format_exponent(n: float) -> str:
+    if not np.isfinite(n):
+        return "NaN"
     base, exp = "{:.2e}".format(n).split("e")
     clean_exp = int(exp)
     return rf"${base} \times 10^{{{clean_exp}}}$"

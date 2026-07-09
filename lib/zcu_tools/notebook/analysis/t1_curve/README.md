@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-06 — f01 flux correction helper
+**Last updated:** 2026-07-09 — effective T1 component labels
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -30,7 +30,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - `plot_t1_vs_elements(dipoles, T1s, T1errs, ...)`：T1 vs |d₀₁|² 散點，覆蓋 ±2σ 的常數 Q 參考帶 (`product2val` 用於把 `T1·|d|²` 乘積轉成欲顯示的物理量)。
 - `plot_sample_t1(...)`：T1 vs normalized flux `φ_ext/φ₀`，上軸同步顯示電流/電壓（透過 `value2flux`/`flux2value`）。實測 device-value array 進入 plotting 前會正規化成 `np.float64` ndarray，避免 scalar/array overload 影響後續 errorbar 與 limits 計算。
 - `plot_t1_with_sample(s_dev_values, s_T1s, s_T1errs, flux_half, flux_period, params, t_fluxs, *, name, noise_name, noise_values, Temp, **other_noise_options)`：疊加多條理論 T1(φ) 曲線；`name` ∈ {`Q_cap`, `x_qp`, `Q_ind`}；`noise_values` 中元素可為 float 或 callable `f(ω, T)`（可變 Q(ω) 模型）；底層呼叫 `simulate.fluxonium.calculate_eff_t1_vs_flux_fast`（**收 `params` tuple、自己 eigensolve，不再收 `Fluxonium`/`spectrum_data`**）。
-- `plot_eff_t1_with_sample(...)`：用法相同，但直接接受已算好的 `t1_effs`。
+- `plot_eff_t1_with_sample(...)`：用法相同，但直接接受已算好的 `t1_effs`；可選 `component_t1s={label: curve}` 疊加每個獨立 T1 機制的上限曲線，曲線長度需與 `t_fluxs` 相同；`parameter_text` 會把擬合參數畫在座標軸外，讓圖內 legend 保持短線名。
 
 ### `t1_curve_fit.py` / `fit.py` — white-list T1 noise fit
 
