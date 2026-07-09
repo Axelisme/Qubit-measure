@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-09 - runtime entrypoint contract
+**Last updated:** 2026-07-09 - app-local tab control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -53,6 +53,15 @@ pre-Qt plotting policy.
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
+
+App-local driving-adapter facets mirror the shared session control pattern.
+`TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
+active/running identity, tab read model, cfg schema commits, save path overrides)
+by composing `WorkspaceService`, `TabService`, `State`, and `EventBus`; remote
+tab handlers use this facet instead of the giant `Controller` surface.
+Run/analyze/save/writeback/cfg-editor path mutation remain separate domains, and
+`Controller` keeps thin compatibility forwards for UI surfaces that have not
+migrated yet.
 
 Key ownership rules:
 

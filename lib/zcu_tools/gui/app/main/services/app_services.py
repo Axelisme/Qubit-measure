@@ -24,6 +24,7 @@ from .post_analyze import PostAnalyzeService
 from .run import RunService
 from .save import SaveService
 from .tab import TabService
+from .tab_control import TabControlFacet
 from .workspace import WorkspaceService
 from .writeback import WritebackService
 
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .cfg_editor import CfgEditorHost
+    from .tab_control import TabControlPort
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,7 @@ class AppServices:
     context_control: ContextControlPort
     setup_control: SetupControlPort
     tab: TabService
+    tab_control: TabControlPort
     load: LoadService
     run: RunService
     analyze: AnalyzeService
@@ -138,6 +141,13 @@ def build_app_services(
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0005).
     tab = TabService(state, registry, writeback)
+    workspace = WorkspaceService(state, tab, bus)
+    tab_control = TabControlFacet(
+        state=state,
+        tab=tab,
+        workspace=workspace,
+        bus=bus,
+    )
     return AppServices(
         operation_gate=operation_gate,
         handles=handles,
@@ -154,6 +164,7 @@ def build_app_services(
         context_control=session.context_control,
         setup_control=session.setup_control,
         tab=tab,
+        tab_control=tab_control,
         load=LoadService(state, bus, writeback),
         run=RunService(state, runner, bus, handles, writeback),
         analyze=AnalyzeService(state, runner, bus, writeback, handles),
@@ -162,7 +173,7 @@ def build_app_services(
         post_analyze=PostAnalyzeService(state, runner, bus, handles),
         save=SaveService(state, background, bus),
         writeback=writeback,
-        workspace=WorkspaceService(state, tab, bus),
+        workspace=workspace,
         startup=session.startup,
         cfg_editor=cfg_editor,
         arb_waveform=arb_waveform,

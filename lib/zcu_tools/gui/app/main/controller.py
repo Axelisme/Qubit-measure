@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
 
     from .services.guard import AnalyzePermit
+    from .services.tab_control import TabControlPort
 
 
 # A View has two distinct down-channels from the Controller (ADR-0013):
@@ -264,6 +265,7 @@ class Controller(SessionControllerMixin):
         self._context_control = services.context_control
         self._setup_control = services.setup_control
         self._tab_svc = services.tab
+        self._tab_control = services.tab_control
         self._load_svc = services.load
         self._run_svc = services.run
         self._analyze_svc = services.analyze
@@ -463,6 +465,10 @@ class Controller(SessionControllerMixin):
     def setup_control(self) -> SetupControlPort:
         return self._setup_control
 
+    @property
+    def tab_control(self) -> TabControlPort:
+        return self._tab_control
+
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
         """Wire the app-level PersistenceCaretaker.
 
@@ -532,19 +538,19 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def new_tab(self, adapter_name: str) -> str:
-        return self._workspace_svc.new_tab(adapter_name)
+        return self._tab_control.new_tab(adapter_name)
 
     def close_tab(self, tab_id: str) -> None:
-        self._workspace_svc.close_tab(tab_id)
+        self._tab_control.close_tab(tab_id)
 
     def set_active_tab(self, tab_id: str) -> None:
-        self._workspace_svc.set_active_tab(tab_id)
+        self._tab_control.set_active_tab(tab_id)
 
     def reorder_tabs(self, tab_ids: list[str]) -> None:
-        self._workspace_svc.reorder_tabs(tab_ids)
+        self._tab_control.reorder_tabs(tab_ids)
 
     def get_active_tab_id(self) -> str | None:
-        return self._state.active_tab_id
+        return self._tab_control.get_active_tab_id()
 
     # ------------------------------------------------------------------
     # Run flow (RunService & ContextService)
@@ -563,7 +569,7 @@ class Controller(SessionControllerMixin):
         return self._ctx_svc.is_active_context()
 
     def get_running_tab_id(self) -> str | None:
-        return self._state.running_tab_id
+        return self._tab_control.get_running_tab_id()
 
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
@@ -1336,22 +1342,22 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def has_tab(self, tab_id: str) -> bool:
-        return self._state.has_tab(tab_id)
+        return self._tab_control.has_tab(tab_id)
 
     def list_tab_ids(self) -> list[str]:
-        return self._state.list_tab_ids()
+        return self._tab_control.list_tab_ids()
 
     def get_tab_adapter_name(self, tab_id: str) -> str:
-        return self._state.get_tab(tab_id).adapter_name
+        return self._tab_control.get_tab_adapter_name(tab_id)
 
     def get_tab_cfg_schema(self, tab_id: str) -> CfgSchema:
-        return self._state.get_tab(tab_id).cfg_schema
+        return self._tab_control.get_tab_cfg_schema(tab_id)
 
     def get_tab_result(self, tab_id: str) -> object | None:
-        return self._tab_svc.get_tab_result(tab_id)
+        return self._tab_control.get_tab_result(tab_id)
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
-        return self._tab_svc.get_snapshot(tab_id)
+        return self._tab_control.get_tab_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
         """Auto-commit boundary for tab CfgFormWidget.
@@ -1367,7 +1373,7 @@ class Controller(SessionControllerMixin):
         Terminal: → ``TabService.update_tab_cfg`` → ``State.update_tab_cfg_schema``,
         which bumps ``tab:<id>:cfg`` and emits no event.
         """
-        self._tab_svc.update_tab_cfg(tab_id, schema)
+        self._tab_control.update_tab_cfg(tab_id, schema)
 
     def reset_tab_cfg(self, tab_id: str) -> CfgSchema:
         """Regenerate the tab's cfg to the adapter's default and commit it.
@@ -1380,15 +1386,7 @@ class Controller(SessionControllerMixin):
         worker captured the cfg at launch) — fail fast, mirroring the
         ``tab.update_cfg`` RPC guard.
         """
-        if self._state.running_tab_id == tab_id:
-            raise RuntimeError(
-                f"tab {tab_id!r} is currently running; cancel the run before "
-                "resetting cfg"
-            )
-        adapter_name = self._tab_svc.get_tab_adapter_name(tab_id)
-        schema = self._tab_svc.make_default_cfg(adapter_name)
-        self._tab_svc.update_tab_cfg(tab_id, schema)
-        return schema
+        return self._tab_control.reset_tab_cfg(tab_id)
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
@@ -1399,10 +1397,7 @@ class Controller(SessionControllerMixin):
     def update_tab_save_paths(
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
-        self._tab_svc.update_tab_save_path_overrides(tab_id, data_path, image_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(tab_id=tab_id),
-        )
+        self._tab_control.update_tab_save_paths(tab_id, data_path, image_path)
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
