@@ -219,6 +219,9 @@ class MainWindow(QMainWindow):
                 self._tabs.removeTab(index)
             tab_w.deleteLater()
 
+    def has_tab_widget(self, tab_id: str) -> bool:
+        return tab_id in self._tab_widgets
+
     def view_tab_ids(self) -> list[str]:
         return list(self._tab_widgets)
 

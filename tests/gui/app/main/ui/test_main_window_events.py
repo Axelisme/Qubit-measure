@@ -7,10 +7,12 @@ from typing import Any, cast
 
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
+    TabAddedPayload,
     TabContentChangedPayload,
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.app.main.ui.main_window_events import MainWindowEventCoordinator
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.events import ContextSwitchedPayload, MlChangedPayload
 
 from tests.gui._control_fakes import CallLog, call
@@ -62,6 +64,10 @@ class RecordingHost:
 
     def remove_tab_widget(self, tab_id: str) -> None:
         self._log.add("host", "remove_tab_widget", tab_id)
+
+    def has_tab_widget(self, tab_id: str) -> bool:
+        self._log.add("host", "has_tab_widget", tab_id)
+        return tab_id in self.tab_ids
 
     def view_tab_ids(self) -> list[str]:
         self._log.add("host", "view_tab_ids")
@@ -173,6 +179,7 @@ def test_tab_content_changed_refreshes_full_tab_content_sequence() -> None:
     coordinator._on_tab_content_changed(TabContentChangedPayload("tab-1"))
 
     assert log.calls == [
+        call("host", "has_tab_widget", "tab-1"),
         call("ctrl", "get_tab_snapshot", "tab-1"),
         call("host", "refresh_tab_analyze_form", "tab-1", snapshot),
         call("host", "refresh_tab_post_analyze_form", "tab-1", snapshot),
@@ -182,6 +189,31 @@ def test_tab_content_changed_refreshes_full_tab_content_sequence() -> None:
         call("host", "refresh_tab_post_figure", "tab-1", snapshot),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
         call("host", "refresh_feedback_widget"),
+    ]
+
+
+def test_tab_content_changed_ignores_missing_view_tab() -> None:
+    coordinator, log, _ctrl, host = _coordinator()
+    host.tab_ids = []
+
+    coordinator._on_tab_content_changed(TabContentChangedPayload("tab-1"))
+
+    assert log.calls == [
+        call("host", "has_tab_widget", "tab-1"),
+    ]
+
+
+def test_bind_routes_events_and_close_unsubscribes() -> None:
+    coordinator, log, _ctrl, _host = _coordinator()
+    bus = BaseEventBus()
+
+    coordinator.bind(bus)
+    bus.emit(TabAddedPayload("tab-1", "adapter-a"))
+    coordinator.close()
+    bus.emit(TabAddedPayload("tab-2", "adapter-b"))
+
+    assert log.calls == [
+        call("host", "add_tab_widget", "tab-1", "adapter-a"),
     ]
 
 

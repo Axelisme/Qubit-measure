@@ -33,6 +33,7 @@ class MainWindowEventHost(Protocol):
 
     def add_tab_widget(self, tab_id: str, adapter_name: str) -> None: ...
     def remove_tab_widget(self, tab_id: str) -> None: ...
+    def has_tab_widget(self, tab_id: str) -> bool: ...
     def view_tab_ids(self) -> list[str]: ...
     def focus_run_result_panel(self, tab_id: str) -> None: ...
 
@@ -153,6 +154,8 @@ class MainWindowEventCoordinator:
 
     def _on_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
         tab_id = payload.tab_id
+        if not self._host.has_tab_widget(tab_id):
+            return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         self._host.refresh_tab_analyze_form(tab_id, snapshot)
         self._host.refresh_tab_post_analyze_form(tab_id, snapshot)
