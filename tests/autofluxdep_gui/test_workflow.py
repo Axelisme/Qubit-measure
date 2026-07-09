@@ -21,7 +21,12 @@ import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.spec import (
+    Dependency,
+    ModuleDep,
+    ModuleFallback,
+    Need,
+)
 
 from ._helpers import make_builder, run_controller_to_completion
 
@@ -76,7 +81,7 @@ def _builders():
         "lenrabi",
         provides=("pi_length", "pi2_length", "rabi_freq", "pi_product"),
         provides_modules=("pi_pulse", "pi2_pulse"),
-        requires=(Dependency("qubit_freq"),),
+        requires=(Dependency("qubit_freq", need=Need.NOW),),
         optional=(
             Dependency("t1", smooth="ewma", default=lambda: None),
             Dependency("pi_length", default=lambda: None),
@@ -104,7 +109,9 @@ def _builders():
             Dependency("best_ro_freq", default=lambda: None),
             Dependency("best_ro_gain", default=lambda: None),
         ),
-        requires_modules=(ModuleDep("pi_pulse"),),
+        requires_modules=(
+            ModuleDep("pi_pulse", need=Need.NOW, fallback=ModuleFallback.NONE),
+        ),
         optional_modules=(ModuleDep("readout", default=lambda: None),),
         produce_fn=ro_produce,
         result_factory=_filling_result,

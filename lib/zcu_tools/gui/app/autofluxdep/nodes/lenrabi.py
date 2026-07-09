@@ -84,7 +84,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep, Need
 from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
@@ -539,7 +539,7 @@ class LenRabiBuilder(Builder):
     name = "lenrabi"
     provides = ("pi_length", "pi2_length", "rabi_freq", "pi_product")
     provides_modules = ("pi_pulse", "pi2_pulse")
-    requires = (Dependency("qubit_freq"),)
+    requires = (Dependency("qubit_freq", need=Need.NOW),)
     optional = (
         Dependency("t1", smooth="ewma", default=missing_info_value),
         Dependency("pi_length", default=missing_info_value),

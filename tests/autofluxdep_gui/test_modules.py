@@ -9,7 +9,7 @@ emits a module via ``patch.set_module``; a downstream provider declaring
 from __future__ import annotations
 
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
-from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep, Need
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     Orchestrator,
@@ -73,6 +73,22 @@ def test_module_prev_point_when_not_produced_this_point():
     snap = resolve_provider_snapshot(p, info, _FakeML({})).snapshot
     assert snap is not None
     assert snap.module("readout") == "from_prev"
+
+
+def test_module_now_only_does_not_use_prev_point():
+    p = place(
+        make_builder(
+            "n",
+            optional_modules=(
+                ModuleDep("readout", need=Need.NOW, default=lambda: None),
+            ),
+        )
+    )
+    info = InfoStore(module_prev={"readout": "from_prev"})
+    snap = resolve_provider_snapshot(p, info, _FakeML({})).snapshot
+
+    assert snap is not None
+    assert snap.module("readout") is None
 
 
 # --- end-to-end: producer Node → downstream Node reads tuned module ---

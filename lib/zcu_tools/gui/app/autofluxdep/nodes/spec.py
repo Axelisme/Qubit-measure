@@ -14,14 +14,12 @@ A provider declares:
 - ``optional``  — dependencies that fall back to a default when absent
   ((2) "缺則用 default").
 
-A dependency is just a **key** (the quantity) plus an optional **smooth** flag.
-There is deliberately NO time scope: resolution is "give me the latest available
-value" — the orchestrator looks this flux point first, then falls back to the
-previous point, then to the optional default. The notebook's ``info`` vs
-``info.last`` distinction was never a user choice; it only reflected execution
-order (a provider running after the producer sees this point's value, one
-running before sees the previous point's). Both are "latest available", so the
-consumer need not say which.
+A dependency is a **key** (the quantity), an optional **smooth** flag, and a
+source policy. The default source policy is ``Need.LATEST``: the orchestrator
+looks this flux point first, then falls back to the previous point, then to the
+optional default. A provider may instead declare ``Need.NOW`` when stale values
+would be physically misleading; then only values produced earlier in the same
+flux point are accepted.
 
 Two time semantics that *aren't* "latest available" live OUTSIDE the dependency
 system, as internal state of whoever owns them:
@@ -48,17 +46,33 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Literal
 
 SmoothMode = Literal["ewma", "step_weighted"]
+
+
+class Need(str, Enum):
+    """Which produced value/module generation a dependency may read."""
+
+    LATEST = "latest"
+    NOW = "now"
+
+
+class ModuleFallback(str, Enum):
+    """Fallback policy after node-produced modules are unavailable."""
+
+    LIBRARY = "library"
+    NONE = "none"
 
 
 @dataclass(frozen=True)
 class Dependency:
     """A single declared dependency of a provider.
 
-    ``key`` is the quantity to read (the latest available value — this point,
-    else the previous point, else the default). ``smooth``, when set, means
+    ``key`` is the quantity to read. ``need`` controls whether the resolver may
+    use the latest available value or only a current-point value. ``smooth``,
+    when set, means
     "read the smoothed estimate of ``key`` under the same name": a
     SmoothingService smooths the raw ``key`` with the given mode and the
     resolver projects it in under ``key`` — the provider still reads
@@ -73,6 +87,12 @@ class Dependency:
     key: str
     smooth: SmoothMode | None = None
     default: Callable[[], Any] | None = None
+    need: Need = Need.LATEST
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "need", Need(self.need))
+        if self.smooth is not None and self.need is Need.NOW:
+            raise ValueError("smoothed dependencies cannot require need=NOW")
 
     @property
     def is_optional(self) -> bool:
@@ -84,11 +104,11 @@ class ModuleDep:
     """A declared module dependency of a provider.
 
     ``name`` names the module the provider wants (a cfg component such as a
-    readout). It is resolved latest-available across producers, then falls back
-    to the ml library's same-named preset or declared aliases, then to
-    ``default``:
+    readout). It is resolved from node-produced modules according to ``need``.
+    When ``fallback`` allows it, resolution then falls back to the ml library's
+    same-named preset or declared aliases, then to ``default``:
 
-        Node-produced this point → produced previous point → ml preset/alias → default
+        Node-produced this point → maybe produced previous point → maybe ml preset/alias → default
 
     ``default`` is a zero-arg callable returning a module (lazy, like
     ``Dependency.default``). A required module dep (``default is None``) that
@@ -103,6 +123,12 @@ class ModuleDep:
     name: str
     default: Callable[[], Any] | None = None
     aliases: tuple[str, ...] = ()
+    need: Need = Need.LATEST
+    fallback: ModuleFallback = ModuleFallback.LIBRARY
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "need", Need(self.need))
+        object.__setattr__(self, "fallback", ModuleFallback(self.fallback))
 
     @property
     def is_optional(self) -> bool:

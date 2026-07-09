@@ -7,7 +7,7 @@ runs it. Per flux point, for each provider in order it:
 
 1. resolves the provider's declared ``requires`` / ``optional`` / module deps
    against the current info/module state into a read-only ``Snapshot``
-   (latest-available, with skip/fallback) — ``resolve_provider_snapshot``;
+   (source-policy aware, with skip/fallback) — ``resolve_provider_snapshot``;
 2. builds the provider's Node for this point via ``builder.build_node(env)``,
    currying in the execution environment (flux, soc, tools, this provider's
    Result, the round_hook) so ``produce`` exposes only "requirements in, Patch
@@ -48,6 +48,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import (
     Snapshot,
     validate_patch,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleFallback, Need
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.gui.app.autofluxdep.tools import Tools
 
@@ -146,8 +147,8 @@ class InfoStore:
     Two parallel spaces. **Info values**: ``point``/``prev`` (raw + derived) and
     ``point_smoothed``/``prev_smoothed`` (smoothed projections built after the
     Nodes). **Modules**: ``module_point``/``module_prev`` hold Node-produced
-    modules (e.g. ro_optimize's tuned readout); a module dep resolves
-    module_point → module_prev → ml preset → declared default.
+    modules (e.g. ro_optimize's tuned readout); a module dep resolves according
+    to its source/fallback policy.
     """
 
     point: dict[str, Any] = field(default_factory=dict)
@@ -173,30 +174,33 @@ class InfoStore:
         self.point_smoothed = dict(self.prev_smoothed)
         self.point_smoothed.update(smoothed)
 
-    def latest(self, key: str, *, smoothed: bool) -> Any:
-        """Latest available value for ``key``, or the sentinel ``_MISSING``.
+    def resolve_value(self, key: str, *, smoothed: bool, need: Need) -> Any:
+        """Resolve value for ``key`` according to the dependency source policy.
 
-        Raw: this point if present, else the previous point. Smoothed: ONLY the
-        previous point — a smoothed value is necessarily the previous point's
-        estimate, because the SmoothingService derives this point's smoothed
-        value only AFTER every Node has run (it needs all raw outputs). So while
-        Nodes execute, smoothing consumers read the latest trusted carried-over
-        estimate.
+        ``Need.LATEST`` preserves the historic latest-available behavior: this
+        point first, then previous point. ``Need.NOW`` only accepts the current
+        flux point. Smoothed values are necessarily carried from the previous
+        point because this point's smoothing projection is computed only after
+        every node has run.
         """
         if smoothed:
             return self.prev_smoothed.get(key, _MISSING)
         if key in self.point:
             return self.point[key]
+        if need is Need.NOW:
+            return _MISSING
         return self.prev.get(key, _MISSING)
 
-    def latest_module(self, name: str) -> Any:
-        """Latest Node-produced module for ``name``: this point, else previous.
+    def resolve_produced_module(self, name: str, *, need: Need) -> Any:
+        """Resolve a node-produced module according to source policy.
 
-        Returns ``_MISSING`` if no Node produced it — the caller then falls back
-        to the ml preset, then the declared default.
+        ``Need.NOW`` only accepts modules produced earlier in the current flux
+        point. ``Need.LATEST`` falls back to the previous flux point.
         """
         if name in self.module_point:
             return self.module_point[name]
+        if need is Need.NOW:
+            return _MISSING
         return self.module_prev.get(name, _MISSING)
 
 
@@ -204,16 +208,21 @@ _MISSING = object()
 
 
 def _resolve_module(
-    name: str, aliases: tuple[str, ...], info: InfoStore, ml: ModuleSource | None
+    name: str,
+    aliases: tuple[str, ...],
+    need: Need,
+    fallback: ModuleFallback,
+    info: InfoStore,
+    ml: ModuleSource | None,
 ) -> Any:
-    """Latest-available module: Node-produced (this/prev point), else ml preset.
+    """Resolve a module: node-produced per policy, then optional library preset.
 
     Returns ``_MISSING`` if neither a Node nor the ml library provides it.
     """
-    produced = info.latest_module(name)
+    produced = info.resolve_produced_module(name, need=need)
     if produced is not _MISSING:
         return produced
-    if ml is not None:
+    if fallback is ModuleFallback.LIBRARY and ml is not None:
         for module_name in aliases or (name,):
             preset = ml.get_module(module_name)
             if preset is not None:
@@ -230,7 +239,11 @@ def resolve_provider_snapshot(
     resolved: dict[str, Any] = {}
     missing_info_keys: list[str] = []
     for d in deps:
-        value = info.latest(d.key, smoothed=d.smooth is not None)
+        value = info.resolve_value(
+            d.key,
+            smoothed=d.smooth is not None,
+            need=d.need,
+        )
         if value is _MISSING:
             if d.default is not None:
                 resolved[d.key] = d.default()
@@ -245,7 +258,7 @@ def resolve_provider_snapshot(
     modules: dict[str, Any] = {}
     missing_modules: list[str] = []
     for m in provider.all_module_deps():
-        mod = _resolve_module(m.name, m.aliases, info, ml)
+        mod = _resolve_module(m.name, m.aliases, m.need, m.fallback, info, ml)
         if mod is _MISSING:
             if m.default is not None:
                 modules[m.name] = m.default()
