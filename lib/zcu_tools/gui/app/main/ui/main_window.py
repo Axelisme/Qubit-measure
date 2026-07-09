@@ -25,8 +25,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QMenu,
-    QPushButton,
     QStatusBar,
     QTabWidget,
     QVBoxLayout,
@@ -37,6 +35,7 @@ from .exp_tab_widget import ExpTabWidget, TabActions
 from .feedback_dock import FeedbackDockController
 from .main_dialog_registry import MainDialogRegistry
 from .main_window_events import MainWindowEventCoordinator
+from .main_window_toolbar import MainWindowToolbar
 
 if TYPE_CHECKING:
     from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
@@ -119,29 +118,8 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(4, 4, 4, 4)
 
         # --- toolbar ---
-        toolbar = QHBoxLayout()
-        self._new_tab_btn = QPushButton("New Tab ▾")
-        self._new_tab_btn.clicked.connect(self._on_new_tab_requested)
-        toolbar.addWidget(self._new_tab_btn)
-        toolbar.addStretch()
-
-        setup_btn = QPushButton("Setup…")
-        setup_btn.clicked.connect(self._on_setup_clicked)
-        toolbar.addWidget(setup_btn)
-
-        devices_btn = QPushButton("Devices…")
-        devices_btn.clicked.connect(self._on_devices_clicked)
-        toolbar.addWidget(devices_btn)
-
-        predictor_btn = QPushButton("Predictor…")
-        predictor_btn.clicked.connect(self._on_predictor_clicked)
-        toolbar.addWidget(predictor_btn)
-
-        inspect_btn = QPushButton("Inspect…")
-        inspect_btn.clicked.connect(self._on_inspect_clicked)
-        toolbar.addWidget(inspect_btn)
-
-        main_layout.addLayout(toolbar)
+        self._toolbar = MainWindowToolbar(self, parent=self)
+        main_layout.addLayout(self._toolbar.layout)
 
         # --- context / predictor status bar ---
         ctx_bar = QHBoxLayout()
@@ -206,7 +184,7 @@ class MainWindow(QMainWindow):
         # sub-view + wire controller signals) — the whole-tab analogue of
         # CfgFormWidget.attach.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        self._new_tab_btn.setEnabled(True)
+        self._toolbar.set_new_tab_enabled(True)
         tab_w.attach(snapshot, self._tab_actions)
 
     def remove_tab_widget(self, tab_id: str) -> None:
@@ -356,7 +334,7 @@ class MainWindow(QMainWindow):
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
-        self._new_tab_btn.setEnabled(True)
+        self._toolbar.set_new_tab_enabled(True)
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
@@ -522,45 +500,10 @@ class MainWindow(QMainWindow):
     # Internal event handlers
     # ------------------------------------------------------------------
 
-    def _on_new_tab_requested(self) -> None:
-        menu = QMenu(self)
-        submenus: dict[tuple[str, ...], QMenu] = {}
+    def list_adapter_names(self) -> list[str]:
+        return self._ctrl.get_adapter_names()
 
-        def _get_or_create_submenu(path: tuple[str, ...]) -> QMenu:
-            cached = submenus.get(path)
-            if cached is not None:
-                return cached
-            if len(path) == 1:
-                parent_menu = menu
-            else:
-                parent_menu = _get_or_create_submenu(path[:-1])
-            sub_menu = parent_menu.addMenu(path[-1])
-            if sub_menu is None:
-                raise RuntimeError(f"Failed to create submenu: {'/'.join(path)}")
-            submenus[path] = sub_menu
-            return sub_menu
-
-        for name in self._ctrl.get_adapter_names():
-            parts = tuple(name.split("/"))
-            if len(parts) == 1:
-                action = menu.addAction(parts[0])
-                action.setData(name)  # type: ignore[union-attr]
-                continue
-            parent_menu = _get_or_create_submenu(parts[:-1])
-            action = parent_menu.addAction(parts[-1])
-            action.setData(name)  # type: ignore[union-attr]
-
-        action = menu.exec(
-            self._new_tab_btn.mapToGlobal(  # type: ignore[assignment]
-                self._new_tab_btn.rect().bottomLeft()
-            )
-        )
-        if action is None:
-            return
-        adapter_name = action.data()
-        if not adapter_name:
-            return
-
+    def create_tab(self, adapter_name: str) -> None:
         self._ctrl.new_tab(adapter_name)
 
     def _on_tab_close_requested(self, index: int) -> None:
@@ -717,18 +660,6 @@ class MainWindow(QMainWindow):
         self._ctrl.save_result(
             tab_id, data_path, image_path, comment=tab_w.get_comment()
         )
-
-    def _on_setup_clicked(self) -> None:
-        self.open_dialog(DialogName.SETUP)
-
-    def _on_devices_clicked(self) -> None:
-        self.open_dialog(DialogName.DEVICE)
-
-    def _on_predictor_clicked(self) -> None:
-        self.open_dialog(DialogName.PREDICTOR)
-
-    def _on_inspect_clicked(self) -> None:
-        self.open_dialog(DialogName.INSPECT)
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control

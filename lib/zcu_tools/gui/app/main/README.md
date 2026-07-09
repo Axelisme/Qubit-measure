@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-09 - main-window event coordinator
+**Last updated:** 2026-07-09 - main-window toolbar coordinator
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -68,6 +68,9 @@ while `MainWindowEventCoordinator` owns EventBus subscription and payload routin
 The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
 which refresh sequence a payload requires, but the window keeps widget ownership
 and concrete rendering methods.
+`MainWindowToolbar` owns the top toolbar widgets and slash-grouped new-tab menu;
+it reports selected actions back through a narrow `MainWindowToolbarHost` surface
+instead of reaching into `Controller` directly.
 
 Key ownership rules:
 
