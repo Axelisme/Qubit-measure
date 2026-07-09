@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-08 - process runtime behavior
+**Last updated:** 2026-07-09 - runtime entrypoint contract
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -40,7 +40,9 @@ Shared layers:
 `gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
 persistence caretaker, startup dialog, and the app-local `RemoteControlAdapter`
 without owning process policy such as logging, matplotlib backend selection,
-`QApplication`, control option construction, or exit-code handling.
+`QApplication`, control option construction, or exit-code handling. The
+standalone launcher is the process entrypoint; this module does not expose a
+second `run_app` path.
 
 The launcher still owns the experiment-adapter composition boundary by passing a
 registry factory into `MeasureGuiBehavior`; the factory imports

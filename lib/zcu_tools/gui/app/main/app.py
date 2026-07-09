@@ -17,7 +17,6 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
     PlotPolicy,
-    run_gui_runtime,
 )
 
 if TYPE_CHECKING:
@@ -117,40 +116,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         parent = assembly.window
         assert _is_main_window(parent)
         _show_startup_dialog(ctrl, parent=parent)
-
-
-def run_app(
-    registry: Registry,
-    role_catalog: RoleCatalog,
-    control_opts: ControlOptions | None = None,
-    clean: bool = False,
-    project_root: str | None = None,
-) -> int:
-    """Build and launch the GUI. Blocks until the window is closed.
-
-    ``registry`` and ``role_catalog`` are already populated by the entry script
-    (the GUI framework does not know which experiments exist — the script wires
-    them from ``experiment.v2_gui``).
-
-    ``control_opts`` (if provided) starts a ``RemoteControlAdapter`` after the
-    window is constructed; the adapter is stopped from ``MainWindow.closeEvent``.
-
-    ``clean=True`` starts without restoring the previous persisted session
-    (the on-disk ``gui_state_v1.json`` is left untouched at startup; a normal
-    close still flushes over it).
-
-    ``project_root`` is the base dir the default result/database paths anchor
-    under; the entry script passes the repo root so a .bat launcher that cd's
-    into script/ does not scope defaults under script/. None falls back to cwd.
-    """
-    return run_gui_runtime(
-        MeasureGuiBehavior(
-            lambda: (registry, role_catalog),
-            clean=clean,
-            project_root=project_root,
-        ),
-        control_opts,
-    )
 
 
 def _show_startup_dialog(ctrl: Controller, parent: MainWindow) -> None:

@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-08 — GUI process runtime
+**Last updated:** 2026-07-09 — runtime entrypoint contract
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -16,7 +16,7 @@ state/services/UI 與 GUI-process remote adapter。Import path 固定為
 
 ## 架構（對標 fluxdep，骨架共用、領域各寫）
 
-分層：`app.py`（composition root，`DispersiveGuiBehavior.spec` 宣告 process contract，`assemble()` 只做 controller/window/adapter wiring；bootstrap 由 `gui.runtime` 統一處理）→ `state.py`（被動 DispersiveState + VersionTable）→ `controller.py`（命令 façade，emit EventBus；**繼承共用 `BaseController`**/`gui/controller_base` 取 state/bus/project_root + `_emit`，façade body 各 app）→ `services/`（純 sync Qt-free）→ `services/remote/`（read-only RPC + MCP）→ `ui/`（**單流程面板**）→ `event_bus.py`。
+分層：`app.py`（composition root，`DispersiveGuiBehavior.spec` 宣告 process contract，`assemble()` 只做 controller/window/adapter wiring；bootstrap 由 `gui.runtime` 統一處理，process entrypoint 只在 `script/run_dispersive_gui.py`）→ `state.py`（被動 DispersiveState + VersionTable）→ `controller.py`（命令 façade，emit EventBus；**繼承共用 `BaseController`**/`gui/controller_base` 取 state/bus/project_root + `_emit`，façade body 各 app）→ `services/`（純 sync Qt-free）→ `services/remote/`（read-only RPC + MCP）→ `ui/`（**單流程面板**）→ `event_bus.py`。
 
 **與 fluxdep 的關鍵差異**：dispersive 是**單 onetone、單一線性流程**，不是 fluxdep 的「多 spectrum 集合 + 左 list 右 stacked」。`PipelinePanelWidget` 佈局：**控件壓在上方緊湊排**（step1/2/3 並排一排，**只放按鈕**）、**底下一條共用 info bar**（`_build_info_row`，把 step1 inputs 文字 + step2 onetone 狀態移來這，讓 step1/2/3 box 變矮）、再 step4 tune、**最下一個 QTabWidget 共用大圖區**（Preprocess / Tune 兩 tab）。前一步完成才 enable 下一步。step3 preprocess / step4 tune 各自獨立 **busy/indeterminate** progress bar（compute 都是黑盒，無百分比），`_begin_progress`/`_end_progress` 顯/隱、`_active_progress` 記當前。**step4 自身佈局**：上方 g / r_f 兩條 QSlider **垂直排**（各一列：名稱+slider+數值）；下方一橫列左 = Add sample flux / Clear samples / **Auto tune** / Use these g/r_f，右（push）= Export 按鈕（+label）。**沒有獨立 step5**：export 收進 step4 右下角（`_export_btn` gate on has_result，非整個 box）。`_inputs_label`/`_onetone_label` 在 info bar（不在 step1/2 box 內）。
 

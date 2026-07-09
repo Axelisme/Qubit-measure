@@ -21,7 +21,6 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
     PlotPolicy,
-    run_gui_runtime,
 )
 
 if TYPE_CHECKING:
@@ -46,7 +45,7 @@ def build_core(
 
     ``project_root`` is the base directory default result/database paths anchor
     under (the setup dialog derives defaults against it). None falls back to cwd —
-    fine for tests / a ``python -m`` run from the repo root; ``run_app`` injects
+    fine for tests / a ``python -m`` run from the repo root; the launcher injects
     the repo root so the defaults are correct regardless of the working directory.
     """
     from zcu_tools.gui.app.autofluxdep.controller import Controller
@@ -103,19 +102,6 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
         parent = assembly.window
         assert _is_main_window(parent)
         _show_startup_dialog(parent=parent)
-
-
-def run_app(
-    project: ProjectInfo | None = None,
-    control: ControlOptions | None = None,
-) -> int:
-    """Build and launch the autofluxdep-gui. Blocks until the window closes.
-
-    ``control`` (a ``ControlOptions`` with a TCP port/token) opts the run into the
-    read-only remote-control bridge — the RPC face an agent/MCP observes the
-    workflow through. None (the default) leaves the GUI un-instrumented.
-    """
-    return run_gui_runtime(AutoFluxDepGuiBehavior(project), control)
 
 
 def _repo_root() -> str:

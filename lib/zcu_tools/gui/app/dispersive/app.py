@@ -1,4 +1,4 @@
-"""Composition root — assemble and launch the dispersive-fit-gui.
+"""Composition root for the dispersive-fit-gui.
 
 Wires State + Controller + MainWindow behind the shared GUI process runtime. Like
 fluxdep-gui there is no registry/role-catalog and no session-restore caretaker:
@@ -19,7 +19,6 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
     PlotPolicy,
-    run_gui_runtime,
 )
 
 if TYPE_CHECKING:
@@ -65,21 +64,4 @@ class DispersiveGuiBehavior(GuiRuntimeBehavior):
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
 
-def run_app(
-    project: ProjectInfo | None = None,
-    control: ControlOptions | None = None,
-    project_root: str | None = None,
-) -> int:
-    """Build and launch the dispersive-fit-gui. Blocks until the window is closed.
-
-    ``project_root`` is the base dir the default result/database paths anchor
-    under; the entry script passes the repo root so a .bat launcher that cd's
-    into script/ does not scope defaults under script/. None falls back to cwd.
-    """
-    return run_gui_runtime(
-        DispersiveGuiBehavior(project=project, project_root=project_root),
-        control,
-    )
-
-
-__all__ = ["DispersiveGuiBehavior", "run_app"]
+__all__ = ["DispersiveGuiBehavior"]

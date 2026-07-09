@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -20,6 +23,58 @@ from zcu_tools.gui.runtime import GuiLaunchOptions, GuiRuntimeBehavior
 
 def _load_launcher(module_name: str) -> ModuleType:
     return importlib.import_module(module_name)
+
+
+def test_launcher_module_is_import_light() -> None:
+    code = "\n".join(
+        [
+            "import importlib",
+            "import json",
+            "import sys",
+            "importlib.import_module('zcu_tools.gui.launcher')",
+            "watched = [",
+            "    'zcu_tools.gui.runtime',",
+            "    'qtpy',",
+            "    'PySide6',",
+            "    'PyQt5',",
+            "    'matplotlib',",
+            "    'zcu_tools.gui.app.main.app',",
+            "    'zcu_tools.gui.app.autofluxdep.app',",
+            "    'zcu_tools.gui.app.fluxdep.app',",
+            "    'zcu_tools.gui.app.dispersive.app',",
+            "]",
+            "print(json.dumps([name for name in watched if name in sys.modules]))",
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(result.stdout) == []
+
+
+@pytest.mark.parametrize(
+    ("module_name", "behavior_name"),
+    [
+        ("zcu_tools.gui.app.main.app", "MeasureGuiBehavior"),
+        ("zcu_tools.gui.app.autofluxdep.app", "AutoFluxDepGuiBehavior"),
+        ("zcu_tools.gui.app.fluxdep.app", "FluxDepGuiBehavior"),
+        ("zcu_tools.gui.app.dispersive.app", "DispersiveGuiBehavior"),
+    ],
+)
+def test_app_modules_expose_runtime_behavior_not_legacy_run_app(
+    module_name: str,
+    behavior_name: str,
+) -> None:
+    module = importlib.import_module(module_name)
+
+    assert getattr(module, behavior_name).__name__ == behavior_name
+    assert not hasattr(module, "run_app")
+    assert "run_app" not in getattr(module, "__all__", ())
 
 
 def test_runtime_options_from_args_preserves_common_cli_contract() -> None:

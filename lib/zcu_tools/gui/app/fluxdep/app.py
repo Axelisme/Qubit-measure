@@ -1,4 +1,4 @@
-"""Composition root — assemble and launch the fluxdep-gui.
+"""Composition root for the fluxdep-gui.
 
 Wires State + Controller + MainWindow behind the shared GUI process runtime.
 Unlike measure-gui there is no registry/role-catalog (no experiment adapters)
@@ -16,7 +16,6 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
     PlotPolicy,
-    run_gui_runtime,
 )
 
 if TYPE_CHECKING:
@@ -59,25 +58,4 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
 
-def run_app(
-    project: ProjectInfo | None = None,
-    control: ControlOptions | None = None,
-    project_root: str | None = None,
-) -> int:
-    """Build and launch the fluxdep-gui. Blocks until the window is closed.
-
-    When ``control`` is given, a ``RemoteControlAdapter`` is started so an
-    automation agent (or the MCP server) can drive the GUI over TCP; it is
-    stopped on the Qt main thread when the app quits.
-
-    ``project_root`` is the base dir the default result/database paths anchor
-    under; the entry script passes the repo root so a .bat launcher that cd's
-    into script/ does not scope defaults under script/. None falls back to cwd.
-    """
-    return run_gui_runtime(
-        FluxDepGuiBehavior(project=project, project_root=project_root),
-        control,
-    )
-
-
-__all__ = ["FluxDepGuiBehavior", "run_app"]
+__all__ = ["FluxDepGuiBehavior"]

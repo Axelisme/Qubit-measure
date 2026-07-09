@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-08 — GUI process runtime
+**Last updated:** 2026-07-09 — runtime entrypoint contract
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -109,7 +109,8 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   與 embedded plot policy；`gui.runtime` 在 behavior 建立前設定 logging 與
   matplotlib backend，建立 `QApplication` 後處理 `ensure_host()` /
   `aboutToQuit→set_shutting_down(True)` / adapter start-stop。`app.py` 的
-  behavior 只做 controller/window/adapter wiring。
+  behavior 只做 controller/window/adapter wiring；process entrypoint 只在
+  `script/run_fluxdep_gui.py`。
 - **FitPanel R4**：DB 搜尋經共用 `gui/background.py` `BackgroundRunner`（per-panel）提交，
   `enter=` CM 組合 `routing_scope(diag_container)` + `use_pbar_factory(factory)`，由 runner
   在 worker 執行緒**於 thunk 內**進入（ContextVar 在 QThreadPool worker 裡看不到主執行緒的

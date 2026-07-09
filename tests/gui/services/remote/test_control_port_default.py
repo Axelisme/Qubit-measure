@@ -5,8 +5,8 @@ Covers three guarantees:
    server's ``default_port`` for every app (measure / fluxdep / dispersive /
    autofluxdep).  These are pure import-level constants — no Qt needed.
 2. --no-control suppression: when ``no_control=True`` is passed (simulating
-   the --no-control flag), ``control_opts`` / ``control`` is None, so
-   ``run_app`` never tries to open a socket.
+   the --no-control flag), runtime control options are None, so app assembly
+   never tries to open a socket.
 3. Port-collision fast-fail: when ``NdjsonRpcEndpoint.start()`` raises
    ``RuntimeError`` (simulating an EADDRINUSE bind failure), the adapter's
    ``start()`` re-raises the same RuntimeError so the app-level handler can
@@ -204,9 +204,9 @@ def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:  # noq
 def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     """RemoteControlServiceBase.start() rolls back, then propagates bind errors.
 
-    The app-level try/except in run_app / autofluxdep app.py catches this and
-    prints a user-friendly message. This test confirms the error is not swallowed
-    at the service layer and measure-gui's extra listeners are not leaked.
+    The shared runtime catches this and prints a user-friendly message. This
+    test confirms the error is not swallowed at the service layer and
+    measure-gui's extra listeners are not leaked.
     """
 
     # Import the measure-gui adapter (representative of all four).

@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-08 — live Labber Browser sidecar streaming
+**Last updated:** 2026-07-09 — runtime entrypoint contract
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
@@ -12,7 +12,7 @@ autofluxdep/
 ├── run_session.py   — one in-memory run session：持有 run-lived `RunStore` / `Tools` / `SmoothingService` / providers / `InfoStore` / cursor / open writers / Result objects；每個 run/continue segment 是一個 OperationRunner operation；Pause 是 flux-boundary non-terminal state，Stop/Abort 是 terminal finalize
 ├── run_locks.py     — guarded wrappers over shared setup/context/device/predictor control ports；run/paused 時允許 read/query 與 device live refresh，但拒絕 setup/context/device/predictor mutation；device live refresh 以 `try_poll_device_info() -> bool` 顯式回報 inner refresh result
 ├── state.py         — AutoFluxDepState(SessionState)：nodes/flux_values/flux_device_name/run_results/run_predictor + ProjectInfo；version keys workflow/flux
-├── app.py           — build_core(project?, project_root?) + AutoFluxDepGuiBehavior（注入 repo-root project_root，組 MainWindow）
+├── app.py           — build_core(project?, project_root?) + AutoFluxDepGuiBehavior（runtime behavior；launcher 注入 repo-root project_root，組 MainWindow）
 ├── events/          — autofluxdep domain payloads（`run.py`：Run* 生命週期；`workflow.py`：Workflow/Flux 編輯）；`EventBus` 本身只是 `BaseEventBus` 的別名（app.py/controller.py `import BaseEventBus as EventBus`，無獨立 event_bus.py）
 ├── operation_gate.py— app-local OperationGate thin wrapper（注入 autofluxdep RUN kind 到 shared RunBlocksHardwareGate）
 ├── cfg/             — 唯一 import measure spec/value 模型的 seam：`__init__`（純資料：CfgSchema/*Spec/*Value re-export + OverridePlan re-export）+ `schema`（NodeCfgSchema：node 旋鈕 SSOT，raw make_cfg-shaped value tree + flat logical-key projection，lower/set_field/with_overrides/read_knobs/to_persisted_raw/restore_persisted_raw；no-knob builder 用 `empty_node_schema()`）+ `override_plan`（Default cfg runtime override contract：RunCfgSnapshot / path validation / declared patch application；見 ADR-0043）+ `form`（shared CfgFormWidget/SectionLiveField/LiveModelEnv/field decoration re-export）

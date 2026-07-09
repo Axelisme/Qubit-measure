@@ -6,8 +6,9 @@
 
 Standalone GUI apps share process mechanics: logging setup, matplotlib backend
 selection, `QApplication` creation, plot host lifecycle, remote-control socket
-startup, adapter shutdown, and process exit codes. These concerns accumulated in
-launcher scripts, `gui/run_app.py`, and app-local `run_app` functions. The
+startup, adapter shutdown, and process exit codes. These concerns previously
+accumulated in launcher scripts, `gui/run_app.py`, and app-local `run_app`
+functions. The
 existing shared layers already cover lower-level mechanisms: `gui/remote` owns
 transport, `gui/session` owns measurement-session primitives, and `gui/plotting`
 owns figure routing. Process startup needs its own module without absorbing app
@@ -39,8 +40,9 @@ The runtime owns:
 - remote adapter `start()` / `stop()` and bind-failure reporting;
 - integer exit codes.
 
-Launcher scripts parse CLI flags and call `sys.exit(main(argv))`. Runtime and app
-composition functions return `int` and do not call `sys.exit`.
+Launcher scripts parse CLI flags, call `launch_gui_runtime(...)`, and call
+`sys.exit(main(argv))`. App modules expose `GuiRuntimeBehavior` classes and do
+not expose app-local `run_app` compatibility wrappers.
 
 Launcher scripts share their process-runtime CLI edge through `gui.launcher`.
 That module only declares common CLI flags and converts parser output into
@@ -55,8 +57,9 @@ policy remains in each app and in the existing shared layers.
 
 ## Consequences
 
-`run_qt_app` is retired. New GUI apps implement `GuiRuntimeBehavior` instead of
-passing callback factories to a helper. The standalone launchers for `measure`,
-`autofluxdep`, `fluxdep`, and `dispersive` all use the runtime; apps with richer
-persistence and startup-dialog lifecycle express that work through behavior
-assembly and lifecycle hooks.
+`run_qt_app` and app-local `run_app` wrappers are retired. New GUI apps
+implement `GuiRuntimeBehavior` instead of passing callback factories to a
+helper. The standalone launchers for `measure`, `autofluxdep`, `fluxdep`, and
+`dispersive` all use the runtime; apps with richer persistence and
+startup-dialog lifecycle express that work through behavior assembly and
+lifecycle hooks.

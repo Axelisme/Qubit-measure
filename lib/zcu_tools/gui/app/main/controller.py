@@ -277,8 +277,9 @@ class Controller(SessionControllerMixin):
         # Notify prompt registry (Stage 4b): independent of OperationHandles;
         # tokens minted on the main thread, consumed off-main (ADR-0025).
         self._notify_handles: NotifyHandles = NotifyHandles()
-        # App-level PersistenceCaretaker, injected by run_app via attach_caretaker
-        # (None in bare-Controller tests that don't exercise persistence).
+        # App-level PersistenceCaretaker, injected by runtime behavior via
+        # attach_caretaker (None in bare-Controller tests that don't exercise
+        # persistence).
         self._caretaker: PersistenceCaretaker | None = None
         # Lazily built on first begin_shutdown so the Controller stays importable
         # without a Qt event loop (tests construct a bare Controller). The driver
@@ -463,8 +464,10 @@ class Controller(SessionControllerMixin):
         return self._setup_control
 
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
-        """Wire the app-level PersistenceCaretaker (built by run_app). The
-        Controller is the Memento Originator; the Caretaker owns disk I/O."""
+        """Wire the app-level PersistenceCaretaker.
+
+        The Controller is the Memento Originator; the Caretaker owns disk I/O.
+        """
         self._caretaker = caretaker
 
     # -- Memento Originator (PersistOriginatorPort) --------------------------
@@ -488,7 +491,7 @@ class Controller(SessionControllerMixin):
         self._present_restore_report(report)
         return report
 
-    # -- lifecycle façade (run_app startup / MainWindow close) ---------------
+    # -- lifecycle façade (runtime startup / MainWindow close) ---------------
 
     def restore_all(self, *, load: bool = True) -> None:
         assert self._caretaker is not None, "caretaker not attached"
