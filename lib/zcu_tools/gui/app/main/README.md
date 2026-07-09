@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-09 - remote save control facet
+**Last updated:** 2026-07-09 - remote writeback control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -68,9 +68,12 @@ expose the op-agnostic handle/progress surface used by generic `operation.*`
 handlers, including device setup handles. `SaveControlPort` / `SaveControlFacet`
 expose save artifact creation and save-path mutation by composing `GuardService`,
 `TabService`, `SaveService`, `State`, and `EventBus`; remote save handlers use
-this facet instead of the giant `Controller` surface. Writeback/cfg-editor remain
-separate domains, and `Controller` keeps thin compatibility forwards for UI
-surfaces that have not migrated yet.
+this facet instead of the giant `Controller` surface. `WritebackControlPort` /
+`WritebackControlFacet` expose persistent writeback draft read/edit/apply by
+composing `GuardService`, `WritebackService`, `State`, and a resource-version
+provider; remote writeback handlers use this facet instead of the giant
+`Controller` surface. Cfg-editor remains a separate domain, and `Controller`
+keeps thin compatibility forwards for UI surfaces that have not migrated yet.
 
 Inside the Qt view, `MainWindow` remains the top-level View / RenderHost facade
 while `MainWindowEventCoordinator` owns EventBus subscription and payload routing.

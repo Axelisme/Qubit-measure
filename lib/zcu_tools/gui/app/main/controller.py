@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
+    from .services.writeback_control import WritebackControlPort
 
 
 # A View has two distinct down-channels from the Controller (ADR-0013):
@@ -245,6 +246,7 @@ class Controller(SessionControllerMixin):
             cfg_editor_ctrl=self,
             progress_transport=transport,
             notify_info=self._info,
+            resource_versions=self.resources_versions,
             render_host=lambda: self._render_host,
             project_root=self._project_root,
         )
@@ -276,6 +278,7 @@ class Controller(SessionControllerMixin):
         self._save_svc = services.save
         self._save_control = services.save_control
         self._writeback_svc = services.writeback
+        self._writeback_control = services.writeback_control
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
@@ -484,6 +487,10 @@ class Controller(SessionControllerMixin):
     @property
     def save_control(self) -> SaveControlPort:
         return self._save_control
+
+    @property
+    def writeback_control(self) -> WritebackControlPort:
+        return self._writeback_control
 
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
         """Wire the app-level PersistenceCaretaker.
@@ -821,19 +828,18 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        """Recompute the tab's writeback proposals (read-only, no permit).
+        """Read the tab's persistent writeback draft (read-only, no permit).
 
         Returns [] when the tab has no run/analyze result yet.
         """
-        return list(self._writeback_svc.get_tab_writeback_items(tab_id))
+        return self._writeback_control.get_tab_writeback_items(tab_id)
 
     def apply_writeback(self, tab_id: str) -> dict[str, Any]:
         """Apply the tab's persistent writeback draft as-is (no recompute).
 
         Returns ``{applied_ids, written}`` echoing what was actually written
         (see WritebackService.apply_tab_writeback)."""
-        permit = self._guard_svc.acquire_writeback_permit(tab_id)
-        return self._writeback_svc.apply_tab_writeback(permit)
+        return self._writeback_control.apply_writeback(tab_id)
 
     def set_writeback_item(
         self, tab_id: str, session_id: str, **changes: Any
@@ -841,8 +847,7 @@ class Controller(SessionControllerMixin):
         """Edit a persistent writeback item (selected / target_name / metadict
         value / module-waveform cfg edits). Returns the aggregated
         ``{valid, removed, added}`` of any applied cfg edits."""
-        self._guard_svc.acquire_writeback_permit(tab_id)
-        return self._writeback_svc.set_item_field(tab_id, session_id, **changes)
+        return self._writeback_control.set_writeback_item(tab_id, session_id, **changes)
 
     # ------------------------------------------------------------------
     # Save (TabService)

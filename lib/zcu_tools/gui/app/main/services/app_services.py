@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -31,6 +31,7 @@ from .tab import TabService
 from .tab_control import TabControlFacet
 from .workspace import WorkspaceService
 from .writeback import WritebackService
+from .writeback_control import WritebackControlFacet
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.registry import Registry
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     from .run_analyze_control import RunAnalyzeControlPort, RunAnalyzeRenderHost
     from .save_control import SaveControlPort
     from .tab_control import TabControlPort
+    from .writeback_control import WritebackControlPort
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,7 @@ class AppServices:
     save: SaveService
     save_control: SaveControlPort
     writeback: WritebackService
+    writeback_control: WritebackControlPort
     workspace: WorkspaceService
     startup: StartupService
     cfg_editor: CfgEditorService
@@ -106,6 +109,7 @@ def build_app_services(
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
     notify_info: Callable[[str], None],
+    resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
     project_root: str,
 ) -> AppServices:
@@ -186,6 +190,12 @@ def build_app_services(
         save=save,
         notify_info=notify_info,
     )
+    writeback_control = WritebackControlFacet(
+        state=state,
+        guard=guard,
+        writeback=writeback,
+        resource_versions=resource_versions,
+    )
     return AppServices(
         operation_gate=operation_gate,
         operation_control=operation_control,
@@ -214,6 +224,7 @@ def build_app_services(
         save=save,
         save_control=save_control,
         writeback=writeback,
+        writeback_control=writeback_control,
         workspace=workspace,
         startup=session.startup,
         cfg_editor=cfg_editor,

@@ -181,6 +181,7 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
             run_analyze_control=_facet_or_self("run_analyze_control"),
             operation_control=_facet_or_self("operation_control"),
             save_control=_facet_or_self("save_control"),
+            writeback_control=_facet_or_self("writeback_control"),
             context_control=_facet_or_self("context_control"),
             device_control=_facet_or_self("device_control"),
             predictor_control=_facet_or_self("predictor_control"),

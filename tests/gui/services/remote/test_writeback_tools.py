@@ -38,12 +38,12 @@ def _ctrl() -> MagicMock:
     ctrl.has_tab.return_value = True
     ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _items()
     # apply now echoes {applied_ids, written}; the handler folds context_version
-    # from resources_versions() read after apply.
+    # from writeback_control.get_context_version() read after apply.
     ctrl.apply_writeback.return_value = {
         "applied_ids": ["md-1"],
         "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
-    ctrl.resources_versions.return_value = {"context": 7}
+    ctrl.get_context_version.return_value = 7
     # set_writeback_item echoes the aggregated {valid, removed, added} on edits.
     ctrl.set_writeback_item.return_value = {"valid": True, "removed": [], "added": []}
     return ctrl
@@ -81,6 +81,81 @@ def test_apply_reads_persistent_draft():
     assert res["written"] == {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}
     assert res["context_version"] == 7
     ctrl.apply_writeback.assert_called_once_with("t")
+
+
+def test_preview_delegates_to_writeback_control_without_ctrl_fallback():
+    ctrl = _ctrl()
+    writeback_control = _ctrl()
+    ctrl.writeback_control = writeback_control
+    ctrl.has_tab = MagicMock(
+        side_effect=AssertionError("tab.writeback_preview must use writeback_control")
+    )
+    ctrl.get_tab_writeback_items = MagicMock(
+        side_effect=AssertionError("tab.writeback_preview must use writeback_control")
+    )
+
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
+
+    assert res["has_draft"] is True
+    writeback_control.has_tab.assert_called_once_with("t")
+    writeback_control.get_tab_writeback_items.assert_called_once_with("t")
+    ctrl.has_tab.assert_not_called()
+    ctrl.get_tab_writeback_items.assert_not_called()
+
+
+def test_set_delegates_to_writeback_control_without_ctrl_fallback():
+    ctrl = _ctrl()
+    writeback_control = _ctrl()
+    ctrl.writeback_control = writeback_control
+    ctrl.has_tab = MagicMock(
+        side_effect=AssertionError("tab.writeback_set must use writeback_control")
+    )
+    ctrl.set_writeback_item = MagicMock(
+        side_effect=AssertionError("tab.writeback_set must use writeback_control")
+    )
+    ctrl.get_tab_writeback_items = MagicMock(
+        side_effect=AssertionError("tab.writeback_set must use writeback_control")
+    )
+
+    res = _dispatch(
+        ctrl,
+        "tab.writeback_set",
+        {"tab_id": "t", "id": "md-1", "selected": False},
+    )
+
+    assert res["item"]["id"] == "md-1"  # type: ignore[index]
+    writeback_control.has_tab.assert_called_once_with("t")
+    writeback_control.set_writeback_item.assert_called_once_with(
+        "t", "md-1", selected=False
+    )
+    ctrl.has_tab.assert_not_called()
+    ctrl.set_writeback_item.assert_not_called()
+    ctrl.get_tab_writeback_items.assert_not_called()
+
+
+def test_apply_delegates_to_writeback_control_without_ctrl_fallback():
+    ctrl = _ctrl()
+    writeback_control = _ctrl()
+    ctrl.writeback_control = writeback_control
+    ctrl.has_tab = MagicMock(
+        side_effect=AssertionError("tab.writeback_apply must use writeback_control")
+    )
+    ctrl.apply_writeback = MagicMock(
+        side_effect=AssertionError("tab.writeback_apply must use writeback_control")
+    )
+    ctrl.resources_versions = MagicMock(
+        side_effect=AssertionError("tab.writeback_apply must use writeback_control")
+    )
+
+    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t"})
+
+    assert res["context_version"] == 7
+    writeback_control.has_tab.assert_called_once_with("t")
+    writeback_control.apply_writeback.assert_called_once_with("t")
+    writeback_control.get_context_version.assert_called_once_with()
+    ctrl.has_tab.assert_not_called()
+    ctrl.apply_writeback.assert_not_called()
+    ctrl.resources_versions.assert_not_called()
 
 
 def test_set_edits_metadict_item():
