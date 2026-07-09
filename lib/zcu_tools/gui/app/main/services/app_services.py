@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -19,13 +20,18 @@ from .arb_waveform import ArbWaveformService
 from .cfg_editor import CfgEditorService
 from .guard import GuardService
 from .load import LoadService
+from .operation_control import OperationControlFacet
 from .operation_gate import OperationGate
 from .post_analyze import PostAnalyzeService
 from .run import RunService
+from .run_analyze_control import RunAnalyzeControlFacet
 from .save import SaveService
+from .save_control import SaveControlFacet
 from .tab import TabService
+from .tab_control import TabControlFacet
 from .workspace import WorkspaceService
 from .writeback import WritebackService
+from .writeback_control import WritebackControlFacet
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.registry import Registry
@@ -40,6 +46,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .cfg_editor import CfgEditorHost
+    from .operation_control import OperationControlPort
+    from .run_analyze_control import RunAnalyzeControlPort, RunAnalyzeRenderHost
+    from .save_control import SaveControlPort
+    from .tab_control import TabControlPort
+    from .writeback_control import WritebackControlPort
 
 
 @dataclass(frozen=True)
@@ -58,6 +69,7 @@ class AppServices:
     """
 
     operation_gate: OperationGate
+    operation_control: OperationControlPort
     handles: OperationHandles
     background: BackgroundRunner
     progress: ProgressService
@@ -72,12 +84,16 @@ class AppServices:
     context_control: ContextControlPort
     setup_control: SetupControlPort
     tab: TabService
+    tab_control: TabControlPort
+    run_analyze_control: RunAnalyzeControlPort
     load: LoadService
     run: RunService
     analyze: AnalyzeService
     post_analyze: PostAnalyzeService
     save: SaveService
+    save_control: SaveControlPort
     writeback: WritebackService
+    writeback_control: WritebackControlPort
     workspace: WorkspaceService
     startup: StartupService
     cfg_editor: CfgEditorService
@@ -92,6 +108,9 @@ def build_app_services(
     io_manager: IOManager,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
+    notify_info: Callable[[str], None],
+    resource_versions: Callable[[], Mapping[str, int]],
+    render_host: Callable[[], RunAnalyzeRenderHost | None],
     project_root: str,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
@@ -138,12 +157,52 @@ def build_app_services(
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0005).
     tab = TabService(state, registry, writeback)
+    workspace = WorkspaceService(state, tab, bus)
+    tab_control = TabControlFacet(
+        state=state,
+        tab=tab,
+        workspace=workspace,
+        bus=bus,
+    )
+    guard = GuardService(state)
+    load = LoadService(state, bus, writeback)
+    run = RunService(state, runner, bus, handles, writeback)
+    analyze = AnalyzeService(state, runner, bus, writeback, handles)
+    post_analyze = PostAnalyzeService(state, runner, bus, handles)
+    save = SaveService(state, background, bus)
+    run_analyze_control = RunAnalyzeControlFacet(
+        state=state,
+        bus=bus,
+        guard=guard,
+        tab=tab,
+        load=load,
+        run=run,
+        analyze=analyze,
+        post_analyze=post_analyze,
+        render_host=render_host,
+    )
+    operation_control = OperationControlFacet(handles=handles, progress=progress)
+    save_control = SaveControlFacet(
+        state=state,
+        bus=bus,
+        guard=guard,
+        tab=tab,
+        save=save,
+        notify_info=notify_info,
+    )
+    writeback_control = WritebackControlFacet(
+        state=state,
+        guard=guard,
+        writeback=writeback,
+        resource_versions=resource_versions,
+    )
     return AppServices(
         operation_gate=operation_gate,
+        operation_control=operation_control,
         handles=handles,
         background=background,
         progress=progress,
-        guard=GuardService(state),
+        guard=guard,
         device=device,
         device_control=session.device_control,
         soc_connection=session.soc_connection,
@@ -154,15 +213,19 @@ def build_app_services(
         context_control=session.context_control,
         setup_control=session.setup_control,
         tab=tab,
-        load=LoadService(state, bus, writeback),
-        run=RunService(state, runner, bus, handles, writeback),
-        analyze=AnalyzeService(state, runner, bus, writeback, handles),
+        tab_control=tab_control,
+        run_analyze_control=run_analyze_control,
+        load=load,
+        run=run,
+        analyze=analyze,
         # Second analysis layer (post_analysis cap) — handle-only off-main worker,
         # same runner/handles as the primary analyze (ADR-0019, ADR-0026 §1).
-        post_analyze=PostAnalyzeService(state, runner, bus, handles),
-        save=SaveService(state, background, bus),
+        post_analyze=post_analyze,
+        save=save,
+        save_control=save_control,
         writeback=writeback,
-        workspace=WorkspaceService(state, tab, bus),
+        writeback_control=writeback_control,
+        workspace=workspace,
         startup=session.startup,
         cfg_editor=cfg_editor,
         arb_waveform=arb_waveform,

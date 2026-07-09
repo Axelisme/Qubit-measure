@@ -1,10 +1,35 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-07 (result scope cache / remote startup)
+**Last updated:** 2026-07-09 (runtime entrypoint contract)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 `plotting`, `remote`, `session`, `widgets`) are shared by every app.
+
+## Process Runtime (`runtime.py`)
+
+`gui.runtime` owns process-level startup mechanics for launchable GUI apps:
+logging, matplotlib plot policy, `QApplication` creation, shared plot-host
+lifecycle, remote-control option construction, adapter start/stop, and integer
+exit-code handling. Apps expose a fixed `GuiRuntimeBehavior.spec` class variable
+for static process contract and implement `assemble(control)` for app-local
+controller/window/adapter wiring. Launch-time CLI values stay in
+`GuiLaunchOptions` and behavior constructor arguments. App modules expose
+behavior classes; standalone `script/run_*_gui.py` launchers are the process
+entrypoints and call `launch_gui_runtime(...)` directly.
+
+The runtime seam deliberately stops above remote method/domain/session policy:
+`gui.remote` still owns transport, each app owns dispatch/domain handlers, and
+`gui.session` owns measurement-session primitives. All four standalone GUI
+launchers (`measure`, `autofluxdep`, `fluxdep`, `dispersive`) use this runtime
+directly; measurement-session apps keep their domain composition in app behavior
+classes and launcher-provided factories.
+
+`gui.launcher` is the import-light CLI edge companion for runtime launchers. It
+declares shared logging/control/project flags and converts parser output into
+`GuiLaunchOptions` / `ProjectInfo`. It deliberately avoids importing Qt or
+matplotlib or app modules at module import time, so scripts can import it before
+runtime applies plot policy.
 
 ## Project / Result Scope
 
@@ -107,6 +132,9 @@ Key invariants:
   `exc_info` so the real traceback survives the cross-thread marshal).
 - A `--log-file` CLI override (when a launcher exposes one) wins over the
   per-session scheme: the explicit path is used verbatim and no purge runs.
+- Repeated setup in the same process replaces handlers previously installed by
+  this helper instead of stacking duplicate stderr/file handlers. User-installed
+  handlers are left untouched.
 
 The MCP server uses stdout for its JSON-RPC transport, so its logging never
 touches stdout — the helper only adds a stderr handler and the DEBUG file

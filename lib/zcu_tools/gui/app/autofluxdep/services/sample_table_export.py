@@ -16,7 +16,6 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 from zcu_tools.meta_tool.table import SampleTable
 
 CALIBRATED_FLUX_COLUMN = "calibrated mA"
-COMMENT_COLUMN = "comment"
 DATE_COLUMN = "date"
 
 SAMPLE_COLUMNS: tuple[str, ...] = (
@@ -28,7 +27,6 @@ SAMPLE_COLUMNS: tuple[str, ...] = (
     "T2r err (us)",
     "T2e (us)",
     "T2e err (us)",
-    COMMENT_COLUMN,
     DATE_COLUMN,
 )
 
@@ -148,7 +146,6 @@ def export_sample_table_from_artifact(
     events = load_journal_events(_journal_path(manifest, manifest_path))
     rows = sample_rows_from_journal(
         events,
-        comment=_sample_comment(manifest, manifest_path),
         date=_sample_date(),
     )
     output = (
@@ -161,7 +158,6 @@ def export_sample_table_from_artifact(
 def sample_rows_from_journal(
     events: Sequence[Mapping[str, Any]],
     *,
-    comment: str | None = None,
     date: str | None = None,
 ) -> list[dict[str, float | str]]:
     """Build notebook sample rows from committed flux points in journal events."""
@@ -171,7 +167,7 @@ def sample_rows_from_journal(
         raise ValueError("autofluxdep run has no completed flux points to export")
 
     rows_by_flux: dict[int, dict[str, float | str]] = {
-        flux_idx: _sample_row_seed(flux_value, comment, date)
+        flux_idx: _sample_row_seed(flux_value, date)
         for flux_idx, flux_value in committed_flux_points
     }
     for event in events:
@@ -246,12 +242,9 @@ def _set_sample_value(row: dict[str, float | str], column: str, value: Any) -> N
 
 def _sample_row_seed(
     flux_value: float,
-    comment: str | None,
     date: str | None,
 ) -> dict[str, float | str]:
     row: dict[str, float | str] = {CALIBRATED_FLUX_COLUMN: flux_value}
-    if comment is not None:
-        row[COMMENT_COLUMN] = comment
     if date is not None:
         row[DATE_COLUMN] = date
     return row
@@ -306,24 +299,8 @@ def _journal_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:
     return manifest_path.parent / journal_path
 
 
-def _sample_comment(manifest: Mapping[str, Any], manifest_path: Path) -> str:
-    snapshot_dir = _metadata_root_path(manifest, manifest_path)
-    return f"Autofluxdep snapshot: {snapshot_dir}"
-
-
 def _sample_date() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _metadata_root_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:
-    paths = _require_mapping(manifest.get("paths"), "manifest paths")
-    metadata_root = paths.get("metadata_root")
-    if not isinstance(metadata_root, str) or not metadata_root:
-        return manifest_path.parent
-    path = Path(metadata_root)
-    if path.is_absolute():
-        return path
-    return manifest_path.parent / path
 
 
 def _event_flux_idx(event: Mapping[str, Any]) -> int:

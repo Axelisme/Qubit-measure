@@ -22,7 +22,7 @@ def _h_tab_new(
     name = str(params["adapter_name"])
     if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    tab_id = adapter.ctrl.new_tab(name)
+    tab_id = adapter.tab_control.new_tab(name)
     return {"tab_id": tab_id}
 
 
@@ -30,9 +30,9 @@ def _h_tab_close(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    adapter.ctrl.close_tab(tab_id)
+    adapter.tab_control.close_tab(tab_id)
     return {"ok": True}
 
 
@@ -40,9 +40,9 @@ def _h_tab_set_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    adapter.ctrl.set_active_tab(tab_id)
+    adapter.tab_control.set_active_tab(tab_id)
     return {"ok": True}
 
 
@@ -50,14 +50,14 @@ def _h_tab_list_all(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    running_tab_id = adapter.ctrl.get_running_tab_id()
+    running_tab_id = adapter.tab_control.get_running_tab_id()
     tabs = [
         {
             "tab_id": tid,
-            "adapter_name": adapter.ctrl.get_tab_adapter_name(tid),
+            "adapter_name": adapter.tab_control.get_tab_adapter_name(tid),
             "is_running": tid == running_tab_id,
         }
-        for tid in adapter.ctrl.list_tab_ids()
+        for tid in adapter.tab_control.list_tab_ids()
     ]
     # active_tab_id is a view projection (which tab the user is focused on),
     # sourced from the same RenderView snapshot _assemble_overview reads.
@@ -70,14 +70,14 @@ def _h_tab_list_all(
 
 
 def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, object]:
-    snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    snap = adapter.tab_control.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     # Render snapshot always fills the live fields (persist/restore form is the
     # only one that leaves them None, and it never hits the wire).
     assert interaction is not None
     return {
         "tab_id": tab_id,
-        "adapter_name": adapter.ctrl.get_tab_adapter_name(tab_id),
+        "adapter_name": adapter.tab_control.get_tab_adapter_name(tab_id),
         # Shared cfg-editor session id for this tab (None until the tab's form
         # is populated). Address it with the editor.* methods to edit cfg with
         # the GUI reflecting every change. (A tab uses its tab_id as owner key.)
@@ -106,10 +106,10 @@ def _h_tab_snapshot(
     # no shape-switch, so callers index reply["tabs"] uniformly.
     tab_id_raw = params.get("tab_id")
     if tab_id_raw is None:
-        tab_ids = adapter.ctrl.list_tab_ids()
+        tab_ids = adapter.tab_control.list_tab_ids()
     else:
         tab_id = str(tab_id_raw)
-        if not adapter.ctrl.has_tab(tab_id):
+        if not adapter.tab_control.has_tab(tab_id):
             raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
         tab_ids = [tab_id]
     return {"tabs": [_tab_snapshot_wire(adapter, tid) for tid in tab_ids]}
@@ -127,7 +127,7 @@ def _h_tab_get_cfg(
     from ..path_resolver import build_settable_tree
 
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     # A tab's cfg draft is a CfgEditorService session keyed by its tab_id (the
     # same draft the open form attaches to). Build the settable tree off that
@@ -153,11 +153,11 @@ def _h_tab_set_cfg(
     from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
 
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     # Block edits while the tab is running — same guard the human gets via the
     # disabled form (ADR-0013 F11).
-    if adapter.ctrl.get_running_tab_id() == tab_id:
+    if adapter.tab_control.get_running_tab_id() == tab_id:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {tab_id!r} is currently running; cancel the run before editing cfg",

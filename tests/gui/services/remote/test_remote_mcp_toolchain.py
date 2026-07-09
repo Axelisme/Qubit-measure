@@ -133,6 +133,9 @@ def test_operation_progress_device_setup_bars(fx):
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
     fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("operation.progress must use operation_control")
+    )
+    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m),)
     )
     sock = open_client(fx.service.port)
@@ -146,13 +149,14 @@ def test_operation_progress_device_setup_bars(fx):
         assert bar["maximum"] == 10 and bar["value"] == 3
         assert bar["n"] == 3 and bar["total"] == 10
         assert "Ramp" in bar["format"]
-        fx.ctrl.get_operation_progress.assert_called_with(7)
+        fx.service.operation_control.get_operation_progress.assert_called_once_with(7)
+        fx.ctrl.get_operation_progress.assert_not_called()
     finally:
         sock.close()
 
 
 def test_operation_progress_idle_returns_empty(fx):
-    fx.ctrl.get_operation_progress = MagicMock(return_value=())  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(return_value=())  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "operation.progress", {"operation_id": 7})
@@ -174,7 +178,7 @@ def test_operation_progress_serializes_live_bars(fx):
     m1.set_n(23)
     m2 = ProgressBarModel(label="Reps", total=500, start_time=t)
     m2.set_n(5)
-    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m1), (2, m2))
     )
     sock = open_client(fx.service.port)
@@ -199,7 +203,7 @@ def test_operation_progress_unknown_total_has_null_percent(fx):
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="working", total=None, start_time=time.monotonic())
-    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m),)
     )
     sock = open_client(fx.service.port)
@@ -508,10 +512,61 @@ def test_context_ml_delete_delegates(fx):
         sock.close()
 
 
-def test_save_post_image_delegates_to_controller(fx):
+def test_save_data_delegates_to_save_control(fx):
+    fx.ctrl.save_data = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("tab.save_data must use save_control")
+    )
+    fx.service.save_control.save_data = MagicMock(  # type: ignore[method-assign]
+        return_value="/tmp/data.hdf5"
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.save_data",
+            {"tab_id": "tab1", "data_path": "/tmp/data.h5", "comment": "note"},
+        )
+        assert resp["ok"] is True
+        assert resp["result"] == {"data_path": "/tmp/data.hdf5"}
+        fx.service.save_control.save_data.assert_called_once_with(
+            "tab1", "/tmp/data.h5", comment="note"
+        )
+        fx.ctrl.save_data.assert_not_called()
+    finally:
+        sock.close()
+
+
+def test_save_image_delegates_to_save_control(fx):
+    fx.ctrl.save_image = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("tab.save_image must use save_control")
+    )
+    fx.service.save_control.save_image = MagicMock(  # type: ignore[method-assign]
+        return_value="/tmp/image.png"
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.save_image",
+            {"tab_id": "tab1", "image_path": "/tmp/image.png"},
+        )
+        assert resp["ok"] is True
+        assert resp["result"] == {"image_path": "/tmp/image.png"}
+        fx.service.save_control.save_image.assert_called_once_with(
+            "tab1", "/tmp/image.png"
+        )
+        fx.ctrl.save_image.assert_not_called()
+    finally:
+        sock.close()
+
+
+def test_save_post_image_delegates_to_save_control(fx):
     """tab.save_post_image mirrors tab.save_image but targets the post-analysis figure;
-    it delegates to Controller.save_post_image and returns the written path."""
+    it delegates to save_control and returns the written path."""
     fx.ctrl.save_post_image = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("tab.save_post_image must use save_control")
+    )
+    fx.service.save_control.save_post_image = MagicMock(  # type: ignore[method-assign]
         return_value="/tmp/post.png"
     )
     sock = open_client(fx.service.port)
@@ -523,7 +578,77 @@ def test_save_post_image_delegates_to_controller(fx):
         )
         assert resp["ok"] is True
         assert resp["result"] == {"image_path": "/tmp/post.png"}
-        fx.ctrl.save_post_image.assert_called_once_with("tab1", "/tmp/post.png")
+        fx.service.save_control.save_post_image.assert_called_once_with(
+            "tab1", "/tmp/post.png"
+        )
+        fx.ctrl.save_post_image.assert_not_called()
+    finally:
+        sock.close()
+
+
+def test_save_result_delegates_to_save_control(fx):
+    fx.ctrl.save_result = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("tab.save_result must use save_control")
+    )
+    fx.service.save_control.save_result = MagicMock(  # type: ignore[method-assign]
+        return_value=("/tmp/data.hdf5", "/tmp/image.png")
+    )
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.save_result",
+            {
+                "tab_id": "tab1",
+                "data_path": "/tmp/data.h5",
+                "image_path": "/tmp/image.png",
+                "comment": "bundle",
+            },
+        )
+        assert resp["ok"] is True
+        assert resp["result"] == {
+            "data_path": "/tmp/data.hdf5",
+            "image_path": "/tmp/image.png",
+        }
+        fx.service.save_control.save_result.assert_called_once_with(
+            "tab1", "/tmp/data.h5", "/tmp/image.png", comment="bundle"
+        )
+        fx.ctrl.save_result.assert_not_called()
+    finally:
+        sock.close()
+
+
+def test_save_set_paths_delegates_to_save_control(fx):
+    fx.ctrl.has_tab = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("tab.save_set_paths must use save_control")
+    )
+    fx.ctrl.update_tab_save_paths = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("tab.save_set_paths must use save_control")
+    )
+    fx.service.save_control.has_tab = MagicMock(return_value=True)  # type: ignore[method-assign]
+    fx.service.save_control.update_tab_save_paths = MagicMock()  # type: ignore[method-assign]
+    sock = open_client(fx.service.port)
+    try:
+        resp = call(
+            sock,
+            "tab.save_set_paths",
+            {
+                "tab_id": "tab1",
+                "data_path": "/tmp/data.h5",
+                "image_path": "/tmp/image.png",
+            },
+        )
+        assert resp["ok"] is True
+        assert resp["result"] == {
+            "data_path": "/tmp/data.h5",
+            "image_path": "/tmp/image.png",
+        }
+        fx.service.save_control.has_tab.assert_called_once_with("tab1")
+        fx.service.save_control.update_tab_save_paths.assert_called_once_with(
+            "tab1", "/tmp/data.h5", "/tmp/image.png"
+        )
+        fx.ctrl.has_tab.assert_not_called()
+        fx.ctrl.update_tab_save_paths.assert_not_called()
     finally:
         sock.close()
 

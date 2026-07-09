@@ -30,7 +30,7 @@ def test_tab_load_data_dispatch_returns_serializable_outcome() -> None:
         interaction=SimpleNamespace(has_run_result=True),
         analyze_params=_AnalyzeParams(threshold=0.25),
     )
-    adapter = SimpleNamespace(ctrl=ctrl)
+    adapter = SimpleNamespace(run_analyze_control=ctrl)
 
     reply = _h_tab_load_data(
         cast(Any, adapter), {"tab_id": "tab-1", "data_path": "/tmp/result.hdf5"}
@@ -56,7 +56,7 @@ def test_tab_load_data_dispatch_maps_load_data_error() -> None:
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",
         reason_code="invalid_data_file",
     )
-    adapter = SimpleNamespace(ctrl=ctrl)
+    adapter = SimpleNamespace(run_analyze_control=ctrl)
 
     with pytest.raises(RemoteError) as exc_info:
         _h_tab_load_data(

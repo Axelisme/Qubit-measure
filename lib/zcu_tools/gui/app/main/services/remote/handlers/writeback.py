@@ -50,9 +50,9 @@ def _h_tab_writeback_preview(
     the items computed once at analyze time. ``has_draft`` is false before any
     analyze has produced a draft (empty item list)."""
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    items = adapter.ctrl.get_tab_writeback_items(tab_id)
+    items = adapter.writeback_control.get_tab_writeback_items(tab_id)
     return {
         "has_draft": bool(items),
         "items": [_writeback_item_wire(it) for it in items],
@@ -71,7 +71,7 @@ def _h_tab_writeback_set(
     None disambiguates which facet is supplied. Echoes the edited ``item``; an
     ``edits`` batch also folds the aggregated ``{valid, removed, added}``."""
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     session_id = str(params["id"])
     # The wire collapses "omitted optional" and "explicit JSON null" to the same
@@ -115,7 +115,9 @@ def _h_tab_writeback_set(
             edits.append({"path": str(edit["path"]), "value": edit["value"]})
         changes["edits"] = edits
     try:
-        agg = adapter.ctrl.set_writeback_item(tab_id, session_id, **changes)
+        agg = adapter.writeback_control.set_writeback_item(
+            tab_id, session_id, **changes
+        )
     except RuntimeError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     # Echo the edited item so the agent sees the post-edit state in one round-trip.
@@ -127,7 +129,7 @@ def _h_tab_writeback_set(
 
 
 def _find_writeback_item(adapter: RemoteControlAdapter, tab_id: str, session_id: str):
-    for item in adapter.ctrl.get_tab_writeback_items(tab_id):
+    for item in adapter.writeback_control.get_tab_writeback_items(tab_id):
         if item.session_id == session_id:
             return item
     raise RemoteError(
@@ -143,10 +145,10 @@ def _h_tab_writeback_apply(
     destination names actually pushed (``written`` by kind), and the post-apply
     ``context`` resource version (apply bumps it once, ADR-0006)."""
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
-        result = adapter.ctrl.apply_writeback(tab_id)
+        result = adapter.writeback_control.apply_writeback(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -155,7 +157,7 @@ def _h_tab_writeback_apply(
         ) from exc
     # Read the context version AFTER apply so the agent sees the bumped value it
     # can pass back as an expected_versions guard on a follow-up write.
-    context_version = adapter.ctrl.resources_versions().get("context", 0)
+    context_version = adapter.writeback_control.get_context_version()
     return {
         "applied_ids": list(result["applied_ids"]),
         "written": result["written"],

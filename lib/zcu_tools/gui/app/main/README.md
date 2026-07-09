@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-07 - cfg form editing lock / operation state ports / device setup cancel scope / tab lifecycle and writeback role metadata
+**Last updated:** 2026-07-09 - remote writeback control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -36,10 +36,53 @@ Shared layers:
 
 ## Composition Root
 
+`MeasureGuiBehavior` is the process-runtime behavior for the shared
+`gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
+persistence caretaker, startup dialog, and the app-local `RemoteControlAdapter`
+without owning process policy such as logging, matplotlib backend selection,
+`QApplication`, control option construction, or exit-code handling. The
+standalone launcher is the process entrypoint; this module does not expose a
+second `run_app` path.
+
+The launcher still owns the experiment-adapter composition boundary by passing a
+registry factory into `MeasureGuiBehavior`; the factory imports
+`experiment.v2_gui` only after `gui.runtime` has configured logging and the
+pre-Qt plotting policy.
+
 `build_app_services()` constructs the app-local services and injects their driven
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
+
+App-local driving-adapter facets mirror the shared session control pattern.
+`TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
+active/running identity, tab read model, cfg schema commits, save path overrides)
+by composing `WorkspaceService`, `TabService`, `State`, and `EventBus`; remote
+tab handlers use this facet instead of the giant `Controller` surface.
+`RunAnalyzeControlPort` / `RunAnalyzeControlFacet` expose the run/load/analyze
+operation surface (run start/cancel, result load, analyze/post-analyze start and
+result reads) by composing the operation services, guards, tab read model, and a
+render-host provider. Remote run/analyze handlers use this facet instead of the
+giant `Controller` surface. `OperationControlPort` / `OperationControlFacet`
+expose the op-agnostic handle/progress surface used by generic `operation.*`
+handlers, including device setup handles. `SaveControlPort` / `SaveControlFacet`
+expose save artifact creation and save-path mutation by composing `GuardService`,
+`TabService`, `SaveService`, `State`, and `EventBus`; remote save handlers use
+this facet instead of the giant `Controller` surface. `WritebackControlPort` /
+`WritebackControlFacet` expose persistent writeback draft read/edit/apply by
+composing `GuardService`, `WritebackService`, `State`, and a resource-version
+provider; remote writeback handlers use this facet instead of the giant
+`Controller` surface. Cfg-editor remains a separate domain, and `Controller`
+keeps thin compatibility forwards for UI surfaces that have not migrated yet.
+
+Inside the Qt view, `MainWindow` remains the top-level View / RenderHost facade
+while `MainWindowEventCoordinator` owns EventBus subscription and payload routing.
+The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
+which refresh sequence a payload requires, but the window keeps widget ownership
+and concrete rendering methods.
+`MainWindowToolbar` owns the top toolbar widgets and slash-grouped new-tab menu;
+it reports selected actions back through a narrow `MainWindowToolbarHost` surface
+instead of reaching into `Controller` directly.
 
 Key ownership rules:
 

@@ -1,7 +1,7 @@
 """operation.await dispatch handler.
 
 The handler is off_main_thread (blocks the IO worker). It calls
-ctrl.await_operation(operation_id, timeout) and shapes the AwaitResult into
+operation_control.await_operation(operation_id, timeout) and shapes the AwaitResult into
 a wire result (ADR-0025 §cancelled-wire):
   - completed/cancelled → structured {reason:'completed', status:'cancelled',
     feedback?} (NOT a raise; feedback present only when a Stop reason was latched).
@@ -13,19 +13,24 @@ a wire result (ADR-0025 §cancelled-wire):
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.main.services.remote.handlers.operation import (
+    _h_operation_progress,
+)
+from zcu_tools.gui.app.main.services.remote.service import RemoteControlAdapter
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.operation_handles import AwaitResult, OperationOutcome
 
-from ._helpers import dispatch_handler
-
 
 def _HANDLER(ctrl, params):
-    # Handlers receive the adapter (ADR-0013); wrap ctrl in an adapter stub.
-    return dispatch_handler(ctrl, "operation.await", params)
+    # Generic operation handlers must not require the giant ctrl surface.
+    adapter = cast(Any, SimpleNamespace(operation_control=ctrl))
+    return METHOD_REGISTRY["operation.await"].handler(adapter, params)
 
 
 def _ctrl(result: AwaitResult | None) -> MagicMock:
@@ -36,6 +41,17 @@ def _ctrl(result: AwaitResult | None) -> MagicMock:
 
 def test_off_main_thread_flag_set():
     assert METHOD_REGISTRY["operation.await"].off_main_thread is True
+
+
+def test_progress_uses_operation_control_without_ctrl():
+    ctrl = MagicMock()
+    ctrl.get_operation_progress.return_value = ()
+    adapter = cast(RemoteControlAdapter, SimpleNamespace(operation_control=ctrl))
+
+    out = _h_operation_progress(adapter, {"operation_id": 7})
+
+    assert out == {"active": False, "bars": []}
+    ctrl.get_operation_progress.assert_called_once_with(7)
 
 
 # ---------------------------------------------------------------------------

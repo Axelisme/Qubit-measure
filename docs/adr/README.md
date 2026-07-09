@@ -22,6 +22,7 @@
 - [0020 — Shared session core](0020-session-core-shared-layer.md)：measure 與 autofluxdep 共用 context、SoC、device、dialog、operation/session primitive。
 - [0021 — Event ownership domain modules](0021-event-ownership-domain-modules.md)：事件 enum 與 payload 由 domain module 擁有，app 只組裝 bus 與 serializer。
 - [0037 — Value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session value source 提供少量 default / md-write escape hatch；`ValueRef` 立即 materialize。
+- [0044 — GUI process runtime](0044-gui-process-runtime.md)：GUI app 用 static runtime spec + behavior ABC 宣告 process startup contract。
 
 ## Cfg / Value Model
 

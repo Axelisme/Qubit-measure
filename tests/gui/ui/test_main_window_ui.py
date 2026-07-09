@@ -674,7 +674,7 @@ def test_main_window_run_lock_keeps_new_tab_available(qapp):
 
     window.refresh_run_lock("tab-1")
 
-    assert window._new_tab_btn.isEnabled() is True
+    assert window._toolbar.new_tab_button.isEnabled() is True
     tab_one.update_interaction_state.assert_called_once()
     tab_two.update_interaction_state.assert_called_once()
 
@@ -1380,7 +1380,7 @@ def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
 
     monkeypatch.setattr(QMenu, "exec", _fake_exec)
 
-    window._on_new_tab_requested()
+    window._toolbar.show_new_tab_menu()
 
     ctrl.new_tab.assert_called_once_with("twotone/rabi/length")
 

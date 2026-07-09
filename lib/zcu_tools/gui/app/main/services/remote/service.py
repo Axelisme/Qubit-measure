@@ -17,8 +17,13 @@ layers measure-gui's own dispatch policy on top by overriding the base seams:
     out-of-band diagnostic channel (``notify_diagnostic``), both pushed via
     ``endpoint.broadcast`` independent of EventBus.
 
-Handlers receive *this adapter* (not the bare ctrl), so they reach app commands
-through ``adapter.ctrl.<façade>``, context commands through
+Handlers receive *this adapter* (not the bare ctrl), so they reach tab-resource
+commands through ``adapter.tab_control``, run/analyze commands through
+``adapter.run_analyze_control``, generic operation await/progress through
+``adapter.operation_control``, save commands through ``adapter.save_control``,
+writeback commands through ``adapter.writeback_control``,
+other app commands through
+``adapter.ctrl.<façade>``, context commands through
 ``adapter.context_control``, device commands through ``adapter.device_control``,
 predictor commands through ``adapter.predictor_control``, and View-side surfaces
 (render/snapshot) through ``adapter.render_view``. Construct after ``Controller``
@@ -46,6 +51,13 @@ if TYPE_CHECKING:
     # (controller.py imports remote.dialogs). String annotation keeps pyright
     # checking handler/ctrl method names while the runtime import never happens.
     from zcu_tools.gui.app.main.controller import Controller, RenderView, Severity
+    from zcu_tools.gui.app.main.services.operation_control import OperationControlPort
+    from zcu_tools.gui.app.main.services.run_analyze_control import (
+        RunAnalyzeControlPort,
+    )
+    from zcu_tools.gui.app.main.services.save_control import SaveControlPort
+    from zcu_tools.gui.app.main.services.tab_control import TabControlPort
+    from zcu_tools.gui.app.main.services.writeback_control import WritebackControlPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
@@ -84,8 +96,13 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     """Driving adapter: an NDJSON RPC face onto the measure-gui ``Controller``.
 
     Holds the concrete ``Controller`` (app command face), exposes the shared
-    context/device/predictor-control facets, and pulls EventBus from it via
-    ``get_bus()``. Dispatch handlers reach app commands through ``adapter.ctrl``,
+    context/device/predictor-control facets, exposes the app-local tab-control
+    run/analyze-control, operation-control, save-control, and writeback-control facets, and pulls EventBus from it via
+    ``get_bus()``. Dispatch handlers reach tab commands through ``adapter.tab_control``,
+    run/analyze commands through ``adapter.run_analyze_control``, operation
+    await/progress through ``adapter.operation_control``, save commands through
+    ``adapter.save_control``, writeback commands through
+    ``adapter.writeback_control``, other app commands through ``adapter.ctrl``,
     context commands through ``adapter.context_control``, device commands through
     ``adapter.device_control``, predictor commands through ``adapter.predictor_control``,
     and the canvas-bearing View's pure-read surface through ``adapter.render_view``
@@ -94,6 +111,11 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     """
 
     ctrl: Controller
+    tab_control: TabControlPort
+    run_analyze_control: RunAnalyzeControlPort
+    operation_control: OperationControlPort
+    save_control: SaveControlPort
+    writeback_control: WritebackControlPort
     context_control: ContextControlPort
     device_control: DeviceControlPort
     predictor_control: PredictorControlPort
@@ -115,6 +137,11 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             wire_event_name=wire_event_name,
         )
         self.render_view = render_view
+        self.tab_control = controller.tab_control
+        self.run_analyze_control = controller.run_analyze_control
+        self.operation_control = controller.operation_control
+        self.save_control = controller.save_control
+        self.writeback_control = controller.writeback_control
         self.context_control = controller.context_control
         self.device_control = controller.device_control
         self.predictor_control = controller.predictor_control

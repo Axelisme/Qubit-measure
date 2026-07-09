@@ -1,31 +1,34 @@
-"""GUI composition root — assembles all components and launches the app.
+"""GUI composition root — assembles all components for the shared runtime.
 
 This module depends only on ``zcu_tools.gui.app.main``; it does not know which concrete
 experiments exist. The entry script wires a populated ``Registry`` /
 ``RoleCatalog`` (built from ``experiment.v2_gui``) and passes them in — so the
 GUI framework never imports the experiment-adapter layer.
-
-The matplotlib backend must already be configured before ``run_app`` runs (the
-entry script calls ``configure_matplotlib_backend`` from
-``zcu_tools.gui.plotting.setup`` before importing this module); this module only
-assembles and launches, it does not configure the
-backend itself.
 """
 
 from __future__ import annotations
 
-import sys
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, ClassVar, TypeGuard
+
+from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+from zcu_tools.gui.runtime import (
+    GuiAssembly,
+    GuiRuntimeBehavior,
+    GuiRuntimeSpec,
+    PlotPolicy,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
     from zcu_tools.gui.app.main.controller import Controller
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.role_catalog import RoleCatalog
-    from zcu_tools.gui.app.main.services.remote import ControlOptions
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
     from zcu_tools.gui.session.services.io_manager import IOManager
+
+RegistryFactory = Callable[[], tuple["Registry", "RoleCatalog"]]
 
 
 def _make_empty_ctx() -> ExpContext:
@@ -41,98 +44,78 @@ def _make_empty_ctx() -> ExpContext:
     )
 
 
-def run_app(
-    registry: Registry,
-    role_catalog: RoleCatalog,
-    control_opts: ControlOptions | None = None,
-    clean: bool = False,
-    project_root: str | None = None,
-) -> None:
-    """Build and launch the GUI. Blocks until the window is closed.
+class MeasureGuiBehavior(GuiRuntimeBehavior):
+    """measure-gui app wiring behind the shared GUI runtime."""
 
-    ``registry`` and ``role_catalog`` are already populated by the entry script
-    (the GUI framework does not know which experiments exist — the script wires
-    them from ``experiment.v2_gui``).
-
-    ``control_opts`` (if provided) starts a ``RemoteControlAdapter`` after the
-    window is constructed; the adapter is stopped from ``MainWindow.closeEvent``.
-
-    ``clean=True`` starts without restoring the previous persisted session
-    (the on-disk ``gui_state_v1.json`` is left untouched at startup; a normal
-    close still flushes over it).
-
-    ``project_root`` is the base dir the default result/database paths anchor
-    under; the entry script passes the repo root so a .bat launcher that cd's
-    into script/ does not scope defaults under script/. None falls back to cwd.
-    """
-    from zcu_tools.gui.app.main.utils.error_handler import install_global_exception_hook
-
-    install_global_exception_hook()
-
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-
-    from zcu_tools.gui.app.main.state import State
-    from zcu_tools.gui.session.services.io_manager import IOManager
-
-    app = QApplication.instance() or QApplication(sys.argv)
-
-    # Serialize matplotlib mathtext parsing across threads and prewarm it on this
-    # (main) thread, so off-main AnalyzeWorker $...$ title parsing never races the
-    # singleton parser (BUG-1 / ADR-0017). Must run on the main thread.
-    from zcu_tools.gui.plotting import install_mathtext_lock, prewarm_mathtext
-
-    install_mathtext_lock()
-    prewarm_mathtext()
-
-    # --- wire up components ---
-    state = State(_make_empty_ctx())
-    io_manager = IOManager()
-
-    ctrl, window = _build_window(
-        state, registry, role_catalog, io_manager, project_root
+    spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
+        app_name="measure",
+        app_slug="measure",
+        plot_policy=PlotPolicy.EMBEDDED_BACKEND,
+        default_control_port=8765,
+        logging_extra_namespaces=("zcu_tools.experiment.v2_gui",),
     )
 
-    # App-level PersistenceCaretaker (Memento Caretaker): owns the single
-    # gui_state_v1.json file. The Controller is the Originator; restore at
-    # startup, flush at close (MainWindow._perform_close → ctrl.persist_all).
-    from zcu_tools.gui.app.main.services import PersistenceCaretaker
-
-    caretaker = PersistenceCaretaker(ctrl)
-    ctrl.attach_caretaker(caretaker)
-    ctrl.restore_all(load=not clean)
-    window.show()
-
-    if control_opts is not None:
-        from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
-
-        adapter = RemoteControlAdapter(
-            controller=ctrl, opts=control_opts, render_view=window
+    def __init__(
+        self,
+        registry_factory: RegistryFactory,
+        *,
+        clean: bool = False,
+        project_root: str | None = None,
+    ) -> None:
+        from zcu_tools.gui.app.main.utils.error_handler import (
+            install_global_exception_hook,
         )
-        try:
-            adapter.start()
-        except RuntimeError as exc:
-            # With the default port, a busy port already fell back to an ephemeral
-            # one inside start(); reaching here means either an explicitly-pinned
-            # port is taken or even the ephemeral bind failed.
-            port = control_opts.port
-            print(
-                f"\nERROR: cannot open control socket on port {port}.\n"
-                f"  {exc}\n\n"
-                f"  That port is pinned and already in use.\n"
-                f"  Pass a different --control-port <N>, omit it to auto-pick a\n"
-                f"  free port, or --no-control to disable the remote-control socket.\n",
-                file=sys.stderr,
+
+        install_global_exception_hook()
+        self._registry, self._role_catalog = registry_factory()
+        self._clean = clean
+        self._project_root = project_root
+
+    def assemble(self, control: ControlOptions | None) -> GuiAssembly:
+        from zcu_tools.gui.app.main.state import State
+        from zcu_tools.gui.session.services.io_manager import IOManager
+
+        state = State(_make_empty_ctx())
+        io_manager = IOManager()
+        ctrl, window = _build_window(
+            state,
+            self._registry,
+            self._role_catalog,
+            io_manager,
+            self._project_root,
+        )
+
+        adapter = None
+        if control is not None:
+            from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
+
+            adapter = RemoteControlAdapter(
+                controller=ctrl,
+                opts=control,
+                render_view=window,
             )
-            sys.exit(1)
-        # Stash on the window so MainWindow.closeEvent can stop it; keep a
-        # strong ref so the GC does not retire the daemon thread early.
-        window.remote_control_service = adapter  # type: ignore[attr-defined]
+            # MainWindow._perform_close stops this before accepting close. The
+            # runtime also connects adapter.stop to aboutToQuit as an idempotent
+            # safety net for non-window shutdown paths.
+            window.remote_control_service = adapter  # type: ignore[attr-defined]
 
-    # Show startup dialog to let user set chip/qub names and derive paths.
-    # Non-blocking: user can close it and still use the app (with empty context).
-    _show_startup_dialog(ctrl, parent=window)
+        return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
-    sys.exit(app.exec())
+    def before_show(self, assembly: GuiAssembly) -> None:
+        from zcu_tools.gui.app.main.services import PersistenceCaretaker
+
+        ctrl = assembly.controller
+        assert _is_controller(ctrl)
+        caretaker = PersistenceCaretaker(ctrl)
+        ctrl.attach_caretaker(caretaker)
+        ctrl.restore_all(load=not self._clean)
+
+    def after_show(self, assembly: GuiAssembly) -> None:
+        ctrl = assembly.controller
+        assert _is_controller(ctrl)
+        parent = assembly.window
+        assert _is_main_window(parent)
+        _show_startup_dialog(ctrl, parent=parent)
 
 
 def _show_startup_dialog(ctrl: Controller, parent: MainWindow) -> None:
@@ -153,6 +136,18 @@ def _show_startup_dialog(ctrl: Controller, parent: MainWindow) -> None:
     dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     parent.register_dialog(DialogName.STARTUP, dlg)
     dlg.open()
+
+
+def _is_controller(value: object) -> TypeGuard[Controller]:
+    from zcu_tools.gui.app.main.controller import Controller
+
+    return isinstance(value, Controller)
+
+
+def _is_main_window(value: object) -> TypeGuard[MainWindow]:
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    return isinstance(value, MainWindow)
 
 
 def _build_window(

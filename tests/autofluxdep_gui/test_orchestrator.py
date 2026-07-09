@@ -19,9 +19,15 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     RunCfgSnapshot,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
+from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.spec import (
+    Dependency,
+    ModuleDep,
+    ModuleFallback,
+    Need,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
@@ -161,6 +167,28 @@ def test_resolve_falls_back_to_prev_point():
     assert _resolved_values(p, info) == {"x": "before"}
 
 
+def test_resolve_now_dependency_does_not_fallback_to_prev_point():
+    p = place(make_builder("n", requires=(Dependency("x", need=Need.NOW),)))
+    info = InfoStore(prev={"x": "before"})
+    resolution = resolve_provider_snapshot(p, info)
+
+    assert resolution.snapshot is None
+    assert resolution.skip_reason is not None
+    assert resolution.skip_reason.missing_info_keys == ("x",)
+
+
+def test_lenrabi_requires_current_point_qubit_freq():
+    resolution = resolve_provider_snapshot(
+        place(LenRabiBuilder()),
+        InfoStore(prev={"qubit_freq": 5000.0}),
+        _ModuleSource({}),
+    )
+
+    assert resolution.snapshot is None
+    assert resolution.skip_reason is not None
+    assert resolution.skip_reason.missing_info_keys == ("qubit_freq",)
+
+
 def test_resolve_optional_uses_default_when_absent_everywhere():
     p = place(make_builder("n", optional=(Dependency("k", default=lambda: 42),)))
     assert _resolved_values(p, InfoStore()) == {"k": 42}
@@ -229,6 +257,43 @@ def test_module_dep_prefers_produced_module_over_library_alias():
 
     assert snap is not None
     assert snap.module("readout") is produced
+
+
+def test_now_module_without_fallback_does_not_use_prev_or_library():
+    p = place(
+        make_builder(
+            "n",
+            requires_modules=(
+                ModuleDep(
+                    "pi_pulse",
+                    need=Need.NOW,
+                    fallback=ModuleFallback.NONE,
+                    aliases=("pi_len", "pi_pulse"),
+                ),
+            ),
+        )
+    )
+    resolution = resolve_provider_snapshot(
+        p,
+        InfoStore(module_prev={"pi_pulse": object()}),
+        ml=_ModuleSource({"pi_len": object()}),
+    )
+
+    assert resolution.snapshot is None
+    assert resolution.skip_reason is not None
+    assert resolution.skip_reason.missing_modules == ("pi_pulse",)
+
+
+def test_t1_requires_current_point_pi_pulse_without_library_fallback():
+    resolution = resolve_provider_snapshot(
+        place(T1Builder()),
+        InfoStore(module_prev={"pi_pulse": object()}),
+        ml=_ModuleSource({"pi_len": object(), "pi_pulse": object()}),
+    )
+
+    assert resolution.snapshot is None
+    assert resolution.skip_reason is not None
+    assert resolution.skip_reason.missing_modules == ("pi_pulse",)
 
 
 # --- user-ordered execution (no topo sort) ---

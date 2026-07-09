@@ -21,7 +21,7 @@ Phase 126 前，GUI 持久化散在 `StartupService`/`WorkspaceService`/兩個 `
 
 ```
 PersistenceCaretaker（Driven Adapter）  ← 只做單檔 disk I/O + load/flush 時機
-   ↑ Controller 持有（窄 port PersistOriginatorPort，單向；run_app 建立後 attach_caretaker 注入）
+   ↑ Controller 持有（窄 port PersistOriginatorPort，單向；runtime behavior 建立後 attach_caretaker 注入）
 Controller（單一 Originator）  ← capture 從 State+View 現組 memento / restore 派發
    ↕ 各 service capture/restore（序列化內化）
 WorkspaceService.capture_session/apply_session、StartupService.capture_startup/restore_startup
@@ -29,7 +29,7 @@ WorkspaceService.capture_session/apply_session、StartupService.capture_startup/
 
 - **Caretaker 不依賴整個 Controller**：只兩個窄方法 `capture_persisted_state()` / `restore_persisted_state(memento)`。不訂 event、不碰 UI、不碰 State、不懂 cfg。
 - **單檔 `gui_state_v1.json` + 單一 `APP_STATE_VERSION`**：`AppPersistedState{version, startup, session}`，pydantic v2 frozen，`model_validate`/`model_dump` 取代手刻驗證。一次 atomic write（無「半套」狀態）；壞/舊版→default。
-- **關閉才寫**：移除 `DEVICE_CHANGED` 訂閱 + diff-guard + 所有 runtime 即寫。`flush()` 在 close（`_perform_close`/`app.shutdown`），`restore_all()` 在 `run_app` 啟動。crash 丟失可接受（startup 設定多是方便性記憶）。
+- **關閉才寫**：移除 `DEVICE_CHANGED` 訂閱 + diff-guard + 所有 runtime 即寫。`flush()` 在 close（`_perform_close`/`app.shutdown`），`restore_all()` 在 `MeasureGuiBehavior.before_show` 啟動。crash 丟失可接受（startup 設定多是方便性記憶）。
 - **狀態進 State**：startup 偏好移入 `State.startup_prefs`（[[0004]] 兩軸：除 owner 外 setup dialog 也讀 → 進 State），`StartupService` 回歸無狀態。套用/連線時同步寫 prefs（寫入當下），capture 只讀。
 - **codec 不搬家**：tabs 的 raw↔live `session_codec` 是 WorkspaceService capture/apply 的**內部實作**，Caretaker 只見不透明 `cfg_raw`。
 

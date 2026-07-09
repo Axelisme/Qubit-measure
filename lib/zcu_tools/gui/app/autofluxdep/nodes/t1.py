@@ -5,8 +5,8 @@ The short-lived Node applies flux, sweeps relax time, fills the Result row, and
 emits trusted raw ``t1`` plus ``t1err``. See ``CONTEXT.md`` for the Builder/Node
 boundary.
 
-- needs the ``pi_pulse`` module (lenrabi or ModuleLibrary produces it) — without
-  a concrete pi-pulse there is no excited state to relax, so the resolver skips.
+- needs this flux point's ``pi_pulse`` module from lenrabi — without a fresh
+  pi-pulse there is no excited state to relax, so the resolver skips.
 - reads ``t1`` declared ``smooth="ewma"`` (the notebook's smooth_t1) for the
   relax_delay guess + the planted decay constant; reports raw ``t1`` / ``t1err``
   back.
@@ -35,11 +35,12 @@ diagnostic and is not smoothed by default.
             zefd.T1CfgTemplate))
 
 Unlike qubit_freq (which builds its own drive pulse from "設定頭" params), t1's
-drive ``pi_pulse`` and ``readout`` are MODULES taken from the snapshot (lenrabi /
-ro_optimize produce them, or an ml preset / default). The ``relax_delay`` and the
-``sweep_range`` derive from the snapshot's smoothed ``t1``; ``reps`` / ``rounds``
-come from the node's params. The flux ``dev`` entry + the ``length`` sweep are NOT
-in the template — ``produce`` merges them per point.
+drive ``pi_pulse`` and ``readout`` are MODULES taken from the snapshot. The
+``pi_pulse`` is current-point only and never falls back to ModuleLibrary;
+``readout`` may come from ro_optimize, an ml preset, or a default. The
+``relax_delay`` and the ``sweep_range`` derive from the snapshot's smoothed
+``t1``; ``reps`` / ``rounds`` come from the node's params. The flux ``dev`` entry
+and the ``length`` sweep are NOT in the template — ``produce`` merges them per point.
 
 ``produce`` sets this flux point on the picked flux device, sets up devices, and
 acquires against a flux-aware MockSoc (offline) or real hardware. The cfg-derived
@@ -99,13 +100,15 @@ from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
     missing_module_value,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
-    PI_PULSE_LIBRARY_ALIASES,
-    READOUT_LIBRARY_ALIASES,
-)
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import Decay1DPlotter
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.spec import (
+    Dependency,
+    ModuleDep,
+    ModuleFallback,
+    Need,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
@@ -376,7 +379,9 @@ class T1Builder(Builder):
     name = "t1"
     provides = ("t1", "t1err")
     optional = (Dependency("t1", smooth="ewma", default=missing_info_value),)
-    requires_modules = (ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),)
+    requires_modules = (
+        ModuleDep("pi_pulse", need=Need.NOW, fallback=ModuleFallback.NONE),
+    )
     optional_modules = (
         ModuleDep(
             "opt_readout", default=missing_module_value, aliases=READOUT_LIBRARY_ALIASES

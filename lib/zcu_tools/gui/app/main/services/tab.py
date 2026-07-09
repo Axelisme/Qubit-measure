@@ -38,7 +38,7 @@ def _slug(name: str) -> str:
 
 
 class TabService:
-    """Encapsulates tab lifecycle, and per-tab operations like analyze/writeback/save."""
+    """Tab aggregate read model, cfg state, and tab lifecycle primitives."""
 
     def __init__(
         self,

@@ -19,11 +19,12 @@ def _h_analyze_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     # Graceful by contract (no interactive analyze in flight is not an error): the
     # cancelled flag tells the agent whether anything was actually settled.
-    cancelled = adapter.ctrl.cancel_analyze(tab_id)
+    cancelled = control.cancel_analyze(tab_id)
     return {"ok": True, "cancelled": cancelled}
 
 
@@ -31,9 +32,10 @@ def _h_tab_get_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    result = adapter.ctrl.get_tab_analyze_result(tab_id)
+    result = control.get_tab_analyze_result(tab_id)
     if result is None:
         return {"summary": None}
     to_summary = getattr(result, "to_summary_dict", None)
@@ -51,9 +53,10 @@ def _h_tab_get_analyze_params(
     import dataclasses
 
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    snap = control.get_tab_snapshot(tab_id)
     if snap.analyze_params is None:
         return {"analyze_params": None}
     ap = snap.analyze_params
@@ -68,9 +71,10 @@ def _h_tab_analyze(
     import dataclasses
 
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    snap = control.get_tab_snapshot(tab_id)
     # Order the checks by the true cause: analyze params only exist once a run
     # produced a result (they are built from it). A run-in-flight / failed /
     # cancelled tab has no result, so report that — not the downstream "no
@@ -96,7 +100,7 @@ def _h_tab_analyze(
     except (TypeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        operation_id = adapter.ctrl.analyze(tab_id, updated)
+        operation_id = control.analyze(tab_id, updated)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -110,9 +114,10 @@ def _h_tab_get_post_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    result = adapter.ctrl.get_post_analyze_result(tab_id)
+    result = control.get_post_analyze_result(tab_id)
     if result is None:
         return {"summary": None}
     to_summary = getattr(result, "to_summary_dict", None)
@@ -130,9 +135,10 @@ def _h_tab_get_post_analyze_params(
     import dataclasses
 
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    snap = control.get_tab_snapshot(tab_id)
     if snap.post_analyze_params is None:
         return {"post_analyze_params": None}
     pp = snap.post_analyze_params
@@ -147,9 +153,10 @@ def _h_tab_post_analyze(
     import dataclasses
 
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    snap = control.get_tab_snapshot(tab_id)
     # Order the checks by the true cause: post params only exist once a primary
     # analyze produced a result (they are built from it). Report the missing
     # primary result first — it reads as "nothing to post-analyze yet" rather
@@ -176,7 +183,7 @@ def _h_tab_post_analyze(
     except (TypeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        operation_id = adapter.ctrl.start_post_analyze(tab_id, updated)
+        operation_id = control.start_post_analyze(tab_id, updated)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,

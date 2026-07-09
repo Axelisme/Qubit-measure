@@ -48,7 +48,7 @@ def _h_operation_await(
     # PRECONDITION_FAILED so the agent sees it as an error.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
     timeout = float(params["timeout"])  # type: ignore[arg-type]
-    result = adapter.ctrl.await_operation(operation_id, timeout)
+    result = adapter.operation_control.await_operation(operation_id, timeout)
     if result is None:
         # Should not happen with the new API, but guard for forward-compat.
         raise RemoteError(
@@ -94,4 +94,6 @@ def _h_operation_progress(
     # setup alike, keyed by operation_id — the SSOT); _progress_bars_wire reads
     # their methods at this point. The mcp poll folds this into its reply.
     operation_id = int(params["operation_id"])  # type: ignore[arg-type]
-    return _progress_bars_wire(adapter.ctrl.get_operation_progress(operation_id))
+    return _progress_bars_wire(
+        adapter.operation_control.get_operation_progress(operation_id)
+    )

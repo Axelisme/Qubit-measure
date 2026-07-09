@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -30,12 +29,10 @@ from zcu_tools.gui.session.services.mock_flux import (
 
 from .adapter import (
     AnalysisMode,
-    AnalyzeRequest,
     CfgSchema,
     ExpContext,
     InteractiveHost,
     InteractiveSession,
-    SavePaths,
     WritebackItem,
 )
 from .events.tab import TabContentChangedPayload, TabInteractionChangedPayload
@@ -69,7 +66,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
 
-    from .services.guard import AnalyzePermit
+    from .services.operation_control import OperationControlPort
+    from .services.run_analyze_control import RunAnalyzeControlPort
+    from .services.save_control import SaveControlPort
+    from .services.tab_control import TabControlPort
+    from .services.writeback_control import WritebackControlPort
 
 
 # A View has two distinct down-channels from the Controller (ADR-0013):
@@ -244,10 +245,14 @@ class Controller(SessionControllerMixin):
             io_manager=io_manager,
             cfg_editor_ctrl=self,
             progress_transport=transport,
+            notify_info=self._info,
+            resource_versions=self.resources_versions,
+            render_host=lambda: self._render_host,
             project_root=self._project_root,
         )
         self._services = services
         self._operation_gate = services.operation_gate
+        self._operation_control = services.operation_control
         self._operation_handles = services.handles
         # ADR-0025: cross-thread interaction now uses per-op OperationChannel;
         # FeedbackInbox and set_feedback_inbox are removed.
@@ -264,12 +269,16 @@ class Controller(SessionControllerMixin):
         self._context_control = services.context_control
         self._setup_control = services.setup_control
         self._tab_svc = services.tab
+        self._tab_control = services.tab_control
+        self._run_analyze_control = services.run_analyze_control
         self._load_svc = services.load
         self._run_svc = services.run
         self._analyze_svc = services.analyze
         self._post_analyze_svc = services.post_analyze
         self._save_svc = services.save
+        self._save_control = services.save_control
         self._writeback_svc = services.writeback
+        self._writeback_control = services.writeback_control
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
         self._cfg_editor_svc = services.cfg_editor
@@ -277,8 +286,9 @@ class Controller(SessionControllerMixin):
         # Notify prompt registry (Stage 4b): independent of OperationHandles;
         # tokens minted on the main thread, consumed off-main (ADR-0025).
         self._notify_handles: NotifyHandles = NotifyHandles()
-        # App-level PersistenceCaretaker, injected by run_app via attach_caretaker
-        # (None in bare-Controller tests that don't exercise persistence).
+        # App-level PersistenceCaretaker, injected by runtime behavior via
+        # attach_caretaker (None in bare-Controller tests that don't exercise
+        # persistence).
         self._caretaker: PersistenceCaretaker | None = None
         # Lazily built on first begin_shutdown so the Controller stays importable
         # without a Qt event loop (tests construct a bare Controller). The driver
@@ -462,9 +472,31 @@ class Controller(SessionControllerMixin):
     def setup_control(self) -> SetupControlPort:
         return self._setup_control
 
+    @property
+    def tab_control(self) -> TabControlPort:
+        return self._tab_control
+
+    @property
+    def run_analyze_control(self) -> RunAnalyzeControlPort:
+        return self._run_analyze_control
+
+    @property
+    def operation_control(self) -> OperationControlPort:
+        return self._operation_control
+
+    @property
+    def save_control(self) -> SaveControlPort:
+        return self._save_control
+
+    @property
+    def writeback_control(self) -> WritebackControlPort:
+        return self._writeback_control
+
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
-        """Wire the app-level PersistenceCaretaker (built by run_app). The
-        Controller is the Memento Originator; the Caretaker owns disk I/O."""
+        """Wire the app-level PersistenceCaretaker.
+
+        The Controller is the Memento Originator; the Caretaker owns disk I/O.
+        """
         self._caretaker = caretaker
 
     # -- Memento Originator (PersistOriginatorPort) --------------------------
@@ -488,7 +520,7 @@ class Controller(SessionControllerMixin):
         self._present_restore_report(report)
         return report
 
-    # -- lifecycle façade (run_app startup / MainWindow close) ---------------
+    # -- lifecycle façade (runtime startup / MainWindow close) ---------------
 
     def restore_all(self, *, load: bool = True) -> None:
         assert self._caretaker is not None, "caretaker not attached"
@@ -529,19 +561,19 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def new_tab(self, adapter_name: str) -> str:
-        return self._workspace_svc.new_tab(adapter_name)
+        return self._tab_control.new_tab(adapter_name)
 
     def close_tab(self, tab_id: str) -> None:
-        self._workspace_svc.close_tab(tab_id)
+        self._tab_control.close_tab(tab_id)
 
     def set_active_tab(self, tab_id: str) -> None:
-        self._workspace_svc.set_active_tab(tab_id)
+        self._tab_control.set_active_tab(tab_id)
 
     def reorder_tabs(self, tab_ids: list[str]) -> None:
-        self._workspace_svc.reorder_tabs(tab_ids)
+        self._tab_control.reorder_tabs(tab_ids)
 
     def get_active_tab_id(self) -> str | None:
-        return self._state.active_tab_id
+        return self._tab_control.get_active_tab_id()
 
     # ------------------------------------------------------------------
     # Run flow (RunService & ContextService)
@@ -560,7 +592,7 @@ class Controller(SessionControllerMixin):
         return self._ctx_svc.is_active_context()
 
     def get_running_tab_id(self) -> str | None:
-        return self._state.running_tab_id
+        return self._tab_control.get_running_tab_id()
 
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
@@ -593,59 +625,16 @@ class Controller(SessionControllerMixin):
         return self._state.version.snapshot()
 
     def start_run(self, tab_id: str) -> int:
-        # GuardService proves context readiness + committed-cfg validity + soc
-        # capability, and carries the worker payload in the permit. Both clients
-        # acquire through the same path so guard logic cannot drift. Returns the
-        # operation token (handle for operation.await).
-        #
-        # Terminal: this only launches the worker. The outcome lands on the Qt
-        # main thread in ``RunService._on_run_finished`` / ``_on_run_failed``,
-        # which bump ``tab:<id>:result`` (finished only), release the RUN lease
-        # exactly-once, and emit ``RUN_FINISHED`` carrying the outcome in its
-        # payload (finished / failed / cancelled).
-        permit = self._guard_svc.acquire_run_permit(tab_id)
-        # Headless (no Qt RenderHost, e.g. a pure-agent process): RunService
-        # tolerates a None live container. The progress factory is minted by
-        # RunService from ProgressService (bound to the operation), not the View.
-        host = self._render_host
-        live_container = host.make_live_container(tab_id) if host is not None else None
-        return self._run_svc.start_run(permit, live_container)
+        return self._run_analyze_control.start_run(tab_id)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
-        permit = self._guard_svc.acquire_load_permit(tab_id)
-        outcome = self._load_svc.load_result(permit, data_path)
-        tab = self._state.get_tab(tab_id)
-        has_analyze_params = False
-        if tab.adapter.capabilities.analysis is not AnalysisMode.NONE:
-            self._tab_svc.initialize_tab_analyze_params(tab_id)
-            has_analyze_params = True
-        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
-        return replace(outcome, has_analyze_params=has_analyze_params)
+        return self._run_analyze_control.load_tab_result(tab_id, data_path)
 
     def cancel_run(self) -> bool:
-        # Best-effort: True when a live run was signalled, False on a no-op
-        # (no run in flight). The worker's true terminal is observed via the
-        # run handle (ADR-0019 / ADR-0026 §8).
-        return self._run_svc.cancel_run()
+        return self._run_analyze_control.cancel_run()
 
     def cancel_analyze(self, tab_id: str) -> bool:
-        """Cancel an in-flight INTERACTIVE analyze on ``tab_id``.
-
-        Interactive analyze and run are separate operations (ADR-0019): cancel_run
-        only trips the run's stop_event and never touches the analyze handle or
-        ``is_analyzing``. The interactive picker has no worker / stop_event, so its
-        only non-Done settle path is here — tear down the mounted picker widget,
-        then settle the analyze handle as cancelled (clears ``is_analyzing`` so the
-        tab can close). Returns False (graceful no-op) when the tab has no
-        in-flight interactive analyze.
-
-        The View teardown runs unconditionally first so a stale mounted widget
-        never lingers, even if the service side is already settled.
-        """
-        host = self._render_host
-        if host is not None:
-            host.unmount_interactive_analysis(tab_id)
-        return self._analyze_svc.cancel_interactive(tab_id)
+        return self._run_analyze_control.cancel_analyze(tab_id)
 
     def _active_operation(self) -> tuple[int | None, str | None]:
         """Return (token, tag) for the single foreground in-flight operation.
@@ -787,65 +776,17 @@ class Controller(SessionControllerMixin):
         self._shutdown_driver.begin(on_closed)
 
     def get_operation_progress(self, operation_id: int) -> tuple:
-        """Live progress bars for one operation by id (run / device setup alike).
-        The wire's operation.progress handler reads this; the mcp poll folds it
-        into its reply."""
-        return self._progress_svc.bars_for_operation(operation_id)
+        return self._operation_control.get_operation_progress(operation_id)
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
-        return self._tab_svc.get_tab_analyze_result(tab_id)
+        return self._run_analyze_control.get_tab_analyze_result(tab_id)
 
     # ------------------------------------------------------------------
     # Analyze flow (TabService)
     # ------------------------------------------------------------------
 
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
-        """Start analyze; returns the operation token to await.
-
-        FIT runs on a worker. INTERACTIVE mounts a live picker on the main thread
-        (no worker) and the lease is held until the user clicks Done — see
-        ``_start_interactive_analyze``.
-        """
-        permit = self._guard_svc.acquire_analyze_permit(tab_id)
-        tab = self._state.get_tab(tab_id)
-        if tab.adapter.capabilities.analysis is AnalysisMode.INTERACTIVE:
-            return self._start_interactive_analyze(
-                tab_id, permit, analyze_params_instance
-            )
-        host = self._render_host
-        figure_container = (
-            host.make_live_container(tab_id) if host is not None else None
-        )
-        return self._analyze_svc.start_analyze(
-            permit, analyze_params_instance, figure_container
-        )
-
-    def _start_interactive_analyze(
-        self, tab_id: str, permit: AnalyzePermit, analyze_params_instance: object
-    ) -> int:
-        tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
-        req = AnalyzeRequest(
-            run_result=tab.run_result,
-            analyze_params=analyze_params_instance,
-            md=ctx.md,
-            ml=ctx.ml,
-            predictor=ctx.predictor,
-        )
-        # Acquire the handle (marks analyzing) first, then ask the View to mount
-        # the interactive canvas. The View builds the InteractiveHost (its canvas
-        # + worker pool), gets the adapter's session, and wires Done back to
-        # AnalyzeService.finish_interactive — which runs the same terminal path as
-        # a FIT result.
-        token = self._analyze_svc.start_interactive(permit)
-        host = self._render_host
-        if host is not None:
-            host.mount_interactive_analysis(
-                tab_id,
-                lambda ihost: tab.adapter.setup_interactive_analysis(req, ihost),
-                lambda session: self._analyze_svc.finish_interactive(tab_id, session),
-            )
-        return token
+        return self._run_analyze_control.analyze(tab_id, analyze_params_instance)
 
     # ------------------------------------------------------------------
     # Post-analysis flow (second layer; PostAnalyzeService)
@@ -854,22 +795,12 @@ class Controller(SessionControllerMixin):
     def start_post_analyze(
         self, tab_id: str, post_analyze_params_instance: object
     ) -> int:
-        """Start the second-layer analysis on a tab's primary analyze result.
-
-        Returns the operation token. PostAnalyzeService gates on tab-busy + a
-        primary analyze result existing. The post figure live-plots into the same
-        shared right-pane container as run/analyze (the container shows the most
-        recent figure)."""
-        host = self._render_host
-        figure_container = (
-            host.make_live_container(tab_id) if host is not None else None
-        )
-        return self._post_analyze_svc.start_post_analyze(
-            tab_id, post_analyze_params_instance, figure_container
+        return self._run_analyze_control.start_post_analyze(
+            tab_id, post_analyze_params_instance
         )
 
     def get_post_analyze_result(self, tab_id: str) -> object | None:
-        return self._tab_svc.get_tab_post_analyze_result(tab_id)
+        return self._run_analyze_control.get_post_analyze_result(tab_id)
 
     def update_tab_post_analyze_param_instance(
         self, tab_id: str, instance: object
@@ -897,19 +828,18 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        """Recompute the tab's writeback proposals (read-only, no permit).
+        """Read the tab's persistent writeback draft (read-only, no permit).
 
         Returns [] when the tab has no run/analyze result yet.
         """
-        return list(self._writeback_svc.get_tab_writeback_items(tab_id))
+        return self._writeback_control.get_tab_writeback_items(tab_id)
 
     def apply_writeback(self, tab_id: str) -> dict[str, Any]:
         """Apply the tab's persistent writeback draft as-is (no recompute).
 
         Returns ``{applied_ids, written}`` echoing what was actually written
         (see WritebackService.apply_tab_writeback)."""
-        permit = self._guard_svc.acquire_writeback_permit(tab_id)
-        return self._writeback_svc.apply_tab_writeback(permit)
+        return self._writeback_control.apply_writeback(tab_id)
 
     def set_writeback_item(
         self, tab_id: str, session_id: str, **changes: Any
@@ -917,50 +847,22 @@ class Controller(SessionControllerMixin):
         """Edit a persistent writeback item (selected / target_name / metadict
         value / module-waveform cfg edits). Returns the aggregated
         ``{valid, removed, added}`` of any applied cfg edits."""
-        self._guard_svc.acquire_writeback_permit(tab_id)
-        return self._writeback_svc.set_item_field(tab_id, session_id, **changes)
+        return self._writeback_control.set_writeback_item(tab_id, session_id, **changes)
 
     # ------------------------------------------------------------------
     # Save (TabService)
     # ------------------------------------------------------------------
 
-    def _resolve_save_paths(self, tab_id: str) -> SavePaths:
-        paths = self._tab_svc.get_tab_save_paths(tab_id)
-        if paths is None:
-            raise RuntimeError(
-                f"Tab {tab_id!r} has no save paths configured — "
-                "set paths via the Save panel or update_tab_save_paths()."
-            )
-        return paths
-
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str = ""
     ) -> str:
-        """Start the (async) data save; returns the path the saver will write
-        (``.hdf5`` + uniqueness suffix already applied), known synchronously."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        resolved = data_path or self._resolve_save_paths(tab_id).data_path
-        return self._save_svc.start_save_data(permit, resolved, comment=comment)
+        return self._save_control.save_data(tab_id, data_path, comment=comment)
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str:
-        """Save the image synchronously; returns the written image path."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        resolved = image_path or self._resolve_save_paths(tab_id).image_path
-        self._save_svc.save_image_sync(permit, resolved)
-        self._info(f"Image saved to {resolved}")
-        return resolved
+        return self._save_control.save_image(tab_id, image_path)
 
     def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
-        """Save the post-analysis figure synchronously; returns the written path.
-
-        The post sub-tab's own Save Image — targets ``tab.post_figure`` (distinct
-        from the primary ``save_image``). Reuses the save permit (active context +
-        run result); the View additionally gates the button on a post result."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        resolved = image_path or self._resolve_save_paths(tab_id).image_path
-        self._save_svc.save_post_image_sync(permit, resolved)
-        self._info(f"Post-analysis image saved to {resolved}")
-        return resolved
+        return self._save_control.save_post_image(tab_id, image_path)
 
     def save_result(
         self,
@@ -969,16 +871,12 @@ class Controller(SessionControllerMixin):
         image_path: str | None = None,
         comment: str = "",
     ) -> tuple[str, str]:
-        """Save image (sync) + data (async); returns ``(data_path, image_path)``
-        the saver will write — the data path with its ``.hdf5``/suffix applied."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        paths = self._resolve_save_paths(tab_id)
-        resolved_data = data_path or paths.data_path
-        resolved_image = image_path or paths.image_path
-        written_data = self._save_svc.start_save_result(
-            permit, resolved_data, resolved_image, comment=comment
+        return self._save_control.save_result(
+            tab_id,
+            data_path,
+            image_path,
+            comment=comment,
         )
-        return written_data, resolved_image
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -1249,14 +1147,7 @@ class Controller(SessionControllerMixin):
         return self._dev_svc.get_active_device_operations()
 
     def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
-        """Block until an async operation settles or a wakeup condition fires.
-
-        Returns an AwaitResult with reason in {'completed', 'user_feedback',
-        'timeout'}. Never returns None (kept for type-checker clarity during
-        migration). Runs on an off-main IO thread — only touches the thread-safe
-        OperationHandles / OperationChannel, no main-thread-owned state. (ADR-0025)
-        """
-        return self._operation_handles.await_outcome(operation_id, timeout)
+        return self._operation_control.await_operation(operation_id, timeout)
 
     # ------------------------------------------------------------------
     # Notify-user prompt (Stage 4b, ADR-0025 two-RPC design)
@@ -1333,22 +1224,22 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def has_tab(self, tab_id: str) -> bool:
-        return self._state.has_tab(tab_id)
+        return self._tab_control.has_tab(tab_id)
 
     def list_tab_ids(self) -> list[str]:
-        return self._state.list_tab_ids()
+        return self._tab_control.list_tab_ids()
 
     def get_tab_adapter_name(self, tab_id: str) -> str:
-        return self._state.get_tab(tab_id).adapter_name
+        return self._tab_control.get_tab_adapter_name(tab_id)
 
     def get_tab_cfg_schema(self, tab_id: str) -> CfgSchema:
-        return self._state.get_tab(tab_id).cfg_schema
+        return self._tab_control.get_tab_cfg_schema(tab_id)
 
     def get_tab_result(self, tab_id: str) -> object | None:
         return self._tab_svc.get_tab_result(tab_id)
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
-        return self._tab_svc.get_snapshot(tab_id)
+        return self._tab_control.get_tab_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
         """Auto-commit boundary for tab CfgFormWidget.
@@ -1364,7 +1255,7 @@ class Controller(SessionControllerMixin):
         Terminal: → ``TabService.update_tab_cfg`` → ``State.update_tab_cfg_schema``,
         which bumps ``tab:<id>:cfg`` and emits no event.
         """
-        self._tab_svc.update_tab_cfg(tab_id, schema)
+        self._tab_control.update_tab_cfg(tab_id, schema)
 
     def reset_tab_cfg(self, tab_id: str) -> CfgSchema:
         """Regenerate the tab's cfg to the adapter's default and commit it.
@@ -1377,15 +1268,7 @@ class Controller(SessionControllerMixin):
         worker captured the cfg at launch) — fail fast, mirroring the
         ``tab.update_cfg`` RPC guard.
         """
-        if self._state.running_tab_id == tab_id:
-            raise RuntimeError(
-                f"tab {tab_id!r} is currently running; cancel the run before "
-                "resetting cfg"
-            )
-        adapter_name = self._tab_svc.get_tab_adapter_name(tab_id)
-        schema = self._tab_svc.make_default_cfg(adapter_name)
-        self._tab_svc.update_tab_cfg(tab_id, schema)
-        return schema
+        return self._tab_control.reset_tab_cfg(tab_id)
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
@@ -1396,10 +1279,7 @@ class Controller(SessionControllerMixin):
     def update_tab_save_paths(
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
-        self._tab_svc.update_tab_save_path_overrides(tab_id, data_path, image_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(tab_id=tab_id),
-        )
+        self._save_control.update_tab_save_paths(tab_id, data_path, image_path)
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
