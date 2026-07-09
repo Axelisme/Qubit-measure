@@ -38,16 +38,11 @@ class RecordingTab:
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.default_schema = object()
-        self.result = object()
         self.snapshot = object()
 
     def get_tab_adapter_name(self, tab_id: str) -> str:
         self._log.add("tab", "get_tab_adapter_name", tab_id)
         return "adapter-a"
-
-    def get_tab_result(self, tab_id: str) -> object:
-        self._log.add("tab", "get_tab_result", tab_id)
-        return self.result
 
     def get_snapshot(self, tab_id: str) -> object:
         self._log.add("tab", "get_snapshot", tab_id)
@@ -163,12 +158,10 @@ def test_tab_control_routes_tab_read_model_to_tab_service() -> None:
     facet, log, _state, tab, _workspace, _bus = _facet()
 
     assert facet.get_tab_adapter_name("tab-1") == "adapter-a"
-    assert facet.get_tab_result("tab-1") is tab.result
     assert facet.get_tab_snapshot("tab-1") is tab.snapshot
 
     assert log.calls == [
         call("tab", "get_tab_adapter_name", "tab-1"),
-        call("tab", "get_tab_result", "tab-1"),
         call("tab", "get_snapshot", "tab-1"),
     ]
 

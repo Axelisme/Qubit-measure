@@ -1354,7 +1354,7 @@ class Controller(SessionControllerMixin):
         return self._tab_control.get_tab_cfg_schema(tab_id)
 
     def get_tab_result(self, tab_id: str) -> object | None:
-        return self._tab_control.get_tab_result(tab_id)
+        return self._tab_svc.get_tab_result(tab_id)
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab_control.get_tab_snapshot(tab_id)
