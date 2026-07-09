@@ -558,8 +558,8 @@ def test_ml_module_source_returns_none_on_absent():
     # the orchestrator's ModuleSource contract is "None if absent", but
     # ModuleLibrary.get_module raises — the adapter start_run threads in must
     # bridge that so an absent module dep falls back instead of crashing the run.
-    from zcu_tools.gui.app.autofluxdep.controller import _MlModuleSource
+    from zcu_tools.gui.app.autofluxdep.services.run_setup import MlModuleSource
     from zcu_tools.meta_tool import ModuleLibrary
 
-    source = _MlModuleSource(ModuleLibrary())
+    source = MlModuleSource(ModuleLibrary())
     assert source.get_module("not_a_module") is None  # must not raise

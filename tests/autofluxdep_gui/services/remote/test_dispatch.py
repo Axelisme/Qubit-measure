@@ -6,10 +6,10 @@ RPC. The tests therefore build the state directly through the ``Controller`` (th
 GUI's own command API, exercised by the controller/UI tests) and assert that the
 read handlers report it correctly.
 
-Qt-free at the handler level: the handlers only touch ``adapter.ctrl`` (a real
-``Controller``), so a tiny stub adapter exercises the whole RPC handler surface
-without the socket server. The autouse ``qapp`` fixture (conftest) provides the
-QApplication the Controller's session services need at construction.
+Qt-free at the handler level: the handlers only touch the adapter read model, so
+a tiny stub adapter exercises the whole RPC handler surface without the socket
+server. The autouse ``qapp`` fixture (conftest) provides the QApplication the
+Controller's session services need at construction.
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ from zcu_tools.gui.app.autofluxdep.services.remote.dispatch import (
     METHOD_REGISTRY,
 )
 from zcu_tools.gui.app.autofluxdep.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.autofluxdep.services.remote.read_model import (
+    ControllerRemoteReadModel,
+)
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
@@ -35,10 +38,11 @@ from zcu_tools.utils.datasaver import get_datafolder_path
 
 
 class _StubAdapter:
-    """Minimal stand-in: handlers reach the façade via ``adapter.ctrl`` only."""
+    """Minimal stand-in for the read-only remote adapter."""
 
     def __init__(self, ctrl: Controller) -> None:
         self.ctrl = ctrl
+        self.read_model = ControllerRemoteReadModel(ctrl)
         self.screenshot_targets: list[str] = []
 
     def take_screenshot(self, target: str) -> bytes:

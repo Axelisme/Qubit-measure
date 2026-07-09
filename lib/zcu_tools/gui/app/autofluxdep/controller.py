@@ -35,7 +35,6 @@ from qtpy.QtCore import (
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CfgSectionValue,
     RunCfgSnapshot,
-    validate_override_plan_base_cfg,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.events.run import (
@@ -53,15 +52,12 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
-from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
-from zcu_tools.gui.app.autofluxdep.nodes.predictor import PredictorBuilder
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
     InfoStore,
     ModuleSource,
     Notify,
-    Orchestrator,
 )
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.app.autofluxdep.run_locks import (
@@ -87,7 +83,18 @@ from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
     RestoreIssue,
     RestoreReport,
 )
-from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore
+from zcu_tools.gui.app.autofluxdep.services.run_setup import (
+    allocate_run_results,
+    build_run_providers,
+    build_run_tools,
+    run_dry,
+)
+from zcu_tools.gui.app.autofluxdep.services.run_setup import (
+    build_run_cfg_snapshots as make_run_cfg_snapshots,
+)
+from zcu_tools.gui.app.autofluxdep.services.run_setup import (
+    create_run_session as create_session_from_setup,
+)
 from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
     SampleTableExportResult,
     export_sample_table_from_artifact,
@@ -101,11 +108,7 @@ from zcu_tools.gui.app.autofluxdep.state import (
     AutoFluxDepState,
     ProjectInfo,
 )
-from zcu_tools.gui.app.autofluxdep.tools import (
-    FluxoniumPredictorAdapter,
-    SimplePredictor,
-    Tools,
-)
+from zcu_tools.gui.app.autofluxdep.tools import Tools
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import BasePayload
@@ -151,40 +154,12 @@ if TYPE_CHECKING:
         StartupProjectRequest,
     )
     from zcu_tools.gui.session.setup_control import SetupControlPort
-    from zcu_tools.meta_tool import ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
 RUN_PROGRESS_OWNER_ID = "autofluxdep-run"
 FLUX_PROGRESS_LABEL = "flux sweep"
 _PERSIST_DEBOUNCE_MS = 500
-
-
-class _MlModuleSource:
-    """Transparent ``ModuleLibrary`` proxy honouring the ``ModuleSource`` contract.
-
-    The run resolver wants the orchestrator's ``ModuleSource`` contract:
-    ``get_module(name)`` returns None if absent, so the dependency resolver can
-    fall back to a Node-produced module or dependency default. A node cfg builder
-    still wants the full ``ModuleLibrary`` surface (``get_waveform`` /
-    ``make_cfg``), which should raise on a missing reference. This proxy serves
-    both: it overrides only ``get_module``'s raise-on-absent behavior
-    (``ModuleLibrary`` raises ``ValueError``) into None-on-absent, and forwards
-    every other attribute to the wrapped library.
-    """
-
-    def __init__(self, ml: ModuleLibrary) -> None:
-        self._ml = ml
-
-    def get_module(self, name: str) -> Any:
-        if name not in self._ml.modules:
-            return None
-        return self._ml.get_module(name)
-
-    def __getattr__(self, attr: str) -> Any:
-        # forward get_waveform / make_cfg / etc. to the real library (called only
-        # for attributes not defined on this proxy; _ml is a real attribute).
-        return getattr(self._ml, attr)
 
 
 @dataclass(frozen=True)
@@ -628,6 +603,13 @@ class Controller(SessionControllerMixin):
         self._bus.emit(WorkflowChangedPayload(name=changed_name))
         self._schedule_persist_all()
 
+    def _commit_flux_edit(self, *, changed_count: int | None = None) -> None:
+        self._clear_run_products()
+        self._state.version.bump(FLUX_VERSION_KEY)
+        if changed_count is not None:
+            self._bus.emit(FluxChangedPayload(count=changed_count))
+        self._schedule_persist_all()
+
     def clear_run_products(self) -> None:
         """UI start-failure recovery entry: clear run-lived products."""
         self._clear_run_products()
@@ -862,8 +844,7 @@ class Controller(SessionControllerMixin):
             )
         else:
             logger.debug("set_flux_values: cleared")
-        self._bus.emit(FluxChangedPayload(count=len(values)))
-        self._schedule_persist_all()
+        self._commit_flux_edit(changed_count=len(values))
 
     def set_flux_sweep_expressions(
         self, start_expr: str, stop_expr: str, npts_expr: str
@@ -873,9 +854,7 @@ class Controller(SessionControllerMixin):
         self._state.flux_start_expr = start_expr
         self._state.flux_stop_expr = stop_expr
         self._state.flux_npts_expr = npts_expr
-        self._clear_run_products()
-        self._state.version.bump(FLUX_VERSION_KEY)
-        self._schedule_persist_all()
+        self._commit_flux_edit()
 
     def get_flux_sweep_expressions(self) -> tuple[str, str, str]:
         return (
@@ -902,16 +881,13 @@ class Controller(SessionControllerMixin):
         self._state.flux_stop_expr = stop_expr
         self._state.flux_npts_expr = npts_expr
         self._state.flux_values = values
-        self._clear_run_products()
-        self._state.version.bump(FLUX_VERSION_KEY)
         logger.debug(
             "commit_flux_sweep: n=%d range=[%g, %g]",
             len(values),
             values[0],
             values[-1],
         )
-        self._bus.emit(FluxChangedPayload(count=len(values)))
-        self._schedule_persist_all()
+        self._commit_flux_edit(changed_count=len(values))
         return values
 
     def set_auto_follow_tabs(self, enabled: bool) -> None:
@@ -1099,8 +1075,7 @@ class Controller(SessionControllerMixin):
         providers. The Service is loaded because qubit_freq requires
         ``predict_freq`` — it is not in the user's list, but it runs first each
         point so its ``predict_freq`` is this-point-available downstream."""
-        service = PlacedNode(builder=PredictorBuilder())
-        return [service, *self._enabled_nodes()]
+        return build_run_providers(self._enabled_nodes())
 
     def _build_tools(self, providers: list[PlacedNode] | None = None) -> Tools:
         """Build the sweep's run-lived predictor and feedback capabilities.
@@ -1111,17 +1086,7 @@ class Controller(SessionControllerMixin):
         base-only ``SimplePredictor`` stand-in. Feedback capabilities are built
         from placed-node declarations and generation policy.
         """
-        raw = self._state.exp_context.predictor
-        predictor = (
-            FluxoniumPredictorAdapter(fluxonium=raw)
-            if raw is not None
-            else SimplePredictor()
-        )
-        feedback = build_feedback_runtime(
-            providers or self._build_providers(),
-            md=self._state.exp_context.md,
-        )
-        return Tools(predictor=predictor, feedback=feedback)
+        return build_run_tools(self._state, providers or self._build_providers())
 
     def _emit_point_done_on_main(self, idx: int) -> None:
         self._cur_idx = idx
@@ -1141,13 +1106,7 @@ class Controller(SessionControllerMixin):
         returns None), so it is absent from the map — the orchestrator curries no
         Result for it and the UI builds no figure, with no ``isinstance``.
         """
-        results: dict[str, Any] = {}
-        md = self._state.exp_context.md
-        for node in self._enabled_nodes():
-            result = node.builder.make_init_result(node.schema, flux, md=md)
-            if result is not None:
-                results[node.name] = result
-        return results
+        return allocate_run_results(self._state, self._enabled_nodes(), flux)
 
     def start_run(self, notify: Notify | None = None) -> int:
         """Start an async flux × providers RUN operation.
@@ -1189,68 +1148,20 @@ class Controller(SessionControllerMixin):
             len(flux_values),
         )
 
-        ctx = self._state.exp_context
-        ml = _MlModuleSource(ctx.ml)
-        enabled_names = {node.name for node in enabled_nodes}
-        if not self._state.run_results or not set(self._state.run_results).issubset(
-            enabled_names
-        ):
-            self.prepare_run_results()
-        results = self._state.run_results
-        providers = self._build_providers()
-        tools = self._build_tools(providers)
-        self._state.run_predictor = tools.predictor
-        flux_device = self._state.flux_device_name
-        cfg_snapshots = self._build_run_cfg_snapshots(enabled_nodes)
-        store = RunStore.create(
+        return create_session_from_setup(
+            state=self._state,
+            enabled_nodes=enabled_nodes,
+            flux_values=flux_values,
             project=project,
-            flux_values=flux_values,
-            flux_device_name=flux_device,
-            nodes=enabled_nodes,
-            results=results,
-            cfg_snapshots={
-                name: snapshot.to_wire() for name, snapshot in cfg_snapshots.items()
-            },
-        )
-        return RunSession(
-            providers=providers,
-            user_nodes=enabled_nodes,
-            flux_values=flux_values,
-            flux_device=flux_device,
-            results=results,
-            cfg_snapshots=cfg_snapshots,
-            store=store,
-            tools=tools,
-            ml=ml,
-            soc=ctx.soc,
-            soccfg=ctx.soccfg,
-            md=ctx.md,
             notify=notify,
             event_sink=self._run_events,
-            has_loaded_predictor=ctx.predictor is not None,
             progress_label=FLUX_PROGRESS_LABEL,
         )
 
     def _build_run_cfg_snapshots(
         self, enabled_nodes: list[PlacedNode]
     ) -> dict[str, RunCfgSnapshot]:
-        ctx = self._state.exp_context
-        snapshots: dict[str, RunCfgSnapshot] = {}
-        for node in enabled_nodes:
-            base_cfg = node.schema.lower_raw(ctx.ml, ctx.md)
-            override_plan = node.builder.override_plan(node.schema)
-            knobs = node.schema.lower(ctx.ml, ctx.md)
-            validate_override_plan_base_cfg(
-                override_plan,
-                base_cfg,
-                node_name=node.name,
-            )
-            snapshots[node.name] = RunCfgSnapshot(
-                base_cfg=base_cfg,
-                override_plan=override_plan,
-                knobs=knobs,
-            )
-        return snapshots
+        return make_run_cfg_snapshots(self._state, enabled_nodes)
 
     def _begin_run_segment(self, session: RunSession, *, continuing: bool) -> int:
         if self._active_run_token is not None:
@@ -1527,18 +1438,10 @@ class Controller(SessionControllerMixin):
         SimplePredictor if none bound); ``ml`` is the module-library fallback;
         smoothing is auto-built from declarations. Returns the final InfoStore.
         Providers run in list order (no topo sort)."""
-        enabled_nodes = self._enabled_nodes()
-        providers = self._build_providers()
-        ctx = self._state.exp_context
-        run_ml = ml
-        if run_ml is None and ctx.ml is not None:
-            run_ml = _MlModuleSource(ctx.ml)
-        cfg_snapshots = self._build_run_cfg_snapshots(enabled_nodes)
-        orch = Orchestrator(
-            providers=providers,
-            tools=tools or self._build_tools(providers),
-            ml=run_ml,
-            md=ctx.md,
-            cfg_snapshots=cfg_snapshots,
+        return run_dry(
+            state=self._state,
+            enabled_nodes=self._enabled_nodes(),
+            flux_values=self._current_flux_values_for_run(),
+            tools=tools,
+            ml=ml,
         )
-        return orch.run(self._current_flux_values_for_run())

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
+from .read_model import ControllerRemoteReadModel, RemoteReadModel
 from .wire_version import GUI_VERSION, WIRE_VERSION
 
 
@@ -41,14 +42,15 @@ class ScreenshotView(Protocol):
 class RemoteControlAdapter(RemoteControlServiceBase):
     """Driving adapter: an NDJSON RPC face onto the autofluxdep ``Controller``.
 
-    Dispatch handlers receive *this adapter*, so they reach commands through
-    ``adapter.ctrl.<m>``. Construct after the Controller exists; inert until
+    Dispatch handlers receive *this adapter*, so they reach read-only queries through
+    ``adapter.read_model.<m>``. Construct after the Controller exists; inert until
     ``start()``. autofluxdep's EventBus is reached via the base default
     (``ctrl.bus`` — a ``BaseEventBus``) and its serializers are keyed by payload
     ``type``.
     """
 
     ctrl: Controller
+    read_model: RemoteReadModel
 
     def __init__(
         self,
@@ -67,6 +69,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             event_serializers=EVENT_SERIALIZERS,
             wire_event_name=wire_event_name,
         )
+        self.read_model = ControllerRemoteReadModel(controller)
         self._view = view
 
     def take_screenshot(self, target: str) -> bytes:

@@ -1,221 +1,93 @@
-"""Method dispatcher for the autofluxdep RemoteControlAdapter.
+"""Remote method routing for autofluxdep-gui.
 
-Every handler is a pure synchronous function ``(adapter, params) -> Mapping`` that
-runs on the Qt main thread. The adapter layer is responsible for marshalling —
-handlers must not touch threading or Qt directly. Handlers reach the autofluxdep
-command façade via ``adapter.ctrl`` (a ``Controller``).
-
-The whole surface is READ-ONLY: the agent observes a workflow the user drives.
-There are deliberately NO mutating handlers (add-node / set-flux / run / stop):
-those are user actions in the GUI. Building the node graph and judging the live
-fits need the human's eye on the plot, which the agent does not have.
-
-Reading the run-lived ``run_results`` on the main thread is safe even mid-run: the
-worker only fills pre-allocated numpy rows in place (not a State semantic write),
-so the handler sees a consistent snapshot (rows not yet measured stay nan).
-
-Adding a method:
-  1. Implement ``def _h_<dotted_name>(adapter, params): ...`` (returns wire dict).
-  2. Register it in ``_HANDLERS`` below; declare its contract in ``method_specs``.
+This module binds the Qt-free method specs to small synchronous handlers. The
+handlers deliberately depend on ``adapter.read_model`` instead of the full
+Controller, keeping the remote bridge read-only by construction.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    # Type-only: a runtime import of the adapter would cycle (service.py imports
-    # this module). String annotations keep pyright checking the call sites.
-    from .service import RemoteControlAdapter
-
-from zcu_tools.gui.app.autofluxdep.cfg import override_plan_to_wire
-from zcu_tools.gui.app.autofluxdep.services.result_io import result_progress_summary
-from zcu_tools.gui.app.autofluxdep.state import AutoFluxDepState
-from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
-from zcu_tools.gui.remote.readonly_handlers import h_resources_versions
+from zcu_tools.gui.remote.method_spec import build_method_registry
 
 from .method_specs import METHOD_SPECS
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from .service import RemoteControlAdapter
 
-# Precise per-app handler alias (assignable to the shared, unconstrained
-# ``method_spec.Handler``): every handler takes this app's RemoteControlAdapter.
 Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, object]]
-
-
-# ---------------------------------------------------------------------------
-# Project — note autofluxdep's ProjectInfo differs from gui.project.ProjectInfo
-# (it also carries ``params_path`` and may be None), so the shared
-# project_info_payload / is_real_project helpers do NOT apply; only the
-# DEFAULT_CHIP / DEFAULT_QUBIT placeholder constants are reused.
-# ---------------------------------------------------------------------------
-
-
-def _has_real_project(state: AutoFluxDepState) -> bool:
-    """Whether the user has set a real chip/qubit project (not the placeholders)."""
-    project = state.project
-    return bool(
-        project is not None
-        and project.chip_name
-        and project.qub_name
-        and (project.chip_name, project.qub_name) != (DEFAULT_CHIP, DEFAULT_QUBIT)
-    )
 
 
 def _h_project_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    project = adapter.ctrl.state.project
-    if project is None:
-        return {
-            "chip_name": None,
-            "qub_name": None,
-            "result_dir": None,
-            "database_path": None,
-            "params_path": None,
-        }
-    return {
-        "chip_name": project.chip_name,
-        "qub_name": project.qub_name,
-        "result_dir": project.result_dir,
-        "database_path": project.database_path,
-        "params_path": project.params_path,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Workflow definition
-# ---------------------------------------------------------------------------
+    return adapter.read_model.project_info()
 
 
 def _h_workflow_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    state = adapter.ctrl.state
-    results = state.run_results
-    return {
-        "nodes": [
-            {
-                "name": node.name,
-                "type": node.type_name,
-                "enabled": node.enabled,
-                "provides": list(node.provides),
-                "provides_modules": list(node.provides_modules),
-                "requires": [dep.key for dep in node.all_dependencies()],
-                "has_result": node.name in results,
-            }
-            for node in state.nodes
-        ]
-    }
+    return adapter.read_model.workflow_list()
 
 
 def _h_node_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # ``name`` is already validated as a required non-empty string by the service
-    # (it runs validate_params against the method's ParamSpec before dispatch).
     name = params["name"]
-    for node in adapter.ctrl.state.nodes:
-        if node.name == name:
-            return {
-                "name": node.name,
-                "type": node.type_name,
-                "knobs": node.schema.read_knobs(),
-                "override_plan": override_plan_to_wire(
-                    node.builder.override_plan(node.schema)
-                ),
-            }
-    raise KeyError(f"No placed node named {name!r}")
-
-
-# ---------------------------------------------------------------------------
-# Per-node run results — progress summary only, never the raw 2D arrays.
-# ---------------------------------------------------------------------------
+    if not isinstance(name, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "node.cfg name must be a string")
+    return adapter.read_model.node_cfg(name)
 
 
 def _h_result_summary(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    results = adapter.ctrl.state.run_results
-    return {
-        "results": [
-            {"name": name, **result_progress_summary(result)}
-            for name, result in results.items()
-        ]
-    }
-
-
-# ---------------------------------------------------------------------------
-# UI read-only view
-# ---------------------------------------------------------------------------
+    return adapter.read_model.result_summary()
 
 
 def _h_ui_screenshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    target = str(params.get("target") or "window")
-    if target != "window":
+    target = params.get("target", "window")
+    if not isinstance(target, str) or target != "window":
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"target must be 'window', got {target!r}",
         )
     try:
-        png = adapter.take_screenshot(target)
+        data = adapter.take_screenshot(target)
     except (RuntimeError, ValueError) as exc:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
-    if not isinstance(png, (bytes, bytearray)):
+    if not isinstance(data, (bytes, bytearray)):
         raise RemoteError(
             ErrorCode.INTERNAL,
-            f"screenshot returned non-bytes {type(png).__name__}",
+            f"screenshot returned non-bytes {type(data).__name__}",
         )
     path = Path(gettempdir()) / "zcu_tools_autofluxdep_window_screenshot.png"
-    path.write_bytes(bytes(png))
-    return {"target": target, "path": str(path), "bytes": len(png)}
-
-
-# ---------------------------------------------------------------------------
-# State handler (app-specific; resources.versions is shared, see
-# zcu_tools.gui.remote.readonly_handlers; project.info is app-local because
-# autofluxdep's ProjectInfo shape differs from the shared one).
-# ---------------------------------------------------------------------------
+    path.write_bytes(bytes(data))
+    return {"target": target, "path": str(path), "bytes": len(data)}
 
 
 def _h_state_check(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    state = adapter.ctrl.state
-    return {
-        "has_project": _has_real_project(state),
-        "has_soc": state.exp_context.has_soc(),
-        "node_count": len(state.nodes),
-        "flux_count": len(state.flux_values),
-        "has_flux_device": state.flux_device_name is not None,
-        "is_running": adapter.ctrl.is_running,
-        "is_paused": adapter.ctrl.is_paused,
-        "next_flux_idx": adapter.ctrl.next_flux_idx,
-        "run_status": adapter.ctrl.run_status,
-        "has_results": bool(state.run_results),
-        # Predictor flags (D4): only presence, no calibration curves. The loaded
-        # raw FluxoniumPredictor lives in exp_context; the adaptive per-run
-        # predictor (Simple stand-in or Fluxonium-backed) is run-lived state.
-        "has_loaded_predictor": state.exp_context.predictor is not None,
-        "has_run_predictor": state.run_predictor is not None,
-    }
+    return adapter.read_model.state_check()
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
+def _h_resources_versions(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    return adapter.read_model.resources_versions()
 
 
 _HANDLERS: dict[str, Handler] = {
@@ -223,9 +95,11 @@ _HANDLERS: dict[str, Handler] = {
     "workflow.list": _h_workflow_list,
     "node.cfg": _h_node_cfg,
     "result.summary": _h_result_summary,
-    "resources.versions": h_resources_versions,
-    "state.check": _h_state_check,
     "ui.screenshot": _h_ui_screenshot,
+    "resources.versions": _h_resources_versions,
+    "state.check": _h_state_check,
 }
 
-METHOD_REGISTRY: dict[str, BoundMethod] = build_method_registry(_HANDLERS, METHOD_SPECS)
+METHOD_REGISTRY = build_method_registry(_HANDLERS, METHOD_SPECS)
+
+__all__ = ["METHOD_REGISTRY", "_HANDLERS"]
