@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 
 import matplotlib.pyplot as plt
@@ -268,14 +268,32 @@ def plot_eff_t1_with_sample(
     label: str = r"$t_1^{eff}$",
     title: str | None = None,
     xlabel: str = "Current (mA)",
+    component_t1s: Mapping[str, NDArray[np.float64]] | None = None,
+    parameter_text: str | None = None,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     if title is not None:
         fig.suptitle(title)
 
-    s_fluxs = value2flux(s_dev_values, flux_half, flux_period)
+    t_fluxs = np.asarray(t_fluxs, dtype=np.float64)
+    t1_effs = np.asarray(t1_effs, dtype=np.float64)
+    if t1_effs.shape != t_fluxs.shape:
+        raise ValueError("t1_effs must have the same shape as t_fluxs")
+
+    s_fluxs = np.asarray(
+        value2flux(s_dev_values, flux_half, flux_period), dtype=np.float64
+    )
     ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
+
+    if component_t1s is not None:
+        for component_label, component_t1 in component_t1s.items():
+            component_arr = np.asarray(component_t1, dtype=np.float64)
+            if component_arr.shape != t_fluxs.shape:
+                raise ValueError(
+                    f"component_t1s[{component_label!r}] must have the same shape as t_fluxs"
+                )
+            ax.plot(t_fluxs, component_arr, label=component_label, linestyle=":")
 
     ax.plot(t_fluxs, t1_effs, label=label, linestyle="--")
 
@@ -287,6 +305,24 @@ def plot_eff_t1_with_sample(
     ax.set_yscale("log")
     ax.legend(fontsize="x-large")
     ax.grid()
+
+    if parameter_text:
+        ax.text(
+            1.02,
+            0.98,
+            parameter_text,
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontsize=10,
+            bbox=dict(
+                boxstyle="round,pad=0.35",
+                facecolor="white",
+                edgecolor="0.5",
+                alpha=0.85,
+            ),
+            clip_on=False,
+        )
 
     ax2 = ax.secondary_xaxis(
         "top",

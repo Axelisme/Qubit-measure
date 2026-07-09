@@ -79,10 +79,8 @@ print("flx_half = ", flx_half)
 print("flx_int = ", flx_int)
 print("flx_period = ", flx_period)
 
-sample_f = 9.58464
-
 g = 0.1  # GHz
-rf_w = 4.2e-3  # GHz
+rf_w = 14.8e-3  # GHz
 bare_rf = fit_inputs.bare_rf_seed
 if prior_dispersive is not None:
     g = prior_dispersive.g
@@ -109,7 +107,7 @@ else:
     print(f"No '{t1err_col}' column found; T1 fitting will be unweighted.")
 
 # filter out bad points
-finite_positive_err = np.isfinite(s_T1errs) & (s_T1errs > 0.0)
+finite_positive_err = np.isfinite(s_T1errs) & (s_T1errs > 0.0) & np.isfinite(s_fpts)
 valid = np.isnan(s_T1errs) | (finite_positive_err & (s_T1errs < 0.25 * s_T1s))
 s_mAs = s_mAs[valid]
 s_fpts = s_fpts[valid]
@@ -168,8 +166,6 @@ if correct_flx_from_f01:
 
     s_flxs = np.where(accepted, f01_corrected_flxs, s_flxs_raw)
     s_mAs_for_plot = np.where(accepted, s_mAs + f01_biases, s_mAs)
-    if np.any(accepted):
-        plot_xlabel = "f01-corrected Current (mA)"
 
     print(
         "f01 flx correction: "
@@ -251,7 +247,7 @@ s_Qcaps, s_Qcaps_err = zt1.calc_Qcap_vs_omega(
 
 fig, ax = zt1.plot_Q_vs_omega(s_omegas, s_Qcaps, s_Qcaps_err, Qname=r"$Q_{cap}$")
 ax.set_title(f"Temp = {Temp_Qcap * 1e3:.2f} mK")
-ax.set_ylim(1e4, 1e6)
+# ax.set_ylim(1e4, 1e6)
 
 _, fit_Qcaps = zt1.add_Q_fit(ax, s_omegas, s_Qcaps, omega_range=mask_range, fit_constant=True)
 
@@ -280,14 +276,15 @@ Q_cap = float(np.mean(fit_Qcaps))
 
 # Q_cap = 4e5
 log_product = np.log(mask_T1s * mask_cap_dipoles)
-up_Q = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
-down_Q = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
+up_Qcap = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
+down_Qcap = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
 
 fig, _ = zt1.plot_t1_with_sample(
     *plot_args,
     name="Q_cap",
     noise_name="t1_capacitive",
-    noise_values=[down_Q, Q_cap, up_Q],
+    noise_values=[down_Qcap, Q_cap, up_Qcap],
+    # noise_values=[Q_cap],
     Temp=Temp_Qcap,
     xlabel=plot_xlabel,
 )
@@ -364,14 +361,14 @@ x_qp = 1 / float(np.mean(fit_Qqps) + 20*np.std(fit_Qqps))
 
 # x_qp = 1.5e-4
 log_product = np.log(mask_T1s * mask_qp_dipoles)
-up_Q = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
-down_Q = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
+up_Qqp = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
+down_Qqp = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
 
 fig, _ = zt1.plot_t1_with_sample(
     *plot_args,
     name="x_qp",
     noise_name="t1_quasiparticle_tunneling",
-    noise_values=[1/down_Q, x_qp, 1/up_Q],
+    noise_values=[1/down_Qqp, x_qp, 1/up_Qqp],
     Temp=Temp,
     xlabel=plot_xlabel,
 )
@@ -447,14 +444,14 @@ Q_ind = float(np.mean(fit_Qinds))
 
 # Q_ind = 7e7
 log_product = np.log(mask_T1s * mask_ind_dipoles)
-up_Q = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
-down_Q = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
+up_Qind = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
+down_Qind = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
 
 fig, ax = zt1.plot_t1_with_sample(
     *plot_args,
     name="Q_ind",
     noise_name="t1_inductive",
-    noise_values=[down_Q, Q_ind, up_Q],
+    noise_values=[down_Qind, Q_ind, up_Qind],
     Temp=Temp_Qind,
     xlabel=plot_xlabel,
 )
@@ -470,9 +467,12 @@ plt.close(fig)
 ```python
 fit_init = zt1.T1FitParams(
     Temp=Temp,
-    Q_cap=Q_cap,
-    x_qp=x_qp,
+    # Q_cap=Q_cap,
+    # x_qp=x_qp,
     # Q_ind=Q_ind,
+    Q_cap=up_Qcap,
+    x_qp=1/up_Qqp,
+    Q_ind=up_Qind,
 )
 
 fit_bounds = {"Temp": (10e-3, 300e-3)}
@@ -490,7 +490,7 @@ fit_result = zt1.fit_t1_noise_params(
     init=fit_init,
     bounds=fit_bounds,
     # fixed=("Temp",),
-    T1errs=s_T1errs,
+    # T1errs=s_T1errs,
     residual_mode="log",
     loss="soft_l1",
     max_nfev=200,
@@ -510,6 +510,39 @@ if fit_x_qp is not None:
 if fit_Q_ind is not None:
     fit_noise.append(("t1_inductive", dict(Q_ind=fit_Q_ind)))
 
+
+def t1_component_label(channel_name, options):
+    channel_labels = {
+        "t1_capacitive": "capacitive",
+        "t1_quasiparticle_tunneling": "quasiparticle",
+        "t1_inductive": "inductive",
+    }
+    return channel_labels.get(channel_name, channel_name)
+
+
+def t1_parameter_text(noise_channels, Temp, extra_lines=()):
+    lines = []
+    for _, options in noise_channels:
+        for name, value in options.items():
+            value_label = f"{name}(w)" if callable(value) else f"{value:.3e}"
+            lines.append(f"{name} = {value_label}")
+    lines.append(f"Temp = {Temp * 1e3:.2f} mK")
+    lines.extend(extra_lines)
+    return "\n".join(lines)
+
+
+def calculate_component_t1s(noise_channels, Temp):
+    return {
+        t1_component_label(channel_name, options): zf.calculate_eff_t1_vs_flux_fast(
+            params,
+            t_flxs,
+            [(channel_name, dict(options))],
+            Temp,
+        )
+        for channel_name, options in noise_channels
+    }
+
+
 print("fit success =", fit_result.success)
 print("fit message =", fit_result.message)
 if fit_Q_cap is not None:
@@ -526,6 +559,7 @@ print(f"reduced chi2 = {fit_result.reduced_chi2:.3g}")
 
 ```python
 fit_t1_effs = zf.calculate_eff_t1_vs_flux_fast(params, t_flxs, fit_noise, fit_Temp)
+fit_component_t1s = calculate_component_t1s(fit_noise, fit_Temp)
 fit_image_path = os.path.join(image_dir, "T1s_fit_all_in_once.png")
 
 QubitParams(os.path.join(result_dir, "params.json")).set_t1_curve_fit(
@@ -573,34 +607,12 @@ fig, ax = zt1.plot_eff_t1_with_sample(
     label="all-in-one fit",
     title=f"Temperature = {fit_Temp * 1e3:.2f} mK",
     xlabel=plot_xlabel,
-)
-
-fit_annotation = "\n".join(
-    line
-    for line in [
-        None if fit_Q_cap is None else f"Q_cap = {fit_Q_cap:.3e}",
-        None if fit_x_qp is None else f"x_qp = {fit_x_qp:.3e}",
-        None if fit_Q_ind is None else f"Q_ind = {fit_Q_ind:.3e}",
-        f"Temp = {fit_Temp * 1e3:.2f} mK",
-        f"reduced chi2 = {fit_result.reduced_chi2:.3g}",
-    ]
-    if line is not None
-)
-ax.text(
-    1.02,
-    0.98,
-    fit_annotation,
-    transform=ax.transAxes,
-    va="top",
-    ha="left",
-    fontsize=10,
-    bbox=dict(
-        boxstyle="round,pad=0.35",
-        facecolor="white",
-        edgecolor="0.5",
-        alpha=0.85,
+    component_t1s=fit_component_t1s,
+    parameter_text=t1_parameter_text(
+        fit_noise,
+        fit_Temp,
+        extra_lines=[f"reduced chi2 = {fit_result.reduced_chi2:.3g}"],
     ),
-    clip_on=False,
 )
 
 plt.show()
@@ -624,13 +636,8 @@ noise_channels = fit_noise
 #     ("t1_inductive", dict(Q_ind=Q_ind)),
 # ]
 
-noise_label = "\n".join(
-    [
-        f"{name:<5} = " + f"{name}(w)" if callable(value) else f"{value:.1e}"
-        for ch in noise_channels
-        for name, value in ch[1].items()
-    ]
-)
+t1_component_t1s = calculate_component_t1s(noise_channels, Temp)
+t1_eff_parameter_text = t1_parameter_text(noise_channels, Temp)
 ```
 
 ```python
@@ -647,13 +654,15 @@ fig, ax = zt1.plot_eff_t1_with_sample(
     flx_half,
     flx_period,
     t_flxs,
-    label=noise_label,
+    label="effective T1",
     title=f"Temperature = {Temp * 1e3:.2f} mK",
     xlabel=plot_xlabel,
+    component_t1s=t1_component_t1s,
+    parameter_text=t1_eff_parameter_text,
 )
 
 plt.show()
-fig.savefig(os.path.join(image_dir, "T1s_fit_eff.png"))
+fig.savefig(os.path.join(image_dir, "T1s_fit_eff.png"), bbox_inches="tight")
 plt.close(fig)
 ```
 
@@ -675,6 +684,19 @@ print(f"T1 = {1e-3 * t1:.2f} us")
 percell_t1s = zf.calculate_purcell_t1_vs_flux(
     t_flxs, bare_rf=bare_rf, kappa=rf_w, g=g, Temp=Temp, params=params
 )
+component_t1s_with_purcell = {
+    **t1_component_t1s,
+    "Purcell": percell_t1s,
+}
+purcell_parameter_text = t1_parameter_text(
+    noise_channels,
+    Temp,
+    extra_lines=[
+        f"bare_rf = {bare_rf:.4f} GHz",
+        f"g = {1e3 * g:.2f} MHz",
+        f"kappa/2pi = {1e3 * rf_w:.2f} MHz",
+    ],
+)
 ```
 
 ```python
@@ -687,13 +709,15 @@ fig, ax = zt1.plot_eff_t1_with_sample(
     flx_half,
     flx_period,
     t_flxs,
-    label=noise_label,
+    label="effective T1 + Purcell",
     title=f"Temperature = {Temp * 1e3:.2f} mK",
     xlabel=plot_xlabel,
+    component_t1s=component_t1s_with_purcell,
+    parameter_text=purcell_parameter_text,
 )
 
 plt.show()
-fig.savefig(os.path.join(image_dir, "T1s_fit_eff_with_percell.png"))
+fig.savefig(os.path.join(image_dir, "T1s_fit_eff_with_percell.png"), bbox_inches="tight")
 plt.close(fig)
 ```
 
