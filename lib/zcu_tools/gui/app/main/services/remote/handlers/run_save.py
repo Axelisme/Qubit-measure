@@ -102,7 +102,7 @@ def _h_tab_save_data(
     data_path = params["data_path"]
     comment = str(params["comment"])
     try:
-        written = adapter.ctrl.save_data(
+        written = adapter.save_control.save_data(
             tab_id, str(data_path) if data_path is not None else None, comment=comment
         )
     except RuntimeError as exc:
@@ -123,7 +123,7 @@ def _h_tab_save_image(
     tab_id = str(params["tab_id"])
     image_path = params["image_path"]
     try:
-        written = adapter.ctrl.save_image(
+        written = adapter.save_control.save_image(
             tab_id, str(image_path) if image_path is not None else None
         )
     except RuntimeError as exc:
@@ -141,7 +141,7 @@ def _h_tab_save_post_image(
     tab_id = str(params["tab_id"])
     image_path = params["image_path"]
     try:
-        written = adapter.ctrl.save_post_image(
+        written = adapter.save_control.save_post_image(
             tab_id, str(image_path) if image_path is not None else None
         )
     except RuntimeError as exc:
@@ -161,7 +161,7 @@ def _h_tab_save_result(
     image_path = params["image_path"]
     comment = str(params["comment"])
     try:
-        written_data, written_image = adapter.ctrl.save_result(
+        written_data, written_image = adapter.save_control.save_result(
             tab_id,
             str(data_path) if data_path is not None else None,
             str(image_path) if image_path is not None else None,
@@ -183,9 +183,9 @@ def _h_tab_save_set_paths(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    if not adapter.save_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     data_path = str(params["data_path"])
     image_path = str(params["image_path"])
-    adapter.ctrl.update_tab_save_paths(tab_id, data_path, image_path)
+    adapter.save_control.update_tab_save_paths(tab_id, data_path, image_path)
     return {"data_path": data_path, "image_path": image_path}

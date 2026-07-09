@@ -69,7 +69,12 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
     handler_params = validate_params(spec.params, params) if spec.params else params
     adapter = cast(
         RemoteControlAdapter,
-        SimpleNamespace(ctrl=ctrl, run_analyze_control=ctrl, operation_control=ctrl),
+        SimpleNamespace(
+            ctrl=ctrl,
+            run_analyze_control=ctrl,
+            operation_control=ctrl,
+            save_control=ctrl,
+        ),
     )
     return spec.handler(adapter, handler_params)
 

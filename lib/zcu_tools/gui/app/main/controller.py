@@ -33,7 +33,6 @@ from .adapter import (
     ExpContext,
     InteractiveHost,
     InteractiveSession,
-    SavePaths,
     WritebackItem,
 )
 from .events.tab import TabContentChangedPayload, TabInteractionChangedPayload
@@ -69,6 +68,7 @@ if TYPE_CHECKING:
 
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
+    from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
 
 
@@ -244,6 +244,7 @@ class Controller(SessionControllerMixin):
             io_manager=io_manager,
             cfg_editor_ctrl=self,
             progress_transport=transport,
+            notify_info=self._info,
             render_host=lambda: self._render_host,
             project_root=self._project_root,
         )
@@ -273,6 +274,7 @@ class Controller(SessionControllerMixin):
         self._analyze_svc = services.analyze
         self._post_analyze_svc = services.post_analyze
         self._save_svc = services.save
+        self._save_control = services.save_control
         self._writeback_svc = services.writeback
         self._workspace_svc = services.workspace
         self._startup_svc = services.startup
@@ -478,6 +480,10 @@ class Controller(SessionControllerMixin):
     @property
     def operation_control(self) -> OperationControlPort:
         return self._operation_control
+
+    @property
+    def save_control(self) -> SaveControlPort:
+        return self._save_control
 
     def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
         """Wire the app-level PersistenceCaretaker.
@@ -842,43 +848,16 @@ class Controller(SessionControllerMixin):
     # Save (TabService)
     # ------------------------------------------------------------------
 
-    def _resolve_save_paths(self, tab_id: str) -> SavePaths:
-        paths = self._tab_svc.get_tab_save_paths(tab_id)
-        if paths is None:
-            raise RuntimeError(
-                f"Tab {tab_id!r} has no save paths configured — "
-                "set paths via the Save panel or update_tab_save_paths()."
-            )
-        return paths
-
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str = ""
     ) -> str:
-        """Start the (async) data save; returns the path the saver will write
-        (``.hdf5`` + uniqueness suffix already applied), known synchronously."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        resolved = data_path or self._resolve_save_paths(tab_id).data_path
-        return self._save_svc.start_save_data(permit, resolved, comment=comment)
+        return self._save_control.save_data(tab_id, data_path, comment=comment)
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str:
-        """Save the image synchronously; returns the written image path."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        resolved = image_path or self._resolve_save_paths(tab_id).image_path
-        self._save_svc.save_image_sync(permit, resolved)
-        self._info(f"Image saved to {resolved}")
-        return resolved
+        return self._save_control.save_image(tab_id, image_path)
 
     def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
-        """Save the post-analysis figure synchronously; returns the written path.
-
-        The post sub-tab's own Save Image — targets ``tab.post_figure`` (distinct
-        from the primary ``save_image``). Reuses the save permit (active context +
-        run result); the View additionally gates the button on a post result."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        resolved = image_path or self._resolve_save_paths(tab_id).image_path
-        self._save_svc.save_post_image_sync(permit, resolved)
-        self._info(f"Post-analysis image saved to {resolved}")
-        return resolved
+        return self._save_control.save_post_image(tab_id, image_path)
 
     def save_result(
         self,
@@ -887,16 +866,12 @@ class Controller(SessionControllerMixin):
         image_path: str | None = None,
         comment: str = "",
     ) -> tuple[str, str]:
-        """Save image (sync) + data (async); returns ``(data_path, image_path)``
-        the saver will write — the data path with its ``.hdf5``/suffix applied."""
-        permit = self._guard_svc.acquire_save_permit(tab_id)
-        paths = self._resolve_save_paths(tab_id)
-        resolved_data = data_path or paths.data_path
-        resolved_image = image_path or paths.image_path
-        written_data = self._save_svc.start_save_result(
-            permit, resolved_data, resolved_image, comment=comment
+        return self._save_control.save_result(
+            tab_id,
+            data_path,
+            image_path,
+            comment=comment,
         )
-        return written_data, resolved_image
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -1299,7 +1274,7 @@ class Controller(SessionControllerMixin):
     def update_tab_save_paths(
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
-        self._tab_control.update_tab_save_paths(tab_id, data_path, image_path)
+        self._save_control.update_tab_save_paths(tab_id, data_path, image_path)
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()

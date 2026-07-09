@@ -20,7 +20,8 @@ layers measure-gui's own dispatch policy on top by overriding the base seams:
 Handlers receive *this adapter* (not the bare ctrl), so they reach tab-resource
 commands through ``adapter.tab_control``, run/analyze commands through
 ``adapter.run_analyze_control``, generic operation await/progress through
-``adapter.operation_control``, other app commands through
+``adapter.operation_control``, save commands through ``adapter.save_control``,
+other app commands through
 ``adapter.ctrl.<façade>``, context commands through
 ``adapter.context_control``, device commands through ``adapter.device_control``,
 predictor commands through ``adapter.predictor_control``, and View-side surfaces
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.services.run_analyze_control import (
         RunAnalyzeControlPort,
     )
+    from zcu_tools.gui.app.main.services.save_control import SaveControlPort
     from zcu_tools.gui.app.main.services.tab_control import TabControlPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -93,11 +95,11 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
     Holds the concrete ``Controller`` (app command face), exposes the shared
     context/device/predictor-control facets, exposes the app-local tab-control
-    run/analyze-control, and operation-control facets, and pulls EventBus from it via
+    run/analyze-control, operation-control, and save-control facets, and pulls EventBus from it via
     ``get_bus()``. Dispatch handlers reach tab commands through ``adapter.tab_control``,
     run/analyze commands through ``adapter.run_analyze_control``, operation
-    await/progress through ``adapter.operation_control``, other app commands
-    through ``adapter.ctrl``,
+    await/progress through ``adapter.operation_control``, save commands through
+    ``adapter.save_control``, other app commands through ``adapter.ctrl``,
     context commands through ``adapter.context_control``, device commands through
     ``adapter.device_control``, predictor commands through ``adapter.predictor_control``,
     and the canvas-bearing View's pure-read surface through ``adapter.render_view``
@@ -109,6 +111,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     tab_control: TabControlPort
     run_analyze_control: RunAnalyzeControlPort
     operation_control: OperationControlPort
+    save_control: SaveControlPort
     context_control: ContextControlPort
     device_control: DeviceControlPort
     predictor_control: PredictorControlPort
@@ -133,6 +136,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self.tab_control = controller.tab_control
         self.run_analyze_control = controller.run_analyze_control
         self.operation_control = controller.operation_control
+        self.save_control = controller.save_control
         self.context_control = controller.context_control
         self.device_control = controller.device_control
         self.predictor_control = controller.predictor_control

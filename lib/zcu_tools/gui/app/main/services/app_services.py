@@ -26,6 +26,7 @@ from .post_analyze import PostAnalyzeService
 from .run import RunService
 from .run_analyze_control import RunAnalyzeControlFacet
 from .save import SaveService
+from .save_control import SaveControlFacet
 from .tab import TabService
 from .tab_control import TabControlFacet
 from .workspace import WorkspaceService
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     from .cfg_editor import CfgEditorHost
     from .operation_control import OperationControlPort
     from .run_analyze_control import RunAnalyzeControlPort, RunAnalyzeRenderHost
+    from .save_control import SaveControlPort
     from .tab_control import TabControlPort
 
 
@@ -87,6 +89,7 @@ class AppServices:
     analyze: AnalyzeService
     post_analyze: PostAnalyzeService
     save: SaveService
+    save_control: SaveControlPort
     writeback: WritebackService
     workspace: WorkspaceService
     startup: StartupService
@@ -102,6 +105,7 @@ def build_app_services(
     io_manager: IOManager,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
+    notify_info: Callable[[str], None],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
     project_root: str,
 ) -> AppServices:
@@ -161,6 +165,7 @@ def build_app_services(
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles)
+    save = SaveService(state, background, bus)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -173,6 +178,14 @@ def build_app_services(
         render_host=render_host,
     )
     operation_control = OperationControlFacet(handles=handles, progress=progress)
+    save_control = SaveControlFacet(
+        state=state,
+        bus=bus,
+        guard=guard,
+        tab=tab,
+        save=save,
+        notify_info=notify_info,
+    )
     return AppServices(
         operation_gate=operation_gate,
         operation_control=operation_control,
@@ -198,7 +211,8 @@ def build_app_services(
         # Second analysis layer (post_analysis cap) — handle-only off-main worker,
         # same runner/handles as the primary analyze (ADR-0019, ADR-0026 §1).
         post_analyze=post_analyze,
-        save=SaveService(state, background, bus),
+        save=save,
+        save_control=save_control,
         writeback=writeback,
         workspace=workspace,
         startup=session.startup,
