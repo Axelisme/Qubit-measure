@@ -133,6 +133,9 @@ def test_operation_progress_device_setup_bars(fx):
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
     fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("operation.progress must use operation_control")
+    )
+    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m),)
     )
     sock = open_client(fx.service.port)
@@ -146,13 +149,14 @@ def test_operation_progress_device_setup_bars(fx):
         assert bar["maximum"] == 10 and bar["value"] == 3
         assert bar["n"] == 3 and bar["total"] == 10
         assert "Ramp" in bar["format"]
-        fx.ctrl.get_operation_progress.assert_called_with(7)
+        fx.service.operation_control.get_operation_progress.assert_called_once_with(7)
+        fx.ctrl.get_operation_progress.assert_not_called()
     finally:
         sock.close()
 
 
 def test_operation_progress_idle_returns_empty(fx):
-    fx.ctrl.get_operation_progress = MagicMock(return_value=())  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(return_value=())  # type: ignore[method-assign]
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "operation.progress", {"operation_id": 7})
@@ -174,7 +178,7 @@ def test_operation_progress_serializes_live_bars(fx):
     m1.set_n(23)
     m2 = ProgressBarModel(label="Reps", total=500, start_time=t)
     m2.set_n(5)
-    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m1), (2, m2))
     )
     sock = open_client(fx.service.port)
@@ -199,7 +203,7 @@ def test_operation_progress_unknown_total_has_null_percent(fx):
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     m = ProgressBarModel(label="working", total=None, start_time=time.monotonic())
-    fx.ctrl.get_operation_progress = MagicMock(  # type: ignore[method-assign]
+    fx.service.operation_control.get_operation_progress = MagicMock(  # type: ignore[method-assign]
         return_value=((1, m),)
     )
     sock = open_client(fx.service.port)

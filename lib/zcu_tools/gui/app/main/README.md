@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-09 - main-window toolbar coordinator
+**Last updated:** 2026-07-09 - remote run/analyze control facet
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -59,9 +59,15 @@ App-local driving-adapter facets mirror the shared session control pattern.
 active/running identity, tab read model, cfg schema commits, save path overrides)
 by composing `WorkspaceService`, `TabService`, `State`, and `EventBus`; remote
 tab handlers use this facet instead of the giant `Controller` surface.
-Run/analyze/save/writeback/cfg-editor path mutation remain separate domains, and
-`Controller` keeps thin compatibility forwards for UI surfaces that have not
-migrated yet.
+`RunAnalyzeControlPort` / `RunAnalyzeControlFacet` expose the run/load/analyze
+operation surface (run start/cancel, result load, analyze/post-analyze start and
+result reads) by composing the operation services, guards, tab read model, and a
+render-host provider. Remote run/analyze handlers use this facet instead of the
+giant `Controller` surface. `OperationControlPort` / `OperationControlFacet`
+expose the op-agnostic handle/progress surface used by generic `operation.*`
+handlers, including device setup handles. Save/writeback/cfg-editor path
+mutation remain separate domains, and `Controller` keeps thin compatibility
+forwards for UI surfaces that have not migrated yet.
 
 Inside the Qt view, `MainWindow` remains the top-level View / RenderHost facade
 while `MainWindowEventCoordinator` owns EventBus subscription and payload routing.

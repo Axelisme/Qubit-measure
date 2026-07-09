@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -19,9 +20,11 @@ from .arb_waveform import ArbWaveformService
 from .cfg_editor import CfgEditorService
 from .guard import GuardService
 from .load import LoadService
+from .operation_control import OperationControlFacet
 from .operation_gate import OperationGate
 from .post_analyze import PostAnalyzeService
 from .run import RunService
+from .run_analyze_control import RunAnalyzeControlFacet
 from .save import SaveService
 from .tab import TabService
 from .tab_control import TabControlFacet
@@ -41,6 +44,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .cfg_editor import CfgEditorHost
+    from .operation_control import OperationControlPort
+    from .run_analyze_control import RunAnalyzeControlPort, RunAnalyzeRenderHost
     from .tab_control import TabControlPort
 
 
@@ -60,6 +65,7 @@ class AppServices:
     """
 
     operation_gate: OperationGate
+    operation_control: OperationControlPort
     handles: OperationHandles
     background: BackgroundRunner
     progress: ProgressService
@@ -75,6 +81,7 @@ class AppServices:
     setup_control: SetupControlPort
     tab: TabService
     tab_control: TabControlPort
+    run_analyze_control: RunAnalyzeControlPort
     load: LoadService
     run: RunService
     analyze: AnalyzeService
@@ -95,6 +102,7 @@ def build_app_services(
     io_manager: IOManager,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
+    render_host: Callable[[], RunAnalyzeRenderHost | None],
     project_root: str,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
@@ -148,12 +156,30 @@ def build_app_services(
         workspace=workspace,
         bus=bus,
     )
+    guard = GuardService(state)
+    load = LoadService(state, bus, writeback)
+    run = RunService(state, runner, bus, handles, writeback)
+    analyze = AnalyzeService(state, runner, bus, writeback, handles)
+    post_analyze = PostAnalyzeService(state, runner, bus, handles)
+    run_analyze_control = RunAnalyzeControlFacet(
+        state=state,
+        bus=bus,
+        guard=guard,
+        tab=tab,
+        load=load,
+        run=run,
+        analyze=analyze,
+        post_analyze=post_analyze,
+        render_host=render_host,
+    )
+    operation_control = OperationControlFacet(handles=handles, progress=progress)
     return AppServices(
         operation_gate=operation_gate,
+        operation_control=operation_control,
         handles=handles,
         background=background,
         progress=progress,
-        guard=GuardService(state),
+        guard=guard,
         device=device,
         device_control=session.device_control,
         soc_connection=session.soc_connection,
@@ -165,12 +191,13 @@ def build_app_services(
         setup_control=session.setup_control,
         tab=tab,
         tab_control=tab_control,
-        load=LoadService(state, bus, writeback),
-        run=RunService(state, runner, bus, handles, writeback),
-        analyze=AnalyzeService(state, runner, bus, writeback, handles),
+        run_analyze_control=run_analyze_control,
+        load=load,
+        run=run,
+        analyze=analyze,
         # Second analysis layer (post_analysis cap) — handle-only off-main worker,
         # same runner/handles as the primary analyze (ADR-0019, ADR-0026 §1).
-        post_analyze=PostAnalyzeService(state, runner, bus, handles),
+        post_analyze=post_analyze,
         save=SaveService(state, background, bus),
         writeback=writeback,
         workspace=workspace,

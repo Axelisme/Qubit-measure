@@ -21,10 +21,11 @@ def _h_tab_run_start(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
-        operation_id = adapter.ctrl.start_run(tab_id)
+        operation_id = control.start_run(tab_id)
     except RuntimeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -40,10 +41,11 @@ def _h_tab_load_data(
     import dataclasses
 
     tab_id = str(params["tab_id"])
-    if not adapter.ctrl.has_tab(tab_id):
+    control = adapter.run_analyze_control
+    if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
-        outcome = adapter.ctrl.load_tab_result(tab_id, str(params["data_path"]))
+        outcome = control.load_tab_result(tab_id, str(params["data_path"]))
     except LoadDataError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -60,7 +62,7 @@ def _h_tab_load_data(
             reason=reason,
         ) from exc
 
-    snap = adapter.ctrl.get_tab_snapshot(tab_id)
+    snap = control.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     assert interaction is not None
     result: dict[str, object] = dataclasses.asdict(outcome)
@@ -82,7 +84,7 @@ def _h_tab_run_cancel(
     # cancelled is best-effort: True when a live run was signalled, False on a
     # no-op. The worker's true terminal is observed via the run handle (ADR-0026
     # §8) — cancel only requests, it does not wait for the stop.
-    cancelled = adapter.ctrl.cancel_run()
+    cancelled = adapter.run_analyze_control.cancel_run()
     return {"ok": True, "cancelled": cancelled}
 
 
@@ -90,7 +92,7 @@ def _h_run_running_tab(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    return {"tab_id": adapter.ctrl.get_running_tab_id()}
+    return {"tab_id": adapter.run_analyze_control.get_running_tab_id()}
 
 
 def _h_tab_save_data(
