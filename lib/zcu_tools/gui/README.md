@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-10（Qt-free cfg binding ownership）
+**Last updated:** 2026-07-10（shared Qt cfg widget ownership）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -106,13 +106,33 @@ or an equivalent named registry when remote screenshot/list semantics require
 stable names. Either path keeps a Python reference until `finished` / `destroyed`
 cleanup runs.
 
-## Cfg Form Decoration
+## Shared Qt Cfg Widgets (`widgets/cfg/`)
+
+`zcu_tools.gui.widgets.cfg`擁有`CfgFormWidget`、field widgets與presentation-only
+decoration contract。widget attach service-owned `CfgDraft`並render `draft.root`；detach會
+unsubscribe並刪除Qt tree，但不會close draft。shared widget只import Qt、`gui.cfg`、
+`gui.cfg.binding`與shared spinbox，不知道app/controller/session/EventBus/ModuleLibrary或
+experiment policy。
+
+每個`CfgFormWidget`持有一個`FrozenFieldRendererRegistry`。沒有顯式注入時，
+`default_cfg_renderers()`會建立全新的builder、為六個exact field types註冊固定
+`FieldRenderer(field, context)` factory再freeze。immutable `FieldRenderContext`只攜帶path、
+top-level標記、label width、decoration resolver、text enhancer與同一frozen registry；不攜帶
+controller/service/app/runtime資料。root、section child與reference subtree都走registry
+`render()`，沒有consumer-side constructor分支、module-global mapping、decorator、string key或
+inheritance fallback。registration會先驗factory call shape，render則驗QWidget與field-widget
+protocol。
+
+`CfgFormWidget.attach()`先成功建立完整root widget，再訂閱caller-owned draft；build失敗不留下
+draft callbacks。detach以stable Python callback解除change/validity subscriptions並刪除Qt tree，
+仍不close draft。
 
 `CfgFormWidget` accepts an optional field decoration provider keyed by full dotted
 cfg path. The shared renderer applies `hidden`, `enabled`, `tone`, `badge`, and
 `tooltip` metadata without changing the live value model. App-specific semantics
-stay outside the shared layer: for example, autofluxdep uses the same hook to
-mark generated Default cfg fields from its `OverridePlan`.
+stay outside the shared layer: for example, autofluxdep uses the same hook to mark
+generated Default cfg fields from its `OverridePlan`。measure則以generic
+`TextInputEnhancer` seam安裝app-local value-source completion，shared widget不import session。
 
 Normal `LiteralSpec` rows remain hidden, but a decoration may explicitly unhide a
 literal when an app needs to show a generated read-only value in the form.

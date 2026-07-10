@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from typing import Any, cast
 
 logger = logging.getLogger(__name__)
@@ -20,6 +19,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.cfg import ChoiceSectionSpec, DirectValue, LiteralSpec
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
     ReferenceField,
@@ -27,20 +27,11 @@ from zcu_tools.gui.cfg.binding import (
     SweepField,
 )
 
-from ...adapter import ChoiceSectionSpec, DirectValue, LiteralSpec
+from ..decoration import FieldDecorationProtocol
+from ..registry import FieldRenderContext, FieldWidgetProtocol
 from .common import (
     BaseLiveWidget,
-    CenteredSweepWidget,
     ElidedLabel,
-    ScalarWidget,
-    SweepWidget,
-    TextInputEnhancer,
-)
-from .registry import (
-    FieldDecorationProtocol,
-    FieldWidgetProtocol,
-    get_widget_cls,
-    register_widget,
 )
 
 _TONE_STYLES = {
@@ -121,34 +112,29 @@ class _CollapsibleSection(QWidget):
             self._toggle_btn.setStyleSheet(style)
 
 
-@register_widget(SectionField)
 class SectionWidget(BaseLiveWidget):
     def __init__(
         self,
         field: SectionField,
-        top_level: bool = False,
-        no_header: bool = False,
-        field_label_max_width: int | None = None,
-        path: str = "",
-        decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
-        | None = None,
-        text_input_enhancer: TextInputEnhancer | None = None,
+        *,
+        context: FieldRenderContext,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(field, parent)
-        self._field_label_max_width = field_label_max_width
-        self._path = path
-        self._decoration_for_path = decoration_for_path
-        self._text_input_enhancer = text_input_enhancer
+        self._context = context
+        self._field_label_max_width = context.field_label_max_width
+        self._path = context.path
+        self._decoration_for_path = context.decoration_for_path
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        no_header = context.top_level and bool(context.path)
         self._container = _CollapsibleSection(
             field.spec.label,
-            collapsible=not top_level and not no_header,
-            no_header=no_header or (top_level and not field.spec.label),
+            collapsible=not context.top_level,
+            no_header=no_header or (context.top_level and not field.spec.label),
         )
         layout.addWidget(self._container)
 
@@ -188,42 +174,8 @@ class SectionWidget(BaseLiveWidget):
             ):
                 continue
 
-            widget_cls = get_widget_cls(child_field)
-            if widget_cls is SectionWidget:
-                w = SectionWidget(
-                    cast(SectionField, child_field),
-                    field_label_max_width=self._field_label_max_width,
-                    path=child_path,
-                    decoration_for_path=self._decoration_for_path,
-                    text_input_enhancer=self._text_input_enhancer,
-                )
-            elif widget_cls is ReferenceWidget:
-                w = ReferenceWidget(
-                    cast(ReferenceField, child_field),
-                    path=child_path,
-                    decoration_for_path=self._decoration_for_path,
-                    field_label_max_width=self._field_label_max_width,
-                    text_input_enhancer=self._text_input_enhancer,
-                )
-            elif widget_cls is SweepWidget:
-                w = SweepWidget(
-                    cast(SweepField, child_field),
-                    path=child_path,
-                    decoration_for_path=self._decoration_for_path,
-                    text_input_enhancer=self._text_input_enhancer,
-                )
-            elif widget_cls is CenteredSweepWidget:
-                w = CenteredSweepWidget(
-                    cast(CenteredSweepField, child_field),
-                    text_input_enhancer=self._text_input_enhancer,
-                )
-            elif widget_cls is ScalarWidget:
-                w = ScalarWidget(
-                    cast(Any, child_field),
-                    text_input_enhancer=self._text_input_enhancer,
-                )
-            else:
-                w = widget_cls(child_field)  # type: ignore
+            child_context = self._context.derive(path=child_path, top_level=False)
+            w = self._context.registry.render(child_field, child_context)
             self._child_widgets[key] = w
 
             group = getattr(spec, "group", "") or ""
@@ -259,7 +211,7 @@ class SectionWidget(BaseLiveWidget):
         ``path`` is a dotted cfg value-tree path. An empty path rebuilds this
         section. The method deliberately keeps ancestor widgets alive so mode
         changes inside one ``ChoiceSectionSpec`` do not force the whole form to
-        detach and reattach its LiveModel.
+        detach and reattach its caller-owned draft.
         """
         if path == self._path:
             self._rebuild_children()
@@ -358,23 +310,17 @@ def _choice_visible_keys(field: SectionField) -> set[str] | None:
     return visible
 
 
-@register_widget(ReferenceField)
 class ReferenceWidget(BaseLiveWidget):
     def __init__(
         self,
         field: ReferenceField,
-        path: str = "",
-        decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
-        | None = None,
-        field_label_max_width: int | None = None,
-        text_input_enhancer: TextInputEnhancer | None = None,
+        *,
+        context: FieldRenderContext,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(field, parent)
-        self._path = path
-        self._decoration_for_path = decoration_for_path
-        self._field_label_max_width = field_label_max_width
-        self._text_input_enhancer = text_input_enhancer
+        self._context = context
+        self._path = context.path
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -550,18 +496,8 @@ class ReferenceWidget(BaseLiveWidget):
             self._sub_widget = None
 
         if sub_field:
-            widget_cls = get_widget_cls(sub_field)
-            if widget_cls == SectionWidget:
-                w = SectionWidget(
-                    sub_field,
-                    no_header=True,
-                    field_label_max_width=self._field_label_max_width,
-                    path=self._path,
-                    decoration_for_path=self._decoration_for_path,
-                    text_input_enhancer=self._text_input_enhancer,
-                )
-            else:
-                w = widget_cls(sub_field)  # type: ignore
+            sub_context = self._context.derive(top_level=True)
+            w = self._context.registry.render(sub_field, sub_context)
             self._sub_widget = w
             self._sub_layout.addWidget(cast(QWidget, w))
         self._sync_expand_btn()

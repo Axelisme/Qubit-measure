@@ -1,4 +1,4 @@
-"""Tests — CfgFormWidget populate / read_values round-trip."""
+"""Tests for shared CfgFormWidget populate and read-values behavior."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeSpec,
@@ -24,16 +26,24 @@ from zcu_tools.gui.app.main.adapter import (
     SweepSpec,
     SweepValue,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
+    CfgField,
+    LiteralField,
     ReferenceField,
     ScalarField,
     SectionField,
     SweepField,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.widgets.cfg import (
+    FieldRenderContext,
+    FieldRenderer,
+    FieldRendererRegistry,
+    FrozenFieldRendererRegistry,
+    default_cfg_renderers,
+)
+from zcu_tools.gui.widgets.cfg.registry import FieldWidgetProtocol
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -58,12 +68,7 @@ def _schema(spec_fields: dict, value_fields: dict) -> CfgSchema:
 
 
 def _attach(w, schema: CfgSchema, ctrl):
-    """Build a CfgDraft from ``schema`` and attach the widget to it.
-
-    Mirrors the production flow where the CfgEditorService owns the model and the
-    widget ``attach``es (ADR-0008). The model is returned for tests that drive it
-    directly (e.g. external refresh, which the service performs in production).
-    """
+    """Build a caller-owned draft, attach the widget, and return its root field."""
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w.attach(draft)
     return draft.root
@@ -79,6 +84,53 @@ def _scalar_field(
         bindings.provide_options,
         initial_val,
     )
+
+
+_RENDERED_FIELD_TYPES = (
+    LiteralField,
+    ScalarField,
+    SweepField,
+    CenteredSweepField,
+    SectionField,
+    ReferenceField,
+)
+
+
+def _registry_with_factories(
+    overrides: dict[type[CfgField], FieldRenderer],
+) -> FrozenFieldRendererRegistry:
+    defaults = default_cfg_renderers()
+    builder = FieldRendererRegistry()
+    for field_type in _RENDERED_FIELD_TYPES:
+        builder.register(
+            field_type,
+            overrides.get(field_type, defaults.resolve(field_type)),
+        )
+    return builder.freeze()
+
+
+def _registry_with_section_factory(
+    renderer: FieldRenderer,
+) -> FrozenFieldRendererRegistry:
+    return _registry_with_factories({SectionField: renderer})
+
+
+def _marked_section_factory(
+    marker: str,
+    calls: list[tuple[CfgField, FieldRenderContext]],
+) -> FieldRenderer:
+    def factory(
+        field: CfgField,
+        context: FieldRenderContext,
+    ) -> FieldWidgetProtocol:
+        from zcu_tools.gui.widgets.cfg.fields import SectionWidget
+
+        calls.append((field, context))
+        widget = SectionWidget(cast(SectionField, field), context=context)
+        widget.setObjectName(marker)
+        return widget
+
+    return factory
 
 
 def _make_ctx():
@@ -126,7 +178,7 @@ def test_sweep_value_step_mode():
 
 
 def test_scalar_int_widget_round_trip(qapp):
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="X", type=int)
     w = make_scalar_widget(spec, 42)
@@ -134,7 +186,7 @@ def test_scalar_int_widget_round_trip(qapp):
 
 
 def test_scalar_float_widget_round_trip(qapp):
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Pi", type=float)
     w = make_scalar_widget(spec, 3.14)
@@ -142,7 +194,7 @@ def test_scalar_float_widget_round_trip(qapp):
 
 
 def test_scalar_bool_widget_round_trip(qapp):
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Flag", type=bool)
     w = make_scalar_widget(spec, True)
@@ -150,7 +202,7 @@ def test_scalar_bool_widget_round_trip(qapp):
 
 
 def test_scalar_choices_widget_round_trip(qapp):
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Model", type=str, choices=["hm", "t", "auto"])
     w = make_scalar_widget(spec, "hm")
@@ -159,7 +211,7 @@ def test_scalar_choices_widget_round_trip(qapp):
 
 def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = ["asset_a", "asset_b"]
     schema = _schema(
@@ -193,7 +245,7 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
 
 def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = ["asset_a"]
     schema = _schema(
@@ -223,7 +275,7 @@ def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
 
 def test_dynamic_choice_renders_inactive_current_value_but_remains_invalid(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = []
     schema = _schema(
@@ -250,7 +302,7 @@ def test_dynamic_choice_renders_inactive_current_value_but_remains_invalid(qapp,
 
 
 def test_scalar_editable_false_widget_disabled(qapp):
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget
 
     spec = ScalarSpec(label="RO", type=float, editable=False)
     w = make_scalar_widget(spec, 1.0)
@@ -259,7 +311,7 @@ def test_scalar_editable_false_widget_disabled(qapp):
 
 def test_optional_scalar_widget_is_line_edit_empty_for_none(qapp):
     from qtpy.QtWidgets import QLineEdit
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Mixer freq", type=float, optional=True)
     # None → an empty QLineEdit (spinbox cannot show "unset"); reads back as None.
@@ -271,7 +323,7 @@ def test_optional_scalar_widget_is_line_edit_empty_for_none(qapp):
 
 def test_optional_scalar_widget_round_trips_value(qapp):
     from qtpy.QtWidgets import QLineEdit
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget, read_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget, read_scalar_widget
 
     spec = ScalarSpec(label="Mixer freq", type=float, optional=True)
     w = make_scalar_widget(spec, 5000.0)
@@ -283,8 +335,9 @@ def test_optional_scalar_widget_round_trips_value(qapp):
 
 
 def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
-    from zcu_tools.gui.app.main.adapter import make_default_value
-    from zcu_tools.gui.app.main.ui.fields.containers import (
+    from zcu_tools.gui.cfg import make_default_value
+    from zcu_tools.gui.widgets.cfg import FieldRenderContext, default_cfg_renderers
+    from zcu_tools.gui.widgets.cfg.fields import (
         SectionWidget,
         _CollapsibleSection,
     )
@@ -302,7 +355,14 @@ def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
         .new_draft(CfgSchema(spec, make_default_value(spec)))
         .root
     )
-    w = SectionWidget(field, top_level=True)
+    registry = default_cfg_renderers()
+    w = cast(
+        SectionWidget,
+        registry.render(
+            field,
+            FieldRenderContext(registry=registry, top_level=True),
+        ),
+    )
 
     # Both fields get widgets (grouping is presentation-only, not a value change).
     assert set(w._child_widgets) == {"reps", "mixer_freq"}
@@ -318,8 +378,163 @@ def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
     assert not advanced[0]._toggle_btn.isChecked()  # collapsed by default
 
 
+def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget, default_cfg_renderers
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget, SectionWidget
+
+    inner_spec = CfgSectionSpec(
+        label="Inner",
+        fields={"value": ScalarSpec(label="Value", type=int)},
+    )
+    inner_value = CfgSectionValue(fields={"value": DirectValue(1)})
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[inner_spec])},
+        {
+            "ref": ReferenceValue(
+                chosen_key="<Custom:Inner>",
+                value=inner_value,
+            )
+        },
+    )
+    renderers = default_cfg_renderers()
+    form = CfgFormWidget(renderers=renderers)
+
+    _attach(form, schema, ctrl)
+
+    root = form._root_widget
+    assert isinstance(root, SectionWidget)
+    reference = root._child_widgets["ref"]
+    assert isinstance(reference, ReferenceWidget)
+    assert root._context.registry is renderers
+    assert reference._context.registry is renderers
+    assert isinstance(reference._sub_widget, SectionWidget)
+    assert reference._sub_widget._context.registry is renderers
+
+
+def test_custom_section_factory_renders_root_nested_and_reference_subtree(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget, SectionWidget
+
+    nested_spec = CfgSectionSpec(
+        label="Nested",
+        fields={"nested_value": ScalarSpec(label="Nested value", type=int)},
+    )
+    reference_spec = CfgSectionSpec(
+        label="Reference inner",
+        fields={"ref_value": ScalarSpec(label="Reference value", type=int)},
+    )
+    schema = _schema(
+        {
+            "nested": nested_spec,
+            "reference": ReferenceSpec(kind="module", allowed=[reference_spec]),
+        },
+        {
+            "nested": CfgSectionValue(
+                fields={"nested_value": DirectValue(1)},
+            ),
+            "reference": ReferenceValue(
+                chosen_key="<Custom:Reference inner>",
+                value=CfgSectionValue(fields={"ref_value": DirectValue(2)}),
+            ),
+        },
+    )
+    calls: list[tuple[CfgField, FieldRenderContext]] = []
+    registry = _registry_with_section_factory(
+        _marked_section_factory("custom-section", calls)
+    )
+    form = CfgFormWidget(renderers=registry)
+
+    _attach(form, schema, ctrl)
+
+    root = cast(SectionWidget, form._root_widget)
+    nested = cast(SectionWidget, root._child_widgets["nested"])
+    reference = cast(ReferenceWidget, root._child_widgets["reference"])
+    reference_subtree = cast(SectionWidget, reference._sub_widget)
+    assert root.objectName() == "custom-section"
+    assert nested.objectName() == "custom-section"
+    assert reference_subtree.objectName() == "custom-section"
+    assert {(context.path, context.top_level) for _, context in calls} == {
+        ("", True),
+        ("nested", False),
+        ("reference", True),
+    }
+    assert all(context.registry is registry for _, context in calls)
+
+
+def test_custom_reference_factory_renders_actual_widget(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget, SectionWidget
+
+    calls: list[tuple[CfgField, FieldRenderContext]] = []
+
+    def reference_factory(
+        field: CfgField,
+        context: FieldRenderContext,
+    ) -> FieldWidgetProtocol:
+        calls.append((field, context))
+        widget = ReferenceWidget(cast(ReferenceField, field), context=context)
+        widget.setObjectName("custom-reference")
+        return widget
+
+    inner_spec = CfgSectionSpec(
+        label="Inner",
+        fields={"value": ScalarSpec(label="Value", type=int)},
+    )
+    schema = _schema(
+        {"reference": ReferenceSpec(kind="module", allowed=[inner_spec])},
+        {
+            "reference": ReferenceValue(
+                chosen_key="<Custom:Inner>",
+                value=CfgSectionValue(fields={"value": DirectValue(1)}),
+            )
+        },
+    )
+    registry = _registry_with_factories({ReferenceField: reference_factory})
+    form = CfgFormWidget(renderers=registry)
+
+    _attach(form, schema, ctrl)
+
+    root = cast(SectionWidget, form._root_widget)
+    reference = cast(ReferenceWidget, root._child_widgets["reference"])
+    assert reference.objectName() == "custom-reference"
+    assert [(context.path, context.registry) for _, context in calls] == [
+        ("reference", registry)
+    ]
+
+
+def test_two_forms_render_with_isolated_custom_factories(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    schema = _schema(
+        {"value": ScalarSpec(label="Value", type=int)},
+        {"value": DirectValue(1)},
+    )
+    first_calls: list[tuple[CfgField, FieldRenderContext]] = []
+    second_calls: list[tuple[CfgField, FieldRenderContext]] = []
+    first = CfgFormWidget(
+        renderers=_registry_with_section_factory(
+            _marked_section_factory("first-form", first_calls)
+        )
+    )
+    second = CfgFormWidget(
+        renderers=_registry_with_section_factory(
+            _marked_section_factory("second-form", second_calls)
+        )
+    )
+
+    _attach(first, schema, ctrl)
+    _attach(second, schema, ctrl)
+
+    assert first._root_widget is not None
+    assert second._root_widget is not None
+    assert first._root_widget.objectName() == "first-form"
+    assert second._root_widget.objectName() == "second-form"
+    assert len(first_calls) == 1
+    assert len(second_calls) == 1
+
+
 def test_scalar_widget_minimum_width_reduced(qapp):
-    from zcu_tools.gui.app.main.ui.fields import make_scalar_widget
+    from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget
 
     spec = ScalarSpec(label="Name", type=str)
     w = make_scalar_widget(spec, "demo")
@@ -327,7 +542,7 @@ def test_scalar_widget_minimum_width_reduced(qapp):
 
 
 def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -345,7 +560,7 @@ def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
 
 
 def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
@@ -364,9 +579,9 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
 def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
     from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.gui.session.value_lookup import ValueInfo
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -402,7 +617,7 @@ def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctr
 
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -427,7 +642,7 @@ def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
 
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
     from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
+    from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
@@ -456,7 +671,7 @@ def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
 
 
 def test_read_values_before_populate_raises(qapp):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     w = CfgFormWidget()
     with pytest.raises(RuntimeError):
@@ -464,7 +679,7 @@ def test_read_values_before_populate_raises(qapp):
 
 
 def test_read_schema_before_populate_raises(qapp):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     w = CfgFormWidget()
     with pytest.raises(RuntimeError):
@@ -472,7 +687,7 @@ def test_read_schema_before_populate_raises(qapp):
 
 
 def test_populate_scalar_fields_round_trip(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {
@@ -492,9 +707,98 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
     assert out.fields["freq"].value == pytest.approx(6.0)  # type: ignore[union-attr]
 
 
+def test_attach_bad_renderer_return_leaves_draft_callbacks_empty(qapp, ctrl):
+    from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    def bad_factory(
+        field: CfgField,
+        context: FieldRenderContext,
+    ) -> FieldWidgetProtocol:
+        del field, context
+        return cast(FieldWidgetProtocol, QWidget())
+
+    schema = _schema(
+        {"value": ScalarSpec(label="Value", type=int)},
+        {"value": DirectValue(1)},
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget(
+        renderers=_registry_with_section_factory(bad_factory),
+    )
+
+    with pytest.raises(TypeError, match="expected FieldWidgetProtocol"):
+        form.attach(draft)
+
+    assert draft.on_change._callbacks == []
+    assert draft.on_validity_changed._callbacks == []
+    assert form._draft is None
+    assert form._root_widget is None
+    assert form._field_decorations == {}
+
+
+def test_attach_factory_exception_leaves_draft_callbacks_empty(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    def failing_factory(
+        field: CfgField,
+        context: FieldRenderContext,
+    ) -> FieldWidgetProtocol:
+        del field, context
+        raise RuntimeError("factory exploded")
+
+    schema = _schema(
+        {"value": ScalarSpec(label="Value", type=int)},
+        {"value": DirectValue(1)},
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget(
+        renderers=_registry_with_section_factory(failing_factory),
+    )
+
+    with pytest.raises(RuntimeError, match="factory exploded"):
+        form.attach(draft)
+
+    assert draft.on_change._callbacks == []
+    assert draft.on_validity_changed._callbacks == []
+    assert form._draft is None
+    assert form._root_widget is None
+
+
+def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    schema = _schema(
+        {"value": ScalarSpec(label="Value", type=int, required=True)},
+        {"value": DirectValue(1)},
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    validity: list[bool] = []
+    form.validity_changed.connect(validity.append)
+
+    form.attach(draft)
+    assert draft.on_change._callbacks == [form._on_draft_changed]
+    assert draft.on_validity_changed._callbacks == [form._on_draft_validity_changed]
+    assert validity == [True]
+
+    form.detach()
+    assert draft.on_change._callbacks == []
+    assert draft.on_validity_changed._callbacks == []
+
+    form.attach(draft)
+    assert draft.on_change._callbacks == [form._on_draft_changed]
+    assert draft.on_validity_changed._callbacks == [form._on_draft_validity_changed]
+    assert validity == [True, True]
+
+    value_field = cast(ScalarField, draft.root.fields["value"])
+    value_field.set_value(None)
+    assert validity == [True, True, False]
+
+
 def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
     from qtpy.QtWidgets import QScrollArea, QSpinBox  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
@@ -542,14 +846,8 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
 
 
 def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
-    """The widget repaints when the (service-owned) model refreshes an EvalValue.
-
-    Under ADR-0008 the service drives ``refresh_external`` on the model it owns;
-    the attached widget reflects it for free via the model's bubbling on_change.
-    Here we drive the model directly (the service-bus path is covered in
-    test_cfg_editor) and assert the widget's read-back + schema_changed fire.
-    """
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    """The widget reflects expression refreshes from its attached draft."""
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -565,7 +863,7 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     model = _attach(w, schema, ctrl)
 
     md.r_f = 6100.0
-    model.refresh_expressions()  # the service does this in production
+    model.refresh_expressions()
 
     val = w.read_values().fields["freq"]
     assert isinstance(val, EvalValue)
@@ -574,9 +872,8 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
 
 
 def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
-    """The widget no longer touches the EventBus (ADR-0008 moved refresh to the
-    service). attach/detach must not register any bus subscription."""
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    """Attach/detach never registers an EventBus subscription."""
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
@@ -591,7 +888,7 @@ def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
 
 
 def test_read_schema_returns_cfg_schema(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
@@ -606,7 +903,7 @@ def test_read_schema_returns_cfg_schema(qapp, ctrl):
 
 def test_read_values_does_not_mutate_original(qapp, ctrl):
     from qtpy.QtWidgets import QSpinBox  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {"reps": ScalarSpec(label="Reps", type=int)},
@@ -625,7 +922,7 @@ def test_read_values_does_not_mutate_original(qapp, ctrl):
 
 
 def test_populate_sweep_field_round_trip(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -645,8 +942,8 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
 
 def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
     from qtpy.QtWidgets import QLabel, QSizePolicy
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.common import CenteredSweepWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget
 
     schema = _schema(
         {
@@ -711,7 +1008,7 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -727,8 +1024,8 @@ def test_populate_sweep_field_step_preserved(qapp, ctrl):
 
 
 def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -749,8 +1046,8 @@ def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
 
 
 def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -769,9 +1066,9 @@ def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
 
 
 def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
-    from zcu_tools.gui.app.main.adapter import EvalValue
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
+    from zcu_tools.gui.cfg import EvalValue
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
     schema = _schema(
         {"f": SweepSpec(label="Freq")},
@@ -793,7 +1090,7 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
 
 
 def test_populate_nested_section_round_trip(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {
@@ -814,7 +1111,7 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
 
 def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
     from qtpy.QtWidgets import QLabel
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {
@@ -835,7 +1132,7 @@ def test_nested_sections_render_without_outer_duplicate_label(qapp, ctrl):
 
 
 def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
@@ -902,8 +1199,8 @@ def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
 
 
 def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import SectionWidget
 
     fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
@@ -964,11 +1261,11 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
 
 
 def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import (
+    from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
         FieldDecorationPatch,
     )
-    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
+    from zcu_tools.gui.widgets.cfg.fields import SectionWidget
 
     class BadgeProvider:
         def __init__(self, badge: str) -> None:
@@ -1012,11 +1309,11 @@ def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
 
 def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl):
     from qtpy.QtWidgets import QWidget
-    from zcu_tools.gui.app.main.ui.cfg_form import (
+    from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
         FieldDecorationPatch,
     )
-    from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
+    from zcu_tools.gui.widgets.cfg.fields import ElidedLabel
 
     class TooltipProvider:
         def decoration_for(
@@ -1063,11 +1360,11 @@ def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl)
 
 def test_sweep_edge_decoration_disables_only_that_edge(qapp, ctrl):
     from qtpy.QtWidgets import QLabel
-    from zcu_tools.gui.app.main.ui.cfg_form import (
+    from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
         FieldDecorationPatch,
     )
-    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
+    from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
     class StopGeneratedProvider:
         def decoration_for(
@@ -1125,7 +1422,7 @@ def test_choice_section_rejects_unknown_choice_fields():
 
 
 def test_choice_section_unknown_selector_value_fast_fails(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
@@ -1171,7 +1468,7 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
     """All LiteralSpec fields render no widget — discriminators (type/style) and
     adapter lock_literal'd fields (e.g. a sweep-driven freq) alike."""
     from qtpy.QtWidgets import QLabel
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
         {
@@ -1202,11 +1499,11 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
 
 def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.ui.cfg_form import (
+    from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,
         FieldDecorationPatch,
     )
-    from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
+    from zcu_tools.gui.widgets.cfg.fields import ElidedLabel
 
     class RevealLiteralProvider:
         def decoration_for(
@@ -1245,8 +1542,8 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
 
 def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
     custom_spec = CfgSectionSpec(
         label="Pulse Shape",
@@ -1293,8 +1590,8 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
 
 def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
     custom_spec = CfgSectionSpec(
         label="Gaussian",
@@ -1336,8 +1633,8 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
 
 def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
     from qtpy.QtWidgets import QFormLayout
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import SectionWidget
 
     custom_spec = CfgSectionSpec(
         label="Long Custom Module Name",
@@ -1365,8 +1662,8 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
 
 
 def test_populate_module_ref_field_round_trip(qapp, ctrl):
-    from zcu_tools.gui.app.main.adapter import ReferenceSpec, ReferenceValue
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.cfg import ReferenceSpec, ReferenceValue
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     allowed_spec = CfgSectionSpec(
         label="Pulse",
@@ -1402,8 +1699,8 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 def test_populate_full_fake_freq_schema(qapp, ctrl):
     """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.app.main.adapter import ReferenceSpec
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+    from zcu_tools.gui.cfg import ReferenceSpec
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctx = _make_ctx()
     schema = FakeFreqAdapter().make_default_cfg(ctx)
@@ -1430,7 +1727,8 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 
 
 def test_section_widget_no_header(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
+    from zcu_tools.gui.widgets.cfg import FieldRenderContext, default_cfg_renderers
+    from zcu_tools.gui.widgets.cfg.fields import SectionWidget
 
     spec = CfgSectionSpec(
         label="TestSection",
@@ -1439,13 +1737,34 @@ def test_section_widget_no_header(qapp, ctrl):
     val = CfgSectionValue(fields={"val": DirectValue(10)})
     field = MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, val)).root
 
-    # 1. no_header=False (default)
-    w1 = SectionWidget(field, top_level=False, no_header=False)
+    # A regular nested section owns a collapsible header.
+    renderers = default_cfg_renderers()
+    w1 = cast(
+        SectionWidget,
+        renderers.render(
+            field,
+            FieldRenderContext(
+                registry=renderers,
+                path="section",
+                top_level=False,
+            ),
+        ),
+    )
     assert w1._container._toggle_btn is not None
     assert w1._container._header_label is not None
 
-    # 2. no_header=True
-    w2 = SectionWidget(field, top_level=False, no_header=True)
+    # A reference subtree boundary omits its duplicate section header.
+    w2 = cast(
+        SectionWidget,
+        renderers.render(
+            field,
+            FieldRenderContext(
+                registry=renderers,
+                path="reference",
+                top_level=True,
+            ),
+        ),
+    )
     assert w2._container._toggle_btn is None
     assert w2._container._header_label is None
 
@@ -1454,8 +1773,8 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from typing import Any, cast
 
     from qtpy.QtWidgets import QDoubleSpinBox
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()
@@ -1548,7 +1867,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
 
 
 def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
-    from zcu_tools.gui.app.main.adapter import ReferenceSpec, ReferenceValue
+    from zcu_tools.gui.cfg import ReferenceSpec, ReferenceValue
 
     inner_spec = CfgSectionSpec(
         label="Pulse",
@@ -1576,8 +1895,8 @@ def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
 
 
 def test_optional_module_ref_renders_none_option(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
@@ -1592,8 +1911,8 @@ def test_optional_module_ref_renders_none_option(qapp, ctrl):
 
 
 def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
@@ -1617,9 +1936,9 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
     """A LINKED ref to an absent library key shows the red missing-ref badge and
     is invalid (recoverable — re-adding the name re-links it)."""
-    from zcu_tools.gui.app.main.adapter import LiteralSpec
-    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
+    from zcu_tools.gui.cfg import LiteralSpec
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.meta_tool import ModuleLibrary
 
     pulse_spec = CfgSectionSpec(

@@ -2168,19 +2168,13 @@ def test_real_builders_restrict_generated_readout_to_pulse_shape():
         assert [spec.label for spec in readout.allowed] == ["Pulse Readout"]
 
 
-# --- 3. seam invariant: cfg app imports use an exact transitional allowlist -----
+# --- 3. seam invariant: autoflux production has no measure-app imports ----------
 
 
-def test_autoflux_measure_app_imports_match_transitional_allowlist():
+def test_autoflux_measure_app_imports_are_zero():
     pkg = pathlib.Path(__file__).resolve().parents[2] / (
         "lib/zcu_tools/gui/app/autofluxdep"
     )
-    allowed: dict[pathlib.Path, set[str]] = {
-        pkg / "cfg" / "form.py": {
-            "zcu_tools.gui.app.main.ui.cfg_form",
-            "zcu_tools.gui.app.main.ui.fields.common",
-        },
-    }
     actual: dict[pathlib.Path, set[str]] = {}
     for py in pkg.rglob("*.py"):
         tree = ast.parse(py.read_text(encoding="utf-8"))
@@ -2199,7 +2193,4 @@ def test_autoflux_measure_app_imports_match_transitional_allowlist():
     actual_relative = {
         str(path.relative_to(pkg)): modules for path, modules in actual.items()
     }
-    allowed_relative = {
-        str(path.relative_to(pkg)): modules for path, modules in allowed.items()
-    }
-    assert actual_relative == allowed_relative
+    assert actual_relative == {}

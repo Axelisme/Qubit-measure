@@ -1,8 +1,10 @@
-"""Fields package."""
+"""Shared cfg field widgets."""
 
 from __future__ import annotations
 
 from .common import (
+    CenteredSweepWidget,
+    ElidedLabel,
     LiteralWidget,
     ScalarWidget,
     SweepWidget,
@@ -17,11 +19,10 @@ from .containers import (
     SectionWidget,
     _CollapsibleSection,
 )
-from .registry import get_widget_cls, register_widget
 
 __all__ = [
-    "get_widget_cls",
-    "register_widget",
+    "CenteredSweepWidget",
+    "ElidedLabel",
     "LiteralWidget",
     "ScalarWidget",
     "SweepWidget",

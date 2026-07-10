@@ -32,8 +32,7 @@ from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
-
-from .cfg_form import CfgFormWidget
+from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller

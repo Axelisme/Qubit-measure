@@ -34,7 +34,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from .fields import _CollapsibleSection
+from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller

@@ -1,14 +1,13 @@
 """CfgFormWidget — renders a CfgSchema as an interactive reactive Qt form.
 
-Uses CfgDraft as the active data layer and delegates field rendering to
-lib/zcu_tools/gui/ui/fields/.
+Uses CfgDraft as the active data layer and delegates field rendering to the
+shared cfg field widgets.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, cast
 
 from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -17,18 +16,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.main.adapter import (
-    CenteredSweepSpec,
+from zcu_tools.gui.cfg import (
     CfgNodeSpec,
     CfgNodeValue,
-    CfgSectionSpec,
     ChoiceSectionSpec,
     DirectValue,
     EvalValue,
-    LiteralSpec,
-    ReferenceSpec,
-    ScalarSpec,
-    SweepSpec,
 )
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
@@ -40,86 +33,35 @@ from zcu_tools.gui.cfg.binding import (
     SweepField,
 )
 
-from .fields import SectionWidget, TextInputEnhancer
+from .decoration import (
+    FieldDecoration,
+    FieldDecorationProvider,
+    default_decoration_for_spec,
+)
+from .registry import (
+    FieldRenderContext,
+    FieldWidgetProtocol,
+    FrozenFieldRendererRegistry,
+    TextInputEnhancer,
+    default_cfg_renderers,
+)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue
+    from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue
 
 logger = logging.getLogger(__name__)
 
-Tone = Literal["normal", "muted", "info", "warning", "error"]
-
-
-@dataclass(frozen=True)
-class FieldDecoration:
-    """Presentation contract for one rendered cfg field path."""
-
-    hidden: bool = False
-    enabled: bool = True
-    tone: Tone = "normal"
-    badge: str = ""
-    tooltip: str = ""
-    label_suffix: str = ""
-
-    def merge(self, patch: FieldDecorationPatch | None) -> FieldDecoration:
-        if patch is None:
-            return self
-        updates = {
-            name: value
-            for name, value in {
-                "hidden": patch.hidden,
-                "enabled": patch.enabled,
-                "tone": patch.tone,
-                "badge": patch.badge,
-                "tooltip": patch.tooltip,
-                "label_suffix": patch.label_suffix,
-            }.items()
-            if value is not None
-        }
-        return replace(self, **updates)
-
-
-@dataclass(frozen=True)
-class FieldDecorationPatch:
-    """Sparse app-specific patch over a field's default decoration."""
-
-    hidden: bool | None = None
-    enabled: bool | None = None
-    tone: Tone | None = None
-    badge: str | None = None
-    tooltip: str | None = None
-    label_suffix: str | None = None
-
-
-class FieldDecorationProvider(Protocol):
-    """App-specific decoration lookup keyed by full value-tree path."""
-
-    def decoration_for(
-        self,
-        path: str,
-        spec: CfgNodeSpec,
-        value: CfgNodeValue | None,
-    ) -> FieldDecorationPatch | None: ...
-
 
 class CfgFormWidget(QWidget):
-    """A pluggable viewer over a service-owned CfgDraft (ADR-0008).
+    """A pluggable renderer over a caller-owned ``CfgDraft`` (ADR-0008).
 
-    The widget does *not* own a CfgDraft — it ``attach``es to one that the
-    ``CfgEditorService`` owns (renders it + reflects its changes) and
-    ``detach``es without tearing it down. This makes an agent edit and a user
-    view converge on the same model (WYSIWYG), and lets a model outlive the
-    widget. md/ml-change refresh of EvalValue snapshots is the service's job (it
-    owns the model); the widget repaints for free via the model's ``on_change``.
-
-    Whether changes propagate to ``State.cfg_schema`` depends on who handles
-    ``schema_changed``: in the tab pane it is bound to ``update_tab_cfg``
-    (auto-commit); in inspect / writeback dialogs the host commits on Apply.
+    ``attach`` renders and observes the draft. ``detach`` removes those
+    observations and the Qt tree without closing the draft. The host decides
+    whether and when emitted snapshots cross its commit boundary.
     """
 
     validity_changed: Signal = Signal(bool)
-    # Auto-commit signal (in tab mode) / draft-change notification (in dialog
-    # mode). Payload is a freshly built CfgSchema snapshot of the LiveModel.
+    # Payload is a fresh CfgSchema snapshot of the attached draft.
     schema_changed: Signal = Signal(object)
 
     def __init__(
@@ -129,13 +71,15 @@ class CfgFormWidget(QWidget):
         field_label_max_width: int | None = None,
         decoration_provider: FieldDecorationProvider | None = None,
         text_input_enhancer: TextInputEnhancer | None = None,
+        renderers: FrozenFieldRendererRegistry | None = None,
     ) -> None:
         super().__init__(parent)
         self._draft: CfgDraft | None = None
-        self._root_widget: SectionWidget | None = None
+        self._root_widget: QWidget | None = None
         self._field_label_max_width = field_label_max_width
         self._decoration_provider = decoration_provider
         self._text_input_enhancer = text_input_enhancer
+        self._renderers = default_cfg_renderers() if renderers is None else renderers
         self._field_decorations: dict[str, FieldDecoration] = {}
         self._choice_state: tuple[tuple[str, str], ...] = ()
         self._pending_section_refresh_paths: set[str] = set()
@@ -157,34 +101,50 @@ class CfgFormWidget(QWidget):
         scroll.setWidget(self._inner)
 
     def attach(self, draft: CfgDraft) -> None:
-        """Render + reflect a service-owned ``CfgDraft``.
-
-        Connects to the model's signals and builds the widget tree. The widget
-        does NOT own the model — ``detach`` (and Qt destruction) never tears it
-        down; only the ``CfgEditorService`` does.
-        """
+        """Render and observe a caller-owned ``CfgDraft`` transactionally."""
         self.detach()
 
-        self._draft = draft
         self._field_decorations = {}
-        self._choice_state = _choice_state_for_model(draft.root)
-        draft.on_validity_changed.connect(self.validity_changed.emit)
-        draft.on_change.connect(self._on_draft_changed)
-
-        self._root_widget = SectionWidget(
-            draft.root,
+        choice_state = _choice_state_for_model(draft.root)
+        context = FieldRenderContext(
+            registry=self._renderers,
             top_level=True,
             field_label_max_width=self._field_label_max_width,
             decoration_for_path=self._resolve_decoration,
             text_input_enhancer=self._text_input_enhancer,
         )
-        self._apply_editing_enabled()
-        self._inner_layout.insertWidget(
-            self._inner_layout.count() - 1, self._root_widget
-        )
+        try:
+            root = self._renderers.render(draft.root, context)
+        except Exception:
+            self._field_decorations = {}
+            self._choice_state = ()
+            raise
+
+        root_widget = cast(QWidget, root)
+        self._draft = draft
+        self._root_widget = root_widget
+        self._choice_state = choice_state
+        try:
+            draft.on_validity_changed.connect(self._on_draft_validity_changed)
+            draft.on_change.connect(self._on_draft_changed)
+            self._apply_editing_enabled()
+            self._inner_layout.insertWidget(
+                self._inner_layout.count() - 1,
+                root_widget,
+            )
+        except Exception:
+            draft.on_change.disconnect(self._on_draft_changed)
+            draft.on_validity_changed.disconnect(self._on_draft_validity_changed)
+            self._draft = None
+            self._root_widget = None
+            cast(FieldWidgetProtocol, root).teardown()
+            root_widget.deleteLater()
+            self._field_decorations = {}
+            self._choice_state = ()
+            raise
 
         self.validity_changed.emit(draft.is_valid())
-        logger.debug("CfgFormWidget.attach: built reactive form over owned draft")
+        logger.debug("CfgFormWidget.attach: built reactive form over attached draft")
 
     def set_editing_enabled(self, enabled: bool) -> None:
         """Enable or disable editing without disabling the scroll container."""
@@ -192,21 +152,19 @@ class CfgFormWidget(QWidget):
         self._apply_editing_enabled()
 
     def detach(self) -> None:
-        """Disconnect from the model + drop the widget tree, WITHOUT teardown.
+        """Unsubscribe and drop the Qt tree without closing the draft."""
+        draft = self._draft
+        self._draft = None
+        if draft is not None:
+            draft.on_change.disconnect(self._on_draft_changed)
+            draft.on_validity_changed.disconnect(self._on_draft_validity_changed)
 
-        The model is service-owned and may outlive this widget (agent still
-        editing it); only its signal bindings + the Qt widget tree go away.
-        """
-        if self._draft is not None:
-            self._draft.on_change.disconnect(self._on_draft_changed)
-            self._draft.on_validity_changed.disconnect(self.validity_changed.emit)
-            self._draft = None  # NOTE: detach never closes a service-owned draft.
-
-        if self._root_widget:
-            self._root_widget.teardown()
-            self._inner_layout.removeWidget(self._root_widget)
-            self._root_widget.deleteLater()
-            self._root_widget = None
+        root = self._root_widget
+        self._root_widget = None
+        if root is not None:
+            cast(FieldWidgetProtocol, root).teardown()
+            self._inner_layout.removeWidget(root)
+            root.deleteLater()
         self._field_decorations = {}
         self._choice_state = ()
         self._pending_section_refresh_paths = set()
@@ -245,13 +203,7 @@ class CfgFormWidget(QWidget):
         return self._draft.snapshot().value
 
     def read_schema(self) -> CfgSchema:
-        """Snapshot the LiveModel draft as a fresh ``CfgSchema``.
-
-        Tab callers should normally read ``State.cfg_schema`` instead (the
-        committed truth, kept in sync by auto-commit). This method exists for
-        local-draft hosts (inspect / writeback dialogs) that need to capture
-        the unsaved draft at their own Apply boundary.
-        """
+        """Snapshot the attached draft as a fresh ``CfgSchema``."""
         if self._draft is None:
             raise RuntimeError("attach() must be called before read_schema()")
         return self._draft.snapshot()
@@ -279,6 +231,9 @@ class CfgFormWidget(QWidget):
         changed_selectors = _changed_choice_selector_paths(self._choice_state, state)
         self._choice_state = state
         self._queue_section_refresh(_parent_section_paths(changed_selectors))
+
+    def _on_draft_validity_changed(self, valid: bool) -> None:
+        self.validity_changed.emit(valid)
 
     def _resolve_decoration(self, path: str, field: CfgField) -> FieldDecoration:
         decoration = self._decoration_for_field(path, field)
@@ -344,9 +299,10 @@ class CfgFormWidget(QWidget):
         root = self._root_widget
         if root is None:
             return
+        root_field_widget = cast(FieldWidgetProtocol, root)
         for path in _minimal_section_paths(section_paths):
             self._drop_decorations_under(path)
-            if not root.refresh_section(path):
+            if not root_field_widget.refresh_section(path):
                 # A stale or unsupported path should not leave the form half-updated.
                 if self._draft is not None:
                     self.attach(self._draft)
@@ -422,25 +378,7 @@ class CfgFormWidget(QWidget):
         return None
 
 
-def default_decoration_for_spec(spec: CfgNodeSpec) -> FieldDecoration:
-    """Return the generic decoration implied by a pure cfg spec."""
-    if isinstance(spec, LiteralSpec):
-        return FieldDecoration(hidden=True, enabled=False)
-    if isinstance(spec, (ScalarSpec, SweepSpec, CenteredSweepSpec)):
-        return FieldDecoration(enabled=bool(spec.editable), tooltip=spec.tooltip)
-    if isinstance(spec, (ReferenceSpec, CfgSectionSpec)):
-        return FieldDecoration(enabled=True)
-    raise TypeError(f"Unsupported cfg spec type {type(spec).__name__}")
-
-
-__all__ = [
-    "CfgFormWidget",
-    "FieldDecoration",
-    "FieldDecorationPatch",
-    "FieldDecorationProvider",
-    "Tone",
-    "default_decoration_for_spec",
-]
+__all__ = ["CfgFormWidget"]
 
 
 def _choice_state_for_model(model: SectionField) -> tuple[tuple[str, str], ...]:

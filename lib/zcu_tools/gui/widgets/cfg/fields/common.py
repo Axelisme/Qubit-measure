@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.cfg import (
+    DirectValue,
+    EvalValue,
+    ScalarSpec,
+    default_value_for_type,
+)
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
     CfgField,
@@ -33,16 +39,11 @@ from zcu_tools.gui.cfg.binding import (
 )
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
-from ...adapter import DirectValue, EvalValue, default_value_for_type
-from .registry import FieldDecorationProtocol, register_widget
-
-if TYPE_CHECKING:
-    from ...adapter import ScalarSpec
-
+from ..decoration import FieldDecorationProtocol
+from ..registry import TextInputEnhancer
 
 FIELD_INPUT_MIN_WIDTH = 20
 FIELD_LABEL_MAX_WIDTH = 80
-TextInputEnhancer = Callable[[QLineEdit], object | None]
 
 _TONE_STYLES = {
     "muted": "color: #6b7280;",
@@ -345,7 +346,6 @@ class BaseLiveWidget(QWidget):
         return False
 
 
-@register_widget(LiteralField)
 class LiteralWidget(QLineEdit):
     """Read-only display for fixed literal values when a view reveals them."""
 
@@ -369,7 +369,6 @@ class LiteralWidget(QLineEdit):
         return False
 
 
-@register_widget(ScalarField)
 class ScalarWidget(BaseLiveWidget):
     """Generic input widget for ScalarField."""
 
@@ -608,7 +607,6 @@ class ScalarWidget(BaseLiveWidget):
         )
 
 
-@register_widget(SweepField)
 class SweepWidget(BaseLiveWidget):
     """Inline 2x2 input for start/stop/expts/step with synchronized updates."""
 
@@ -719,7 +717,6 @@ class SweepWidget(BaseLiveWidget):
             self._updating = False
 
 
-@register_widget(CenteredSweepField)
 class CenteredSweepWidget(BaseLiveWidget):
     """Inline 2x2 input for center/span/expts/step with synchronized updates."""
 

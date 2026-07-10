@@ -10,6 +10,8 @@ from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets.cfg import CfgFormWidget
+from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +40,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from .analyze_form import AnalyzeFormWidget
-from .cfg_form import CfgFormWidget
-from .fields import _CollapsibleSection
 from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:

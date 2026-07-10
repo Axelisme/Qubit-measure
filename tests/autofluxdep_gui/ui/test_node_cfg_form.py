@@ -1,9 +1,8 @@
-"""Phase 160b — NodeCfgForm: typed cfg form over a PlacedNode's schema SSOT.
+"""NodeCfgForm: typed shared cfg form over a PlacedNode's schema SSOT.
 
-The node detail pane's edit form is now the measure CfgFormWidget (reused via the
-``cfg/form`` seam) bound to a ``CfgDraft`` over the placement's schema.
-These tests drive the binding fields the form renders (the same surface a user spin /
-line-edit drives) and assert:
+The node detail pane uses ``zcu_tools.gui.widgets.cfg.CfgFormWidget`` with an
+autoflux-owned binding over the placement schema. These tests drive the rendered
+binding fields and assert:
 
 - the rendered field set == the node's declared knob keys (spec keys);
 - the rendered root field set == the node's declared section keys;
@@ -14,8 +13,8 @@ line-edit drives) and assert:
   value stays — no malformed write);
 - the run-time read-only lock disables editing while keeping values visible.
 
-No qtbot: the repo drives widgets directly under the autouse ``qapp`` fixture
-(mirrors ``tests/gui/ui/test_cfg_form.py``).
+No qtbot: the repo drives widgets directly under the autouse ``qapp`` fixture,
+matching ``tests/gui/widgets/cfg/test_form.py``.
 """
 
 from __future__ import annotations
@@ -41,10 +40,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     ScalarSpec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
-from zcu_tools.gui.app.autofluxdep.cfg.form import (
-    CfgFormWidget,
-    FieldDecorationPatch,
-)
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
     Node,
@@ -56,9 +51,13 @@ from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import (
     NODE_FIELD_LABEL_MAX_WIDTH,
     NodeCfgForm,
 )
-from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
 from zcu_tools.gui.cfg.binding import SectionField
 from zcu_tools.gui.session.events import SessionEvent
+from zcu_tools.gui.widgets.cfg import (
+    CfgFormWidget,
+    FieldDecorationPatch,
+)
+from zcu_tools.gui.widgets.cfg.fields import ElidedLabel
 
 from .._helpers import node_field, node_section, sectioned_node_schema
 
@@ -535,7 +534,7 @@ def test_ro_optimize_previous_best_ranges_are_editable_initial_fields(qapp):
 
 def test_lenrabi_auto_sweep_marks_only_stop_generated(qapp):
     from qtpy.QtWidgets import QLabel
-    from zcu_tools.gui.app.main.ui.fields.common import SweepWidget
+    from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
     ctrl = build_core()
     node = ctrl.add_node_by_type("lenrabi")

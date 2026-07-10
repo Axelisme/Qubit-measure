@@ -26,8 +26,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
 )
 from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
-
-from .cfg_form import CfgFormWidget
+from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller

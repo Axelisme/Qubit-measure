@@ -2,7 +2,9 @@ from unittest.mock import MagicMock, patch
 
 from qtpy.QtWidgets import QCheckBox, QDialog, QLineEdit, QPushButton
 from zcu_tools.gui.app.main.adapter import MetaDictWriteback, ModuleWriteback
+from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 
 
 def _find_open_dialog(title_prefix: str) -> QDialog:
@@ -151,7 +153,12 @@ def test_edit_cfg_item_can_change_target_name(qapp):
     item.editor_id = "editor-9"
 
     ctrl = MagicMock()
-    ctrl.get_cfg_editor_draft.return_value = MagicMock()
+    ctrl.get_cfg_editor_draft.return_value = MeasureCfgBindings(ctrl).new_draft(
+        CfgSchema(
+            spec=CfgSectionSpec(fields={}),
+            value=CfgSectionValue(fields={}),
+        )
+    )
     widget = WritebackWidget(ctrl)
     widget.populate([item])
 

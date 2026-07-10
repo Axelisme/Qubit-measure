@@ -1,8 +1,8 @@
 """NodeCfgForm — the typed cfg form for one PlacedNode's user knobs.
 
 Replaces the prototype's text ``ParamForm`` (Phase 160b): the node's knobs are
-now a typed ``NodeCfgSchema`` (the per-placement SSOT), so the form reuses the
-measure-app cfg form machinery via the ``cfg/form`` seam. The placement's schema
+now a typed ``NodeCfgSchema`` (the per-placement SSOT), so the form uses the
+shared ``zcu_tools.gui.widgets.cfg`` renderer. The placement's schema
 value tree is split into a main "Default cfg" form and, when present, a
 "Generation overrides" form, each backed by its own ``CfgDraft`` and
 rendered by ``CfgFormWidget``. This gives int/float spin widgets, a 3-field sweep
@@ -39,12 +39,9 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     make_default_value,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
-from zcu_tools.gui.app.autofluxdep.cfg.form import (
-    CfgFormWidget,
-    FieldDecorationPatch,
-)
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.session.events import SessionEvent
+from zcu_tools.gui.widgets.cfg import CfgFormWidget, FieldDecorationPatch
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-10 — Qt-free cfg binding ownership
+**Last updated:** 2026-07-10 — shared Qt cfg widget ownership
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -17,7 +17,7 @@ framework 只看 `ExpAdapterProtocol`。
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
 - `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators。
 - `ui/`：Qt widgets、MainWindow top-level façade、tab-local `ExpTabWidget`、
-  cfg form、writeback view、feedback/prompt widgets。
+  writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns tab-local rendering and receives tab actions through a
   narrow `TabActions` port; `MainWindow` adapts those actions to top-level
   handlers.
@@ -29,6 +29,8 @@ Shared layers:
 
 - `zcu_tools.gui.cfg`：Qt-free Spec/Value model、`CfgSchema` data carrier、inheritance、
   persistence codec與generic finished-cfg validation/lowering ports。
+- `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
+  instance-owned frozen exact renderer registry。
 - `zcu_tools.gui.session`：context、SoC、device、startup、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
@@ -157,7 +159,7 @@ dynamic scalar options與ValueRef resolution policy；widget只讀field API，sh
 app-local policy。device selector是required string `ScalarSpec`，wire value維持`DirectValue(str)`。
 measure composition另以generic `QLineEdit -> keepalive object` enhancer seam安裝
 `ValueSourceInputController`，保留eval input的completion與resolve-on-space；shared binding仍
-不import ValueRef或session。
+不import ValueRef或session，shared widget只接收generic enhancer callable。
 
 Sweep-like fields keep their UI value model until this lowering boundary:
 `SweepSpec` stores `start` / `stop` / `expts`, while `CenteredSweepSpec` stores
@@ -178,7 +180,12 @@ Adapter defaults are assembled in `experiment/v2_gui` with `CfgBuilder` and the
 role table. Locked literals are declared in `cfg_spec()`; adapter defaults do not
 hand-write those values.
 
-`CfgFormWidget` accepts an optional field decoration provider keyed by full value
+`CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
+每個form使用自己的frozen exact renderer registry；固定renderer factory接收immutable
+presentation context，root與recursive section/reference共享該instance，沒有consumer-side
+constructor dispatch、global decorator registration或inheritance fallback。attach在成功build
+root後才訂閱draft，detach會解除change/validity callbacks但不close draft。`CfgFormWidget`
+accepts an optional field decoration provider keyed by full value
 tree path. The shared widget owns only generic presentation metadata
 (`hidden`/`enabled`/tone/badge/tooltip/label suffix) and computes the default
 decoration from the spec; app-specific policy such as generated fields stays in

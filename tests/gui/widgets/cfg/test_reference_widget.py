@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.cfg import (
     CfgSectionSpec,
@@ -13,6 +14,9 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
 )
 from zcu_tools.gui.cfg.binding import ReferenceField, ResolvedReference
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
 _INNER_LABEL = "readout_rf"
 
@@ -60,12 +64,21 @@ def _make_field(catalog: _Catalog) -> ReferenceField:
     )
 
 
-def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
+def _make_widget(field: ReferenceField) -> ReferenceWidget:
+    from zcu_tools.gui.widgets.cfg import FieldRenderContext, default_cfg_renderers
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
+    registry = default_cfg_renderers()
+    return cast(
+        ReferenceWidget,
+        registry.render(field, FieldRenderContext(registry=registry)),
+    )
+
+
+def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):  # noqa: ARG001
     catalog = _Catalog()
     field = _make_field(catalog)
-    widget = ReferenceWidget(field)
+    widget = _make_widget(field)
     count_before = widget._combo.count()
 
     catalog.entries["my_module"] = ResolvedReference(_INNER_LABEL, _inner_value())
@@ -79,19 +92,15 @@ def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):  # noqa: AR
 
 
 def test_module_ref_widget_teardown_disconnects_field_callbacks(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
-
     field = _make_field(_Catalog())
-    widget = ReferenceWidget(field)
+    widget = _make_widget(field)
     widget.teardown()
 
     assert widget._on_model_changed not in field.on_change._callbacks
 
 
 def test_module_ref_widget_initial_combo_without_catalog_keys(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
-
-    widget = ReferenceWidget(_make_field(_Catalog()))
+    widget = _make_widget(_make_field(_Catalog()))
 
     assert [
         widget._combo.itemText(index) for index in range(widget._combo.count())
