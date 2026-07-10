@@ -7,7 +7,6 @@ generated from it. See ADR-0009 / ADR-0012.
 """
 
 from .helpers import (
-    make_default_value,
     make_trig_offset,
     patch_pulse_fields,
     patch_ro_cfg_fields,
@@ -28,7 +27,6 @@ __all__ = [
     "role_blank",
     "role_ref",
     # shared value-tree primitives
-    "make_default_value",
     "make_trig_offset",
     "patch_pulse_fields",
     "patch_ro_cfg_fields",

@@ -28,15 +28,17 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
-    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
-    SweepSpec,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    FloatSpec,
+    SweepSpec,
 )
 
 RoOptFreqRunResult: TypeAlias = FreqResult

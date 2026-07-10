@@ -1,36 +1,8 @@
-"""GUI adapter package — contracts, types, lowering, and inheritance helpers."""
+"""Measure GUI adapter contracts, request/result types, and lowering helpers."""
 
 # Session-core value types live in ``gui/session/types``; re-exported here because
 # ``ExpAdapterProtocol``'s signatures speak in them (the adapter contract's
 # vocabulary), so adapter authors import them from the adapter package.
-from zcu_tools.gui.cfg import (
-    CenteredSweepSpec,
-    CenteredSweepValue,
-    CfgNodeSpec,
-    CfgNodeValue,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ChoiceBinding,
-    ChoiceSectionSpec,
-    DirectValue,
-    EvalValue,
-    FloatSpec,
-    IntSpec,
-    LiteralSpec,
-    ReferenceSpec,
-    ReferenceValue,
-    ScalarLeafInput,
-    ScalarSpec,
-    ScalarValue,
-    SweepSpec,
-    SweepValue,
-    align_locked_literals,
-    default_value_for_type,
-    inherit_from,
-    make_default_value,
-    select_ref_value_spec,
-)
 from zcu_tools.gui.session.types import (
     ContextReadiness,
     ExpContext,

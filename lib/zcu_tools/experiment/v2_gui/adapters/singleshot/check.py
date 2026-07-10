@@ -19,12 +19,14 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
+    ExpContext,
+    NoAnalyzeParams,
+)
+from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
-    ExpContext,
     IntSpec,
     LiteralSpec,
-    NoAnalyzeParams,
 )
 
 from ._shared import read_ge_centers

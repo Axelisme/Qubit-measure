@@ -279,10 +279,13 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     schema = adapter.make_default_cfg(ctx)
 
     # Override to small values so the test is fast
-    from zcu_tools.gui.app.main.adapter import DirectValue, SweepValue
+    from zcu_tools.gui.cfg import (
+        DirectValue,
+        SweepValue,
+    )
 
     schema.value.fields["rounds"] = DirectValue(2)
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue
+    from zcu_tools.gui.cfg import CfgSectionValue
 
     schema.value.fields["sweep"] = CfgSectionValue(
         fields={"freq": SweepValue(start=5800.0, stop=5808.0, expts=5)}

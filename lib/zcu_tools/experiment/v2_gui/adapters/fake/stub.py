@@ -18,19 +18,21 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+)
 
 
 @dataclass(frozen=True)

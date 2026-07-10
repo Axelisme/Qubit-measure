@@ -17,9 +17,7 @@ from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
     ContextReadiness,
-    DirectValue,
     ExpContext,
 )
 from zcu_tools.gui.app.main.controller import Controller
@@ -36,6 +34,10 @@ from zcu_tools.gui.app.main.services import (
 )
 from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.app.main.state import DeviceStatus, State
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    DirectValue,
+)
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind

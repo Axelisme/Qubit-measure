@@ -20,17 +20,19 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
-    FloatSpec,
     RunRequest,
-    SweepSpec,
-    SweepValue,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    FloatSpec,
+    SweepSpec,
+    SweepValue,
+)
 
 OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 

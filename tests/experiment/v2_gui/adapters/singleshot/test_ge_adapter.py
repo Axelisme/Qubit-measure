@@ -19,15 +19,17 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    CfgSchema,
-    CfgSectionValue,
     MetaDictWriteback,
     PostAnalyzeRequest,
-    ReferenceValue,
     RunRequest,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionValue,
+    ReferenceValue,
+)
 
 from ._helpers import make_ctx as _make_ctx
 from ._helpers import make_ml as _make_ml

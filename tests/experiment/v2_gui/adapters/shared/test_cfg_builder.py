@@ -22,12 +22,12 @@ from zcu_tools.experiment.v2_gui.adapters.shared.cfg_builder import (
     CfgBuilder,
     RoleInit,
 )
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    ExpContext,
     LiteralSpec,
     ReferenceSpec,
     ReferenceValue,

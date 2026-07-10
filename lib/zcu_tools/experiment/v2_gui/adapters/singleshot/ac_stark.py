@@ -23,21 +23,23 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
     ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
     RunRequest,
-    SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    EvalValue,
+    SweepSpec,
+    SweepValue,
+)
 
 from ._shared import read_chi_kappa, read_ge_centers
 

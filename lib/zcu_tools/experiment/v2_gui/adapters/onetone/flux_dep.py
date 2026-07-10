@@ -27,18 +27,20 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
     ExpContext,
     InteractiveHost,
     InteractiveSession,
     MetaDictWriteback,
     RunRequest,
-    ScalarSpec,
-    SweepSpec,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    EvalValue,
+    ScalarSpec,
+    SweepSpec,
 )
 
 OneToneFluxDepRunResult: TypeAlias = FluxDepResult

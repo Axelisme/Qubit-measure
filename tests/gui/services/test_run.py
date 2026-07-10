@@ -25,15 +25,17 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer, current_stop_signal
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     RunRequest,
 )
 from zcu_tools.gui.app.main.services.guard import RunPermit
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.main.services.run import RunService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (

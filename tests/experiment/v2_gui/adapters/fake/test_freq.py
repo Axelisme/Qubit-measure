@@ -5,8 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter import RunRequest
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.meta_tool import MetaDict
 
 
@@ -87,7 +88,10 @@ def test_fakefreq_modules_are_readout_only():
 
 def test_fakefreq_make_default_cfg_spec_structure():
     """Spec structure matches FakeFreqCfg nesting."""
-    from zcu_tools.gui.app.main.adapter import CfgSectionSpec, SweepSpec
+    from zcu_tools.gui.cfg import (
+        CfgSectionSpec,
+        SweepSpec,
+    )
 
     ctx = _make_ctx()
     schema = FakeFreqAdapter().make_default_cfg(ctx)

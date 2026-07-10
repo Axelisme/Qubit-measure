@@ -27,16 +27,18 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
-    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
-    SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    FloatSpec,
+    SweepSpec,
+    SweepValue,
 )
 
 RoOptLengthRunResult: TypeAlias = LengthResult

@@ -4,16 +4,16 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    NoAnalyzeParams,
-)
+from zcu_tools.gui.app.main.adapter import NoAnalyzeParams
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.services.guard import LoadPermit
 from zcu_tools.gui.app.main.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 

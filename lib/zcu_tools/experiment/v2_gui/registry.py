@@ -22,15 +22,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from zcu_tools.gui.app.main.adapter import (
-    ExpContext,
-    ReferenceValue,
-    make_default_value,
-)
+from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_default_value,
+)
 
 from .adapters.fake.freq import FakeFreqAdapter
 from .adapters.lookback import LookbackAdapter

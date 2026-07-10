@@ -19,24 +19,24 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize import (
     RoOptPowerAdapter,
 )
 from zcu_tools.gui.app.main.adapter import (
+    MetaDictWriteback,
+    ModuleWriteback,
+    RunRequest,
+    WritebackRequest,
+    describe_analyze_params,
+)
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
     LiteralSpec,
-    MetaDictWriteback,
-    ModuleWriteback,
     ReferenceSpec,
     ReferenceValue,
-    RunRequest,
-    WritebackRequest,
-    describe_analyze_params,
 )
-from zcu_tools.gui.app.main.adapter import (
-    SweepValue as GuiSweepValue,
-)
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import SweepValue as GuiSweepValue
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, PulseReadoutCfg, SweepCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg

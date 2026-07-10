@@ -28,15 +28,17 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
-    SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    SweepSpec,
+    SweepValue,
 )
 
 from ._shared import RESET_120_FIELD_MD_MAP

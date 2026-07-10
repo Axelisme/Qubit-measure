@@ -27,14 +27,16 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     NoAnalyzeParams,
-    SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    SweepSpec,
+    SweepValue,
 )
 
 SingleToneLengthRunResult: TypeAlias = LengthResult

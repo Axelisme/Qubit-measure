@@ -22,14 +22,16 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
-    SweepSpec,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    SweepSpec,
 )
 
 FreqRunResult: TypeAlias = FreqResult

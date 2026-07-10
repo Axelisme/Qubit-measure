@@ -10,6 +10,15 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    MetaDictWriteback,
+    ModuleWriteback,
+    NoAnalysisResult,
+    WaveformWriteback,
+    require_soc_handles,
+)
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.main.adapter.protocol import NoAnalyzeParams
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgSchema,
@@ -17,20 +26,13 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    MetaDictWriteback,
-    ModuleWriteback,
-    NoAnalysisResult,
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformWriteback,
     make_default_value,
-    require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.app.main.adapter.protocol import NoAnalyzeParams
 from zcu_tools.meta_tool import MetaDict
 
 # ---------------------------------------------------------------------------
@@ -223,7 +225,7 @@ def test_sweepvalue_auto_norm_expts_one_gives_zero_step():
 def test_sweepvalue_auto_norm_skips_evalvalue_bounds():
     # EvalValue bounds are left to SweepEditor (resolved-edge handling); auto_norm
     # never touches an EvalValue's resolved, so the supplied step stays.
-    from zcu_tools.gui.app.main.adapter import EvalValue
+    from zcu_tools.gui.cfg import EvalValue
 
     v = SweepValue(start=EvalValue("r_f - 0.1"), stop=600.0, expts=11, step=0.5)
     assert v.step == pytest.approx(0.5)

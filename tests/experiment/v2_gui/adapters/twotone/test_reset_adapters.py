@@ -189,7 +189,7 @@ def test_reset_build_exp_cfg_uses_cfg_assembler(
 
 
 def test_reset_freq_sweep_centres_on_reset_f() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         EvalValue,
         SweepValue,
@@ -210,7 +210,7 @@ def test_reset_freq_sweep_centres_on_reset_f() -> None:
 
 
 def test_reset_freq_locks_tested_reset_freq() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         ReferenceValue,
@@ -228,7 +228,7 @@ def test_reset_freq_locks_tested_reset_freq() -> None:
 
 
 def test_reset_freq_default_seed_matches_notebook_values() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         EvalValue,
@@ -262,7 +262,7 @@ def test_reset_freq_default_seed_matches_notebook_values() -> None:
 
 
 def test_reset_freq_post_delay_has_direct_fallback_without_rf_w() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         ReferenceValue,
@@ -322,7 +322,10 @@ def test_reset_freq_writeback_proposes_reset_f_and_resetf_w() -> None:
 
 
 def test_reset_freq_gated_reset_10_when_md_present() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        DirectValue,
+    )
 
     # md has reset_f and a snapshot exists → reset_10 module proposed, freq from md.
     items = _single_freq_items(reset_f=1500.0, with_snapshot=True)
@@ -344,7 +347,7 @@ def test_reset_freq_no_reset_10_without_snapshot() -> None:
 
 
 def test_reset_length_sets_tested_reset_freq_from_md() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         EvalValue,
         ReferenceValue,
@@ -395,7 +398,11 @@ def _single_length_items(*, reset_f: float | None, with_snapshot: bool) -> list[
 
 
 def test_reset_length_gated_reset_10_when_md_present() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue, DirectValue
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        CfgSectionValue,
+        DirectValue,
+    )
 
     # Gated per-experiment: md has reset_f + a snapshot → reset_10 proposed, with
     # the calibrated sideband freq taken from md (overwriting the swept 0.0).
@@ -471,7 +478,7 @@ def test_dual_reset_build_exp_cfg_round_trip(
 
 
 def test_dual_reset_freq_centres_each_axis_and_locks_freqs() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         EvalValue,
@@ -505,7 +512,7 @@ def test_dual_reset_freq_centres_each_axis_and_locks_freqs() -> None:
 
 
 def test_dual_reset_freq_gains_md_link() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         EvalValue,
         ReferenceValue,
@@ -548,7 +555,11 @@ def _dual_two_pulse_snapshot() -> Any:
 
 
 def _assert_reset_120(items: list[Any]) -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue, DirectValue
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        CfgSectionValue,
+        DirectValue,
+    )
 
     mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
     assert len(mod_items) == 1
@@ -682,7 +693,7 @@ def test_dual_reset_freq_run_passes_method_hard() -> None:
 
 
 def test_dual_reset_power_locks_gains_and_freqs_md_link() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         EvalValue,
@@ -740,7 +751,7 @@ def test_dual_reset_power_writeback_proposes_reset_gains() -> None:
 
 
 def test_dual_reset_length_carries_calibrated_reset() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         EvalValue,
         ReferenceValue,
@@ -865,7 +876,7 @@ def test_bath_reset_build_exp_cfg_round_trip(
 
 
 def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         EvalValue,
@@ -901,7 +912,7 @@ def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
 
 
 def test_bath_reset_default_uses_nested_refs_and_pi2_role_priority() -> None:
-    from zcu_tools.gui.app.main.adapter import DirectValue
+    from zcu_tools.gui.cfg import DirectValue
 
     ml = _make_ml()
     ml.modules = {
@@ -951,7 +962,10 @@ def _bath_snapshot() -> Any:
 
 
 def _assert_reset_bath_pair(items: list[Any]) -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSchema, DirectValue
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        DirectValue,
+    )
 
     mod_items = [it for it in items if isinstance(it, ModuleWriteback)]
     by_name = {it.target_name: it for it in mod_items}
@@ -1091,7 +1105,7 @@ def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
     from zcu_tools.experiment.v2_gui.adapters.twotone.reset.bath.length import (
         BathLengthAnalyzeResult,
     )
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         EvalValue,
@@ -1137,7 +1151,7 @@ def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
 
 
 def test_bath_phase_locks_pi2_phase_and_holds_cavity() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         EvalValue,
@@ -1316,7 +1330,7 @@ def test_rabi_check_tested_reset_is_4_shape() -> None:
 
 def test_rabi_check_tested_reset_can_be_pulse_reset() -> None:
     """Round-trip with a pulse-reset tested_reset validates correctly."""
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         ReferenceValue,
     )
@@ -1334,7 +1348,10 @@ def test_rabi_check_tested_reset_can_be_pulse_reset() -> None:
 
 def test_rabi_check_sweep_gain_range() -> None:
     """Default gain sweep spans 0.0 → 1.0 over 51 points."""
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, SweepValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        SweepValue,
+    )
 
     schema = RabiCheckAdapter().make_default_cfg(_make_ctx(_make_ml()))
     sweep = schema.value.fields["sweep"]

@@ -18,7 +18,9 @@ import logging
 from collections.abc import Callable
 from typing import Literal, TypeAlias
 
-from .adapter import ExpContext, ReferenceValue
+from zcu_tools.gui.cfg import ReferenceValue
+
+from .adapter import ExpContext
 
 logger = logging.getLogger(__name__)
 

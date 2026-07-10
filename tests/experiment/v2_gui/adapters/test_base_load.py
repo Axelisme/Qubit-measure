@@ -10,12 +10,14 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
 )
 
 

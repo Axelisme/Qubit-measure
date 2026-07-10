@@ -181,7 +181,7 @@ def test_set_field_sweep_expts_non_integer_rejected(lf):
 
 
 def _centered_sweep_root():
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CenteredSweepSpec,
         CenteredSweepValue,
         CfgSectionSpec,
@@ -197,7 +197,7 @@ def _centered_sweep_root():
 
 
 def _locked_centered_sweep_root():
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CenteredSweepSpec,
         CenteredSweepValue,
         CfgSectionSpec,
@@ -219,7 +219,7 @@ def _locked_centered_sweep_root():
 
 
 def _single_point_centered_sweep_root():
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CenteredSweepSpec,
         CenteredSweepValue,
         CfgSectionSpec,

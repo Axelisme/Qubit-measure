@@ -17,7 +17,10 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 from zcu_tools.experiment.v2_gui.adapters.shared.ctx_helpers import proper_flux_range
-from zcu_tools.gui.app.main.adapter import EvalValue, SweepValue
+from zcu_tools.gui.cfg import (
+    EvalValue,
+    SweepValue,
+)
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams

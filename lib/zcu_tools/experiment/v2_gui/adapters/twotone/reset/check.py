@@ -21,9 +21,11 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
+    ExpContext,
+)
+from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
-    ExpContext,
     SweepSpec,
     SweepValue,
 )

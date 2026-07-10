@@ -13,7 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     proper_relax,
     proper_res_freq_range,
 )
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
     SweepValue,

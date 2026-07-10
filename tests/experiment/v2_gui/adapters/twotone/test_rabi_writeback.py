@@ -29,14 +29,16 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import (
     LenRabiAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
+    MetaDictWriteback,
+    ModuleWriteback,
+    WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    MetaDictWriteback,
-    ModuleWriteback,
     ReferenceValue,
     SweepValue,
-    WritebackRequest,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
@@ -281,7 +283,7 @@ class TestLenRabiWriteback:
         )
         # The waveform field is a ReferenceValue; its .value.fields["length"]
         # holds the overridden DirectValue.
-        from zcu_tools.gui.app.main.adapter import ReferenceValue
+        from zcu_tools.gui.cfg import ReferenceValue
 
         wav_ref = pi_mod.edit_schema.value.fields["waveform"]  # type: ignore[union-attr]
         assert isinstance(wav_ref, ReferenceValue)
@@ -296,7 +298,7 @@ class TestLenRabiWriteback:
             for it in items
             if isinstance(it, ModuleWriteback) and it.target_name == "pi2_len"
         )
-        from zcu_tools.gui.app.main.adapter import ReferenceValue
+        from zcu_tools.gui.cfg import ReferenceValue
 
         wav_ref = pi2_mod.edit_schema.value.fields["waveform"]  # type: ignore[union-attr]
         assert isinstance(wav_ref, ReferenceValue)

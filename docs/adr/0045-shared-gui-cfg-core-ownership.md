@@ -54,10 +54,11 @@ text-input enhancer與decoration provider ports；measure的ValueSource enhancer
 `gui.cfg` 不 import `gui.app.*`、`experiment.*`、Qt 或 `meta_tool`。`CfgSchema` 不保存
 environment callback、resolver registration 或 app runtime dependency。
 
-measure adapter package re-export shared cfg public names，而且identity必須相同；
-model/inheritance/codec implementation只由shared core擁有。finished-cfg generic algorithm與
-三個窄runtime ports由 [[0046]] 擁有；measure保留caller-facing `validate_schema`與
-`schema_to_raw_dict`，在adapter內組app-owned ports。
+measure adapter package只暴露framework contract、request/result/writeback/analyze params與
+protocol signature需要的`gui.session.types` vocabulary；不import或forward shared cfg public
+names。generic consumer直接依賴shared owner，model/inheritance/codec implementation只由shared
+core擁有。finished-cfg generic algorithm與三個窄runtime ports由 [[0046]] 擁有；measure保留
+caller-facing `validate_schema`與`schema_to_raw_dict`，在adapter內組app-owned ports。
 
 autofluxdep caller直接從shared owner匯入generic model、inheritance、codec names與Qt form。
 `zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露`NodeCfgSchema`、OverridePlan/policy、
@@ -73,7 +74,8 @@ conversion遵循 [[0046]]，production不import measure app。
 - shared Qt cfg widget可重用同一份draft renderer而不載入任何app/session policy。
 - renderer註冊是instance-owned、fixed-factory、exact且freeze後不可變，不受import order影響。
 - measure 與 autofluxdep 使用同一組 class/function identity與相同 codec wire shape。
-- generic cfg consumer直接依賴shared owner；autofluxdep local barrel只提供app-owned API。
+- generic cfg consumer直接依賴shared owner；measure adapter與autofluxdep local barrel只提供
+  app-owned API。
 - finished-cfg caller使用app-local free function，observable validation/lowering順序不變。
 - generic lowering的ownership與ports由 [[0046]] 定義。
 

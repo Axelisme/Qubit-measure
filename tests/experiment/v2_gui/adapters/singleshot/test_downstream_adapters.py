@@ -36,15 +36,15 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.freq import (
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import (
     MistPowerAnalyzeResult,
 )
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.adapter.lowering import (
+    schema_to_raw_dict,
+    validate_schema,
+)
+from zcu_tools.gui.cfg import (
     CfgSectionValue,
     EvalValue,
     ReferenceValue,
     SweepValue,
-)
-from zcu_tools.gui.app.main.adapter.lowering import (
-    schema_to_raw_dict,
-    validate_schema,
 )
 from zcu_tools.meta_tool import MetaDict
 

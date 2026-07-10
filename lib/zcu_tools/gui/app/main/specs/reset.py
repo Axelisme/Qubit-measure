@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.adapter import CfgSectionSpec, LiteralSpec, ReferenceSpec
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    LiteralSpec,
+    ReferenceSpec,
+)
 
 from .pulse import make_pulse_spec
 

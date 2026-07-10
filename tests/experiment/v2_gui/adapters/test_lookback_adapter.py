@@ -3,7 +3,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.lookback import LookbackAdapter
-from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue, ReferenceValue
+from zcu_tools.gui.cfg import (
+    CfgSectionValue,
+    DirectValue,
+    ReferenceValue,
+)
 from zcu_tools.meta_tool import MetaDict
 
 

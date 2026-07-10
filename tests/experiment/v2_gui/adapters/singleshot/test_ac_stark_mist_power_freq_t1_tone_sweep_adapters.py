@@ -44,16 +44,18 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone_sweep import (
     SsT1ToneSweepAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
-    CfgSectionValue,
-    EvalValue,
     MetaDictWriteback,
-    ReferenceValue,
-    SweepValue,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionValue,
+    EvalValue,
+    ReferenceValue,
+    SweepValue,
 )
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.utils.datasaver import load_labber_data

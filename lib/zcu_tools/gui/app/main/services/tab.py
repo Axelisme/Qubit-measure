@@ -6,11 +6,13 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import (
     AnalysisMode,
-    CfgSchema,
-    CfgSectionSpec,
     SavePaths,
 )
 from zcu_tools.gui.app.main.state import Session, TabInteractionState
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+)
 
 from .ports import TabSnapshot
 

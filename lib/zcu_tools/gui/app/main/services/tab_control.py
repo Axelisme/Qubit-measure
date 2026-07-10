@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Protocol
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import CfgSchema
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .ports import TabSnapshot

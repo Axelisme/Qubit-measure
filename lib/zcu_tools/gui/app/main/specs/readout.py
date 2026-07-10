@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     LiteralSpec,

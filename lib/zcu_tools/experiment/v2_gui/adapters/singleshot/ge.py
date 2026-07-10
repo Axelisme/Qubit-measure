@@ -27,17 +27,19 @@ from zcu_tools.gui.app.main.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
-    IntSpec,
-    LiteralSpec,
     MetaDictWriteback,
     ParamMeta,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    IntSpec,
+    LiteralSpec,
 )
 
 GERunResult: TypeAlias = GE_Result

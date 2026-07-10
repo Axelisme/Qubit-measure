@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
     ExpAdapterProtocol,
     RunRequest,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.types import ContextReadiness
 
 logger = logging.getLogger(__name__)

@@ -24,17 +24,19 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
-    ScalarSpec,
-    SweepSpec,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    EvalValue,
+    ScalarSpec,
+    SweepSpec,
 )
 
 OneToneFreqRunResult: TypeAlias = FreqResult

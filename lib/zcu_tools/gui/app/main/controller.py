@@ -8,6 +8,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 logger = logging.getLogger(__name__)
 
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
@@ -30,7 +31,6 @@ from zcu_tools.gui.session.services.mock_flux import (
 
 from .adapter import (
     AnalysisMode,
-    CfgSchema,
     ExpContext,
     InteractiveHost,
     InteractiveSession,
@@ -985,9 +985,9 @@ class Controller(SessionControllerMixin):
         against the live md turns those into the md's current concrete values
         (ModuleLibrary stores concrete numbers, never md references).
         """
-        from zcu_tools.gui.app.main.adapter import CfgSchema
         from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
         from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+        from zcu_tools.gui.cfg import CfgSchema
 
         if not name:
             raise RuntimeError("Entry name must not be empty.")

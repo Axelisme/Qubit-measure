@@ -9,12 +9,12 @@ from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzePa
 from zcu_tools.experiment.v2_gui.registry import ADAPTERS, register_all
 from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
-    DirectValue,
     RunRequest,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.cfg import DirectValue
 
 
 def _make_ctx():

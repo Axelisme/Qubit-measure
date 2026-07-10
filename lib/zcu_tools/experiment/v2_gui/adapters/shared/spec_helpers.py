@@ -2,14 +2,6 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.adapter import (
-    CfgNodeSpec,
-    CfgSchema,
-    CfgSectionSpec,
-    FloatSpec,
-    IntSpec,
-    ReferenceSpec,
-)
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
 from zcu_tools.gui.app.main.specs.readout import (
@@ -21,6 +13,14 @@ from zcu_tools.gui.app.main.specs.reset import (
     make_none_reset_spec,
     make_pulse_reset_spec,
     make_two_pulse_reset_spec,
+)
+from zcu_tools.gui.cfg import (
+    CfgNodeSpec,
+    CfgSchema,
+    CfgSectionSpec,
+    FloatSpec,
+    IntSpec,
+    ReferenceSpec,
 )
 
 

@@ -4,7 +4,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
     MetaDictWriteback,
     ModuleWriteback,
     WaveformWriteback,
@@ -12,6 +11,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
+from zcu_tools.gui.cfg import CfgSchema
 
 from .guard import WritebackPermit
 from .ports import CfgEditorPort, ContextWrites

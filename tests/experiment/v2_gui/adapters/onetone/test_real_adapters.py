@@ -20,16 +20,18 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
 )
 from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
-    CfgSectionValue,
-    DirectValue,
     MetaDictWriteback,
     ModuleWriteback,
-    ReferenceValue,
     RunRequest,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionValue,
+    DirectValue,
+    ReferenceValue,
+)
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import (
@@ -389,7 +391,11 @@ def test_onetone_2d_build_exp_cfg_delegates_to_ml_make_cfg(adapter, cfg_model) -
 
 
 def test_onetone_power_dep_default_sweep_freq_uses_eval_value() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, EvalValue, SweepValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        EvalValue,
+        SweepValue,
+    )
 
     ctx = _make_ctx(_make_ml())
     ctx.md.r_f = 6100.0
@@ -406,7 +412,11 @@ def test_onetone_power_dep_default_sweep_freq_uses_eval_value() -> None:
 
 
 def test_onetone_flux_dep_default_sweep_freq_uses_eval_value() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, EvalValue, SweepValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        EvalValue,
+        SweepValue,
+    )
 
     ctx = _make_ctx(_make_ml())
     ctx.md.r_f = 6100.0
@@ -423,7 +433,10 @@ def test_onetone_flux_dep_default_sweep_freq_uses_eval_value() -> None:
 
 
 def test_onetone_flux_dep_default_flux_device_uses_named_device_source() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        DirectValue,
+    )
 
     registry = ValueRegistry()
     registry.register(
@@ -474,7 +487,7 @@ def test_real_onetone_run_without_soc_fast_fails(adapter) -> None:
 
 
 def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         ReferenceValue,
@@ -513,7 +526,7 @@ def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> N
 
 
 def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.cfg import (
         CfgSectionValue,
         DirectValue,
         EvalValue,
@@ -555,7 +568,10 @@ def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
 
 
 def test_onetone_freq_default_ignores_library_readout() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ReferenceValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        ReferenceValue,
+    )
 
     ml = ModuleLibrary()
 

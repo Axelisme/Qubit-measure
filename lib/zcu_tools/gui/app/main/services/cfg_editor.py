@@ -47,11 +47,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
-    EvalValue,
-    make_default_value,
-)
 from zcu_tools.gui.app.main.cfg_binding import (
     MeasureCfgBindingHost,
     MeasureCfgBindings,
@@ -62,6 +57,11 @@ from zcu_tools.gui.app.main.cfg_schemas import (
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    EvalValue,
+    make_default_value,
+)
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueLookupError, decode_value_ref

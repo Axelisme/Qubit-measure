@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -13,7 +14,6 @@ from zcu_tools.gui.app.main.adapter import (
     inherit_from,
     make_default_value,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 
 
 def _section(fields: dict) -> CfgSectionSpec:

@@ -12,9 +12,6 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     InteractiveHost,
     InteractiveSession,
@@ -36,6 +33,11 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
+)
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
 )
 
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list

@@ -8,18 +8,18 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.device.base import BaseDeviceInfo
-from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    SavePaths,
-)
+from zcu_tools.gui.app.main.adapter import SavePaths
 from zcu_tools.gui.app.main.state import (
     DeviceState,
     DeviceStatus,
     Session,
     State,
     TabInteractionState,
+)
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
 )
 
 
@@ -403,12 +403,12 @@ def test_device_state_status_predicates():
 
 
 def test_tab_state_predicates():
-    from zcu_tools.gui.app.main.adapter import (
+    from zcu_tools.gui.app.main.state import Session
+    from zcu_tools.gui.cfg import (
         CfgSchema,
         CfgSectionSpec,
         CfgSectionValue,
     )
-    from zcu_tools.gui.app.main.state import Session
 
     tab = Session(
         adapter_name="fake",

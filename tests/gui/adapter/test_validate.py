@@ -10,7 +10,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.adapter.lowering import validate_schema
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgSchema,
@@ -25,7 +26,6 @@ from zcu_tools.gui.app.main.adapter import (
     SweepSpec,
     SweepValue,
 )
-from zcu_tools.gui.app.main.adapter.lowering import validate_schema
 
 
 def _ml() -> MagicMock:

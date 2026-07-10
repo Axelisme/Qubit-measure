@@ -21,8 +21,12 @@ from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
     role_blank,
     role_ref,
 )
-from zcu_tools.gui.app.main.adapter import CfgSectionValue, DirectValue, EvalValue
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+from zcu_tools.gui.cfg import (
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+)
 from zcu_tools.gui.session.value_lookup import ValueKey, ValueRegistry
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg

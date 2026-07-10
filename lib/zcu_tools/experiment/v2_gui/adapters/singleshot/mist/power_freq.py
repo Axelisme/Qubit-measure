@@ -23,17 +23,19 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     NoAnalyzeParams,
     RunRequest,
-    SweepSpec,
-    SweepValue,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    SweepSpec,
+    SweepValue,
+)
 
 from .._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
 

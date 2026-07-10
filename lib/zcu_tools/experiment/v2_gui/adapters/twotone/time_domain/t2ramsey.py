@@ -33,21 +33,23 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
-    FloatSpec,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
-    SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    FloatSpec,
+    SweepSpec,
+    SweepValue,
+)
 
 logger = logging.getLogger(__name__)
 

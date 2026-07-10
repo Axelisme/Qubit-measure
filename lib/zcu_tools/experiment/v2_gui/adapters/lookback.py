@@ -22,14 +22,16 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
-    LiteralSpec,
     MetaDictWriteback,
     ParamMeta,
     WritebackItem,
     WritebackRequest,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    LiteralSpec,
 )
 
 LookbackRunResult: TypeAlias = LookbackResult

@@ -22,17 +22,17 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
     T2EchoAdapter,
     T2RamseyAdapter,
 )
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.adapter import RunRequest
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
     EvalValue,
     ReferenceSpec,
-    RunRequest,
     SweepValue,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import ModuleCfgFactory, SweepCfg
@@ -263,7 +263,7 @@ def test_flux_dep_build_exp_cfg_converts_device_section() -> None:
 
 
 def test_flux_dep_default_flux_device_uses_named_device_source() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue
+    from zcu_tools.gui.cfg import CfgSectionValue
 
     registry = ValueRegistry()
     registry.register(
@@ -501,7 +501,10 @@ def test_t2echo_modules_contain_both_pulses() -> None:
 )
 def test_twotone_readout_prefers_library_module(adapter: Any) -> None:
     """When ml contains readout_dpm, the readout default links to it (not inline)."""
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ReferenceValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        ReferenceValue,
+    )
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()
@@ -540,7 +543,10 @@ def test_twotone_readout_prefers_library_module(adapter: Any) -> None:
 )
 def test_twotone_readout_fallback_inline_when_ml_empty(adapter: Any) -> None:
     """When ml has no calibrated readout module, fall back to inline pulse readout."""
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ReferenceValue
+    from zcu_tools.gui.cfg import (
+        CfgSectionValue,
+        ReferenceValue,
+    )
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()  # empty — no readout_dpm / readout_rf

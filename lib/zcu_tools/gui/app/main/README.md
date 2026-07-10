@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-10 — shared Qt cfg widget ownership
+**Last updated:** 2026-07-10 — measure adapter import ownership
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -10,7 +10,7 @@ framework 只看 `ExpAdapterProtocol`。
 ## Package Boundaries
 
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
-  adapter validation，以及 shared cfg public identity re-export。
+  adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
 - `specs/`：program module cfg 的 GUI spec factory。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
@@ -147,9 +147,10 @@ against current `MetaDict` when a field is set or lowered. `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
 
-generic static/dynamic validation與lowering由`zcu_tools.gui.cfg`擁有；measure adapter只把
-current `MetaDict` expression evaluator、measure-owned module/waveform shape conversion與
-`SweepCfg` factory組成三個窄ports。adapter package re-export shared cfg identities，不保留
+generic model、inheritance、codec、static/dynamic validation與lowering由
+`zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter只把current
+`MetaDict` expression evaluator、measure-owned module/waveform shape conversion與`SweepCfg`
+factory組成三個窄ports；adapter package不import或forward shared cfg public names，也不保留
 第二份algorithm或model/inheritance/codec implementation（ADR-0045、ADR-0046）。
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。

@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
     ROLE_TABLE,
     role_ref,
 )
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionValue,
     DirectValue,
@@ -267,7 +267,7 @@ def test_readout_role_ref_fallback_uses_directvalue_when_md_missing():
 
 
 def test_readout_role_ref_fallback_prefers_ro_waveform_if_present():
-    from zcu_tools.gui.app.main.adapter import ReferenceValue
+    from zcu_tools.gui.cfg import ReferenceValue
 
     ml = ModuleLibrary()
     ml.register_waveform(

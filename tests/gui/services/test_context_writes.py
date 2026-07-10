@@ -9,13 +9,14 @@ batch. The CfgSchema lowering itself is experiment-coupled and lives app-side
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.adapter import CfgSchema, ContextReadiness
+from zcu_tools.gui.app.main.adapter import ContextReadiness
 from zcu_tools.gui.app.main.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.app.main.services.cfg_lowering import lower_module, lower_waveform
 from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.io_manager import IOManager

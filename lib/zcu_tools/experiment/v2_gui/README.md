@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-10 — CfgBuilder final API
+**Last updated:** 2026-07-10 — shared cfg direct-import ownership
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -34,9 +34,11 @@ md/ml 算預設值）、`run` / `analyze` / `get_writeback_items`，並在同一
 concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
 assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active
 `ml/md` 綁進長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
-generic validation/lowering由`zcu_tools.gui.cfg`擁有；measure entry point只組current md
-expression、measure module shape與`SweepCfg` ports。role/module conversion policy仍在
-experiment/measure domain，不下沉到shared core（ADR-0046）。
+generic model/default/inheritance與validation/lowering直接從`zcu_tools.gui.cfg`匯入；measure
+entry point只組current md expression、measure module shape與`SweepCfg` ports。measure adapter
+facade只提供framework contract、request/result/writeback/analyze params與session signature
+vocabulary，不forward shared generic names。role/module conversion policy仍在experiment/measure
+domain，不下沉到shared core（ADR-0045、ADR-0046）。
 
 Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
 `ReferenceSpec(kind="module" | "waveform")`與`ReferenceValue`。kind由domain factory顯式

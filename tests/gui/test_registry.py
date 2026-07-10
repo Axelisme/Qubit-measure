@@ -11,9 +11,6 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     LoadDataRequest,
     MetaDictWriteback,
@@ -23,6 +20,11 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+)
 
 
 class _DummyExp:

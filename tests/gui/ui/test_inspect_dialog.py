@@ -59,12 +59,12 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
     commit (records last commit), and teardown.
     """
-    from zcu_tools.gui.app.main.adapter import CfgSchema
     from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.app.main.cfg_schemas import (
         module_cfg_to_value,
         waveform_cfg_to_value,
     )
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.cfg.binding import CfgDraft
 
     ml = ctrl.get_current_ml.return_value

@@ -41,20 +41,22 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
     SaveDataRequest,
-    SweepSpec,
-    SweepValue,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    SweepSpec,
+    SweepValue,
+)
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     AbsReadoutCfg,

@@ -38,17 +38,19 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone import (
     SsT1ToneRunResult,
 )
 from zcu_tools.gui.app.main.adapter import (
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
     MetaDictWriteback,
-    ReferenceValue,
-    SweepValue,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    ReferenceValue,
+    SweepValue,
 )
 from zcu_tools.meta_tool import MetaDict
 

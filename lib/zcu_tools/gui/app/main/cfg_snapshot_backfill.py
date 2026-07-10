@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.adapter import CfgSchema
+from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary

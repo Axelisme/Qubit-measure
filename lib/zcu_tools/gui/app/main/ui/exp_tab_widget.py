@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
+from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter

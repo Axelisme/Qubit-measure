@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .adapter import (
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeSpec,
@@ -10,19 +10,22 @@ from .adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    ScalarSpec,
+    ScalarValue,
+    SweepSpec,
+    SweepValue,
+    make_default_value,
+)
+
+from .adapter import (
     ExpAdapterProtocol,
     ExpContext,
     MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
     SavePaths,
-    ScalarSpec,
-    ScalarValue,
-    SweepSpec,
-    SweepValue,
     WaveformWriteback,
     WritebackItem,
-    make_default_value,
     reconstruct_params,
 )
 from .registry import Registry

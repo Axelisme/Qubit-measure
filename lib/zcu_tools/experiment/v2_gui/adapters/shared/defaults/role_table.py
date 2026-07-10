@@ -25,13 +25,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.adapter import (
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
-    ReferenceValue,
-    ScalarValue,
-)
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec as make_pulse_spec_
 from zcu_tools.gui.app.main.specs.readout import (
     make_direct_readout_spec as make_direct_readout_spec_,
@@ -57,13 +50,20 @@ from zcu_tools.gui.app.main.specs.waveform import (
 from zcu_tools.gui.app.main.specs.waveform import (
     make_cosine_waveform_spec as make_cosine_waveform_spec_,
 )
+from zcu_tools.gui.cfg import (
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    ReferenceValue,
+    ScalarValue,
+    make_default_value,
+)
 from zcu_tools.gui.session.value_lookup import ValueRef, resolve_value_ref
 from zcu_tools.program.v2.modules import AbsResetCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
 from ..ctx_helpers import md_has_key
 from .helpers import (
-    make_default_value,
     make_trig_offset,
     patch_pulse_fields,
     patch_ro_cfg_fields,
@@ -72,7 +72,8 @@ from .helpers import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import CfgSectionSpec, ExpContext
+    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.cfg import CfgSectionSpec
 
 _RefNode = ReferenceValue
 

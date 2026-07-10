@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import cast
 
-from zcu_tools.gui.app.main.adapter import ReferenceSpec
 from zcu_tools.gui.app.main.specs import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
     make_pulse_spec,
     make_waveform_spec_by_style,
 )
+from zcu_tools.gui.cfg import ReferenceSpec
 
 
 def test_direct_readout_factory_returns_fresh_specs():

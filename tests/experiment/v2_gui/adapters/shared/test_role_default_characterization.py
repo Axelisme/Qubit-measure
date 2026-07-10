@@ -24,7 +24,7 @@ import pytest
 from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_factories import (
     ROLE_FACTORIES,
 )
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,

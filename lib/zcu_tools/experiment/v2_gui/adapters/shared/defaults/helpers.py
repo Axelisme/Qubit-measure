@@ -1,22 +1,19 @@
 """Shared building blocks for the per-role default factories.
 
-These are the primitives every ``defaults/<role>.py`` uses to assemble a value
-tree: in-place field patchers, a trig-offset builder, and re-exports of the
-library-lookup selector and the blank-value builder. The role files import only
-from here (plus ctx_helpers and the gui specs).
+These are the primitives every role default uses to assemble a value tree:
+in-place field patchers, a trig-offset builder, and library-lookup selectors.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
     ReferenceValue,
     ScalarValue,
-    make_default_value,
 )
 
 from ..ctx_helpers import md_has_key
@@ -30,7 +27,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
 
 __all__ = [
-    "make_default_value",
     "select_named_module_value",
     "select_named_waveform_value",
     "NamedModuleValue",

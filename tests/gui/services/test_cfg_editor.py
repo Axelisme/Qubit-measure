@@ -106,7 +106,7 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
     # commit_schema is the aggregate's own behaviour: it yields the un-lowered
     # CfgSchema (ADR-0006 — lowering + register belong to the write authority).
     session.set_field("ch", 0)
-    from zcu_tools.gui.app.main.adapter import CfgSchema
+    from zcu_tools.gui.cfg import CfgSchema
 
     schema = session.commit_schema()
     assert isinstance(schema, CfgSchema)
@@ -119,8 +119,11 @@ def test_seeded_session_rejects_commit_on_the_aggregate(service):
     """commit-guard (item_kind is None) is enforced on the aggregate, not just
     the service facade. A seeded session (tab cfg / writeback draft) is
     teardown-only."""
-    from zcu_tools.gui.app.main.adapter import CfgSchema, make_default_value
     from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        make_default_value,
+    )
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
     seed = CfgSchema(spec=spec, value=make_default_value(spec))
@@ -314,8 +317,11 @@ def test_commit_failure_keeps_session(service, ctrl):
 
 def _make_tab_seed():
     """Build a CfgSchema seed as a tab cfg / writeback draft would carry."""
-    from zcu_tools.gui.app.main.adapter import CfgSchema, make_default_value
     from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        make_default_value,
+    )
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
     return CfgSchema(spec=spec, value=make_default_value(spec))

@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
 )

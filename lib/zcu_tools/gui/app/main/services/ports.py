@@ -29,11 +29,11 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import (
         AdapterCapabilities,
-        CfgSchema,
         SavePaths,
         WritebackItem,
     )
     from zcu_tools.gui.app.main.state import Session, TabInteractionState
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.cfg.binding import CfgDraft
     from zcu_tools.gui.session.types import ExpContext
 

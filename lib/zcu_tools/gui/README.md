@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-10（shared cfg owner imports）
+**Last updated:** 2026-07-10（shared cfg direct-import ownership）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -13,10 +13,11 @@ default/inheritance helpers、raw persistence codec，以及generic finished-cfg
 validation/lowering。lowering只依賴expression/reference/range三個callable ports，維持
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
 
-generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。
-`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露`NodeCfgSchema`、OverridePlan/policy、
-module reference spec helpers與其它autoflux-local API；module conversion/spec functions仍由
-`cfg.module_adapter`擁有。measure adapter的public re-export contract維持app-local adapter owner。
+generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adapter facade只暴露
+framework contract、request/result/writeback/analyze params與protocol signature需要的session
+vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
+`NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
+conversion/spec functions仍由`cfg.module_adapter`擁有。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
 allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與

@@ -11,14 +11,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from zcu_tools.gui.app.main.adapter import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ReferenceValue,
-    ScalarValue,
-    make_default_value,
-)
 from zcu_tools.gui.app.main.specs import (
     make_bath_reset_spec,
     make_const_waveform_spec,
@@ -29,6 +21,14 @@ from zcu_tools.gui.app.main.specs import (
     make_pulse_spec,
     make_two_pulse_reset_spec,
     make_waveform_spec_by_style,
+)
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    ReferenceValue,
+    ScalarValue,
+    make_default_value,
 )
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg

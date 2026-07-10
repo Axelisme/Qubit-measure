@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.state import (
     DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,  # noqa: F401  (re-export)
 )
@@ -27,7 +28,6 @@ from zcu_tools.gui.session.types import ExpContext
 
 from .adapter import (
     AnalyzeResultWithFigure,
-    CfgSchema,
     ExpAdapterProtocol,
     SavePaths,
     T_AnalyzeParams,
