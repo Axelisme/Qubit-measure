@@ -1,51 +1,19 @@
 """t2ramsey — Ramsey fringe acquire and fit.
 
-The Builder lowers resolved pi/2/readout modules plus timing knobs into the run
-cfg. The short-lived Node applies flux, sweeps delay time, fits the fringe, and
-emits trusted raw ``t2r`` / ``t2r_err`` / detune values.
-
-- requires the ``pi2_pulse`` module (lenrabi or ModuleLibrary produces it); the
-  resolver skips the node until a concrete pi/2 pulse is available.
-- reads ``t1`` (smooth="ewma") and ``t2r`` (smooth="ewma") as optional deps:
-  ``t2r`` seeds the planted t2 so the sweep tracks a plausible decoherence time;
-  ``t1`` is available for cfg sanity checks (not used directly in the prototype).
-- the ``opt_readout`` module is optional (ro_optimize produces it → ml preset →
-  default).
-
-``make_cfg`` lowers the active context (a populated ml + the ``pi2_pulse`` drive
-module + the ``opt_readout`` readout module both present on the snapshot) + this
-point's snapshot into the base ``T2RamseyCfgTemplate`` — exercising the real
-``ml.make_cfg`` pipeline — and ``produce`` takes the delay-time window from the
-cfg's ``sweep_range`` (which encodes ``2.5 * prev_t2r``), then acquires against a
-flux-aware MockSoc (offline) or real hardware. ``make_cfg`` Fast Fails when the
-context is unconfigured.
-
-Compare ``notebook_md/autofluxdep.md`` (the T2RamseyTask block):
-
-    cfg_maker=lambda ctx, ml: (
-        (info := ctx.env["info"])
-        and (cur_t1 := info.get("smooth_t1", md.t1))                 # relax_delay
-        and (prev_t2r := info.last.get("smooth_t2r", md.t2r))        # sweep_range
-        and (cur_pi2_pulse := info.get("pi2_pulse"))                 # required module
-        and (opt_readout := info.last.get("opt_readout", readout_cfg))  # optional
-        and ml.make_cfg({"modules": {"pi2_pulse": cur_pi2_pulse,
-                                     "readout": opt_readout},
-                         "relax_delay": max(1.0, 3 * cur_t1),
-                         "reps": 1000, "rounds": 10,
-                         "sweep_range": (0, 2.5 * prev_t2r)}, ...) )
+The Builder resolves the required ``pi2_pulse``, optional readout, and smoothed
+timing feedback into a typed cfg. The Node sweeps Ramsey delay, applies the
+configured phase ramp, and emits trusted ``t2r``, ``t2r_err``, and detune values.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import MutableMapping
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -58,8 +26,8 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     build_stop_condition,
     fill_decay_fit_or_skip,
     make_signal_update,
-    require_flux_device,
-    set_flux_by_name,
+    schedule_completed,
+    setup_flux_point,
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
@@ -151,7 +119,6 @@ class T2RamseyNode(Node):
         env = self._env
 
         result: Sweep1DResult = env.result
-        times = result.x
         idx = env.flux_idx
 
         # Lower the active context into the run cfg (Fast Fail if unconfigured: a
@@ -162,11 +129,7 @@ class T2RamseyNode(Node):
         times = np.linspace(float(lo), float(hi), result.n_x)
         result.x[:] = times
 
-        flux_device = require_flux_device(env, "t2ramsey")
-        set_flux_by_name(
-            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
-        )
-        setup_devices(cfg, progress=False)
+        setup_flux_point(cfg, env, "t2ramsey")
 
         # The Ramsey delay sweep + the activate-detune phase ramp on the 2nd pi/2
         # (lower layer: activate_detune = detune_ratio / len_sweep.step).
@@ -217,22 +180,12 @@ class T2RamseyNode(Node):
                 progress=False,
                 progress_label=f"{env.node_name or 't2ramsey'} flux {idx + 1} rounds",
                 progress_leave=False,
-                stop_condition=build_stop_condition(env, probe, signal2real_flip),
+                stop_condition=build_stop_condition(env, probe),
             )
             outcome = sched.outcome
 
-        if outcome.status == "stopped":
+        if not schedule_completed(outcome, "t2ramsey"):
             return Patch()
-        if outcome.status == "failed":
-            reason = outcome.reason or "t2ramsey Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status == "interrupted":
-            reason = outcome.reason or "t2ramsey Schedule acquire interrupted"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status != "completed":
-            raise RuntimeError(
-                f"unsupported t2ramsey Schedule outcome: {outcome.status!r}"
-            )
 
         real = signal2real_flip(np.asarray(signal, dtype=np.complex128))
 

@@ -51,15 +51,13 @@ window).
 from __future__ import annotations
 
 import logging
-from collections.abc import MutableMapping
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
@@ -72,8 +70,8 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     build_stop_condition,
     fill_decay_fit_or_skip,
     make_signal_update,
-    require_flux_device,
-    set_flux_by_name,
+    schedule_completed,
+    setup_flux_point,
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
@@ -221,11 +219,7 @@ class T1Node(Node):
             length_cycles, times = times_to_cycles_and_axis(env.soccfg, times)
         result.x[:] = times
 
-        flux_device = require_flux_device(env, "t1")
-        set_flux_by_name(
-            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
-        )
-        setup_devices(cfg, progress=False)
+        setup_flux_point(cfg, env, "t1")
 
         result.flux[idx] = env.flux
 
@@ -283,20 +277,12 @@ class T1Node(Node):
                 progress=False,
                 progress_label=f"{env.node_name or 't1'} flux {idx + 1} rounds",
                 progress_leave=False,
-                stop_condition=build_stop_condition(env, probe, signal2real_flip),
+                stop_condition=build_stop_condition(env, probe),
             )
             outcome = sched.outcome
 
-        if outcome.status == "stopped":
+        if not schedule_completed(outcome, "t1"):
             return Patch()
-        if outcome.status == "failed":
-            reason = outcome.reason or "t1 Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status == "interrupted":
-            reason = outcome.reason or "t1 Schedule acquire interrupted"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status != "completed":
-            raise RuntimeError(f"unsupported t1 Schedule outcome: {outcome.status!r}")
 
         real = signal2real_flip(np.asarray(signal, dtype=np.complex128))
 

@@ -19,9 +19,8 @@ from them.
 - the ``readout`` module is optional (a base readout template); it is the readout
   the cfg sweeps over (its freq/gain are swept), mirroring the real experiment.
 
-No fit step: Schedule acquire updates the SNR landscape row as tracker data arrives;
-after acquire, ``produce`` refreshes the row with the final landscape and then emits
-the optimum or fallback fields.
+No fit step: each Schedule buffer update writes the current SNR landscape row;
+``produce`` uses the returned final landscape to emit the optimum or fallback fields.
 
 ``produce`` lowers the active context + this point's snapshot into a runnable
 ``RoOptimizeCfgTemplate`` via the Builder's ``make_cfg`` (Fast Fail if the context
@@ -35,10 +34,9 @@ fidelity landscape varies with the operating flux.
 from __future__ import annotations
 
 import logging
-from collections.abc import MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -46,7 +44,6 @@ from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -56,8 +53,8 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     DEFAULT_ACQUIRE_RETRY,
     acquire_retry,
     axis_to_sweep,
-    require_flux_device,
-    set_flux_by_name,
+    schedule_completed,
+    setup_flux_point,
 )
 from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
     missing_info_value,
@@ -111,8 +108,6 @@ from zcu_tools.utils.process import smooth_signal_nd
 logger = logging.getLogger(__name__)
 _RO_LANDSCAPE_PERF = PerfStats("worker.ro_optimize.landscape", logger, slow_ms=20.0)
 _RO_ACQUIRE_PERF = PerfStats("worker.ro_optimize.acquire", logger, slow_ms=50.0)
-_RO_MIN_LANDSCAPE_SPAN = 1e-12
-_RO_MIN_LOCAL_PROMINENCE_FRACTION = 1e-3
 
 
 @dataclass(frozen=True)
@@ -121,11 +116,6 @@ class _RoOptimum:
     gain_index: int
     freq: float
     gain: float
-
-
-def _ro_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Smooth the SNR landscape before argmax (lower-layer ``ro_opt_signal2real``)."""
-    return np.abs(smooth_signal_nd(signals, method="wavelet", sigma=1.0))
 
 
 def _ro_landscape(
@@ -144,7 +134,13 @@ def _ro_landscape(
     snr = snr_as_signal([tracker], ge_axis=1, skew_penalty=skew_penalty)
     snr_ms = elapsed_ms(snr_start)
     smooth_start = perf_now()
-    landscape = _ro_signal2real(np.asarray(snr, dtype=np.float64).reshape(shape))
+    landscape = np.abs(
+        smooth_signal_nd(
+            np.asarray(snr, dtype=np.float64).reshape(shape),
+            method="wavelet",
+            sigma=1.0,
+        )
+    )
     smooth_ms = elapsed_ms(smooth_start)
     _RO_LANDSCAPE_PERF.record(
         elapsed_ms(profile_start),
@@ -164,6 +160,8 @@ def _accepted_ro_optimum(
     is accepted only when the smoothed landscape has finite structure, a unique
     interior maximum, and that maximum rises above its local neighbourhood.
     """
+    min_landscape_span = 1e-12
+    min_local_prominence_fraction = 1e-3
     snr = np.asarray(landscape, dtype=np.float64)
     freq_axis = np.asarray(freqs, dtype=np.float64)
     gain_axis = np.asarray(gains, dtype=np.float64)
@@ -182,7 +180,7 @@ def _accepted_ro_optimum(
         return None
     finite_values = snr[finite]
     span = float(np.max(finite_values) - np.min(finite_values))
-    if not np.isfinite(span) or span <= _RO_MIN_LANDSCAPE_SPAN:
+    if not np.isfinite(span) or span <= min_landscape_span:
         return None
 
     masked = np.where(finite, snr, -np.inf)
@@ -202,8 +200,8 @@ def _accepted_ro_optimum(
         return None
     local_prominence = best_value - float(np.max(local_neighbors))
     min_prominence = max(
-        _RO_MIN_LANDSCAPE_SPAN,
-        _RO_MIN_LOCAL_PROMINENCE_FRACTION * span,
+        min_landscape_span,
+        min_local_prominence_fraction * span,
     )
     if local_prominence < min_prominence:
         return None
@@ -264,6 +262,46 @@ def _centered_window(start: float, stop: float, *, expts: int) -> CenteredSweepV
     return CenteredSweepValue(center=0.5 * (lo + hi), span=abs(hi - lo), expts=expts)
 
 
+class _RangeSweep(Protocol):
+    start: float
+    stop: float
+
+
+def _resolve_search_range(
+    sweep: _RangeSweep,
+    *,
+    axis: Literal["freq", "gain"],
+    range_mode: str,
+    window_mode: str,
+    center: float,
+    fixed_half_width: float,
+    bounds: tuple[float, float] | None,
+) -> tuple[float, float]:
+    """Resolve one readout search range from fixed or recentered controls."""
+    fixed_start = float(sweep.start)
+    fixed_stop = float(sweep.stop)
+    if range_mode == _RANGE_MODE_FIXED:
+        start, stop = fixed_start, fixed_stop
+    elif range_mode == _RANGE_MODE_PREVIOUS_BEST:
+        if window_mode == _WINDOW_MODE_DEFAULT_SWEEP:
+            half_width = abs(fixed_stop - fixed_start) / 2.0
+        elif window_mode == _WINDOW_MODE_FIXED_HALF_WIDTH:
+            half_width = float(fixed_half_width)
+        else:
+            raise RuntimeError(
+                f"unsupported ro_optimize {axis} window mode: {window_mode!r}"
+            )
+        start, stop = float(center) - half_width, float(center) + half_width
+    else:
+        raise RuntimeError(f"unsupported ro_optimize {axis} range mode: {range_mode!r}")
+
+    if bounds is not None:
+        lower, upper = bounds
+        start = max(float(lower), start)
+        stop = min(float(upper), stop)
+    return start, stop
+
+
 class RoOptimizeNode(Node):
     """One flux point's ro_optimize: set flux → real acquire → SNR argmax → Patch.
 
@@ -296,11 +334,7 @@ class RoOptimizeNode(Node):
         result.freq[:] = freqs
         result.gain[:] = gains
 
-        flux_device = require_flux_device(env, "ro_optimize")
-        set_flux_by_name(
-            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
-        )
-        setup_devices(cfg, progress=False)
+        setup_flux_point(cfg, env, "ro_optimize")
 
         # Sweep the readout freq × gain over the cfg-derived axes (lower layer sets
         # the freq / gain params on the readout pulse). Keep Result axes in sync so
@@ -367,21 +401,10 @@ class RoOptimizeNode(Node):
                 f"freq_points={result.n_freq} gain_points={result.n_gain}"
             ),
         )
-        if outcome.status == "stopped":
+        if not schedule_completed(outcome, "ro_optimize"):
             return Patch()
-        if outcome.status == "failed":
-            reason = outcome.reason or "ro_optimize Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status == "interrupted":
-            reason = outcome.reason or "ro_optimize Schedule acquire interrupted"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status != "completed":
-            raise RuntimeError(
-                f"unsupported ro_optimize Schedule outcome: {outcome.status!r}"
-            )
 
         landscape = np.asarray(signal, dtype=np.float64)
-        np.copyto(result.signal[idx], landscape)
 
         optimum = _accepted_ro_optimum(landscape, freqs, gains)
         if optimum is None:
@@ -654,55 +677,26 @@ class RoOptimizeBuilder(Builder):
         # use the default centres; fixed modes use the operator's explicit ranges.
         # ``produce`` rebuilds these axes from the lowered per-point cfg before
         # acquiring.
-        freq_fixed_start = float(freq_range_knob.start)
-        freq_fixed_stop = float(freq_range_knob.stop)
         freq_range_mode = str(knobs["freq_range_mode"])
-        if freq_range_mode == _RANGE_MODE_PREVIOUS_BEST:
-            freq_window_mode = str(knobs["freq_window_mode"])
-            if freq_window_mode == _WINDOW_MODE_DEFAULT_SWEEP:
-                freq_width = abs(freq_fixed_stop - freq_fixed_start) / 2.0
-            elif freq_window_mode == _WINDOW_MODE_FIXED_HALF_WIDTH:
-                freq_width = float(knobs["freq_half_width_mhz"])
-            else:
-                raise RuntimeError(
-                    f"unsupported ro_optimize freq window mode: {freq_window_mode!r}"
-                )
-            freq_center = _center_of(freq_range_knob)
-            freq_range = (freq_center - freq_width, freq_center + freq_width)
-        elif freq_range_mode == _RANGE_MODE_FIXED:
-            freq_range = (freq_fixed_start, freq_fixed_stop)
-        else:
-            raise RuntimeError(
-                f"unsupported ro_optimize freq range mode: {freq_range_mode!r}"
-            )
-
-        gain_fixed_start = float(gain_range_knob.start)
-        gain_fixed_stop = float(gain_range_knob.stop)
         gain_range_mode = str(knobs["gain_range_mode"])
-        if gain_range_mode == _RANGE_MODE_PREVIOUS_BEST:
-            gain_window_mode = str(knobs["gain_window_mode"])
-            if gain_window_mode == _WINDOW_MODE_DEFAULT_SWEEP:
-                gain_width = abs(gain_fixed_stop - gain_fixed_start) / 2.0
-            elif gain_window_mode == _WINDOW_MODE_FIXED_HALF_WIDTH:
-                gain_width = float(knobs["gain_half_width"])
-            else:
-                raise RuntimeError(
-                    f"unsupported ro_optimize gain window mode: {gain_window_mode!r}"
-                )
-            gain_center = _center_of(gain_range_knob)
-            gain_range = (
-                max(0.0, gain_center - gain_width),
-                min(1.0, gain_center + gain_width),
-            )
-        elif gain_range_mode == _RANGE_MODE_FIXED:
-            gain_range = (
-                max(0.0, gain_fixed_start),
-                min(1.0, gain_fixed_stop),
-            )
-        else:
-            raise RuntimeError(
-                f"unsupported ro_optimize gain range mode: {gain_range_mode!r}"
-            )
+        freq_range = _resolve_search_range(
+            freq_range_knob,
+            axis="freq",
+            range_mode=freq_range_mode,
+            window_mode=str(knobs["freq_window_mode"]),
+            center=_center_of(freq_range_knob),
+            fixed_half_width=float(knobs["freq_half_width_mhz"]),
+            bounds=None,
+        )
+        gain_range = _resolve_search_range(
+            gain_range_knob,
+            axis="gain",
+            range_mode=gain_range_mode,
+            window_mode=str(knobs["gain_window_mode"]),
+            center=_center_of(gain_range_knob),
+            fixed_half_width=float(knobs["gain_half_width"]),
+            bounds=(0.0, 1.0),
+        )
         freqs = np.linspace(freq_range[0], freq_range[1], freq_expts)
         gains = np.linspace(gain_range[0], gain_range[1], gain_expts)
         return Sweep2DResult.allocate(flux, freqs, gains)
@@ -770,63 +764,33 @@ class RoOptimizeBuilder(Builder):
         freq_range_knob = knobs["freq_range"]
         gain_range_knob = knobs["gain_range"]
 
-        freq_fixed_start = float(freq_range_knob.start)
-        freq_fixed_stop = float(freq_range_knob.stop)
         freq_range_mode = str(knobs["freq_range_mode"])
-        if freq_range_mode == _RANGE_MODE_PREVIOUS_BEST:
-            freq_window_mode = str(knobs["freq_window_mode"])
-            if freq_window_mode == _WINDOW_MODE_DEFAULT_SWEEP:
-                freq_width = abs(freq_fixed_stop - freq_fixed_start) / 2.0
-            elif freq_window_mode == _WINDOW_MODE_FIXED_HALF_WIDTH:
-                freq_width = float(knobs["freq_half_width_mhz"])
-            else:
-                raise RuntimeError(
-                    f"unsupported ro_optimize freq window mode: {freq_window_mode!r}"
-                )
-            freq_center = snapshot_float(
-                snapshot,
-                "best_ro_freq",
-                _center_of(freq_range_knob),
-            )
-            freq_range = (freq_center - freq_width, freq_center + freq_width)
-        elif freq_range_mode == _RANGE_MODE_FIXED:
-            freq_range = (freq_fixed_start, freq_fixed_stop)
-        else:
-            raise RuntimeError(
-                f"unsupported ro_optimize freq range mode: {freq_range_mode!r}"
-            )
-
-        gain_fixed_start = float(gain_range_knob.start)
-        gain_fixed_stop = float(gain_range_knob.stop)
         gain_range_mode = str(knobs["gain_range_mode"])
+        freq_center = _center_of(freq_range_knob)
+        if freq_range_mode == _RANGE_MODE_PREVIOUS_BEST:
+            freq_center = snapshot_float(snapshot, "best_ro_freq", freq_center)
+        gain_center = _center_of(gain_range_knob)
         if gain_range_mode == _RANGE_MODE_PREVIOUS_BEST:
-            gain_window_mode = str(knobs["gain_window_mode"])
-            if gain_window_mode == _WINDOW_MODE_DEFAULT_SWEEP:
-                gain_width = abs(gain_fixed_stop - gain_fixed_start) / 2.0
-            elif gain_window_mode == _WINDOW_MODE_FIXED_HALF_WIDTH:
-                gain_width = float(knobs["gain_half_width"])
-            else:
-                raise RuntimeError(
-                    f"unsupported ro_optimize gain window mode: {gain_window_mode!r}"
-                )
-            gain_center = snapshot_float(
-                snapshot,
-                "best_ro_gain",
-                _center_of(gain_range_knob),
-            )
-            gain_range = (
-                max(0.0, gain_center - gain_width),
-                min(1.0, gain_center + gain_width),
-            )
-        elif gain_range_mode == _RANGE_MODE_FIXED:
-            gain_range = (
-                max(0.0, gain_fixed_start),
-                min(1.0, gain_fixed_stop),
-            )
-        else:
-            raise RuntimeError(
-                f"unsupported ro_optimize gain range mode: {gain_range_mode!r}"
-            )
+            gain_center = snapshot_float(snapshot, "best_ro_gain", gain_center)
+
+        freq_range = _resolve_search_range(
+            freq_range_knob,
+            axis="freq",
+            range_mode=freq_range_mode,
+            window_mode=str(knobs["freq_window_mode"]),
+            center=freq_center,
+            fixed_half_width=float(knobs["freq_half_width_mhz"]),
+            bounds=None,
+        )
+        gain_range = _resolve_search_range(
+            gain_range_knob,
+            axis="gain",
+            range_mode=gain_range_mode,
+            window_mode=str(knobs["gain_window_mode"]),
+            center=gain_center,
+            fixed_half_width=float(knobs["gain_half_width"]),
+            bounds=(0.0, 1.0),
+        )
 
         t1 = snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
         relax_delay_mode = str(knobs["relax_delay_mode"])

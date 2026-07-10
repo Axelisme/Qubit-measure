@@ -29,10 +29,10 @@ from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiCfg,
     LenRabiModuleCfg,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
+from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
     QubitFreqCfgTemplate as GuiQubitFreqCfgTemplate,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
+from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
     QubitFreqModuleCfg as GuiQubitFreqModuleCfg,
 )
 from zcu_tools.program.v2 import DirectReadoutCfg, ProgramV2Cfg, PulseCfg

@@ -359,8 +359,7 @@ def _mocked_qubit_freq_produce_env(
             raise NotImplementedError
 
     monkeypatch.setattr(qf_mod, "ModularProgramV2", _DummyModularProgram)
-    monkeypatch.setattr(qf_mod, "setup_devices", lambda *args, **kwargs: None)
-    monkeypatch.setattr(qf_mod, "set_flux_by_name", lambda *args, **kwargs: None)
+    monkeypatch.setattr(qf_mod, "setup_flux_point", lambda *args, **kwargs: None)
     monkeypatch.setattr(qf_mod, "_signal2real", lambda _signals: real)
     monkeypatch.setattr(qf_mod, "fit_qubit_freq", lambda _freqs, _real: fit_return)
 

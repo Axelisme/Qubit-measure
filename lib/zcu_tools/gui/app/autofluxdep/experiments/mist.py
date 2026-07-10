@@ -1,45 +1,21 @@
-"""mist — 1D gain sweep with variance readout.
+"""mist — disturbance-gain sweep with direct variance readout.
 
-Sets this flux point's value on the picked flux device, sets up devices, acquires
-a state-disturbance curve over a gain axis with ``ModularProgramV2`` (pi_pulse →
-mist_pulse → Readout), reads the variance directly — there is no fit step — and
-fills its Sweep1DResult row in place. ``fit_value`` and ``fit_curve``
-remain nan (allocated as nan by ``Sweep1DResult.allocate``); the
-``ColormapLinePlotter`` shows the flux × gain colormap with the latest flux rows
-as traces (no fit marker).
-
-- needs the ``pi_pulse`` module (pi-pulse prepares the excited state whose
-  disturbance the variance measures). The resolver skips until a concrete pulse
-  is produced or available in ModuleLibrary.
-- the ``opt_readout`` module is optional (ro_optimize produces it); used by the
-  cfg builder as the run cfg's ``readout``.
-
-No fit step: MIST reads the disturbance magnitude directly from the acquired IQ
-scatter. The row is considered complete after one round, so ``round_hook`` is
-called once per round. Provides ``success=1.0`` (float, consistent with the
-info-value domain) to signal that the MIST pass completed without a hardware
-error.
-
-``produce`` lowers the active context (a populated ml + a ``pi_pulse`` module on
-the snapshot + the mist-drive "設定頭" params present) into the lower-layer
-``MistCfgTemplate`` (``ProgramV2Cfg`` + ``ExpCfgModel`` with ``pi_pulse`` /
-``mist_pulse`` / ``readout`` modules) via ``ml.make_cfg``, then acquires against a
-flux-aware MockSoc (offline) or real hardware. ``make_cfg`` Fast Fails when the
-context is unconfigured. There is no fit — mist reads the variance directly.
+The experiment requires a ``pi_pulse`` and resolves an ``opt_readout`` module.
+Its Builder owns the typed module cfg; its Node sweeps ``mist_pulse.gain``, maps
+IQ scatter through the experiment-specific magnitude transform, fills the raw
+result row, and emits ``success`` without a fit. Fit fields therefore stay NaN.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import MutableMapping
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -48,8 +24,8 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     acquire_retry,
     acquire_to_complex,
     axis_to_sweep,
-    require_flux_device,
-    set_flux_by_name,
+    schedule_completed,
+    setup_flux_point,
 )
 from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
     missing_module_value,
@@ -82,7 +58,9 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     sweep2param,
 )
 
@@ -103,18 +81,11 @@ def _mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class MistModuleCfg(ConfigBase):
-    """The mist run cfg's module set, mirroring the lower-layer ``MistModuleCfg``.
+    """Typed preparation, disturbance, and readout modules for one MIST run."""
 
-    ``pi_pulse`` prepares the excited state, ``mist_pulse`` is the disturbance
-    drive whose gain the experiment sweeps, and ``readout`` reads the resulting
-    state. Typed loosely as ``Any`` here — ``ml.make_cfg`` lowers the raw dicts/modules into the concrete
-    PulseCfg / ReadoutCfg via the module factory; the lower-layer
-    ``experiment/v2/autofluxdep`` ``MistCfgTemplate`` carries the strict types.
-    """
-
-    pi_pulse: Any
-    mist_pulse: Any
-    readout: Any
+    pi_pulse: PulseCfg
+    mist_pulse: PulseCfg
+    readout: ReadoutCfg
 
 
 class MistCfgTemplate(ProgramV2Cfg, ExpCfgModel):
@@ -131,17 +102,7 @@ class MistCfgTemplate(ProgramV2Cfg, ExpCfgModel):
 
 
 class MistNode(Node):
-    """One flux point's MIST: set flux → real acquire → variance curve → fill row → Patch.
-
-    No fit step: ``_mist_signal2real`` returns a real (n_gain,) magnitude directly.
-    ``fit_value[idx]`` and ``fit_curve[idx]`` are left as nan (already the
-    allocate default), so the ``ColormapLinePlotter`` shows only the colormap
-    (no fit marker). Calls ``round_hook`` once per round while filling the row.
-
-    ``produce`` lowers the active context into the run cfg via the Builder's
-    ``make_cfg`` (Fast Fail if unconfigured), sweeps the disturbance pulse gain,
-    and acquires against a flux-aware MockSoc (offline) or real hardware.
-    """
+    """Acquire one flux point's transformed disturbance curve without fitting."""
 
     def __init__(self, env: RunEnv, builder: MistBuilder) -> None:
         self._env = env
@@ -161,11 +122,7 @@ class MistNode(Node):
         # gap rather than degrading to noise.
         cfg = self._builder.make_cfg(env, snapshot)
 
-        flux_device = require_flux_device(env, "mist")
-        set_flux_by_name(
-            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
-        )
-        setup_devices(cfg, progress=False)
+        setup_flux_point(cfg, env, "mist")
 
         # Sweep the disturbance pulse gain over the Result's gain axis (lower layer
         # sets sweep2param("gain") on mist_pulse).
@@ -210,19 +167,10 @@ class MistNode(Node):
             )
             outcome = sched.outcome
 
-        if outcome.status == "stopped":
+        if not schedule_completed(outcome, "mist"):
             return Patch()
-        if outcome.status == "failed":
-            reason = outcome.reason or "mist Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status == "interrupted":
-            reason = outcome.reason or "mist Schedule acquire interrupted"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status != "completed":
-            raise RuntimeError(f"unsupported mist Schedule outcome: {outcome.status!r}")
 
         curve = np.asarray(signal, dtype=np.float64)
-        np.copyto(result.signal[idx], curve)
 
         logger.debug(
             "mist @flux%d: success, variance range [%.3f, %.3f]",

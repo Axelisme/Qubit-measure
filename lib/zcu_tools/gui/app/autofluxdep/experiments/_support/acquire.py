@@ -16,13 +16,18 @@ each Node.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, MutableMapping
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.utils import estimate_snr, snr_checker
+from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import ScheduleOutcome
+from zcu_tools.experiment.v2.utils import estimate_snr
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.program.v2 import SweepCfg
@@ -148,6 +153,28 @@ def require_flux_device(env: RunEnv, exp_name: str) -> str:
     return env.flux_device
 
 
+def setup_flux_point(cfg: ExpCfgModel, env: RunEnv, exp_name: str) -> None:
+    """Apply this point's flux to the selected device before acquisition."""
+    set_flux_by_name(
+        cast("MutableMapping[str, DeviceInfo] | None", cfg.dev),
+        require_flux_device(env, exp_name),
+        env.flux,
+    )
+    setup_devices(cfg, progress=False)
+
+
+def schedule_completed(outcome: ScheduleOutcome, exp_name: str) -> bool:
+    """Return whether acquisition completed, preserving Schedule failure semantics."""
+    if outcome.status == "completed":
+        return True
+    if outcome.status == "stopped":
+        return False
+    if outcome.status in ("failed", "interrupted"):
+        reason = outcome.reason or f"{exp_name} Schedule acquire {outcome.status}"
+        raise RuntimeError(reason) from outcome.exception
+    raise RuntimeError(f"unsupported {exp_name} Schedule outcome: {outcome.status!r}")
+
+
 def acquire_to_complex(raw: Any) -> NDArray[np.complex128]:
     """Collapse a ``.acquire`` round/result into a 1-D complex trace.
 
@@ -166,7 +193,7 @@ def signal2real_flip(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     the trace starts high (``init_val`` above the midpoint). The decay / rabi /
     fringe fitters are baseline-agnostic, but flipping keeps the curve in the
     orientation the lower layer fits, so the fitted scalar matches."""
-    real = rotate2real(signals.astype(np.complex128)).real
+    real = rotate2real(np.asarray(signals, dtype=np.complex128)).real
     lo, hi = float(real.min()), float(real.max())
     real = (real - lo) / (hi - lo + 1e-12)
     if real[0] < 0.5:  # init below midpoint → flip so the decay starts high
@@ -175,11 +202,7 @@ def signal2real_flip(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class SnrProbe:
-    """A minimal ``ctx``-shaped shim so the lower-layer ``snr_checker`` can read
-    the running acquire trace. ``snr_checker`` only touches ``ctx.value`` — the
-    Node updates ``value`` each round so the SNR early-stop sees the latest average.
-    ``snr`` mirrors the same round for the GUI liveplot title.
-    """
+    """The current running trace and its already-computed SNR."""
 
     value: NDArray[np.complex128] | None = None
     snr: float = np.nan
@@ -188,7 +211,6 @@ class SnrProbe:
 def build_stop_condition(
     env: RunEnv,
     probe: SnrProbe,
-    signal2real_fn: Callable[[np.ndarray], np.ndarray],
 ) -> Callable[[], bool] | None:
     """Return the completed-round stop condition for a 1-D measurement acquire.
 
@@ -198,12 +220,22 @@ def build_stop_condition(
     threshold = env.knob("earlystop_snr", None)
     if threshold is None:
         return None
-    check_snr = snr_checker(probe, threshold, signal2real_fn)
+    threshold = float(threshold)
+    triggered = False
+    last_check = 0.0
 
     def check_snr_when_ready() -> bool:
+        nonlocal triggered, last_check
+        if triggered:
+            return True
         if probe.value is None:
             return False
-        return check_snr()
+        now = time.time()
+        if now - last_check < 0.1:
+            return False
+        last_check = now
+        triggered = probe.snr >= threshold
+        return triggered
 
     return check_snr_when_ready
 

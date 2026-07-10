@@ -433,6 +433,63 @@ def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
     )
 
 
+@pytest.mark.parametrize(
+    ("history_key", "message"),
+    [
+        ("pi_length", "previous pi_length"),
+        ("pi_product", "previous pi_product"),
+    ],
+)
+def test_lenrabi_make_cfg_rejects_zero_feedback_history(
+    history_key: str, message: str
+) -> None:
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
+
+    ml = _ml()
+    builder = LenRabiBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(builder, {"qub_ch": 4, "qub_nqz": 2}),
+        ml=ml,
+    )
+    snap = Snapshot(
+        {"qubit_freq": 5135.0, history_key: 0.0},
+        modules={"opt_readout": _READOUT},
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        builder.make_cfg(env, snap)
+
+
+def test_lenrabi_make_cfg_treats_zero_t1_history_as_missing() -> None:
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
+
+    ml = _ml()
+    builder = LenRabiBuilder()
+    env = RunEnv(
+        flux=0.0,
+        flux_idx=0,
+        schema=_schema(builder, {"qub_ch": 4, "qub_nqz": 2}),
+        ml=ml,
+    )
+    knobs = env.schema.lower(ml)
+    snap = Snapshot(
+        {"qubit_freq": 5135.0, "t1": 0.0},
+        modules={"opt_readout": _READOUT},
+    )
+
+    cfg = builder.make_cfg(env, snap)
+
+    assert cfg.relax_delay == pytest.approx(
+        auto_relax_delay_from_t1(
+            float(knobs["t1_seed_us"]),
+            factor=float(knobs["relax_factor"]),
+            minimum=float(knobs["relax_min_us"]),
+        )
+    )
+
+
 def test_lenrabi_produce_fast_fails_when_context_unconfigured():
     # the real-acquire contract: produce Fast Fails (no synthetic fallback) when ml
     # is None — make_cfg cannot lower the rabi drive pulse.
@@ -889,9 +946,7 @@ def _patch_t1_fast_produce(
             captured["builder"] = probe
             return probe
 
-    monkeypatch.setattr(t1_mod, "require_flux_device", lambda env, name: "flux")
-    monkeypatch.setattr(t1_mod, "set_flux_by_name", lambda cfg_dev, name, value: None)
-    monkeypatch.setattr(t1_mod, "setup_devices", lambda cfg, progress=False: None)
+    monkeypatch.setattr(t1_mod, "setup_flux_point", lambda *args, **kwargs: None)
     monkeypatch.setattr(t1_mod, "Schedule", ScheduleProbe)
     monkeypatch.setattr(
         t1_mod,

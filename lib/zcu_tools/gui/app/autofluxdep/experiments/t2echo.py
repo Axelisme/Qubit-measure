@@ -32,14 +32,12 @@ unconfigured.
 from __future__ import annotations
 
 import logging
-from collections.abc import MutableMapping
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -52,8 +50,8 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     build_stop_condition,
     fill_decay_fit_or_skip,
     make_signal_update,
-    require_flux_device,
-    set_flux_by_name,
+    schedule_completed,
+    setup_flux_point,
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
@@ -160,11 +158,7 @@ class T2EchoNode(Node):
         times = np.linspace(lo, hi, result.n_x)
         result.x[:] = times
 
-        flux_device = require_flux_device(env, "t2echo")
-        set_flux_by_name(
-            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
-        )
-        setup_devices(cfg, progress=False)
+        setup_flux_point(cfg, env, "t2echo")
 
         # The total-delay sweep, split across the two echo halves (Delay 0.5·τ each),
         # + the activate-detune phase ramp on the 2nd pi/2 (lower layer:
@@ -219,22 +213,12 @@ class T2EchoNode(Node):
                 progress=False,
                 progress_label=f"{env.node_name or 't2echo'} flux {idx + 1} rounds",
                 progress_leave=False,
-                stop_condition=build_stop_condition(env, probe, signal2real_flip),
+                stop_condition=build_stop_condition(env, probe),
             )
             outcome = sched.outcome
 
-        if outcome.status == "stopped":
+        if not schedule_completed(outcome, "t2echo"):
             return Patch()
-        if outcome.status == "failed":
-            reason = outcome.reason or "t2echo Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status == "interrupted":
-            reason = outcome.reason or "t2echo Schedule acquire interrupted"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status != "completed":
-            raise RuntimeError(
-                f"unsupported t2echo Schedule outcome: {outcome.status!r}"
-            )
 
         real = signal2real_flip(np.asarray(signal, dtype=np.complex128))
 

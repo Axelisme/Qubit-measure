@@ -7,6 +7,9 @@ from typing import Any, cast
 import numpy as np
 import pytest
 from pydantic import BaseModel, ValidationError
+from zcu_tools.device import FakeDeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.v2.runner import ScheduleOutcome
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     RunCfgSnapshot,
@@ -262,41 +265,37 @@ def test_run_env_direct_knobs_snapshot_is_immutable_and_flux_independent() -> No
     assert second.knob("feedback")["gain"] == 0.1
 
 
-def test_snr_stop_condition_waits_until_probe_has_value(monkeypatch: Any):
-    calls = {"count": 0}
-
-    def fake_snr_checker(ctx: Any, snr_threshold: float | None, signal2real_fn: Any):
-        assert snr_threshold == 50.0
-
-        def check() -> bool:
-            calls["count"] += 1
-            assert ctx.value is not None
-            signal2real_fn(ctx.value)
-            return True
-
-        return check
-
-    monkeypatch.setattr(acquire_mod, "snr_checker", fake_snr_checker)
+def test_snr_stop_condition_reads_cached_snr_at_original_cadence(
+    monkeypatch: Any,
+) -> None:
+    now = {"value": 1.0}
+    monkeypatch.setattr(acquire_mod.time, "time", lambda: now["value"])
     probe = acquire_mod.SnrProbe()
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
         schema=QubitFreqBuilder().make_default_schema(),
+        knobs_snapshot={"earlystop_snr": 50.0},
     )
 
-    stop_condition = acquire_mod.build_stop_condition(
-        env,
-        probe,
-        lambda signals: np.asarray(signals, dtype=np.complex128).real,
-    )
+    stop_condition = acquire_mod.build_stop_condition(env, probe)
 
     assert stop_condition is not None
     assert stop_condition() is False
-    assert calls["count"] == 0
 
     probe.value = np.asarray([1.0 + 0.0j], dtype=np.complex128)
+    probe.snr = 49.9
+    assert stop_condition() is False
+
+    probe.snr = 50.0
+    now["value"] = 1.05
+    assert stop_condition() is False
+
+    now["value"] = 1.101
     assert stop_condition() is True
-    assert calls["count"] == 1
+
+    probe.snr = 0.0
+    assert stop_condition() is True
 
 
 def test_snr_stop_condition_uses_run_start_knob_snapshot() -> None:
@@ -307,13 +306,71 @@ def test_snr_stop_condition_uses_run_start_knob_snapshot() -> None:
         knobs_snapshot={"earlystop_snr": None},
     )
 
-    stop_condition = acquire_mod.build_stop_condition(
-        env,
-        acquire_mod.SnrProbe(),
-        lambda signals: np.asarray(signals, dtype=np.complex128).real,
-    )
+    stop_condition = acquire_mod.build_stop_condition(env, acquire_mod.SnrProbe())
 
     assert stop_condition is None
+
+
+def test_setup_flux_point_updates_selected_device_before_setup(
+    monkeypatch: Any,
+) -> None:
+    cfg = ExpCfgModel(dev={"flux": FakeDeviceInfo(address="none")})
+    env = RunEnv(
+        flux=0.25,
+        flux_idx=0,
+        schema=QubitFreqBuilder().make_default_schema(),
+        flux_device="flux",
+    )
+    setup_calls: list[tuple[ExpCfgModel, bool]] = []
+
+    def record_setup(value: ExpCfgModel, *, progress: bool) -> None:
+        setup_calls.append((value, progress))
+
+    monkeypatch.setattr(acquire_mod, "setup_devices", record_setup)
+
+    acquire_mod.setup_flux_point(cfg, env, "qubit_freq")
+
+    assert cfg.dev is not None
+    assert cast(FakeDeviceInfo, cfg.dev["flux"]).value == pytest.approx(0.25)
+    assert setup_calls == [(cfg, False)]
+
+
+def test_setup_flux_point_fast_fails_without_selected_device() -> None:
+    cfg = ExpCfgModel(dev={"flux": FakeDeviceInfo(address="none")})
+    env = RunEnv(
+        flux=0.25,
+        flux_idx=0,
+        schema=QubitFreqBuilder().make_default_schema(),
+        flux_device=None,
+    )
+
+    with pytest.raises(RuntimeError, match="needs a flux device picked"):
+        acquire_mod.setup_flux_point(cfg, env, "qubit_freq")
+
+
+def test_schedule_completed_distinguishes_completed_and_stopped() -> None:
+    assert acquire_mod.schedule_completed(ScheduleOutcome(), "t1")
+    assert not acquire_mod.schedule_completed(
+        ScheduleOutcome(status="stopped", reason="operator stopped"), "t1"
+    )
+
+
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+def test_schedule_completed_preserves_failure_reason_and_cause(status: Any) -> None:
+    cause = ValueError("hardware")
+    outcome = ScheduleOutcome(status=status, reason="acquire aborted", exception=cause)
+
+    with pytest.raises(RuntimeError, match="acquire aborted") as exc_info:
+        acquire_mod.schedule_completed(outcome, "t1")
+
+    assert exc_info.value.__cause__ is cause
+
+
+def test_schedule_completed_rejects_unknown_status() -> None:
+    outcome = ScheduleOutcome(status=cast(Any, "paused"))
+
+    with pytest.raises(RuntimeError, match="unsupported t1 Schedule outcome"):
+        acquire_mod.schedule_completed(outcome, "t1")
 
 
 def test_acquire_retry_reads_default_and_validates_non_negative():

@@ -24,16 +24,15 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -46,8 +45,8 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     build_stop_condition,
     is_good_fit,
     make_signal_update,
-    require_flux_device,
-    set_flux_by_name,
+    schedule_completed,
+    setup_flux_point,
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
@@ -103,8 +102,6 @@ logger = logging.getLogger(__name__)
 
 _DRIVE_GAIN_CAP = 1.0
 _MIN_TRUSTED_PI_LENGTH = 0.03
-_MAX_PI_SWEEP_FRACTION = 0.9
-_MAX_FIT_RESIDUAL_RATIO = 0.1
 _SWEEP_RANGE_MODE_AUTO_PI_LENGTH = "auto_pi_length"
 _SWEEP_RANGE_MODE_FIXED = "fixed"
 _RELAX_DELAY_MODE_AUTO_T1 = "auto_t1"
@@ -152,23 +149,11 @@ def _last_fit(result: Any) -> float:
     return float(valid[-1]) if valid.size else float("nan")
 
 
-def _float_or_none(value: Any) -> float | None:
-    if value is None:
-        return None
-    return float(value)
-
-
 def _require_positive_finite(name: str, value: Any) -> float:
     out = float(value)
     if not np.isfinite(out) or out <= 0.0:
         raise RuntimeError(f"lenrabi {name} must be positive and finite")
     return out
-
-
-def _optional_positive_finite(name: str, value: Any) -> float | None:
-    if value is None:
-        return None
-    return _require_positive_finite(name, value)
 
 
 def _drive_gain_from_pi_product(
@@ -179,12 +164,6 @@ def _drive_gain_from_pi_product(
     gain_factor = _require_positive_finite("pi_product_factor", factor)
     gain_cap = _require_positive_finite("drive_gain_cap", drive_gain_cap)
     return min(gain_cap, product / (gain_factor * target))
-
-
-def _clamp_drive_gain(value: float) -> float:
-    gain = _require_positive_finite("drive_gain", value)
-    gain_cap = _DRIVE_GAIN_CAP
-    return min(gain_cap, gain)
 
 
 def _blend_positive(prior: float, feedback: float, confidence: float) -> float:
@@ -203,45 +182,12 @@ def _drive_pulse_with_length(base: PulseCfg, length: float) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
-class _LenRabiFeedbackInputs:
-    target_pi_length: float
-    range_pi_length: float
-    feedback_pi_product: float
-
-
-def _resolve_feedback_inputs(
-    snapshot: Snapshot, knobs: Mapping[str, Any]
-) -> _LenRabiFeedbackInputs:
-    target_pi_length = _require_positive_finite(
-        "expected_pi_length", knobs["expected_pi_length"]
-    )
-    range_pi_length = (
-        _optional_positive_finite("previous pi_length", snapshot.get("pi_length"))
-        or target_pi_length
-    )
-    feedback_pi_product = _optional_positive_finite(
-        "previous pi_product", snapshot.get("pi_product")
-    ) or _require_positive_finite("pi_product_seed", knobs["pi_product_seed"])
-    return _LenRabiFeedbackInputs(
-        target_pi_length=target_pi_length,
-        range_pi_length=range_pi_length,
-        feedback_pi_product=feedback_pi_product,
-    )
-
-
-@dataclass(frozen=True)
 class _LenRabiFit:
     pi_length: float
     pi2_length: float
     rabi_freq: float
     residual: float
     fit_curve: NDArray[np.float64]
-
-
-def _fit_residual_sort_key(fit: _LenRabiFit) -> tuple[int, float]:
-    if not np.isfinite(fit.residual):
-        return (1, np.inf)
-    return (0, fit.residual)
 
 
 def _fit_lenrabi(
@@ -277,12 +223,21 @@ def _fit_lenrabi(
         raise RuntimeError(
             "lenrabi fit failed for decay and non-decay candidates"
         ) from (fit_errors[-1] if fit_errors else None)
-    return min(fits, key=_fit_residual_sort_key)
+    return min(
+        fits,
+        key=lambda candidate: (
+            (1, np.inf)
+            if not np.isfinite(candidate.residual)
+            else (0, candidate.residual)
+        ),
+    )
 
 
 def _is_trusted_lenrabi_fit(
     fit: _LenRabiFit, lengths: NDArray[np.float64], real: NDArray[np.float64]
 ) -> bool:
+    max_pi_sweep_fraction = 0.9
+    max_fit_residual_ratio = 0.1
     if not (
         np.isfinite(fit.pi_length)
         and np.isfinite(fit.rabi_freq)
@@ -294,10 +249,10 @@ def _is_trusted_lenrabi_fit(
     max_length = float(np.max(np.asarray(lengths, dtype=np.float64)))
     if (
         not np.isfinite(max_length)
-        or fit.pi_length > _MAX_PI_SWEEP_FRACTION * max_length
+        or fit.pi_length > max_pi_sweep_fraction * max_length
     ):
         return False
-    return is_good_fit(real, fit.fit_curve, threshold=_MAX_FIT_RESIDUAL_RATIO)
+    return is_good_fit(real, fit.fit_curve, threshold=max_fit_residual_ratio)
 
 
 def _fill_lenrabi_fit_or_skip(
@@ -338,25 +293,6 @@ def _patch_from_lenrabi_fit(fit: _LenRabiFit, base_drive_pulse: PulseCfg) -> Pat
     return patch
 
 
-def _update_drive_gain_feedback(
-    env: RunEnv, fit: _LenRabiFit, base_drive_pulse: PulseCfg
-) -> None:
-    if env.feedback is None:
-        return
-    knobs = env.knobs_view()
-    if str(knobs["drive_gain_mode"]) != _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
-        return
-    controller = env.feedback.controller(_DRIVE_GAIN_SLOT.key)
-    if controller is None:
-        return
-    target = _require_positive_finite("expected_pi_length", knobs["expected_pi_length"])
-    current_gain = _require_positive_finite("drive_gain", base_drive_pulse.gain)
-    normalized_error = math.log(
-        _require_positive_finite("pi_length", fit.pi_length) / target
-    )
-    controller.propose(current_gain, normalized_error)
-
-
 class LenRabiNode(Node):
     """One flux point's lenrabi: set flux → real acquire → fit_rabi → fill row → Patch.
 
@@ -384,11 +320,7 @@ class LenRabiNode(Node):
 
         # Point the flux device at this sweep point and push it to hardware (mock:
         # writes the FakeDevice value → SimEngine reads it live).
-        flux_device = require_flux_device(env, "lenrabi")
-        set_flux_by_name(
-            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
-        )
-        setup_devices(cfg, progress=False)
+        setup_flux_point(cfg, env, "lenrabi")
 
         # Sweep the rabi pulse length over the Result's trailing axis (the lower
         # layer's sweep2param("length") set on rabi_pulse).
@@ -431,22 +363,12 @@ class LenRabiNode(Node):
                 progress=False,
                 progress_label=f"{env.node_name or 'lenrabi'} flux {idx + 1} rounds",
                 progress_leave=False,
-                stop_condition=build_stop_condition(env, probe, signal2real_flip),
+                stop_condition=build_stop_condition(env, probe),
             )
             outcome = sched.outcome
 
-        if outcome.status == "stopped":
+        if not schedule_completed(outcome, "lenrabi"):
             return Patch()
-        if outcome.status == "failed":
-            reason = outcome.reason or "lenrabi Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status == "interrupted":
-            reason = outcome.reason or "lenrabi Schedule acquire interrupted"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status != "completed":
-            raise RuntimeError(
-                f"unsupported lenrabi Schedule outcome: {outcome.status!r}"
-            )
 
         real = signal2real_flip(np.asarray(signal, dtype=np.complex128))
 
@@ -467,7 +389,24 @@ class LenRabiNode(Node):
             fit.pi_length,
             fit.pi2_length,
         )
-        _update_drive_gain_feedback(env, fit, base_drive_pulse)
+        knobs = env.knobs_view()
+        if (
+            env.feedback is not None
+            and str(knobs["drive_gain_mode"]) == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT
+        ):
+            controller = env.feedback.controller(_DRIVE_GAIN_SLOT.key)
+            if controller is not None:
+                target_pi_length = _require_positive_finite(
+                    "expected_pi_length", knobs["expected_pi_length"]
+                )
+                current_gain = _require_positive_finite(
+                    "drive_gain", base_drive_pulse.gain
+                )
+                normalized_error = math.log(
+                    _require_positive_finite("pi_length", fit.pi_length)
+                    / target_pi_length
+                )
+                controller.propose(current_gain, normalized_error)
 
         return _patch_from_lenrabi_fit(fit, base_drive_pulse)
 
@@ -701,14 +640,34 @@ class LenRabiBuilder(Builder):
             )
         knobs = env.knobs_view()
         qubit_freq = float(snapshot["qubit_freq"])
-        t1 = _float_or_none(snapshot.get("t1")) or float(knobs["t1_seed_us"])
-        feedback = _resolve_feedback_inputs(snapshot, knobs)
+
+        previous_t1 = snapshot.get("t1")
+        t1 = (
+            float(knobs["t1_seed_us"])
+            if previous_t1 is None
+            else float(previous_t1) or float(knobs["t1_seed_us"])
+        )
+        target_pi_length = _require_positive_finite(
+            "expected_pi_length", knobs["expected_pi_length"]
+        )
+        previous_pi_length = snapshot.get("pi_length")
+        range_pi_length = (
+            target_pi_length
+            if previous_pi_length is None
+            else _require_positive_finite("previous pi_length", previous_pi_length)
+        )
+        previous_pi_product = snapshot.get("pi_product")
+        feedback_pi_product = (
+            _require_positive_finite("pi_product_seed", knobs["pi_product_seed"])
+            if previous_pi_product is None
+            else _require_positive_finite("previous pi_product", previous_pi_product)
+        )
 
         drive_gain_mode = str(knobs["drive_gain_mode"])
         if drive_gain_mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
             drive_gain = _drive_gain_from_pi_product(
-                feedback.feedback_pi_product,
-                feedback.target_pi_length,
+                feedback_pi_product,
+                target_pi_length,
                 factor=1.2,
                 drive_gain_cap=_DRIVE_GAIN_CAP,
             )
@@ -726,12 +685,15 @@ class LenRabiBuilder(Builder):
             if controller is not None:
                 latest = controller.latest()
                 if latest is not None:
-                    drive_gain = _blend_positive(
+                    blended_gain = _blend_positive(
                         drive_gain,
                         latest.value,
                         latest.confidence,
                     )
-                    drive_gain = _clamp_drive_gain(drive_gain)
+                    drive_gain = min(
+                        _DRIVE_GAIN_CAP,
+                        _require_positive_finite("drive_gain", blended_gain),
+                    )
         patches: dict[str, object] = {
             "modules.rabi_pulse.freq": qubit_freq,
         }
@@ -760,7 +722,7 @@ class LenRabiBuilder(Builder):
             sweep_range = (
                 float(fixed_sweep.start),
                 auto_sweep_stop(
-                    feedback.range_pi_length,
+                    range_pi_length,
                     stop_factor=float(knobs["sweep_stop_factor"]),
                     stop_min=None,
                 ),

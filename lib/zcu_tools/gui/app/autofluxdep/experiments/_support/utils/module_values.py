@@ -80,13 +80,6 @@ def nested_get(value: Any, *path: str) -> Any | None:
     return cur
 
 
-def pulse_gain(module: Any) -> float | None:
-    value = nested_get(module, "gain")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
-
-
 def pulse_length(module: Any) -> float | None:
     value = nested_get(module, "waveform", "length")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -96,33 +89,16 @@ def pulse_length(module: Any) -> float | None:
 
 def pulse_product(module: Any) -> float | None:
     length = pulse_length(module)
-    gain = pulse_gain(module)
-    if length is None or gain is None:
+    gain = nested_get(module, "gain")
+    if length is None or not isinstance(gain, (int, float)) or isinstance(gain, bool):
         return None
-    return length * gain
-
-
-def readout_pulse_freq(module: Any) -> float | None:
-    value = nested_get(module, "pulse_cfg", "freq")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
-
-
-def readout_pulse_gain(module: Any) -> float | None:
-    value = nested_get(module, "pulse_cfg", "gain")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
+    return length * float(gain)
 
 
 __all__ = [
     "ctx_md_float",
     "ctx_module",
     "nested_get",
-    "pulse_gain",
     "pulse_length",
     "pulse_product",
-    "readout_pulse_freq",
-    "readout_pulse_gain",
 ]

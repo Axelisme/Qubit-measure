@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
@@ -28,7 +28,6 @@ from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
@@ -41,8 +40,8 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     build_stop_condition,
     is_good_fit,
     make_signal_update,
-    require_flux_device,
-    set_flux_by_name,
+    schedule_completed,
+    setup_flux_point,
 )
 from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
     missing_info_value,
@@ -64,7 +63,7 @@ from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl, ScalarEstim
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.tools import Predictor, Tools
+from zcu_tools.gui.app.autofluxdep.tools import Predictor
 from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
@@ -87,8 +86,6 @@ from zcu_tools.utils.process import rotate2real
 logger = logging.getLogger(__name__)
 
 _DRIVE_GAIN_CAP = 1.0
-_FREQ_FIT_RESIDUAL_RATIO = 0.2
-_LINEWIDTH_FIT_RESIDUAL_RATIO = 0.1
 _DRIVE_GAIN_MODE_ADAPTIVE = "adaptive"
 _DRIVE_GAIN_MODE_FIXED = "fixed"
 _PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
@@ -165,7 +162,7 @@ def _observe_predict_freq_residual(
 
 def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """PCA-rotate to the real axis and normalise to [0, 1] (a dip near 0)."""
-    real = rotate2real(signals.astype(np.complex128)).real
+    real = rotate2real(np.asarray(signals, dtype=np.complex128)).real
     lo, hi = float(real.min()), float(real.max())
     real = (real - lo) / (hi - lo + 1e-12)
     # orient so the resonance is a dip (start/end high, centre low)
@@ -177,7 +174,7 @@ def _signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 def _is_trusted_frequency_fit(
     real: NDArray[np.float64], fit_curve: NDArray[np.float64]
 ) -> bool:
-    return is_good_fit(real, fit_curve, threshold=_FREQ_FIT_RESIDUAL_RATIO)
+    return is_good_fit(real, fit_curve, threshold=0.2)
 
 
 def _is_trusted_linewidth_fit(
@@ -197,7 +194,7 @@ def _is_trusted_linewidth_fit(
     if not np.isfinite(span) or span <= 0.0 or width > span:
         return False
 
-    return is_good_fit(real, fit_curve, threshold=_LINEWIDTH_FIT_RESIDUAL_RATIO)
+    return is_good_fit(real, fit_curve, threshold=0.1)
 
 
 class QubitFreqNode(Node):
@@ -235,13 +232,7 @@ class QubitFreqNode(Node):
         # Point the flux device at this sweep point and push it to hardware (mock:
         # writes the FakeDevice value → SimEngine reads it live). Fast Fail if no
         # flux source is picked — a real flux sweep must drive a device.
-        flux_device = require_flux_device(env, "qubit_freq")
-        # cfg.dev is typed Mapping but make_cfg always populates it with a mutable
-        # dict (GlobalDeviceManager.get_all_info); cast for the in-place name write.
-        set_flux_by_name(
-            cast("MutableMapping[str, Any] | None", cfg.dev), flux_device, env.flux
-        )
-        setup_devices(cfg, progress=False)
+        setup_flux_point(cfg, env, "qubit_freq")
 
         # Recenter the detune sweep on the predicted freq (mirrors the lower layer:
         # qub_pulse.freq + detune_param), so the FPGA sweeps freq across the detune
@@ -292,22 +283,12 @@ class QubitFreqNode(Node):
                 progress=False,
                 progress_label=f"{env.node_name or 'qubit_freq'} flux {idx + 1} rounds",
                 progress_leave=False,
-                stop_condition=build_stop_condition(env, probe, _signal2real),
+                stop_condition=build_stop_condition(env, probe),
             )
             outcome = sched.outcome
 
-        if outcome.status == "stopped":
+        if not schedule_completed(outcome, "qubit_freq"):
             return Patch()
-        if outcome.status == "failed":
-            reason = outcome.reason or "qubit_freq Schedule acquire failed"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status == "interrupted":
-            reason = outcome.reason or "qubit_freq Schedule acquire interrupted"
-            raise RuntimeError(reason) from outcome.exception
-        if outcome.status != "completed":
-            raise RuntimeError(
-                f"unsupported qubit_freq Schedule outcome: {outcome.status!r}"
-            )
 
         real = _signal2real(np.asarray(signal, dtype=np.complex128))
 
@@ -349,7 +330,7 @@ class QubitFreqNode(Node):
             snapshot_predict_freq=base_pred_qf,
             estimator_key=_PREDICT_FREQ_CORRECTION_SLOT.key,
         )
-        base_for_residual = physical_prediction_for_residual(env, base_pred_qf, knobs)
+        base_for_residual = physical_prediction_for_make_cfg(env, base_pred_qf, knobs)
         if not recovery_reseeded:
             _observe_predict_freq_residual(env, float(freq), base_for_residual)
 
@@ -738,14 +719,6 @@ def physical_prediction_for_make_cfg(
     return float(state.overlay.predict_freq(env.flux))
 
 
-def physical_prediction_for_residual(
-    env: RunEnv,
-    snapshot_predict_freq: float,
-    knobs: Mapping[str, Any],
-) -> float:
-    return physical_prediction_for_make_cfg(env, snapshot_predict_freq, knobs)
-
-
 def on_fit_failed(
     env: RunEnv,
     *,
@@ -877,7 +850,9 @@ def _attempt_recovery_fit(
         )
         return False
 
-    predictor = _active_physical_predictor(env.tools, state)
+    predictor = state.overlay
+    if predictor is None and env.tools is not None:
+        predictor = env.tools.predictor
     if predictor is None:
         state.last_attempt = _attempt(
             trigger,
@@ -906,7 +881,16 @@ def _attempt_recovery_fit(
         base,
         ((point.flux, point.frequency_mhz) for point in selected),
     )
-    candidate = _candidate_overlay(predictor, fit)
+    candidate: Predictor | None = None
+    if fit.accepted and fit.fitted is not None:
+        try:
+            candidate = predictor.overlay_physical(fit.fitted)
+        except Exception as exc:
+            raise RuntimeError("qubit_freq physical recovery overlay failed") from exc
+
+    estimator = None
+    if env.feedback is not None:
+        estimator = env.feedback.estimator(estimator_key)
     attempt = _accept_candidate(
         env,
         cfg,
@@ -916,7 +900,7 @@ def _attempt_recovery_fit(
         candidate,
         fit,
         snapshot_predict_freq=snapshot_predict_freq,
-        estimator=_estimator(env, estimator_key),
+        estimator=estimator,
     )
     state.last_attempt = attempt
     if attempt.accepted and candidate is not None:
@@ -939,18 +923,6 @@ def _attempt_recovery_fit(
             attempt.reason,
         )
     return attempt.accepted and candidate is not None
-
-
-def _candidate_overlay(
-    base_predictor: Predictor,
-    fit: FluxoniumLocalFitResult,
-) -> Predictor | None:
-    if not fit.accepted or fit.fitted is None:
-        return None
-    try:
-        return base_predictor.overlay_physical(fit.fitted)
-    except Exception as exc:
-        raise RuntimeError("qubit_freq physical recovery overlay failed") from exc
 
 
 def _accept_candidate(
@@ -1095,23 +1067,6 @@ def _accept_candidate(
         fit.fitted_rms_mhz,
         center_shift,
     )
-
-
-def _active_physical_predictor(
-    tools: Tools | None,
-    state: QubitFreqRecoveryState,
-) -> Predictor | None:
-    if state.overlay is not None:
-        return state.overlay
-    if tools is None:
-        return None
-    return tools.predictor
-
-
-def _estimator(env: RunEnv, estimator_key: str) -> ScalarEstimator | None:
-    if env.feedback is None:
-        return None
-    return env.feedback.estimator(estimator_key)
 
 
 def _placement_key(env: RunEnv) -> str:

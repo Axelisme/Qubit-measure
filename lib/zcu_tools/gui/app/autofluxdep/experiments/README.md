@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — experiment authoring boundary
+**Last updated:** 2026-07-11 — readable experiment policy
 
 # autofluxdep experiments
 
@@ -27,7 +27,7 @@ experiments/
 
 ## 修改既有實驗
 
-直接修改對應的 `<name>.py`，並保留 Builder/Node 介面、declaration keys、persistence/wire shape 與 Result/Patch 語意。只被該實驗使用的 helper 留在同一檔案；確實被至少兩個實驗共用時才移入 `_support/`。
+直接修改對應的 `<name>.py`，並保留 Builder/Node 介面、declaration keys、persistence/wire shape 與 Result/Patch 語意。每個 experiment file 自己擁有 domain policy；跨實驗相同的 flux setup、Schedule outcome 與 acquire mechanics 集中在 `_support/`。單用 forwarding logic 就近 inline，只有多處共用或直接受測、具有清楚 domain/algorithm seam 的 helper 才保留。
 
 ## 新增實驗 checklist
 
