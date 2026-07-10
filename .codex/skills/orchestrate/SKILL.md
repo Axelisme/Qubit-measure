@@ -1,7 +1,7 @@
 ---
 name: orchestrate
 description: Act as the repo-wide orchestrator / tech lead — hold the architecture mental model, own the roadmap and progress, coordinate task plans, worktree lanes, integration branches, and sub-agent reports, and independently sanity-check delegated plans/reviews when risk warrants it. Use when asked to plan and push the whole repo forward, coordinate a multi-step / cross-module effort, manage a phase roadmap, or steer work across several sub-agents rather than do one concrete edit yourself.
-skill_version: 10
+skill_version: 12
 ---
 
 # orchestrate
@@ -281,9 +281,9 @@ git branch -d agent/<task-id>
 
 在 Codex runtime 生成 sub-agent 時，依 agent role 指定 model；委派 prompt 也要明確寫入對應 model 設定，避免 runtime default 漂移：
 
-- planner 類（`impl-detail-planner`、內建 `Plan`，以及等價的規劃型委派）使用 model `5.5`，reasoning effort 設為 `high`。
-- reviewer 類（`python-module-reviewer`、`mcp-skill-tester` 進行 review / dogfooding 時，以及等價的審查型委派）使用 model `5.5`，reasoning effort 設為 `high`。
-- implementer 類（`plan-item-implementer`，以及等價的落地改碼型委派）使用 model `5.3-codex-spark`。
+- planner 類（`impl-detail-planner`、內建 `Plan`，以及等價的規劃型委派）優先使用 model `5.6-terra`；若 runtime 只提供 5.5 系列，退回 `5.5-high`。
+- reviewer 類（`python-module-reviewer`、`mcp-skill-tester` 進行 review / dogfooding 時，以及等價的審查型委派）優先使用 model `5.6-terra`；若 runtime 只提供 5.5 系列，退回 `5.5-high`。
+- implementer 類（`plan-item-implementer`，以及等價的落地改碼型委派）優先使用 model `5.6-tarra`；若 runtime 只提供 5.5 系列，退回 `5.5-med`。
 
 ### Claude Sub-Agent Model
 
