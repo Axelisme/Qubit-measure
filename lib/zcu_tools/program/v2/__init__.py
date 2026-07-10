@@ -38,7 +38,5 @@ from .modules import (
     WaveformCfg,
     WaveformCfgFactory,
 )
-from .onetone import OneToneCfg, OneToneProgram
 from .sweep import SweepCfg
-from .twotone import TwoToneCfg, TwoToneProgram
 from .utils import sweep2param

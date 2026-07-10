@@ -7,12 +7,12 @@ import pytest
 from zcu_tools.experiment.v2.singleshot.len_rabi import (
     LenRabiCfg,
     LenRabiExp,
+    LenRabiModuleCfg,
     LenRabiResult,
     LenRabiSweepCfg,
 )
 from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, SweepCfg
 from zcu_tools.program.v2.modules import ConstWaveformCfg
-from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 from zcu_tools.utils.datasaver import LabberData, load_labber_data, save_labber_data
 
 from script.migrate_experiment_data import migrate_experiment_data
@@ -49,7 +49,7 @@ def _cfg() -> LenRabiCfg:
     return LenRabiCfg(
         reps=1,
         rounds=1,
-        modules=TwoToneModuleCfg(
+        modules=LenRabiModuleCfg(
             reset=None,
             init_pulse=None,
             qub_pulse=_pulse(ch=1, freq=3000.0, gain=0.2),

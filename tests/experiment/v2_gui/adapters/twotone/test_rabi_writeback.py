@@ -14,10 +14,12 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
     AmpRabiCfg,
+    AmpRabiModuleCfg,
     AmpRabiResult,
 )
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiCfg,
+    LenRabiModuleCfg,
     LenRabiResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.amp_rabi import (
@@ -43,7 +45,6 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 
 # ---------------------------------------------------------------------------
 # Fixtures — shared across both adapters
@@ -73,7 +74,7 @@ def _make_amp_rabi_run_result(gain: float = 0.5) -> AmpRabiResult:
     import numpy as np
 
     qub_pulse = _make_qub_pulse(gain=gain)
-    modules = MagicMock(spec=TwoToneModuleCfg)
+    modules = MagicMock(spec=AmpRabiModuleCfg)
     modules.qub_pulse = qub_pulse
     cfg = MagicMock(spec=AmpRabiCfg)
     cfg.modules = modules
@@ -89,7 +90,7 @@ def _make_len_rabi_run_result(length: float = 0.1) -> LenRabiResult:
     import numpy as np
 
     qub_pulse = _make_qub_pulse(length=length)
-    modules = MagicMock(spec=TwoToneModuleCfg)
+    modules = MagicMock(spec=LenRabiModuleCfg)
     modules.qub_pulse = qub_pulse
     cfg = MagicMock(spec=LenRabiCfg)
     cfg.modules = modules

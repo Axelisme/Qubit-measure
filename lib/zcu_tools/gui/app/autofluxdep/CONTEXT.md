@@ -38,8 +38,8 @@ Node's `produce` builds the real run cfg from that context (`Builder.make_cfg`
 `cfg.dev[flux_device]` by device **name** (`set_flux_by_name` — the GUI picker
 stores a device name, e.g. the auto-provisioned `fake_flux`; the lower layer's
 `flux_dev` label is a different dimension), pushes it with `setup_devices`, then
-runs the experiment program's `.acquire` (TwoToneProgram / ModularProgramV2 /
-…) with a running-average `round_hook` + completed-round SNR `stop_condition`
+runs the experiment program's `.acquire` (`ModularProgramV2` / …) with a
+running-average `round_hook` + completed-round SNR `stop_condition`
 (cooperative cancel flows through the ambient Schedule stop flag), and fits — `qubit_freq` keeps the raw
 predictor immutable and
 composes run-local physical overlay plus residual feedback; `ro_optimize`

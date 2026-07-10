@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-07-02 — cfg contract hardening
+**Last updated:** 2026-07-11 — tone-specific cfg ownership
 
 ## Testing & Type Checking Conventions
 
@@ -44,6 +44,8 @@ The IR is divided into three layers to decouple high-level program structure fro
 
 - `MyProgramV2`: Base class for experiments, wraps QICK's `AveragerProgramV2`.
 - `ModularProgramV2`: Supports pulse blocks and reusable modules.
+- Program layer 不提供 one-tone/two-tone 專用 cfg 或 program base；使用方以
+  `ProgramV2Cfg`、local module cfg 與自己的 experiment cfg 直接組合完整 contract。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## Macro Layer

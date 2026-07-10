@@ -24,8 +24,11 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseCfg,
+    ReadoutCfg,
+    ResetCfg,
     SweepCfg,
-    TwoToneCfg,
     sweep2param,
 )
 from zcu_tools.utils.process import minus_background
@@ -48,7 +51,15 @@ class PowerSweepCfg(ConfigBase):
     freq: SweepCfg
 
 
-class PowerCfg(TwoToneCfg, ExpCfgModel):
+class PowerModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class PowerCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: PowerModuleCfg
     sweep: PowerSweepCfg
 
 

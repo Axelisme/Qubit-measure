@@ -24,6 +24,7 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
@@ -71,9 +72,12 @@ from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
+    PulseCfg,
     Readout,
-    TwoToneCfg,
+    ReadoutCfg,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_qubit_freq
@@ -97,15 +101,25 @@ _PREDICT_FREQ_CORRECTION_SLOT = FeedbackSlotDecl(
 )
 
 
-class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
-    """The base two-tone cfg qubit_freq lowers a context into.
+class QubitFreqModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
 
-    Just ``TwoToneCfg`` (reps/rounds/relax + qub_pulse/readout modules) + the
-    ``ExpCfgModel`` device/save fields — the flux ``dev`` entry and the ``detune``
-    sweep are merged in by ``produce`` (the sweep recenters on the predicted freq,
-    and the dev carries this flux point's value), mirroring the lower-layer
-    ``experiment/v2/autofluxdep`` QubitFreqCfgTemplate.
+
+class QubitFreqCfgTemplate(ProgramV2Cfg, ExpCfgModel):
+    """The explicit qubit-frequency cfg lowered from the active context.
+
+    ``ProgramV2Cfg`` supplies the program runtime fields, this node owns its
+    module shape, and ``ExpCfgModel`` supplies the experiment fields. The flux
+    ``dev`` entry and ``detune`` sweep are merged in by ``produce`` (the sweep
+    recenters on the predicted frequency and the device carries this point's
+    flux value), mirroring the lower-layer ``experiment/v2/autofluxdep``
+    ``QubitFreqCfgTemplate``.
     """
+
+    modules: QubitFreqModuleCfg
 
 
 def _drive_gain_from_qfw_factor(

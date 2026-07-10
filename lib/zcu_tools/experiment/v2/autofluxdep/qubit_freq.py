@@ -21,7 +21,14 @@ from zcu_tools.experiment.v2.runner import (
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
-from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, sweep2param
+from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseCfg,
+    ReadoutCfg,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 from zcu_tools.utils.fitting import fit_qubit_freq
@@ -52,14 +59,23 @@ def qubitfreq_fluxdep_signal2real(
     return np.array(list(map(qubitfreq_signal2real, signals)), dtype=np.float64)
 
 
-class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel): ...
+class QubitFreqModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class QubitFreqCfgTemplate(ProgramV2Cfg, ExpCfgModel):
+    modules: QubitFreqModuleCfg
 
 
 class QubitFreqSweepCfg(ConfigBase):
     detune: SweepCfg
 
 
-class QubitFreqCfg(TwoToneCfg, FluxDepCfg):
+class QubitFreqCfg(ProgramV2Cfg, FluxDepCfg):
+    modules: QubitFreqModuleCfg
     sweep: QubitFreqSweepCfg
 
 

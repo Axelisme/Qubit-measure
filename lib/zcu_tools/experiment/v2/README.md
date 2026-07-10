@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-07-10 — RB recovery uses full Clifford inverse (Cayley table)
+**Last updated:** 2026-07-11 — concrete experiment cfg ownership
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -169,6 +169,8 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 - `ConfigBase`（`zcu_tools/cfg_model.py`）是 `BaseModel` 的子類別，預設 `extra="forbid"`, `validate_assignment=True`，並提供 `with_updates()` 與 `to_dict()` 工具。所有模組/實驗 cfg 都應繼承 `ConfigBase` 而不是直接用 `BaseModel`。
 - `ProgramV2Cfg`（來自 `program/v2`）定義 QICK 程式需要的欄位（`reps`、`rounds`、...）。
+- 每個 concrete experiment 直接宣告自己的 local module cfg，並組合
+  `ProgramV2Cfg` / `ExpCfgModel`；不透過 one-tone/two-tone cfg base 隱藏欄位。
 - `ExpCfgModel`（`experiment/cfg_model.py`）提供共用欄位（目前含 `dev`）與統一驗證行為。
 - `SweepCfg` 已移至 `program/v2/sweep.py`（從 `zcu_tools.program.v2` import），繼承 `ConfigBase`，並帶有 `@model_validator` 驗證 `start/stop/step/expts` 一致性。
 - **run-time cfg materialization** 由 `zcu_tools.experiment.cfg_assembler` 擁有，而不是 `ModuleLibrary` store 擁有。核心 `assemble_experiment_cfg(raw_cfg, cfg_model, *, ml, device_snapshot, overrides=None)` 是 stateless function：caller 每次傳入 current `ml` 與當下 device snapshot；它負責套 overrides、注入 `dev` snapshot、lower `modules`、format single sweep、最後 `cfg_model.model_validate()`。`make_cfg(...)` 是薄 wrapper，預設在呼叫當下讀 `GlobalDeviceManager.get_all_info()`；`ModuleLibrary.make_cfg(...)` 只作過渡 forwarding wrapper，caller migration 後刪除。

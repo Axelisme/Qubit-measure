@@ -93,7 +93,7 @@ class SsLenRabiAdapter(
 
     @classmethod
     def cfg_spec(cls) -> CfgSectionSpec:
-        # cfg mirrors TwoToneModuleCfg (qub_pulse / readout / reset) + sweep.length.
+        # LenRabiCfg owns qub_pulse/readout/reset modules plus sweep.length.
         return build_exp_spec(
             modules={
                 "reset": make_reset_module_spec(optional=True),

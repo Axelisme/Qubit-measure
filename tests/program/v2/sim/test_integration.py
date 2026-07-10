@@ -63,15 +63,22 @@ from zcu_tools.experiment.v2.lookback import (
     LookbackModuleCfg,
 )
 from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Exp, GEModuleCfg
-from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqSweepCfg
+from zcu_tools.experiment.v2.twotone.freq import (
+    FreqCfg,
+    FreqExp,
+    FreqModuleCfg,
+    FreqSweepCfg,
+)
 from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
     AmpRabiCfg,
     AmpRabiExp,
+    AmpRabiModuleCfg,
     AmpRabiSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
     LenRabiCfg,
     LenRabiExp,
+    LenRabiModuleCfg,
     LenRabiSweepCfg,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
@@ -105,7 +112,6 @@ from zcu_tools.program.v2.sim.readout import (
     resonator_freqs,
     s21,
 )
-from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 # Fixed operating point: reduced flux = 1.0 (R-3, matches the engine constant).
@@ -173,12 +179,6 @@ def _readout() -> DirectReadoutCfg:
     return DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=_rf_g_mhz())
 
 
-def _twotone_modules(qub_pulse: PulseCfg) -> TwoToneModuleCfg:
-    return TwoToneModuleCfg(
-        reset=None, init_pulse=None, qub_pulse=qub_pulse, readout=_readout()
-    )
-
-
 def _sim_dephasing(*, T2: float, T2_star: float) -> SimParams:
     """``_SIM`` clone with a chosen homogeneous/inhomogeneous coherence split.
 
@@ -222,7 +222,12 @@ def test_freq_recovers_f_qubit() -> None:
     cfg = FreqCfg(
         reps=200,
         rounds=2,
-        modules=_twotone_modules(qub_pulse),
+        modules=FreqModuleCfg(
+            reset=None,
+            init_pulse=None,
+            qub_pulse=qub_pulse,
+            readout=_readout(),
+        ),
         sweep=FreqSweepCfg(
             freq=SweepCfg(
                 start=f_qubit - 200.0, stop=f_qubit + 200.0, expts=81, step=400.0 / 80
@@ -268,7 +273,12 @@ def test_amp_rabi_recovers_pi_gain() -> None:
     cfg = AmpRabiCfg(
         reps=120,
         rounds=2,
-        modules=_twotone_modules(qub_pulse),
+        modules=AmpRabiModuleCfg(
+            reset=None,
+            init_pulse=None,
+            qub_pulse=qub_pulse,
+            readout=_readout(),
+        ),
         sweep=AmpRabiSweepCfg(
             gain=SweepCfg(start=0.0, stop=1.6, expts=60, step=1.6 / 59)
         ),
@@ -313,7 +323,12 @@ def test_len_rabi_recovers_gain_scaling() -> None:
         cfg = LenRabiCfg(
             reps=150,
             rounds=2,
-            modules=_twotone_modules(qub_pulse),
+            modules=LenRabiModuleCfg(
+                reset=None,
+                init_pulse=None,
+                qub_pulse=qub_pulse,
+                readout=_readout(),
+            ),
             sweep=LenRabiSweepCfg(
                 length=SweepCfg(start=0.05, stop=3.0, expts=25, step=(3.0 - 0.05) / 24)
             ),

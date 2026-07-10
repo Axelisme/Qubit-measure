@@ -26,8 +26,11 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseCfg,
+    ReadoutCfg,
+    ResetCfg,
     SweepCfg,
-    TwoToneCfg,
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_rabi
@@ -49,7 +52,15 @@ class LenRabiSweepCfg(ConfigBase):
     length: SweepCfg
 
 
-class LenRabiCfg(TwoToneCfg, ExpCfgModel):
+class LenRabiModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: LenRabiModuleCfg
     sweep: LenRabiSweepCfg
 
 

@@ -26,8 +26,14 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, sweep2param
-from zcu_tools.program.v2.twotone import TwoToneModuleCfg
+from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseCfg,
+    ReadoutCfg,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
 
 from .util import calc_populations, correct_populations, raw_population_signal
 
@@ -50,8 +56,15 @@ class LenRabiSweepCfg(ConfigBase):
     length: SweepCfg
 
 
-class LenRabiCfg(TwoToneCfg, ExpCfgModel):
-    modules: TwoToneModuleCfg
+class LenRabiModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: LenRabiModuleCfg
     sweep: LenRabiSweepCfg
 
 

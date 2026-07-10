@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — run-local module and cfg snapshots
+**Last updated:** 2026-07-11 — explicit node cfg ownership
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
@@ -29,6 +29,8 @@ generation persistence的raw dict reshape/traversal仍由autofluxdep擁有，不
 
 ## 關鍵設計
 
+- **qubit_freq cfg ownership**：app-local template 直接組合 `ProgramV2Cfg`、
+  完整 local module cfg 與 `ExpCfgModel`，讓 node 的 runtime contract 在使用處完整可見。
 - **RUN acquire helper contract**：`nodes/acquire.py` 的 SNR early-stop 是
   completed-round closure；threshold 讀 run-start knob snapshot，probe 尚未有 signal
   時回 False，有 signal 後才交給 SNR checker 判斷，不保存額外 data-stop flag。

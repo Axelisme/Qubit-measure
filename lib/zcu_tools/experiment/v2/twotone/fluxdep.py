@@ -29,7 +29,14 @@ from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
     InteractiveLines,
 )
-from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, sweep2param
+from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseCfg,
+    ReadoutCfg,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
 from zcu_tools.utils.process import minus_background
 
 
@@ -50,7 +57,15 @@ class FreqFluxSweepCfg(ConfigBase):
     freq: SweepCfg
 
 
-class FreqFluxCfg(TwoToneCfg, ExpCfgModel):
+class FreqFluxModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class FreqFluxCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: FreqFluxModuleCfg
     dev: Mapping[str, DeviceInfo]  # type: ignore[dict-item]
     sweep: FreqFluxSweepCfg
 

@@ -24,7 +24,14 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program.v2 import SweepCfg, TwoToneCfg, sweep2param
+from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseCfg,
+    ReadoutCfg,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import minus_background
 
@@ -44,7 +51,15 @@ class FreqSweepCfg(ConfigBase):
     freq: SweepCfg
 
 
-class FreqCfg(TwoToneCfg, ExpCfgModel):
+class FreqModuleCfg(ConfigBase):
+    reset: ResetCfg | None = None
+    init_pulse: PulseCfg | None = None
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class FreqCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: FreqModuleCfg
     sweep: FreqSweepCfg
 
 
