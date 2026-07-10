@@ -20,11 +20,13 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import zcu_tools.gui.app.autofluxdep.nodes.utils.schema as node_schema_module
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgSectionSpec,
     CfgSectionValue,
+    ChoiceSectionSpec,
     DirectValue,
     EvalValue,
     FloatSpec,
@@ -42,6 +44,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     validate_override_plan_base_cfg,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
+from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import pulse_length, pulse_product
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -63,7 +66,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.utils import NodeSchemaBuilder
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
+from zcu_tools.gui.cfg import LiteralSpec
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
@@ -137,6 +142,454 @@ _BUILDER_IDS = [builder.name for builder in _BUILDERS]
 
 def test_pi_pulse_library_aliases_prefer_length_calibrated_pulse() -> None:
     assert PI_PULSE_LIBRARY_ALIASES == ("pi_len", "pi_amp", "pi_pulse")
+
+
+def test_node_schema_builder_pulse_uses_first_compatible_library_key() -> None:
+    ml = ModuleLibrary()
+    first = {**_PI_PULSE, "ch": 4, "freq": 5001.0, "gain": 0.25}
+    second = {**_PI_PULSE, "ch": 6, "freq": 5002.0, "gain": 0.5}
+    ml.register_module(first=first, second=second, wrong_type=_READOUT)
+
+    schema = (
+        NodeSchemaBuilder(_ctx(ml=ml), label="Builder contract")
+        .pulse(
+            "drive",
+            "modules.drive",
+            label="Drive",
+            library_keys=("wrong_type", "first", "second"),
+            blank_overrides={"ch": 9, "gain": 0.9},
+            overrides={"freq": 5123.0},
+            locked={"nqz": 1},
+        )
+        .build()
+    )
+
+    drive = read_value_tree(schema)["modules"]["drive"]
+    assert drive["chosen_key"] == "first"
+    assert drive["value"]["ch"] == 4
+    assert drive["value"]["nqz"] == 1
+    assert drive["value"]["gain"] == pytest.approx(0.25)
+    assert drive["value"]["freq"] == pytest.approx(5123.0)
+
+
+def test_node_schema_builder_pulse_applies_both_override_modes() -> None:
+    schema = (
+        NodeSchemaBuilder(label="Builder contract")
+        .pulse(
+            "drive",
+            "modules.drive",
+            label="Drive",
+            blank_overrides={"ch": 7, "gain": 0.4},
+            overrides={"freq": 5100.0},
+            locked={"nqz": 1},
+        )
+        .build()
+    )
+
+    drive = read_value_tree(schema)["modules"]["drive"]
+    assert drive["chosen_key"] == "<Custom:Pulse>"
+    assert drive["value"]["ch"] == 7
+    assert drive["value"]["nqz"] == 1
+    assert drive["value"]["gain"] == pytest.approx(0.4)
+    assert drive["value"]["freq"] == pytest.approx(5100.0)
+
+
+def test_node_schema_builder_readout_declares_literal_locks() -> None:
+    schema = (
+        NodeSchemaBuilder(label="Builder contract")
+        .pulse_readout(
+            "readout",
+            "modules.readout",
+            label="Readout",
+            locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
+        )
+        .build()
+    )
+
+    modules = schema.schema.spec.fields["modules"]
+    assert isinstance(modules, CfgSectionSpec)
+    readout = modules.fields["readout"]
+    assert isinstance(readout, ReferenceSpec)
+    pulse_cfg = readout.allowed[0].fields["pulse_cfg"]
+    ro_cfg = readout.allowed[0].fields["ro_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionSpec)
+    assert isinstance(ro_cfg, CfgSectionSpec)
+    assert pulse_cfg.fields["freq"] == LiteralSpec(0.0)
+    assert ro_cfg.fields["ro_freq"] == LiteralSpec(0.0)
+    raw = schema.lower_raw(ModuleLibrary(), md=MetaDict())
+    assert raw["modules"]["readout"]["pulse_cfg"]["freq"] == 0.0
+    assert raw["modules"]["readout"]["ro_cfg"]["ro_freq"] == 0.0
+
+
+def test_node_schema_builder_validates_all_module_paths_before_mounting() -> None:
+    builder = NodeSchemaBuilder(label="Builder contract")
+
+    with pytest.raises(KeyError, match="missing"):
+        builder.pulse(
+            "drive",
+            "modules.drive",
+            label="Drive",
+            overrides={"freq": 5100.0, "missing": 1.0},
+        )
+
+    schema = builder.pulse(
+        "drive",
+        "modules.drive",
+        label="Drive",
+        overrides={"freq": 5100.0},
+    ).build()
+    assert schema.logical_paths == {"drive": "modules.drive"}
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ("blank_overrides", "overrides", "locked"),
+)
+def test_node_schema_builder_pulse_rejects_custom_type_discriminator_before_mounting(
+    operation: str,
+) -> None:
+    builder = NodeSchemaBuilder(label="Builder contract")
+
+    with pytest.raises(
+        TypeError,
+        match=rf"pulse {operation} path 'type'.*LiteralSpec.*ScalarSpec",
+    ):
+        if operation == "blank_overrides":
+            builder.pulse(
+                "drive",
+                "modules.drive",
+                label="Drive",
+                blank_overrides={"type": "pulse"},
+            )
+        elif operation == "overrides":
+            builder.pulse(
+                "drive",
+                "modules.drive",
+                label="Drive",
+                overrides={"type": "pulse"},
+            )
+        else:
+            builder.pulse(
+                "drive",
+                "modules.drive",
+                label="Drive",
+                locked={"type": "pulse"},
+            )
+
+    schema = builder.pulse(
+        "drive",
+        "modules.drive",
+        label="Drive",
+        overrides={"freq": 5100.0},
+    ).build()
+    assert schema.logical_paths == {"drive": "modules.drive"}
+    assert read_value_tree(schema)["modules"]["drive"]["chosen_key"] == "<Custom:Pulse>"
+
+
+def test_node_schema_builder_pulse_rejects_linked_type_discriminator_before_seed() -> (
+    None
+):
+    ml = ModuleLibrary()
+    ml.register_module(pi=_PI_PULSE)
+    builder = NodeSchemaBuilder(_ctx(ml=ml), label="Builder contract")
+
+    with pytest.raises(
+        TypeError,
+        match=r"pulse blank_overrides path 'type'.*LiteralSpec.*ScalarSpec",
+    ):
+        builder.pulse(
+            "drive",
+            "modules.drive",
+            label="Drive",
+            library_keys=("pi",),
+            blank_overrides={"type": "pulse"},
+        )
+
+    schema = builder.pulse(
+        "drive",
+        "modules.drive",
+        label="Drive",
+        library_keys=("pi",),
+        overrides={"freq": 5100.0},
+    ).build()
+    drive = read_value_tree(schema)["modules"]["drive"]
+    assert drive["chosen_key"] == "pi"
+    assert drive["value"]["freq"] == pytest.approx(5100.0)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "target_type"),
+    (
+        ("type", "LiteralSpec"),
+        ("section", "CfgSectionSpec"),
+        ("ref", "ReferenceSpec"),
+        ("sweep", "SweepSpec"),
+    ),
+)
+def test_node_schema_builder_pulse_only_mutates_original_scalar_specs(
+    monkeypatch: pytest.MonkeyPatch,
+    relative_path: str,
+    target_type: str,
+) -> None:
+    nested_ref = ReferenceSpec(
+        kind="nested",
+        allowed=[
+            CfgSectionSpec(fields={"value": ScalarSpec(label="Value", type=float)})
+        ],
+    )
+    spec = ReferenceSpec(
+        kind="module",
+        allowed=[
+            CfgSectionSpec(
+                fields={
+                    "type": LiteralSpec("pulse"),
+                    "section": CfgSectionSpec(fields={}),
+                    "ref": nested_ref,
+                    "sweep": SweepSpec(label="Sweep"),
+                }
+            )
+        ],
+    )
+
+    def pulse_spec(*, label: str, optional: bool) -> ReferenceSpec:
+        del label, optional
+        return spec
+
+    monkeypatch.setattr(node_schema_module, "pulse_module_ref_spec", pulse_spec)
+
+    with pytest.raises(
+        TypeError,
+        match=rf"pulse overrides path '{relative_path}'.*{target_type}.*ScalarSpec",
+    ):
+        NodeSchemaBuilder().pulse(
+            "drive",
+            "modules.drive",
+            label="Drive",
+            overrides={relative_path: 1.0},
+        )
+
+
+def test_node_schema_builder_acquisition_omits_unrequested_snr() -> None:
+    schema = NodeSchemaBuilder().acquisition(retry=3).build()
+
+    assert schema.logical_paths == {
+        "acquire_retry": "generation.acquisition.acquire_retry"
+    }
+    assert schema.lower(None) == {"acquire_retry": 3}
+
+
+def test_node_schema_builder_rejects_duplicate_keys_and_paths() -> None:
+    builder = NodeSchemaBuilder().int("reps", "reps", label="Reps", default=10)
+
+    with pytest.raises(ValueError, match="duplicate logical key"):
+        builder.int("reps", "rounds", label="Rounds", default=2)
+    with pytest.raises(ValueError, match="already exists"):
+        builder.int("rounds", "reps", label="Rounds", default=2)
+    with pytest.raises(KeyError, match="missing"):
+        builder.knob("missing", "generation.missing")
+
+
+@pytest.mark.parametrize("logical_key", ("", "bad.key"))
+def test_node_schema_builder_field_validates_logical_key_before_mutation(
+    logical_key: str,
+) -> None:
+    builder = NodeSchemaBuilder()
+
+    with pytest.raises(ValueError, match="Node logical key"):
+        builder.int(logical_key, "value", label="Value", default=1)
+
+    schema = builder.int("value", "value", label="Value", default=2).build()
+    assert schema.lower(None) == {"value": 2}
+
+
+@pytest.mark.parametrize("logical_key", ("", "bad.key"))
+def test_node_schema_builder_knob_validates_logical_key_before_mutation(
+    logical_key: str,
+) -> None:
+    builder = NodeSchemaBuilder().pulse(
+        "drive",
+        "modules.drive",
+        label="Drive",
+    )
+
+    with pytest.raises(ValueError, match="Node logical key"):
+        builder.knob(logical_key, "modules.drive.ch")
+
+    schema = builder.knob("drive_ch", "modules.drive.ch").build()
+    assert set(schema.logical_paths) == {"drive", "drive_ch"}
+
+
+def test_node_schema_builder_build_is_transactional_and_reusable_after_failure() -> (
+    None
+):
+    builder = (
+        NodeSchemaBuilder()
+        .choice(
+            "mode",
+            "generation.group.mode",
+            label="Mode",
+            choices=("on",),
+            default="on",
+        )
+        .float(
+            "visible",
+            "generation.group.visible",
+            label="Visible",
+            default=1.0,
+        )
+        .choice_fields("generation.group", "mode", {"on": ("visible",)})
+        .choice_fields("generation.group", "mode", {"on": ("missing",)})
+    )
+
+    with pytest.raises(ValueError, match="unknown field 'missing'"):
+        builder.build()
+
+    schema = builder.float(
+        "missing",
+        "generation.group.missing",
+        label="Missing",
+        default=2.0,
+    ).build()
+    group = _generation_group_spec(schema, "group")
+    assert isinstance(group, ChoiceSectionSpec)
+    assert len(group.bindings) == 2
+
+    internal_generation = builder._tree.spec.fields["generation"]
+    assert isinstance(internal_generation, CfgSectionSpec)
+    internal_group = internal_generation.fields["group"]
+    assert not isinstance(internal_group, ChoiceSectionSpec)
+
+
+def test_failed_node_schema_creation_does_not_consume_builder() -> None:
+    builder = NodeSchemaBuilder().int("first", "value", label="Value", default=1)
+    builder.knob("second", "value")
+
+    with pytest.raises(ValueError, match="Duplicate node logical path"):
+        builder.build()
+    with pytest.raises(ValueError, match="Duplicate node logical path"):
+        builder.build()
+
+
+def test_node_schema_builder_acquisition_failure_is_atomic() -> None:
+    builder = NodeSchemaBuilder().int(
+        "acquire_retry",
+        "existing",
+        label="Existing",
+        default=1,
+    )
+
+    with pytest.raises(ValueError, match="duplicate logical key 'acquire_retry'"):
+        builder.acquisition(retry=3, early_stop_snr=20.0)
+
+    schema = builder.int("reps", "reps", label="Reps", default=10).build()
+    assert set(schema.schema.spec.fields) == {"existing", "reps"}
+    assert set(schema.logical_paths) == {"acquire_retry", "reps"}
+
+
+def test_node_schema_builder_auto_relax_failure_is_atomic() -> None:
+    builder = NodeSchemaBuilder().float(
+        "relax_factor",
+        "existing",
+        label="Existing",
+        default=2.0,
+    )
+
+    with pytest.raises(ValueError, match="duplicate logical key 'relax_factor'"):
+        builder.auto_relax_from_t1(seed_us=10.0, factor=3.0, minimum_us=1.0)
+
+    schema = builder.int("reps", "reps", label="Reps", default=10).build()
+    assert set(schema.schema.spec.fields) == {"existing", "reps"}
+    assert set(schema.logical_paths) == {"relax_factor", "reps"}
+
+
+def test_node_schema_builder_feedback_slot_failure_is_atomic() -> None:
+    builder = NodeSchemaBuilder().float(
+        "pred_idw_epsilon",
+        "existing",
+        label="Existing",
+        default=1e-6,
+    )
+    slot = FeedbackSlotDecl(key="prediction", kind="estimator", prefix="pred")
+
+    with pytest.raises(ValueError, match="duplicate logical key 'pred_idw_epsilon'"):
+        builder.feedback_slot(slot)
+
+    schema = builder.int("reps", "reps", label="Reps", default=10).build()
+    assert set(schema.schema.spec.fields) == {"existing", "reps"}
+    assert set(schema.logical_paths) == {"pred_idw_epsilon", "reps"}
+
+
+def test_node_schema_builder_compound_paths_are_preflighted_before_mutation() -> None:
+    acquisition = NodeSchemaBuilder().int(
+        "existing",
+        "generation.acquisition.acquire_retry",
+        label="Existing",
+        default=1,
+    )
+    with pytest.raises(ValueError, match="acquire_retry.*already exists"):
+        acquisition.acquisition(retry=3, early_stop_snr=20.0)
+    assert acquisition.int("reps", "reps", label="Reps", default=10).build().lower(
+        None
+    ) == {"existing": 1, "reps": 10}
+
+    relax = NodeSchemaBuilder().float(
+        "existing",
+        "generation.relax.relax_factor",
+        label="Existing",
+        default=1.0,
+    )
+    with pytest.raises(ValueError, match="relax_factor.*already exists"):
+        relax.auto_relax_from_t1(seed_us=10.0, factor=3.0, minimum_us=1.0)
+    assert relax.int("reps", "reps", label="Reps", default=10).build().lower(None) == {
+        "existing": 1.0,
+        "reps": 10,
+    }
+
+    feedback = NodeSchemaBuilder().float(
+        "existing",
+        "generation.feedback.pred_idw_epsilon",
+        label="Existing",
+        default=1e-6,
+    )
+    slot = FeedbackSlotDecl(key="prediction", kind="estimator", prefix="pred")
+    with pytest.raises(ValueError, match="pred_idw_epsilon.*already exists"):
+        feedback.feedback_slot(slot)
+    assert feedback.int("reps", "reps", label="Reps", default=10).build().lower(
+        None
+    ) == {"existing": 1e-6, "reps": 10}
+
+
+def test_node_schema_builder_is_one_shot() -> None:
+    builder = NodeSchemaBuilder().int("reps", "reps", label="Reps", default=10)
+    builder.build()
+
+    with pytest.raises(RuntimeError, match="already built"):
+        builder.int("rounds", "rounds", label="Rounds", default=2)
+
+
+def test_node_schema_builder_public_verbs_exclude_old_names() -> None:
+    public_verbs = {
+        name
+        for name, value in vars(NodeSchemaBuilder).items()
+        if not name.startswith("_") and callable(value)
+    }
+
+    assert public_verbs == {
+        "pulse",
+        "pulse_readout",
+        "float",
+        "int",
+        "bool",
+        "choice",
+        "sweep",
+        "centered_sweep",
+        "knob",
+        "acquisition",
+        "auto_relax_from_t1",
+        "feedback_slot",
+        "choice_fields",
+        "build",
+    }
 
 
 def _section_spec(schema: NodeCfgSchema, key: str) -> CfgSectionSpec:
@@ -844,6 +1297,12 @@ def test_generation_display_labels_drop_redundant_group_prefixes():
     assert _scalar_labels(_generation_group_spec(echo_schema, "fit")) == {
         "fit_method": "method"
     }
+
+
+def test_t1_generation_sweep_keeps_exact_section_label() -> None:
+    schema = T1Builder().make_default_schema()
+
+    assert _generation_group_spec(schema, "sweep").label == "T1 sweep window"
 
 
 def test_generation_persistence_uses_flat_logical_keys():

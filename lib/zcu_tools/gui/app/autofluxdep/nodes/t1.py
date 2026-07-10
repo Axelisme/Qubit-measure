@@ -64,8 +64,6 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepValue,
-    pulse_module_ref_spec,
-    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -115,7 +113,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
 from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
-    module_ref_default,
     times_to_cycles_and_axis,
 )
 from zcu_tools.program.v2 import (
@@ -210,8 +207,7 @@ class T1Node(Node):
         # the Plotter + the fit share one axis.
         cfg = self._builder.make_cfg(env, snapshot)
         lo, hi = cfg.sweep_range
-        knobs = env.knobs()
-        uniform_value = knobs.get("uniform", True)
+        uniform_value = env.knob("uniform", True)
         if not isinstance(uniform_value, bool):
             raise ValueError(
                 f"t1 uniform must be a bool, got {type(uniform_value).__name__}"
@@ -344,31 +340,19 @@ class T1Builder(Builder):
         sweep_stop_min_us = 1.0
         max_length_default = max(sweep_stop_min_us, t1_seed * sweep_stop_factor)
 
-        pi_pulse_spec = pulse_module_ref_spec(label="Pi Pulse")
-        readout_spec = pulse_readout_module_ref_spec(label="Readout")
         return (
-            NodeSchemaBuilder(label="T1")
-            .field(
+            NodeSchemaBuilder(ctx, label="T1")
+            .pulse(
                 "pi_pulse",
                 "modules.pi_pulse",
-                spec=pi_pulse_spec,
-                default=module_ref_default(
-                    ctx,
-                    pi_pulse_spec,
-                    *PI_PULSE_LIBRARY_ALIASES,
-                    accepted_types=("pulse",),
-                ),
+                label="Pi Pulse",
+                library_keys=PI_PULSE_LIBRARY_ALIASES,
             )
-            .field(
+            .pulse_readout(
                 "readout",
                 "modules.readout",
-                spec=readout_spec,
-                default=module_ref_default(
-                    ctx,
-                    readout_spec,
-                    *READOUT_LIBRARY_ALIASES,
-                    accepted_types=("readout/pulse",),
-                ),
+                label="Readout",
+                library_keys=READOUT_LIBRARY_ALIASES,
             )
             .float(
                 "relax_delay",
@@ -399,19 +383,58 @@ class T1Builder(Builder):
             .int("reps", "reps", label="Reps", default=1000)
             .int("rounds", "rounds", label="Rounds", default=10)
             .acquisition(
-                earlystop_snr=20.0,
-                acquire_retry=DEFAULT_ACQUIRE_RETRY,
+                retry=DEFAULT_ACQUIRE_RETRY,
+                early_stop_snr=20.0,
             )
             .auto_relax_from_t1(
                 seed_us=t1_seed,
                 factor=relax_factor,
                 minimum_us=relax_min_us,
             )
-            .auto_sweep_stop_from_t1(
-                stop_factor=sweep_stop_factor,
-                stop_min_us=sweep_stop_min_us,
-                stop_max_us=max_length_default,
-                group_label="T1 sweep window",
+            .choice(
+                "sweep_range_mode",
+                "generation.sweep.sweep_range_mode",
+                label="range_mode",
+                choices=("auto_t1", "fixed"),
+                default="auto_t1",
+                tooltip=(
+                    "Auto derives the sweep stop from latest trusted T1; "
+                    "start/expts stay in Default cfg."
+                ),
+            )
+            .float(
+                "sweep_stop_factor",
+                "generation.sweep.sweep_stop_factor",
+                label="stop_factor",
+                default=sweep_stop_factor,
+                tooltip="T1 multiplier for the auto sweep stop.",
+            )
+            .float(
+                "sweep_stop_min_us",
+                "generation.sweep.sweep_stop_min_us",
+                label="stop_min_us",
+                default=sweep_stop_min_us,
+                tooltip="Minimum stop value for the auto T1 sweep.",
+            )
+            .float(
+                "max_length",
+                "generation.sweep.max_length",
+                label="max_length",
+                default=max_length_default,
+                tooltip="Maximum stop value for the auto T1 sweep.",
+            )
+            .choice_fields(
+                "generation.sweep",
+                "sweep_range_mode",
+                {
+                    "fixed": (),
+                    "auto_t1": (
+                        "sweep_stop_factor",
+                        "sweep_stop_min_us",
+                        "max_length",
+                    ),
+                },
+                section_label="T1 sweep window",
             )
             .bool(
                 "uniform",
@@ -497,7 +520,7 @@ class T1Builder(Builder):
             raise RuntimeError(
                 "t1.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.knobs()
+        knobs = env.knobs_view()
         smoothed_t1 = snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
 
         relax_delay_mode = str(knobs["relax_delay_mode"])

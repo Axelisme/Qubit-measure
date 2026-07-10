@@ -17,7 +17,7 @@ Run start 對每個 enabled runnable node 建立 run-start snapshot：
 
 - `base_cfg`：以當下 md/ml lower 的 Default cfg raw dict，排除 `generation` section。
 - `override_plan`：該 node builder 在同一 schema 上宣告的 wire-safe plan。
-- `knobs`：同一時間 lower 的 logical-key knob snapshot，供 runtime 讀固定的 generation strategy。
+- `knobs`：同一時間 lower 的 logical-key knob snapshot；runtime 以 `RunEnv.knob(key)` 讀單鍵，以 `RunEnv.knobs_view()` 取得多鍵只讀 view。
 
 每個 flux point 從 `base_cfg` deep copy 開始，只套用 builder-declared `override_plan` 內允許的 patches。未宣告 path、`after_first_point` 在 flux index 0 被 patch、或 target 不存在都會 Fast Fail。`all_points` path 每個 flux point 都必須提供 patch；`after_first_point` path 在 flux index 0 使用 `base_cfg`，後續 flux point 都必須提供 patch；`fallback` path 可在任一 flux point 省略，省略時保留 `base_cfg` value，提供 patch 時套用 patch。`modules.<name>` whole-module replacement 一律禁止；像 `modules.pi_pulse.waveform` 這類 module 內 discriminated sub-object 可被宣告並整體 patch，避免把 `waveform.style` 改成 `flat_top` 卻漏掉 `raise_waveform` 的非法半狀態。
 
@@ -29,7 +29,7 @@ Cfg form 的 generic decoration seam 以 full value-tree path 計算 `FieldDecor
 
 - 新 node 若會跨 flux point 覆寫 Default cfg path，必須先在 builder `override_plan(schema)` 宣告 path、mode、source、reason。
 - `OverridePlan.path`、Default cfg editor path、runtime patch path 使用同一個 dotted path vocabulary。`generation.*` path 不可出現在 plan 中。
-- `make_cfg()` 不重新 `schema.lower_raw()` 或整個替換 `raw_cfg["modules"][...]`。它讀 `RunEnv.knobs()` 的 run-start snapshot，計算 patches，透過 builder `point_cfg(env, patches)` 套用到 run-start `base_cfg`。
+- `make_cfg()` 不重新 `schema.lower_raw()` 或整個替換 `raw_cfg["modules"][...]`。單一 knob 讀取使用 `RunEnv.knob(key)`，多個 knobs 的唯讀 view 使用 `RunEnv.knobs_view()`；兩者都只讀 run-start snapshot。計算 patches 後，透過 builder `point_cfg(env, patches)` 套用到 run-start `base_cfg`。
 - `fallback` 是唯一可省略 patch 的 runtime mode；它仍必須由 builder 宣告 path、source、reason，且 path 必須存在於 run-start `base_cfg`。Artifact / remote consumer 必須把它視為 public wire/artifact mode，而不是 UI-only badge。
 - Remote/MCP 仍 read-only；`override_plan` 只讓 agent 觀測 contract，不授權 agent 修改 workflow 或 run control。
 - Artifact consumer 應以 `base_cfg` + `override_plan` 作為 run-start cfg truth；workflow memento 仍是 GUI 下一次開啟的 editable state。

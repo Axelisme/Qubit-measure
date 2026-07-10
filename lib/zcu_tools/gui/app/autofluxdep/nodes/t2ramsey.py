@@ -50,8 +50,6 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepValue,
-    pulse_module_ref_spec,
-    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -96,7 +94,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
 from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
-    module_ref_default,
 )
 from zcu_tools.program.v2 import (
     Delay,
@@ -175,7 +172,7 @@ class T2RamseyNode(Node):
         # (lower layer: activate_detune = detune_ratio / len_sweep.step).
         length_sweep = axis_to_sweep(times)
         length_param = sweep2param("length", length_sweep)
-        detune_ratio = float(env.knobs()["detune_ratio"])
+        detune_ratio = float(env.knob("detune_ratio"))
         activate_detune = detune_ratio / length_sweep.step
         pi2_pulse = cfg.modules.pi2_pulse
 
@@ -301,31 +298,19 @@ class T2RamseyBuilder(Builder):
         relax_min_us = 1.0
         max_length_default = t2r_seed * sweep_stop_factor
 
-        pi2_pulse_spec = pulse_module_ref_spec(label="Pi/2 Pulse")
-        readout_spec = pulse_readout_module_ref_spec(label="Readout")
         return (
-            NodeSchemaBuilder(label="T2 Ramsey")
-            .field(
+            NodeSchemaBuilder(ctx, label="T2 Ramsey")
+            .pulse(
                 "pi2_pulse",
                 "modules.pi2_pulse",
-                spec=pi2_pulse_spec,
-                default=module_ref_default(
-                    ctx,
-                    pi2_pulse_spec,
-                    *PI2_PULSE_LIBRARY_ALIASES,
-                    accepted_types=("pulse",),
-                ),
+                label="Pi/2 Pulse",
+                library_keys=PI2_PULSE_LIBRARY_ALIASES,
             )
-            .field(
+            .pulse_readout(
                 "readout",
                 "modules.readout",
-                spec=readout_spec,
-                default=module_ref_default(
-                    ctx,
-                    readout_spec,
-                    *READOUT_LIBRARY_ALIASES,
-                    accepted_types=("readout/pulse",),
-                ),
+                label="Readout",
+                library_keys=READOUT_LIBRARY_ALIASES,
             )
             .float(
                 "relax_delay",
@@ -362,7 +347,10 @@ class T2RamseyBuilder(Builder):
             )
             .int("reps", "reps", label="Reps", default=1000)
             .int("rounds", "rounds", label="Rounds", default=10)
-            .acquisition(earlystop_snr=20.0, acquire_retry=DEFAULT_ACQUIRE_RETRY)
+            .acquisition(
+                retry=DEFAULT_ACQUIRE_RETRY,
+                early_stop_snr=20.0,
+            )
             .auto_relax_from_t1(
                 seed_us=t1_seed,
                 factor=relax_factor,
@@ -400,7 +388,7 @@ class T2RamseyBuilder(Builder):
                 default=max_length_default,
                 tooltip="Maximum stop value for the auto Ramsey sweep.",
             )
-            .choice_group(
+            .choice_fields(
                 "generation.sweep",
                 "sweep_range_mode",
                 {
@@ -484,7 +472,7 @@ class T2RamseyBuilder(Builder):
             raise RuntimeError(
                 "t2ramsey.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.knobs()
+        knobs = env.knobs_view()
         t1 = snapshot_float(snapshot, "t1", float(knobs["t1_seed_us"]))
         t2r = snapshot_float(snapshot, "t2r", float(knobs["t2r_seed_us"]))
 

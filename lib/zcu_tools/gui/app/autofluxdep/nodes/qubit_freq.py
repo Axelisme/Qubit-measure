@@ -30,8 +30,6 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CenteredSweepValue,
     OverridePlan,
-    pulse_module_ref_spec,
-    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
@@ -70,8 +68,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
-    module_ref_default,
-    module_ref_value_from_ctx,
 )
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
@@ -340,7 +336,7 @@ class QubitFreqNode(Node):
         # The physical/base predictor stays immutable during the run. Physical
         # recovery may install a run-local overlay; generic feedback carries the
         # remaining residual correction.
-        knobs = env.knobs()
+        knobs = env.knobs_view()
         recovery_reseeded = on_fit_succeeded(
             env,
             float(freq),
@@ -476,38 +472,25 @@ class QubitFreqBuilder(Builder):
             if isinstance(value, int) and not isinstance(value, bool):
                 qub_ch = value
 
-        qub_pulse_spec = pulse_module_ref_spec(label="Probe Pulse")
-        readout_spec = pulse_readout_module_ref_spec(label="Readout")
-        qub_pulse_default = module_ref_value_from_ctx(
-            ctx, "qub_probe", accepted_types=("pulse",)
-        )
-        if qub_pulse_default is None:
-            qub_pulse_default = module_ref_default(ctx, qub_pulse_spec)
-            if qub_pulse_default is None:
-                raise RuntimeError("qubit_freq pulse default is unexpectedly empty")
-        qub_pulse_default.with_field("ch", qub_ch)
-        qub_pulse_default.with_field("freq", 0.0)
-        qub_pulse_default.with_field("gain", 0.1)
-        qub_pulse_default.with_field("waveform.length", 5.0)
-
         return (
-            NodeSchemaBuilder(label="Qubit Frequency")
-            .field(
+            NodeSchemaBuilder(ctx, label="Qubit Frequency")
+            .pulse(
                 "qub_pulse",
                 "modules.qub_pulse",
-                spec=qub_pulse_spec,
-                default=qub_pulse_default,
+                label="Probe Pulse",
+                library_keys=("qub_probe",),
+                overrides={
+                    "ch": qub_ch,
+                    "freq": 0.0,
+                    "gain": 0.1,
+                    "waveform.length": 5.0,
+                },
             )
-            .field(
+            .pulse_readout(
                 "readout",
                 "modules.readout",
-                spec=readout_spec,
-                default=module_ref_default(
-                    ctx,
-                    readout_spec,
-                    *READOUT_LIBRARY_ALIASES,
-                    accepted_types=("readout/pulse",),
-                ),
+                label="Readout",
+                library_keys=READOUT_LIBRARY_ALIASES,
             )
             .float("relax_delay", "relax_delay", label="Relax delay (us)", default=1.0)
             .int("reps", "reps", label="Reps", default=1000)
@@ -526,11 +509,14 @@ class QubitFreqBuilder(Builder):
                 ),
                 tooltip="Detune search window around the generated qubit drive center.",
             )
-            .logical("qub_ch", "modules.qub_pulse.ch")
-            .logical("qub_nqz", "modules.qub_pulse.nqz")
-            .logical("qub_gain", "modules.qub_pulse.gain")
-            .logical("qub_length", "modules.qub_pulse.waveform.length")
-            .acquisition(earlystop_snr=50.0, acquire_retry=DEFAULT_ACQUIRE_RETRY)
+            .knob("qub_ch", "modules.qub_pulse.ch")
+            .knob("qub_nqz", "modules.qub_pulse.nqz")
+            .knob("qub_gain", "modules.qub_pulse.gain")
+            .knob("qub_length", "modules.qub_pulse.waveform.length")
+            .acquisition(
+                retry=DEFAULT_ACQUIRE_RETRY,
+                early_stop_snr=50.0,
+            )
             .choice(
                 "physical_recovery_mode",
                 "generation.freq_recovery.physical_recovery_mode",
@@ -557,7 +543,7 @@ class QubitFreqBuilder(Builder):
                 default=6.5,
                 tooltip="Target linewidth in MHz for adaptive drive gain.",
             )
-            .choice_group(
+            .choice_fields(
                 "generation.drive_gain",
                 "drive_gain_mode",
                 {
@@ -626,7 +612,7 @@ class QubitFreqBuilder(Builder):
             raise RuntimeError(
                 "qubit_freq.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.knobs()
+        knobs = env.knobs_view()
         base_predict_freq = physical_prediction_for_make_cfg(
             env,
             float(snapshot["predict_freq"]),

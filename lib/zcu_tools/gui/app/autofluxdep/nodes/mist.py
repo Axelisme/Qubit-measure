@@ -45,8 +45,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     EvalValue,
     OverridePlan,
     SweepValue,
-    pulse_module_ref_spec,
-    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -77,8 +75,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
-    module_ref_default,
-    module_ref_value_from_ctx,
 )
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
@@ -264,55 +260,36 @@ class MistBuilder(Builder):
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Default cfg for the MIST power sweep."""
-        pi_pulse_spec = pulse_module_ref_spec(label="Pi Pulse")
-        mist_pulse_spec = pulse_module_ref_spec(label="MIST Pulse")
-        readout_spec = pulse_readout_module_ref_spec(label="Readout")
-
-        mist_pulse_default = module_ref_value_from_ctx(
-            ctx, "res_probe", accepted_types=("pulse",)
-        )
-        if mist_pulse_default is None:
-            mist_pulse_default = module_ref_default(ctx, mist_pulse_spec)
-            if mist_pulse_default is None:
-                raise RuntimeError("MIST pulse default is unexpectedly empty")
-            mist_pulse_default.with_field("ch", 0)
-            mist_pulse_default.with_field("nqz", 1).with_field("gain", 0.0)
-            mist_pulse_default.with_field("waveform.length", 1.0)
-        mist_pulse_default.with_field("freq", seed_readout_freq(ctx, fallback=6000.0))
-
         relax_delay_default: float | EvalValue = 30.5
         if isinstance(ctx, ExpContext) and ctx.md.get("t1") is not None:
             relax_delay_default = EvalValue("5.0 * t1")
 
         return (
-            NodeSchemaBuilder(label="MIST")
-            .field(
+            NodeSchemaBuilder(ctx, label="MIST")
+            .pulse(
                 "pi_pulse",
                 "modules.pi_pulse",
-                spec=pi_pulse_spec,
-                default=module_ref_default(
-                    ctx,
-                    pi_pulse_spec,
-                    *PI_PULSE_LIBRARY_ALIASES,
-                    accepted_types=("pulse",),
-                ),
+                label="Pi Pulse",
+                library_keys=PI_PULSE_LIBRARY_ALIASES,
             )
-            .field(
+            .pulse(
                 "mist_pulse",
                 "modules.mist_pulse",
-                spec=mist_pulse_spec,
-                default=mist_pulse_default,
+                label="MIST Pulse",
+                library_keys=("res_probe",),
+                blank_overrides={
+                    "ch": 0,
+                    "nqz": 1,
+                    "gain": 0.0,
+                    "waveform.length": 1.0,
+                },
+                overrides={"freq": seed_readout_freq(ctx, fallback=6000.0)},
             )
-            .field(
+            .pulse_readout(
                 "readout",
                 "modules.readout",
-                spec=readout_spec,
-                default=module_ref_default(
-                    ctx,
-                    readout_spec,
-                    *READOUT_LIBRARY_ALIASES,
-                    accepted_types=("readout/pulse",),
-                ),
+                label="Readout",
+                library_keys=READOUT_LIBRARY_ALIASES,
             )
             .float(
                 "relax_delay",
@@ -329,12 +306,12 @@ class MistBuilder(Builder):
             )
             .int("reps", "reps", label="Reps", default=1000)
             .int("rounds", "rounds", label="Rounds", default=10)
-            .logical("mist_ch", "modules.mist_pulse.ch")
-            .logical("mist_nqz", "modules.mist_pulse.nqz")
-            .logical("mist_freq", "modules.mist_pulse.freq")
-            .logical("mist_gain", "modules.mist_pulse.gain")
-            .logical("mist_length", "modules.mist_pulse.waveform.length")
-            .acquire_retry(DEFAULT_ACQUIRE_RETRY)
+            .knob("mist_ch", "modules.mist_pulse.ch")
+            .knob("mist_nqz", "modules.mist_pulse.nqz")
+            .knob("mist_freq", "modules.mist_pulse.freq")
+            .knob("mist_gain", "modules.mist_pulse.gain")
+            .knob("mist_length", "modules.mist_pulse.waveform.length")
+            .acquisition(retry=DEFAULT_ACQUIRE_RETRY)
             .build()
         )
 

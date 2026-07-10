@@ -1,79 +1,96 @@
-"""Schema declaration helpers for autofluxdep experiment nodes."""
+"""Autoflux-local domain builder for experiment node schemas."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
-from typing import Any
+from copy import deepcopy
+from typing import TYPE_CHECKING, Any
 
-from zcu_tools.gui.app.autofluxdep.cfg import (
+from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import (
+    pulse_module_ref_spec,
+    pulse_readout_module_ref_spec,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, str_choice_spec
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeSpec,
-    CfgSchema,
     CfgSectionSpec,
-    CfgSectionValue,
-    ChoiceBinding,
-    ChoiceSectionSpec,
-    DirectValue,
-    EvalValue,
     FloatSpec,
     IntSpec,
-    NodeCfgSchema,
     ReferenceSpec,
     ReferenceValue,
+    ScalarLeafInput,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    align_locked_literals,
-    make_default_value,
-    str_choice_spec,
+    read_value_path,
+    resolve_spec_path,
 )
-from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import module_cfg_to_value
-from zcu_tools.gui.session.types import ExpContext
 
-_MISSING = object()
+from ._schema_tree import _default_value_for_spec, _SchemaTree
+from .module_values import _seed_module_reference
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 
 
 class NodeSchemaBuilder:
-    """Linear builder for an autofluxdep node's typed knob schema.
+    """One-shot domain builder for an autofluxdep node's typed cfg schema."""
 
-    The builder owns only the mechanical cfg-tree assembly: path mounting,
-    default value wrapping, logical-key projection, and choice-section wiring.
-    Experiment policy stays in the node's ``make_default_schema`` and
-    ``make_cfg``.
-    """
-
-    def __init__(self, *, label: str = "") -> None:
-        self._spec = CfgSectionSpec(label=label, fields={})
-        self._value = CfgSectionValue(fields={})
+    def __init__(self, ctx: Any | None = None, *, label: str = "") -> None:
+        self._ctx = ctx
+        self._tree = _SchemaTree(label=label)
         self._logical_paths: dict[str, str] = {}
-        self._choice_groups: list[tuple[str, str, Mapping[str, tuple[str, ...]]]] = []
+        self._built = False
 
-    def field(
+    def pulse(
         self,
         logical_key: str,
         path: str,
         *,
-        spec: CfgNodeSpec,
-        default: Any = _MISSING,
+        label: str,
+        library_keys: tuple[str, ...] = (),
+        optional: bool = False,
+        blank_overrides: Mapping[str, ScalarLeafInput] | None = None,
+        overrides: Mapping[str, ScalarLeafInput] | None = None,
+        locked: Mapping[str, object] | None = None,
     ) -> NodeSchemaBuilder:
-        if logical_key in self._logical_paths:
-            raise ValueError(f"duplicate logical key {logical_key!r}")
-        value = (
-            _default_value_for_spec(spec)
-            if default is _MISSING
-            else _wrap_default(spec, default)
+        """Declare a pulse reference with ordered ModuleLibrary adoption."""
+        spec = pulse_module_ref_spec(label=label, optional=optional)
+        spec, default = self._module_default(
+            spec,
+            verb="pulse",
+            library_keys=library_keys,
+            accepted_types=("pulse",),
+            blank_overrides=blank_overrides,
+            overrides=overrides,
+            locked=locked,
         )
-        _set_cfg_path(self._spec, self._value, path, spec, value)
-        self._logical_paths[logical_key] = path
-        return self
+        return self._field(logical_key, path, spec=spec, default=default)
 
-    def logical(self, logical_key: str, path: str) -> NodeSchemaBuilder:
-        if logical_key in self._logical_paths:
-            raise ValueError(f"duplicate logical key {logical_key!r}")
-        self._logical_paths[logical_key] = path
-        return self
+    def pulse_readout(
+        self,
+        logical_key: str,
+        path: str,
+        *,
+        label: str,
+        library_keys: tuple[str, ...] = (),
+        optional: bool = False,
+        locked: Mapping[str, object] | None = None,
+    ) -> NodeSchemaBuilder:
+        """Declare a pulse-readout reference with ordered library adoption."""
+        spec = pulse_readout_module_ref_spec(label=label, optional=optional)
+        spec, default = self._module_default(
+            spec,
+            verb="pulse_readout",
+            library_keys=library_keys,
+            accepted_types=("readout/pulse",),
+            blank_overrides=None,
+            overrides=None,
+            locked=locked,
+        )
+        return self._field(logical_key, path, spec=spec, default=default)
 
     def float(
         self,
@@ -81,12 +98,12 @@ class NodeSchemaBuilder:
         path: str,
         *,
         label: str,
-        default: Any,
+        default: ScalarLeafInput,
         decimals: int | None = None,
         optional: bool = False,
         tooltip: str = "",
     ) -> NodeSchemaBuilder:
-        return self.field(
+        return self._field(
             logical_key,
             path,
             spec=FloatSpec(
@@ -107,7 +124,7 @@ class NodeSchemaBuilder:
         default: int,
         tooltip: str = "",
     ) -> NodeSchemaBuilder:
-        return self.field(
+        return self._field(
             logical_key,
             path,
             spec=IntSpec(label=label, tooltip=tooltip),
@@ -123,7 +140,7 @@ class NodeSchemaBuilder:
         default: bool,
         tooltip: str = "",
     ) -> NodeSchemaBuilder:
-        return self.field(
+        return self._field(
             logical_key,
             path,
             spec=ScalarSpec(label=label, type=bool, tooltip=tooltip),
@@ -140,7 +157,7 @@ class NodeSchemaBuilder:
         default: str,
         tooltip: str = "",
     ) -> NodeSchemaBuilder:
-        return self.field(
+        return self._field(
             logical_key,
             path,
             spec=str_choice_spec(label, choices, tooltip=tooltip),
@@ -157,7 +174,7 @@ class NodeSchemaBuilder:
         decimals: int | None = None,
         tooltip: str = "",
     ) -> NodeSchemaBuilder:
-        return self.field(
+        return self._field(
             logical_key,
             path,
             spec=SweepSpec(label=label, decimals=decimals, tooltip=tooltip),
@@ -178,7 +195,7 @@ class NodeSchemaBuilder:
         center_tooltip: str = "",
         locked_center: float | None = None,
     ) -> NodeSchemaBuilder:
-        return self.field(
+        return self._field(
             logical_key,
             path,
             spec=CenteredSweepSpec(
@@ -193,31 +210,48 @@ class NodeSchemaBuilder:
             default=default,
         )
 
-    def acquire_retry(self, default: int) -> NodeSchemaBuilder:
-        self._ensure_section("generation.acquisition", "Acquisition guardrails")
-        return self.int(
-            "acquire_retry",
-            "generation.acquisition.acquire_retry",
-            label="retry",
-            default=default,
-            tooltip="Retries for transient program build or acquire failures.",
-        )
+    def knob(self, logical_key: str, existing_path: str) -> NodeSchemaBuilder:
+        self._check_mutable()
+        self._check_logical_key(logical_key)
+        resolve_spec_path(self._tree.spec, existing_path)
+        self._logical_paths[logical_key] = existing_path
+        return self
 
     def acquisition(
         self,
         *,
-        earlystop_snr: float | None,
-        acquire_retry: int,
+        retry: int,
+        early_stop_snr: float | None = None,
     ) -> NodeSchemaBuilder:
-        self._ensure_section("generation.acquisition", "Acquisition guardrails")
-        return self.float(
-            "earlystop_snr",
-            "generation.acquisition.earlystop_snr",
-            label="earlystop_snr",
-            default=earlystop_snr,
-            optional=True,
-            tooltip="Stop averaging once completed-round SNR reaches this value.",
-        ).acquire_retry(acquire_retry)
+        declarations = [
+            ("acquire_retry", "generation.acquisition.acquire_retry"),
+        ]
+        if early_stop_snr is not None:
+            declarations.insert(
+                0,
+                ("earlystop_snr", "generation.acquisition.earlystop_snr"),
+            )
+        self._preflight_declarations(tuple(declarations))
+        trial = self._copy_for_compound()
+        trial._ensure_section("generation.acquisition", "Acquisition guardrails")
+        if early_stop_snr is not None:
+            trial.float(
+                "earlystop_snr",
+                "generation.acquisition.earlystop_snr",
+                label="earlystop_snr",
+                default=early_stop_snr,
+                optional=True,
+                tooltip="Stop averaging once completed-round SNR reaches this value.",
+            )
+        trial.int(
+            "acquire_retry",
+            "generation.acquisition.acquire_retry",
+            label="retry",
+            default=retry,
+            tooltip="Retries for transient program build or acquire failures.",
+        )
+        self._adopt_compound(trial)
+        return self
 
     def auto_relax_from_t1(
         self,
@@ -226,8 +260,17 @@ class NodeSchemaBuilder:
         factor: float,
         minimum_us: float,
     ) -> NodeSchemaBuilder:
-        self._ensure_section("generation.relax", "Relax timing")
-        self.choice(
+        self._preflight_declarations(
+            (
+                ("relax_delay_mode", "generation.relax.relax_delay_mode"),
+                ("t1_seed_us", "generation.relax.t1_seed_us"),
+                ("relax_factor", "generation.relax.relax_factor"),
+                ("relax_min_us", "generation.relax.relax_min_us"),
+            )
+        )
+        trial = self._copy_for_compound()
+        trial._ensure_section("generation.relax", "Relax timing")
+        trial.choice(
             "relax_delay_mode",
             "generation.relax.relax_delay_mode",
             label="delay_mode",
@@ -235,28 +278,28 @@ class NodeSchemaBuilder:
             default="auto_t1",
             tooltip="Auto derives relax delay from T1; fixed keeps Default cfg delay.",
         )
-        self.float(
+        trial.float(
             "t1_seed_us",
             "generation.relax.t1_seed_us",
             label="initial_t1_us",
             default=seed_us,
             tooltip="Initial T1 before measured feedback exists.",
         )
-        self.float(
+        trial.float(
             "relax_factor",
             "generation.relax.relax_factor",
             label="factor",
             default=factor,
             tooltip="Multiplier applied to T1 for auto relax delay.",
         )
-        self.float(
+        trial.float(
             "relax_min_us",
             "generation.relax.relax_min_us",
             label="min_us",
             default=minimum_us,
             tooltip="Minimum auto relax delay.",
         )
-        self.choice_group(
+        trial.choice_fields(
             "generation.relax",
             "relax_delay_mode",
             {
@@ -264,75 +307,31 @@ class NodeSchemaBuilder:
                 "auto_t1": ("relax_factor", "relax_min_us"),
             },
         )
-        return self
-
-    def auto_sweep_stop_from_t1(
-        self,
-        *,
-        stop_factor: float,
-        stop_min_us: float,
-        stop_max_us: float,
-        group_label: str,
-    ) -> NodeSchemaBuilder:
-        self._ensure_section("generation.sweep", group_label)
-        self.choice(
-            "sweep_range_mode",
-            "generation.sweep.sweep_range_mode",
-            label="range_mode",
-            choices=("auto_t1", "fixed"),
-            default="auto_t1",
-            tooltip=(
-                "Auto derives the sweep stop from latest trusted T1; "
-                "start/expts stay in Default cfg."
-            ),
-        )
-        self.float(
-            "sweep_stop_factor",
-            "generation.sweep.sweep_stop_factor",
-            label="stop_factor",
-            default=stop_factor,
-            tooltip="T1 multiplier for the auto sweep stop.",
-        )
-        self.float(
-            "sweep_stop_min_us",
-            "generation.sweep.sweep_stop_min_us",
-            label="stop_min_us",
-            default=stop_min_us,
-            tooltip="Minimum stop value for the auto T1 sweep.",
-        )
-        self.float(
-            "max_length",
-            "generation.sweep.max_length",
-            label="max_length",
-            default=stop_max_us,
-            tooltip="Maximum stop value for the auto T1 sweep.",
-        )
-        self.choice_group(
-            "generation.sweep",
-            "sweep_range_mode",
-            {
-                "fixed": (),
-                "auto_t1": (
-                    "sweep_stop_factor",
-                    "sweep_stop_min_us",
-                    "max_length",
-                ),
-            },
-        )
+        self._adopt_compound(trial)
         return self
 
     def feedback_slot(
         self,
-        slot: Any,
+        slot: FeedbackSlotDecl,
         *,
         group: str = "feedback",
         group_label: str | None = None,
     ) -> NodeSchemaBuilder:
+        if slot.kind not in {"estimator", "controller"}:
+            raise ValueError(f"unsupported feedback slot kind: {slot.kind!r}")
         section_path = f"generation.{group}"
-        self._ensure_section(section_path, group_label or _section_label(group))
         strategy_key = slot.field_name("strategy")
+        declarations = [(strategy_key, f"{section_path}.{strategy_key}")]
         if slot.kind == "estimator":
-            self.choice(
+            for field in ("idw_k", "idw_epsilon", "decay_points"):
+                key = slot.field_name(field)
+                declarations.append((key, f"{section_path}.{key}"))
+        self._preflight_declarations(tuple(declarations))
+
+        trial = self._copy_for_compound()
+        trial._ensure_section(section_path, group_label or _section_label(group))
+        if slot.kind == "estimator":
+            trial.choice(
                 strategy_key,
                 f"{section_path}.{strategy_key}",
                 label="strategy",
@@ -340,28 +339,28 @@ class NodeSchemaBuilder:
                 default=str(slot.default_strategy),
                 tooltip="Select how trusted samples estimate the next value.",
             )
-            self.int(
+            trial.int(
                 slot.field_name("idw_k"),
                 f"{section_path}.{slot.field_name('idw_k')}",
                 label="idw_k",
-                default=int(slot.default_idw_k),
+                default=slot.default_idw_k,
                 tooltip="Nearest trusted samples used by IDW estimation.",
             )
-            self.float(
+            trial.float(
                 slot.field_name("idw_epsilon"),
                 f"{section_path}.{slot.field_name('idw_epsilon')}",
                 label="idw_epsilon",
-                default=float(slot.default_idw_epsilon),
+                default=slot.default_idw_epsilon,
                 tooltip="Small distance floor for IDW weighting.",
             )
-            self.float(
+            trial.float(
                 slot.field_name("decay_points"),
                 f"{section_path}.{slot.field_name('decay_points')}",
                 label="decay_points",
-                default=float(slot.default_decay_points),
+                default=slot.default_decay_points,
                 tooltip="Flux queries before stale estimates fade out.",
             )
-            return self.choice_group(
+            trial.choice_fields(
                 section_path,
                 strategy_key,
                 {
@@ -374,9 +373,10 @@ class NodeSchemaBuilder:
                     "last_good": (slot.field_name("decay_points"),),
                 },
             )
-
+            self._adopt_compound(trial)
+            return self
         if slot.kind == "controller":
-            self.choice(
+            trial.choice(
                 strategy_key,
                 f"{section_path}.{strategy_key}",
                 label="strategy",
@@ -384,256 +384,208 @@ class NodeSchemaBuilder:
                 default=str(slot.default_strategy),
                 tooltip="Select whether controller feedback adjusts the next value.",
             )
-            return self.choice_group(
+            trial.choice_fields(
                 section_path,
                 strategy_key,
-                {
-                    "off": (),
-                    "log_step": (),
-                },
+                {"off": (), "log_step": ()},
             )
+            self._adopt_compound(trial)
+            return self
+        raise AssertionError("feedback slot kind was preflighted")
 
-        raise ValueError(f"unsupported feedback slot kind: {slot.kind!r}")
-
-    def choice_group(
+    def choice_fields(
         self,
         section_path: str,
         selector_key: str,
-        choices: Mapping[str, tuple[str, ...]],
+        fields_by_choice: Mapping[str, tuple[str, ...]],
+        *,
+        section_label: str | None = None,
     ) -> NodeSchemaBuilder:
-        if not choices:
-            raise ValueError("choice_group needs at least one choice")
-        self._choice_groups.append((section_path, selector_key, choices))
+        self._check_mutable()
+        self._tree.add_choice_binding(
+            section_path,
+            selector_key,
+            fields_by_choice,
+            section_label=section_label,
+        )
         return self
 
     def build(self) -> NodeCfgSchema:
-        for section_path, selector_key, choices in self._choice_groups:
-            _replace_with_choice_section(
-                self._spec, section_path, selector_key, choices
-            )
-        align_locked_literals(self._spec, self._value)
-        return NodeCfgSchema(
-            CfgSchema(spec=self._spec, value=self._value),
-            logical_paths=dict(self._logical_paths),
+        self._check_mutable()
+        schema = self._tree.build()
+        node_schema = NodeCfgSchema(schema, logical_paths=dict(self._logical_paths))
+        self._built = True
+        return node_schema
+
+    def _field(
+        self,
+        logical_key: str,
+        path: str,
+        *,
+        spec: CfgNodeSpec,
+        default: object,
+    ) -> NodeSchemaBuilder:
+        self._check_mutable()
+        self._check_logical_key(logical_key)
+        self._tree.declare(path, spec, default)
+        self._logical_paths[logical_key] = path
+        return self
+
+    def _module_default(
+        self,
+        spec: ReferenceSpec,
+        *,
+        verb: str,
+        library_keys: tuple[str, ...],
+        accepted_types: tuple[str, ...],
+        blank_overrides: Mapping[str, ScalarLeafInput] | None,
+        overrides: Mapping[str, ScalarLeafInput] | None,
+        locked: Mapping[str, object] | None,
+    ) -> tuple[ReferenceSpec, ReferenceValue | None]:
+        self._check_mutable()
+        blank = blank_overrides or {}
+        always = overrides or {}
+        locks = locked or {}
+        self._validate_module_paths(
+            spec,
+            verb=verb,
+            operation="blank_overrides",
+            relative_paths=tuple(blank),
+        )
+        self._validate_module_paths(
+            spec,
+            verb=verb,
+            operation="overrides",
+            relative_paths=tuple(always),
+        )
+        self._validate_module_paths(
+            spec,
+            verb=verb,
+            operation="locked",
+            relative_paths=tuple(locks),
         )
 
-    def _ensure_section(self, path: str, label: str) -> None:
-        _ensure_section(self._spec, self._value, path, label)
+        for relative_path, value in locks.items():
+            spec = spec.lock_literal(relative_path, value)
 
+        default = _seed_module_reference(
+            self._ctx,
+            library_keys,
+            accepted_types=accepted_types,
+        )
+        is_blank = default is None
+        if default is None:
+            fallback = _default_value_for_spec(spec)
+            if fallback is not None and not isinstance(fallback, ReferenceValue):
+                raise TypeError(
+                    f"ReferenceSpec default produced {type(fallback).__name__}"
+                )
+            default = fallback
 
-def module_ref_default(
-    ctx: Any | None,
-    spec: ReferenceSpec,
-    *names: str,
-    accepted_types: tuple[str, ...] = (),
-) -> ReferenceValue | None:
-    linked = module_ref_value_from_ctx(ctx, *names, accepted_types=accepted_types)
-    if linked is not None:
-        return linked
-    value = _default_value_for_spec(spec)
-    if value is None:
-        return None
-    if not isinstance(value, ReferenceValue):
-        raise TypeError(f"ReferenceSpec default produced {type(value).__name__}")
-    return value
-
-
-def module_ref_value_from_ctx(
-    ctx: Any | None,
-    *names: str,
-    accepted_types: tuple[str, ...] = (),
-) -> ReferenceValue | None:
-    if not isinstance(ctx, ExpContext):
-        return None
-    for name in names:
-        try:
-            module = ctx.ml.get_module(name)
-        except (KeyError, ValueError):
-            module = None
-        if module is None:
-            continue
-        if accepted_types and _module_type(module) not in set(accepted_types):
-            continue
-        _, value = module_cfg_to_value(module)
-        return ReferenceValue(chosen_key=name, value=value)
-    return None
-
-
-def _module_type(module: Any) -> str | None:
-    if isinstance(module, Mapping):
-        value = module.get("type")
-    else:
-        value = getattr(module, "type", None)
-        if value is None and hasattr(module, "to_dict"):
-            raw = module.to_dict()
-            if isinstance(raw, Mapping):
-                value = raw.get("type")
-    return str(value) if value is not None else None
-
-
-def _default_value_for_spec(spec: CfgNodeSpec) -> Any:
-    return make_default_value(CfgSectionSpec(fields={"value": spec})).fields["value"]
-
-
-def _wrap_default(spec: CfgNodeSpec, default: Any) -> Any:
-    if isinstance(spec, SweepSpec):
-        if not isinstance(default, SweepValue):
-            raise TypeError(
-                f"SweepSpec default must be SweepValue, got {type(default).__name__}"
+        applicable: dict[str, tuple[str, ScalarLeafInput]] = {}
+        if is_blank:
+            applicable.update(
+                (path, ("blank_overrides", value)) for path, value in blank.items()
             )
-        return default
-    if isinstance(spec, CenteredSweepSpec):
-        if not isinstance(default, CenteredSweepValue):
-            raise TypeError(
-                "CenteredSweepSpec default must be CenteredSweepValue, "
-                f"got {type(default).__name__}"
-            )
-        return default
-    if isinstance(spec, ScalarSpec):
-        if isinstance(default, (DirectValue, EvalValue)):
-            return default
-        return DirectValue(default)
-    if isinstance(spec, ReferenceSpec):
-        if default is None and spec.optional:
-            return None
-        if not isinstance(default, ReferenceValue):
-            raise TypeError(
-                f"ReferenceSpec default must be ReferenceValue, got {type(default).__name__}"
-            )
-        return default
-    if isinstance(spec, CfgSectionSpec):
-        if not isinstance(default, CfgSectionValue):
-            raise TypeError(
-                f"CfgSectionSpec default must be CfgSectionValue, got {type(default).__name__}"
-            )
-        return default
-    return default
+        applicable.update(
+            (path, ("overrides", value)) for path, value in always.items()
+        )
+        if default is not None:
+            for relative_path, (operation, _) in applicable.items():
+                try:
+                    read_value_path(default.value, relative_path)
+                except KeyError as exc:
+                    raise KeyError(
+                        f"{verb} {operation} path {relative_path!r} is absent from "
+                        "the selected module value"
+                    ) from exc
+                except RuntimeError as exc:
+                    raise RuntimeError(
+                        f"{verb} {operation} path {relative_path!r} cannot be "
+                        "applied to the selected module value"
+                    ) from exc
+            for relative_path, (_, value) in applicable.items():
+                default.value.with_field(relative_path, value)
+        return spec, default
 
-
-def _set_cfg_path(
-    root_spec: CfgSectionSpec,
-    root_value: CfgSectionValue,
-    path: str,
-    spec: CfgNodeSpec,
-    value: Any,
-) -> None:
-    parent_spec, parent_value, leaf = _ensure_parent(root_spec, root_value, path)
-    if leaf in parent_spec.fields:
-        raise ValueError(f"cfg path {path!r} already exists")
-    parent_spec.fields[leaf] = spec
-    parent_value.fields[leaf] = value
-
-
-def _ensure_section(
-    root_spec: CfgSectionSpec,
-    root_value: CfgSectionValue,
-    path: str,
-    label: str,
-) -> None:
-    parent_spec, parent_value, leaf = _ensure_parent(root_spec, root_value, path)
-    spec = parent_spec.fields.get(leaf)
-    value = parent_value.fields.get(leaf)
-    if spec is None:
-        parent_spec.fields[leaf] = CfgSectionSpec(label=label, fields={})
-        parent_value.fields[leaf] = CfgSectionValue(fields={})
-        return
-    if not isinstance(spec, CfgSectionSpec) or not isinstance(value, CfgSectionValue):
-        raise TypeError(f"cfg path {path!r} is not a section")
-    if label and not spec.label:
-        parent_spec.fields[leaf] = replace(spec, label=label)
-
-
-def _ensure_parent(
-    root_spec: CfgSectionSpec,
-    root_value: CfgSectionValue,
-    path: str,
-) -> tuple[CfgSectionSpec, CfgSectionValue, str]:
-    parts = _split_path(path)
-    spec = root_spec
-    value = root_value
-    for idx, part in enumerate(parts[:-1]):
-        child_spec = spec.fields.get(part)
-        child_value = value.fields.get(part)
-        if child_spec is None:
-            child_spec = CfgSectionSpec(label=_section_label(part), fields={})
-            child_value = CfgSectionValue(fields={})
-            spec.fields[part] = child_spec
-            value.fields[part] = child_value
-        if not isinstance(child_spec, CfgSectionSpec) or not isinstance(
-            child_value, CfgSectionValue
-        ):
-            parent = ".".join(parts[: idx + 1])
-            raise TypeError(f"cfg path {path!r} cannot descend through {parent!r}")
-        spec = child_spec
-        value = child_value
-    return spec, value, parts[-1]
-
-
-def _replace_with_choice_section(
-    root_spec: CfgSectionSpec,
-    section_path: str,
-    selector_key: str,
-    choices: Mapping[str, tuple[str, ...]],
-) -> None:
-    parent, leaf = _section_parent(root_spec, section_path)
-    section = parent.fields[leaf]
-    if not isinstance(section, CfgSectionSpec):
-        raise TypeError(f"choice section {section_path!r} is not a section")
-    binding = _choice_binding(section, selector_key, choices)
-    bindings = section.bindings if isinstance(section, ChoiceSectionSpec) else ()
-    parent.fields[leaf] = ChoiceSectionSpec(
-        fields=dict(section.fields),
-        label=section.label,
-        inherit_hook=section.inherit_hook,
-        bindings=(*bindings, binding),
-    )
-
-
-def _choice_binding(
-    section: CfgSectionSpec,
-    selector_key: str,
-    choices: Mapping[str, tuple[str, ...]],
-) -> ChoiceBinding:
-    variants: dict[str, CfgSectionSpec] = {}
-    for value, field_keys in choices.items():
-        fields: dict[str, CfgNodeSpec] = {}
-        for key in field_keys:
+    @staticmethod
+    def _validate_module_paths(
+        spec: ReferenceSpec,
+        *,
+        verb: str,
+        operation: str,
+        relative_paths: tuple[str, ...],
+    ) -> None:
+        root = CfgSectionSpec(fields={"module": spec})
+        for relative_path in relative_paths:
+            if not relative_path:
+                raise ValueError(f"{verb} {operation} path must not be empty")
             try:
-                fields[key] = section.fields[key]
+                leaf = resolve_spec_path(root, f"module.{relative_path}")
             except KeyError as exc:
-                raise ValueError(
-                    f"choice {selector_key}={value!r} references unknown field {key!r}"
+                raise KeyError(
+                    f"{verb} {operation} path {relative_path!r} is missing from "
+                    "the original module spec"
                 ) from exc
-        variants[value] = CfgSectionSpec(fields=fields, label=value)
-    return ChoiceBinding(selector_key, variants)
+            except TypeError as exc:
+                raise TypeError(
+                    f"{verb} {operation} path {relative_path!r} resolves "
+                    "inconsistently in the original module spec"
+                ) from exc
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"{verb} {operation} path {relative_path!r} cannot descend "
+                    "through the original module spec"
+                ) from exc
+            if not isinstance(leaf, ScalarSpec):
+                raise TypeError(
+                    f"{verb} {operation} path {relative_path!r} targets "
+                    f"{type(leaf).__name__} in the original module spec; "
+                    "expected ScalarSpec"
+                )
 
+    def _copy_for_compound(self) -> NodeSchemaBuilder:
+        self._check_mutable()
+        trial = NodeSchemaBuilder(self._ctx)
+        trial._tree = deepcopy(self._tree)
+        trial._logical_paths = dict(self._logical_paths)
+        return trial
 
-def _section_parent(root_spec: CfgSectionSpec, path: str) -> tuple[CfgSectionSpec, str]:
-    parts = _split_path(path)
-    section = root_spec
-    for part in parts[:-1]:
-        child = section.fields.get(part)
-        if not isinstance(child, CfgSectionSpec):
-            raise TypeError(f"cfg path {path!r} cannot descend through {part!r}")
-        section = child
-    leaf = parts[-1]
-    if leaf not in section.fields:
-        raise KeyError(f"cfg path {path!r} is missing")
-    return section, leaf
+    def _adopt_compound(self, trial: NodeSchemaBuilder) -> None:
+        self._tree = trial._tree
+        self._logical_paths = trial._logical_paths
 
+    def _preflight_declarations(
+        self, declarations: tuple[tuple[str, str], ...]
+    ) -> None:
+        self._check_mutable()
+        declared_keys: set[str] = set()
+        for logical_key, _ in declarations:
+            self._check_logical_key(logical_key)
+            if logical_key in declared_keys:
+                raise ValueError(f"duplicate logical key {logical_key!r}")
+            declared_keys.add(logical_key)
+        self._tree.validate_declarations(tuple(path for _, path in declarations))
 
-def _split_path(path: str) -> tuple[str, ...]:
-    parts = tuple(part for part in path.split(".") if part)
-    if not parts:
-        raise ValueError("cfg path must not be empty")
-    return parts
+    def _ensure_section(self, path: str, label: str) -> None:
+        self._check_mutable()
+        self._tree.ensure_section(path, label)
+
+    def _check_logical_key(self, logical_key: str) -> None:
+        if not logical_key:
+            raise ValueError("Node logical key must not be empty")
+        if "." in logical_key:
+            raise ValueError(f"Node logical key must not contain '.': {logical_key!r}")
+        if logical_key in self._logical_paths:
+            raise ValueError(f"duplicate logical key {logical_key!r}")
+
+    def _check_mutable(self) -> None:
+        if self._built:
+            raise RuntimeError("NodeSchemaBuilder is already built; create a new one")
 
 
 def _section_label(key: str) -> str:
     labels = {
-        "modules": "Modules",
-        "sweep": "Sweep",
-        "generation": "Generation overrides",
         "acquisition": "Acquisition guardrails",
         "relax": "Relax timing",
     }

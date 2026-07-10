@@ -222,7 +222,7 @@ def test_dry_run_uses_run_cfg_snapshots_for_override_plan_nodes():
     def record(env, snapshot):
         del snapshot
         cfg = env.point_cfg({"freq": 2.0 + env.flux})
-        seen.append((float(env.knobs()["freq"]), float(cfg["freq"])))
+        seen.append((float(env.knob("freq")), float(cfg["freq"])))
         return Patch()
 
     ctrl = build_core()

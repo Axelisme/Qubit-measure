@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -38,8 +38,6 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     SweepValue,
-    pulse_module_ref_spec,
-    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
@@ -82,8 +80,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeSchemaBuilder,
     ctx_md_float,
     ctx_module,
-    module_ref_default,
-    module_ref_value_from_ctx,
     pulse_length,
     pulse_product,
 )
@@ -210,7 +206,7 @@ class _LenRabiFeedbackInputs:
 
 
 def _resolve_feedback_inputs(
-    snapshot: Snapshot, knobs: dict[str, Any]
+    snapshot: Snapshot, knobs: Mapping[str, Any]
 ) -> _LenRabiFeedbackInputs:
     target_pi_length = _require_positive_finite(
         "expected_pi_length", knobs["expected_pi_length"]
@@ -343,7 +339,7 @@ def _update_drive_gain_feedback(
 ) -> None:
     if env.feedback is None:
         return
-    knobs = env.knobs()
+    knobs = env.knobs_view()
     if str(knobs["drive_gain_mode"]) != _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
         return
     controller = env.feedback.controller(_DRIVE_GAIN_SLOT.key)
@@ -511,41 +507,21 @@ class LenRabiBuilder(Builder):
             if isinstance(value, int) and not isinstance(value, bool):
                 qub_ch = value
 
-        rabi_pulse_spec = pulse_module_ref_spec(label="Rabi Pulse")
-        readout_spec = pulse_readout_module_ref_spec(label="Readout")
-        rabi_pulse_default = module_ref_value_from_ctx(
-            ctx, *_PI_PULSE_SEED_NAMES, accepted_types=("pulse",)
-        )
-        if rabi_pulse_default is None:
-            rabi_pulse_default = module_ref_value_from_ctx(
-                ctx, "rabi_pulse", accepted_types=("pulse",)
-            )
-        if rabi_pulse_default is None:
-            rabi_pulse_default = module_ref_default(ctx, rabi_pulse_spec)
-            if rabi_pulse_default is None:
-                raise RuntimeError("lenrabi pulse default is unexpectedly empty")
-            rabi_pulse_default.with_field("ch", qub_ch)
-            rabi_pulse_default.with_field("gain", 0.3)
-        rabi_pulse_default.with_field("waveform.length", 1.0)
-
         return (
-            NodeSchemaBuilder(label="Length Rabi")
-            .field(
+            NodeSchemaBuilder(ctx, label="Length Rabi")
+            .pulse(
                 "rabi_pulse",
                 "modules.rabi_pulse",
-                spec=rabi_pulse_spec,
-                default=rabi_pulse_default,
+                label="Rabi Pulse",
+                library_keys=(*_PI_PULSE_SEED_NAMES, "rabi_pulse"),
+                blank_overrides={"ch": qub_ch, "gain": 0.3},
+                overrides={"waveform.length": 1.0},
             )
-            .field(
+            .pulse_readout(
                 "readout",
                 "modules.readout",
-                spec=readout_spec,
-                default=module_ref_default(
-                    ctx,
-                    readout_spec,
-                    *READOUT_LIBRARY_ALIASES,
-                    accepted_types=("readout/pulse",),
-                ),
+                label="Readout",
+                library_keys=READOUT_LIBRARY_ALIASES,
             )
             .float(
                 "relax_delay",
@@ -574,10 +550,13 @@ class LenRabiBuilder(Builder):
             )
             .int("reps", "reps", label="Reps", default=1000)
             .int("rounds", "rounds", label="Rounds", default=10)
-            .logical("qub_ch", "modules.rabi_pulse.ch")
-            .logical("qub_nqz", "modules.rabi_pulse.nqz")
-            .logical("qub_gain", "modules.rabi_pulse.gain")
-            .acquisition(earlystop_snr=30.0, acquire_retry=DEFAULT_ACQUIRE_RETRY)
+            .knob("qub_ch", "modules.rabi_pulse.ch")
+            .knob("qub_nqz", "modules.rabi_pulse.nqz")
+            .knob("qub_gain", "modules.rabi_pulse.gain")
+            .acquisition(
+                retry=DEFAULT_ACQUIRE_RETRY,
+                early_stop_snr=30.0,
+            )
             .auto_relax_from_t1(
                 seed_us=t1_seed,
                 factor=relax_factor,
@@ -608,7 +587,7 @@ class LenRabiBuilder(Builder):
                 default=sweep_stop_factor,
                 tooltip="Pi-length multiplier for the auto sweep stop.",
             )
-            .choice_group(
+            .choice_fields(
                 "generation.sweep",
                 "sweep_range_mode",
                 {
@@ -631,7 +610,7 @@ class LenRabiBuilder(Builder):
                 default=pi_product_seed,
                 tooltip="Initial pi-length times gain before feedback exists.",
             )
-            .choice_group(
+            .choice_fields(
                 "generation.drive_gain",
                 "drive_gain_mode",
                 {
@@ -716,7 +695,7 @@ class LenRabiBuilder(Builder):
             raise RuntimeError(
                 "lenrabi.make_cfg needs a readout module (none produced or preset)"
             )
-        knobs = env.knobs()
+        knobs = env.knobs_view()
         qubit_freq = float(snapshot["qubit_freq"])
         t1 = _float_or_none(snapshot.get("t1")) or float(knobs["t1_seed_us"])
         feedback = _resolve_feedback_inputs(snapshot, knobs)

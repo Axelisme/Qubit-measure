@@ -53,8 +53,6 @@ from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.gui.app.autofluxdep.cfg import (
     CenteredSweepValue,
     OverridePlan,
-    pulse_module_ref_spec,
-    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -94,7 +92,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
 from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
-    module_ref_default,
 )
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.program.v2 import (
@@ -465,36 +462,24 @@ class RoOptimizeBuilder(Builder):
         freq_seed = seed_readout_freq(ctx, 6000.0)
         gain_seed = seed_readout_gain(ctx, 0.1)
 
-        pi_pulse_spec = pulse_module_ref_spec(label="Pi Pulse")
-        readout_spec = (
-            pulse_readout_module_ref_spec(label="Readout")
-            .lock_literal("pulse_cfg.freq", 0.0)
-            .lock_literal("ro_cfg.ro_freq", 0.0)
-            .lock_literal("pulse_cfg.gain", 0.0)
-        )
         return (
-            NodeSchemaBuilder(label="Readout Optimize")
-            .field(
+            NodeSchemaBuilder(ctx, label="Readout Optimize")
+            .pulse(
                 "pi_pulse",
                 "modules.pi_pulse",
-                spec=pi_pulse_spec,
-                default=module_ref_default(
-                    ctx,
-                    pi_pulse_spec,
-                    *PI_PULSE_LIBRARY_ALIASES,
-                    accepted_types=("pulse",),
-                ),
+                label="Pi Pulse",
+                library_keys=PI_PULSE_LIBRARY_ALIASES,
             )
-            .field(
+            .pulse_readout(
                 "readout",
                 "modules.readout",
-                spec=readout_spec,
-                default=module_ref_default(
-                    ctx,
-                    readout_spec,
-                    *READOUT_LIBRARY_ALIASES,
-                    accepted_types=("readout/pulse",),
-                ),
+                label="Readout",
+                library_keys=READOUT_LIBRARY_ALIASES,
+                locked={
+                    "pulse_cfg.freq": 0.0,
+                    "ro_cfg.ro_freq": 0.0,
+                    "pulse_cfg.gain": 0.0,
+                },
             )
             .float(
                 "relax_delay",
@@ -544,7 +529,7 @@ class RoOptimizeBuilder(Builder):
                     "lowered to start/stop for the program."
                 ),
             )
-            .acquire_retry(DEFAULT_ACQUIRE_RETRY)
+            .acquisition(retry=DEFAULT_ACQUIRE_RETRY)
             .choice(
                 "relax_delay_mode",
                 "generation.relax.relax_delay_mode",
@@ -567,7 +552,7 @@ class RoOptimizeBuilder(Builder):
                 default=relax_factor,
                 tooltip="Multiplier applied to T1 for auto relax delay.",
             )
-            .choice_group(
+            .choice_fields(
                 "generation.relax",
                 "relax_delay_mode",
                 {
@@ -598,7 +583,7 @@ class RoOptimizeBuilder(Builder):
                 default=freq_half_width_mhz,
                 tooltip="Frequency half-width around the readout search center.",
             )
-            .choice_group(
+            .choice_fields(
                 "generation.freq_search",
                 "freq_range_mode",
                 {
@@ -609,7 +594,7 @@ class RoOptimizeBuilder(Builder):
                     ),
                 },
             )
-            .choice_group(
+            .choice_fields(
                 "generation.freq_search",
                 "freq_window_mode",
                 {
@@ -640,7 +625,7 @@ class RoOptimizeBuilder(Builder):
                 default=gain_half_width,
                 tooltip="Gain half-width around the readout search center.",
             )
-            .choice_group(
+            .choice_fields(
                 "generation.gain_search",
                 "gain_range_mode",
                 {
@@ -651,7 +636,7 @@ class RoOptimizeBuilder(Builder):
                     ),
                 },
             )
-            .choice_group(
+            .choice_fields(
                 "generation.gain_search",
                 "gain_window_mode",
                 {
@@ -787,7 +772,7 @@ class RoOptimizeBuilder(Builder):
                 "ro_optimize.make_cfg needs the pi_pulse + readout modules "
                 "(none produced or preset)"
             )
-        knobs = env.knobs()
+        knobs = env.knobs_view()
         freq_range_knob = knobs["freq_range"]
         gain_range_knob = knobs["gain_range"]
 
