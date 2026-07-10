@@ -27,7 +27,8 @@ from zcu_tools.gui.app.main.adapter import (
     EvalValue,
     ExpContext,
     LiteralSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -177,7 +178,7 @@ def test_set_overrides_scalar_inside_mounted_role():
         .set("modules.qub_pulse.gain", 0.05)
     )
     v = b.build()
-    qub = cast(ModuleRefValue, v.fields["modules"].fields["qub_pulse"])  # type: ignore[union-attr]
+    qub = cast(ReferenceValue, v.fields["modules"].fields["qub_pulse"])  # type: ignore[union-attr]
     assert qub.value.fields["gain"] == DirectValue(0.05)
 
 
@@ -235,7 +236,7 @@ def test_role_mounts_module_ref():
     b = CfgBuilder(_empty_ctx(), _spec()).role("modules.qub_pulse", "qub_probe")
     v = b.build()
     node = v.fields["modules"].fields["qub_pulse"]  # type: ignore[union-attr]
-    assert isinstance(node, ModuleRefValue)
+    assert isinstance(node, ReferenceValue)
 
 
 def test_role_adopt_uses_library_match():
@@ -244,7 +245,7 @@ def test_role_adopt_uses_library_match():
     )
     v = b.build()
     node = v.fields["modules"].fields["readout"]  # type: ignore[union-attr]
-    assert isinstance(node, ModuleRefValue)
+    assert isinstance(node, ReferenceValue)
     assert node.chosen_key == "readout_rf"
 
 
@@ -261,7 +262,7 @@ def test_role_inline_forces_blank_even_when_library_has_match():
     )
     v = b.build()
     node = v.fields["modules"].fields["readout"]  # type: ignore[union-attr]
-    assert isinstance(node, ModuleRefValue)
+    assert isinstance(node, ReferenceValue)
     assert node.chosen_key == "<Custom:Pulse Readout>"
 
 
@@ -271,8 +272,37 @@ def test_role_unknown_id_fast_fails():
 
 
 def test_role_on_non_ref_spec_fast_fails():
-    with pytest.raises(RuntimeError, match="not a ModuleRefSpec/WaveformRefSpec"):
+    with pytest.raises(RuntimeError, match="not a ReferenceSpec"):
         CfgBuilder(_empty_ctx(), _spec()).role("reps", "qub_probe")
+
+
+def test_role_rejects_waveform_role_for_module_spec_at_mount() -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        CfgBuilder(_empty_ctx(), _spec()).role("modules.qub_pulse", "qub_waveform")
+
+    assert str(exc_info.value) == (
+        "CfgBuilder.role: spec at 'modules.qub_pulse' expects reference kind "
+        "'module', but role 'qub_waveform' has kind 'waveform'"
+    )
+
+
+def test_role_rejects_module_role_for_waveform_spec_at_mount() -> None:
+    spec = CfgSectionSpec(
+        fields={
+            "waveform": ReferenceSpec(
+                kind="waveform",
+                allowed=[CfgSectionSpec(label="Const", fields={})],
+            )
+        }
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        CfgBuilder(_empty_ctx(), spec).role("waveform", "qub_probe")
+
+    assert str(exc_info.value) == (
+        "CfgBuilder.role: spec at 'waveform' expects reference kind 'waveform', "
+        "but role 'qub_probe' has kind 'module'"
+    )
 
 
 def test_role_disabled_on_required_ref_fast_fails():
@@ -347,7 +377,7 @@ def test_build_fills_locked_literal_inside_mounted_ref():
         "modules.readout", "readout", Init.INLINE
     )
     v = b.build()
-    readout = cast(ModuleRefValue, v.fields["modules"].fields["readout"])  # type: ignore[union-attr]
+    readout = cast(ReferenceValue, v.fields["modules"].fields["readout"])  # type: ignore[union-attr]
     pulse_cfg = cast(Any, readout.value.fields["pulse_cfg"])
     assert pulse_cfg.fields["freq"] == DirectValue(0.0)
 

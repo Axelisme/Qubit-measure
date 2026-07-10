@@ -42,8 +42,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.cfg import (
     CfgNodeSpec,
-    ModuleRefValue,
-    WaveformRefValue,
+    ReferenceSpec,
+    ReferenceValue,
+    select_ref_value_spec,
 )
 
 if TYPE_CHECKING:
@@ -223,7 +224,7 @@ def sectioned_node_schema(sections: tuple[NodeSectionSpec, ...]) -> NodeCfgSchem
 
 def read_value_tree(schema: NodeCfgSchema) -> dict[str, Any]:
     """Return a JSON-friendly value tree for white-box test assertions."""
-    return _jsonify_value_tree(schema.schema.value)
+    return _jsonify_value_tree(schema.schema.spec, schema.schema.value)
 
 
 def _default_value_for(spec: CfgNodeSpec, default: Any) -> Any:
@@ -332,24 +333,22 @@ def _ensure_unique(kind: str, values: Any) -> None:
         raise ValueError(f"Duplicate {kind}: {', '.join(sorted(duplicates))}")
 
 
-def _jsonify_value_node(value: Any) -> Any:
+def _jsonify_value_node(spec: CfgNodeSpec, value: Any) -> Any:
     if value is None:
         return None
     if isinstance(value, CfgSectionValue):
-        return _jsonify_value_tree(value)
-    if isinstance(value, ModuleRefValue):
+        if not isinstance(spec, CfgSectionSpec):
+            raise TypeError(
+                f"CfgSectionValue requires CfgSectionSpec, got {type(spec).__name__}"
+            )
+        return _jsonify_value_tree(spec, value)
+    if isinstance(spec, ReferenceSpec) and isinstance(value, ReferenceValue):
+        value_spec = select_ref_value_spec(spec, value)
         return {
-            "__kind": "module_ref",
+            "__kind": f"{spec.kind}_ref",
             "chosen_key": value.chosen_key,
             "is_overridden": bool(value.is_overridden),
-            "value": _jsonify_value_tree(value.value),
-        }
-    if isinstance(value, WaveformRefValue):
-        return {
-            "__kind": "waveform_ref",
-            "chosen_key": value.chosen_key,
-            "is_overridden": bool(value.is_overridden),
-            "value": _jsonify_value_tree(value.value),
+            "value": _jsonify_value_tree(value_spec, value.value),
         }
     if isinstance(value, SweepValue):
         return {
@@ -374,11 +373,11 @@ def _jsonify_value_node(value: Any) -> Any:
     )
 
 
-def _jsonify_value_tree(value: CfgSectionValue) -> dict[str, Any]:
+def _jsonify_value_tree(spec: CfgSectionSpec, value: CfgSectionValue) -> dict[str, Any]:
     return {
-        key: _jsonify_value_node(child)
+        key: _jsonify_value_node(spec.fields[key], child)
         for key, child in value.fields.items()
-        if child is not None
+        if child is not None and key in spec.fields
     }
 
 

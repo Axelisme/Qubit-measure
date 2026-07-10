@@ -14,14 +14,12 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     make_default_value,
 )
 from zcu_tools.gui.app.main.live_model import (
@@ -29,12 +27,15 @@ from zcu_tools.gui.app.main.live_model import (
     CenteredSweepLiveField,
     LibraryBindingState,
     LiveModelEnv,
-    ModuleRefLiveField,
+    ReferenceLiveField,
     ScalarLiveField,
     SectionLiveField,
     SweepLiveField,
 )
+from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
 from zcu_tools.gui.app.main.specs.readout import make_pulse_readout_spec
+from zcu_tools.gui.app.main.specs.waveform import make_const_waveform_spec
+from zcu_tools.gui.app.main.ui.fields.utils import _spec_value_for_chosen
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.gui.session.value_lookup import ValueInfo, ValueRef, ValueTypeError
@@ -73,6 +74,40 @@ def test_scalar_field_reactivity(env):
     assert isinstance(value, DirectValue)
     assert value.value == 20
     assert cb.called
+
+
+def test_same_name_module_and_waveform_references_use_isolated_stores() -> None:
+    ml = ModuleLibrary()
+    ml.register_module(
+        shared={
+            "type": "pulse",
+            "waveform": {"style": "const", "length": 0.25},
+            "ch": 3,
+            "nqz": 2,
+            "freq": 5000.0,
+            "gain": 0.4,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+        }
+    )
+    ml.register_waveform(shared={"style": "const", "length": 1.5})
+    module_ref = ReferenceSpec(kind="module", allowed=[make_pulse_spec()])
+    waveform_ref = ReferenceSpec(
+        kind="waveform",
+        allowed=[make_const_waveform_spec()],
+    )
+
+    module_spec, module_value = _spec_value_for_chosen("shared", module_ref, ml)
+    waveform_spec, waveform_value = _spec_value_for_chosen("shared", waveform_ref, ml)
+
+    assert module_spec is not None and module_spec.label == "Pulse"
+    assert module_value is not None
+    assert module_value.fields["type"] == DirectValue("pulse")
+    assert waveform_spec is not None and waveform_spec.label == "Const"
+    assert waveform_value is not None
+    assert waveform_value.fields["style"] == DirectValue("const")
+    assert waveform_value.fields["length"] == DirectValue(1.5)
 
 
 def test_optional_scalar_unset_is_valid(env):
@@ -337,7 +372,7 @@ def test_centered_sweep_live_field_can_lock_center_only(env):
 
 
 # ---------------------------------------------------------------------------
-# optional ModuleRefSpec
+# optional ReferenceSpec
 # ---------------------------------------------------------------------------
 
 
@@ -348,7 +383,9 @@ def _make_optional_module_ref_spec() -> CfgSectionSpec:
     )
     return CfgSectionSpec(
         fields={
-            "module": ModuleRefSpec(allowed=[inner], label="Module", optional=True),
+            "module": ReferenceSpec(
+                kind="module", allowed=[inner], label="Module", optional=True
+            ),
             "reps": ScalarSpec(label="Reps", type=int),
         }
     )
@@ -359,7 +396,7 @@ def test_optional_module_ref_disabled_is_valid(env):
     # Value omits "module" key → field starts disabled
     initial = CfgSectionValue(fields={"reps": DirectValue(10)})
     parent = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, parent.fields["module"])
+    field = cast(ReferenceLiveField, parent.fields["module"])
 
     assert not field.is_enabled
     assert field.is_valid()
@@ -370,7 +407,7 @@ def test_optional_module_ref_set_enabled_emits_signals(env):
     spec = _make_optional_module_ref_spec()
     initial = CfgSectionValue(fields={"reps": DirectValue(10)})
     parent = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, parent.fields["module"])
+    field = cast(ReferenceLiveField, parent.fields["module"])
 
     on_enabled = MagicMock()
     on_change = MagicMock()
@@ -389,19 +426,21 @@ def test_optional_module_ref_noop_for_non_optional(env):
     )
     spec = CfgSectionSpec(
         fields={
-            "module": ModuleRefSpec(allowed=[inner], label="Module", optional=False)
+            "module": ReferenceSpec(
+                kind="module", allowed=[inner], label="Module", optional=False
+            )
         }
     )
     initial = CfgSectionValue(
         fields={
-            "module": ModuleRefValue(
+            "module": ReferenceValue(
                 chosen_key="<Custom:Pulse>",
                 value=CfgSectionValue(fields={"ch": DirectValue(0)}),
             )
         }
     )
     parent = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, parent.fields["module"])
+    field = cast(ReferenceLiveField, parent.fields["module"])
 
     assert field.is_enabled is True
     field.set_enabled(False)  # noop for non-optional
@@ -424,13 +463,13 @@ def test_module_ref_set_value_none_disables(env):
     """set_value(None) disables an optional ref; get_value round-trips to None
     (ADR-0010) — symmetric set/get, no TypeError."""
     spec = _make_optional_module_ref_spec()
-    inner_val = ModuleRefValue(
+    inner_val = ReferenceValue(
         "<Custom:Pulse>", CfgSectionValue(fields={"ch": DirectValue(3)})
     )
     parent = SectionLiveField(
         spec, env, initial_val=CfgSectionValue(fields={"module": inner_val})
     )
-    field = cast(ModuleRefLiveField, parent.fields["module"])
+    field = cast(ReferenceLiveField, parent.fields["module"])
     assert field.is_enabled is True
     assert field.get_value() is not None
 
@@ -444,13 +483,13 @@ def test_module_ref_disabled_then_reenabled_round_trips(env):
     shape (chosen_key set), not a crash."""
     spec = _make_optional_module_ref_spec()
     parent = SectionLiveField(spec, env, initial_val=CfgSectionValue(fields={}))
-    field = cast(ModuleRefLiveField, parent.fields["module"])
+    field = cast(ReferenceLiveField, parent.fields["module"])
     assert field.is_enabled is False
     assert field.get_value() is None
 
     field.set_enabled(True)
     out = field.get_value()
-    assert isinstance(out, ModuleRefValue)
+    assert isinstance(out, ReferenceValue)
 
 
 def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
@@ -458,7 +497,9 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
     inner = CfgSectionSpec(
         label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
     )
-    spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
+    spec = CfgSectionSpec(
+        fields={"module": ReferenceSpec(kind="module", allowed=[inner])}
+    )
 
     # The library HAS lib_mod (so the ref is a genuine modified library ref, not
     # dangling). Stub the lookup to return the synthetic spec (avoids a real cfg
@@ -476,7 +517,7 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
 
     initial = CfgSectionValue(
         fields={
-            "module": ModuleRefValue(
+            "module": ReferenceValue(
                 chosen_key="lib_mod",
                 value=CfgSectionValue(fields={"ch": DirectValue(1)}),
                 is_overridden=True,
@@ -485,7 +526,7 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
     )
     env.ctrl.get_current_ml.return_value = ModuleLibrary()
     section = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, section.fields["module"])
+    field = cast(ReferenceLiveField, section.fields["module"])
 
     out = field.get_value()
     assert out is not None
@@ -496,7 +537,11 @@ def test_module_ref_sub_edit_marks_overridden_in_get_value(env, monkeypatch):
 def test_linked_ref_normalizes_locked_literals_without_override(env):
     locked_readout = make_pulse_readout_spec().lock_literal("pulse_cfg.freq", 0.0)
     spec = CfgSectionSpec(
-        fields={"readout": ModuleRefSpec(allowed=[locked_readout], label="Readout")}
+        fields={
+            "readout": ReferenceSpec(
+                kind="module", allowed=[locked_readout], label="Readout"
+            )
+        }
     )
     ml = ModuleLibrary()
     ml.modules["readout_rf"] = ModuleCfgFactory.from_raw(
@@ -528,13 +573,13 @@ def test_linked_ref_normalizes_locked_literals_without_override(env):
         env,
         initial_val=CfgSectionValue(
             fields={
-                "readout": ModuleRefValue(
+                "readout": ReferenceValue(
                     "<Custom:Pulse Readout>", make_default_value(locked_readout)
                 )
             }
         ),
     )
-    field = cast(ModuleRefLiveField, section.fields["readout"])
+    field = cast(ReferenceLiveField, section.fields["readout"])
 
     field.set_chosen_key("readout_rf")
 
@@ -560,7 +605,9 @@ def test_module_ref_overridden_dangling_stays_relinkable(env, monkeypatch):
         label="Pulse",
         fields={"type": LiteralSpec("pulse"), "ch": ScalarSpec(label="Ch", type=int)},
     )
-    spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
+    spec = CfgSectionSpec(
+        fields={"module": ReferenceSpec(kind="module", allowed=[inner])}
+    )
 
     present = {"yes": False}
     import zcu_tools.gui.app.main.ui.fields.utils as _utils
@@ -577,7 +624,7 @@ def test_module_ref_overridden_dangling_stays_relinkable(env, monkeypatch):
     monkeypatch.setattr(_utils, "_spec_value_for_chosen", _fake_lookup)
     initial = CfgSectionValue(
         fields={
-            "module": ModuleRefValue(
+            "module": ReferenceValue(
                 chosen_key="some_lib_module",
                 value=CfgSectionValue(
                     fields={"type": DirectValue("pulse"), "ch": DirectValue(7)}
@@ -589,13 +636,13 @@ def test_module_ref_overridden_dangling_stays_relinkable(env, monkeypatch):
     env.ctrl.get_current_ml.return_value = ModuleLibrary()
 
     section = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, section.fields["module"])
+    field = cast(ReferenceLiveField, section.fields["module"])
 
     assert field.get_chosen_key() == "some_lib_module"
     assert field.has_missing_library_ref() is True
     assert field.is_valid() is False
     out = field.get_value()
-    assert isinstance(out, ModuleRefValue)
+    assert isinstance(out, ReferenceValue)
     assert out.chosen_key == "some_lib_module"
     assert out.is_overridden is True
     ch = out.value.fields["ch"]
@@ -609,7 +656,7 @@ def test_module_ref_overridden_dangling_stays_relinkable(env, monkeypatch):
     assert field.has_missing_library_ref() is False
     assert field.is_valid() is True
     out = field.get_value()
-    assert isinstance(out, ModuleRefValue)
+    assert isinstance(out, ReferenceValue)
     assert out.is_overridden is False
     ch = out.value.fields["ch"]
     assert isinstance(ch, DirectValue) and ch.value == 11
@@ -629,7 +676,9 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
         },
     )
     spec = CfgSectionSpec(
-        fields={"wav": WaveformRefSpec(allowed=[inner], label="Waveform")}
+        fields={
+            "wav": ReferenceSpec(kind="waveform", allowed=[inner], label="Waveform")
+        }
     )
 
     present = {"yes": True}
@@ -649,7 +698,7 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
 
     initial = CfgSectionValue(
         fields={
-            "wav": WaveformRefValue(
+            "wav": ReferenceValue(
                 chosen_key="lib_wav",
                 value=CfgSectionValue(
                     fields={"style": DirectValue("const"), "length": DirectValue(99.9)}
@@ -659,7 +708,7 @@ def test_modified_ref_self_heals_when_library_key_deleted_at_runtime(env, monkey
         }
     )
     section = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, section.fields["wav"])
+    field = cast(ReferenceLiveField, section.fields["wav"])
     assert field.get_chosen_key() == "lib_wav"
     assert field.is_modified() is True
 
@@ -682,10 +731,12 @@ def test_module_ref_custom_key_is_never_overridden(env):
     inner = CfgSectionSpec(
         label="Pulse", fields={"ch": ScalarSpec(label="Ch", type=int)}
     )
-    spec = CfgSectionSpec(fields={"module": ModuleRefSpec(allowed=[inner])})
+    spec = CfgSectionSpec(
+        fields={"module": ReferenceSpec(kind="module", allowed=[inner])}
+    )
     initial = CfgSectionValue(
         fields={
-            "module": ModuleRefValue(
+            "module": ReferenceValue(
                 chosen_key="<Custom:Pulse>",
                 value=CfgSectionValue(fields={"ch": DirectValue(3)}),
                 is_overridden=True,  # nonsensical for Custom; must be ignored
@@ -693,7 +744,7 @@ def test_module_ref_custom_key_is_never_overridden(env):
         }
     )
     section = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, section.fields["module"])
+    field = cast(ReferenceLiveField, section.fields["module"])
 
     assert field.is_modified() is False
     out = field.get_value()
@@ -712,7 +763,11 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
         },
     )
     spec = CfgSectionSpec(
-        fields={"waveform": WaveformRefSpec(allowed=[wav_spec], label="Waveform")}
+        fields={
+            "waveform": ReferenceSpec(
+                kind="waveform", allowed=[wav_spec], label="Waveform"
+            )
+        }
     )
 
     present = {"yes": False}
@@ -732,7 +787,7 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
 
     initial = CfgSectionValue(
         fields={
-            "waveform": WaveformRefValue(
+            "waveform": ReferenceValue(
                 chosen_key="ro_waveform",
                 value=CfgSectionValue(
                     fields={
@@ -744,21 +799,21 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
         }
     )
     section = SectionLiveField(spec, env, initial_val=initial)
-    field = cast(ModuleRefLiveField, section.fields["waveform"])
+    field = cast(ReferenceLiveField, section.fields["waveform"])
     # Absent key → LINKED + missing + invalid (NOT healed to Custom).
     assert field.get_chosen_key() == "ro_waveform"
     assert field._binding_state is LibraryBindingState.LINKED
     assert field.has_missing_library_ref() is True
     assert field.is_valid() is False
     out = field.get_value()
-    assert isinstance(out, WaveformRefValue)
+    assert isinstance(out, ReferenceValue)
     assert out.value.fields["length"] == DirectValue(5.0)
 
     # Other session refreshes keep the embedded snapshot instead of replacing it
     # with an empty section while the library key is still missing.
     field.refresh_external(SessionEvent.CONTEXT_SWITCHED)
     out = field.get_value()
-    assert isinstance(out, WaveformRefValue)
+    assert isinstance(out, ReferenceValue)
     assert out.value.fields["length"] == DirectValue(5.0)
 
     # Re-add an entry of that name → re-links to a valid LINKED ref.
@@ -769,5 +824,5 @@ def test_linked_ref_missing_key_is_invalid_and_relinks_on_readd(env, monkeypatch
     assert field.has_missing_library_ref() is False
     assert field.is_valid() is True
     out = field.get_value()
-    assert isinstance(out, WaveformRefValue)
+    assert isinstance(out, ReferenceValue)
     assert out.value.fields["length"] == DirectValue(1.0)

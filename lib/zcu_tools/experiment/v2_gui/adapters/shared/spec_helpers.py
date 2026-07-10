@@ -1,4 +1,4 @@
-"""Spec helper factories for common ModuleRefSpec combinations."""
+"""Spec helper factories for common ReferenceSpec combinations."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     FloatSpec,
     IntSpec,
-    ModuleRefSpec,
+    ReferenceSpec,
 )
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
@@ -26,8 +26,9 @@ from zcu_tools.gui.app.main.specs.reset import (
 
 def make_readout_module_spec(
     label: str = "Readout", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
+) -> ReferenceSpec:
+    return ReferenceSpec(
+        kind="module",
         allowed=[make_direct_readout_spec(), make_pulse_readout_spec()],
         label=label,
         optional=optional,
@@ -36,8 +37,9 @@ def make_readout_module_spec(
 
 def make_pulse_readout_module_spec(
     label: str = "Readout", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
+) -> ReferenceSpec:
+    return ReferenceSpec(
+        kind="module",
         allowed=[make_pulse_readout_spec()],
         label=label,
         optional=optional,
@@ -46,8 +48,9 @@ def make_pulse_readout_module_spec(
 
 def make_pulse_module_spec(
     label: str = "Init Pulse", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
+) -> ReferenceSpec:
+    return ReferenceSpec(
+        kind="module",
         allowed=[make_pulse_spec()],
         label=label,
         optional=optional,
@@ -56,8 +59,9 @@ def make_pulse_module_spec(
 
 def make_reset_module_spec(
     label: str = "Reset", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
+) -> ReferenceSpec:
+    return ReferenceSpec(
+        kind="module",
         allowed=[
             make_none_reset_spec(),
             make_pulse_reset_spec(),
@@ -82,9 +86,10 @@ def make_reset_module_spec(
 
 def make_pulse_reset_module_spec(
     label: str = "Tested Reset", optional: bool = False
-) -> ModuleRefSpec:
+) -> ReferenceSpec:
     """Single-shape ``reset/pulse`` ref (the tested reset of a one-pulse sweep)."""
-    return ModuleRefSpec(
+    return ReferenceSpec(
+        kind="module",
         allowed=[make_pulse_reset_spec()],
         label=label,
         optional=optional,
@@ -93,9 +98,10 @@ def make_pulse_reset_module_spec(
 
 def make_two_pulse_reset_module_spec(
     label: str = "Tested Reset", optional: bool = False
-) -> ModuleRefSpec:
+) -> ReferenceSpec:
     """Single-shape ``reset/two_pulse`` ref (the tested reset of a two-pulse sweep)."""
-    return ModuleRefSpec(
+    return ReferenceSpec(
+        kind="module",
         allowed=[make_two_pulse_reset_spec()],
         label=label,
         optional=optional,
@@ -104,9 +110,10 @@ def make_two_pulse_reset_module_spec(
 
 def make_bath_reset_module_spec(
     label: str = "Tested Reset", optional: bool = False
-) -> ModuleRefSpec:
+) -> ReferenceSpec:
     """Single-shape ``reset/bath`` ref (the tested reset of a bath-reset sweep)."""
-    return ModuleRefSpec(
+    return ReferenceSpec(
+        kind="module",
         allowed=[make_bath_reset_spec()],
         label=label,
         optional=optional,

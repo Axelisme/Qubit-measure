@@ -28,7 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    ModuleRefSpec,
+    ReferenceSpec,
     RunRequest,
     SweepValue,
 )
@@ -248,7 +248,7 @@ def test_twotone_freq_qubit_drive_label_is_probe_pulse() -> None:
     modules = schema.spec.fields["modules"]
     assert isinstance(modules, CfgSectionSpec)
     qub_pulse = modules.fields["qub_pulse"]
-    assert isinstance(qub_pulse, ModuleRefSpec)
+    assert isinstance(qub_pulse, ReferenceSpec)
     assert qub_pulse.label == "Probe Pulse"
 
 
@@ -501,7 +501,7 @@ def test_t2echo_modules_contain_both_pulses() -> None:
 )
 def test_twotone_readout_prefers_library_module(adapter: Any) -> None:
     """When ml contains readout_dpm, the readout default links to it (not inline)."""
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ReferenceValue
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()
@@ -530,7 +530,7 @@ def test_twotone_readout_prefers_library_module(adapter: Any) -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     readout = modules.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     # Should be a library link, not an inline custom readout.
     assert readout.chosen_key == "readout_dpm"
 
@@ -540,7 +540,7 @@ def test_twotone_readout_prefers_library_module(adapter: Any) -> None:
 )
 def test_twotone_readout_fallback_inline_when_ml_empty(adapter: Any) -> None:
     """When ml has no calibrated readout module, fall back to inline pulse readout."""
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ReferenceValue
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()  # empty — no readout_dpm / readout_rf
@@ -548,5 +548,5 @@ def test_twotone_readout_fallback_inline_when_ml_empty(adapter: Any) -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     readout = modules.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     assert readout.chosen_key == "<Custom:Pulse Readout>"

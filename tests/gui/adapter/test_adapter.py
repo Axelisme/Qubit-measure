@@ -19,14 +19,13 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     MetaDictWriteback,
-    ModuleRefSpec,
-    ModuleRefValue,
     ModuleWriteback,
     NoAnalysisResult,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
     WaveformWriteback,
     make_default_value,
     require_soc_handles,
@@ -399,7 +398,7 @@ def test_centered_sweep_eval_center_resolves_against_md_when_no_snapshot():
 
 
 # ---------------------------------------------------------------------------
-# ModuleRefSpec / ModuleRefValue — value is directly flattened (no ml.get_module)
+# ReferenceSpec / ReferenceValue — value is directly flattened (no ml.get_module)
 # ---------------------------------------------------------------------------
 
 
@@ -412,9 +411,9 @@ def test_module_ref_named_key_without_library_entry_raises():
         fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
     )
     s = _schema(
-        {"readout": ModuleRefSpec(allowed=[inner_spec])},
+        {"readout": ReferenceSpec(kind="module", allowed=[inner_spec])},
         {
-            "readout": ModuleRefValue(
+            "readout": ReferenceValue(
                 chosen_key="readout_rf",
                 value=CfgSectionValue(fields={"ro_ch": DirectValue(99)}),
             )
@@ -430,9 +429,9 @@ def test_module_ref_custom_key_resolves_by_label():
         fields={"gain": ScalarSpec(label="Gain", type=float)},
     )
     s = _schema(
-        {"ro": ModuleRefSpec(allowed=[inner_spec])},
+        {"ro": ReferenceSpec(kind="module", allowed=[inner_spec])},
         {
-            "ro": ModuleRefValue(
+            "ro": ReferenceValue(
                 chosen_key="<Custom:Direct Readout>",
                 value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
             )
@@ -489,10 +488,12 @@ def test_make_default_value_module_ref():
         label="Direct Readout",
         fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
     )
-    spec = CfgSectionSpec(fields={"ro": ModuleRefSpec(allowed=[inner_spec])})
+    spec = CfgSectionSpec(
+        fields={"ro": ReferenceSpec(kind="module", allowed=[inner_spec])}
+    )
     val = make_default_value(spec)
     ro = val.fields["ro"]
-    assert isinstance(ro, ModuleRefValue)
+    assert isinstance(ro, ReferenceValue)
     assert ro.chosen_key == "<Custom:Direct Readout>"
     assert isinstance(ro.value, CfgSectionValue)
 
@@ -533,22 +534,22 @@ def test_waveform_writeback_valid():
 
 
 # ---------------------------------------------------------------------------
-# ModuleRefSpec / WaveformRefSpec empty allowed raises
+# ReferenceSpec / ReferenceSpec empty allowed raises
 # ---------------------------------------------------------------------------
 
 
 def test_module_ref_spec_empty_allowed_raises():
     with pytest.raises(RuntimeError, match="allowed"):
-        ModuleRefSpec(allowed=[])
+        ReferenceSpec(kind="module", allowed=[])
 
 
 def test_waveform_ref_spec_empty_allowed_raises():
     with pytest.raises(RuntimeError, match="allowed"):
-        WaveformRefSpec(allowed=[])
+        ReferenceSpec(kind="waveform", allowed=[])
 
 
 # ---------------------------------------------------------------------------
-# optional ModuleRefSpec lowering
+# optional ReferenceSpec lowering
 # ---------------------------------------------------------------------------
 
 
@@ -563,7 +564,7 @@ def test_optional_module_ref_omitted_when_disabled():
     inner_spec = _inner_module_spec()
     outer_spec = CfgSectionSpec(
         fields={
-            "module": ModuleRefSpec(allowed=[inner_spec], optional=True),
+            "module": ReferenceSpec(kind="module", allowed=[inner_spec], optional=True),
             "reps": ScalarSpec(label="Reps", type=int),
         }
     )
@@ -581,14 +582,14 @@ def test_optional_module_ref_included_when_enabled():
     inner_spec = _inner_module_spec()
     outer_spec = CfgSectionSpec(
         fields={
-            "module": ModuleRefSpec(allowed=[inner_spec], optional=True),
+            "module": ReferenceSpec(kind="module", allowed=[inner_spec], optional=True),
             "reps": ScalarSpec(label="Reps", type=int),
         }
     )
     inner_val = CfgSectionValue(fields={"ch": DirectValue(3)})
     outer_val = CfgSectionValue(
         fields={
-            "module": ModuleRefValue(chosen_key="<Custom:Pulse>", value=inner_val),
+            "module": ReferenceValue(chosen_key="<Custom:Pulse>", value=inner_val),
             "reps": DirectValue(100),
         }
     )
@@ -645,8 +646,8 @@ def test_device_ref_empty_string_raises():
 
 def test_custom_key_missing_close_bracket_raises():
     inner_spec = CfgSectionSpec(label="Pulse", fields={})
-    ref_spec = ModuleRefSpec(allowed=[inner_spec])
-    ref_val = ModuleRefValue(chosen_key="<Custom:Pulse", value=CfgSectionValue())
+    ref_spec = ReferenceSpec(kind="module", allowed=[inner_spec])
+    ref_val = ReferenceValue(chosen_key="<Custom:Pulse", value=CfgSectionValue())
 
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"ref": ref_spec}),
@@ -658,8 +659,8 @@ def test_custom_key_missing_close_bracket_raises():
 
 def test_custom_key_unknown_label_raises():
     inner_spec = CfgSectionSpec(label="Pulse", fields={})
-    ref_spec = ModuleRefSpec(allowed=[inner_spec])
-    ref_val = ModuleRefValue(chosen_key="<Custom:UnknownSpec>", value=CfgSectionValue())
+    ref_spec = ReferenceSpec(kind="module", allowed=[inner_spec])
+    ref_val = ReferenceValue(chosen_key="<Custom:UnknownSpec>", value=CfgSectionValue())
 
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"ref": ref_spec}),

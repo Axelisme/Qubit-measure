@@ -33,7 +33,7 @@ from zcu_tools.gui.app.main.live_model import (
     CenteredSweepLiveField,
     DeviceRefLiveField,
     LiteralLiveField,
-    ModuleRefLiveField,
+    ReferenceLiveField,
     ScalarLiveField,
     SectionLiveField,
     SweepLiveField,
@@ -89,7 +89,7 @@ def _set_recursive(
         _set_centered_sweep_edge(field, head, rest, full_path, value)
         return
 
-    if isinstance(field, ModuleRefLiveField):
+    if isinstance(field, ReferenceLiveField):
         _set_moduleref(field, head, rest, full_path, value)
         return
 
@@ -149,7 +149,7 @@ def _set_leaf(field: LiveField, full_path: str, value: object) -> None:
             )
         field.set_chosen_name(value)
         return
-    if isinstance(field, ModuleRefLiveField):
+    if isinstance(field, ReferenceLiveField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets a module ref; set "
@@ -297,7 +297,7 @@ def _set_centered_sweep_edge(
 
 
 def _set_moduleref(
-    ref: ModuleRefLiveField,
+    ref: ReferenceLiveField,
     head: str,
     rest: list[str],
     full_path: str,
@@ -471,7 +471,7 @@ def _list_field(path: str, field: LiveField) -> list[dict[str, object]]:
                 "type": "string",
             }
         ]
-    if isinstance(field, ModuleRefLiveField):
+    if isinstance(field, ReferenceLiveField):
         out = [
             {
                 "path": f"{path}.ref",
@@ -641,7 +641,7 @@ def _tree_field(field: LiveField) -> object:
                 "options": list(field.env.ctrl.list_device_names()),
             }
         }
-    if isinstance(field, ModuleRefLiveField):
+    if isinstance(field, ReferenceLiveField):
         # Only the currently-bound variant is expanded; ``options`` lists the
         # allowed variant labels (bare), while ``current`` is the chosen key (a
         # built-in variant reads as the tagged ``<Custom:label>`` form, mirroring
@@ -739,7 +739,7 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple[LiveField, s
             consumed.append(head)
             i += 1
             continue
-        if isinstance(field, ModuleRefLiveField):
+        if isinstance(field, ReferenceLiveField):
             if head == "ref":
                 # The key segment maps back to the ref field itself; its
                 # sub-tree is re-listed at the ref's own base path.

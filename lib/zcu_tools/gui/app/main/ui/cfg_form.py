@@ -27,16 +27,15 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
+    ReferenceSpec,
     ScalarSpec,
     SweepSpec,
-    WaveformRefSpec,
 )
 
 from ..live_model import (
     CenteredSweepLiveField,
     LiveField,
-    ModuleRefLiveField,
+    ReferenceLiveField,
     ScalarLiveField,
     SectionLiveField,
     SweepLiveField,
@@ -318,7 +317,7 @@ class CfgFormWidget(QWidget):
                 child_path = f"{path}.{key}" if path else key
                 self._collect_decoration_state(child, child_path, state)
             return
-        if isinstance(field, ModuleRefLiveField) and field.sub_field is not None:
+        if isinstance(field, ReferenceLiveField) and field.sub_field is not None:
             for key, child in field.sub_field.fields.items():
                 child_path = f"{path}.{key}" if path else key
                 self._collect_decoration_state(child, child_path, state)
@@ -403,7 +402,7 @@ class CfgFormWidget(QWidget):
                 path=f"{path}.center" if path else "sweep.center",
             )
 
-        if isinstance(field, ModuleRefLiveField):
+        if isinstance(field, ReferenceLiveField):
             if field.is_valid():
                 return None
             key = field.get_chosen_key()
@@ -437,9 +436,7 @@ def default_decoration_for_spec(spec: CfgNodeSpec) -> FieldDecoration:
         return FieldDecoration(hidden=True, enabled=False)
     if isinstance(spec, (ScalarSpec, SweepSpec, CenteredSweepSpec)):
         return FieldDecoration(enabled=bool(spec.editable), tooltip=spec.tooltip)
-    if isinstance(
-        spec, (ModuleRefSpec, WaveformRefSpec, DeviceRefSpec, CfgSectionSpec)
-    ):
+    if isinstance(spec, (ReferenceSpec, DeviceRefSpec, CfgSectionSpec)):
         return FieldDecoration(enabled=True)
     raise TypeError(f"Unsupported cfg spec type {type(spec).__name__}")
 

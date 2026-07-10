@@ -22,8 +22,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionValue,
     MetaDictWriteback,
-    ModuleRefValue,
     PostAnalyzeRequest,
+    ReferenceValue,
     RunRequest,
     WritebackRequest,
 )
@@ -124,7 +124,7 @@ def test_ge_default_adopts_library_readout() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     readout = modules.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     assert readout.chosen_key == "readout_dpm"
 
 

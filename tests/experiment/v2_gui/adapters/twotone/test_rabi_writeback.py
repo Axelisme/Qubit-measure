@@ -33,10 +33,9 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     MetaDictWriteback,
-    ModuleRefValue,
     ModuleWriteback,
+    ReferenceValue,
     SweepValue,
-    WaveformRefValue,
     WritebackRequest,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -280,12 +279,12 @@ class TestLenRabiWriteback:
             for it in items
             if isinstance(it, ModuleWriteback) and it.target_name == "pi_len"
         )
-        # The waveform field is a WaveformRefValue; its .value.fields["length"]
+        # The waveform field is a ReferenceValue; its .value.fields["length"]
         # holds the overridden DirectValue.
-        from zcu_tools.gui.app.main.adapter import WaveformRefValue
+        from zcu_tools.gui.app.main.adapter import ReferenceValue
 
         wav_ref = pi_mod.edit_schema.value.fields["waveform"]  # type: ignore[union-attr]
-        assert isinstance(wav_ref, WaveformRefValue)
+        assert isinstance(wav_ref, ReferenceValue)
         length_val = wav_ref.value.fields["length"]
         assert isinstance(length_val, DirectValue)
         assert length_val.value == pytest.approx(0.05)
@@ -297,10 +296,10 @@ class TestLenRabiWriteback:
             for it in items
             if isinstance(it, ModuleWriteback) and it.target_name == "pi2_len"
         )
-        from zcu_tools.gui.app.main.adapter import WaveformRefValue
+        from zcu_tools.gui.app.main.adapter import ReferenceValue
 
         wav_ref = pi2_mod.edit_schema.value.fields["waveform"]  # type: ignore[union-attr]
-        assert isinstance(wav_ref, WaveformRefValue)
+        assert isinstance(wav_ref, ReferenceValue)
         length_val = wav_ref.value.fields["length"]
         assert isinstance(length_val, DirectValue)
         assert length_val.value == pytest.approx(0.025)
@@ -386,20 +385,20 @@ def _amp_qub_waveform_length(ctx: MagicMock) -> DirectValue | EvalValue:
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
-    assert isinstance(qub_pulse, ModuleRefValue)
+    assert isinstance(qub_pulse, ReferenceValue)
     waveform = qub_pulse.value.fields["waveform"]
-    assert isinstance(waveform, WaveformRefValue)
+    assert isinstance(waveform, ReferenceValue)
     length = waveform.value.fields["length"]
     assert isinstance(length, DirectValue | EvalValue)
     return length
 
 
-def _amp_qub_pulse(ctx: MagicMock) -> ModuleRefValue:
+def _amp_qub_pulse(ctx: MagicMock) -> ReferenceValue:
     val = AmpRabiAdapter().make_default_value(ctx)
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
-    assert isinstance(qub_pulse, ModuleRefValue)
+    assert isinstance(qub_pulse, ReferenceValue)
     return qub_pulse
 
 
@@ -453,7 +452,7 @@ class TestAmpRabiDefaultValueGainSeed:
         assert qub_pulse.value.fields["ch"] == DirectValue(5)
         assert qub_pulse.value.fields["freq"] == DirectValue(5100.0)
         waveform = qub_pulse.value.fields["waveform"]
-        assert isinstance(waveform, WaveformRefValue)
+        assert isinstance(waveform, ReferenceValue)
         assert waveform.value.fields["length"] == DirectValue(0.24)
 
     def test_pi_amp_module_is_secondary_pulse_seed(self) -> None:
@@ -500,18 +499,18 @@ def _len_qub_gain(ctx: MagicMock) -> DirectValue:
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
-    assert isinstance(qub_pulse, ModuleRefValue)
+    assert isinstance(qub_pulse, ReferenceValue)
     gain = qub_pulse.value.fields["gain"]
     assert isinstance(gain, DirectValue)
     return gain
 
 
-def _len_qub_pulse(ctx: MagicMock) -> ModuleRefValue:
+def _len_qub_pulse(ctx: MagicMock) -> ReferenceValue:
     val = LenRabiAdapter().make_default_value(ctx)
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
-    assert isinstance(qub_pulse, ModuleRefValue)
+    assert isinstance(qub_pulse, ReferenceValue)
     return qub_pulse
 
 
@@ -551,7 +550,7 @@ class TestLenRabiDefaultValueLengthSeed:
         assert qub_pulse.value.fields["ch"] == DirectValue(5)
         assert qub_pulse.value.fields["freq"] == DirectValue(5100.0)
         waveform = qub_pulse.value.fields["waveform"]
-        assert isinstance(waveform, WaveformRefValue)
+        assert isinstance(waveform, ReferenceValue)
         assert waveform.value.fields["length"] == DirectValue(1.0)
 
     def test_pi_amp_module_is_secondary_pulse_seed(self) -> None:
@@ -566,5 +565,5 @@ class TestLenRabiDefaultValueLengthSeed:
         assert qub_pulse.value.fields["ch"] == DirectValue(6)
         assert qub_pulse.value.fields["freq"] == DirectValue(5200.0)
         waveform = qub_pulse.value.fields["waveform"]
-        assert isinstance(waveform, WaveformRefValue)
+        assert isinstance(waveform, ReferenceValue)
         assert waveform.value.fields["length"] == DirectValue(1.0)

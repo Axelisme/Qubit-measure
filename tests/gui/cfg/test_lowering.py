@@ -16,13 +16,11 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     lower_finished_cfg,
 )
 from zcu_tools.meta_tool import MetaDict
@@ -143,9 +141,9 @@ def test_custom_reference_flattens_embedded_snapshot() -> None:
         },
     )
     schema = _schema(
-        {"module": ModuleRefSpec(allowed=[pulse])},
+        {"module": ReferenceSpec(kind="module", allowed=[pulse])},
         {
-            "module": ModuleRefValue(
+            "module": ReferenceValue(
                 "<Custom:Pulse>",
                 CfgSectionValue(
                     fields={
@@ -165,7 +163,7 @@ def test_custom_reference_flattens_embedded_snapshot() -> None:
 def test_disabled_optional_reference_is_omitted() -> None:
     pulse = CfgSectionSpec(label="Pulse", fields={})
     schema = _schema(
-        {"module": ModuleRefSpec(allowed=[pulse], optional=True)},
+        {"module": ReferenceSpec(kind="module", allowed=[pulse], optional=True)},
         {"module": None},
     )
 
@@ -176,20 +174,24 @@ def test_disabled_optional_reference_is_omitted() -> None:
     ("spec", "value", "expected"),
     [
         (
-            ModuleRefSpec(allowed=[CfgSectionSpec(label="Pulse", fields={})]),
-            ModuleRefValue("missing", CfgSectionValue()),
+            ReferenceSpec(
+                kind="module", allowed=[CfgSectionSpec(label="Pulse", fields={})]
+            ),
+            ReferenceValue("missing", CfgSectionValue()),
             "Unknown module reference: 'missing'",
         ),
         (
-            WaveformRefSpec(allowed=[CfgSectionSpec(label="Const", fields={})]),
-            WaveformRefValue("missing", CfgSectionValue()),
+            ReferenceSpec(
+                kind="waveform", allowed=[CfgSectionSpec(label="Const", fields={})]
+            ),
+            ReferenceValue("missing", CfgSectionValue()),
             "Unknown waveform reference: 'missing'",
         ),
     ],
 )
 def test_missing_library_reference_uses_exact_error(
-    spec: ModuleRefSpec | WaveformRefSpec,
-    value: ModuleRefValue | WaveformRefValue,
+    spec: ReferenceSpec,
+    value: ReferenceValue,
     expected: str,
 ) -> None:
     schema = _schema({"ref": spec}, {"ref": value})
@@ -203,8 +205,8 @@ def test_missing_library_reference_uses_exact_error(
 def test_library_reference_without_library_uses_exact_error() -> None:
     pulse = CfgSectionSpec(label="Pulse", fields={})
     schema = _schema(
-        {"module": ModuleRefSpec(allowed=[pulse])},
-        {"module": ModuleRefValue("named", CfgSectionValue())},
+        {"module": ReferenceSpec(kind="module", allowed=[pulse])},
+        {"module": ReferenceValue("named", CfgSectionValue())},
     )
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -215,11 +217,37 @@ def test_library_reference_without_library_uses_exact_error() -> None:
     )
 
 
+def test_reference_kind_is_forwarded_as_opaque_id() -> None:
+    shape = CfgSectionSpec(label="Asset", fields={})
+    schema = _schema(
+        {"asset": ReferenceSpec(kind="app-local/asset", allowed=[shape])},
+        {"asset": ReferenceValue("named", CfgSectionValue())},
+    )
+    calls: list[tuple[str, str]] = []
+
+    def resolve_reference(kind: str, key: str, /) -> str | None:
+        calls.append((kind, key))
+        return "Asset"
+
+    raw = lower_finished_cfg(
+        schema,
+        resolve_expression=None,
+        resolve_reference=resolve_reference,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+
+    assert raw == {"asset": {}}
+    assert calls == [
+        ("app-local/asset", "named"),
+        ("app-local/asset", "named"),
+    ]
+
+
 def test_library_reference_unsupported_shape_uses_exact_error() -> None:
     direct_readout = CfgSectionSpec(label="Direct Readout", fields={})
     schema = _schema(
-        {"module": ModuleRefSpec(allowed=[direct_readout])},
-        {"module": ModuleRefValue("drive", CfgSectionValue())},
+        {"module": ReferenceSpec(kind="module", allowed=[direct_readout])},
+        {"module": ReferenceValue("drive", CfgSectionValue())},
     )
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -250,8 +278,8 @@ def test_invalid_custom_reference_uses_exact_error(
 ) -> None:
     pulse = CfgSectionSpec(label="Pulse", fields={})
     schema = _schema(
-        {"module": ModuleRefSpec(allowed=[pulse])},
-        {"module": ModuleRefValue(chosen_key, CfgSectionValue())},
+        {"module": ReferenceSpec(kind="module", allowed=[pulse])},
+        {"module": ReferenceValue(chosen_key, CfgSectionValue())},
     )
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -266,9 +294,9 @@ def test_shared_ports_preserve_stage_order_without_reference_caching() -> None:
         fields={"gain": ScalarSpec("Gain", float)},
     )
     schema = _schema(
-        {"module": ModuleRefSpec(allowed=[pulse])},
+        {"module": ReferenceSpec(kind="module", allowed=[pulse])},
         {
-            "module": ModuleRefValue(
+            "module": ReferenceValue(
                 "drive",
                 CfgSectionValue(fields={"gain": EvalValue("gain", resolved=0.25)}),
             )

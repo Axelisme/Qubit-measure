@@ -19,8 +19,8 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -193,7 +193,9 @@ def test_device_selected_passes():
 
 def test_disabled_optional_ref_skipped():
     spec = CfgSectionSpec(
-        fields={"m": ModuleRefSpec(allowed=[_inner_spec()], optional=True)}
+        fields={
+            "m": ReferenceSpec(kind="module", allowed=[_inner_spec()], optional=True)
+        }
     )
     schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"m": None}))
     schema_to_raw_dict(schema, _md(), _ml())
@@ -201,12 +203,14 @@ def test_disabled_optional_ref_skipped():
 
 def test_enabled_ref_recurses_into_unset_scalar():
     inner = _inner_spec()
-    spec = CfgSectionSpec(fields={"m": ModuleRefSpec(allowed=[inner], label="M")})
+    spec = CfgSectionSpec(
+        fields={"m": ReferenceSpec(kind="module", allowed=[inner], label="M")}
+    )
     schema = CfgSchema(
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "m": ModuleRefValue(
+                "m": ReferenceValue(
                     "<Custom:Pulse>",
                     CfgSectionValue(
                         fields={

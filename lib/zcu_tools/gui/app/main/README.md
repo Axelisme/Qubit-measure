@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-10 — shared cfg lowering ports
+**Last updated:** 2026-07-10 — generic reference model
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -150,6 +150,10 @@ current `MetaDict` expression evaluator、measure-owned module/waveform shape co
 `SweepCfg` factory組成三個窄ports。adapter package re-export shared cfg identities，不保留
 第二份algorithm或model/inheritance/codec implementation（ADR-0045、ADR-0046）。
 
+Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
+measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
+LiveModel與widget依`spec.kind`選擇ModuleLibrary store/converter；shared cfg不認識這些policy。
+
 Sweep-like fields keep their UI value model until this lowering boundary:
 `SweepSpec` stores `start` / `stop` / `expts`, while `CenteredSweepSpec` stores
 `center` / `span` / `expts` and lowers to a program sweep only when building the
@@ -159,7 +163,7 @@ the search window editable. Sweep editors render as two balanced label+input
 columns per row, so start/stop or center/span share the available width evenly
 inside a full-width form row.
 
-Linked `ModuleRef` / `WaveformRef` fields preserve their embedded value snapshot
+Linked module / waveform reference fields preserve their embedded value snapshot
 when the library key is missing. The field stays library-keyed and invalid so
 re-adding the same key relinks it, including restored overridden refs whose key
 is absent at load time, while persistence can still serialize the snapshot

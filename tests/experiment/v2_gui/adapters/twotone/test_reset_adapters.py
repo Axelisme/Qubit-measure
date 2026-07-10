@@ -70,7 +70,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue, ModuleRefValue
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue, ReferenceValue
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import PulseCfg, SweepCfg
 from zcu_tools.program.v2.modules import (
@@ -111,8 +111,8 @@ def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
 
 
 def _pulse_ref_section(node: object) -> CfgSectionValue:
-    assert isinstance(node, ModuleRefValue)
-    ref = cast(ModuleRefValue, node)
+    assert isinstance(node, ReferenceValue)
+    ref = cast(ReferenceValue, node)
     assert isinstance(ref.value, CfgSectionValue)
     return ref.value
 
@@ -213,14 +213,14 @@ def test_reset_freq_locks_tested_reset_freq() -> None:
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         DirectValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     schema = SingleToneFreqAdapter().make_default_cfg(_make_ctx(_make_ml()))
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested_reset = modules.fields["tested_reset"]
-    assert isinstance(tested_reset, ModuleRefValue)
+    assert isinstance(tested_reset, ReferenceValue)
     pulse_cfg = tested_reset.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     # The sweep axis owns the frequency, so it is locked to 0.0 (notebook freq=0).
@@ -232,8 +232,7 @@ def test_reset_freq_default_seed_matches_notebook_values() -> None:
         CfgSectionValue,
         DirectValue,
         EvalValue,
-        ModuleRefValue,
-        WaveformRefValue,
+        ReferenceValue,
     )
 
     ctx = _make_ctx(_make_ml())
@@ -250,7 +249,7 @@ def test_reset_freq_default_seed_matches_notebook_values() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested_reset = modules.fields["tested_reset"]
-    assert isinstance(tested_reset, ModuleRefValue)
+    assert isinstance(tested_reset, ReferenceValue)
     pulse_cfg = tested_reset.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     assert pulse_cfg.fields["gain"] == DirectValue(0.3)
@@ -258,7 +257,7 @@ def test_reset_freq_default_seed_matches_notebook_values() -> None:
     assert isinstance(post_delay, EvalValue)
     assert post_delay.expr == "5.0 / (2 * 3.141592653589793 * rf_w)"
     waveform = pulse_cfg.fields["waveform"]
-    assert isinstance(waveform, WaveformRefValue)
+    assert isinstance(waveform, ReferenceValue)
     assert waveform.value.fields["length"] == DirectValue(5.0)
 
 
@@ -266,14 +265,14 @@ def test_reset_freq_post_delay_has_direct_fallback_without_rf_w() -> None:
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         DirectValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     schema = SingleToneFreqAdapter().make_default_cfg(_make_ctx(_make_ml()))
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested_reset = modules.fields["tested_reset"]
-    assert isinstance(tested_reset, ModuleRefValue)
+    assert isinstance(tested_reset, ReferenceValue)
     pulse_cfg = tested_reset.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     assert pulse_cfg.fields["post_delay"] == DirectValue(0.8)
@@ -348,7 +347,7 @@ def test_reset_length_sets_tested_reset_freq_from_md() -> None:
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     ctx = _make_ctx(_make_ml())
@@ -357,7 +356,7 @@ def test_reset_length_sets_tested_reset_freq_from_md() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested_reset = modules.fields["tested_reset"]
-    assert isinstance(tested_reset, ModuleRefValue)
+    assert isinstance(tested_reset, ReferenceValue)
     pulse_cfg = tested_reset.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     # Length sweep holds freq fixed at the calibrated reset_f (md-linked).
@@ -476,7 +475,7 @@ def test_dual_reset_freq_centres_each_axis_and_locks_freqs() -> None:
         CfgSectionValue,
         DirectValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
         SweepValue,
     )
 
@@ -498,7 +497,7 @@ def test_dual_reset_freq_centres_each_axis_and_locks_freqs() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
     for key in ("pulse1_cfg", "pulse2_cfg"):
         pulse = tested.value.fields[key]
         assert isinstance(pulse, CfgSectionValue)
@@ -509,7 +508,7 @@ def test_dual_reset_freq_gains_md_link() -> None:
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     ctx = _make_ctx(_make_ml())
@@ -519,7 +518,7 @@ def test_dual_reset_freq_gains_md_link() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
     p1 = tested.value.fields["pulse1_cfg"]
     p2 = tested.value.fields["pulse2_cfg"]
     assert isinstance(p1, CfgSectionValue) and isinstance(p2, CfgSectionValue)
@@ -687,7 +686,7 @@ def test_dual_reset_power_locks_gains_and_freqs_md_link() -> None:
         CfgSectionValue,
         DirectValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     ctx = _make_ctx(_make_ml())
@@ -697,7 +696,7 @@ def test_dual_reset_power_locks_gains_and_freqs_md_link() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
     p1 = tested.value.fields["pulse1_cfg"]
     p2 = tested.value.fields["pulse2_cfg"]
     assert isinstance(p1, CfgSectionValue) and isinstance(p2, CfgSectionValue)
@@ -744,7 +743,7 @@ def test_dual_reset_length_carries_calibrated_reset() -> None:
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     ctx = _make_ctx(_make_ml())
@@ -756,7 +755,7 @@ def test_dual_reset_length_carries_calibrated_reset() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
     p1 = tested.value.fields["pulse1_cfg"]
     p2 = tested.value.fields["pulse2_cfg"]
     assert isinstance(p1, CfgSectionValue) and isinstance(p2, CfgSectionValue)
@@ -870,7 +869,7 @@ def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
         CfgSectionValue,
         DirectValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
         SweepValue,
     )
 
@@ -890,7 +889,7 @@ def test_bath_freq_gain_centres_freq_and_locks_cavity_and_pi2() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
     cavity = _pulse_ref_section(tested.value.fields["cavity_tone_cfg"])
     # The sweep owns cavity freq + gain → locked to 0.0 (notebook: not used).
     assert cavity.fields["freq"] == DirectValue(0.0)
@@ -913,16 +912,16 @@ def test_bath_reset_default_uses_nested_refs_and_pi2_role_priority() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
 
     cavity_ref = tested.value.fields["cavity_tone_cfg"]
     qubit_ref = tested.value.fields["qubit_tone_cfg"]
     pi2_ref = tested.value.fields["pi2_cfg"]
-    assert isinstance(cavity_ref, ModuleRefValue)
+    assert isinstance(cavity_ref, ReferenceValue)
     assert cavity_ref.chosen_key == "<Custom:Pulse>"
-    assert isinstance(qubit_ref, ModuleRefValue)
+    assert isinstance(qubit_ref, ReferenceValue)
     assert qubit_ref.chosen_key == "<Custom:Pulse>"
-    assert isinstance(pi2_ref, ModuleRefValue)
+    assert isinstance(pi2_ref, ReferenceValue)
     assert pi2_ref.chosen_key == "pi2_amp"
 
     pi2 = _pulse_ref_section(pi2_ref)
@@ -1096,7 +1095,7 @@ def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
         CfgSectionValue,
         DirectValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     ctx = _make_ctx(_make_ml())
@@ -1106,7 +1105,7 @@ def test_bath_length_holds_cavity_md_link_and_no_writeback() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
     cavity = _pulse_ref_section(tested.value.fields["cavity_tone_cfg"])
     # Cavity freq/gain held md-linked so the cfg snapshot carries the calibrated
     # reset forward (D2(a)).
@@ -1142,7 +1141,7 @@ def test_bath_phase_locks_pi2_phase_and_holds_cavity() -> None:
         CfgSectionValue,
         DirectValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
         SweepValue,
     )
 
@@ -1160,7 +1159,7 @@ def test_bath_phase_locks_pi2_phase_and_holds_cavity() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     tested = modules.fields["tested_reset"]
-    assert isinstance(tested, ModuleRefValue)
+    assert isinstance(tested, ReferenceValue)
     # The sweep owns pi2_cfg.phase → locked to 0.0.
     pi2 = _pulse_ref_section(tested.value.fields["pi2_cfg"])
     assert pi2.fields["phase"] == DirectValue(0.0)
@@ -1319,7 +1318,7 @@ def test_rabi_check_tested_reset_can_be_pulse_reset() -> None:
     """Round-trip with a pulse-reset tested_reset validates correctly."""
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
-        ModuleRefValue,
+        ReferenceValue,
     )
 
     adapter = RabiCheckAdapter()
@@ -1328,7 +1327,7 @@ def test_rabi_check_tested_reset_can_be_pulse_reset() -> None:
     assert isinstance(modules, CfgSectionValue)
     tested_reset = modules.fields["tested_reset"]
     # Default shape is pulse reset (the reset role's blank).
-    assert isinstance(tested_reset, ModuleRefValue)
+    assert isinstance(tested_reset, ReferenceValue)
     reset_type = tested_reset.value.fields.get("type")
     assert reset_type is not None
 

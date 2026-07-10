@@ -29,7 +29,7 @@ def _split_spec_path(path: str) -> list[str]:
 
 def _path_exists(spec: CfgSectionSpec, parts: list[str]) -> bool:
     """True if the dotted ``parts`` resolve to a leaf within ``spec`` (descending
-    CfgSectionSpec.fields and ModuleRefSpec/WaveformRefSpec.allowed). Used by the
+    CfgSectionSpec.fields and ReferenceSpec.allowed). Used by the
     duck-type descent to decide which allowed shapes contain a path."""
     head, rest = parts[0], parts[1:]
     child = spec.fields.get(head)
@@ -39,7 +39,7 @@ def _path_exists(spec: CfgSectionSpec, parts: list[str]) -> bool:
         return True
     if isinstance(child, CfgSectionSpec):
         return _path_exists(child, rest)
-    if isinstance(child, (ModuleRefSpec, WaveformRefSpec)):
+    if isinstance(child, ReferenceSpec):
         return any(_path_exists(shape, rest) for shape in child.allowed)
     return False
 
@@ -164,20 +164,23 @@ class CenteredSweepSpec:
 
 
 @dataclass(frozen=True)
-class ModuleRefSpec:
+class ReferenceSpec:
+    kind: str
     allowed: list[CfgSectionSpec]
-    label: str = "Module"
+    label: str = "Reference"
     optional: bool = False
 
     def __post_init__(self) -> None:
+        if not self.kind:
+            raise RuntimeError("ReferenceSpec.kind must be non-empty")
         if not self.allowed:
-            raise RuntimeError("ModuleRefSpec.allowed must be non-empty")
+            raise RuntimeError("ReferenceSpec.allowed must be non-empty")
 
     def lock_literal(self, path: str, value: object) -> Self:
         """Lock a leaf of this ref's allowed shapes (path is relative to the
         shape, e.g. ``pulse_cfg.freq``). Lets an adapter lock fields on the
         sub-tree as it is built, instead of from the root section. Returns a new
-        frozen ModuleRefSpec; chains stay on this type."""
+        frozen ReferenceSpec; chains stay on this type."""
         return self._with_override(
             _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
         )
@@ -197,48 +200,31 @@ class ModuleRefSpec:
             allowed_labels = ", ".join(s.label for s in self.allowed)
             raise RuntimeError(
                 f"Spec override path {'.'.join(parts)!r} not found in any allowed "
-                f"shape of ModuleRefSpec (allowed: {allowed_labels})"
+                f"shape of ReferenceSpec (allowed: {allowed_labels})"
             )
         return replace(self, allowed=new_allowed)
 
 
-@dataclass(frozen=True)
-class WaveformRefSpec:
-    allowed: list[CfgSectionSpec]
-    label: str = "Waveform"
-    optional: bool = False
-
-    def __post_init__(self) -> None:
-        if not self.allowed:
-            raise RuntimeError("WaveformRefSpec.allowed must be non-empty")
-
-    def lock_literal(self, path: str, value: object) -> Self:
-        """Lock a leaf of this ref's allowed shapes (path is relative to the
-        shape, e.g. ``length``). Symmetric with ``ModuleRefSpec.lock_literal`` so
-        a leaf nested inside a waveform ref can be locked from the parent spec.
-        Returns a new frozen WaveformRefSpec; chains stay on this type."""
-        return self._with_override(
-            _split_spec_path(path), lambda leaf: LiteralSpec(value=value)
-        )
-
-    def _with_override(self, parts: list[str], fn: _LeafTransform) -> Self:
-        # Duck-type descent: apply to every allowed shape that contains the path,
-        # skip those that don't. Fail only if no allowed shape matches (real typo).
-        new_allowed: list[CfgSectionSpec] = []
-        matched = False
-        for shape in self.allowed:
-            if _path_exists(shape, parts):
-                new_allowed.append(shape._with_override(parts, fn))
-                matched = True
-            else:
-                new_allowed.append(shape)
-        if not matched:
-            allowed_labels = ", ".join(s.label for s in self.allowed)
-            raise RuntimeError(
-                f"Spec override path {'.'.join(parts)!r} not found in any allowed "
-                f"shape of WaveformRefSpec (allowed: {allowed_labels})"
-            )
-        return replace(self, allowed=new_allowed)
+def _reference_discriminator_key(spec: ReferenceSpec) -> str | None:
+    """Return the unique literal field that distinguishes all allowed shapes."""
+    first = spec.allowed[0]
+    common_keys = set(first.fields)
+    for allowed in spec.allowed[1:]:
+        common_keys.intersection_update(allowed.fields)
+    for key in first.fields:
+        if key not in common_keys:
+            continue
+        leaves = [allowed.fields[key] for allowed in spec.allowed]
+        if not all(isinstance(leaf, LiteralSpec) for leaf in leaves):
+            continue
+        values = [leaf.value for leaf in leaves if isinstance(leaf, LiteralSpec)]
+        if all(
+            value != other
+            for idx, value in enumerate(values)
+            for other in values[idx + 1 :]
+        ):
+            return key
+    return None
 
 
 @dataclass(frozen=True)
@@ -277,7 +263,7 @@ class CfgSectionSpec:
         child = self.fields[head]
         if not rest:
             new_child: CfgNodeSpec = fn(child)
-        elif isinstance(child, (CfgSectionSpec, ModuleRefSpec, WaveformRefSpec)):
+        elif isinstance(child, (CfgSectionSpec, ReferenceSpec)):
             new_child = child._with_override(rest, fn)
         else:
             raise RuntimeError(
@@ -358,8 +344,7 @@ CfgNodeSpec = (
     | LiteralSpec
     | SweepSpec
     | CenteredSweepSpec
-    | ModuleRefSpec
-    | WaveformRefSpec
+    | ReferenceSpec
     | CfgSectionSpec
     | ChoiceSectionSpec
     | DeviceRefSpec
@@ -449,7 +434,7 @@ class CenteredSweepValue:
 
 
 @dataclass
-class ModuleRefValue:
+class ReferenceValue:
     chosen_key: str
     value: CfgSectionValue
     # True when chosen_key names a library entry but the user has edited value
@@ -470,17 +455,6 @@ class ModuleRefValue:
 
 
 @dataclass
-class WaveformRefValue:
-    chosen_key: str
-    value: CfgSectionValue
-    is_overridden: bool = False
-
-    def with_field(self, path: str, value: ScalarLeafInput) -> Self:
-        self.value.with_field(path, value)
-        return self
-
-
-@dataclass
 class CfgSectionValue:
     # The value tree is always *complete*: every spec field has a corresponding
     # entry (no missing keys, ADR-0010). A disabled optional ModuleRef/WaveformRef
@@ -494,7 +468,7 @@ class CfgSectionValue:
 
         ``value`` may be a raw scalar (wrapped in ``DirectValue``) or an already-
         built ``DirectValue``/``EvalValue``. Descends ``CfgSectionValue.fields``
-        and ``ModuleRefValue``/``WaveformRefValue`` (into their ``.value``).
+        and ``ReferenceValue`` (into its ``.value``).
         """
         parts = [p for p in path.split(".") if p]
         if not parts:
@@ -502,7 +476,7 @@ class CfgSectionValue:
         node: CfgSectionValue = self
         for seg in parts[:-1]:
             child = node.fields.get(seg)
-            if isinstance(child, (ModuleRefValue, WaveformRefValue)):
+            if isinstance(child, ReferenceValue):
                 node = child.value
             elif isinstance(child, CfgSectionValue):
                 node = child
@@ -519,12 +493,7 @@ class CfgSectionValue:
 
 
 CfgNodeValue = (
-    ScalarValue
-    | SweepValue
-    | CenteredSweepValue
-    | ModuleRefValue
-    | WaveformRefValue
-    | CfgSectionValue
+    ScalarValue | SweepValue | CenteredSweepValue | ReferenceValue | CfgSectionValue
 )
 
 

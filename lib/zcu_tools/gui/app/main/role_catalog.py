@@ -18,21 +18,20 @@ import logging
 from collections.abc import Callable
 from typing import Literal, TypeAlias
 
-from .adapter import ExpContext, ModuleRefValue, WaveformRefValue
+from .adapter import ExpContext, ReferenceValue
 
 logger = logging.getLogger(__name__)
 
 RoleItemKind: TypeAlias = Literal["module", "waveform"]
-RoleValueFactory: TypeAlias = Callable[[ExpContext], ModuleRefValue | WaveformRefValue]
+RoleValueFactory: TypeAlias = Callable[[ExpContext], ReferenceValue]
 
 
 class RoleEntry:
     """One named experiment-role template.
 
     ``make_value`` is the eval-aware default factory for this role: given the
-    live ``ExpContext`` it returns a ``ModuleRefValue`` (modules) or
-    ``WaveformRefValue`` (waveforms) whose inner value carries md-linked
-    ``EvalValue`` defaults.
+    live ``ExpContext`` it returns a ``ReferenceValue`` whose inner value carries
+    md-linked ``EvalValue`` defaults.
 
     ``default_name`` is a naming-convention suggestion for the create dialog's
     name field (e.g. ``"readout_rf"``); empty means "no suggestion" (blank roles

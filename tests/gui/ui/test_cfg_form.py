@@ -18,13 +18,11 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.live_model import (
@@ -1206,7 +1204,7 @@ def test_literal_rows_revealed_by_decoration_use_framed_read_only_value(qapp, ct
 def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
     custom_spec = CfgSectionSpec(
         label="Pulse Shape",
@@ -1216,9 +1214,9 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
         },
     )
     schema = _schema(
-        {"pulse": ModuleRefSpec(label="Pulse", allowed=[custom_spec])},
+        {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[custom_spec])},
         {
-            "pulse": ModuleRefValue(
+            "pulse": ReferenceValue(
                 chosen_key="<Custom:Pulse Shape>",
                 value=CfgSectionValue(fields={"gain": DirectValue(0.25)}),
             )
@@ -1228,7 +1226,7 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
     _attach(w, schema, ctrl)
     w.show()
 
-    ref_widget = w.findChild(ModuleRefWidget)
+    ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
 
     root_layout = ref_widget.layout()
@@ -1254,7 +1252,7 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
 def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox, QHBoxLayout, QToolButton
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
     custom_spec = CfgSectionSpec(
         label="Gaussian",
@@ -1264,9 +1262,13 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
         },
     )
     schema = _schema(
-        {"waveform": WaveformRefSpec(label="Waveform", allowed=[custom_spec])},
         {
-            "waveform": WaveformRefValue(
+            "waveform": ReferenceSpec(
+                kind="waveform", label="Waveform", allowed=[custom_spec]
+            )
+        },
+        {
+            "waveform": ReferenceValue(
                 chosen_key="<Custom:Gaussian>",
                 value=CfgSectionValue(fields={"sigma": DirectValue(0.5)}),
             )
@@ -1275,7 +1277,7 @@ def test_waveform_ref_toggle_sits_left_of_combo(qapp, ctrl):
     w = CfgFormWidget()
     _attach(w, schema, ctrl)
 
-    ref_widget = w.findChild(ModuleRefWidget)
+    ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
     root_layout = ref_widget.layout()
     assert root_layout is not None
@@ -1300,9 +1302,9 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
         fields={"gain": ScalarSpec(label="Gain", type=float)},
     )
     schema = _schema(
-        {"pulse": ModuleRefSpec(label="Pulse", allowed=[custom_spec])},
+        {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[custom_spec])},
         {
-            "pulse": ModuleRefValue(
+            "pulse": ReferenceValue(
                 chosen_key="<Custom:Long Custom Module Name>",
                 value=CfgSectionValue(fields={"gain": DirectValue(0.25)}),
             )
@@ -1321,7 +1323,7 @@ def test_cfg_form_does_not_wrap_module_ref_row(qapp, ctrl):
 
 
 def test_populate_module_ref_field_round_trip(qapp, ctrl):
-    from zcu_tools.gui.app.main.adapter import ModuleRefSpec, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import ReferenceSpec, ReferenceValue
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     allowed_spec = CfgSectionSpec(
@@ -1330,11 +1332,15 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
     )
     schema = CfgSchema(
         spec=CfgSectionSpec(
-            fields={"mod": ModuleRefSpec(allowed=[allowed_spec], label="Module")}
+            fields={
+                "mod": ReferenceSpec(
+                    kind="module", allowed=[allowed_spec], label="Module"
+                )
+            }
         ),
         value=CfgSectionValue(
             fields={
-                "mod": ModuleRefValue(
+                "mod": ReferenceValue(
                     chosen_key="<Custom:Pulse>",
                     value=CfgSectionValue(fields={"gain": DirectValue(0.5)}),
                 )
@@ -1346,7 +1352,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
     out = w.read_values()
 
     mod = out.fields["mod"]
-    assert isinstance(mod, ModuleRefValue)
+    assert isinstance(mod, ReferenceValue)
     assert mod.chosen_key == "<Custom:Pulse>"
     assert mod.value.fields["gain"].value == pytest.approx(0.5)  # type: ignore[union-attr]
 
@@ -1354,7 +1360,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 def test_populate_full_fake_freq_schema(qapp, ctrl):
     """Smoke test: FakeFreqAdapter default schema populates and round-trips."""
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.app.main.adapter import ModuleRefSpec
+    from zcu_tools.gui.app.main.adapter import ReferenceSpec
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     ctx = _make_ctx()
@@ -1371,14 +1377,14 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 
     assert isinstance(out.fields["sweep"], CfgSectionValue)
     assert isinstance(out.fields["sweep"].fields["freq"], SweepValue)
-    # modules is a CfgSectionValue with readout as ModuleRefValue
+    # modules is a CfgSectionValue with readout as ReferenceValue
     modules_val = out.fields["modules"]
     assert isinstance(modules_val, CfgSectionValue)
-    # Verify spec has ModuleRefSpec for readout
+    # Verify spec has ReferenceSpec for readout
     modules_spec = schema.spec.fields["modules"]
     assert hasattr(modules_spec, "fields")
     readout_spec = modules_spec.fields["readout"]  # type: ignore[union-attr]
-    assert isinstance(readout_spec, ModuleRefSpec)
+    assert isinstance(readout_spec, ReferenceSpec)
 
 
 def test_section_widget_no_header(qapp, ctrl):
@@ -1407,9 +1413,9 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from typing import Any, cast
 
     from qtpy.QtWidgets import QDoubleSpinBox
-    from zcu_tools.gui.app.main.live_model import ModuleRefLiveField
+    from zcu_tools.gui.app.main.live_model import ReferenceLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()
@@ -1423,11 +1429,13 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     )
     schema = CfgSchema(
         spec=CfgSectionSpec(
-            fields={"mod": ModuleRefSpec(allowed=[lib_spec], label="Module")}
+            fields={
+                "mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Module")
+            }
         ),
         value=CfgSectionValue(
             fields={
-                "mod": ModuleRefValue(
+                "mod": ReferenceValue(
                     chosen_key="my_pulse",
                     value=lib_val,
                 )
@@ -1439,13 +1447,13 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     _attach(w, schema, ctrl)
     w.show()
 
-    ref_widget = w.findChild(ModuleRefWidget)
+    ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
     assert ref_widget._expand_btn.isChecked() is False
     assert ref_widget._sub_container.isVisible() is False
     # 1. Initially unmodified
     assert ref_widget._combo.currentText() == "Lib: my_pulse"
-    assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False
+    assert cast(ReferenceLiveField, ref_widget._field).is_modified() is False
 
     # 2. Simulate user edits the inner value via spinbox
     spin = ref_widget.findChild(QDoubleSpinBox)
@@ -1453,7 +1461,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     spin.setValue(8000.0)
 
     # Verify is_modified is True and combobox text has (modified) suffix
-    assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is True
+    assert cast(ReferenceLiveField, ref_widget._field).is_modified() is True
     assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
 
     # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
@@ -1465,7 +1473,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
 
     # Should stay as user modified (8000.0), not library default (7000.0)
     mod_val = w.read_values().fields["mod"]
-    assert isinstance(mod_val, ModuleRefValue)
+    assert isinstance(mod_val, ReferenceValue)
     freq_val = mod_val.value.fields["ro_freq"]
     assert isinstance(freq_val, DirectValue)
     assert freq_val.value == 8000.0
@@ -1486,21 +1494,21 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert clean_idx >= 0
     ref_widget._combo.setCurrentIndex(clean_idx)
 
-    assert cast(ModuleRefLiveField, ref_widget._field).is_modified() is False
+    assert cast(ReferenceLiveField, ref_widget._field).is_modified() is False
     mod_val2 = w.read_values().fields["mod"]
-    assert isinstance(mod_val2, ModuleRefValue)
+    assert isinstance(mod_val2, ReferenceValue)
     freq_val2 = mod_val2.value.fields["ro_freq"]
     assert isinstance(freq_val2, DirectValue)
     assert freq_val2.value == 7000.0
 
 
 # ---------------------------------------------------------------------------
-# optional ModuleRefSpec UI (None option in combo)
+# optional ReferenceSpec UI (None option in combo)
 # ---------------------------------------------------------------------------
 
 
 def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
-    from zcu_tools.gui.app.main.adapter import ModuleRefSpec, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import ReferenceSpec, ReferenceValue
 
     inner_spec = CfgSectionSpec(
         label="Pulse",
@@ -1508,8 +1516,8 @@ def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
     )
     outer_spec = CfgSectionSpec(
         fields={
-            "module": ModuleRefSpec(
-                allowed=[inner_spec], label="Module", optional=True
+            "module": ReferenceSpec(
+                kind="module", allowed=[inner_spec], label="Module", optional=True
             ),
             "reps": ScalarSpec(label="Reps", type=int),
         }
@@ -1518,7 +1526,7 @@ def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
         inner_val = CfgSectionValue(fields={"ch": DirectValue(0)})
         outer_val = CfgSectionValue(
             fields={
-                "module": ModuleRefValue(chosen_key="<Custom:Pulse>", value=inner_val),
+                "module": ReferenceValue(chosen_key="<Custom:Pulse>", value=inner_val),
                 "reps": DirectValue(10),
             }
         )
@@ -1529,37 +1537,37 @@ def _make_optional_module_ref_schema(enabled: bool = True) -> CfgSchema:
 
 def test_optional_module_ref_renders_none_option(qapp, ctrl):
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
     _attach(w, schema, ctrl)
 
-    module_widgets = w.findChildren(ModuleRefWidget)
+    module_widgets = w.findChildren(ReferenceWidget)
     assert len(module_widgets) >= 1
     mw = module_widgets[0]
 
     # None option should be at index 0
-    assert mw._combo.itemData(0) == ModuleRefWidget._NONE_KEY
+    assert mw._combo.itemData(0) == ReferenceWidget._NONE_KEY
 
 
 def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
-    from zcu_tools.gui.app.main.live_model import ModuleRefLiveField
+    from zcu_tools.gui.app.main.live_model import ReferenceLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
     schema = _make_optional_module_ref_schema(enabled=True)
     w = CfgFormWidget()
     _attach(w, schema, ctrl)
 
-    module_widgets = w.findChildren(ModuleRefWidget)
+    module_widgets = w.findChildren(ReferenceWidget)
     mw = module_widgets[0]
-    field = cast(ModuleRefLiveField, mw._field)
+    field = cast(ReferenceLiveField, mw._field)
 
     assert field.is_enabled is True
 
     # Select the None option
-    none_idx = mw._combo.findData(ModuleRefWidget._NONE_KEY)
+    none_idx = mw._combo.findData(ReferenceWidget._NONE_KEY)
     assert none_idx == 0
     mw._combo.setCurrentIndex(none_idx)
 
@@ -1571,9 +1579,9 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
     """A LINKED ref to an absent library key shows the red missing-ref badge and
     is invalid (recoverable — re-adding the name re-links it)."""
     from zcu_tools.gui.app.main.adapter import LiteralSpec
-    from zcu_tools.gui.app.main.live_model import ModuleRefLiveField
+    from zcu_tools.gui.app.main.live_model import ReferenceLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
     from zcu_tools.meta_tool import ModuleLibrary
 
     pulse_spec = CfgSectionSpec(
@@ -1584,9 +1592,9 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
         },
     )
     schema = _schema(
-        {"pulse": ModuleRefSpec(label="Pulse", allowed=[pulse_spec])},
+        {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[pulse_spec])},
         {
-            "pulse": ModuleRefValue(
+            "pulse": ReferenceValue(
                 chosen_key="missing_pulse",
                 value=CfgSectionValue(
                     fields={"type": DirectValue("pulse"), "gain": DirectValue(0.2)}
@@ -1600,9 +1608,9 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
     _attach(w, schema, ctrl)
     w.show()
 
-    ref_widget = w.findChild(ModuleRefWidget)
+    ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
-    field = cast(ModuleRefLiveField, ref_widget._field)
+    field = cast(ReferenceLiveField, ref_widget._field)
     assert field.has_missing_library_ref() is True
     assert field.is_valid() is False
     assert ref_widget._missing_ref_hint.isVisible() is True

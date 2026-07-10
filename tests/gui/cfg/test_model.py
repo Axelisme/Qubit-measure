@@ -11,10 +11,9 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
-    WaveformRefSpec,
 )
 
 
@@ -38,11 +37,18 @@ def _nested_spec() -> CfgSectionSpec:
     return CfgSectionSpec(
         fields={
             "modules": CfgSectionSpec(
-                fields={"readout": ModuleRefSpec(allowed=[shape_a, shape_b])}
+                fields={
+                    "readout": ReferenceSpec(kind="module", allowed=[shape_a, shape_b])
+                }
             ),
             "reps": ScalarSpec("Reps", int),
         }
     )
+
+
+def test_reference_spec_requires_non_empty_kind() -> None:
+    with pytest.raises(RuntimeError, match="ReferenceSpec.kind must be non-empty"):
+        ReferenceSpec(kind="", allowed=[CfgSectionSpec(label="Shape")])
 
 
 # --- spec.lock_literal ------------------------------------------------------
@@ -84,18 +90,18 @@ def test_lock_literal_chains():
 
 
 def test_module_ref_spec_lock_literal_is_chain_start():
-    """ModuleRefSpec.lock_literal locks a leaf relative to its allowed shapes,
+    """ReferenceSpec.lock_literal locks a leaf relative to its allowed shapes,
     so a sub-tree from a helper can be locked as it is built (path is shorter,
-    no need to start from the root section). Returns a ModuleRefSpec for chaining."""
+    no need to start from the root section). Returns a ReferenceSpec for chaining."""
     inner = CfgSectionSpec(
         label="A",
         fields={
             "pulse_cfg": CfgSectionSpec(fields={"freq": ScalarSpec("Freq", float)})
         },
     )
-    ref = ModuleRefSpec(allowed=[inner])
+    ref = ReferenceSpec(kind="module", allowed=[inner])
     locked = ref.lock_literal("pulse_cfg.freq", 0.0)
-    assert isinstance(locked, ModuleRefSpec)
+    assert isinstance(locked, ReferenceSpec)
     leaf = cast(Any, locked.allowed[0]).fields["pulse_cfg"].fields["freq"]
     assert isinstance(leaf, LiteralSpec)
     assert leaf.value == 0.0
@@ -116,11 +122,11 @@ def test_lock_literal_raises_on_unknown_top_segment():
         spec.lock_literal("nope.freq", 0.0)
 
 
-# --- lock_literal descent through WaveformRefSpec (framework symmetry) -------
+# --- lock_literal descent through ReferenceSpec (framework symmetry) -------
 
 
 def _pulse_with_waveform() -> CfgSectionSpec:
-    """A pulse shape whose 'waveform' is a WaveformRefSpec with two shapes."""
+    """A pulse shape whose 'waveform' is a ReferenceSpec with two shapes."""
     const = CfgSectionSpec(label="Const", fields={"length": ScalarSpec("Len", float)})
     gauss = CfgSectionSpec(
         label="Gauss",
@@ -133,18 +139,18 @@ def _pulse_with_waveform() -> CfgSectionSpec:
         label="Pulse",
         fields={
             "freq": ScalarSpec("Freq", float),
-            "waveform": WaveformRefSpec(allowed=[const, gauss]),
+            "waveform": ReferenceSpec(kind="waveform", allowed=[const, gauss]),
         },
     )
 
 
 def test_lock_literal_descends_into_waveform_ref_via_module_ref():
-    """A leaf nested inside a WaveformRefSpec can be locked from the parent
-    ModuleRefSpec — symmetric with the ModuleRefSpec descent."""
-    ref = ModuleRefSpec(allowed=[_pulse_with_waveform()])
+    """A leaf nested inside a ReferenceSpec can be locked from the parent
+    ReferenceSpec — symmetric with the ReferenceSpec descent."""
+    ref = ReferenceSpec(kind="module", allowed=[_pulse_with_waveform()])
     locked = ref.lock_literal("waveform.length", 0.0)
     wf = cast(Any, locked.allowed[0]).fields["waveform"]
-    assert isinstance(wf, WaveformRefSpec)
+    assert isinstance(wf, ReferenceSpec)
     # every allowed waveform shape with a 'length' leaf is locked (duck-typed)
     for shape in wf.allowed:
         leaf = shape.fields["length"]
@@ -155,11 +161,11 @@ def test_lock_literal_descends_into_waveform_ref_via_module_ref():
 
 
 def test_waveform_ref_spec_lock_literal_is_chain_start():
-    """WaveformRefSpec.lock_literal returns a WaveformRefSpec; original frozen."""
+    """ReferenceSpec.lock_literal returns a ReferenceSpec; original frozen."""
     const = CfgSectionSpec(label="Const", fields={"length": ScalarSpec("Len", float)})
-    ref = WaveformRefSpec(allowed=[const])
+    ref = ReferenceSpec(kind="waveform", allowed=[const])
     locked = ref.lock_literal("length", 0.0)
-    assert isinstance(locked, WaveformRefSpec)
+    assert isinstance(locked, ReferenceSpec)
     assert isinstance(locked.allowed[0].fields["length"], LiteralSpec)
     assert isinstance(ref.allowed[0].fields["length"], ScalarSpec)  # untouched
 
@@ -169,7 +175,11 @@ def test_lock_literal_descends_waveform_ref_via_full_section_path():
     spec = CfgSectionSpec(
         fields={
             "modules": CfgSectionSpec(
-                fields={"qub_pulse": ModuleRefSpec(allowed=[_pulse_with_waveform()])}
+                fields={
+                    "qub_pulse": ReferenceSpec(
+                        kind="module", allowed=[_pulse_with_waveform()]
+                    )
+                }
             )
         }
     )
@@ -185,7 +195,7 @@ def test_lock_literal_descends_waveform_ref_via_full_section_path():
 
 def test_lock_literal_waveform_ref_raises_when_no_shape_matches():
     const = CfgSectionSpec(label="Const", fields={"length": ScalarSpec("Len", float)})
-    ref = WaveformRefSpec(allowed=[const])
+    ref = ReferenceSpec(kind="waveform", allowed=[const])
     with pytest.raises(RuntimeError, match="not found in any allowed"):
         ref.lock_literal("nope", 0.0)
 
@@ -203,7 +213,7 @@ def _nested_value() -> CfgSectionValue:
     )
     return CfgSectionValue(
         fields={
-            "readout": ModuleRefValue(chosen_key="<Custom:X>", value=inner),
+            "readout": ReferenceValue(chosen_key="<Custom:X>", value=inner),
             "reps": DirectValue(100),
         }
     )
@@ -235,7 +245,7 @@ def test_with_field_accepts_prebuilt_eval_value():
 
 def test_with_field_module_ref_with_field_delegates():
     inner = CfgSectionValue(fields={"gain": DirectValue(0.1)})
-    ref = ModuleRefValue(chosen_key="<Custom:X>", value=inner)
+    ref = ReferenceValue(chosen_key="<Custom:X>", value=inner)
     out = ref.with_field("gain", 0.3)
     assert out is ref
     assert cast(Any, ref.value.fields["gain"]).value == 0.3

@@ -24,8 +24,7 @@ from collections.abc import Callable
 
 from zcu_tools.gui.app.main.adapter import (
     ExpContext,
-    ModuleRefValue,
-    WaveformRefValue,
+    ReferenceValue,
     make_default_value,
 )
 from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
@@ -149,27 +148,27 @@ _BLANK_WAVEFORM_DISCRIMINATORS = [
 
 def _blank_module_factory(
     disc: str,
-) -> Callable[[ExpContext], ModuleRefValue]:
-    def _make(_ctx: ExpContext) -> ModuleRefValue:
+) -> Callable[[ExpContext], ReferenceValue]:
+    def _make(_ctx: ExpContext) -> ReferenceValue:
         value = make_default_value(_MODULE_SPEC_FACTORIES[disc]())
-        return ModuleRefValue(f"<Custom:{disc}>", value)
+        return ReferenceValue(f"<Custom:{disc}>", value)
 
     return _make
 
 
 def _blank_waveform_factory(
     disc: str,
-) -> Callable[[ExpContext], WaveformRefValue]:
-    def _make(_ctx: ExpContext) -> WaveformRefValue:
+) -> Callable[[ExpContext], ReferenceValue]:
+    def _make(_ctx: ExpContext) -> ReferenceValue:
         value = make_default_value(make_waveform_spec_by_style(disc))
-        return WaveformRefValue(f"<Custom:{disc}>", value)
+        return ReferenceValue(f"<Custom:{disc}>", value)
 
     return _make
 
 
 def _blank_entries() -> list[RoleEntry]:
     entries: list[RoleEntry] = []
-    factory: Callable[[ExpContext], ModuleRefValue | WaveformRefValue]
+    factory: Callable[[ExpContext], ReferenceValue]
     for disc in _BLANK_MODULE_DISCRIMINATORS:
         factory = _blank_module_factory(disc)
         entries.append(RoleEntry(f"{disc}:blank", f"Blank: {disc}", "module", factory))

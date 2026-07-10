@@ -46,14 +46,12 @@ from .adapter import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
 )
 from .sweep_model import CenteredSweepEditor, SweepEditor
 
@@ -579,10 +577,7 @@ class SectionLiveField(LiveField):
         for key, node_spec in spec.fields.items():
             if key in provided_val.fields:
                 child_val = provided_val.fields[key]
-            elif (
-                isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec))
-                and node_spec.optional
-            ):
+            elif isinstance(node_spec, ReferenceSpec) and node_spec.optional:
                 child_val = None  # missing optional ref → disabled
             else:
                 child_val = default_val.fields.get(key)
@@ -698,14 +693,14 @@ def _binding_state_for_key(chosen_key: str) -> LibraryBindingState:
     return LibraryBindingState.LINKED
 
 
-class ModuleRefLiveField(LiveField):
+class ReferenceLiveField(LiveField):
     """Reactive field for Module/Waveform references with dynamic sub-sections."""
 
-    spec: ModuleRefSpec | WaveformRefSpec
+    spec: ReferenceSpec
 
     def __init__(
         self,
-        spec: ModuleRefSpec | WaveformRefSpec,
+        spec: ReferenceSpec,
         env: LiveModelEnv,
         initial_val: object = None,
     ) -> None:
@@ -715,7 +710,7 @@ class ModuleRefLiveField(LiveField):
         # (ADR-0010): the disabled state is a plain ``None`` in the value tree,
         # mapped here to ``is_enabled=False`` with a first-allowed default shape.
         init_overridden = False
-        if isinstance(initial_val, (ModuleRefValue, WaveformRefValue)):
+        if isinstance(initial_val, ReferenceValue):
             self._chosen_key = initial_val.chosen_key
             init_sub: CfgSectionValue | None = initial_val.value
             init_overridden = initial_val.is_overridden
@@ -766,7 +761,7 @@ class ModuleRefLiveField(LiveField):
         self._missing_library_ref = False
         try:
             chosen_spec, lib_val = _spec_value_for_chosen(
-                self._chosen_key, self.spec.allowed, ml
+                self._chosen_key, self.spec, ml
             )
         except RuntimeError as exc:
             # The referenced library entry no longer exists (deleted/renamed, or
@@ -800,7 +795,7 @@ class ModuleRefLiveField(LiveField):
                     self._chosen_key = f"<Custom:{label}>"
                     self._binding_state = LibraryBindingState.CUSTOM
                     chosen_spec, lib_val = _spec_value_for_chosen(
-                        self._chosen_key, self.spec.allowed, ml
+                        self._chosen_key, self.spec, ml
                     )
                     if hint is None:
                         hint = kept_val
@@ -846,13 +841,14 @@ class ModuleRefLiveField(LiveField):
                 if spec.label == old_spec.label:
                     return old_spec
         if isinstance(value, CfgSectionValue):
-            disc_field = value.fields.get("type") or value.fields.get("style")
-            disc = getattr(disc_field, "value", None)
-            if isinstance(disc, str):
-                for spec in self.spec.allowed:
-                    lit = spec.fields.get("type") or spec.fields.get("style")
-                    if getattr(lit, "value", None) == disc:
-                        return spec
+            from .adapter import select_ref_value_spec
+
+            try:
+                return select_ref_value_spec(
+                    self.spec, ReferenceValue(self._chosen_key, value)
+                )
+            except RuntimeError:
+                return None
         return None
 
     def _custom_label_for_value(
@@ -871,13 +867,14 @@ class ModuleRefLiveField(LiveField):
         ):
             return old_spec.label
         if isinstance(value, CfgSectionValue):
-            disc_field = value.fields.get("type") or value.fields.get("style")
-            disc = getattr(disc_field, "value", None)
-            if isinstance(disc, str):
-                for spec in self.spec.allowed:
-                    lit = spec.fields.get("type") or spec.fields.get("style")
-                    if getattr(lit, "value", None) == disc and spec.label:
-                        return spec.label
+            from .adapter import select_ref_value_spec
+
+            try:
+                return select_ref_value_spec(
+                    self.spec, ReferenceValue(self._chosen_key, value)
+                ).label
+            except RuntimeError:
+                pass
         return self.spec.allowed[0].label if self.spec.allowed else "Custom"
 
     def _on_sub_change(self, *_: object) -> None:
@@ -903,14 +900,14 @@ class ModuleRefLiveField(LiveField):
             return
         if self._missing_library_ref:
             logger.debug(
-                "ModuleRefLiveField._refresh_validity: key=%r missing in library",
+                "ReferenceLiveField._refresh_validity: key=%r missing in library",
                 self._chosen_key,
             )
             self._set_valid(False)
             return
         if self.sub_field is None:
             logger.debug(
-                "ModuleRefLiveField._refresh_validity: key=%r sub_field=None → valid=True",
+                "ReferenceLiveField._refresh_validity: key=%r sub_field=None → valid=True",
                 self._chosen_key,
             )
             self._set_valid(True)
@@ -918,7 +915,7 @@ class ModuleRefLiveField(LiveField):
             valid = self.sub_field.is_valid()
             if not valid:
                 logger.debug(
-                    "ModuleRefLiveField._refresh_validity: key=%r sub_field invalid",
+                    "ReferenceLiveField._refresh_validity: key=%r sub_field invalid",
                     self._chosen_key,
                 )
             self._set_valid(valid)
@@ -953,7 +950,12 @@ class ModuleRefLiveField(LiveField):
         ml = self.env.ctrl.get_current_ml()
         if ml is None:
             return False
-        store = ml.modules if isinstance(self.spec, ModuleRefSpec) else ml.waveforms
+        if self.spec.kind == "module":
+            store = ml.modules
+        elif self.spec.kind == "waveform":
+            store = ml.waveforms
+        else:
+            raise RuntimeError(f"Unsupported reference kind {self.spec.kind!r}")
         return self._chosen_key in store
 
     def get_chosen_key(self) -> str:
@@ -966,16 +968,13 @@ class ModuleRefLiveField(LiveField):
             self._rebuild_sub_field(hint=None)
             self.on_change.emit(self.get_value())
 
-    def get_value(self) -> ModuleRefValue | WaveformRefValue | None:
+    def get_value(self) -> ReferenceValue | None:
         # A disabled optional ref self-reports ``None`` (ADR-0010): the disabled
         # state is in-band in the value, not a parent-side omission.
         if self.spec.optional and not self.is_enabled:
             return None
-        klass = (
-            ModuleRefValue if isinstance(self.spec, ModuleRefSpec) else WaveformRefValue
-        )
         sub_val = self.sub_field.get_value() if self.sub_field else CfgSectionValue()
-        return klass(
+        return ReferenceValue(
             chosen_key=self._chosen_key,
             value=sub_val,
             is_overridden=self.is_modified(),
@@ -987,10 +986,10 @@ class ModuleRefLiveField(LiveField):
         if val is None:
             self.set_enabled(False)
             return
-        if not isinstance(val, (ModuleRefValue, WaveformRefValue)):
+        if not isinstance(val, ReferenceValue):
             raise TypeError(
-                "ModuleRefLiveField expects ModuleRefValue, WaveformRefValue or "
-                f"None, got {type(val).__name__}"
+                "ReferenceLiveField expects ReferenceValue or None, "
+                f"got {type(val).__name__}"
             )
         if self.spec.optional and not self.is_enabled:
             self.set_enabled(True)
@@ -1040,8 +1039,8 @@ def create_live_field(
         return SweepLiveField(spec, env, initial_val)
     if isinstance(spec, CenteredSweepSpec):
         return CenteredSweepLiveField(spec, env, initial_val)
-    if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
-        return ModuleRefLiveField(spec, env, initial_val)
+    if isinstance(spec, ReferenceSpec):
+        return ReferenceLiveField(spec, env, initial_val)
     if isinstance(spec, DeviceRefSpec):
         return DeviceRefLiveField(spec, env, initial_val)
     if isinstance(spec, CfgSectionSpec):

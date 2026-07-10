@@ -25,8 +25,8 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     MetaDictWriteback,
     ModuleWriteback,
+    ReferenceValue,
     RunRequest,
-    WaveformRefValue,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
@@ -164,7 +164,7 @@ def _assert_readout_rf_schema(
     assert _direct_float(ro_cfg.fields["trig_offset"]) == pytest.approx(trig_offset)
     assert _direct_float(ro_cfg.fields["gen_ch"]) == pytest.approx(gen_ch)
     waveform = pulse_cfg.fields["waveform"]
-    assert isinstance(waveform, WaveformRefValue)
+    assert isinstance(waveform, ReferenceValue)
     assert _direct_float(waveform.value.fields["length"]) == pytest.approx(
         waveform_length
     )
@@ -477,7 +477,7 @@ def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> N
     from zcu_tools.gui.app.main.adapter import (
         CfgSectionValue,
         DirectValue,
-        ModuleRefValue,
+        ReferenceValue,
         SweepValue,
     )
 
@@ -486,7 +486,7 @@ def test_onetone_freq_default_fallback_uses_direct_values_without_md_keys() -> N
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     readout = modules.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     readout_val = readout.value
     pulse_cfg = readout_val.fields["pulse_cfg"]
     ro_cfg = readout_val.fields["ro_cfg"]
@@ -517,7 +517,7 @@ def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
         CfgSectionValue,
         DirectValue,
         EvalValue,
-        ModuleRefValue,
+        ReferenceValue,
         SweepValue,
     )
 
@@ -531,7 +531,7 @@ def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     readout = modules.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     readout_val = readout.value
     pulse_cfg = readout_val.fields["pulse_cfg"]
     ro_cfg = readout_val.fields["ro_cfg"]
@@ -555,7 +555,7 @@ def test_onetone_freq_default_uses_eval_when_md_keys_exist() -> None:
 
 
 def test_onetone_freq_default_ignores_library_readout() -> None:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ModuleRefValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ReferenceValue
 
     ml = ModuleLibrary()
 
@@ -585,5 +585,5 @@ def test_onetone_freq_default_ignores_library_readout() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     readout = modules.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     assert readout.chosen_key == "<Custom:Pulse Readout>"

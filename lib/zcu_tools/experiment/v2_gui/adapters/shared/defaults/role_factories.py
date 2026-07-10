@@ -24,22 +24,20 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Literal
 
 from .role_table import ROLE_TABLE, RoleDef, role_blank, role_ref
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import (
         ExpContext,
-        ModuleRefValue,
-        WaveformRefValue,
+        ReferenceValue,
     )
 
 # A blank factory always produces a value (never None); a ref factory's optional
 # path may return None (the disabled-optional ref, ADR-0010).
-_RefNode = Union["ModuleRefValue", "WaveformRefValue"]
-BlankFactory = Callable[["ExpContext"], _RefNode]
-RefFactory = Callable[..., _RefNode | None]
+BlankFactory = Callable[["ExpContext"], "ReferenceValue"]
+RefFactory = Callable[..., "ReferenceValue | None"]
 
 
 @dataclass(frozen=True)
@@ -51,6 +49,7 @@ class RoleFactorySpec:
     Asking such a role for a ref/optional mount is a Fast-Fail at the call site.
     """
 
+    kind: Literal["module", "waveform"]
     blank: BlankFactory
     ref: RefFactory | None = None
 
@@ -58,18 +57,20 @@ class RoleFactorySpec:
 def _from_role(role: RoleDef) -> RoleFactorySpec:
     """Build the blank/ref factory pair from a declarative ``RoleDef``."""
 
-    def blank(ctx: ExpContext, _role: RoleDef = role) -> _RefNode:
+    kind: Literal["module", "waveform"] = "waveform" if role.is_waveform else "module"
+
+    def blank(ctx: ExpContext, _role: RoleDef = role) -> ReferenceValue:
         return role_blank(_role, ctx)
 
     if role.lib is None:
-        return RoleFactorySpec(blank=blank)
+        return RoleFactorySpec(kind=kind, blank=blank)
 
     def ref(
         ctx: ExpContext, *, optional: bool = False, _role: RoleDef = role
-    ) -> _RefNode | None:
+    ) -> ReferenceValue | None:
         return role_ref(_role, ctx, optional=optional)
 
-    return RoleFactorySpec(blank=blank, ref=ref)
+    return RoleFactorySpec(kind=kind, blank=blank, ref=ref)
 
 
 # role_id -> factory pair, generated from ROLE_TABLE. Order is informational only

@@ -29,10 +29,10 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     EvalValue,
     FloatSpec,
     IntSpec,
-    ModuleRefSpec,
     NodeCfgSchema,
     OverridePath,
     OverridePlan,
+    ReferenceSpec,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -2164,7 +2164,7 @@ def test_real_builders_restrict_generated_readout_to_pulse_shape():
         modules = schema.schema.spec.fields["modules"]
         assert isinstance(modules, CfgSectionSpec), builder.name
         readout = modules.fields["readout"]
-        assert isinstance(readout, ModuleRefSpec), builder.name
+        assert isinstance(readout, ReferenceSpec), builder.name
         assert [spec.label for spec in readout.allowed] == ["Pulse Readout"]
 
 

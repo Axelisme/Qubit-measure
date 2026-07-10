@@ -19,8 +19,8 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -199,7 +199,9 @@ def test_choices_out_raises():
 
 def test_none_on_optional_ref_passes():
     spec = CfgSectionSpec(
-        fields={"m": ModuleRefSpec(allowed=[_inner_spec()], optional=True)}
+        fields={
+            "m": ReferenceSpec(kind="module", allowed=[_inner_spec()], optional=True)
+        }
     )
     schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"m": None}))
     validate_schema(schema, _ml())
@@ -207,7 +209,9 @@ def test_none_on_optional_ref_passes():
 
 def test_none_on_required_ref_raises():
     spec = CfgSectionSpec(
-        fields={"m": ModuleRefSpec(allowed=[_inner_spec()], optional=False)}
+        fields={
+            "m": ReferenceSpec(kind="module", allowed=[_inner_spec()], optional=False)
+        }
     )
     schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"m": None}))
     with pytest.raises(RuntimeError, match="not a disabled optional ref"):
@@ -226,13 +230,15 @@ def test_none_on_scalar_raises():
 
 def test_enabled_ref_recurses_into_sub_value():
     inner = _inner_spec()
-    spec = CfgSectionSpec(fields={"m": ModuleRefSpec(allowed=[inner], label="M")})
+    spec = CfgSectionSpec(
+        fields={"m": ReferenceSpec(kind="module", allowed=[inner], label="M")}
+    )
     # the ref's sub-value omits 'gain' → incomplete → raises at m.gain
     schema = CfgSchema(
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "m": ModuleRefValue(
+                "m": ReferenceValue(
                     "<Custom:Pulse>",
                     CfgSectionValue(fields={"type": DirectValue("pulse")}),
                 )
@@ -245,12 +251,14 @@ def test_enabled_ref_recurses_into_sub_value():
 
 def test_enabled_ref_complete_sub_value_passes():
     inner = _inner_spec()
-    spec = CfgSectionSpec(fields={"m": ModuleRefSpec(allowed=[inner], label="M")})
+    spec = CfgSectionSpec(
+        fields={"m": ReferenceSpec(kind="module", allowed=[inner], label="M")}
+    )
     schema = CfgSchema(
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "m": ModuleRefValue(
+                "m": ReferenceValue(
                     "<Custom:Pulse>",
                     CfgSectionValue(
                         fields={

@@ -23,13 +23,12 @@ from .model import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
+    _reference_discriminator_key,
 )
 
 
@@ -84,7 +83,7 @@ def _section_value_to_raw(
         if node_val is None:
             if isinstance(node_spec, LiteralSpec) and fill_missing_literals:
                 payload[key] = _node_value_to_raw(node_spec, DirectValue(None))
-            elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+            elif isinstance(node_spec, ReferenceSpec):
                 payload[key] = {"__kind": "disabled"}
             else:
                 raise SessionCodecError(
@@ -143,34 +142,18 @@ def _node_value_to_raw(
             value,
             fill_missing_literals=fill_missing_literals,
         )
-    if isinstance(spec, ModuleRefSpec):
-        assert isinstance(value, ModuleRefValue)
+    if isinstance(spec, ReferenceSpec):
+        assert isinstance(value, ReferenceValue)
+        disc_key = _reference_discriminator_key(spec)
         return {
-            "__kind": "module_ref",
+            "__kind": f"{spec.kind}_ref",
             "chosen_key": value.chosen_key,
             "is_overridden": value.is_overridden,
             "value": _section_value_to_raw(
                 _select_allowed_spec(
                     spec,
                     value.chosen_key,
-                    _value_discriminator(value.value, "type"),
-                    value_fields=value.value.fields.keys(),
-                ),
-                value.value,
-                fill_missing_literals=True,
-            ),
-        }
-    if isinstance(spec, WaveformRefSpec):
-        assert isinstance(value, WaveformRefValue)
-        return {
-            "__kind": "waveform_ref",
-            "chosen_key": value.chosen_key,
-            "is_overridden": value.is_overridden,
-            "value": _section_value_to_raw(
-                _select_allowed_spec(
-                    spec,
-                    value.chosen_key,
-                    _value_discriminator(value.value, "style"),
+                    _value_discriminator(value.value, disc_key),
                     value_fields=value.value.fields.keys(),
                 ),
                 value.value,
@@ -265,10 +248,8 @@ def _node_value_from_raw(
         if not isinstance(raw, dict):
             raise RuntimeError("Section payload must be an object")
         return _section_value_from_raw(spec, raw)
-    if isinstance(spec, ModuleRefSpec):
+    if isinstance(spec, ReferenceSpec):
         return _ref_value_from_raw(spec, raw)
-    if isinstance(spec, WaveformRefSpec):
-        return _waveform_ref_value_from_raw(spec, raw)
     raise RuntimeError(f"Unsupported spec node for restore: {type(spec).__name__}")
 
 
@@ -287,73 +268,50 @@ def _parse_sweep_edge(raw: object) -> float | EvalValue:
 
 
 def _ref_value_from_raw(
-    spec: ModuleRefSpec,
+    spec: ReferenceSpec,
     raw: object,
-) -> ModuleRefValue:
+) -> ReferenceValue:
     # The disabled marker is handled by the caller (``_section_value_from_raw``
     # maps it to None) — this only decodes an enabled ref.
     if (
         isinstance(raw, dict)
-        and raw.get("__kind") == "module_ref"
+        and raw.get("__kind") == f"{spec.kind}_ref"
         and isinstance(raw.get("chosen_key"), str)
         and isinstance(raw.get("value"), dict)
     ):
         chosen_key = raw["chosen_key"]
         raw_value = raw["value"]
+        disc_key = _reference_discriminator_key(spec)
         value_spec = _select_allowed_spec(
             spec,
             chosen_key,
-            _raw_discriminator(raw_value, "type"),
+            _raw_discriminator(raw_value, disc_key),
             value_fields=raw_value.keys(),
         )
         nested = _section_value_from_raw(value_spec, raw_value)
-        return ModuleRefValue(
+        return ReferenceValue(
             chosen_key=chosen_key,
             value=nested,
             is_overridden=bool(raw.get("is_overridden", False)),
         )
-    raise RuntimeError("Module reference must use module_ref payload encoding")
+    kind_label = spec.kind.capitalize()
+    raise RuntimeError(
+        f"{kind_label} reference must use {spec.kind}_ref payload encoding"
+    )
 
 
-def _waveform_ref_value_from_raw(
-    spec: WaveformRefSpec,
-    raw: object,
-) -> WaveformRefValue:
-    if (
-        isinstance(raw, dict)
-        and raw.get("__kind") == "waveform_ref"
-        and isinstance(raw.get("chosen_key"), str)
-        and isinstance(raw.get("value"), dict)
-    ):
-        chosen_key = raw["chosen_key"]
-        raw_value = raw["value"]
-        value_spec = _select_allowed_spec(
-            spec,
-            chosen_key,
-            _raw_discriminator(raw_value, "style"),
-            value_fields=raw_value.keys(),
-        )
-        nested = _section_value_from_raw(value_spec, raw_value)
-        return WaveformRefValue(
-            chosen_key=chosen_key,
-            value=nested,
-            is_overridden=bool(raw.get("is_overridden", False)),
-        )
-    raise RuntimeError("Waveform reference must use waveform_ref payload encoding")
-
-
-def _value_discriminator(value: CfgSectionValue, key: str) -> object:
+def _value_discriminator(value: CfgSectionValue, key: str | None) -> object:
     """The discriminator leaf's value from a live section value (``None`` if the
     field is absent). ``key`` is ``type`` for modules / ``style`` for waveforms;
     the leaf is a ``DirectValue`` whose ``.value`` names the chosen shape."""
-    leaf = value.fields.get(key)
+    leaf = value.fields.get(key) if key is not None else None
     return getattr(leaf, "value", None)
 
 
-def _raw_discriminator(raw_value: object, key: str) -> object:
+def _raw_discriminator(raw_value: object, key: str | None) -> object:
     """The discriminator leaf's value from a raw section dict (``None`` if absent).
     Mirror of ``_value_discriminator`` for the serialised side."""
-    if isinstance(raw_value, dict):
+    if isinstance(raw_value, dict) and key is not None:
         node = raw_value.get(key)
         if isinstance(node, dict):
             return node.get("value")
@@ -361,7 +319,7 @@ def _raw_discriminator(raw_value: object, key: str) -> object:
 
 
 def _select_allowed_spec(
-    spec: ModuleRefSpec | WaveformRefSpec,
+    spec: ReferenceSpec,
     chosen_key: str,
     discriminator: object,
     *,
@@ -390,26 +348,27 @@ def _select_allowed_spec(
     # shape need not even carry one).
     if len(spec.allowed) == 1:
         return spec.allowed[0]
-    disc_key = "type" if isinstance(spec, ModuleRefSpec) else "style"
+    disc_key = _reference_discriminator_key(spec)
+    disc_label = disc_key or "discriminator"
     for allowed_spec in spec.allowed:
-        leaf = allowed_spec.fields.get(disc_key)
+        leaf = allowed_spec.fields.get(disc_label)
         if isinstance(leaf, LiteralSpec) and leaf.value == discriminator:
             return allowed_spec
     if discriminator is None and value_fields is not None:
-        by_fields = _select_allowed_spec_by_fields(spec, disc_key, value_fields)
+        by_fields = _select_allowed_spec_by_fields(spec, disc_label, value_fields)
         if by_fields is not None:
             return by_fields
     available = ", ".join(
-        repr(getattr(s.fields.get(disc_key), "value", None)) for s in spec.allowed
+        repr(getattr(s.fields.get(disc_label), "value", None)) for s in spec.allowed
     )
     raise SessionCodecError(
-        f"Reference {chosen_key!r} has {disc_key}={discriminator!r}, but no allowed "
-        f"shape matches (available {disc_key}: {available})"
+        f"Reference {chosen_key!r} has {disc_label}={discriminator!r}, but no allowed "
+        f"shape matches (available {disc_label}: {available})"
     )
 
 
 def _select_allowed_spec_by_fields(
-    spec: ModuleRefSpec | WaveformRefSpec,
+    spec: ReferenceSpec,
     disc_key: str,
     value_fields: object,
 ) -> CfgSectionSpec | None:

@@ -15,12 +15,11 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     EvalValue,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import SweepCfg
@@ -185,7 +184,7 @@ def test_autoflux_reference_missing_then_relinks_with_embedded_snapshot() -> Non
     _, snapshot = module_cfg_to_value(snapshot_raw)
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"drive": pulse_module_ref_spec()}),
-        value=CfgSectionValue(fields={"drive": ModuleRefValue("drive", snapshot)}),
+        value=CfgSectionValue(fields={"drive": ReferenceValue("drive", snapshot)}),
     )
     ml = ModuleLibrary()
     ml.register_module(drive=_PULSE)
@@ -200,16 +199,56 @@ def test_autoflux_reference_missing_then_relinks_with_embedded_snapshot() -> Non
     assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
 
 
+def _unknown_reference_schema(*, disabled: bool) -> CfgSchema:
+    asset_spec = CfgSectionSpec(label="Asset", fields={})
+    ref_spec = ReferenceSpec(
+        kind="unknown/asset",
+        allowed=[asset_spec],
+        optional=disabled,
+    )
+    value = (
+        None
+        if disabled
+        else ReferenceValue("<Custom:Asset>", CfgSectionValue(fields={}))
+    )
+    return CfgSchema(
+        spec=CfgSectionSpec(fields={"asset": ref_spec}),
+        value=CfgSectionValue(fields={"asset": value}),
+    )
+
+
+def test_autoflux_rejects_unknown_custom_reference_kind_exactly() -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        schema_to_raw_dict(_unknown_reference_schema(disabled=False), None, None)
+
+    assert str(exc_info.value) == (
+        "Config field 'asset' uses unsupported reference kind 'unknown/asset'; "
+        "allowed kinds: module, waveform"
+    )
+
+
+def test_autoflux_rejects_unknown_disabled_reference_kind_exactly() -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        schema_to_raw_dict(_unknown_reference_schema(disabled=True), None, None)
+
+    assert str(exc_info.value) == (
+        "Config field 'asset' uses unsupported reference kind 'unknown/asset'; "
+        "allowed kinds: module, waveform"
+    )
+
+
 def test_autoflux_waveform_missing_then_relinks_with_snapshot_precedence() -> None:
     snapshot_raw = {"style": "gauss", "length": 0.4, "sigma": 0.08}
     snapshot_spec, snapshot = waveform_cfg_to_value(snapshot_raw)
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
-                "waveform": WaveformRefSpec(allowed=[snapshot_spec], label="Waveform")
+                "waveform": ReferenceSpec(
+                    kind="waveform", allowed=[snapshot_spec], label="Waveform"
+                )
             }
         ),
-        value=CfgSectionValue(fields={"waveform": WaveformRefValue("rise", snapshot)}),
+        value=CfgSectionValue(fields={"waveform": ReferenceValue("rise", snapshot)}),
     )
     ml = ModuleLibrary()
     ml.register_waveform(rise=snapshot_raw)
@@ -231,10 +270,12 @@ def test_autoflux_waveform_reference_reports_unsupported_shape_exactly() -> None
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
-                "waveform": WaveformRefSpec(allowed=[snapshot_spec], label="Waveform")
+                "waveform": ReferenceSpec(
+                    kind="waveform", allowed=[snapshot_spec], label="Waveform"
+                )
             }
         ),
-        value=CfgSectionValue(fields={"waveform": WaveformRefValue("rise", snapshot)}),
+        value=CfgSectionValue(fields={"waveform": ReferenceValue("rise", snapshot)}),
     )
     ml = ModuleLibrary()
     ml.register_waveform(rise={"style": "const", "length": 0.4})
@@ -252,7 +293,7 @@ def test_autoflux_legal_direct_readout_shape_is_reported_as_unsupported() -> Non
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"readout": pulse_readout_module_ref_spec()}),
         value=CfgSectionValue(
-            fields={"readout": ModuleRefValue("readout", CfgSectionValue())}
+            fields={"readout": ReferenceValue("readout", CfgSectionValue())}
         ),
     )
     ml = ModuleLibrary()

@@ -13,13 +13,11 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     align_locked_literals,
     inherit_from,
     make_default_value,
@@ -163,47 +161,45 @@ def test_centered_sweep_type_mismatch_uses_default():
 
 
 # ---------------------------------------------------------------------------
-# ModuleRefSpec / WaveformRefSpec
+# ReferenceSpec / ReferenceSpec
 # ---------------------------------------------------------------------------
 
 
 def test_moduleref_inherits_chosen_key_and_value():
     inner = _section({"ch": _scalar_spec(int)})
-    ref_spec = ModuleRefSpec(allowed=[inner])
+    ref_spec = ReferenceSpec(kind="module", allowed=[inner])
     old_spec = _section({"m": ref_spec})
     new_spec = _section({"m": ref_spec})
     old_inner_val = _val({"ch": DirectValue(3)})
-    old_val = _val({"m": ModuleRefValue(chosen_key="readout_rf", value=old_inner_val)})
+    old_val = _val({"m": ReferenceValue(chosen_key="readout_rf", value=old_inner_val)})
 
     result = inherit_from(old_val, old_spec, new_spec)
 
     mrv = result.fields["m"]
-    assert isinstance(mrv, ModuleRefValue)
+    assert isinstance(mrv, ReferenceValue)
     assert mrv.chosen_key == "readout_rf"
     assert mrv.value.fields["ch"] == DirectValue(3)
 
 
 def test_waveformref_inherits():
     inner = _section({"amp": _scalar_spec(float)})
-    ref_spec = WaveformRefSpec(allowed=[inner])
+    ref_spec = ReferenceSpec(kind="waveform", allowed=[inner])
     old_spec = _section({"w": ref_spec})
     new_spec = _section({"w": ref_spec})
     old_inner_val = _val({"amp": DirectValue(0.9)})
-    old_val = _val(
-        {"w": WaveformRefValue(chosen_key="ro_waveform", value=old_inner_val)}
-    )
+    old_val = _val({"w": ReferenceValue(chosen_key="ro_waveform", value=old_inner_val)})
 
     result = inherit_from(old_val, old_spec, new_spec)
 
     wrv = result.fields["w"]
-    assert isinstance(wrv, WaveformRefValue)
+    assert isinstance(wrv, ReferenceValue)
     assert wrv.chosen_key == "ro_waveform"
     assert wrv.value.fields["amp"] == DirectValue(0.9)
 
 
 def test_moduleref_type_mismatch_uses_default():
     inner = _section({"ch": _scalar_spec(int)})
-    ref_spec = ModuleRefSpec(allowed=[inner])
+    ref_spec = ReferenceSpec(kind="module", allowed=[inner])
     old_spec = _section({"m": _scalar_spec(float)})
     new_spec = _section({"m": ref_spec})
     old_val = _val({"m": DirectValue(1.0)})
@@ -211,7 +207,7 @@ def test_moduleref_type_mismatch_uses_default():
     result = inherit_from(old_val, old_spec, new_spec)
 
     mrv = result.fields["m"]
-    assert isinstance(mrv, ModuleRefValue)
+    assert isinstance(mrv, ReferenceValue)
     assert mrv.chosen_key.startswith("<Custom:")
 
 
@@ -376,9 +372,15 @@ def test_make_default_value_is_complete_and_optional_ref_is_none():
     spec = CfgSectionSpec(
         fields={
             "reps": ScalarSpec("Reps", int),
-            "opt_mod": ModuleRefSpec(allowed=[inner], label="Opt", optional=True),
-            "req_mod": ModuleRefSpec(allowed=[inner], label="Req", optional=False),
-            "opt_wf": WaveformRefSpec(allowed=[inner], label="OptWf", optional=True),
+            "opt_mod": ReferenceSpec(
+                kind="module", allowed=[inner], label="Opt", optional=True
+            ),
+            "req_mod": ReferenceSpec(
+                kind="module", allowed=[inner], label="Req", optional=False
+            ),
+            "opt_wf": ReferenceSpec(
+                kind="waveform", allowed=[inner], label="OptWf", optional=True
+            ),
         }
     )
     val = make_default_value(spec)
@@ -388,8 +390,8 @@ def test_make_default_value_is_complete_and_optional_ref_is_none():
     # optional refs default to None (disabled)
     assert val.fields["opt_mod"] is None
     assert val.fields["opt_wf"] is None
-    # non-optional ref defaults to an enabled ModuleRefValue
-    assert isinstance(val.fields["req_mod"], ModuleRefValue)
+    # non-optional ref defaults to an enabled ReferenceValue
+    assert isinstance(val.fields["req_mod"], ReferenceValue)
 
 
 def test_inherit_from_preserves_disabled_optional_ref():
@@ -397,7 +399,11 @@ def test_inherit_from_preserves_disabled_optional_ref():
     it disabled in the new value (ADR-0010)."""
     inner = CfgSectionSpec(label="Pulse", fields={"ch": ScalarSpec("Ch", int)})
     spec = CfgSectionSpec(
-        fields={"reset": ModuleRefSpec(allowed=[inner], label="Reset", optional=True)}
+        fields={
+            "reset": ReferenceSpec(
+                kind="module", allowed=[inner], label="Reset", optional=True
+            )
+        }
     )
     old_val = CfgSectionValue(fields={"reset": None})
     result = inherit_from(old_val, spec, spec)
@@ -407,21 +413,25 @@ def test_inherit_from_preserves_disabled_optional_ref():
 def test_align_locked_literals_projects_linked_ref_into_caller_spec():
     locked_readout = make_pulse_readout_spec().lock_literal("pulse_cfg.freq", 0.0)
     spec = CfgSectionSpec(
-        fields={"readout": ModuleRefSpec(allowed=[locked_readout], label="Readout")}
+        fields={
+            "readout": ReferenceSpec(
+                kind="module", allowed=[locked_readout], label="Readout"
+            )
+        }
     )
     readout_value = make_default_value(make_pulse_readout_spec())
     pulse_cfg = readout_value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     pulse_cfg.fields["freq"] = DirectValue(5998.0)
     value = CfgSectionValue(
-        fields={"readout": ModuleRefValue("readout_rf", readout_value)}
+        fields={"readout": ReferenceValue("readout_rf", readout_value)}
     )
 
     result = align_locked_literals(spec, value)
 
     assert result is value
     readout = result.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     pulse_cfg = readout.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     assert pulse_cfg.fields["freq"] == DirectValue(0.0)

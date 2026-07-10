@@ -13,7 +13,7 @@ from .common import (
 )
 from .containers import (
     DeviceRefWidget,
-    ModuleRefWidget,
+    ReferenceWidget,
     SectionWidget,
     _CollapsibleSection,
 )
@@ -27,7 +27,7 @@ __all__ = [
     "ScalarWidget",
     "SweepWidget",
     "SectionWidget",
-    "ModuleRefWidget",
+    "ReferenceWidget",
     "_CollapsibleSection",
     "make_value_widget",
     "read_value_widget",

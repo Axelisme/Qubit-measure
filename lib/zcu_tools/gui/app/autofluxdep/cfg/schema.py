@@ -28,16 +28,15 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SessionCodecError,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     raw_to_schema,
     schema_to_raw,
+    select_ref_value_spec,
 )
 
 from .lowering import schema_to_raw_dict
@@ -256,24 +255,13 @@ class NodeCfgSchema:
             _ensure_centered_sweep_assignment(key, spec, value)
             _assign_value_at_path(self.schema.value, path, value)
             return
-        if isinstance(spec, ModuleRefSpec):
+        if isinstance(spec, ReferenceSpec):
             if value is None and spec.optional:
                 _assign_value_at_path(self.schema.value, path, None)
                 return
-            if not isinstance(value, ModuleRefValue):
+            if not isinstance(value, ReferenceValue):
                 raise TypeError(
-                    f"Param {key!r} is a module ref; expected a ModuleRefValue, "
-                    f"got {type(value).__name__}"
-                )
-            _assign_value_at_path(self.schema.value, path, value)
-            return
-        if isinstance(spec, WaveformRefSpec):
-            if value is None and spec.optional:
-                _assign_value_at_path(self.schema.value, path, None)
-                return
-            if not isinstance(value, WaveformRefValue):
-                raise TypeError(
-                    f"Param {key!r} is a waveform ref; expected a WaveformRefValue, "
+                    f"Param {key!r} is a {spec.kind} ref; expected a ReferenceValue, "
                     f"got {type(value).__name__}"
                 )
             _assign_value_at_path(self.schema.value, path, value)
@@ -317,7 +305,7 @@ class NodeCfgSchema:
         knobs: dict[str, Any] = {}
         for logical_key, path in self.logical_paths.items():
             spec = _resolve_spec_at_path(self.schema.spec, path)
-            if ml is None and isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
+            if ml is None and isinstance(spec, ReferenceSpec):
                 continue
             value = _lower_value_at_path(self.schema.value, spec, path, ml, md)
             if value is _MISSING:
@@ -347,8 +335,9 @@ class NodeCfgSchema:
         """
         knobs: dict[str, Any] = {}
         for logical_key, path in self.logical_paths.items():
+            spec = _resolve_spec_at_path(self.schema.spec, path)
             knobs[logical_key] = _jsonify_value_node(
-                _get_value_at_path(self.schema.value, path)
+                spec, _get_value_at_path(self.schema.value, path)
             )
         return knobs
 
@@ -399,14 +388,13 @@ def _validate_logical_paths(spec: CfgSectionSpec, paths: Mapping[str, str]) -> N
                 ScalarSpec,
                 SweepSpec,
                 CenteredSweepSpec,
-                ModuleRefSpec,
-                WaveformRefSpec,
+                ReferenceSpec,
             ),
         ):
             raise TypeError(
                 f"Logical node param {logical_key!r} maps to unsupported spec "
                 f"{type(leaf_spec).__name__}; only ScalarSpec, SweepSpec, "
-                "CenteredSweepSpec, ModuleRefSpec, and WaveformRefSpec are supported"
+                "CenteredSweepSpec, and ReferenceSpec are supported"
             )
 
 
@@ -429,7 +417,7 @@ def _resolve_spec_at_path(spec: CfgSectionSpec, path: str) -> CfgNodeSpec:
                 )
             node_spec = node_spec.fields[part]
             continue
-        if isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+        if isinstance(node_spec, ReferenceSpec):
             remaining = ".".join(parts[idx:])
             node_spec = _resolve_ref_spec_at_path(node_spec, remaining)
             break
@@ -441,9 +429,7 @@ def _resolve_spec_at_path(spec: CfgSectionSpec, path: str) -> CfgNodeSpec:
     return node_spec
 
 
-def _resolve_ref_spec_at_path(
-    spec: ModuleRefSpec | WaveformRefSpec, path: str
-) -> CfgNodeSpec:
+def _resolve_ref_spec_at_path(spec: ReferenceSpec, path: str) -> CfgNodeSpec:
     matches: list[CfgNodeSpec] = []
     for allowed in spec.allowed:
         try:
@@ -470,7 +456,7 @@ def _get_value_at_path(value: CfgSectionValue, path: str) -> Any:
     parts = _split_path(path)
     for part in parts[:-1]:
         child = section.fields.get(part)
-        if isinstance(child, (ModuleRefValue, WaveformRefValue)):
+        if isinstance(child, ReferenceValue):
             section = child.value
         elif isinstance(child, CfgSectionValue):
             section = child
@@ -489,7 +475,7 @@ def _assign_value_at_path(value: CfgSectionValue, path: str, leaf: Any) -> None:
     parts = _split_path(path)
     for part in parts[:-1]:
         child = section.fields.get(part)
-        if isinstance(child, (ModuleRefValue, WaveformRefValue)):
+        if isinstance(child, ReferenceValue):
             section = child.value
         elif isinstance(child, CfgSectionValue):
             section = child
@@ -642,24 +628,22 @@ def _rewrite_single_value_lower_error(message: str, path: str) -> str:
     )
 
 
-def _jsonify_value_node(value: Any) -> Any:
+def _jsonify_value_node(spec: CfgNodeSpec, value: Any) -> Any:
     if value is None:
         return None
     if isinstance(value, CfgSectionValue):
-        return _jsonify_value_tree(value)
-    if isinstance(value, ModuleRefValue):
+        if not isinstance(spec, CfgSectionSpec):
+            raise TypeError(
+                f"CfgSectionValue requires CfgSectionSpec, got {type(spec).__name__}"
+            )
+        return _jsonify_value_tree(spec, value)
+    if isinstance(spec, ReferenceSpec) and isinstance(value, ReferenceValue):
+        value_spec = select_ref_value_spec(spec, value)
         return {
-            "__kind": "module_ref",
+            "__kind": f"{spec.kind}_ref",
             "chosen_key": value.chosen_key,
             "is_overridden": bool(value.is_overridden),
-            "value": _jsonify_value_tree(value.value),
-        }
-    if isinstance(value, WaveformRefValue):
-        return {
-            "__kind": "waveform_ref",
-            "chosen_key": value.chosen_key,
-            "is_overridden": bool(value.is_overridden),
-            "value": _jsonify_value_tree(value.value),
+            "value": _jsonify_value_tree(value_spec, value.value),
         }
     if isinstance(value, SweepValue):
         return {
@@ -685,11 +669,11 @@ def _jsonify_value_node(value: Any) -> Any:
     )
 
 
-def _jsonify_value_tree(value: CfgSectionValue) -> dict[str, Any]:
+def _jsonify_value_tree(spec: CfgSectionSpec, value: CfgSectionValue) -> dict[str, Any]:
     return {
-        key: _jsonify_value_node(child)
+        key: _jsonify_value_node(spec.fields[key], child)
         for key, child in value.fields.items()
-        if child is not None
+        if child is not None and key in spec.fields
     }
 
 

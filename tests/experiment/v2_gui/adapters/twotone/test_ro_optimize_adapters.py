@@ -26,10 +26,10 @@ from zcu_tools.gui.app.main.adapter import (
     EvalValue,
     LiteralSpec,
     MetaDictWriteback,
-    ModuleRefSpec,
     ModuleWriteback,
+    ReferenceSpec,
+    ReferenceValue,
     RunRequest,
-    WaveformRefValue,
     WritebackRequest,
     describe_analyze_params,
 )
@@ -163,7 +163,7 @@ def _assert_readout_dpm_schema(
     assert _direct_float(ro_cfg.fields["ro_freq"]) == pytest.approx(freq)
     assert _direct_float(pulse_cfg.fields["gain"]) == pytest.approx(gain)
     waveform = pulse_cfg.fields["waveform"]
-    assert isinstance(waveform, WaveformRefValue)
+    assert isinstance(waveform, ReferenceValue)
     assert _direct_float(waveform.value.fields["length"]) == pytest.approx(
         length + READOUT_DPM_PULSE_TAIL_US
     )
@@ -335,7 +335,7 @@ def test_ro_opt_readout_spec_is_pulse_only(adapter: Any) -> None:
     modules = adapter.cfg_spec().fields["modules"]
     assert isinstance(modules, CfgSectionSpec)
     readout = modules.fields["readout"]
-    assert isinstance(readout, ModuleRefSpec)
+    assert isinstance(readout, ReferenceSpec)
     assert len(readout.allowed) == 1
     type_spec = readout.allowed[0].fields["type"]
     assert isinstance(type_spec, LiteralSpec)

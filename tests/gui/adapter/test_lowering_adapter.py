@@ -11,8 +11,8 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     EvalValue,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -69,9 +69,9 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
     _, snapshot = module_cfg_to_value(snapshot_raw)
     schema = CfgSchema(
         spec=CfgSectionSpec(
-            fields={"drive": ModuleRefSpec(allowed=[make_pulse_spec()])}
+            fields={"drive": ReferenceSpec(kind="module", allowed=[make_pulse_spec()])}
         ),
-        value=CfgSectionValue(fields={"drive": ModuleRefValue("drive", snapshot)}),
+        value=CfgSectionValue(fields={"drive": ReferenceValue("drive", snapshot)}),
     )
     ml = ModuleLibrary()
     ml.register_module(drive=_PULSE)
@@ -84,3 +84,41 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
     ml.register_module(drive={**_PULSE, "gain": 0.9})
     raw = schema_to_raw_dict(schema, None, ml)
     assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
+
+
+def _unknown_reference_schema(*, disabled: bool) -> CfgSchema:
+    asset_spec = CfgSectionSpec(label="Asset", fields={})
+    ref_spec = ReferenceSpec(
+        kind="unknown/asset",
+        allowed=[asset_spec],
+        optional=disabled,
+    )
+    value = (
+        None
+        if disabled
+        else ReferenceValue("<Custom:Asset>", CfgSectionValue(fields={}))
+    )
+    return CfgSchema(
+        spec=CfgSectionSpec(fields={"asset": ref_spec}),
+        value=CfgSectionValue(fields={"asset": value}),
+    )
+
+
+def test_measure_rejects_unknown_custom_reference_kind_exactly() -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        schema_to_raw_dict(_unknown_reference_schema(disabled=False), None, None)
+
+    assert str(exc_info.value) == (
+        "Config field 'asset' uses unsupported reference kind 'unknown/asset'; "
+        "allowed kinds: module, waveform"
+    )
+
+
+def test_measure_rejects_unknown_disabled_reference_kind_exactly() -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        schema_to_raw_dict(_unknown_reference_schema(disabled=True), None, None)
+
+    assert str(exc_info.value) == (
+        "Config field 'asset' uses unsupported reference kind 'unknown/asset'; "
+        "allowed kinds: module, waveform"
+    )

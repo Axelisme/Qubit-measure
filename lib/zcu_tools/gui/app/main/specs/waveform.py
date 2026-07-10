@@ -5,8 +5,8 @@ from __future__ import annotations
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     LiteralSpec,
+    ReferenceSpec,
     ScalarSpec,
-    WaveformRefSpec,
 )
 
 
@@ -69,7 +69,8 @@ def make_arb_waveform_spec() -> CfgSectionSpec:
 
 
 def make_flat_top_waveform_spec() -> CfgSectionSpec:
-    raise_waveform_spec = WaveformRefSpec(
+    raise_waveform_spec = ReferenceSpec(
+        kind="waveform",
         allowed=[
             make_cosine_waveform_spec(),
             make_gauss_waveform_spec(),

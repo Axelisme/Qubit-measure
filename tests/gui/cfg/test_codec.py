@@ -19,14 +19,12 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SessionCodecError,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     raw_to_schema,
     schema_to_raw,
 )
@@ -139,11 +137,15 @@ def test_waveform_ref_roundtrip():
     )
     schema = CfgSchema(
         spec=CfgSectionSpec(
-            fields={"wf": WaveformRefSpec(allowed=[inner_spec], label="Waveform")}
+            fields={
+                "wf": ReferenceSpec(
+                    kind="waveform", allowed=[inner_spec], label="Waveform"
+                )
+            }
         ),
         value=CfgSectionValue(
             fields={
-                "wf": WaveformRefValue(
+                "wf": ReferenceValue(
                     chosen_key="Gaussian",
                     value=CfgSectionValue(fields={"width": DirectValue(value=50.0)}),
                 ),
@@ -154,10 +156,138 @@ def test_waveform_ref_roundtrip():
     restored = raw_to_schema(_empty(schema.spec), schema_to_raw(schema))
 
     wf = restored.value.fields["wf"]
-    assert isinstance(wf, WaveformRefValue)
+    assert isinstance(wf, ReferenceValue)
     assert wf.chosen_key == "Gaussian"
     assert wf.value.fields["width"] == DirectValue(value=50.0)
     assert wf.is_overridden is False
+
+
+def test_reference_discriminator_single_allowed_needs_no_literal() -> None:
+    only = CfgSectionSpec(
+        label="Only",
+        fields={"payload": ScalarSpec(label="Payload", type=int)},
+    )
+    spec = CfgSectionSpec(fields={"asset": ReferenceSpec(kind="asset", allowed=[only])})
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "asset": ReferenceValue(
+                    "named",
+                    CfgSectionValue(fields={"payload": DirectValue(7)}),
+                )
+            }
+        ),
+    )
+
+    restored = raw_to_schema(_empty(spec), schema_to_raw(schema))
+
+    asset = restored.value.fields["asset"]
+    assert isinstance(asset, ReferenceValue)
+    assert asset.value.fields == {"payload": DirectValue(7)}
+
+
+def test_reference_discriminator_multi_allowed_uses_distinct_literals() -> None:
+    left = CfgSectionSpec(
+        label="Left",
+        fields={
+            "shape": LiteralSpec("left"),
+            "payload": ScalarSpec(label="Payload", type=int),
+        },
+    )
+    right = CfgSectionSpec(
+        label="Right",
+        fields={
+            "shape": LiteralSpec("right"),
+            "payload": ScalarSpec(label="Payload", type=int),
+        },
+    )
+    spec = CfgSectionSpec(
+        fields={"asset": ReferenceSpec(kind="asset", allowed=[left, right])}
+    )
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "asset": ReferenceValue(
+                    "named",
+                    CfgSectionValue(
+                        fields={
+                            "shape": DirectValue("right"),
+                            "payload": DirectValue(9),
+                        }
+                    ),
+                )
+            }
+        ),
+    )
+
+    restored = raw_to_schema(_empty(spec), schema_to_raw(schema))
+
+    asset = restored.value.fields["asset"]
+    assert isinstance(asset, ReferenceValue)
+    assert asset.value.fields["shape"] == DirectValue("right")
+    assert asset.value.fields["payload"] == DirectValue(9)
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [
+        [
+            CfgSectionSpec(
+                label="Left",
+                fields={
+                    "shape": LiteralSpec("same"),
+                    "payload": ScalarSpec(label="Payload", type=int),
+                },
+            ),
+            CfgSectionSpec(
+                label="Right",
+                fields={
+                    "shape": LiteralSpec("same"),
+                    "payload": ScalarSpec(label="Payload", type=int),
+                },
+            ),
+        ],
+        [
+            CfgSectionSpec(
+                label="Left",
+                fields={
+                    "type": LiteralSpec("left"),
+                    "payload": ScalarSpec(label="Payload", type=int),
+                },
+            ),
+            CfgSectionSpec(
+                label="Right",
+                fields={
+                    "style": LiteralSpec("right"),
+                    "payload": ScalarSpec(label="Payload", type=int),
+                },
+            ),
+        ],
+    ],
+    ids=["same-literal", "no-common-literal"],
+)
+def test_reference_discriminator_ambiguous_shapes_fail_fast(
+    allowed: list[CfgSectionSpec],
+) -> None:
+    spec = CfgSectionSpec(
+        fields={"asset": ReferenceSpec(kind="asset", allowed=allowed)}
+    )
+    schema = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={
+                "asset": ReferenceValue(
+                    "named",
+                    CfgSectionValue(fields={"payload": DirectValue(1)}),
+                )
+            }
+        ),
+    )
+
+    with pytest.raises(SessionCodecError, match="no allowed shape matches"):
+        schema_to_raw(schema)
 
 
 def test_disabled_module_ref_roundtrip():
@@ -170,8 +300,8 @@ def test_disabled_module_ref_roundtrip():
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
-                "reset": ModuleRefSpec(
-                    allowed=[inner_spec], label="Reset", optional=True
+                "reset": ReferenceSpec(
+                    kind="module", allowed=[inner_spec], label="Reset", optional=True
                 ),
             }
         ),
@@ -194,7 +324,9 @@ def test_disabled_module_ref_missing_key_restores_to_none():
     )
     spec = CfgSectionSpec(
         fields={
-            "reset": ModuleRefSpec(allowed=[inner_spec], label="Reset", optional=True),
+            "reset": ReferenceSpec(
+                kind="module", allowed=[inner_spec], label="Reset", optional=True
+            ),
         }
     )
     restored = raw_to_schema(CfgSchema(spec=spec, value=_empty(spec).value), {})
@@ -209,8 +341,11 @@ def test_disabled_waveform_ref_roundtrip():
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
-                "wf": WaveformRefSpec(
-                    allowed=[inner_spec], label="Waveform", optional=True
+                "wf": ReferenceSpec(
+                    kind="waveform",
+                    allowed=[inner_spec],
+                    label="Waveform",
+                    optional=True,
                 ),
             }
         ),
@@ -224,21 +359,23 @@ def test_disabled_waveform_ref_roundtrip():
 
 
 def test_enabled_module_ref_roundtrip():
-    """A non-disabled optional ModuleRef survives as an enabled ModuleRefValue."""
+    """A non-disabled optional ModuleRef survives as an enabled ReferenceValue."""
     inner_spec = CfgSectionSpec(
         fields={"gain": ScalarSpec(label="Gain", type=float)},
         label="Pulse",
     )
     spec = CfgSectionSpec(
         fields={
-            "reset": ModuleRefSpec(allowed=[inner_spec], label="Reset", optional=True),
+            "reset": ReferenceSpec(
+                kind="module", allowed=[inner_spec], label="Reset", optional=True
+            ),
         }
     )
     schema = CfgSchema(
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "reset": ModuleRefValue(
+                "reset": ReferenceValue(
                     "<Custom:Pulse>",
                     CfgSectionValue(fields={"gain": DirectValue(0.3)}),
                 )
@@ -247,7 +384,7 @@ def test_enabled_module_ref_roundtrip():
     )
     restored = raw_to_schema(_empty(spec), schema_to_raw(schema))
     reset = restored.value.fields["reset"]
-    assert isinstance(reset, ModuleRefValue)
+    assert isinstance(reset, ReferenceValue)
     assert reset.value.fields["gain"] == DirectValue(0.3)
 
 
@@ -258,11 +395,15 @@ def test_waveform_ref_preserves_override():
     )
     schema = CfgSchema(
         spec=CfgSectionSpec(
-            fields={"wf": WaveformRefSpec(allowed=[inner_spec], label="Waveform")}
+            fields={
+                "wf": ReferenceSpec(
+                    kind="waveform", allowed=[inner_spec], label="Waveform"
+                )
+            }
         ),
         value=CfgSectionValue(
             fields={
-                "wf": WaveformRefValue(
+                "wf": ReferenceValue(
                     chosen_key="Gaussian",
                     value=CfgSectionValue(fields={"width": DirectValue(value=50.0)}),
                     is_overridden=True,
@@ -273,11 +414,11 @@ def test_waveform_ref_preserves_override():
 
     restored = raw_to_schema(_empty(schema.spec), schema_to_raw(schema))
     wf = restored.value.fields["wf"]
-    assert isinstance(wf, WaveformRefValue)
+    assert isinstance(wf, ReferenceValue)
     assert wf.is_overridden is True
 
 
-def _multi_shape_module_spec() -> ModuleRefSpec:
+def _multi_shape_module_spec() -> ReferenceSpec:
     """A two-shape module ref (direct vs pulse readout), discriminated by ``type``
     — mirrors ``make_readout_module_spec``'s [direct, pulse] allowed order."""
     direct = CfgSectionSpec(
@@ -294,7 +435,7 @@ def _multi_shape_module_spec() -> ModuleRefSpec:
         },
         label="Pulse Readout",
     )
-    return ModuleRefSpec(allowed=[direct, pulse], label="Readout")
+    return ReferenceSpec(kind="module", allowed=[direct, pulse], label="Readout")
 
 
 def test_linked_multi_shape_ref_uses_value_discriminator_not_allowed0():
@@ -308,7 +449,7 @@ def test_linked_multi_shape_ref_uses_value_discriminator_not_allowed0():
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "readout": ModuleRefValue(
+                "readout": ReferenceValue(
                     chosen_key="my_lib_readout",  # LINKED, not <Custom:...>
                     value=CfgSectionValue(
                         fields={
@@ -327,7 +468,7 @@ def test_linked_multi_shape_ref_uses_value_discriminator_not_allowed0():
 
     restored = raw_to_schema(_empty(spec), raw)
     readout = restored.value.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     assert set(readout.value.fields) == {"type", "gain"}  # pulse shape, not direct
     assert readout.value.fields["gain"] == DirectValue(0.4)
 
@@ -340,7 +481,7 @@ def test_linked_multi_shape_ref_serializes_when_literal_leaf_omitted():
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "readout": ModuleRefValue(
+                "readout": ReferenceValue(
                     chosen_key="missing_lib_readout",
                     value=CfgSectionValue(fields={"gain": DirectValue(0.4)}),
                 )
@@ -371,7 +512,7 @@ def test_linked_multi_shape_ref_restores_when_literal_leaf_omitted():
     restored = raw_to_schema(_empty(spec), raw)
 
     readout = restored.value.fields["readout"]
-    assert isinstance(readout, ModuleRefValue)
+    assert isinstance(readout, ReferenceValue)
     assert set(readout.value.fields) == {"type", "gain"}
     assert readout.value.fields["type"] == DirectValue("readout/pulse")
     assert readout.value.fields["gain"] == DirectValue(0.4)

@@ -23,10 +23,10 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     ChoiceBinding,
     ChoiceSectionSpec,
     DirectValue,
-    ModuleRefSpec,
-    ModuleRefValue,
     NodeCfgSchema,
     OverridePath,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
@@ -309,7 +309,7 @@ def _generation_choice_binding(
     return ChoiceBinding(choice.selector_key, variants)
 
 
-def module_ref_value_from_ctx(ctx: Any | None, *names: str) -> ModuleRefValue | None:
+def module_ref_value_from_ctx(ctx: Any | None, *names: str) -> ReferenceValue | None:
     """Return a linked module ref for the first named module present in ``ctx``."""
     if not isinstance(ctx, ExpContext):
         return None
@@ -321,7 +321,7 @@ def module_ref_value_from_ctx(ctx: Any | None, *names: str) -> ModuleRefValue | 
         if module is None:
             continue
         _, value = module_cfg_to_value(module)
-        return ModuleRefValue(chosen_key=name, value=value)
+        return ReferenceValue(chosen_key=name, value=value)
     return None
 
 
@@ -435,8 +435,8 @@ def _restrict_module_ref_labels(
     labels: tuple[str, ...],
 ) -> None:
     node = _get_cfg_node(root_spec, path)
-    if not isinstance(node, ModuleRefSpec):
-        raise TypeError(f"cfg spec path {path!r} is not a ModuleRefSpec")
+    if not isinstance(node, ReferenceSpec) or node.kind != "module":
+        raise TypeError(f"cfg spec path {path!r} is not a module ReferenceSpec")
     allowed_labels = set(labels)
     allowed = [spec for spec in node.allowed if spec.label in allowed_labels]
     if not allowed:

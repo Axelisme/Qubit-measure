@@ -42,7 +42,7 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
     MetaDictWriteback,
-    ModuleRefValue,
+    ReferenceValue,
     SweepValue,
     WritebackRequest,
 )
@@ -97,7 +97,7 @@ def test_ss_len_rabi_default_seed_matches_notebook_values() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
-    assert isinstance(qub_pulse, ModuleRefValue)
+    assert isinstance(qub_pulse, ReferenceValue)
     assert qub_pulse.value.fields["gain"] == DirectValue(1.0)
 
     sweep = schema.value.fields["sweep"]
@@ -188,7 +188,7 @@ def test_ss_t1_tone_probe_defaults_to_readout_frequency_and_channel() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     probe = modules.fields["probe_pulse"]
-    assert isinstance(probe, ModuleRefValue)
+    assert isinstance(probe, ReferenceValue)
     assert probe.chosen_key == "<Custom:Pulse>"
     freq = probe.value.fields["freq"]
     ch = probe.value.fields["ch"]

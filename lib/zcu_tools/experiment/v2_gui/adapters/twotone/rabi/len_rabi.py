@@ -33,9 +33,9 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     ExpContext,
     MetaDictWriteback,
-    ModuleRefValue,
     ModuleWriteback,
     ParamMeta,
+    ReferenceValue,
     RunRequest,
     SweepSpec,
     SweepValue,
@@ -53,7 +53,7 @@ def _uses_blank_qub_pulse(value: CfgSectionValue) -> bool:
     if not isinstance(modules, CfgSectionValue):
         raise RuntimeError("LenRabi default value is missing modules section")
     qub_pulse = modules.fields.get("qub_pulse")
-    if not isinstance(qub_pulse, ModuleRefValue):
+    if not isinstance(qub_pulse, ReferenceValue):
         raise RuntimeError("LenRabi default value is missing qub_pulse module ref")
     return qub_pulse.chosen_key == "<Custom:Pulse>"
 

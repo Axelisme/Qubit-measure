@@ -1,4 +1,4 @@
-"""Tests — ModuleRefWidget combo auto-refresh on library change.
+"""Tests — ReferenceWidget combo auto-refresh on library change.
 
 Bug: adding a module to the library after the widget was shown did not update
 the combo — the widget only subscribed to model on_change (which only fires when
@@ -16,11 +16,11 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
 )
-from zcu_tools.gui.app.main.live_model import LiveModelEnv, ModuleRefLiveField
+from zcu_tools.gui.app.main.live_model import LiveModelEnv, ReferenceLiveField
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import MlChangedPayload
 
@@ -43,9 +43,9 @@ def _inner_value() -> CfgSectionValue:
     return CfgSectionValue(fields={"freq": DirectValue(1000.0)})
 
 
-def _ref_spec() -> ModuleRefSpec:
-    """ModuleRefSpec allowing one custom shape whose label is _INNER_LABEL."""
-    return ModuleRefSpec(allowed=[_inner_spec()])
+def _ref_spec() -> ReferenceSpec:
+    """ReferenceSpec allowing one custom shape whose label is _INNER_LABEL."""
+    return ReferenceSpec(kind="module", allowed=[_inner_spec()])
 
 
 def _ctrl(bus: EventBus, ml: MagicMock | None = None) -> MagicMock:
@@ -56,14 +56,14 @@ def _ctrl(bus: EventBus, ml: MagicMock | None = None) -> MagicMock:
     return c
 
 
-def _make_field(ctrl: MagicMock) -> ModuleRefLiveField:
+def _make_field(ctrl: MagicMock) -> ReferenceLiveField:
     spec = _ref_spec()
-    value = ModuleRefValue(
+    value = ReferenceValue(
         chosen_key=f"<Custom:{_INNER_LABEL}>",
         value=_inner_value(),
         is_overridden=False,
     )
-    return ModuleRefLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+    return ReferenceLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
 
 
 # ---------------------------------------------------------------------------
@@ -80,9 +80,9 @@ def test_module_ref_widget_combo_refreshes_on_ml_changed(qapp):
     ctrl = _ctrl(bus, ml)
     field = _make_field(ctrl)
 
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
-    w = ModuleRefWidget(field)
+    w = ReferenceWidget(field)
     count_before = w._combo.count()
 
     # Simulate adding "my_module" to the library: the ctrl now returns a ml
@@ -122,9 +122,9 @@ def test_module_ref_widget_teardown_removes_bus_subscription(qapp):
     ctrl = _ctrl(bus, ml)
     field = _make_field(ctrl)
 
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
-    w = ModuleRefWidget(field)
+    w = ReferenceWidget(field)
     w.teardown()
 
     # After teardown: adding to the bus and emitting should not raise (stale
@@ -143,9 +143,9 @@ def test_module_ref_widget_initial_combo_without_ml(qapp):
     ctrl = _ctrl(bus, ml=None)
     field = _make_field(ctrl)
 
-    from zcu_tools.gui.app.main.ui.fields.containers import ModuleRefWidget
+    from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
-    w = ModuleRefWidget(field)
+    w = ReferenceWidget(field)
 
     texts = [w._combo.itemText(i) for i in range(w._combo.count())]
     # Only the single custom spec entry should be present.

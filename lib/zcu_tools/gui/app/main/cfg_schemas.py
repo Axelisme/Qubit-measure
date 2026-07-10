@@ -15,9 +15,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    ModuleRefValue,
+    ReferenceValue,
     ScalarValue,
-    WaveformRefValue,
     make_default_value,
 )
 from zcu_tools.gui.app.main.specs import (
@@ -114,7 +113,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
             fields={
                 "style": DirectValue("flat_top"),
                 "length": _val(cfg, "length"),
-                "raise_waveform": WaveformRefValue(
+                "raise_waveform": ReferenceValue(
                     chosen_key=f"<Custom:{raise_spec.label}>",
                     value=raise_val,
                 ),
@@ -149,7 +148,7 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
             "type": DirectValue("pulse"),
-            "waveform": WaveformRefValue(
+            "waveform": ReferenceValue(
                 chosen_key=f"<Custom:{wav_spec.label}>",
                 value=wav_val,
             ),
@@ -166,12 +165,12 @@ def _pulse_to_value(cfg: dict) -> CfgSectionValue:
     )
 
 
-def _pulse_ref_to_value(cfg: object) -> ModuleRefValue:
+def _pulse_ref_to_value(cfg: object) -> ReferenceValue:
     if isinstance(cfg, dict):
         value = _pulse_to_value(cfg)
     else:
         value = make_default_value(make_pulse_spec())
-    return ModuleRefValue(chosen_key="<Custom:Pulse>", value=value)
+    return ReferenceValue(chosen_key="<Custom:Pulse>", value=value)
 
 
 def _direct_readout_to_value(cfg: dict) -> CfgSectionValue:

@@ -16,8 +16,8 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
 )
 from zcu_tools.meta_tool import MetaDict
@@ -116,11 +116,11 @@ def test_static_error_precedes_reference_error() -> None:
     schema = _schema(
         {
             "literal": LiteralSpec("fixed"),
-            "module": ModuleRefSpec(allowed=[pulse]),
+            "module": ReferenceSpec(kind="module", allowed=[pulse]),
         },
         {
             "literal": DirectValue("changed"),
-            "module": ModuleRefValue("missing", CfgSectionValue()),
+            "module": ReferenceValue("missing", CfgSectionValue()),
         },
     )
 

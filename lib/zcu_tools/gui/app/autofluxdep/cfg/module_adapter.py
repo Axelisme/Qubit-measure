@@ -9,11 +9,10 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     LiteralSpec,
-    ModuleRefSpec,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     ScalarValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     make_default_value,
 )
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
@@ -125,7 +124,8 @@ def _make_flat_top_waveform_spec() -> CfgSectionSpec:
         fields={
             "style": LiteralSpec("flat_top"),
             "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-            "raise_waveform": WaveformRefSpec(
+            "raise_waveform": ReferenceSpec(
+                kind="waveform",
                 allowed=[
                     _make_cosine_waveform_spec(),
                     _make_gauss_waveform_spec(),
@@ -158,7 +158,8 @@ def _make_pulse_spec(label: str = "Pulse") -> CfgSectionSpec:
         label=label,
         fields={
             "type": LiteralSpec("pulse"),
-            "waveform": WaveformRefSpec(
+            "waveform": ReferenceSpec(
+                kind="waveform",
                 allowed=[
                     _make_const_waveform_spec(),
                     _make_cosine_waveform_spec(),
@@ -225,8 +226,9 @@ def _make_pulse_readout_spec() -> CfgSectionSpec:
 
 def pulse_module_ref_spec(
     label: str = "Pulse", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
+) -> ReferenceSpec:
+    return ReferenceSpec(
+        kind="module",
         allowed=[_make_pulse_spec()],
         label=label,
         optional=optional,
@@ -235,8 +237,9 @@ def pulse_module_ref_spec(
 
 def pulse_readout_module_ref_spec(
     label: str = "Readout", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
+) -> ReferenceSpec:
+    return ReferenceSpec(
+        kind="module",
         allowed=[_make_pulse_readout_spec()],
         label=label,
         optional=optional,
@@ -293,7 +296,7 @@ def waveform_cfg_to_value(
             fields={
                 "style": DirectValue("flat_top"),
                 "length": _value(cfg, "length"),
-                "raise_waveform": WaveformRefValue(
+                "raise_waveform": ReferenceValue(
                     chosen_key=f"<Custom:{raise_spec.label}>",
                     value=raise_value,
                 ),
@@ -315,7 +318,7 @@ def _pulse_to_value(cfg: dict[str, Any]) -> CfgSectionValue:
     return CfgSectionValue(
         fields={
             "type": DirectValue("pulse"),
-            "waveform": WaveformRefValue(
+            "waveform": ReferenceValue(
                 chosen_key=f"<Custom:{waveform_spec.label}>",
                 value=waveform_value,
             ),

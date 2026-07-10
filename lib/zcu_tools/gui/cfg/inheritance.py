@@ -12,13 +12,12 @@ from .model import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
+    _reference_discriminator_key,
     default_value_for_type,
 )
 
@@ -51,18 +50,14 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
             fields[key] = SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)
         elif isinstance(node_spec, CenteredSweepSpec):
             fields[key] = CenteredSweepValue(center=0.5, span=1.0, expts=11, step=0.1)
-        elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
+        elif isinstance(node_spec, ReferenceSpec):
             if node_spec.optional:
                 fields[key] = None  # optional ref defaults to disabled (ADR-0010)
             else:
                 first = node_spec.allowed[0]
                 label = first.label or "Custom"
-                fields[key] = (
-                    ModuleRefValue(f"<Custom:{label}>", make_default_value(first))
-                    if isinstance(node_spec, ModuleRefSpec)
-                    else WaveformRefValue(
-                        f"<Custom:{label}>", make_default_value(first)
-                    )
+                fields[key] = ReferenceValue(
+                    f"<Custom:{label}>", make_default_value(first)
                 )
         elif isinstance(node_spec, DeviceRefSpec):
             fields[key] = DirectValue("")
@@ -72,8 +67,8 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
 
 
 def select_ref_value_spec(
-    ref_spec: ModuleRefSpec | WaveformRefSpec,
-    ref_val: ModuleRefValue | WaveformRefValue,
+    ref_spec: ReferenceSpec,
+    ref_val: ReferenceValue,
 ) -> CfgSectionSpec:
     """Return the caller-allowed spec matching a ref value's concrete shape.
 
@@ -95,32 +90,33 @@ def select_ref_value_spec(
             f"Unknown custom reference label {label!r}; allowed labels: {allowed}"
         )
 
-    disc_key = "type" if isinstance(ref_spec, ModuleRefSpec) else "style"
+    disc_key = _reference_discriminator_key(ref_spec)
+    disc_label = disc_key or "discriminator"
     discriminator = _section_discriminator(ref_val.value, disc_key)
     if discriminator is None:
         if len(ref_spec.allowed) == 1:
             return ref_spec.allowed[0]
         available = ", ".join(
-            repr(getattr(spec.fields.get(disc_key), "value", None))
+            repr(getattr(spec.fields.get(disc_label), "value", None))
             for spec in ref_spec.allowed
         )
         raise RuntimeError(
-            f"Reference {chosen!r} has no {disc_key!r} discriminator; "
-            f"available {disc_key}: {available}"
+            f"Reference {chosen!r} has no {disc_label!r} discriminator; "
+            f"available {disc_label}: {available}"
         )
 
     for spec in ref_spec.allowed:
-        leaf = spec.fields.get(disc_key)
+        leaf = spec.fields.get(disc_label)
         if isinstance(leaf, LiteralSpec) and leaf.value == discriminator:
             return spec
 
     available = ", ".join(
-        repr(getattr(spec.fields.get(disc_key), "value", None))
+        repr(getattr(spec.fields.get(disc_label), "value", None))
         for spec in ref_spec.allowed
     )
     raise RuntimeError(
-        f"Reference {chosen!r} has {disc_key}={discriminator!r}, but no allowed "
-        f"shape matches (available {disc_key}: {available})"
+        f"Reference {chosen!r} has {disc_label}={discriminator!r}, but no allowed "
+        f"shape matches (available {disc_label}: {available})"
     )
 
 
@@ -143,21 +139,16 @@ def align_locked_literals(
             node_val, CfgSectionValue
         ):
             align_locked_literals(node_spec, node_val)
-        elif isinstance(node_spec, ModuleRefSpec) and isinstance(
-            node_val, ModuleRefValue
-        ):
-            chosen_spec = select_ref_value_spec(node_spec, node_val)
-            align_locked_literals(chosen_spec, node_val.value)
-        elif isinstance(node_spec, WaveformRefSpec) and isinstance(
-            node_val, WaveformRefValue
+        elif isinstance(node_spec, ReferenceSpec) and isinstance(
+            node_val, ReferenceValue
         ):
             chosen_spec = select_ref_value_spec(node_spec, node_val)
             align_locked_literals(chosen_spec, node_val.value)
     return value
 
 
-def _section_discriminator(value: CfgSectionValue, key: str) -> object:
-    leaf = value.fields.get(key)
+def _section_discriminator(value: CfgSectionValue, key: str | None) -> object:
+    leaf = value.fields.get(key) if key is not None else None
     return getattr(leaf, "value", None)
 
 
@@ -229,15 +220,18 @@ def inherit_from(
                 )
             continue
 
-        if isinstance(new_node_spec, ModuleRefSpec):
-            if isinstance(old_node_spec, ModuleRefSpec) and isinstance(
-                old_node_val, ModuleRefValue
+        if isinstance(new_node_spec, ReferenceSpec):
+            if (
+                isinstance(old_node_spec, ReferenceSpec)
+                and old_node_spec.kind == new_node_spec.kind
+                and isinstance(old_node_val, ReferenceValue)
             ):
-                new_fields[key] = ModuleRefValue(
+                new_fields[key] = ReferenceValue(
                     old_node_val.chosen_key, old_node_val.value
                 )
             elif (
-                isinstance(old_node_spec, ModuleRefSpec)
+                isinstance(old_node_spec, ReferenceSpec)
+                and old_node_spec.kind == new_node_spec.kind
                 and key in old_val.fields
                 and old_node_val is None
             ):
@@ -247,30 +241,7 @@ def inherit_from(
             else:
                 first = new_node_spec.allowed[0]
                 label = first.label or "Custom"
-                new_fields[key] = ModuleRefValue(
-                    f"<Custom:{label}>", make_default_value(first)
-                )
-            continue
-
-        if isinstance(new_node_spec, WaveformRefSpec):
-            if isinstance(old_node_spec, WaveformRefSpec) and isinstance(
-                old_node_val, WaveformRefValue
-            ):
-                new_fields[key] = WaveformRefValue(
-                    old_node_val.chosen_key, old_node_val.value
-                )
-            elif (
-                isinstance(old_node_spec, WaveformRefSpec)
-                and key in old_val.fields
-                and old_node_val is None
-            ):
-                new_fields[key] = None  # inherit the disabled state (ADR-0010)
-            elif new_node_spec.optional:
-                new_fields[key] = None  # optional ref defaults to disabled
-            else:
-                first = new_node_spec.allowed[0]
-                label = first.label or "Custom"
-                new_fields[key] = WaveformRefValue(
+                new_fields[key] = ReferenceValue(
                     f"<Custom:{label}>", make_default_value(first)
                 )
             continue

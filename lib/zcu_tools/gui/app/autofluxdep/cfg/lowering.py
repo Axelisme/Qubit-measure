@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.cfg import (
     CfgSchema,
     ExpressionResolver,
     ReferenceResolver,
     lower_finished_cfg,
+    validate_reference_kinds,
 )
 from zcu_tools.program.v2 import SweepCfg
 
@@ -16,6 +17,8 @@ from .module_adapter import module_cfg_shape_label, waveform_cfg_shape_label
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+_REFERENCE_KINDS = frozenset({"module", "waveform"})
 
 
 def _make_expression_resolver(md: MetaDict) -> ExpressionResolver:
@@ -28,16 +31,16 @@ def _make_expression_resolver(md: MetaDict) -> ExpressionResolver:
 
 
 def _make_reference_resolver(ml: ModuleLibrary) -> ReferenceResolver:
-    def resolve_reference(
-        kind: Literal["module", "waveform"], key: str, /
-    ) -> str | None:
+    def resolve_reference(kind: str, key: str, /) -> str | None:
         if kind == "module":
             if key not in ml.modules:
                 return None
             return module_cfg_shape_label(ml.modules[key])
-        if key not in ml.waveforms:
-            return None
-        return waveform_cfg_shape_label(ml.waveforms[key])
+        if kind == "waveform":
+            if key not in ml.waveforms:
+                return None
+            return waveform_cfg_shape_label(ml.waveforms[key])
+        raise RuntimeError(f"Unsupported reference kind {kind!r}")
 
     return resolve_reference
 
@@ -72,6 +75,7 @@ def schema_to_raw_dict(
     md: MetaDict | None,
     ml: ModuleLibrary | None,
 ) -> dict[str, object]:
+    validate_reference_kinds(schema, _REFERENCE_KINDS)
     return lower_finished_cfg(
         schema,
         resolve_expression=None if md is None else _make_expression_resolver(md),

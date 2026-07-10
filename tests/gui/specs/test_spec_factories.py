@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from zcu_tools.gui.app.main.adapter import WaveformRefSpec
+from zcu_tools.gui.app.main.adapter import ReferenceSpec
 from zcu_tools.gui.app.main.specs import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
@@ -51,7 +51,7 @@ def test_pulse_factory_embeds_fresh_waveform_allowed_specs():
     first = make_pulse_spec()
     second = make_pulse_spec()
 
-    first_waveform = cast(WaveformRefSpec, first.fields["waveform"])
-    second_waveform = cast(WaveformRefSpec, second.fields["waveform"])
+    first_waveform = cast(ReferenceSpec, first.fields["waveform"])
+    second_waveform = cast(ReferenceSpec, second.fields["waveform"])
     assert first_waveform is not second_waveform
     assert first_waveform.allowed[0] is not second_waveform.allowed[0]

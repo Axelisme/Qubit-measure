@@ -14,9 +14,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    ModuleRefValue,
+    ReferenceValue,
     ScalarValue,
-    WaveformRefValue,
     make_default_value,
 )
 
@@ -56,7 +55,7 @@ def patch_pulse_fields(
     best_ro_* readout seed) as readily as a literal constant.
     """
     waveform_ref = value.fields.get("waveform")
-    if isinstance(waveform_ref, (ModuleRefValue, WaveformRefValue)):
+    if isinstance(waveform_ref, ReferenceValue):
         waveform_ref.value.fields["length"] = (
             length
             if isinstance(length, (DirectValue, EvalValue))

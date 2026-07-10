@@ -51,14 +51,12 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DeviceRefSpec,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarLeafInput,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     align_locked_literals,
     make_default_value,
 )
@@ -78,7 +76,7 @@ if TYPE_CHECKING:
 # A node the builder mounts at a path: a whole ref node, a sweep, or None (a
 # disabled optional ref). Scalars never go through _mount_node — they are set
 # via CfgSectionValue.with_field (scalar-leaf only).
-_MountNode = ModuleRefValue | WaveformRefValue | SweepValue | None
+_MountNode = ReferenceValue | SweepValue | None
 
 
 class _NoDefault:
@@ -204,6 +202,7 @@ class CfgBuilder:
                 f"CfgBuilder.role: unknown role_id {role_id!r} "
                 f"(available: {', '.join(sorted(ROLE_FACTORIES))})"
             )
+        self._check_role_kind(ref_spec, spec.kind, path, role_id)
 
         if init is Init.DISABLED:
             if not ref_spec.optional:
@@ -223,7 +222,7 @@ class CfgBuilder:
         else:
             node = spec.ref(self._ctx)
 
-        self._check_ref_kind(ref_spec, node, path, role_id)
+        self._check_ref_value(node, path, role_id)
         self._mount_node(parts, node)
         return self
 
@@ -291,7 +290,7 @@ class CfgBuilder:
         node_value: CfgSectionValue = self._value
         for seg in parts[:-1]:
             child = node_value.fields.get(seg)
-            if isinstance(child, (ModuleRefValue, WaveformRefValue)):
+            if isinstance(child, ReferenceValue):
                 node_value = child.value
             elif isinstance(child, CfgSectionValue):
                 node_value = child
@@ -321,14 +320,12 @@ class CfgBuilder:
             del i
         return spec
 
-    def _resolve_ref_spec(
-        self, parts: list[str], path: str
-    ) -> ModuleRefSpec | WaveformRefSpec:
+    def _resolve_ref_spec(self, parts: list[str], path: str) -> ReferenceSpec:
         leaf_spec = self._resolve_leaf_spec(parts, path)
-        if not isinstance(leaf_spec, (ModuleRefSpec, WaveformRefSpec)):
+        if not isinstance(leaf_spec, ReferenceSpec):
             raise RuntimeError(
                 f"CfgBuilder.role: spec at {path!r} is "
-                f"{type(leaf_spec).__name__}, not a ModuleRefSpec/WaveformRefSpec"
+                f"{type(leaf_spec).__name__}, not a ReferenceSpec"
             )
         return leaf_spec
 
@@ -349,25 +346,30 @@ class CfgBuilder:
         )
 
     @staticmethod
-    def _check_ref_kind(
-        ref_spec: ModuleRefSpec | WaveformRefSpec,
+    def _check_role_kind(
+        ref_spec: ReferenceSpec,
+        role_kind: str,
+        path: str,
+        role_id: str,
+    ) -> None:
+        if ref_spec.kind != role_kind:
+            raise RuntimeError(
+                f"CfgBuilder.role: spec at {path!r} expects reference kind "
+                f"{ref_spec.kind!r}, but role {role_id!r} has kind {role_kind!r}"
+            )
+
+    @staticmethod
+    def _check_ref_value(
         node: _MountNode,
         path: str,
         role_id: str,
     ) -> None:
         if node is None:
             return  # optional miss → disabled ref (ADR-0010)
-        if isinstance(ref_spec, ModuleRefSpec) and not isinstance(node, ModuleRefValue):
+        if not isinstance(node, ReferenceValue):
             raise RuntimeError(
-                f"CfgBuilder.role: spec at {path!r} expects a module ref but role "
-                f"{role_id!r} produced {type(node).__name__}"
-            )
-        if isinstance(ref_spec, WaveformRefSpec) and not isinstance(
-            node, WaveformRefValue
-        ):
-            raise RuntimeError(
-                f"CfgBuilder.role: spec at {path!r} expects a waveform ref but role "
-                f"{role_id!r} produced {type(node).__name__}"
+                f"CfgBuilder.role: role {role_id!r} at {path!r} produced "
+                f"{type(node).__name__}, not ReferenceValue"
             )
 
 
@@ -380,7 +382,7 @@ def _split(path: str) -> list[str]:
 
 def _spec_path_exists(spec: CfgSectionSpec, parts: list[str]) -> bool:
     """True if ``parts`` resolve to a leaf within ``spec`` (duck-typing across
-    ModuleRefSpec.allowed shapes, mirroring the spec-layer descent)."""
+    ReferenceSpec.allowed shapes, mirroring the spec-layer descent)."""
     head, rest = parts[0], parts[1:]
     child: CfgNodeSpec | None = spec.fields.get(head)
     if child is None:
@@ -389,14 +391,14 @@ def _spec_path_exists(spec: CfgSectionSpec, parts: list[str]) -> bool:
         return True
     if isinstance(child, CfgSectionSpec):
         return _spec_path_exists(child, rest)
-    if isinstance(child, (ModuleRefSpec, WaveformRefSpec)):
+    if isinstance(child, ReferenceSpec):
         return any(_spec_path_exists(shape, rest) for shape in child.allowed)
     return False
 
 
 def _is_locked_path(spec: CfgSectionSpec, parts: list[str]) -> bool:
     """True if ``parts`` land on a ``LiteralSpec`` leaf (duck-typing across
-    ModuleRefSpec.allowed shapes). Used to reject ``.set`` on a locked field —
+    ReferenceSpec.allowed shapes). Used to reject ``.set`` on a locked field —
     if *any* allowed shape locks the path, the field is treated as locked
     (lock_literal applies the lock to every shape that contains the path)."""
     head, rest = parts[0], parts[1:]
@@ -407,6 +409,6 @@ def _is_locked_path(spec: CfgSectionSpec, parts: list[str]) -> bool:
         return isinstance(child, LiteralSpec)
     if isinstance(child, CfgSectionSpec):
         return _is_locked_path(child, rest)
-    if isinstance(child, (ModuleRefSpec, WaveformRefSpec)):
+    if isinstance(child, ReferenceSpec):
         return any(_is_locked_path(shape, rest) for shape in child.allowed)
     return False

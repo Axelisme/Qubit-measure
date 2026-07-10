@@ -29,9 +29,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    ModuleRefValue,
+    ReferenceValue,
     ScalarValue,
-    WaveformRefValue,
 )
 from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec as make_pulse_spec_
 from zcu_tools.gui.app.main.specs.readout import (
@@ -75,7 +74,7 @@ from .helpers import (
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import CfgSectionSpec, ExpContext
 
-_RefNode = ModuleRefValue | WaveformRefValue
+_RefNode = ReferenceValue
 
 # ---------------------------------------------------------------------------
 # Seed value carriers — the md-mechanism today, a ValueSource seam tomorrow.
@@ -204,7 +203,7 @@ def _section(value: CfgSectionValue, at: str) -> CfgSectionValue:
     if at == "":
         return value
     sub = value.fields.get(at)
-    if isinstance(sub, (ModuleRefValue, WaveformRefValue)):
+    if isinstance(sub, ReferenceValue):
         return sub.value
     if not isinstance(sub, CfgSectionValue):
         raise RuntimeError(f"role seed path {at!r} is not a section")
@@ -232,9 +231,9 @@ def _adopt_waveform(value: CfgSectionValue, ctx: ExpContext, name: str) -> None:
     if not isinstance(pulse_cfg, CfgSectionValue):
         return
     waveform_ref = pulse_cfg.fields.get("waveform")
-    if isinstance(waveform_ref, WaveformRefValue) and name in ctx.ml.waveforms:
+    if isinstance(waveform_ref, ReferenceValue) and name in ctx.ml.waveforms:
         _, wav_val = waveform_cfg_to_value(ctx.ml.waveforms[name])
-        pulse_cfg.fields["waveform"] = WaveformRefValue(chosen_key=name, value=wav_val)
+        pulse_cfg.fields["waveform"] = ReferenceValue(chosen_key=name, value=wav_val)
 
 
 def role_blank(role: RoleDef, ctx: ExpContext) -> _RefNode:
@@ -269,8 +268,8 @@ def role_blank(role: RoleDef, ctx: ExpContext) -> _RefNode:
         _adopt_waveform(value, ctx, role.adopt_waveform)
 
     if role.is_waveform:
-        return WaveformRefValue(chosen_key=role.tag, value=value)
-    return ModuleRefValue(role.tag, value)
+        return ReferenceValue(chosen_key=role.tag, value=value)
+    return ReferenceValue(role.tag, value)
 
 
 def role_ref(
@@ -290,7 +289,7 @@ def role_ref(
             ml=ctx.ml, module_type=lib.module_type, preferred_names=list(lib.prefer)
         )
         if selected is not None:
-            return ModuleRefValue(chosen_key=selected.name, value=selected.value)
+            return ReferenceValue(chosen_key=selected.name, value=selected.value)
     if optional:
         return None
     return role_blank(role, ctx)

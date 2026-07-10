@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from zcu_tools.meta_tool import ModuleLibrary
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import CfgSectionValue, WaveformRefValue
+    from zcu_tools.gui.app.main.adapter import CfgSectionValue, ReferenceValue
 
 
 @dataclass(frozen=True)
@@ -47,14 +47,14 @@ def select_named_module_value(
 
 def select_named_waveform_value(
     ml: ModuleLibrary, preferred_names: list[str]
-) -> WaveformRefValue | None:
+) -> ReferenceValue | None:
     """Waveform twin of ``select_named_module_value``: first preferred-named
-    library waveform → a LINKED ``WaveformRefValue``, else None."""
-    from zcu_tools.gui.app.main.adapter import WaveformRefValue
+    library waveform → a LINKED ``ReferenceValue``, else None."""
+    from zcu_tools.gui.app.main.adapter import ReferenceValue
     from zcu_tools.gui.app.main.cfg_schemas import waveform_cfg_to_value
 
     for name in preferred_names:
         if name in ml.waveforms:
             _, wav_val = waveform_cfg_to_value(ml.waveforms[name])
-            return WaveformRefValue(chosen_key=name, value=wav_val)
+            return ReferenceValue(chosen_key=name, value=wav_val)
     return None

@@ -13,6 +13,7 @@ from .lowering import (
     ReferenceResolver,
     lower_finished_cfg,
     validate_finished_cfg,
+    validate_reference_kinds,
 )
 from .model import (
     CenteredSweepSpec,
@@ -30,15 +31,13 @@ from .model import (
     FloatSpec,
     IntSpec,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarLeafInput,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     default_value_for_type,
 )
 
@@ -59,8 +58,8 @@ __all__ = [
     "FloatSpec",
     "IntSpec",
     "LiteralSpec",
-    "ModuleRefSpec",
-    "ModuleRefValue",
+    "ReferenceSpec",
+    "ReferenceValue",
     "RangeFactory",
     "ReferenceResolver",
     "ScalarLeafInput",
@@ -69,8 +68,6 @@ __all__ = [
     "SessionCodecError",
     "SweepSpec",
     "SweepValue",
-    "WaveformRefSpec",
-    "WaveformRefValue",
     "align_locked_literals",
     "default_value_for_type",
     "inherit_from",
@@ -80,4 +77,5 @@ __all__ = [
     "schema_to_raw",
     "select_ref_value_spec",
     "validate_finished_cfg",
+    "validate_reference_kinds",
 ]

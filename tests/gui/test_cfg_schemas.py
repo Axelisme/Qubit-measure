@@ -10,7 +10,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionValue,
     DirectValue,
-    WaveformRefValue,
+    ReferenceValue,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.cfg_schemas import (
@@ -48,7 +48,7 @@ def test_waveform_cfg_flat_top():
     assert cast(DirectValue, val.fields["style"]).value == "flat_top"
 
     raise_wav = val.fields["raise_waveform"]
-    assert isinstance(raise_wav, WaveformRefValue)
+    assert isinstance(raise_wav, ReferenceValue)
     assert cast(DirectValue, raise_wav.value.fields["length"]).value == 0.5
 
 

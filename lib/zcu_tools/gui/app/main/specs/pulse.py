@@ -5,8 +5,8 @@ from __future__ import annotations
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     LiteralSpec,
+    ReferenceSpec,
     ScalarSpec,
-    WaveformRefSpec,
 )
 
 from .waveform import (
@@ -24,7 +24,8 @@ def make_pulse_spec(label: str = "Pulse") -> CfgSectionSpec:
         label=label,
         fields={
             "type": LiteralSpec("pulse"),
-            "waveform": WaveformRefSpec(
+            "waveform": ReferenceSpec(
+                kind="waveform",
                 allowed=[
                     make_const_waveform_spec(),
                     make_cosine_waveform_spec(),

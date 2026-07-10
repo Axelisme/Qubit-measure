@@ -19,7 +19,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionValue,
     DirectValue,
-    ModuleRefValue,
+    ReferenceValue,
 )
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import (
@@ -186,7 +186,7 @@ def test_readout_role_ref_uses_library_selection_before_fallback():
     ctx = _make_ctx(ml)
     module_ref = role_ref(ROLE_TABLE["readout"], ctx)
 
-    assert isinstance(module_ref, ModuleRefValue)
+    assert isinstance(module_ref, ReferenceValue)
     assert module_ref.chosen_key == "readout_rf"
 
 
@@ -194,7 +194,7 @@ def test_readout_role_ref_falls_back_to_custom_when_lib_empty():
     ctx = _make_ctx(ModuleLibrary())
     module_ref = role_ref(ROLE_TABLE["readout"], ctx)
 
-    assert isinstance(module_ref, ModuleRefValue)
+    assert isinstance(module_ref, ReferenceValue)
     assert module_ref.chosen_key == "<Custom:Pulse Readout>"
 
 
@@ -242,14 +242,14 @@ def test_readout_role_ref_prefers_readout_dpm_over_readout_rf():
     )
 
     module_ref = role_ref(ROLE_TABLE["readout"], _make_ctx(ml))
-    assert isinstance(module_ref, ModuleRefValue)
+    assert isinstance(module_ref, ReferenceValue)
     assert module_ref.chosen_key == "readout_dpm"
 
 
 def test_readout_role_ref_fallback_uses_directvalue_when_md_missing():
     ctx = _make_ctx(ModuleLibrary())
     module_ref = role_ref(ROLE_TABLE["readout"], ctx)
-    assert isinstance(module_ref, ModuleRefValue)
+    assert isinstance(module_ref, ReferenceValue)
     readout = module_ref.value
     assert isinstance(readout, CfgSectionValue)
 
@@ -267,7 +267,7 @@ def test_readout_role_ref_fallback_uses_directvalue_when_md_missing():
 
 
 def test_readout_role_ref_fallback_prefers_ro_waveform_if_present():
-    from zcu_tools.gui.app.main.adapter import WaveformRefValue
+    from zcu_tools.gui.app.main.adapter import ReferenceValue
 
     ml = ModuleLibrary()
     ml.register_waveform(
@@ -276,12 +276,12 @@ def test_readout_role_ref_fallback_prefers_ro_waveform_if_present():
         )
     )
     module_ref = role_ref(ROLE_TABLE["readout"], _make_ctx(ml))
-    assert isinstance(module_ref, ModuleRefValue)
+    assert isinstance(module_ref, ReferenceValue)
     readout = module_ref.value
     pulse_cfg = readout.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
     waveform = pulse_cfg.fields["waveform"]
-    assert isinstance(waveform, WaveformRefValue)
+    assert isinstance(waveform, ReferenceValue)
     assert waveform.chosen_key == "ro_waveform"
 
 

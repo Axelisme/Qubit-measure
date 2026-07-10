@@ -28,9 +28,8 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    ModuleRefValue,
+    ReferenceValue,
     SweepValue,
-    WaveformRefValue,
 )
 
 _GOLDEN_PATH = Path(__file__).with_name("_role_default_golden.json")
@@ -78,8 +77,8 @@ def _serialize(node: object) -> Any:
     if isinstance(node, SweepValue):
         sweep = cast(SweepValue, node)
         return {"sweep": [sweep.start, sweep.stop, sweep.expts, round(sweep.step, 9)]}
-    if isinstance(node, (ModuleRefValue, WaveformRefValue)):
-        ref = cast(ModuleRefValue | WaveformRefValue, node)
+    if isinstance(node, ReferenceValue):
+        ref = cast(ReferenceValue, node)
         return {
             "ref": ref.chosen_key,
             "ov": ref.is_overridden,

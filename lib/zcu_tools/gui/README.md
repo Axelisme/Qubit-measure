@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-10（shared cfg lowering ports）
+**Last updated:** 2026-07-10（generic reference model）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -12,6 +12,10 @@ own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 default/inheritance helpers、raw persistence codec，以及generic finished-cfg
 validation/lowering。lowering只依賴expression/reference/range三個callable ports，維持
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
+
+Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`是shared core只
+轉送的app-local opaque id。module/waveform factory、resolver與converter policy留在各app，
+既有`module_ref`/`waveform_ref` persistence wire shape不變。
 
 此package不import `gui.app.*`、`experiment.*`、Qt、`meta_tool`、`notebook`或`device`，
 也沒有broad environment object或global resolver registry。measure與autofluxdep各自提供

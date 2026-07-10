@@ -47,7 +47,7 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     EvalValue,
     MetaDictWriteback,
-    ModuleRefValue,
+    ReferenceValue,
     SweepValue,
     WritebackRequest,
 )
@@ -144,7 +144,7 @@ def test_mist_power_freq_probe_defaults_to_readout_frequency_sweep_and_channel()
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     probe = modules.fields["probe_pulse"]
-    assert isinstance(probe, ModuleRefValue)
+    assert isinstance(probe, ReferenceValue)
     freq = probe.value.fields["freq"]
     ch = probe.value.fields["ch"]
     assert isinstance(freq, EvalValue)
@@ -201,7 +201,7 @@ def test_t1_tone_sweep_probe_defaults_to_readout_frequency_and_channel(
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     probe = modules.fields["probe_pulse"]
-    assert isinstance(probe, ModuleRefValue)
+    assert isinstance(probe, ReferenceValue)
     freq = probe.value.fields["freq"]
     ch = probe.value.fields["ch"]
     assert isinstance(freq, EvalValue)

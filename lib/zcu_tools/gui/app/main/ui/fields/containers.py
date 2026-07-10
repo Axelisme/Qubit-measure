@@ -26,7 +26,7 @@ from ...adapter import ChoiceSectionSpec, DirectValue, LiteralSpec
 from ...live_model import (
     CenteredSweepLiveField,
     DeviceRefLiveField,
-    ModuleRefLiveField,
+    ReferenceLiveField,
     SectionLiveField,
     SweepLiveField,
 )
@@ -189,9 +189,9 @@ class SectionWidget(BaseLiveWidget):
                     path=child_path,
                     decoration_for_path=self._decoration_for_path,
                 )
-            elif widget_cls is ModuleRefWidget:
-                w = ModuleRefWidget(
-                    cast(ModuleRefLiveField, child_field),
+            elif widget_cls is ReferenceWidget:
+                w = ReferenceWidget(
+                    cast(ReferenceLiveField, child_field),
                     path=child_path,
                     decoration_for_path=self._decoration_for_path,
                     field_label_max_width=self._field_label_max_width,
@@ -338,11 +338,11 @@ def _choice_visible_keys(field: SectionLiveField) -> set[str] | None:
     return visible
 
 
-@register_widget(ModuleRefLiveField)
-class ModuleRefWidget(BaseLiveWidget):
+@register_widget(ReferenceLiveField)
+class ReferenceWidget(BaseLiveWidget):
     def __init__(
         self,
-        field: ModuleRefLiveField,
+        field: ReferenceLiveField,
         path: str = "",
         decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
         | None = None,
@@ -414,7 +414,7 @@ class ModuleRefWidget(BaseLiveWidget):
         self._combo.blockSignals(True)
         self._combo.clear()
 
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         current = field.get_chosen_key()
 
         # 0. None option for optional fields
@@ -431,13 +431,17 @@ class ModuleRefWidget(BaseLiveWidget):
         # 2. Named modules from Library if available, filtered to allowed spec labels
         ml = field.env.ctrl.get_current_ml()
         if ml:
-            from ...adapter import ModuleRefSpec
             from ...cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
-            is_module = isinstance(field.spec, ModuleRefSpec)
-            store = ml.modules if is_module else ml.waveforms
+            if field.spec.kind == "module":
+                store = ml.modules
+                resolve_fn = module_cfg_to_value
+            elif field.spec.kind == "waveform":
+                store = ml.waveforms
+                resolve_fn = waveform_cfg_to_value
+            else:
+                raise RuntimeError(f"Unsupported reference kind {field.spec.kind!r}")
             allowed_labels = {s.label for s in field.spec.allowed}
-            resolve_fn = module_cfg_to_value if is_module else waveform_cfg_to_value
             compatible: list[str] = []
             for name, cfg in store.items():
                 try:
@@ -447,7 +451,7 @@ class ModuleRefWidget(BaseLiveWidget):
                     # (it can't be offered as a choice) but must not silently
                     # vanish — log it so a broken/corrupt entry is discoverable.
                     logger.warning(
-                        "ModuleRef combo: skipping unresolvable library entry %r",
+                        "Reference combo: skipping unresolvable library entry %r",
                         name,
                         exc_info=True,
                     )
@@ -484,7 +488,7 @@ class ModuleRefWidget(BaseLiveWidget):
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         if key == self._NONE_KEY:
             field.set_enabled(False)
         else:
@@ -495,13 +499,13 @@ class ModuleRefWidget(BaseLiveWidget):
             self._on_toggle_subsection(self._expand_btn.isChecked())
 
     def _should_expand_by_default(self) -> bool:
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         return field.get_chosen_key().startswith("<Custom:")
 
     def _on_model_enabled_changed(self, enabled: bool) -> None:
         self._combo.blockSignals(True)
         if enabled:
-            field = cast(ModuleRefLiveField, self._field)
+            field = cast(ReferenceLiveField, self._field)
             idx = self._combo.findData(field.get_chosen_key())
             if idx >= 0:
                 self._combo.setCurrentIndex(idx)
@@ -517,7 +521,7 @@ class ModuleRefWidget(BaseLiveWidget):
         self._refresh_sub_widget()
 
     def _refresh_missing_ref_hint(self) -> None:
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         if field.has_missing_library_ref():
             key = field.get_chosen_key()
             self._missing_ref_hint.setText(
@@ -535,7 +539,7 @@ class ModuleRefWidget(BaseLiveWidget):
         )
 
     def _sync_expand_btn(self) -> None:
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         has_subsection = self._sub_widget is not None
         visible = has_subsection and (not field.spec.optional or field.is_enabled)
         self._expand_btn.setVisible(visible)
@@ -550,7 +554,7 @@ class ModuleRefWidget(BaseLiveWidget):
         )
 
     def _refresh_sub_widget(self) -> None:
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         sub_field = field.sub_field
 
         if self._sub_widget and self._sub_widget.field == sub_field:
@@ -585,7 +589,7 @@ class ModuleRefWidget(BaseLiveWidget):
         return self._sub_widget.refresh_section(path)
 
     def teardown(self) -> None:
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         field.on_change.disconnect(self._on_model_changed)
         field.on_validity_changed.disconnect(self._on_validity_changed)
         if field.spec.optional:
@@ -597,9 +601,9 @@ class ModuleRefWidget(BaseLiveWidget):
             self._sub_widget.teardown()
 
     def _on_validity_changed(self, valid: bool) -> None:
-        field = cast(ModuleRefLiveField, self._field)
+        field = cast(ReferenceLiveField, self._field)
         logger.debug(
-            "ModuleRefWidget.validity_changed: key=%r valid=%r",
+            "ReferenceWidget.validity_changed: key=%r valid=%r",
             field.get_chosen_key(),
             valid,
         )

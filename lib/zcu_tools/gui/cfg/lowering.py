@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Literal, Protocol
+from collections.abc import Collection
+from typing import Protocol, TypeAlias
 
 from .model import (
     CenteredSweepSpec,
@@ -16,18 +17,16 @@ from .model import (
     DirectValue,
     EvalValue,
     LiteralSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
 )
 
 logger = logging.getLogger(__name__)
 
-ReferenceKind = Literal["module", "waveform"]
+ReferenceKind: TypeAlias = str
 
 _LOCKED_CENTER_ABS_TOL = 1e-12
 
@@ -42,6 +41,44 @@ class ReferenceResolver(Protocol):
 
 class RangeFactory(Protocol):
     def __call__(self, start: float, stop: float, /, *, expts: int) -> object: ...
+
+
+def validate_reference_kinds(
+    schema: CfgSchema,
+    allowed_kinds: Collection[str],
+) -> None:
+    """Validate opaque reference kinds against caller-owned application policy."""
+    allowed = frozenset(allowed_kinds)
+    _validate_reference_kinds_section(schema.spec, allowed, path=[])
+
+
+def _validate_reference_kinds_section(
+    spec: CfgSectionSpec,
+    allowed_kinds: frozenset[str],
+    *,
+    path: list[str],
+) -> None:
+    for key, node_spec in spec.fields.items():
+        node_path = [*path, key]
+        if isinstance(node_spec, ReferenceSpec):
+            if node_spec.kind not in allowed_kinds:
+                allowed = ", ".join(sorted(allowed_kinds))
+                raise RuntimeError(
+                    f"Config field '{'.'.join(node_path)}' uses unsupported "
+                    f"reference kind {node_spec.kind!r}; allowed kinds: {allowed}"
+                )
+            for allowed_spec in node_spec.allowed:
+                _validate_reference_kinds_section(
+                    allowed_spec,
+                    allowed_kinds,
+                    path=node_path,
+                )
+        elif isinstance(node_spec, CfgSectionSpec):
+            _validate_reference_kinds_section(
+                node_spec,
+                allowed_kinds,
+                path=node_path,
+            )
 
 
 def validate_finished_cfg(
@@ -215,8 +252,8 @@ def _validate_centered_sweep_contract(
 
 
 def _select_reference_spec(
-    ref_spec: ModuleRefSpec | WaveformRefSpec,
-    ref_value: ModuleRefValue | WaveformRefValue,
+    ref_spec: ReferenceSpec,
+    ref_value: ReferenceValue,
     resolve_reference: ReferenceResolver | None,
 ) -> CfgSectionSpec:
     chosen = ref_value.chosen_key
@@ -237,12 +274,9 @@ def _select_reference_spec(
             f"Cannot resolve library reference {chosen!r} without ModuleLibrary"
         )
 
-    kind: ReferenceKind = (
-        "module" if isinstance(ref_spec, ModuleRefSpec) else "waveform"
-    )
-    label = resolve_reference(kind, chosen)
+    label = resolve_reference(ref_spec.kind, chosen)
     if label is None:
-        raise RuntimeError(f"Unknown {kind} reference: {chosen!r}")
+        raise RuntimeError(f"Unknown {ref_spec.kind} reference: {chosen!r}")
 
     for spec in ref_spec.allowed:
         if spec.label == label:
@@ -276,10 +310,7 @@ def _lower_section(
             if isinstance(node_spec, LiteralSpec):
                 result[key] = node_spec.value
                 continue
-            if (
-                isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec))
-                and node_spec.optional
-            ):
+            if isinstance(node_spec, ReferenceSpec) and node_spec.optional:
                 continue
             label = getattr(node_spec, "label", "") or key
             full_path = ".".join([*path, key])
@@ -347,8 +378,8 @@ def _lower_section(
                 expts=node_value.expts,
             )
 
-        elif isinstance(node_spec, (ModuleRefSpec, WaveformRefSpec)):
-            assert isinstance(node_value, (ModuleRefValue, WaveformRefValue))
+        elif isinstance(node_spec, ReferenceSpec):
+            assert isinstance(node_value, ReferenceValue)
             if not isinstance(node_value.value, CfgSectionValue):
                 label = node_spec.label or key
                 full_path = ".".join([*path, key])
@@ -420,7 +451,7 @@ def _validate_static_node(
     full_path: str,
 ) -> None:
     if node_value is None:
-        if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)) and spec.optional:
+        if isinstance(spec, ReferenceSpec) and spec.optional:
             return
         raise RuntimeError(
             f"Config field '{full_path}' is None but is not a disabled optional ref"
@@ -470,8 +501,8 @@ def _validate_static_node(
             )
         return
 
-    if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
-        if not isinstance(node_value, (ModuleRefValue, WaveformRefValue)):
+    if isinstance(spec, ReferenceSpec):
+        if not isinstance(node_value, ReferenceValue):
             raise RuntimeError(
                 f"Config field '{full_path}' must be an enabled module/waveform "
                 f"ref, got {type(node_value).__name__}"
@@ -644,8 +675,8 @@ def _validate_dynamic_node(
                 )
         return
 
-    if isinstance(spec, (ModuleRefSpec, WaveformRefSpec)):
-        if isinstance(node_value, (ModuleRefValue, WaveformRefValue)):
+    if isinstance(spec, ReferenceSpec):
+        if isinstance(node_value, ReferenceValue):
             if isinstance(node_value.value, CfgSectionValue):
                 chosen_spec = _select_reference_spec(
                     spec, node_value, resolve_reference

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.adapter import CfgSectionSpec, LiteralSpec, ModuleRefSpec
+from zcu_tools.gui.app.main.adapter import CfgSectionSpec, LiteralSpec, ReferenceSpec
 
 from .pulse import make_pulse_spec
 
@@ -42,12 +42,14 @@ def make_bath_reset_spec() -> CfgSectionSpec:
         label="Bath Reset",
         fields={
             "type": LiteralSpec("reset/bath"),
-            "cavity_tone_cfg": ModuleRefSpec(
-                allowed=[make_pulse_spec()], label="Cavity Tone"
+            "cavity_tone_cfg": ReferenceSpec(
+                kind="module", allowed=[make_pulse_spec()], label="Cavity Tone"
             ),
-            "qubit_tone_cfg": ModuleRefSpec(
-                allowed=[make_pulse_spec()], label="Qubit Tone"
+            "qubit_tone_cfg": ReferenceSpec(
+                kind="module", allowed=[make_pulse_spec()], label="Qubit Tone"
             ),
-            "pi2_cfg": ModuleRefSpec(allowed=[make_pulse_spec()], label="Pi/2 Pulse"),
+            "pi2_cfg": ReferenceSpec(
+                kind="module", allowed=[make_pulse_spec()], label="Pi/2 Pulse"
+            ),
         },
     )

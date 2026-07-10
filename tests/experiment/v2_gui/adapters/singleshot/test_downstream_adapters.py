@@ -39,7 +39,7 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import (
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionValue,
     EvalValue,
-    ModuleRefValue,
+    ReferenceValue,
     SweepValue,
 )
 from zcu_tools.gui.app.main.adapter.lowering import (
@@ -145,7 +145,7 @@ def test_mist_freq_probe_defaults_to_readout_frequency_sweep_and_channel() -> No
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     probe = modules.fields["probe_pulse"]
-    assert isinstance(probe, ModuleRefValue)
+    assert isinstance(probe, ReferenceValue)
     freq = probe.value.fields["freq"]
     ch = probe.value.fields["ch"]
     assert isinstance(freq, EvalValue)
@@ -172,7 +172,7 @@ def test_mist_power_probe_defaults_to_readout_frequency_and_channel() -> None:
     modules = schema.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     probe = modules.fields["probe_pulse"]
-    assert isinstance(probe, ModuleRefValue)
+    assert isinstance(probe, ReferenceValue)
     freq = probe.value.fields["freq"]
     ch = probe.value.fields["ch"]
     assert isinstance(freq, EvalValue)

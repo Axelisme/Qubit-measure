@@ -19,14 +19,12 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     EvalValue,
     FloatSpec,
     IntSpec,
-    ModuleRefSpec,
-    ModuleRefValue,
     NodeCfgSchema,
+    ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    WaveformRefSpec,
-    WaveformRefValue,
     align_locked_literals,
     make_default_value,
     str_choice_spec,
@@ -425,18 +423,18 @@ class NodeSchemaBuilder:
 
 def module_ref_default(
     ctx: Any | None,
-    spec: ModuleRefSpec,
+    spec: ReferenceSpec,
     *names: str,
     accepted_types: tuple[str, ...] = (),
-) -> ModuleRefValue | None:
+) -> ReferenceValue | None:
     linked = module_ref_value_from_ctx(ctx, *names, accepted_types=accepted_types)
     if linked is not None:
         return linked
     value = _default_value_for_spec(spec)
     if value is None:
         return None
-    if not isinstance(value, ModuleRefValue):
-        raise TypeError(f"ModuleRefSpec default produced {type(value).__name__}")
+    if not isinstance(value, ReferenceValue):
+        raise TypeError(f"ReferenceSpec default produced {type(value).__name__}")
     return value
 
 
@@ -444,7 +442,7 @@ def module_ref_value_from_ctx(
     ctx: Any | None,
     *names: str,
     accepted_types: tuple[str, ...] = (),
-) -> ModuleRefValue | None:
+) -> ReferenceValue | None:
     if not isinstance(ctx, ExpContext):
         return None
     for name in names:
@@ -457,7 +455,7 @@ def module_ref_value_from_ctx(
         if accepted_types and _module_type(module) not in set(accepted_types):
             continue
         _, value = module_cfg_to_value(module)
-        return ModuleRefValue(chosen_key=name, value=value)
+        return ReferenceValue(chosen_key=name, value=value)
     return None
 
 
@@ -495,21 +493,12 @@ def _wrap_default(spec: CfgNodeSpec, default: Any) -> Any:
         if isinstance(default, (DirectValue, EvalValue)):
             return default
         return DirectValue(default)
-    if isinstance(spec, ModuleRefSpec):
+    if isinstance(spec, ReferenceSpec):
         if default is None and spec.optional:
             return None
-        if not isinstance(default, ModuleRefValue):
+        if not isinstance(default, ReferenceValue):
             raise TypeError(
-                f"ModuleRefSpec default must be ModuleRefValue, got {type(default).__name__}"
-            )
-        return default
-    if isinstance(spec, WaveformRefSpec):
-        if default is None and spec.optional:
-            return None
-        if not isinstance(default, WaveformRefValue):
-            raise TypeError(
-                "WaveformRefSpec default must be WaveformRefValue, "
-                f"got {type(default).__name__}"
+                f"ReferenceSpec default must be ReferenceValue, got {type(default).__name__}"
             )
         return default
     if isinstance(spec, CfgSectionSpec):
