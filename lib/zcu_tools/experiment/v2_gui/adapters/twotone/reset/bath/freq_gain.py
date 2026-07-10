@@ -14,16 +14,13 @@ from zcu_tools.experiment.v2.twotone.reset.bath.freq import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_bath_reset_module_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    Seed,
+    custom,
     md_get_float,
     md_has_key,
-    proper_relax,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -36,10 +33,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
     EvalValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -53,22 +47,30 @@ BathFreqGainRunResult: TypeAlias = FreqGainResult
 _PI2_PHASE_OFFSET_DEG: float = 90.0
 
 
-def _cavity_freq_range(ctx: ExpContext, expts: int) -> SweepValue:
+def _cavity_freq_range(expts: int) -> Seed[SweepValue]:
     """Cavity-tone frequency sweep range: ``r_f - rabi_f`` centred.
 
     Mirrors the notebook span ``[r_f - 1.2*rabi_f, r_f - 0.8*rabi_f]``. When both
     md keys exist each edge stays an EvalValue (the GUI re-derives if md
     changes); otherwise a fixed fallback span around the available centre.
     """
-    r_f = md_get_float(ctx, "r_f", 6000.0)
-    rabi_f = md_get_float(ctx, "rabi_f", 20.0)
-    if md_has_key(ctx, "r_f") and md_has_key(ctx, "rabi_f"):
+
+    def resolve(ctx: ExpContext) -> SweepValue:
+        r_f = md_get_float(ctx, "r_f", 6000.0)
+        rabi_f = md_get_float(ctx, "rabi_f", 20.0)
+        if md_has_key(ctx, "r_f") and md_has_key(ctx, "rabi_f"):
+            return SweepValue(
+                start=EvalValue(expr="r_f - 1.2 * rabi_f"),
+                stop=EvalValue(expr="r_f - 0.8 * rabi_f"),
+                expts=expts,
+            )
         return SweepValue(
-            start=EvalValue(expr="r_f - 1.2 * rabi_f"),
-            stop=EvalValue(expr="r_f - 0.8 * rabi_f"),
+            start=r_f - 1.2 * rabi_f,
+            stop=r_f - 0.8 * rabi_f,
             expts=expts,
         )
-    return SweepValue(start=r_f - 1.2 * rabi_f, stop=r_f - 0.8 * rabi_f, expts=expts)
+
+    return custom(resolve, description="bath cavity frequency range")
 
 
 @dataclass
@@ -132,41 +134,38 @@ class BathFreqGainAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                # The two sweep axes own the cavity tone freq + gain
-                # (set_param("res_freq"/"res_gain") at run); the internal phase
-                # axis adds onto pi2_cfg.phase. Lock all three off the form so it
-                # never shows a field the sweep silently overwrites (cavity
-                # freq/gain → notebook 0.0; pi2 phase → notebook 90).
-                "tested_reset": make_bath_reset_module_spec()
-                .lock_literal("cavity_tone_cfg.freq", 0.0)
-                .lock_literal("cavity_tone_cfg.gain", 0.0)
-                .lock_literal("pi2_cfg.phase", _PI2_PHASE_OFFSET_DEG),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={
-                "freq": SweepSpec(label="Cavity freq (MHz)"),
-                "gain": SweepSpec(label="Cavity gain (a.u.)"),
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
+            MeasureCfgBuilder()
+            .reset("reset", optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .reset(
+                "tested_reset",
+                role_id="bath_reset",
+                label="Tested Reset",
+                shape="bath",
+                locked={
+                    "cavity_tone_cfg.freq": 0.0,
+                    "cavity_tone_cfg.gain": 0.0,
+                    "pi2_cfg.phase": _PI2_PHASE_OFFSET_DEG,
+                },
             )
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .role("modules.tested_reset", "bath_reset")
-            .role("modules.readout", "readout")
-            .sweep("sweep.freq", _cavity_freq_range(ctx, 51))
-            .sweep("sweep.gain", SweepValue(start=0.4, stop=1.0, expts=51))
+            .readout()
+            .relax_delay(
+                scaled_md("t1", factor=5.0, fallback_value=30.5),
+            )
+            .sweep(
+                "freq",
+                label="Cavity freq (MHz)",
+                default=_cavity_freq_range(51),
+            )
+            .sweep(
+                "gain",
+                label="Cavity gain (a.u.)",
+                default=SweepValue(start=0.4, stop=1.0, expts=51),
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

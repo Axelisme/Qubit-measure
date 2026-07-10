@@ -237,11 +237,9 @@ class CfgSectionSpec:
 
     # -- fluent spec overrides (return a new frozen spec; never mutate) -------
     #
-    # Used inside an adapter's ``cfg_spec()`` to lock/restrict a deep leaf of a
-    # spec tree returned by a shared helper. The result MUST be the value that
-    # ``cfg_spec()`` returns — locking is part of the spec contract, and
-    # ``cfg_spec`` is the sole owner of that contract. Locking the return value
-    # of ``cfg_spec()`` from outside leaks the contract to the call site.
+    # Used while authoring a context-free cfg definition to lock/restrict a deep
+    # leaf. Locking is part of the spec contract and stays local to the field
+    # declaration that owns it.
 
     def lock_literal(self, path: str, value: object) -> Self:
         """Replace the scalar leaf at ``path`` with a fixed ``LiteralSpec(value)``.

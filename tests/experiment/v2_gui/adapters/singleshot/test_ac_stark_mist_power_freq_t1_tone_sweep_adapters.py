@@ -228,6 +228,23 @@ def test_t1_tone_sweep_freq_axis_defaults_to_readout_frequency_range() -> None:
     assert freq_sweep.stop.expr == "readout_f + 1.5 * rf_w"
 
 
+def test_t1_tone_sweep_definition_snapshots_outer_class_defaults() -> None:
+    adapter_cls = SsT1ToneSweepFreqAdapter
+    definition = adapter_cls.cfg_definition()
+    original_expts = adapter_cls.outer_default.expts
+    try:
+        adapter_cls.outer_default.expts = original_expts + 78
+        schema = definition.instantiate(_make_ctx(_make_ml()))
+    finally:
+        adapter_cls.outer_default.expts = original_expts
+
+    sweep = schema.value.fields["sweep"]
+    assert isinstance(sweep, CfgSectionValue)
+    freq_sweep = sweep.fields["freq"]
+    assert isinstance(freq_sweep, SweepValue)
+    assert freq_sweep.expts == original_expts
+
+
 @pytest.mark.parametrize(
     ("adapter", "prefix"),
     [

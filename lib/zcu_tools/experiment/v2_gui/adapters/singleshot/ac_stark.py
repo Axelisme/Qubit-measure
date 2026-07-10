@@ -10,14 +10,12 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.singleshot import AcStarkCfg, AcStarkExp
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    custom,
     md_has_key,
-    proper_relax,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -34,10 +32,7 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     EvalValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -48,6 +43,16 @@ from ._shared import read_chi_kappa, read_ge_centers
 # single_qubit.md:3329) — it is the photon-number-per-gain² calibration the
 # downstream MIST experiments read as ``ac_coeff``.
 SsAcStarkRunResult: TypeAlias = Any  # AcStarkResult (frozen domain dataclass)
+
+
+def _freq_sweep_default(ctx: ExpContext) -> SweepValue:
+    if md_has_key(ctx, "q_f"):
+        return SweepValue(
+            start=EvalValue(expr="q_f - 700.0"),
+            stop=EvalValue(expr="q_f + 100.0"),
+            expts=101,
+        )
+    return SweepValue(start=3300.0, stop=4100.0, expts=101)
 
 
 @dataclass
@@ -106,46 +111,40 @@ class SsAcStarkAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            # Module field order mirrors AcStarkModuleCfg: reset, init_pulse,
-            # stark_pulse1, stark_pulse2, readout.
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                "stark_pulse1": make_pulse_module_spec(label="Stark Pulse 1"),
-                "stark_pulse2": make_pulse_module_spec(label="Stark Pulse 2"),
-                "readout": make_readout_module_spec(),
-            },
-            # 2D sweep: Stark gain (outer) × probe frequency (inner).
-            sweep={
-                "gain": SweepSpec(label="Stark gain (a.u.)"),
-                "freq": SweepSpec(label="Probe frequency (MHz)"),
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        freq_sweep = (
-            SweepValue(
-                start=EvalValue(expr="q_f - 700.0"),
-                stop=EvalValue(expr="q_f + 100.0"),
-                expts=101,
-            )
-            if md_has_key(ctx, "q_f")
-            else SweepValue(start=3300.0, stop=4100.0, expts=101)
-        )
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=2)
-            .set("relax_delay", proper_relax(ctx))
-            .role("modules.stark_pulse1", "qub_probe", RoleInit.INLINE)
-            .role("modules.stark_pulse2", "qub_probe", RoleInit.INLINE)
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .sweep("sweep.gain", SweepValue(start=0.0, stop=0.22, expts=301))
-            .sweep("sweep.freq", freq_sweep)
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .pulse(
+                "stark_pulse1",
+                role_id="qub_probe",
+                label="Stark Pulse 1",
+                init=ModuleInit.INLINE,
+            )
+            .pulse(
+                "stark_pulse2",
+                role_id="qub_probe",
+                label="Stark Pulse 2",
+                init=ModuleInit.INLINE,
+            )
+            .readout()
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .sweep(
+                "gain",
+                label="Stark gain (a.u.)",
+                default=SweepValue(start=0.0, stop=0.22, expts=301),
+            )
+            .sweep(
+                "freq",
+                label="Probe frequency (MHz)",
+                default=custom(
+                    _freq_sweep_default,
+                    description="AC-Stark probe frequency range",
+                ),
+            )
+            .reps(1000)
+            .rounds(2)
             .build()
         )
 

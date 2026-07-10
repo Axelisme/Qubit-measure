@@ -6,11 +6,9 @@ status: accepted
 
 ## 脈絡
 
-ADR-0010 立了「value 樹永遠完整、None 表空」，但**沒有任何地方強制** adapter 的
-`make_default_value(self, ctx)`（BaseAdapter 抽象方法，~20 個各寫）真的回傳完整 value 樹。
-lookback 在 `modules` 子樹省略 `init_pulse`/`reset`、頂層省略 `reps`（LiteralSpec），產出
-結構不完整的 value——上一個 phase 用 codec 回退補丁（`_default_node_value`）掩蓋，但根因是
-「完整性靠 adapter 自律、無強制」。
+ADR-0010立了「value樹永遠完整、None表空」；所有 finished cfg仍必須有一致的runtime boundary
+強制這項contract，不能只依賴authoring helper。[[0012]]的definition + assembler提供
+by-construction完整性，validation則防守restore、agent RPC與手構schema等其它入口。
 
 同時 lowering 對 DirectValue scalar **完全不檢查型別 / choices**（只查 `is None`）：UI 路徑有
 widget 隔離，但 agent RPC / persist restore / 手構 schema 繞過 UI，非法值（型別不符、不在
@@ -36,8 +34,9 @@ linked-reference resolution 位於 measure-owned `gui.app.main.adapter.lowering`
 
 ### 呼叫點 = 成品邊界（不放 `__post_init__`）
 
-- **`BaseAdapter.make_default_cfg`**：產 schema 後 `validate_schema(schema, ctx.ml)` → adapter 漏/錯當場 raise，
-  責任明確指向那 adapter，**框架不補齊**。一處守 ~20 adapter。
+- **`BaseAdapter.make_default_cfg`**：`cfg_definition().instantiate(ctx)`後
+  `validate_schema(schema, ctx.ml)` → definition seed或role materialization錯誤當場raise，
+  **框架不補齊**。
 - **`schema_to_raw_dict(schema, md, ml)`（lower）**：lower 前先呼叫
   `validate_schema(schema, ml)` → 任何要 lower 的 cfg 先過驗證。
 
@@ -66,9 +65,8 @@ validation 是成品邊界的**顯式動作**，不是型別的隱性負擔。
 ## Consequences
 
 - `validate_schema(schema, ml)`（薄 wrapper）→ `lowering.validate_section`（遞迴，復用 `find_allowed_spec`）。
-- `make_default_cfg` + `schema_to_raw_dict` 加 static validation 呼叫。
-- ~20 adapter：lookback 補 `reps`/`init_pulse`/`reset` entry；onetone/freq 在 value 端 `.with_field`
-  覆寫 lock_literal 的 freq/ro_freq=0.0；其餘本就完整不動。
+- `make_default_cfg` + `schema_to_raw_dict`都呼叫static validation。
+- [[0012]] 的paired assembler對齊locked literal；adapter不用在另一個value hook重寫同一個lock value。
 - 移除 codec `_default_node_value` 回退（value 樹保證完整後不需要；非 ref None 改 fast-fail）。
 - **lower 加 validate 的行為變嚴**：以前漏網的不合法 cfg（不在 choices、型別不符）現在被擋——
   揪出來逐個判斷（修 cfg/spec 或放寬 validate）。實證現有代碼 100% 型別嚴格，不炸。

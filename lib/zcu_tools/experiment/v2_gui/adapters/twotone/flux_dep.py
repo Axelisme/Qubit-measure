@@ -10,17 +10,14 @@ from zcu_tools.experiment.v2.twotone.fluxdep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FluxPickParams,
     FluxPickResult,
-    RoleInit,
-    build_exp_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
     build_flux_pick_session,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    proper_flux_range,
-    proper_qub_freq_range,
+    flux_range,
+    qub_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -34,12 +31,6 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    ScalarSpec,
-    SweepSpec,
 )
 
 FluxDepRunResult: TypeAlias = FreqFluxResult
@@ -113,41 +104,37 @@ class FluxDepAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                # The sweep axis owns the qubit-drive frequency
-                # (set_param("freq") at run); lock it so the form does not
-                # show a field the sweep silently overwrites.
-                "qub_pulse": make_pulse_module_spec().lock_literal("freq", 0.0),
-                "readout": make_readout_module_spec(),
-            },
-            dev={
-                "flux_dev": ScalarSpec(
-                    label="Flux Device",
-                    type=str,
-                    choices_source="devices",
-                    required=True,
-                )
-            },
-            sweep={
-                "flux": SweepSpec(label="Flux device value", decimals=6),
-                "freq": SweepSpec(label="Freq (MHz)"),
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=1.0)
-            # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.qub_pulse", "qub_probe", RoleInit.INLINE)
-            .role("modules.readout", "readout")
-            .value_source("dev.flux_dev", "device.flux.name", default="flux_yoko")
-            .sweep("sweep.flux", proper_flux_range(ctx, 101))
-            .sweep("sweep.freq", proper_qub_freq_range(ctx, 1001, span_factor=1.0))
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse(
+                "qub_pulse",
+                role_id="qub_probe",
+                init=ModuleInit.INLINE,
+                locked={"freq": 0.0},
+            )
+            .readout()
+            .device_from_value_source(
+                "flux_dev",
+                label="Flux Device",
+                source_key="device.flux.name",
+                fallback="flux_yoko",
+            )
+            .relax_delay(1.0)
+            .sweep(
+                "flux",
+                label="Flux device value",
+                default=flux_range(expts=101),
+                decimals=6,
+            )
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=qub_freq_range(expts=1001, span_factor=1.0),
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

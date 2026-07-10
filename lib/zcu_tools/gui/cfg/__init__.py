@@ -39,6 +39,11 @@ from .model import (
     SweepValue,
     default_value_for_type,
 )
+from .schema_assembler import (
+    USE_SPEC_DEFAULT,
+    CfgSchemaAssembler,
+    default_value_for_spec,
+)
 from .tree import read_value_path, replace_value_path, resolve_spec_path
 
 __all__ = [
@@ -47,6 +52,7 @@ __all__ = [
     "CfgNodeSpec",
     "CfgNodeValue",
     "CfgSchema",
+    "CfgSchemaAssembler",
     "CfgSectionSpec",
     "CfgSectionValue",
     "ChoiceBinding",
@@ -67,8 +73,10 @@ __all__ = [
     "SessionCodecError",
     "SweepSpec",
     "SweepValue",
+    "USE_SPEC_DEFAULT",
     "align_locked_literals",
     "default_value_for_type",
+    "default_value_for_spec",
     "inherit_from",
     "lower_finished_cfg",
     "make_default_value",

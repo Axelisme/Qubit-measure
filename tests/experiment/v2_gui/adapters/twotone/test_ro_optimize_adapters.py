@@ -332,7 +332,7 @@ def test_ro_opt_auto_defaults_relax_num_points_and_gain_bounds() -> None:
     ],
 )
 def test_ro_opt_readout_spec_is_pulse_only(adapter: Any) -> None:
-    modules = adapter.cfg_spec().fields["modules"]
+    modules = adapter.make_default_cfg(_make_ctx()).spec.fields["modules"]
     assert isinstance(modules, CfgSectionSpec)
     readout = modules.fields["readout"]
     assert isinstance(readout, ReferenceSpec)

@@ -10,11 +10,10 @@ from zcu_tools.experiment.v2.onetone.power_dep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_readout_module_spec,
-    proper_res_freq_range,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -27,10 +26,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    FloatSpec,
-    SweepSpec,
     SweepValue,
 )
 
@@ -80,36 +75,37 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                # No reset module — one-tone runs without a qubit reset
-                # (the ExpCfg defaults reset=None). The sweep axes own
-                # readout freq + gain (set_param at run; "freq" writes
-                # both pulse and ro freq), so lock them off the form.
-                "readout": make_pulse_readout_module_spec()
-                .lock_literal("pulse_cfg.freq", 0.0)
-                .lock_literal("ro_cfg.ro_freq", 0.0)
-                .lock_literal("pulse_cfg.gain", 0.0),
-            },
-            sweep={
-                "gain": SweepSpec(label="Gain (a.u.)"),
-                "freq": SweepSpec(label="Freq (MHz)"),
-            },
-            extra={
-                "earlystop_snr": FloatSpec(
-                    label="Early-stop SNR (0 disables)", decimals=3
-                )
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=1.0, earlystop_snr=0.0)
-            .role("modules.readout", "readout", RoleInit.INLINE)
-            .sweep("sweep.gain", SweepValue(start=0.001, stop=1.0, expts=101))
-            .sweep("sweep.freq", proper_res_freq_range(ctx, 201))
+            MeasureCfgBuilder()
+            .readout(
+                pulse_only=True,
+                init=ModuleInit.INLINE,
+                locked={
+                    "pulse_cfg.freq": 0.0,
+                    "ro_cfg.ro_freq": 0.0,
+                    "pulse_cfg.gain": 0.0,
+                },
+            )
+            .relax_delay(1.0)
+            .sweep(
+                "gain",
+                label="Gain (a.u.)",
+                default=SweepValue(start=0.001, stop=1.0, expts=101),
+            )
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=res_freq_range(expts=201),
+            )
+            .float(
+                "earlystop_snr",
+                label="Early-stop SNR (0 disables)",
+                default=0.0,
+                decimals=3,
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

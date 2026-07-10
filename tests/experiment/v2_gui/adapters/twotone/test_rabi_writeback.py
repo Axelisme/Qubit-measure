@@ -373,7 +373,7 @@ def _make_ctx_with_ml(**modules: PulseCfg) -> MagicMock:
 
 def _gain_sweep_stop(ctx: MagicMock) -> float | EvalValue:
     """Extract the gain sweep stop edge from AmpRabiAdapter.make_default_value."""
-    val = AmpRabiAdapter().make_default_value(ctx)
+    val = AmpRabiAdapter().make_default_cfg(ctx).value
     sweep_section = val.fields["sweep"]
     assert isinstance(sweep_section, CfgSectionValue)
     gain_sweep = sweep_section.fields["gain"]
@@ -384,7 +384,7 @@ def _gain_sweep_stop(ctx: MagicMock) -> float | EvalValue:
 
 
 def _amp_qub_waveform_length(ctx: MagicMock) -> DirectValue | EvalValue:
-    val = AmpRabiAdapter().make_default_value(ctx)
+    val = AmpRabiAdapter().make_default_cfg(ctx).value
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
@@ -397,7 +397,7 @@ def _amp_qub_waveform_length(ctx: MagicMock) -> DirectValue | EvalValue:
 
 
 def _amp_qub_pulse(ctx: MagicMock) -> ReferenceValue:
-    val = AmpRabiAdapter().make_default_value(ctx)
+    val = AmpRabiAdapter().make_default_cfg(ctx).value
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
@@ -478,7 +478,7 @@ class TestAmpRabiDefaultValueGainSeed:
 
 def _length_sweep_stop(ctx: MagicMock) -> float | EvalValue:
     """Extract the length sweep stop edge from LenRabiAdapter.make_default_value."""
-    val = LenRabiAdapter().make_default_value(ctx)
+    val = LenRabiAdapter().make_default_cfg(ctx).value
     sweep_section = val.fields["sweep"]
     assert isinstance(sweep_section, CfgSectionValue)
     length_sweep = sweep_section.fields["length"]
@@ -489,7 +489,7 @@ def _length_sweep_stop(ctx: MagicMock) -> float | EvalValue:
 
 
 def _length_sweep(ctx: MagicMock) -> SweepValue:
-    val = LenRabiAdapter().make_default_value(ctx)
+    val = LenRabiAdapter().make_default_cfg(ctx).value
     sweep_section = val.fields["sweep"]
     assert isinstance(sweep_section, CfgSectionValue)
     length_sweep = sweep_section.fields["length"]
@@ -498,7 +498,7 @@ def _length_sweep(ctx: MagicMock) -> SweepValue:
 
 
 def _len_qub_gain(ctx: MagicMock) -> DirectValue:
-    val = LenRabiAdapter().make_default_value(ctx)
+    val = LenRabiAdapter().make_default_cfg(ctx).value
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]
@@ -509,7 +509,7 @@ def _len_qub_gain(ctx: MagicMock) -> DirectValue:
 
 
 def _len_qub_pulse(ctx: MagicMock) -> ReferenceValue:
-    val = LenRabiAdapter().make_default_value(ctx)
+    val = LenRabiAdapter().make_default_cfg(ctx).value
     modules = val.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     qub_pulse = modules.fields["qub_pulse"]

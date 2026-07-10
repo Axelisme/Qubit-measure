@@ -7,6 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -14,10 +18,6 @@ from zcu_tools.gui.app.main.adapter import (
     LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
 )
 
 
@@ -45,11 +45,8 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedResult, NoAnalysisResult, NoAnalyzeP
     exp_cls = _LoadExp
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec()
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        return CfgSectionValue()
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        return MeasureCfgBuilder().build()
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return "load"

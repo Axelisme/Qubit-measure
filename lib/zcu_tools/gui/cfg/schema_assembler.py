@@ -1,12 +1,14 @@
-"""Private paired Spec/Value tree mechanics for node schema declaration."""
+"""Domain-free lockstep assembly of configuration Spec and Value trees."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
+from typing import Final, Self
 
-from zcu_tools.gui.cfg import (
+from .inheritance import align_locked_literals, make_default_value
+from .model import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeSpec,
@@ -18,61 +20,133 @@ from zcu_tools.gui.cfg import (
     ChoiceSectionSpec,
     DirectValue,
     EvalValue,
+    LiteralSpec,
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    align_locked_literals,
-    make_default_value,
 )
 
 
-class _SchemaTree:
-    """Declare an initially empty Spec/Value tree in lockstep."""
+class _UseSpecDefault:
+    pass
 
-    def __init__(self, *, label: str) -> None:
+
+USE_SPEC_DEFAULT: Final = _UseSpecDefault()
+"""Ask :class:`CfgSchemaAssembler` for the spec's neutral default value."""
+
+
+def default_value_for_spec(spec: CfgNodeSpec) -> CfgNodeValue | None:
+    """Return the neutral value for one spec node.
+
+    This is intentionally structural: it knows no experiment roles or domain
+    defaults. Domain builders may use it while defining a static shape whose
+    real default will only be materialized later.
+    """
+
+    return make_default_value(CfgSectionSpec(fields={"value": spec})).fields["value"]
+
+
+class CfgSchemaAssembler:
+    """Declare an initially empty Spec/Value tree in lockstep.
+
+    The assembler owns only paired-tree mechanics. Section labels may be
+    supplied by a consumer-owned callback; no application vocabulary lives in
+    this module.
+    """
+
+    def __init__(
+        self,
+        *,
+        label: str = "",
+        section_labeler: Callable[[str], str] | None = None,
+    ) -> None:
         self._spec = CfgSectionSpec(label=label, fields={})
         self._value = CfgSectionValue(fields={})
+        self._section_labeler = section_labeler or _generic_section_label
         self._choice_bindings: list[
             tuple[str, str, Mapping[str, tuple[str, ...]], str | None]
         ] = []
+        self._built = False
 
     @property
     def spec(self) -> CfgSectionSpec:
-        return self._spec
+        """An isolated snapshot of the in-progress spec for preflight."""
 
-    def declare(self, path: str, spec: CfgNodeSpec, default: object) -> None:
-        value = _wrap_default(spec, default)
-        parent_spec, parent_value, leaf = _ensure_parent(self._spec, self._value, path)
+        return deepcopy(self._spec)
+
+    @staticmethod
+    def default_value_for_spec(spec: CfgNodeSpec) -> CfgNodeValue | None:
+        return default_value_for_spec(spec)
+
+    def declare(
+        self,
+        path: str,
+        spec: CfgNodeSpec,
+        default: object = USE_SPEC_DEFAULT,
+    ) -> Self:
+        self._check_mutable()
+        owned_spec = deepcopy(spec)
+        resolved_default = (
+            default_value_for_spec(owned_spec)
+            if default is USE_SPEC_DEFAULT
+            else default
+        )
+        owned_value = deepcopy(_wrap_default(owned_spec, resolved_default))
+        parent_spec, parent_value, leaf = _ensure_parent(
+            self._spec,
+            self._value,
+            path,
+            section_labeler=self._section_labeler,
+        )
         if leaf in parent_spec.fields:
             raise ValueError(f"cfg path {path!r} already exists")
-        parent_spec.fields[leaf] = spec
-        parent_value.fields[leaf] = value
+        parent_spec.fields[leaf] = owned_spec
+        parent_value.fields[leaf] = owned_value
+        return self
 
-    def ensure_section(self, path: str, label: str) -> None:
-        parent_spec, parent_value, leaf = _ensure_parent(self._spec, self._value, path)
+    def ensure_section(self, path: str, *, label: str) -> Self:
+        self._check_mutable()
+        parent_spec, parent_value, leaf = _ensure_parent(
+            self._spec,
+            self._value,
+            path,
+            section_labeler=self._section_labeler,
+        )
         spec = parent_spec.fields.get(leaf)
         value = parent_value.fields.get(leaf)
         if spec is None:
             parent_spec.fields[leaf] = CfgSectionSpec(label=label, fields={})
             parent_value.fields[leaf] = CfgSectionValue(fields={})
-            return
+            return self
         if not isinstance(spec, CfgSectionSpec) or not isinstance(
             value, CfgSectionValue
         ):
             raise TypeError(f"cfg path {path!r} is not a section")
         if label and not spec.label:
             parent_spec.fields[leaf] = replace(spec, label=label)
+        return self
 
     def validate_declarations(self, paths: tuple[str, ...]) -> None:
         """Check a declaration batch without modifying the paired tree."""
+
+        self._check_mutable()
         spec = deepcopy(self._spec)
         value = deepcopy(self._value)
         for path in paths:
-            parent_spec, _, leaf = _ensure_parent(spec, value, path)
+            parent_spec, parent_value, leaf = _ensure_parent(
+                spec,
+                value,
+                path,
+                section_labeler=self._section_labeler,
+            )
             if leaf in parent_spec.fields:
                 raise ValueError(f"cfg path {path!r} already exists")
+            # A concrete placeholder makes duplicates and ancestor/descendant
+            # conflicts within the same batch visible during this preflight.
+            parent_spec.fields[leaf] = ScalarSpec(label="", type=bool)
+            parent_value.fields[leaf] = DirectValue(False)
 
     def add_choice_binding(
         self,
@@ -81,14 +155,19 @@ class _SchemaTree:
         fields_by_choice: Mapping[str, tuple[str, ...]],
         *,
         section_label: str | None,
-    ) -> None:
+    ) -> Self:
+        self._check_mutable()
         if not fields_by_choice:
             raise ValueError("choice_fields needs at least one choice")
         self._choice_bindings.append(
-            (section_path, selector_key, fields_by_choice, section_label)
+            (section_path, selector_key, dict(fields_by_choice), section_label)
         )
+        return self
 
     def build(self) -> CfgSchema:
+        """Return an isolated schema snapshot and consume this assembler."""
+
+        self._check_mutable()
         spec = deepcopy(self._spec)
         value = deepcopy(self._value)
         for (
@@ -105,11 +184,12 @@ class _SchemaTree:
                 section_label=section_label,
             )
         align_locked_literals(spec, value)
+        self._built = True
         return CfgSchema(spec=spec, value=value)
 
-
-def _default_value_for_spec(spec: CfgNodeSpec) -> CfgNodeValue | None:
-    return make_default_value(CfgSectionSpec(fields={"value": spec})).fields["value"]
+    def _check_mutable(self) -> None:
+        if self._built:
+            raise RuntimeError("CfgSchemaAssembler is already built; create a new one")
 
 
 def _wrap_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
@@ -128,6 +208,10 @@ def _wrap_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
         return default
     if isinstance(spec, ScalarSpec):
         if isinstance(default, (DirectValue, EvalValue)):
+            return default
+        return DirectValue(default)
+    if isinstance(spec, LiteralSpec):
+        if isinstance(default, DirectValue):
             return default
         return DirectValue(default)
     if isinstance(spec, ReferenceSpec):
@@ -169,6 +253,8 @@ def _ensure_parent(
     root_spec: CfgSectionSpec,
     root_value: CfgSectionValue,
     path: str,
+    *,
+    section_labeler: Callable[[str], str],
 ) -> tuple[CfgSectionSpec, CfgSectionValue, str]:
     parts = _split_path(path)
     spec = root_spec
@@ -177,7 +263,7 @@ def _ensure_parent(
         child_spec = spec.fields.get(part)
         child_value = value.fields.get(part)
         if child_spec is None:
-            child_spec = CfgSectionSpec(label=_section_label(part), fields={})
+            child_spec = CfgSectionSpec(label=section_labeler(part), fields={})
             child_value = CfgSectionValue(fields={})
             spec.fields[part] = child_spec
             value.fields[part] = child_value
@@ -253,12 +339,8 @@ def _split_path(path: str) -> tuple[str, ...]:
     return parts
 
 
-def _section_label(key: str) -> str:
-    labels = {
-        "modules": "Modules",
-        "sweep": "Sweep",
-        "generation": "Generation overrides",
-        "acquisition": "Acquisition guardrails",
-        "relax": "Relax timing",
-    }
-    return labels.get(key, key.replace("_", " ").title())
+def _generic_section_label(key: str) -> str:
+    return key.replace("_", " ").title()
+
+
+__all__ = ["CfgSchemaAssembler", "USE_SPEC_DEFAULT", "default_value_for_spec"]

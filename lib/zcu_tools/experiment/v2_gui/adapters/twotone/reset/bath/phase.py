@@ -14,14 +14,9 @@ from zcu_tools.experiment.v2.twotone.reset.bath.phase import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_bath_reset_module_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_scalar_float,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -34,9 +29,6 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -101,43 +93,31 @@ class BathPhaseAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                # The sweep axis owns the pi/2 phase (set_param("pi2_phase") at
-                # run); lock it off the form so it never shows a field the sweep
-                # silently overwrites.
-                "tested_reset": make_bath_reset_module_spec().lock_literal(
-                    "pi2_cfg.phase", 0.0
-                ),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"phase": SweepSpec(label="Phase (deg)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=1000, relax_delay=10.5)
-            .role("modules.tested_reset", "bath_reset")
-            # Hold the cavity tone at its calibrated freq/gain while the phase is
-            # swept, so the cfg snapshot carries the calibrated reset forward for
-            # the final reset_bath / reset_bath_e registration (D2(a) md-link).
-            .set(
-                "modules.tested_reset.cavity_tone_cfg.freq",
-                md_scalar_float(ctx, "bathreset_freq", 0.0),
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .reset(
+                "tested_reset",
+                role_id="bath_reset",
+                label="Tested Reset",
+                shape="bath",
+                locked={"pi2_cfg.phase": 0.0},
+                overrides={
+                    "cavity_tone_cfg.freq": md("bathreset_freq", fallback=0.0),
+                    "cavity_tone_cfg.gain": md("bathreset_gain", fallback=0.1),
+                },
             )
-            .set(
-                "modules.tested_reset.cavity_tone_cfg.gain",
-                md_scalar_float(ctx, "bathreset_gain", 0.1),
+            .readout()
+            .relax_delay(10.5)
+            .sweep(
+                "phase",
+                label="Phase (deg)",
+                default=SweepValue(start=-360.0, stop=360.0, expts=201),
             )
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .sweep("sweep.phase", SweepValue(start=-360.0, stop=360.0, expts=201))
+            .reps(100)
+            .rounds(1000)
             .build()
         )
 

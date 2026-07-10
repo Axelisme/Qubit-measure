@@ -14,15 +14,11 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
-    proper_relax,
-    proper_res_freq_range,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
     readout_dpm_writeback_items,
+    res_freq_range,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -33,12 +29,6 @@ from zcu_tools.gui.app.main.adapter import (
     ParamMeta,
     WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    FloatSpec,
-    SweepSpec,
 )
 
 RoOptFreqRunResult: TypeAlias = FreqResult
@@ -109,32 +99,24 @@ class RoOptFreqAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "qub_pulse": make_pulse_module_spec(),
-                "readout": make_pulse_readout_module_spec()
-                .lock_literal("pulse_cfg.freq", 0.0)
-                .lock_literal("ro_cfg.ro_freq", 0.0),
-            },
-            sweep={"freq": SweepSpec(label="Readout freq (MHz)")},
-            extra={"skew_penalty": FloatSpec(label="Skew penalty", decimals=3)},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000,
-                rounds=100,
-                relax_delay=proper_relax(ctx, fallback=30.5),
-                skew_penalty=0.0,
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("qub_pulse", role_id="pi_pulse")
+            .readout(
+                pulse_only=True,
+                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
             )
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.qub_pulse", "pi_pulse")
-            .role("modules.readout", "readout")
-            .sweep("sweep.freq", proper_res_freq_range(ctx, 301, span_factor=1.0))
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=30.5))
+            .sweep(
+                "freq",
+                label="Readout freq (MHz)",
+                default=res_freq_range(expts=301, span_factor=1.0),
+            )
+            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

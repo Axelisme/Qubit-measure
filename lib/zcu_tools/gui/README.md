@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-10（shared cfg direct-import ownership）
+**Last updated:** 2026-07-11（domain-free paired schema assembler）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -12,6 +12,12 @@ own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 default/inheritance helpers、raw persistence codec，以及generic finished-cfg
 validation/lowering。lowering只依賴expression/reference/range三個callable ports，維持
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
+
+`CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
+Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
+並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、ExpContext、MetaDict、
+ModuleLibrary、logical key或generation policy；measure與autoflux各自保有domain builder，只共用這層
+tree mechanics（ADR-0012、ADR-0045）。
 
 generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adapter facade只暴露
 framework contract、request/result/writeback/analyze params與protocol signature需要的session

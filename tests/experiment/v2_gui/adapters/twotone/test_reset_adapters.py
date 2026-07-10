@@ -1310,7 +1310,7 @@ def test_rabi_check_tested_reset_is_4_shape() -> None:
         make_two_pulse_reset_spec,
     )
 
-    spec = RabiCheckAdapter.cfg_spec()
+    spec = RabiCheckAdapter().make_default_cfg(_make_ctx()).spec
     modules_spec = spec.fields["modules"]
     # The spec tree owns a "modules" CfgSectionSpec containing the tested_reset slot.
     tested_reset_spec = modules_spec.fields["tested_reset"]  # type: ignore[union-attr]

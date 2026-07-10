@@ -13,13 +13,9 @@ from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import GE_Result
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -34,12 +30,6 @@ from zcu_tools.gui.app.main.adapter import (
     PostAnalyzeResultBase,
     WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    IntSpec,
-    LiteralSpec,
 )
 
 GERunResult: TypeAlias = GE_Result
@@ -152,34 +142,17 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            # Module field order mirrors GEModuleCfg: reset, init_pulse,
-            # probe_pulse, readout.
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                "probe_pulse": make_pulse_module_spec(label="Probe Pulse"),
-                "readout": make_pulse_readout_module_spec(),
-            },
-            # Single-shot has no swept axis; the shot count is the run-only knob
-            # that the domain copies into reps.
-            extra={"shots": IntSpec(label="Shots")},
-            # The domain overwrites reps (← shots) and rounds (← 1) at run, so lock
-            # them off the form (lookback locks reps the same way) — showing fields
-            # the run silently discards would be misleading.
-            reps=LiteralSpec(value=1, label="Reps"),
-            rounds=LiteralSpec(value=1, label="Rounds"),
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(shots=100000, relax_delay=proper_relax(ctx))
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .role("modules.probe_pulse", "pi_pulse")
-            .role("modules.readout", "readout")
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .pulse("probe_pulse", role_id="pi_pulse", label="Probe Pulse")
+            .readout(pulse_only=True)
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .int("shots", label="Shots", default=100000)
+            .reps(1, locked=True)
+            .rounds(1, locked=True)
             .build()
         )
 

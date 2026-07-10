@@ -13,7 +13,8 @@ multi-source defaults and for writing the current value of a source into
 **Related:** ContextService is the single md/ml write authority in [[0006]];
 service role and port discipline follow [[0004]]/[[0005]]; session-core sharing
 is defined in [[0020]]; cfg editor sessions and `EvalValue` wire handling are
-defined in [[0008]]; role defaults and CfgBuilder live under [[0009]]/[[0012]].
+defined in [[0008]]; role defaults and context-free cfg definitions live under
+[[0009]]/[[0012]].
 
 ## Decision
 
@@ -63,9 +64,10 @@ Source references use a sibling concept to `EvalValue`, not an extension of
   registered key closes with `}`. A trailing space after `@{full.key} ` resolves
   once and replaces the token with the current value formatted as text. Plain
   strings in the wire contract are not globally interpreted.
-- Adapter default generation may use `CfgBuilder.value_source(...)`; role-default
-  seeds may use `Source(...)`. Both resolve through `ExpContext.values` during
-  default construction and store ordinary direct values in the cfg tree.
+- Adapter definition may use the typed `value_source(...)` Seed; role-default
+  seeds may use `Source(...)`. Both resolve through `ExpContext.values` only when
+  `MeasureCfgDefinition.instantiate(ctx)` creates a fresh cfg, then store ordinary
+  direct values in the value tree. Restore與使用者編輯不保留或重跑lazy source。
 
 `ContextService` remains the md/ml write authority. Any path that writes a
 `ValueRef`-style token to `MetaDict` resolves it in the UI/input layer before

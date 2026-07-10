@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
+from zcu_tools.gui.cfg import CfgSchema
 
 from .types import (
     AdapterCapabilities,
@@ -52,11 +52,6 @@ class ExpAdapterProtocol(Protocol):
     # adapter overriding it) must annotate this as ``ClassVar`` too, or pyright
     # rejects the Protocol conformance.
     capabilities: ClassVar[AdapterCapabilities]
-
-    @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        """Return the static cfg spec tree (no context, no instance state)."""
-        ...
 
     @classmethod
     def guide(cls) -> AdapterGuide:

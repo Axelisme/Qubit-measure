@@ -11,14 +11,12 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_readout_module_spec,
-    md_get_float,
-    md_has_key,
-    proper_res_freq_range,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    md,
     readout_rf_writeback_items,
+    res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -30,13 +28,6 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
-    ScalarSpec,
-    SweepSpec,
 )
 
 OneToneFreqRunResult: TypeAlias = FreqResult
@@ -112,47 +103,38 @@ class OneToneFreqAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                # No reset module — one-tone spectroscopy runs without a
-                # qubit reset (the ExpCfg defaults reset=None).
-                "readout": make_pulse_readout_module_spec()
-                .lock_literal("pulse_cfg.freq", 0.0)
-                .lock_literal("ro_cfg.ro_freq", 0.0),
-            },
-            sweep={"freq": SweepSpec(label="Freq (MHz)")},
-            extra={
-                "sampling_mode": ScalarSpec(
-                    label="Sampling mode",
-                    type=str,
-                    choices=list(_SAMPLING_MODE_CHOICES),
-                )
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
-        ro_length: float | EvalValue = (
-            EvalValue(expr="res_probe_len - 0.1")
-            if md_has_key(ctx, "res_probe_len")
-            else probe_len - 0.1
-        )
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=100,
-                rounds=100,
-                relax_delay=1.0,
-                sampling_mode="linear",
+            MeasureCfgBuilder()
+            # No reset module — one-tone spectroscopy runs without a qubit
+            # reset. The sweep owns both readout frequency leaves.
+            .readout(
+                pulse_only=True,
+                init=ModuleInit.INLINE,
+                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
+                overrides={
+                    "pulse_cfg.gain": 0.05,
+                    "ro_cfg.ro_length": md(
+                        "res_probe_len",
+                        expr="res_probe_len - 0.1",
+                        fallback=0.9,
+                    ),
+                },
             )
-            # cfg_spec() locks pulse_cfg.freq / ro_cfg.ro_freq to 0.0 (the sweep
-            # axis owns frequency); build() fills those locked literals from the
-            # spec, so they are not set here.
-            .role("modules.readout", "readout", RoleInit.INLINE)
-            .set("modules.readout.pulse_cfg.gain", 0.05)
-            .set("modules.readout.ro_cfg.ro_length", ro_length)
-            .sweep("sweep.freq", proper_res_freq_range(ctx, 301))
+            .relax_delay(1.0)
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=res_freq_range(expts=301),
+            )
+            .choice(
+                "sampling_mode",
+                label="Sampling mode",
+                choices=_SAMPLING_MODE_CHOICES,
+                default="linear",
+            )
+            .reps(100)
+            .rounds(100)
             .build()
         )
 

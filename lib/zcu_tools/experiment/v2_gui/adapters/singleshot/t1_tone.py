@@ -14,15 +14,14 @@ from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    SweepDefault,
+    custom,
     md_eval_scaled,
     md_has_key,
-    proper_relax,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -39,11 +38,7 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
+    EvalValue,
 )
 
 from ._shared import read_ge_centers, readout_probe_freq
@@ -52,6 +47,11 @@ from ._shared import read_ge_centers, readout_probe_freq
 # (``t1_with_tone``) is written back to the MetaDict (key ``t1_with_tone``,
 # matching single_qubit.md:3079).
 SsT1ToneRunResult: TypeAlias = T1WithToneResult
+
+
+def _sweep_stop_default(ctx: ExpContext) -> float | EvalValue:
+    key = "t1_with_tone" if md_has_key(ctx, "t1_with_tone") else "t1"
+    return md_eval_scaled(ctx, key, factor=5.0, fallback=100.0)
 
 
 @dataclass
@@ -111,43 +111,41 @@ class SsT1ToneAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        # ``uniform`` is a run-only flag (not lowered into T1WithToneCfg).
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                "pi_pulse": make_pulse_module_spec(),
-                "probe_pulse": make_pulse_module_spec(label="Probe Pulse"),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Delay (us)")},
-            extra={"uniform": ScalarSpec(label="Uniform (linear) sweep", type=bool)},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        # Prefer t1_with_tone from a prior run; fall back to t1 or 100 us.
-        # md_eval_scaled requires a non-None fallback, so branch on key presence.
-        if md_has_key(ctx, "t1_with_tone"):
-            sweep_stop = md_eval_scaled(ctx, "t1_with_tone", factor=5.0, fallback=100.0)
-        else:
-            sweep_stop = md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0)
-        relax_delay = proper_relax(ctx)
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000,
-                rounds=10,
-                relax_delay=relax_delay,
-                uniform=False,  # domain default: log-spaced
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .pulse("pi_pulse", role_id="pi_pulse")
+            .pulse(
+                "probe_pulse",
+                role_id="res_probe",
+                label="Probe Pulse",
+                init=ModuleInit.INLINE,
+                overrides={
+                    "freq": custom(
+                        readout_probe_freq,
+                        description="readout probe frequency",
+                    )
+                },
             )
-            .role("modules.pi_pulse", "pi_pulse")
-            .role("modules.probe_pulse", "res_probe", RoleInit.INLINE)
-            .set("modules.probe_pulse.freq", readout_probe_freq(ctx))
-            .role("modules.readout", "readout")
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .sweep("sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101))
+            .readout()
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .sweep(
+                "length",
+                label="Delay (us)",
+                default=SweepDefault(
+                    start=0.0,
+                    stop=custom(
+                        _sweep_stop_default,
+                        description="T1-with-tone delay stop",
+                    ),
+                    expts=101,
+                ),
+            )
+            .bool("uniform", label="Uniform (linear) sweep", default=False)
+            .reps(1000)
+            .rounds(10)
             .build()
         )
 

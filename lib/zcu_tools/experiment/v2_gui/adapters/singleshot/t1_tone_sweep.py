@@ -22,6 +22,7 @@ only in which outer sweep they declare + its default.
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
@@ -31,15 +32,13 @@ from zcu_tools.experiment.v2.singleshot.t1 import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FigureOnlyAnalyzeResult,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_eval_scaled,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    SweepDefault,
+    custom,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -52,10 +51,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ScalarSpec,
-    SweepSpec,
     SweepValue,
 )
 
@@ -97,48 +92,51 @@ class _SsT1ToneSweepBase(
     filename_token: ClassVar[str]
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        # ``uniform`` is a run-only flag (not lowered into T1WithToneSweepCfg). The
-        # sweep section holds length + exactly one outer axis (gain XOR freq), so the
-        # lowered cfg always has exactly one outer sweep set.
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "pi_pulse": make_pulse_module_spec(),
-                "probe_pulse": make_pulse_module_spec(label="Probe Pulse"),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={
-                "length": SweepSpec(label="Delay (us)"),
-                cls.outer_key: SweepSpec(label=cls.outer_label),
-            },
-            extra={"uniform": ScalarSpec(label="Uniform (linear) sweep", type=bool)},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        sweep_stop = md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0)
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        outer_key = cls.outer_key
+        outer_label = cls.outer_label
+        outer_default = deepcopy(cls.outer_default)
+        outer_expts = outer_default.expts
         outer_sweep = (
-            readout_probe_freq_range(ctx, self.outer_default.expts)
-            if self.outer_key == "freq"
-            else self.outer_default
-        )
-        relax_delay = proper_relax(ctx)
-        return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000,
-                rounds=10,
-                relax_delay=relax_delay,
-                # domain default is uniform=True (linear length sweep).
-                uniform=True,
+            custom(
+                lambda ctx: readout_probe_freq_range(ctx, outer_expts),
+                description="readout probe frequency range",
             )
-            .role("modules.pi_pulse", "pi_pulse")
-            .role("modules.probe_pulse", "res_probe", RoleInit.INLINE)
-            .set("modules.probe_pulse.freq", readout_probe_freq(ctx))
-            .role("modules.readout", "readout")
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .sweep("sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=51))
-            .sweep(f"sweep.{self.outer_key}", outer_sweep)
+            if outer_key == "freq"
+            else outer_default
+        )
+        return (
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("pi_pulse", role_id="pi_pulse")
+            .pulse(
+                "probe_pulse",
+                role_id="res_probe",
+                label="Probe Pulse",
+                init=ModuleInit.INLINE,
+                overrides={
+                    "freq": custom(
+                        readout_probe_freq,
+                        description="readout probe frequency",
+                    )
+                },
+            )
+            .readout()
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .sweep(
+                "length",
+                label="Delay (us)",
+                default=SweepDefault(
+                    start=0.0,
+                    # Existing md_eval_scaled fallback was factor * 100.0.
+                    stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
+                    expts=51,
+                ),
+            )
+            .sweep(outer_key, label=outer_label, default=outer_sweep)
+            .bool("uniform", label="Uniform (linear) sweep", default=True)
+            .reps(1000)
+            .rounds(10)
             .build()
         )
 

@@ -9,10 +9,7 @@ from zcu_tools.gui.app.main.adapter import (
     SavePaths,
 )
 from zcu_tools.gui.app.main.state import Session, TabInteractionState
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-)
+from zcu_tools.gui.cfg import CfgSchema
 
 from .ports import TabSnapshot
 
@@ -137,10 +134,6 @@ class TabService:
 
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()
-
-    def adapter_cfg_spec(self, adapter_name: str) -> CfgSectionSpec:
-        """Static cfg spec of an adapter — no tab/context needed."""
-        return self._registry.create(adapter_name).cfg_spec()
 
     def adapter_analyze_params(self, adapter_name: str) -> list[dict]:
         """Static analyze-params field spec, or [] when analysis unsupported."""

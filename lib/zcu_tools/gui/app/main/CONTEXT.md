@@ -88,16 +88,16 @@ _Avoid_: 不分 binding state 一律 self-heal（LINKED 失去 re-link 復原、
 ### Spec / Value / Adapter Default
 
 **Spec 樹**:
-一份 cfg 的**靜態結構契約**——欄位名、型別、label、choices、`editable`（語義可改性）、以及 `LiteralSpec.value`（固定值）。由 adapter 的 `cfg_spec()`（classmethod，**不讀 ctx**）建立。契約是 **static, never mutated**：所有 spec 節點 `frozen=True`，任何覆寫都回**新的 frozen 物件**（`dataclasses.replace`），不 in-place 改。**spec 不帶 GUI 渲染概念**：「要不要顯示 widget」是 GUI 決策（如 GUI 對所有 `LiteralSpec` 都不畫 widget），不是 spec 欄位；`editable` 保留是因為它是**語義**屬性（這欄位該不該被使用者改），非渲染指令。
+一份 cfg 的**靜態結構契約**——欄位名、型別、label、choices、`editable`（語義可改性）、以及 `LiteralSpec.value`（固定值）。由 adapter 的context-free `cfg_definition()`建立；builder不讀ctx，契約 **static, never mutated**。所有spec節點`frozen=True`，任何覆寫都回新的frozen物件。**spec不帶GUI渲染概念**：「要不要顯示widget」是GUI決策；`editable`保留是因為它是語義屬性。
 _Avoid_: 把使用者填的值放進 spec、in-place 改 spec、把 spec 當可變 builder、在 spec 加「hidden/visible」這類純渲染旗標
 
 **Value 樹**:
-一份 cfg 的**使用者可編輯狀態**——`DirectValue`/`EvalValue`（scalar）、`SweepValue`、`ReferenceValue` 的選擇 + 子值、`None`（停用 optional ref）。module/waveform由paired `ReferenceSpec.kind`區分，不由value class區分。由 `make_default_value(ctx)`（讀 md/ml）建立。**value 樹永遠完整**（每個 spec 欄位都有 entry、無缺 key，ADR-0010）；`fields: dict[str, Optional[CfgNodeValue]]`。Spec 與 Value 是**兩棵透過欄位名對齊的平行樹**，各自獨立建。
+一份 cfg 的**使用者可編輯狀態**——`DirectValue`/`EvalValue`（scalar）、`SweepValue`、`ReferenceValue` 的選擇 + 子值、`None`（停用 optional ref）。module/waveform由paired `ReferenceSpec.kind`區分，不由value class區分。fresh cfg由`MeasureCfgDefinition.instantiate(ctx)`解析typed Seed與role policy後建立。**value樹永遠完整**；Spec與Value仍是欄位名對齊的兩棵平行樹，但adapter以單段declaration authoring，shared assembler同步materialize。
 _Avoid_: 期望 value 節點能表達「不可編輯」（那是 spec 的 `editable`（語義）/ `LiteralSpec`（固定值））；把「停用（`None`）」與「選 None Reset」（實驗層真 reset）混為一談
 
 **「空」的表示（ADR-0010，取代舊 `DisabledRefValue`）**:
 value 樹裡一切「空」統一用 `None`，由 value 自述、不靠旁路 flag、不反推 spec：
-- **停用 optional `ModuleRef`/`WaveformRef`** = `fields[k] is None`（裸 `None`，無 payload；重新啟用走 helper 預設）。`make_*_ref_default(optional=True)` 庫無時回 `None`，adapter 直接放進 fields（免 `if x is not None`）。`ReferenceField` 停用 `get_value()` 回 `None`、`set_value(None)` 設停用；父 `SectionField` 無條件收集子層自述，不省略 key。
+- **停用 optional reference** = `fields[k] is None`（裸`None`，無payload）。`ModuleInit.SMART` optional library miss與`ModuleInit.DISABLED`都materialize `None`；`ReferenceField`停用`get_value()`回`None`、`set_value(None)`設停用；父`SectionField`不省略key。
 - **未填 scalar** = `DirectValue(value=None)`（**包裝層保留**以保 direct/eval 模式身份；scalar 型別合法值永不為 None，故 None 一義表未填，無 `is_unset` flag）。
 - **「停用→消失」只在 lowering**（run/save 出口 omit）；persist 忠實序列化停用 ref 為 `{"__kind":"disabled"}`、還原回 `None`。
 _Avoid_: 用 scalar 裸 `None`（抹掉 direct/eval 模式）；停用 ref 記 chosen_key（違無 payload）；改 `make_default_value` 全域行為去迁就單一 adapter 偏好（偏好走 OO 鏈式/工廠）；用 `None Reset` 表達停用（那是真 reset 選擇）
@@ -107,16 +107,12 @@ adapter 宣告某欄位「固定、不參與編輯」（notebook 的 `freq: 0.0,
 _Avoid_: 把鎖定放進 value 樹、用 spec 的 hidden 旗標表達「不畫」（渲染由 widget 看 LiteralSpec 自決）
 
 **Spec 覆寫（Spec override，spec 層）**:
-adapter 在 `cfg_spec()` **內**拿 helper 回傳的深層 spec 樹後，把某個葉換成 `LiteralSpec`（鎖定）。機制是 **frozen-recursive `dataclasses.replace` 回新 frozen spec**：method **掛在 spec 型別上**（`CfgSectionSpec.lock_literal(path, value)` 與 `ReferenceSpec.lock_literal(path, value)`），回**同型新 frozen spec**，無 wrapper、無 `.build()`/`.done()`。多覆寫靠「回同型」自然鏈式（`spec.lock_literal(p1, 0).lock_literal(p2, 0)`）。**鏈式起點可從根 `CfgSectionSpec` 或子樹 `ReferenceSpec`**：對 helper 回的 readout 子樹直接 `make_pulse_readout_module_spec().lock_literal("pulse_cfg.freq", 0.0)`（path 從子樹起算、較短、鎖定與該 spec 內聚）勝過從根走 `modules.readout.pulse_cfg.freq`。path 走 dotted 字串，每種 spec 型別知道怎麼往自己的子結構遞迴：`CfgSectionSpec` 走 `fields`、`ReferenceSpec` 走 `allowed`（**duck-type：含該 path 的 allowed shape 就套、不含就跳；全部不含才 raise**）。目前只有 `lock_literal`（`readonly`/`hidden` 之類無真實使用者，未提供——要設 `editable=False` 直接 `ScalarSpec(editable=False)`）。
+adapter在`cfg_definition()`的同一module declaration以`locked={relative_path: value}`點名鎖定；domain builder在固定static spec時以`ReferenceSpec.lock_literal`把leaf換成`LiteralSpec`。path走dotted字串並穿`CfgSectionSpec.fields`/`ReferenceSpec.allowed`；shared assembler在materialization對齊value，但lock ownership仍只在spec。`readonly`/`hidden`等rendering概念不進spec。
 _Avoid_: 可變 SpecBuilder 鏡像、`.build()`/`.done()` 收尾、把 spec method 寫成回 wrapper（回 spec 才能無 done 鏈式）、為對稱而加無使用者的 fluent（YAGNI）
 
-**Default factory**（`make_*_default` / `make_*_ref_default`）:
-產生 value 樹預設的兩層 helper。**第一層**（`make_*_default`）按 module type 組 blank value + 填 md 衍生預設;**第二層**（`make_*_ref_default`）先查 ml 庫有無 `preferred_names` 命名 module，有就引用、無則 fallback 到第一層。adapter 覆寫 default 用 **value 上的 OO 鏈式方法**（`make_pulse_readout_default(ctx).with_gain(0.05).with_ro_length(1.4)`）取代 factory 長參數列。**不在 default factory 裡鎖欄位**（鎖是 spec 的事）。
-_Avoid_: 在 default factory 摻入 spec/鎖定邏輯、把覆寫寫成一長串 factory 參數
-
-**角色 default（語義 wrapper）**:
-對齊 notebook 真實角色的薄 wrapper，把「該角色的固定 fallback 策略」封進名字，使用上是獨立 helper，實作上委派少數通用 default factory：`default_pi`（優先 pi_amp→pi_len）、`default_rabi`（優先 pi_len→pi_amp）、`default_pi2`（優先 pi2_amp→pi2_len）、`default_qub_probe`（blank pulse + ch/waveform/freq value 預設）、`default_res_probe`、`default_reset`。fallback 是 notebook 觀察到的**一致策略**（非單純 rename）。**default factory 零鎖定**：只產 value 預設，不預設鎖任何欄位（即使高頻），鎖定一律由 adapter 在 cfg_spec 用 lock_literal 宣告——鎖屬 spec 層、factory 屬 value 層，不跨層。
-_Avoid_: 每個角色重寫一份 factory（應委派通用 helper + 填 preferred_names/結構）、把角色 wrapper 當成只換名（它封裝 fallback 策略）、在 default factory 預設鎖欄位（即使高頻也歸 adapter 的 cfg_spec）
+**Deferred defaults / role policy**:
+adapter definition以typed Seed描述literal、md expression、scaled md、resolve-once value source或低頻pure custom policy；只有fresh instantiate讀ctx。module alias priority、shape與fallback由`ROLE_TABLE`/`ROLE_FACTORIES`單一source提供，`ModuleInit.SMART/INLINE/DISABLED`選materialization模式。role factory不宣告lock；lock、blank-only override與unconditional override都留在adapter declaration。
+_Avoid_: 依field name猜值、掃描任意library name、建立通用recipe AST、把lock放進role factory
 
 **Value OO 覆寫（value 層，與 spec 層不對稱）**:
 value 容器（`CfgSectionValue`/`ReferenceValue`）上的 `with_*` 方法 **in-place 改 fields 再回 self**（value 樹本就可變、現有 `_patch_*_fields` 本就 in-place、且 default factory 每次新建全新 value 樹不跨呼叫共享 → in-place 安全）。**刻意不對稱於 spec 層**：spec 層回新 frozen（spec never-mutated 契約），value 層 mutate-and-return-self。讀者須知 `spec.lock_literal()` 是衍生新物件、`value.with_gain()` 是就地改。

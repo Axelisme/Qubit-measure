@@ -7,15 +7,11 @@ from typing import Any, ClassVar, TypeAlias
 from zcu_tools.experiment.v2.singleshot.t1.t1 import T1Cfg, T1Exp, T1Result
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FigureOnlyAnalyzeResult,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_eval_scaled,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    SweepDefault,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -28,11 +24,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
 )
 
 from ._shared import read_ge_centers
@@ -93,35 +84,26 @@ class SsT1Adapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        # ``uniform`` controls the sweep spacing inside the domain run: False →
-        # log-spaced geomspace; True → linear uniform. Exposed via extra because it
-        # is a run-only flag (not lowered into T1Cfg).
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "pi_pulse": make_pulse_module_spec(),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Delay (us)")},
-            extra={"uniform": ScalarSpec(label="Uniform (linear) sweep", type=bool)},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        sweep_stop = md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0)
-        relax_delay = proper_relax(ctx)
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000,
-                rounds=10,
-                relax_delay=relax_delay,
-                uniform=False,  # domain default: log-spaced
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("pi_pulse", role_id="pi_pulse")
+            .readout()
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .sweep(
+                "length",
+                label="Delay (us)",
+                default=SweepDefault(
+                    start=0.0,
+                    # Existing md_eval_scaled fallback was factor * 100.0.
+                    stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
+                    expts=101,
+                ),
             )
-            .role("modules.pi_pulse", "pi_pulse")
-            .role("modules.readout", "readout")
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .sweep("sweep.length", SweepValue(start=0.0, stop=sweep_stop, expts=101))
+            .bool("uniform", label="Uniform (linear) sweep", default=False)
+            .reps(1000)
+            .rounds(10)
             .build()
         )
 

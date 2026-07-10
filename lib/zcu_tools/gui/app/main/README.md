@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-10 — measure adapter import ownership
+**Last updated:** 2026-07-11 — context-free adapter cfg definitions
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -177,9 +177,13 @@ re-adding the same key relinks it, including restored overridden refs whose key
 is absent at load time, while persistence can still serialize the snapshot
 without consulting `ModuleLibrary`.
 
-Adapter defaults are assembled in `experiment/v2_gui` with `CfgBuilder` and the
-role table. Locked literals are declared in `cfg_spec()`; adapter defaults do not
-hand-write those values.
+Adapter cfg authoring lives in `experiment/v2_gui` as a context-free
+`MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
+field order, role, lock and deferred typed Seed; fresh `instantiate(ctx)` only resolves
+value defaults, then `BaseAdapter.make_default_cfg` validates the finished schema.
+The framework protocol does not expose a static spec query. Shared
+`CfgSchemaAssembler` owns only paired-tree mechanics and has no measure domain/context
+knowledge (ADR-0012、ADR-0045).
 
 `CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
 每個form使用自己的frozen exact renderer registry；固定renderer factory接收immutable
@@ -308,8 +312,8 @@ on the concrete controller.
 
 ## Adapter-Facing Rules
 
-- Adapter `cfg_spec()` and `make_default_value(ctx)` are pure GUI config
-  construction.
+- Adapter `cfg_definition()` is context-free authoring; only fresh
+  `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.
 - `validate_run_request(req, raw_cfg)` is the place for SoC-dependent preflight
   that can fail before starting an operation.
 - Adapter `run()` receives a concrete config and performs the experiment.

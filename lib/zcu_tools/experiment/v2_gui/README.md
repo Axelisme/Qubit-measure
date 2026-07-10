@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-10 — shared cfg direct-import ownership
+**Last updated:** 2026-07-11 — context-free cfg definition authoring
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -15,13 +15,13 @@ experiment/v2_gui/
 ├── registry.py          — register_all / register_all_roles（啟動時把 adapter 與 role 填進框架 catalog）
 └── adapters/
     ├── base.py          — BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]（共用實作）
-    ├── shared/          — CfgBuilder / build_exp_spec / make_*_module_spec / md_* sugar / ROLE_TABLE role defaults
+    ├── shared/          — MeasureCfgBuilder / typed Seed recipes / module spec helpers / ROLE_TABLE role defaults
     ├── lookback / onetone / twotone / fake
     └── twotone/reset/   — reset 校準實驗群（single_tone / dual_tone / bath / check）
 ```
 
-每個 adapter 實作 `cfg_spec()`（純結構 spec，classmethod）、`make_default_value(ctx)`（讀
-md/ml 算預設值）、`run` / `analyze` / `get_writeback_items`，並在同一 class 以
+每個 adapter 實作 context-free `cfg_definition()`（static shape + deferred fresh-default recipe）、
+`run` / `analyze` / `get_writeback_items`，並在同一 class 以
 `guide_text: ClassVar[AdapterGuide]` 宣告 operator-facing prose；framework-facing `guide()`
 入口由 `BaseAdapter` 統一提供。需要 SoC-dependent
 但可預測的 run-time cfg 檢查時，覆寫 `validate_run_request(req, raw_cfg)` 做純 preflight
@@ -44,16 +44,20 @@ Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
 `ReferenceSpec(kind="module" | "waveform")`與`ReferenceValue`。kind由domain factory顯式
 設定，role/default assembly不再依兩套平行shared class分派。
 
-Adapter default value 由 `CfgBuilder` 組裝。`.role(path, role)` 預設採 `RoleInit.ADOPT`：優先引用
-ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline blank；
-`.role(..., RoleInit.INLINE)`明確要求 inline blank，不 adopt library；
-`.role(..., RoleInit.DISABLED)`只用於 optional ref，library miss時產生 `None`（disabled）。spec 的
-`optional=True` 是結構能力，`RoleInit.DISABLED` 是 adapter default初始化選擇，兩者需同時成立。
+Adapter cfg由context-free `MeasureCfgBuilder`單段宣告；builder不接`ExpContext`，只有
+`MeasureCfgDefinition.instantiate(ctx)`解析fresh defaults。`pulse/readout/reset`的
+`ModuleInit.SMART`優先引用ModuleLibrary calibrated entry，required miss退回inline blank、optional
+miss產生`None`；`ModuleInit.INLINE`永遠使用fresh blank；`ModuleInit.DISABLED`只允許optional ref且
+永遠產生`None`。
 
-`.role(..., blank_overrides={relative_path: scalar})`只修改custom/fallback blank，linked library與
-disabled `None`完全忽略；所有relative paths先驗存在且非locked literal，再transactionally套用，
-所以失敗不會留下partial mount。`.sweep(path, value)`只接受顯式`SweepValue`；跨session value source
-用`.value_source(...)` resolve once後寫入普通direct value。
+module declaration同地保存`blank_overrides`、unconditional `overrides`與`locked`。
+`blank_overrides`只修改custom/fallback blank；`overrides`也作用於linked snapshot；所有paths先完整
+preflight，locked不得與override重疊，因此失敗不留下partial mount。Spec/Value資料模型仍分離，
+但adapter作者只描述一次；shared `CfgSchemaAssembler`同步materialize兩棵樹並對齊literal。
+
+deferred defaults使用小型typed Seed vocabulary：raw/literal、`md`、`scaled_md`、`value_source`、
+少數具名range factory與單一純函式`custom` escape hatch。recipe只在fresh cfg建立時解析；restore與
+使用者編輯不reseed。不得掃描任意library name或依field name猜domain數值。
 
 Adapter defaults 以 notebook bring-up seed 與目前 MetaDict 校準值共同定義：有可信 md 時保持
 md-linked expression，缺校準時退回保守 notebook seed；guide prose 需描述這個 operator-facing
@@ -74,8 +78,8 @@ qubit 類 Pulse role 的 channel seed 依 setup alias fallback `qub_ch → qub_1
 `twotone/freq` 的 qubit-drive module 是 spectroscopy probe，不是 state-prep init pulse；
 UI label 使用 `Probe Pulse`，欄位 key 仍維持 runtime/notebook contract 的 `qub_pulse`。
 
-`build_exp_spec(extra=...)` 表示 adapter-defined top-level knobs，放在 `sweep` 與 `reps`
-之間；它們可以是正式 ExpCfg 欄位，也可以是 run-only adapter 欄位。正式欄位正常 lower 到
+adapter-defined top-level knobs以generic scalar/`field` verb按GUI顯示順序宣告；它們可以是正式
+ExpCfg欄位，也可以是run-only adapter欄位。正式欄位正常lower到
 ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內讀取後 pop 掉。
 `onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
 結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
@@ -83,9 +87,9 @@ ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內
 sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，但把 sweep
 分布交給底層 non-uniform T1 run path。
 
-跨 session 狀態的少數 default 走 `CfgBuilder.value_source(path, key, type_name?, default?)`，透過
-`ctx.values` 立即讀取 registered value source，成功後寫入普通 direct value，不把 lazy ref 放進
-cfg tree。role default table 的同類入口是 `Source(key, type_name?)` seed；只用於來源多變、
+跨session狀態的少數default走`value_source(key, target_type, fallback?)` Seed，於definition
+instantiate時透過`ctx.values` resolve once，成功後寫入普通direct value，不把lazy ref放進cfg
+tree。role default table的同類入口是`Source(key, type_name?)` seed；只用於來源多變、
 強型別 helper 反而會拉寬依賴的情境。device source 只發布具名 device 資訊，不推論 flux
 語義；`onetone/flux_dep` 與 `twotone/flux_dep` 的 `dev.flux_dev` 以 `device.flux.name`
 為預設（也就是名為 `flux` 的 registered device），無可用來源時 fallback 到 `flux_yoko`。

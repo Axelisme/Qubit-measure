@@ -14,15 +14,11 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
-    proper_relax,
-    proper_res_freq_range,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
     readout_dpm_writeback_items,
+    res_freq_range,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -38,11 +34,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    FloatSpec,
-    IntSpec,
-    SweepSpec,
     SweepValue,
 )
 
@@ -115,48 +106,43 @@ class RoOptAutoAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "qub_pulse": make_pulse_module_spec(),
-                # The optimizer owns readout freq + gain (set_param at
-                # run; "freq" writes both pulse and ro freq), so lock
-                # them off the form. Length is swept into the pulse
-                # waveform, not a top-level field — left editable.
-                "readout": make_pulse_readout_module_spec()
-                .lock_literal("pulse_cfg.freq", 0.0)
-                .lock_literal("ro_cfg.ro_freq", 0.0)
-                .lock_literal("pulse_cfg.gain", 0.0),
-            },
-            sweep_label="Search bounds (min–max)",
-            sweep={
-                "freq": SweepSpec(label="Readout freq (MHz)"),
-                "gain": SweepSpec(label="Readout gain (a.u.)"),
-                "length": SweepSpec(label="Readout length (us)"),
-            },
-            extra={
-                "num_points": IntSpec(label="Optimizer points"),
-                "skew_penalty": FloatSpec(label="Skew penalty", decimals=3),
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        sweep_label = "Search bounds (min–max)"
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000,
-                rounds=10,
-                relax_delay=proper_relax(ctx, factor=3.0, fallback=30.5),
-                num_points=1001,
-                skew_penalty=0.0,
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("qub_pulse", role_id="pi_pulse")
+            .readout(
+                pulse_only=True,
+                locked={
+                    "pulse_cfg.freq": 0.0,
+                    "ro_cfg.ro_freq": 0.0,
+                    "pulse_cfg.gain": 0.0,
+                },
             )
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.qub_pulse", "pi_pulse")
-            .role("modules.readout", "readout")
-            .sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
-            .sweep("sweep.gain", SweepValue(start=0.1, stop=0.25, expts=51))
-            .sweep("sweep.length", SweepValue(start=5.0, stop=10.0, expts=51))
+            .relax_delay(scaled_md("t1", factor=3.0, fallback_value=30.5))
+            .sweep(
+                "freq",
+                label="Readout freq (MHz)",
+                default=res_freq_range(expts=51, span_factor=0.2),
+                section_label=sweep_label,
+            )
+            .sweep(
+                "gain",
+                label="Readout gain (a.u.)",
+                default=SweepValue(start=0.1, stop=0.25, expts=51),
+                section_label=sweep_label,
+            )
+            .sweep(
+                "length",
+                label="Readout length (us)",
+                default=SweepValue(start=5.0, stop=10.0, expts=51),
+                section_label=sweep_label,
+            )
+            .int("num_points", label="Optimizer points", default=1001)
+            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
+            .reps(1000)
+            .rounds(10)
             .build()
         )
 

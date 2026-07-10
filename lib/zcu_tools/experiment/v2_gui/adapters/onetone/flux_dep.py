@@ -10,17 +10,18 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FluxPickParams,
     FluxPickResult,
-    RoleInit,
-    build_exp_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    Seed,
     build_flux_pick_session,
-    make_pulse_readout_module_spec,
+    custom,
+    flux_range,
     md_get_float,
     md_has_key,
-    proper_flux_range,
-    proper_res_freq_range,
+    res_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -36,14 +37,20 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
     EvalValue,
-    ScalarSpec,
-    SweepSpec,
 )
 
 OneToneFluxDepRunResult: TypeAlias = FluxDepResult
+
+
+def _readout_length_default() -> Seed[float | EvalValue]:
+    def resolve(ctx: ExpContext) -> float | EvalValue:
+        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
+        if md_has_key(ctx, "res_probe_len") and probe_len > 0.1:
+            return EvalValue(expr="res_probe_len - 0.1")
+        return probe_len - 0.1
+
+    return custom(resolve, description="one-tone flux readout length")
 
 
 class OneToneFluxDepAdapter(
@@ -116,47 +123,38 @@ class OneToneFluxDepAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                # No reset module — one-tone runs without a qubit reset
-                # (the ExpCfg defaults reset=None). The freq sweep owns
-                # the readout frequency (set_param("freq") writes both
-                # pulse and ro freq), so lock it off the form.
-                "readout": make_pulse_readout_module_spec()
-                .lock_literal("pulse_cfg.freq", 0.0)
-                .lock_literal("ro_cfg.ro_freq", 0.0),
-            },
-            dev={
-                "flux_dev": ScalarSpec(
-                    label="Flux Device",
-                    type=str,
-                    choices_source="devices",
-                    required=True,
-                )
-            },
-            sweep={
-                "flux": SweepSpec(label="Flux device value", decimals=6),
-                "freq": SweepSpec(label="Freq (MHz)"),
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
-        ro_length: float | EvalValue = (
-            EvalValue(expr="res_probe_len - 0.1")
-            if md_has_key(ctx, "res_probe_len") and probe_len > 0.1
-            else probe_len - 0.1
-        )
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=1, relax_delay=1.0)
-            .role("modules.readout", "readout", RoleInit.INLINE)
-            .set("modules.readout.pulse_cfg.gain", 0.05)
-            .set("modules.readout.ro_cfg.ro_length", ro_length)
-            .value_source("dev.flux_dev", "device.flux.name", default="flux_yoko")
-            .sweep("sweep.flux", proper_flux_range(ctx, 101))
-            .sweep("sweep.freq", proper_res_freq_range(ctx, 101, span_factor=1.0))
+            MeasureCfgBuilder()
+            .readout(
+                pulse_only=True,
+                init=ModuleInit.INLINE,
+                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
+                overrides={
+                    "pulse_cfg.gain": 0.05,
+                    "ro_cfg.ro_length": _readout_length_default(),
+                },
+            )
+            .device_from_value_source(
+                "flux_dev",
+                label="Flux Device",
+                source_key="device.flux.name",
+                fallback="flux_yoko",
+            )
+            .relax_delay(1.0)
+            .sweep(
+                "flux",
+                label="Flux device value",
+                default=flux_range(expts=101),
+                decimals=6,
+            )
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=res_freq_range(expts=101, span_factor=1.0),
+            )
+            .reps(1000)
+            .rounds(1)
             .build()
         )
 

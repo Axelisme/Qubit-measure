@@ -4,7 +4,7 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from inspect import signature
-from typing import Any, ClassVar, Generic, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
 from zcu_tools.experiment.cfg_assembler import make_cfg
 from zcu_tools.gui.app.main.adapter import (
@@ -34,11 +34,12 @@ from zcu_tools.gui.app.main.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
 )
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-)
+from zcu_tools.gui.cfg import CfgSchema
+
+if TYPE_CHECKING:
+    from zcu_tools.experiment.v2_gui.adapters.shared.schema_builder import (
+        MeasureCfgDefinition,
+    )
 
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list
 # (Cfg, Result, AnalyzeResult, AnalyzeParams).
@@ -86,9 +87,9 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
-    (``cfg_spec``, ``make_default_value``, ``build_exp_cfg``, ``make_filename_stem``
+    (``cfg_definition``, ``build_exp_cfg``, ``make_filename_stem``
     and — when the experiment supports analysis — ``get_analyze_params``/``analyze``).
-    Everything else (spec+value composition, run delegation, save-path policy,
+    Everything else (definition instantiation, run delegation, save-path policy,
     save) is provided here once.
 
     The class is generic over the four experiment types. Adapters without analysis
@@ -224,12 +225,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     @classmethod
     @abstractmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        """Return the static cfg spec tree (no context, no instance state).
-
-        The spec is the structural contract (field names, types, choices) and
-        must not read any context. Default *values* live in make_default_value.
-        """
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        """Return the context-free cfg shape and deferred fresh-value recipes."""
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -243,10 +240,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         (Fast-Fail spirit — surface the gap, do not fake content).
         """
         return cls.guide_text
-
-    @abstractmethod
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        """Build the default value tree, which may read ctx (md/ml/device)."""
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T_Cfg:
         """Build experiment config from the flat GUI raw dict.
@@ -384,14 +377,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # -- shared implementation (provided once) -----------------------------
 
     def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        """Compose the static spec with context-derived default values.
-
-        Validates the result: an adapter's ``make_default_value`` must return a
-        structurally-complete, spec-compliant value tree (every field present,
-        literals/types/choices valid) — a violation fast-fails here, pointing at
-        the offending adapter rather than surfacing as a later lowering error.
-        """
-        schema = CfgSchema(spec=self.cfg_spec(), value=self.make_default_value(ctx))
+        """Instantiate and validate a fresh cfg from the context-free definition."""
+        schema = type(self).cfg_definition().instantiate(ctx)
         validate_schema(schema, ctx.ml)
         return schema
 

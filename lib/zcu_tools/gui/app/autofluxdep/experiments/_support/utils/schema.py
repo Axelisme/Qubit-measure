@@ -15,6 +15,7 @@ from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeSpec,
+    CfgSchemaAssembler,
     CfgSectionSpec,
     FloatSpec,
     IntSpec,
@@ -24,11 +25,11 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    default_value_for_spec,
     read_value_path,
     resolve_spec_path,
 )
 
-from ._schema_tree import _default_value_for_spec, _SchemaTree
 from .module_values import _seed_module_reference
 
 if TYPE_CHECKING:
@@ -40,7 +41,10 @@ class NodeSchemaBuilder:
 
     def __init__(self, ctx: Any | None = None, *, label: str = "") -> None:
         self._ctx = ctx
-        self._tree = _SchemaTree(label=label)
+        self._tree = CfgSchemaAssembler(
+            label=label,
+            section_labeler=_section_label,
+        )
         self._logical_paths: dict[str, str] = {}
         self._built = False
 
@@ -412,7 +416,10 @@ class NodeSchemaBuilder:
 
     def build(self) -> NodeCfgSchema:
         self._check_mutable()
-        schema = self._tree.build()
+        # NodeCfgSchema performs autoflux-local logical-path validation after
+        # the generic tree is built. Use a trial copy so such a domain failure
+        # does not consume this builder.
+        schema = deepcopy(self._tree).build()
         node_schema = NodeCfgSchema(schema, logical_paths=dict(self._logical_paths))
         self._built = True
         return node_schema
@@ -475,7 +482,7 @@ class NodeSchemaBuilder:
         )
         is_blank = default is None
         if default is None:
-            fallback = _default_value_for_spec(spec)
+            fallback = default_value_for_spec(spec)
             if fallback is not None and not isinstance(fallback, ReferenceValue):
                 raise TypeError(
                     f"ReferenceSpec default produced {type(fallback).__name__}"
@@ -569,7 +576,7 @@ class NodeSchemaBuilder:
 
     def _ensure_section(self, path: str, label: str) -> None:
         self._check_mutable()
-        self._tree.ensure_section(path, label)
+        self._tree.ensure_section(path, label=label)
 
     def _check_logical_key(self, logical_key: str) -> None:
         if not logical_key:
@@ -586,6 +593,9 @@ class NodeSchemaBuilder:
 
 def _section_label(key: str) -> str:
     labels = {
+        "modules": "Modules",
+        "sweep": "Sweep",
+        "generation": "Generation overrides",
         "acquisition": "Acquisition guardrails",
         "relax": "Relax timing",
     }

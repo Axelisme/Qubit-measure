@@ -10,12 +10,8 @@ from zcu_tools.experiment.v2.twotone.reset.rabi_check import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -24,9 +20,6 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
 )
 from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -82,39 +75,22 @@ class RabiCheckAdapter(BaseAdapter[RabiCheckCfg, RabiCheckResult]):
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                # Optional upstream reset applied before the rabi init pulse.
-                "reset": make_reset_module_spec(optional=True),
-                # Init pulse whose gain is swept; typically a pi pulse (pi_amp).
-                "rabi_pulse": make_pulse_module_spec(label="Rabi Pulse"),
-                # The reset under test — all four shapes so the user can select
-                # single-tone / two-pulse / bath without opening a different tab.
-                "tested_reset": make_reset_module_spec(label="Tested Reset"),
-                # Pi pulse applied after tested_reset in the third branch.
-                "pi_pulse": make_pulse_module_spec(label="Pi Pulse"),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"gain": SweepSpec(label="Gain (a.u.)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=10, relax_delay=1.0)
-            # Library pi_amp is the canonical init pulse for the rabi check
-            # (notebook: rabi_pulse = "pi_amp").
-            .role("modules.rabi_pulse", "pi_pulse")
-            .role("modules.readout", "readout")
-            # tested_reset defaults to the reset role's inline pulse-reset blank;
-            # the user switches shape in the form for a two-pulse or bath reset.
-            .role("modules.tested_reset", "reset")
-            # pi_pulse for the third branch (same library pi_amp).
-            .role("modules.pi_pulse", "pi_pulse")
-            # optional upstream reset — None when no library entry (ADR-0010).
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .sweep("sweep.gain", SweepValue(start=0.0, stop=1.0, expts=51))
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("rabi_pulse", role_id="pi_pulse", label="Rabi Pulse")
+            .reset("tested_reset", role_id="reset", label="Tested Reset")
+            .pulse("pi_pulse", role_id="pi_pulse", label="Pi Pulse")
+            .readout()
+            .relax_delay(1.0)
+            .sweep(
+                "gain",
+                label="Gain (a.u.)",
+                default=SweepValue(start=0.0, stop=1.0, expts=51),
+            )
+            .reps(1000)
+            .rounds(10)
             .build()
         )
 

@@ -2,119 +2,117 @@
 status: accepted
 ---
 
-# CfgBuilder — value 層引入組裝 builder（對照 0009 spec 層不用 builder）
+# Measure cfg definition — context-free single-pass authoring
+
+**狀態：** accepted（已實作）。
+**關聯：** Spec/Value 與 locked literal 見 [[0009]]；完整 value tree 見 [[0010]]；成品驗證見
+[[0011]]；resolve-once source 見 [[0037]]；shared cfg core ownership 見 [[0045]]。
 
 ## 脈絡
 
-adapter 的 `make_default_value(self, ctx)`（~20 個各寫，未來 `experiment/v2/` 全部實驗都做 adapter
-後將是 50+）現況是手拼一棵巢狀 `CfgSectionValue(fields={...})` literal，並手動把各 per-role L2
-factory（`make_<role>_default(ctx)` / `make_<role>_ref_default(ctx, optional=)`）穿進去（如
-`twotone/freq.py` 的 17 行）。重複的痛點：頂層 scalar 每次手填 `DirectValue(...)`、modules 那坨 ref
-要 import 一串 factory 再拼、sweep 要手建 `SweepValue`。用戶要一個降低 adapter 實作難度的工具。
+measure adapter 的 cfg 同時需要 static shape、module role、locked leaf、MetaDict-linked scalar、
+ModuleLibrary adoption、sweep 與 fallback。若作者分別維護 spec 與 default value 兩棵宣告，field
+order、lock value、role shape 與 fallback 很容易漂移；但把 role、MetaDict 或 ModuleLibrary policy
+下沉到 shared cfg core，又會破壞 app-independent boundary。
 
-grill 過程定錨的事實（推翻 HANDOFF 對 backlog 2 的舊描述）：
-
-- backlog 2 設想的「`default_value_from(ctx, spec)` + 明文 dict + type 字串比對 ref」**主體已被
-  ADR-0009 的 `shared/defaults/` per-role factory 取代**；HANDOFF 是舊快照。
-- 預設值是**角色相關**非 field-name 相關（同名 `gain` 在 qub_probe=0.05、readout=0.1），**寫死字面值的
-  扁平 dict** 解不了；領域默認**含公式**（`trig_offset=timeFly+0.05`、`best_ro_length+0.1`），故資料表的
-  種子必須能表達公式——`ROLE_TABLE` 用 `Md(expr=)` / `TRIG` 種子達成（公式種子仍 lower 成 EvalValue），
-  即一張**typed 種子表 + 兩個 builder**，而非寫死數值的扁平 dict。
-- 「角色」已 first-class：`RoleCatalog`+`RoleEntry`，Inspect 建 module/waveform 用 L2 factory（第二
-  消費者）→ L2 簽名鎖定，**不能被 builder 收編成私有 step**。
+adapter 是 user-maintained experiment flow。authoring surface 必須由上到下可讀，讓 field type、
+label、default source、role、lock 與 override 保持 locality；同時 static shape 不應因 fresh cfg 的
+runtime context 改變。
 
 ## 決策
 
-### 1. 三層分工：L1 blank / L2 role default / L3 CfgBuilder
+### 1. 資料模型分離，authoring 集中
 
-- **L1** `make_default_value(spec)`（shared GUI cfg 層，`zcu_tools.gui.cfg.inheritance`）：吃 spec，回結構完整、值中性
-  骨架（scalar→0/0.0/""、optional ref→None、required ref→`allowed[0]` blank）。
-- **L2** role default（領域層 `shared/defaults/`）：每角色一個 `RoleDef` literal（`role_table.py`
-  的 `ROLE_TABLE`），由 `role_blank` / `role_ref` 兩個泛型 builder 消費，產單角色
-  ModuleRefValue/WaveformRefValue + 領域默認（含公式 EvalValue + library 查找）。生成的
-  `ROLE_FACTORIES`（`{role_id: (blank, ref)}`）由 RoleCatalog/Inspect 與 CfgBuilder **兩個平行消費者**
-  共用（見 [[0009]] 決策 5）。
-- **L3** `CfgBuilder`（新增 `shared/cfg_builder.py`，**領域層**）：flat-path fluent 組裝。起手 = L1 blank
-  骨架（完整性 by construction），`.role()` 經 `ROLE_FACTORIES` 表調 L2，`.scalars()/.set()` 走
-  scalar leaf，`.value_source()` resolve once 後寫入 direct leaf，`.sweep(path, value)` 掛唯一顯式
-  `SweepValue`，`.build()` 回 `CfgSectionValue`。
+Spec tree 與 Value tree 仍是兩棵責任不同的資料樹：Spec 描述 static contract，Value 保存 mutable
+draft。adapter 作者只維護一份 context-free `MeasureCfgDefinition`：
 
-### 2. value 層引入 builder —— 與 ADR-0009 spec 層「不用 builder」並行不悖
+```python
+@classmethod
+def cfg_definition(cls) -> MeasureCfgDefinition:
+    return (
+        MeasureCfgBuilder()
+        .reset("reset", optional=True)
+        .pulse("pi_pulse", role_id="pi_pulse", label="Pi Pulse")
+        .readout("readout")
+        .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+        .sweep("length", label="Delay (us)", default=...)
+        .reps(1000)
+        .rounds(100)
+        .build()
+    )
+```
 
-ADR-0009 決策 2 否決了 **spec 層** 的可變 builder（理由：spec 是純結構、鎖定是離散「一條條點名 leaf
-→ LiteralSpec」、無聚合邏輯，frozen+replace 回同型已天然鏈式，builder 的 `.build()` 是多餘氣味）。
+`MeasureCfgBuilder` 不接收 `ExpContext`。它按呼叫順序保存 immutable ordered declarations，並在
+`build()` 時固定 static spec。`MeasureCfgDefinition.instantiate(ctx)` 只能解析 fresh default，不能
+增減 field、改型別、label、order 或 lock；materialized spec 必須精確等於 definition spec，否則
+Fast Fail。
 
-**這條否決理由在 value 層不成立**：value 的組裝**有領域聚合邏輯**——「reps 該是 100」「readout 該查
-library 的 readout_dpm」「freq 該是 EvalValue(q_f)」是有內容、有策略、跨多欄位協調的決策，spec 層沒有
-的東西 value 層有。所以「spec 不用 builder」推不出「value 不用 builder」。
+`BaseAdapter.make_default_cfg(ctx)` 是 framework-facing fresh-cfg 入口：instantiate definition，接著
+以 `validate_schema(schema, ctx.ml)` 驗證成品。framework protocol 不暴露 static spec query；
+`cfg_definition()` 是 `BaseAdapter` 的 authoring hook。
 
-更關鍵：這堆領域邏輯（role / ctx / library 查找）**不能下沉到框架層的 `CfgSectionValue`**。若給
-`CfgSectionValue` 加 `with_role(path, role_id, ctx, ...)`，則 gui 框架層的純數據容器要懂 qubit role +
-RoleCatalog + library，且簽名一半要 ctx 一半不要（`with_field` 不要）——跨層污染 + API 不一致。
-**Builder 住在領域層，正是這堆邏輯的正確歸屬**：領域知識聚在 Builder，`CfgSectionValue` 保持框架層純結構
-（只懂 fields dict + scalar-leaf path setter）。這比 `CfgSectionValue.with_role` **更**符合 0009 的
-spec/value 分層、責任明確精神。`.build()` 在此是「領域組裝器 → 純數據產物」的合法邊界，與 spec 層那個
-「無聚合邏輯、沒必要 build」的情況性質不同。
+### 2. deferred seed vocabulary 小而 typed
 
-**被否決**：`default_value_from(ctx, spec)` 回 `CfgSectionValue` + 在其上加 `with_role` 鏈式 method。
-否決理由：`with_role` 把領域邏輯塞進框架層數據容器（上述跨層污染）。
+measure domain 以 `Seed[T]` 表達「definition 現在描述來源，fresh cfg 建立時才解析」。public
+vocabulary 維持最小：
 
-### 3. Builder 不走 RoleCatalog，領域層直調 L2 + 自己的 ROLE_FACTORIES 表
+- `literal(value)`：authoring-time snapshot；raw default 由 builder 自動 lift；
+- `md(key, fallback, expr?)`：有 MetaDict key 時保留 live `EvalValue`，否則使用明文 fallback；
+- `scaled_md(key, factor, fallback_value)`：明確區分 missing 時的最終值；
+- `value_source(key, target_type, fallback?)`：透過 [[0037]] 的 read-only lookup resolve once；
+- `custom(resolve, description)`：低頻純 context lookup escape hatch；
+- `SweepDefault`：只組裝 typed sweep edges，不引入另一套 resolver algebra。
 
-事實：adapter 經 `Registry.create()` 無參構造、`make_default_value(self, ctx)` 只收 ctx，
-`ExpContext` **不帶 RoleCatalog**（catalog 只在 Controller）；且 catalog factory **永不回 None**
-（表達不了 optional→None，那能力只在未註冊的 `_ref_default`）。→ Builder 在領域層直接 import L2 函數，
-經單一 `ROLE_FACTORIES` 表（`defaults/role_factories.py`，registry + builder 共用 source）取
-`{role_id: (blank, ref)}`。Inspect/catalog 用 `.blank`；Builder 的 `.role()` 以 `RoleInit` enum 選擇：
-`RoleInit.ADOPT`（預設）用 `.ref`（library aware，無 ref variant 時退回 `.blank`）、
-`RoleInit.INLINE` 強制 `.blank`（守 ignore_library_readout）、`RoleInit.DISABLED` 走
-`.ref(ctx, optional=True)`（library
-miss→None，且 spec ref 必須 optional）。L2 factory 簽名仍保留 `optional=True` 作為內部能力，adapter
-呼叫端不再暴露兩個互斥 boolean。
+常用 range policy可提供具名 seed factory。不得加入 map/zip、conditional AST、priority graph 或依
+field name 猜數值的全域 resolver。`custom` callback 必須無副作用並回傳精確 carrier；restore 與使用者
+編輯不會重跑 seed。
 
-`.role(..., blank_overrides={relative_path: scalar})`只在factory產物是custom `ReferenceValue`時
-套用；ADOPT命中linked library或DISABLED產生`None`時完全忽略。custom blank先一次驗完所有relative
-path存在、可穿nested reference、目標是`ScalarSpec`且不是`LiteralSpec`，才修改local產物並mount，所以任一路徑失敗都不會
-留下partial mount。這讓Rabi等adapter只覆寫fallback blank，不污染已校準library module。
+### 3. measure builder 擁有 domain verbs
 
-### 4. Builder 零鎖定（但自動「填」鎖定值）、value in-place、不 validate（守既有 ADR）
+`MeasureCfgBuilder` 擁有高頻且穩定的 measure vocabulary：`pulse`、`readout`、`reset`、`sweep`、
+`relax_delay`、`reps`、`rounds`、`device`，以及 generic scalar/`field` escape hatch。module 與 sweep
+verb自動落到 `modules.<name>` / `sweep.<name>`；低頻 experiment knob 使用完整 path，不為單一
+adapter 增加新 verb。
 
-- 零鎖定 vs 自動填：**鎖定的「宣告」100% 在 `cfg_spec().lock_literal`（ADR-0009 決策 5），Builder 不宣告任何鎖**；但 Builder **替 adapter 填鎖定值**——`build()` 遍歷 spec 樹，把每個 `LiteralSpec` leaf 的 value 對齊成 `spec.value`（穿透已掛載 ref 的 chosen shape，復用框架層 `select_ref_value_spec`）。動機：L1 blank 已對齊頂層 literal，但 `.role()` 掛的 L2 factory value 不懂 ref shape 內的鎖（如 onetone/freq 在 readout 的 pulse 形狀（`make_pulse_readout_spec`）內鎖 `pulse_cfg.freq=0.0`，但 L2 產 `freq=r_f`），覆蓋後 locked leaf 帶錯值 → build 對齊修正。配套 **`.set` 碰 locked path 直接 raise（C-raise）**：locked 值的唯一 source 是 spec，adapter 既不該也不需手設（消掉舊手拼裡 `freq=0.0`/`ro_freq=0.0` 與 spec 鎖值的重複）。這與 ADR-0011 的 validate（事後查 value==spec.value）互補——build 是事前保證。**lower 本就不看 locked value（`lowering` 對 LiteralSpec 直接用 `spec.value`），所以填對齊只為過 validate + 語意一致**。
-- value in-place（ADR-0009 決策 4）：Builder 持一棵 in-place mutate 的 value，每個 method 只覆寫已存在
-  節點、不增刪 key（守 ADR-0010 完整性）。
-- `.build()` 不 validate：驗證留在 cfg 邊界（`make_default_cfg` / `to_raw_dict`，ADR-0011）。
-- 全方法 Fast-Fail（spec-aware）：bad path / 非 ref spec / kind 不匹配 / 對 required ref 用 optional /
-  `.sweep` 收到非 `SweepValue` → 立即 raise，指向出錯的呼叫。
+module declaration 同地保存 `role_id`、initialization、`blank_overrides`、`overrides` 與 `locked`：
 
-### 5. Shared tree paths集中generic traversal，Builder只保留domain verbs
+- `ModuleInit.SMART`：required role adopt calibrated library entry or blank；optional role adopt or
+  `None`；
+- `ModuleInit.INLINE`：永不查 library，使用 fresh role blank；
+- `ModuleInit.DISABLED`：只允許 optional ref，永遠 materialize `None`；
+- `blank_overrides` 只修改 inline/fallback custom value；`overrides` 同時作用於 custom 與 adopted
+  snapshot；
+- `locked` 把 static leaf變成 `LiteralSpec`；不得與 override path重疊，materialization由 shared
+  assembler 對齊 literal value。
 
-`zcu_tools.gui.cfg.tree`公開`resolve_spec_path`、`read_value_path`、`replace_value_path`三個窄操作。
-Spec resolver穿`CfgSectionSpec.fields`與`ReferenceSpec.allowed`；多個allowed shape命中時leaf class及
-宣告型別（`ScalarSpec.type` / `ReferenceSpec.kind`）必須一致。Value read/replace穿`CfgSectionValue.fields`與`ReferenceValue.value`，且leaf必須已存在，
-不create、不wrap、不處理locking/domain。`CfgSectionValue.with_field`仍只負責scalar wrapping，再委派
-`replace_value_path`；`CfgBuilder`用相同operations完成role/sweep mount與spec-aware Fast Fail，不持有
-自己的split/resolve/mount traversal。
+role alias priority、shape 與 md-linked seed的 SSOT仍是 [[0009]] 的 `ROLE_TABLE` / `ROLE_FACTORIES`。
+builder只消費這份資料，不掃描任意 library name，也不複製 role policy。
+
+### 4. shared assembler 只共用 mechanics
+
+`zcu_tools.gui.cfg.CfgSchemaAssembler` 同步宣告 paired Spec/Value tree，負責 duplicate/parent conflict、
+default wrapping、choice binding、locked alignment、deep-copy snapshot與 one-shot build。它不認識
+`ExpContext`、Seed、role、MetaDict、ModuleLibrary、logical key或 generation policy（[[0045]]）。
+
+measure definition在 instantiate 後把 resolved defaults交給 assembler；autoflux
+`NodeSchemaBuilder`也使用同一 mechanics，但保留自己的 logical path、generation與section label policy。
+兩個 domain builder不共用 DSL。
+
+## 取捨與被拒絕方案
+
+- **採用 context-free definition，而非 `MeasureSchemaBuilder(ctx)`**：多一個 typed deferred carrier，
+  換得 spec shape by construction。cross-context tests是 regression gate，不是結構保證的替代品。
+- **採用 single-pass authoring，而非 split spec/default hooks**：Spec/Value資料模型仍分離，但作者不再
+  重複描述相同 field，消除 drift source。
+- **採用小型 seed vocabulary，而非通用 expression DSL**：特殊 policy用具名 factory或單一 typed
+  `custom` escape hatch，避免 framework programming滲入 adapter data。
+- **只共用 assembler，而非統一 measure/autoflux builders**：兩者只共享 tree mechanics；domain
+  vocabulary、runtime dependency與logical projection維持各自 ownership。
 
 ## 後果
 
-- 新檔 `shared/cfg_builder.py`（`CfgBuilder`）+ `shared/defaults/role_table.py`（`ROLE_TABLE` 角色資料
-  + `role_blank`/`role_ref` builder）+ `shared/defaults/role_factories.py`（從 `ROLE_TABLE` 生成的
-  `ROLE_FACTORIES` 單一 source）。`registry.py` 的 `ROLE_ENTRIES` 改從表取 blank factory（消除 factory
-  重複 source，catalog 仍持有自己的 label/dropdown 順序）。
-- `ScalarLeafInput` 加進 `gui/app/main/adapter/__init__.py` 導出（`.set/.scalars` 的公開入參型別）。
-- 全部 adapter 的 `make_default_value` 走 CfgBuilder（舊手拼寫法仍合法，產出同樣的 `CfgSectionValue`，無
-  big-bang、無 compat shim）。
-- 映射規則：`make_<role>_default` → `.role(path, role, RoleInit.INLINE)`；
-  `make_<role>_ref_default(ctx)` → `.role(path, role)`（`RoleInit.ADOPT` 預設）；
-  `make_<role>_ref_default(optional=True)` → `.role(path, role, RoleInit.DISABLED)`；
-  無條件禁用的 optional ref（lookback 的 init_pulse/reset）→ 不寫（L1 blank 已給 None）。
-
-## 替代方案（綜述）
-
-| 維度 | 選擇 | 否決 |
-| --- | --- | --- |
-| 組裝形狀 | 領域層 CfgBuilder（持 ctx+spec+value，`.build()`） | `default_value_from` 回 value + `CfgSectionValue.with_role`（跨層污染框架容器） |
-| role 解析 | 領域層直調 L2 + ROLE_FACTORIES 表 | 走 Controller-held RoleCatalog（adapter 夠不著、表達不了 optional→None） |
-| 掛整節點 | shared `replace_value_path`（existing leaf only） | Builder 私有 traversal或`CfgSectionValue.with_node` domain-like sugar |
-| sweep API | 唯一 `.sweep(path, value: SweepValue)` | literal overload + `set_sweep`雙入口（caller需選verb、全repo migration成本增加） |
-| scalar 默認 | `.scalars()` 純顯式無表 | 內建 `DOMAIN_SCALAR_DEFAULTS` 表（各 adapter relax_delay/rounds 本就不同，表藏意圖） |
+- 每個 concrete adapter只實作一個 `cfg_definition()` authoring block。
+- fresh default deterministic；library priority與fallback在 role/seed declaration可追蹤。
+- locked/override path會先完整 preflight，再 materialize，失敗不留下 partial tree。
+- definition與每次 instantiate都隔離 mutable spec/value aliases，可安全重用。
+- framework刪除 static spec forwarding；需要 cfg 的 caller一律取得 validated `CfgSchema`。

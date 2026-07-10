@@ -15,14 +15,10 @@ from zcu_tools.experiment.v2.twotone.rabi.len_rabi import (
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_eval_scaled_or_value,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    SweepDefault,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -40,9 +36,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -123,42 +116,32 @@ class LenRabiAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "qub_pulse": make_pulse_module_spec(label="Rabi Pulse").lock_literal(
-                    "waveform.length", 1.0
-                ),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Length (us)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
-            )
-            # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role(
-                "modules.qub_pulse",
-                "rabi_pulse",
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse(
+                "qub_pulse",
+                role_id="rabi_pulse",
+                label="Rabi Pulse",
+                locked={"waveform.length": 1.0},
                 blank_overrides={"gain": 0.3},
             )
-            .role("modules.readout", "readout")
+            .readout()
+            .relax_delay(
+                scaled_md("t1", factor=5.0, fallback_value=30.5),
+            )
             .sweep(
-                "sweep.length",
-                SweepValue(
+                "length",
+                label="Length (us)",
+                default=SweepDefault(
                     start=0.03,
-                    stop=md_eval_scaled_or_value(
-                        ctx, "pi_len", factor=4.0, fallback=0.3
-                    ),
+                    stop=scaled_md("pi_len", factor=4.0, fallback_value=0.3),
                     expts=101,
                 ),
             )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

@@ -3,21 +3,20 @@
 A role has a *blank* factory (md-linked defaults, never a library lookup, never
 ``None``) and optionally a *ref* factory (prefers a named library entry, falls
 back to the blank, and may return ``None`` when ``optional`` and nothing matches).
-Both the GUI ``RoleCatalog`` registration (``registry.py``) and the value-assembly
-``CfgBuilder`` consume this table, so the role vocabulary lives in exactly one
+Both the GUI ``RoleCatalog`` registration (``registry.py``) and fresh measure cfg
+materialization consume this table, so the role vocabulary lives in exactly one
 place.
 
 The factory pair for each role is generated from the declarative ``ROLE_TABLE``
 (``role_table.py``): ``role_blank`` / ``role_ref`` close over the role's
 ``RoleDef``.
 
-The ``CfgBuilder.role()`` verb selects an initialization mode: ``RoleInit.ADOPT``
-calls the *ref* factory (library-aware, the common case), ``RoleInit.INLINE`` forces
-the *blank* factory (e.g. a twotone readout that must stay inline, never adopting
-a library ``readout_dpm``), and ``RoleInit.DISABLED`` takes the *ref* factory's
-optional path (library miss → ``None``). ``RoleCatalog`` always uses the *blank*
-factory (creating from a role seeds a fresh entry, it never references an
-existing library entry).
+The context-free measure builder records a module initialization mode. During fresh
+cfg materialization, ``ModuleInit.SMART`` calls the *ref* factory (library-aware),
+``ModuleInit.INLINE`` forces the *blank* factory, and ``ModuleInit.DISABLED``
+materializes ``None`` for an optional ref. ``RoleCatalog`` always uses the *blank*
+factory (creating from a role seeds a fresh entry, it never references an existing
+library entry).
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from .role_table import ROLE_TABLE, RoleDef, role_blank, role_ref
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.gui.cfg import ReferenceValue
+    from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceValue
 
 # A blank factory always produces a value (never None); a ref factory's optional
 # path may return None (the disabled-optional ref, ADR-0010).
@@ -45,9 +44,12 @@ class RoleFactorySpec:
     ``ref`` is ``None`` for roles that have no library-aware variant (a concrete
     shape that is always built inline — e.g. ``direct_readout``, ``bath_reset``).
     Asking such a role for a ref/optional mount is a Fast-Fail at the call site.
+    ``shape`` carries the context-free RoleDef shape into authoring validation;
+    callers never need to materialize a value tree to detect an incompatible role.
     """
 
     kind: Literal["module", "waveform"]
+    shape: Callable[[], CfgSectionSpec]
     blank: BlankFactory
     ref: RefFactory | None = None
 
@@ -61,14 +63,14 @@ def _from_role(role: RoleDef) -> RoleFactorySpec:
         return role_blank(_role, ctx)
 
     if role.lib is None:
-        return RoleFactorySpec(kind=kind, blank=blank)
+        return RoleFactorySpec(kind=kind, shape=role.shape, blank=blank)
 
     def ref(
         ctx: ExpContext, *, optional: bool = False, _role: RoleDef = role
     ) -> ReferenceValue | None:
         return role_ref(_role, ctx, optional=optional)
 
-    return RoleFactorySpec(kind=kind, blank=blank, ref=ref)
+    return RoleFactorySpec(kind=kind, shape=role.shape, blank=blank, ref=ref)
 
 
 # role_id -> factory pair, generated from ROLE_TABLE. Order is informational only

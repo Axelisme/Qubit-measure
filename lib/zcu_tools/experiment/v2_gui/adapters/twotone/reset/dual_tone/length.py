@@ -12,15 +12,10 @@ from zcu_tools.experiment.v2.twotone.reset.dual_tone.length import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FigureOnlyAnalyzeResult,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    make_two_pulse_reset_module_spec,
-    md_scalar_float,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    md,
     reset_module_writeback_items,
     run_figure_only_analyze,
 )
@@ -33,9 +28,6 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -99,50 +91,32 @@ class DualToneLengthAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                # The sweep axis owns both tested-reset tone lengths
-                # (set_param("length") at run, which drives both waveforms); the
-                # form still shows the waveforms' starting lengths as the editable
-                # shape, mirroring the length-Rabi convention.
-                "tested_reset": make_two_pulse_reset_module_spec(),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Length (us)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=0.5)
-            .role("modules.tested_reset", "two_pulse_reset")
-            # Hold both tones at their calibrated frequencies and gains while the
-            # length is swept, so the cfg snapshot carries the fully calibrated
-            # reset for the final reset_120 registration (D2(a) md-link).
-            .set(
-                "modules.tested_reset.pulse1_cfg.freq",
-                md_scalar_float(ctx, "reset_f1", 0.0),
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .reset(
+                "tested_reset",
+                role_id="two_pulse_reset",
+                label="Tested Reset",
+                shape="two_pulse",
+                overrides={
+                    "pulse1_cfg.freq": md("reset_f1", fallback=0.0),
+                    "pulse2_cfg.freq": md("reset_f2", fallback=0.0),
+                    "pulse1_cfg.gain": md("reset_gain1", fallback=1.0),
+                    "pulse2_cfg.gain": md("reset_gain2", fallback=1.0),
+                },
             )
-            .set(
-                "modules.tested_reset.pulse2_cfg.freq",
-                md_scalar_float(ctx, "reset_f2", 0.0),
+            .readout()
+            .relax_delay(0.5)
+            .sweep(
+                "length",
+                label="Length (us)",
+                default=SweepValue(start=0.05, stop=40.0, expts=51),
             )
-            .set(
-                "modules.tested_reset.pulse1_cfg.gain",
-                md_scalar_float(ctx, "reset_gain1", 1.0),
-            )
-            .set(
-                "modules.tested_reset.pulse2_cfg.gain",
-                md_scalar_float(ctx, "reset_gain2", 1.0),
-            )
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .sweep("sweep.length", SweepValue(start=0.05, stop=40.0, expts=51))
+            .reps(100)
+            .rounds(100)
             .build()
         )
 

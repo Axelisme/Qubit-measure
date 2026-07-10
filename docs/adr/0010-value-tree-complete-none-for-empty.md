@@ -24,7 +24,10 @@ status: accepted
    - **停用 optional ModuleRef/WaveformRef** = `fields[k] = None`（裸 `None`，不記 chosen_key；重新啟用走 helper 預設——停用是純 marker、無 payload）。
    - **未填 scalar** = `DirectValue(value=None)`（**包裝層保留**——scalar 仍須保住 direct vs `EvalValue` 的**模式**身份，裸 `None` 會抹掉這個二元結構）。
 3. **檢測「空」一律 value 自述**：ref 空 = `fields[k] is None`；scalar 空 = `dv.value is None`。不再 isinstance sentinel、不再讀 is_unset flag、不再反推 spec。
-4. **`make_default_value` 是 helper，可盡量猜合理預設**（scalar 0、sweep 範圍、choices[0]）——對 optional ref 猜「停用（`None`）」是最安全、最不驚訝的預設。有特殊需求的 adapter 用 OO 鏈式/工廠覆寫（`with_field`、`make_*_ref_default(optional=True)` 無 lib 時回 `None`）。
+4. **shared `make_default_value(spec)` 是structural helper，可猜neutral預設**（scalar 0、sweep範圍、
+   choices[0]）——對optional ref猜「停用（`None`）」最安全。measure adapter的特殊fresh default由
+   [[0012]] definition seed/module policy明文宣告；`ModuleInit.SMART` optional miss與
+   `ModuleInit.DISABLED`都產生`None`。
 5. **「停用→消失」只在 lowering**（run/save 出口）發生：`_section_to_dict_inner` 對 `None`（停用 ref）省略輸出、對未填 required scalar raise。persist 是 value 樹的忠實序列化，不套用 lowering 的省略語義（停用 ref 序列化為 `{"__kind":"disabled"}`，還原回 `None`）。
 
 ### scalar 與 ref 的「空」載體不對稱，且正確
@@ -38,7 +41,9 @@ status: accepted
 
 早先方案（`DisabledRefValue` marker——一個一等的「停用態」value 型別，符合 `CfgNodeValue`）曾被採用，當時明確**否決** 用 `None`，理由＝「`None` 哨兵用『不存在』表達『停用』、不夠強型別」。**該否決的前提是 value 樹會有缺 key（omit key）**，使 `None`＝「不存在」與「停用」混淆。
 
-本決策的 §1（value 樹永遠完整）**消滅了「不存在」這個態**：`None` 不再等於「缺 key」，而是一義的「entry 在、值為 `None`＝停用」。舊否決理由在新前提下不成立——`DisabledRefValue` 已刪除，停用態改用 `None`。當年用 marker 消除 8 個 twotone adapter 各 3 行 `if x is not None` 守衛的成果**保留**（`make_*_ref_default(optional=True)` 改回 `None` 仍是一行放進 fields，因 `CfgSectionValue.fields` 型別放寬成 `dict[str, Optional[CfgNodeValue]]`）。
+本決策的 §1（value樹永遠完整）**消滅了「不存在」這個態**：`None`不再等於「缺key」，而是一義的
+「entry在、值為`None`＝停用」。`CfgSectionValue.fields`允許optional `CfgNodeValue`，definition
+materialization直接把disabled ref的`None`放進完整fields。
 
 ## 否決的選項
 
@@ -53,5 +58,6 @@ status: accepted
 - `live_model`：`ModuleRefLiveField.get_value/set_value` 對停用回/收 `None`；`SectionLiveField` 父層不再 reach-in；`ScalarLiveField` 未填存 `None` 不再填占位。
 - `zcu_tools.gui.cfg.codec`：停用 ref↔`{"__kind":"disabled"}`↔`None`；scalar 不寫 is_unset，未填 `value:null`；缺 optional ref key 經完整 `make_default_value` 兜底自動得 `None`（bug 還原端自動修復）。
 - `lowering`：`None` 統一處理（optional 省略 / required raise）；邏輯變簡單。
-- `make_*_ref_default(optional=True)`（8 個工廠，`experiment/v2_gui`）改回 `None`；lookback **無需改**（省略 key 經 helper 完整兜底自動得 `None`）。
+- `MeasureCfgDefinition.instantiate(ctx)`與`CfgSchemaAssembler`逐欄同步materialize完整value tree；
+  optional disabled ref保留顯式`None` entry，不省略key。
 - persistence 格式微調（scalar 去 is_unset、停用 ref 用 `disabled` marker）：舊檔走 strict fallback（[[0015]]），可接受一次性遷移；屬同 GUI_VERSION 內（無 wire/RPC 語意改動）。

@@ -12,15 +12,11 @@ from zcu_tools.experiment.v2.twotone.reset.single_tone.length import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FigureOnlyAnalyzeResult,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_pulse_reset_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_scalar_float,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    md,
     reset_module_writeback_items,
     run_figure_only_analyze,
 )
@@ -33,9 +29,6 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -97,37 +90,28 @@ class SingleToneLengthAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                # The sweep axis owns the tested-reset length
-                # (set_param("length") at run, which drives waveform.length);
-                # the form still shows the waveform's starting length as the
-                # editable shape, mirroring the length-Rabi convention.
-                "tested_reset": make_pulse_reset_module_spec(),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Length (us)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100, relax_delay=30.5)
-            .role("modules.tested_reset", "reset", RoleInit.INLINE)
-            # The tested reset drives at the fixed sideband frequency while the
-            # length is swept (notebook: freq = md.reset_f).
-            .set(
-                "modules.tested_reset.pulse_cfg.freq",
-                md_scalar_float(ctx, "reset_f", 0.0),
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .reset(
+                "tested_reset",
+                role_id="reset",
+                label="Tested Reset",
+                shape="pulse",
+                init=ModuleInit.INLINE,
+                overrides={"pulse_cfg.freq": md("reset_f", fallback=0.0)},
             )
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .sweep("sweep.length", SweepValue(start=0.1, stop=20.0, expts=50))
+            .readout()
+            .relax_delay(30.5)
+            .sweep(
+                "length",
+                label="Length (us)",
+                default=SweepValue(start=0.1, stop=20.0, expts=50),
+            )
+            .reps(100)
+            .rounds(100)
             .build()
         )
 

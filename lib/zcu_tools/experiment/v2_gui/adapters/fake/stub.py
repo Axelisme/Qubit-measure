@@ -13,7 +13,10 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import CfgBuilder
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
@@ -27,9 +30,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ScalarSpec,
     SweepSpec,
     SweepValue,
 )
@@ -102,22 +102,18 @@ class FakeAdapter(
     exp_cls = FakeExp
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec(
-            fields={
-                "reps": ScalarSpec(label="Reps", type=int),
-                "rounds": ScalarSpec(label="Rounds", type=int),
-                "sweep": SweepSpec(label="Frequency"),
-                "gain": ScalarSpec(label="Gain", type=float, decimals=4),
-                "noise_scale": ScalarSpec(label="Noise Scale", type=float, decimals=4),
-            }
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=10, gain=0.1, noise_scale=0.1)
-            .sweep("sweep", SweepValue(start=5.0, stop=6.0, expts=11))
+            MeasureCfgBuilder()
+            .reps(100)
+            .rounds(10)
+            .field(
+                "sweep",
+                spec=SweepSpec(label="Frequency"),
+                default=SweepValue(start=5.0, stop=6.0, expts=11),
+            )
+            .float("gain", label="Gain", default=0.1, decimals=4)
+            .float("noise_scale", label="Noise Scale", default=0.1, decimals=4)
             .build()
         )
 

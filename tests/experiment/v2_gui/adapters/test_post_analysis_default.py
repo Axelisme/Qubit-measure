@@ -13,13 +13,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
 )
 
 
@@ -32,12 +32,8 @@ class _FakeAdapter(BaseAdapter[Any, Any, Any, Any]):
     exp_cls = MagicMock
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec()
-
-    def make_default_value(self, ctx: Any) -> CfgSectionValue:
-        del ctx
-        return CfgSectionValue()
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        return MeasureCfgBuilder().build()
 
     def make_filename_stem(self, ctx: Any) -> str:
         del ctx

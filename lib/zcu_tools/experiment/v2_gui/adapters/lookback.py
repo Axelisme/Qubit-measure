@@ -10,12 +10,10 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    custom,
     make_trig_offset,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -27,11 +25,6 @@ from zcu_tools.gui.app.main.adapter import (
     ParamMeta,
     WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    LiteralSpec,
 )
 
 LookbackRunResult: TypeAlias = LookbackResult
@@ -101,34 +94,35 @@ class LookbackAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                "readout": make_pulse_readout_module_spec(),
-            },
-            # reps is locked to 1: decimated acquisition has no multi-rep
-            # averaging, so LookbackExp.run() forces reps=1 anyway. Locking it
-            # here means the GUI never offers a value that gets silently
-            # overridden.
-            reps=LiteralSpec(value=1, label="Reps"),
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        # reps is locked to 1 by the LiteralSpec in cfg_spec(); the L1 blank
-        # already carries that literal, so it is not set here. The optional
-        # init_pulse / reset default to disabled (None) via the L1 blank too.
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(rounds=500, relax_delay=0.0)
-            .role("modules.readout", "readout", RoleInit.INLINE)
-            .set("modules.readout.pulse_cfg.gain", 1.0)
-            .set("modules.readout.ro_cfg.ro_length", 1.5)
-            .set(
-                "modules.readout.ro_cfg.trig_offset",
-                make_trig_offset(ctx, trig_expr="timeFly - 0.1", trig_fallback=0.4),
+            MeasureCfgBuilder()
+            .reset(optional=True, init=ModuleInit.DISABLED)
+            .pulse(
+                "init_pulse",
+                role_id="pi_pulse",
+                optional=True,
+                init=ModuleInit.DISABLED,
             )
+            .readout(
+                pulse_only=True,
+                init=ModuleInit.INLINE,
+                overrides={
+                    "pulse_cfg.gain": 1.0,
+                    "ro_cfg.ro_length": 1.5,
+                    "ro_cfg.trig_offset": custom(
+                        lambda ctx: make_trig_offset(
+                            ctx,
+                            trig_expr="timeFly - 0.1",
+                            trig_fallback=0.4,
+                        ),
+                        description="lookback trigger offset",
+                    ),
+                },
+            )
+            .relax_delay(0.0)
+            .reps(1, locked=True)
+            .rounds(500)
             .build()
         )
 

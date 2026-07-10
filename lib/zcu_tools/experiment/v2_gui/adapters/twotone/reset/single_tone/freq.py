@@ -14,16 +14,11 @@ from zcu_tools.experiment.v2.twotone.reset.single_tone.freq import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_pulse_reset_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_has_key,
-    proper_relax,
-    proper_reset_freq_range,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    md,
+    reset_freq_range,
     reset_module_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -35,12 +30,6 @@ from zcu_tools.gui.app.main.adapter import (
     NoAnalyzeParams,
     WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
-    SweepSpec,
 )
 
 SingleToneFreqRunResult: TypeAlias = FreqResult
@@ -102,44 +91,37 @@ class SingleToneFreqAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                # The sweep axis owns the tested-reset frequency
-                # (set_param("freq") at run); lock it so the form does not show a
-                # field the sweep silently overwrites (notebook: freq=0.0).
-                "tested_reset": make_pulse_reset_module_spec().lock_literal(
-                    "pulse_cfg.freq", 0.0
-                ),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"freq": SweepSpec(label="Freq (MHz)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        post_delay: float | EvalValue = (
-            EvalValue(expr="5.0 / (2 * 3.141592653589793 * rf_w)")
-            if md_has_key(ctx, "rf_w")
-            else 0.8
-        )
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000,
-                rounds=100,
-                relax_delay=proper_relax(ctx, factor=1.0, fallback=30.5),
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .reset(
+                "tested_reset",
+                role_id="reset",
+                label="Tested Reset",
+                shape="pulse",
+                init=ModuleInit.INLINE,
+                locked={"pulse_cfg.freq": 0.0},
+                overrides={
+                    "pulse_cfg.gain": 0.3,
+                    "pulse_cfg.waveform.length": 5.0,
+                    "pulse_cfg.post_delay": md(
+                        "rf_w",
+                        expr="5.0 / (2 * 3.141592653589793 * rf_w)",
+                        fallback=0.8,
+                    ),
+                },
             )
-            .role("modules.tested_reset", "reset", RoleInit.INLINE)
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .set("modules.tested_reset.pulse_cfg.gain", 0.3)
-            .set("modules.tested_reset.pulse_cfg.waveform.length", 5.0)
-            .set("modules.tested_reset.pulse_cfg.post_delay", post_delay)
-            .sweep("sweep.freq", proper_reset_freq_range(ctx, 201))
+            .readout()
+            .relax_delay(md("t1", expr="1.0 * t1", fallback=30.5))
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=reset_freq_range(expts=201),
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

@@ -11,14 +11,12 @@ from zcu_tools.experiment.v2.singleshot.len_rabi import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FigureOnlyAnalyzeResult,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_eval_scaled_or_value,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    SweepDefault,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -31,10 +29,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
-    SweepValue,
 )
 
 from ._shared import read_ge_centers
@@ -92,27 +86,29 @@ class SsLenRabiAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        # LenRabiCfg owns qub_pulse/readout/reset modules plus sweep.length.
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "qub_pulse": make_pulse_module_spec(),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Length (us)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        sweep_stop = md_eval_scaled_or_value(ctx, "pi_len", factor=4.0, fallback=0.2)
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=50.5)
-            .role("modules.qub_pulse", "qub_probe", RoleInit.INLINE)
-            .set("modules.qub_pulse.gain", 1.0)
-            .role("modules.readout", "readout")
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .sweep("sweep.length", SweepValue(start=0.03, stop=sweep_stop, expts=51))
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse(
+                "qub_pulse",
+                role_id="qub_probe",
+                init=ModuleInit.INLINE,
+                overrides={"gain": 1.0},
+            )
+            .readout()
+            .relax_delay(50.5)
+            .sweep(
+                "length",
+                label="Length (us)",
+                default=SweepDefault(
+                    start=0.03,
+                    stop=scaled_md("pi_len", factor=4.0, fallback_value=0.2),
+                    expts=51,
+                ),
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

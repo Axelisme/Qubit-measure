@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — autoflux run snapshot coverage
+**Last updated:** 2026-07-11 — shared cfg assembler and measure definition coverage
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -236,7 +236,17 @@ optimization contract。Segment propagator LRU、單次 signal-grid prefix seque
 要求generic imports直接指向shared owner。autofluxdep的app-local barrel ownership由
 `tests/autofluxdep_gui/test_cfg_import_contract.py`獨立鎖定。
 
+`tests/gui/cfg/test_schema_assembler.py`擁有domain-free paired Spec/Value construction contract：
+path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
+caller alias隔離與one-shot build。domain role、Seed與app section policy不得進入這組shared tests。
+
 ### Experiment v2 GUI adapter tests
+
+`tests/experiment/v2_gui/adapters/shared/test_schema_builder.py`鎖定context-free
+`MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
+resolution/path errors、module override/lock transactionality與definition isolation。
+`tests/gui/adapter/test_adapter_definition.py`是38-entry registry gate：empty/rich md/ml contexts都必須
+保持同一static spec，且definition可重複instantiate。
 
 `tests/experiment/v2_gui/adapters/singleshot/_helpers.py` 集中 singleshot adapter 測試的 `ModuleLibrary` / context / request fixture。singleshot 測試檔名以 domain ownership 命名，例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep；不要再用歷史 Phase 編號命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
 
@@ -265,6 +275,10 @@ only when the tested object has no dialog-presenter boundary for that
 interaction.
 
 ### Autofluxdep GUI tests
+
+`tests/autofluxdep_gui/test_cfg_schema.py`另外鎖定`NodeSchemaBuilder`抽取到shared
+`CfgSchemaAssembler`前後的spec/value/logical-path/persisted observable parity；autoflux domain
+仍擁有logical projection與generation policy。
 
 `tests/autofluxdep_gui/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_cfg_import_contract.py` 鎖定autoflux cfg package只暴露app-owned API，且production generic cfg imports直接指向shared owner。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
 

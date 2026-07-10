@@ -10,13 +10,10 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    proper_qub_freq_range,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    qub_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -27,11 +24,6 @@ from zcu_tools.gui.app.main.adapter import (
     ParamMeta,
     WritebackItem,
     WritebackRequest,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
 )
 
 FreqRunResult: TypeAlias = FreqResult
@@ -107,32 +99,27 @@ class FreqAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                # The sweep axis owns the qubit-drive frequency
-                # (set_param("freq") at run); lock it so the form does not
-                # show a field the sweep silently overwrites.
-                "qub_pulse": make_pulse_module_spec(label="Probe Pulse").lock_literal(
-                    "freq", 0.0
-                ),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"freq": SweepSpec(label="Freq (MHz)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=1.0)
-            # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.qub_pulse", "qub_probe", RoleInit.INLINE)
-            .role("modules.readout", "readout")
-            .set("modules.qub_pulse.waveform.length", 5.0)
-            .set("modules.qub_pulse.gain", 0.1)
-            .sweep("sweep.freq", proper_qub_freq_range(ctx, 301))
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse(
+                "qub_pulse",
+                role_id="qub_probe",
+                label="Probe Pulse",
+                init=ModuleInit.INLINE,
+                locked={"freq": 0.0},
+                overrides={"waveform.length": 5.0, "gain": 0.1},
+            )
+            .readout()
+            .relax_delay(1.0)
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=qub_freq_range(expts=301),
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

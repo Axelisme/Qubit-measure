@@ -17,7 +17,10 @@ status: accepted
 
 證據：`zcu_tools.gui.cfg.model` 契約「Spec tree — static, never mutated」「Value tree — mutable」；`editable` 在 `ScalarSpec`、value 節點碰不到。`LiteralSpec` 已用於 spec 樹（`"type": LiteralSpec("readout/pulse")`），`LiteralLiveField` 已實作「value 永遠=spec.value、set_value no-op」。
 
-→ 鎖定 = `cfg_spec()` 內把該葉宣告/替換為 `LiteralSpec(value)`。**spec-only、不跨樹、不碰 value**。`lock_literal` **必須在 `cfg_spec()` 內呼叫且結果被 `return`**——鎖是 spec 契約的一部分，在 `cfg_spec()` 外對其回傳值鎖會讓 spec 不再是 SSOT。
+→ 鎖定 = context-free cfg definition 的 field declaration把該葉宣告/替換為
+`LiteralSpec(value)`。**鎖的語義只屬spec**；[[0012]] 的 single-pass authoring把 `locked`
+參數與module declaration放在一起，shared assembler只負責materialized value對齊，不改變ownership。
+鎖不得在definition外由caller追加，否則static contract不再是SSOT。
 
 **被否決**：`0.0 + editable=False`——須跨兩樹同改、GUI 顯示唯讀框而非藏；`LiteralSpec` 更乾淨。
 
@@ -36,15 +39,25 @@ status: accepted
 
 ### 4. Value OO 覆寫 in-place 回 self —— 刻意不對稱於 spec 層
 
-value 容器（`CfgSectionValue`/`ModuleRefValue`）**維持可變、`with_*` in-place 改 fields 回 self**，而非回新 frozen。證據支撐 in-place 安全：`make_default_value(spec)` 每次從頭新建（不跨呼叫共享）；runtime LiveModel 不 in-place 改傳入 value。
+value 容器（`CfgSectionValue`/`ReferenceValue`）**維持可變、`with_*` in-place 改 fields 回 self**，
+而非回新 frozen。fresh definition materialization與shared `make_default_value(spec)`都建立隔離的新值，
+runtime LiveModel不in-place改傳入value。
 
 **代價（誠實記錄）**：`spec.lock_literal()` 回新 frozen、`value.with_gain()` 改 self——兩側機制不對稱，是認知負擔點；取捨理由：value 本就可變、改動最小，強收 value frozen 是更大的 YAGNI。
 
 ### 5. 角色 default 是 `ROLE_TABLE` 資料 + 兩個泛型 builder
 
-`defaults/role_table.py` 的 `ROLE_TABLE: dict[role_id, RoleDef]` 為每個角色（qub_probe / res_probe / pi_pulse / pi2_pulse / readout / readout_dpm / reset 各形狀 / qub_waveform / res_waveform …）宣告一個 `RoleDef` literal（pulse / ro / waveform 的 md-linked 種子值，含公式以 `Md(..., expr=)` 或 `TRIG` 表達）。兩個泛型 builder 消費它：`role_blank`（blank：md-linked 預設，永不查庫、永不 `None`）、`role_ref`（查庫 preferred → fallback blank，optional 無 lib 時回 `None`，見 [[0010]]）。共用 patch helper 收進 `defaults/helpers.py`。生成的 `ROLE_FACTORIES`（`{role_id: RoleFactorySpec(blank, ref)}`）是 RoleCatalog 與 CfgBuilder 的單一 source：RoleCatalog 用 `.blank`；adapter 透過 [[0012]] 的 `CfgBuilder.role(..., RoleInit.ADOPT/INLINE/DISABLED)` 選 ref / blank / disabled。
+`defaults/role_table.py` 的 `ROLE_TABLE: dict[role_id, RoleDef]` 為每個角色（qub_probe / res_probe /
+pi_pulse / pi2_pulse / readout / readout_dpm / reset各形狀 / qub_waveform / res_waveform …）宣告一個
+`RoleDef` literal（pulse / ro / waveform 的md-linked種子值，含公式以`Md(..., expr=)`或`TRIG`
+表達）。`role_blank`（永不查庫、永不`None`）與`role_ref`（查庫preferred → fallback blank，
+optional無lib時回`None`，見[[0010]]）消費它。生成的`ROLE_FACTORIES`是RoleCatalog與[[0012]]
+`MeasureCfgDefinition` materialization的單一source：RoleCatalog用`.blank`；adapter declaration以
+`ModuleInit.SMART/INLINE/DISABLED`選adopt-or-fallback、inline或disabled。
 
-**default factory 零鎖定（職責邊界）**：default factory 只產 value 樹預設，**不預設鎖任何欄位**，即使是高頻場景。鎖定 100% 由 adapter 在 `cfg_spec()` 裡 `lock_literal` 宣告——鎖定屬 spec 層（決策 1）、default factory 屬 value 層；「高頻」不是放進 factory 的理由。
+**default factory 零鎖定（職責邊界）**：default factory只產value預設，**不預設鎖任何欄位**，
+即使是高頻場景。鎖定100%由adapter的definition declaration明文宣告；「高頻」不是放進factory
+的理由。
 
 > 演化：曾規劃「角色 wrapper 委派兩層通用 factory」（`default_pi`/`default_qub_probe`…）→ 收斂為每角色一檔的單層 `make_<role>_default` / `make_<role>_ref_default` factory（完整對稱矩陣）→ 再收斂為現在的 `ROLE_TABLE` 資料 + `role_blank` / `role_ref` 兩個泛型 builder（角色詞彙從「一檔一函數」變成「一列資料」，新增角色 = 加一個 `RoleDef` literal；領域公式以 `Md(expr=)` / `TRIG` 種子表達，仍是 EvalValue）。
 

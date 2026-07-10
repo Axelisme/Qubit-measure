@@ -14,15 +14,10 @@ from zcu_tools.experiment.v2.twotone.reset.dual_tone.freq import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    make_two_pulse_reset_module_spec,
-    md_scalar_float,
-    proper_reset_freq_axis,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    md,
+    reset_freq_axis,
     reset_module_writeback_items,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -40,9 +35,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
 )
 
 from ._shared import RESET_120_FIELD_MD_MAP
@@ -112,48 +104,36 @@ class DualToneFreqAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                # Each sweep axis owns one tested-reset tone frequency
-                # (set_param("freq1"/"freq2") at run, which write pulse1/pulse2
-                # freq); lock them so the form does not show fields the sweep
-                # silently overwrites (notebook: freq=0.0).
-                "tested_reset": make_two_pulse_reset_module_spec()
-                .lock_literal("pulse1_cfg.freq", 0.0)
-                .lock_literal("pulse2_cfg.freq", 0.0),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={
-                "freq1": SweepSpec(label="Freq 1 (MHz)"),
-                "freq2": SweepSpec(label="Freq 2 (MHz)"),
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=1000, relax_delay=0.5)
-            .role("modules.tested_reset", "two_pulse_reset")
-            # The frequencies are swept (locked off the form); the gains are held
-            # at their calibrated values so the cfg snapshot carries them forward
-            # for the final reset_120 registration (D2(a) md-link).
-            .set(
-                "modules.tested_reset.pulse1_cfg.gain",
-                md_scalar_float(ctx, "reset_gain1", 1.0),
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .reset(
+                "tested_reset",
+                role_id="two_pulse_reset",
+                label="Tested Reset",
+                shape="two_pulse",
+                locked={"pulse1_cfg.freq": 0.0, "pulse2_cfg.freq": 0.0},
+                overrides={
+                    "pulse1_cfg.gain": md("reset_gain1", fallback=1.0),
+                    "pulse2_cfg.gain": md("reset_gain2", fallback=1.0),
+                },
             )
-            .set(
-                "modules.tested_reset.pulse2_cfg.gain",
-                md_scalar_float(ctx, "reset_gain2", 1.0),
+            .readout()
+            .relax_delay(0.5)
+            .sweep(
+                "freq1",
+                label="Freq 1 (MHz)",
+                default=reset_freq_axis("reset_f1", expts=201),
             )
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .sweep("sweep.freq1", proper_reset_freq_axis(ctx, "reset_f1", 201))
-            .sweep("sweep.freq2", proper_reset_freq_axis(ctx, "reset_f2", 201))
+            .sweep(
+                "freq2",
+                label="Freq 2 (MHz)",
+                default=reset_freq_axis("reset_f2", expts=201),
+            )
+            .reps(100)
+            .rounds(1000)
             .build()
         )
 

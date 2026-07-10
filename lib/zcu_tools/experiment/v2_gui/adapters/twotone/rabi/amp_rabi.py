@@ -14,14 +14,10 @@ from zcu_tools.experiment.v2.twotone.rabi.amp_rabi import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_eval_scaled_or_value,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    SweepDefault,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -37,10 +33,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
-    SweepValue,
 )
 
 AmpRabiRunResult: TypeAlias = AmpRabiResult
@@ -119,51 +111,38 @@ class AmpRabiAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                # The sweep axis owns the qubit-drive gain (set_param
-                # ("gain") at run); lock it so the form does not show a
-                # field the sweep silently overwrites.
-                "qub_pulse": make_pulse_module_spec(label="Rabi Pulse").lock_literal(
-                    "gain", 0.0
-                ),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"gain": SweepSpec(label="Gain (a.u.)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        # gain sweep spans up to 1.2*pi_gain (md-linked), so it is assembled as
-        # an explicit SweepValue.
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
-            )
-            # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role(
-                "modules.qub_pulse",
-                "rabi_pulse",
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse(
+                "qub_pulse",
+                role_id="rabi_pulse",
+                label="Rabi Pulse",
+                locked={"gain": 0.0},
                 blank_overrides={
-                    "waveform.length": md_eval_scaled_or_value(
-                        ctx, "pi_len", factor=1.01, fallback=1.1
+                    "waveform.length": scaled_md(
+                        "pi_len",
+                        factor=1.01,
+                        fallback_value=1.1,
                     )
                 },
             )
-            .role("modules.readout", "readout")
+            .readout()
+            .relax_delay(
+                scaled_md("t1", factor=5.0, fallback_value=30.5),
+            )
             .sweep(
-                "sweep.gain",
-                SweepValue(
+                "gain",
+                label="Gain (a.u.)",
+                default=SweepDefault(
                     start=-0.3,
-                    stop=md_eval_scaled_or_value(
-                        ctx, "pi_gain", factor=1.2, fallback=0.6
-                    ),
+                    stop=scaled_md("pi_gain", factor=1.2, fallback_value=0.6),
                     expts=51,
                 ),
             )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

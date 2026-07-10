@@ -15,14 +15,10 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_eval_scaled_or_value,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    SweepDefault,
+    scaled_md,
 )
 from zcu_tools.experiment.v2_gui.adapters.twotone.time_domain._detune_shared import (
     detune_ratio_of,
@@ -44,11 +40,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    FloatSpec,
-    SweepSpec,
-    SweepValue,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,46 +119,33 @@ class T2EchoAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        # detune_ratio is a run-only knob (not part of T2EchoCfg): it is the
-        # number of fringe periods per delay-sweep step, converted to the
-        # absolute detune (MHz) kwarg of T2EchoExp.run as detune_ratio / step.
-        # It lives in build_exp_spec's `extra` slot and is stripped before
-        # ml.make_cfg in build_exp_cfg (mirrors ro_optimize/auto's num_points).
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "pi_pulse": make_pulse_module_spec(),
-                "pi2_pulse": make_pulse_module_spec(),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Total delay (us)")},
-            extra={
-                "detune_ratio": FloatSpec(
-                    label="Detune ratio (fringes/step)", decimals=3
-                )
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000, rounds=100, relax_delay=proper_relax(ctx), detune_ratio=0.1
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("pi_pulse", role_id="pi_pulse")
+            .pulse("pi2_pulse", role_id="pi2_pulse")
+            .readout()
+            .relax_delay(
+                scaled_md("t1", factor=5.0, fallback_value=100.0),
             )
-            # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.pi2_pulse", "pi2_pulse")
-            .role("modules.pi_pulse", "pi_pulse")
-            .role("modules.readout", "readout")
             .sweep(
-                "sweep.length",
-                SweepValue(
+                "length",
+                label="Total delay (us)",
+                default=SweepDefault(
                     start=0.0,
-                    stop=md_eval_scaled_or_value(ctx, "t2e", factor=1.5, fallback=20.0),
+                    stop=scaled_md("t2e", factor=1.5, fallback_value=20.0),
                     expts=101,
                 ),
             )
+            .float(
+                "detune_ratio",
+                label="Detune ratio (fringes/step)",
+                default=0.1,
+                decimals=3,
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.app.main.adapter (Spec/Value split)."""
+"""Unit tests for zcu_tools.gui.app.main.adapter."""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.adapters.shared import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -49,6 +53,10 @@ def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
     spec = CfgSectionSpec(fields=spec_fields)
     value = CfgSectionValue(fields=val_fields or {})
     return CfgSchema(spec=spec, value=value)
+
+
+def _empty_cfg_definition() -> MeasureCfgDefinition:
+    return MeasureCfgBuilder().build()
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:
@@ -748,11 +756,8 @@ def _make_concrete_adapter() -> BaseAdapter:
         exp_cls = MagicMock()
 
         @classmethod
-        def cfg_spec(cls):
-            return CfgSectionSpec()
-
-        def make_default_value(self, ctx):
-            return CfgSectionValue()
+        def cfg_definition(cls) -> MeasureCfgDefinition:
+            return _empty_cfg_definition()
 
         def build_exp_cfg(self, raw_cfg, req):
             return MagicMock()
@@ -837,11 +842,8 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
             exp_cls = MagicMock()
 
             @classmethod
-            def cfg_spec(cls):
-                return CfgSectionSpec()
-
-            def make_default_value(self, ctx):
-                return CfgSectionValue()
+            def cfg_definition(cls) -> MeasureCfgDefinition:
+                return _empty_cfg_definition()
 
             def build_exp_cfg(self, raw_cfg, req):
                 return MagicMock()
@@ -885,11 +887,8 @@ def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
         ExpCfg_cls = _Cfg
 
         @classmethod
-        def cfg_spec(cls):
-            return CfgSectionSpec()
-
-        def make_default_value(self, ctx):
-            return CfgSectionValue()
+        def cfg_definition(cls) -> MeasureCfgDefinition:
+            return _empty_cfg_definition()
 
         def make_filename_stem(self, ctx):
             return "stem"
@@ -912,11 +911,8 @@ def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():
         exp_cls = MagicMock()
 
         @classmethod
-        def cfg_spec(cls):
-            return CfgSectionSpec()
-
-        def make_default_value(self, ctx):
-            return CfgSectionValue()
+        def cfg_definition(cls) -> MeasureCfgDefinition:
+            return _empty_cfg_definition()
 
         def make_filename_stem(self, ctx):
             return "stem"
@@ -937,11 +933,8 @@ def test_analyze_params_cls_fallback_when_no_annotation():
         exp_cls = MagicMock()
 
         @classmethod
-        def cfg_spec(cls):
-            return CfgSectionSpec()
-
-        def make_default_value(self, ctx):
-            return CfgSectionValue()
+        def cfg_definition(cls) -> MeasureCfgDefinition:
+            return _empty_cfg_definition()
 
         def build_exp_cfg(self, raw_cfg, req):
             return MagicMock()

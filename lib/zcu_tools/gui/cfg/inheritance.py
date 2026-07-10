@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
     """Produce a default CfgSectionValue mirroring the given spec structure.
 
-    A helper for adapters' ``make_default_value(ctx)``: it guesses sensible
-    defaults (scalar 0, sweep range, choices[0]) so an adapter need not spell out
-    every field — special cases are overridden via the value OO fluent. The
+    A structural helper for cfg construction: it guesses sensible defaults
+    (scalar 0, sweep range, choices[0]) so callers need not spell out every field.
+    Domain-specific defaults remain outside this helper. The
     result is **complete**: every spec field has an entry, no missing keys
     (ADR-0010). An *optional* ModuleRef/WaveformRef defaults to ``None``
     (disabled) — the safest, least-surprising default for "this field is

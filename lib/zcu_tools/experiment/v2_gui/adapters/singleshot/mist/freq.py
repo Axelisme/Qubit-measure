@@ -7,14 +7,12 @@ from typing import Any, ClassVar, TypeAlias
 from zcu_tools.experiment.v2.singleshot.mist import FreqCfg, FreqDepExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FigureOnlyAnalyzeResult,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    custom,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -27,9 +25,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
 )
 
 from .._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
@@ -85,30 +80,35 @@ class MistFreqAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            # Module field order mirrors FreqModuleCfg: reset, init_pulse,
-            # probe_pulse, readout.
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                "probe_pulse": make_pulse_module_spec(label="Probe Pulse"),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"freq": SweepSpec(label="Probe freq (MHz)")},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=10000, rounds=1, relax_delay=proper_relax(ctx, fallback=30.5))
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
-            .role("modules.probe_pulse", "res_probe", RoleInit.INLINE)
-            .set("modules.probe_pulse.freq", readout_probe_freq(ctx))
-            .role("modules.readout", "readout")
-            .sweep("sweep.freq", readout_probe_freq_range(ctx, 51))
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .pulse(
+                "probe_pulse",
+                role_id="res_probe",
+                label="Probe Pulse",
+                init=ModuleInit.INLINE,
+                overrides={
+                    "freq": custom(
+                        readout_probe_freq,
+                        description="readout probe frequency",
+                    )
+                },
+            )
+            .readout()
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=30.5))
+            .sweep(
+                "freq",
+                label="Probe freq (MHz)",
+                default=custom(
+                    lambda ctx: readout_probe_freq_range(ctx, 51),
+                    description="readout probe frequency range",
+                ),
+            )
+            .reps(10000)
+            .rounds(1)
             .build()
         )
 

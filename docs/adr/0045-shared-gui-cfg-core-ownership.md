@@ -4,7 +4,7 @@ status: accepted
 
 # 0045 — Shared GUI cfg core ownership
 
-**狀態：** accepted（2026-07-10）。
+**狀態：** accepted（2026-07-11）。
 **關聯：** [[0009]]、[[0010]]、[[0011]]、[[0012]]、[[0043]]、[[0046]]。
 
 ## 背景
@@ -24,6 +24,8 @@ app-owned library shape policy。[[0046]]以窄resolver port提供此能力，sh
 - `model.py`：Spec/Value 型別、`CfgSchema` 的 `spec`/`value` data carrier；
 - `inheritance.py`：default value、locked literal alignment、inheritance；
 - `tree.py`：section/reference-aware Spec resolve與existing-leaf Value read/replace；
+- `schema_assembler.py`：paired Spec/Value declaration、path conflict檢查、default wrapping、
+  choice binding、locked alignment與isolated one-shot build；
 - `codec.py`：session/node cfg raw ↔ live value tree codec 與 `SessionCodecError`；
 - `lowering.py`：[[0046]] 定義的 generic finished-cfg algorithm、三個窄 callable
   ports與 validation/lowering operations；
@@ -52,13 +54,17 @@ text-input enhancer與decoration provider ports；measure的ValueSource enhancer
 `OverridePlan` provider留在各自app。
 
 `gui.cfg` 不 import `gui.app.*`、`experiment.*`、Qt 或 `meta_tool`。`CfgSchema` 不保存
-environment callback、resolver registration 或 app runtime dependency。
+environment callback、resolver registration 或 app runtime dependency。`CfgSchemaAssembler`不
+理解role、Seed、MetaDict、ModuleLibrary、logical key、generation或app section label；consumer只可
+注入窄`section_labeler`，或先明確建立section。
 
 measure adapter package只暴露framework contract、request/result/writeback/analyze params與
 protocol signature需要的`gui.session.types` vocabulary；不import或forward shared cfg public
 names。generic consumer直接依賴shared owner，model/inheritance/codec implementation只由shared
 core擁有。finished-cfg generic algorithm與三個窄runtime ports由 [[0046]] 擁有；measure保留
 caller-facing `validate_schema`與`schema_to_raw_dict`，在adapter內組app-owned ports。
+measure domain另外擁有context-free `MeasureCfgBuilder` / `MeasureCfgDefinition`與deferred typed
+Seed recipes；definition materialization才把resolved defaults交給shared assembler（[[0012]]）。
 
 autofluxdep caller直接從shared owner匯入generic model、inheritance、codec names與Qt form。
 `zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露`NodeCfgSchema`、OverridePlan/policy、
@@ -66,7 +72,9 @@ module reference spec helpers與其它app-owned API，不forward `zcu_tools.gui.
 `cfg.module_adapter`擁有pulse/readout/waveform conversion與spec functions；
 `NodeCfgSchema.logical_paths`、generation persistence reshape、`OverridePlan`、node builder與
 pulse/readout spec factory由app/domain layer擁有。autofluxdep local lowering與module
-conversion遵循 [[0046]]，production不import measure app。
+conversion遵循 [[0046]]，production不import measure app。`NodeSchemaBuilder`使用shared
+`CfgSchemaAssembler`作paired tree mechanics，但logical projection、compound declaration、module
+seeding、generation verbs與section labels仍全由autoflux domain擁有。
 
 ## 後果
 
@@ -74,6 +82,7 @@ conversion遵循 [[0046]]，production不import measure app。
 - shared Qt cfg widget可重用同一份draft renderer而不載入任何app/session policy。
 - renderer註冊是instance-owned、fixed-factory、exact且freeze後不可變，不受import order影響。
 - measure 與 autofluxdep 使用同一組 class/function identity與相同 codec wire shape。
+- measure與autoflux共用paired construction mechanics，但各自保有domain builder與default policy。
 - generic cfg consumer直接依賴shared owner；measure adapter與autofluxdep local barrel只提供
   app-owned API。
 - finished-cfg caller使用app-local free function，observable validation/lowering順序不變。

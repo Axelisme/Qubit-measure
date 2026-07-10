@@ -10,14 +10,10 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.twotone.time_domain.t1 import T1Cfg, T1Exp, T1Result
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    md_eval_scaled,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    SweepDefault,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
@@ -32,14 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
-)
+from zcu_tools.gui.cfg import CfgSchema
 
 T1RunResult: TypeAlias = T1Result
 
@@ -100,38 +89,32 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "pi_pulse": make_pulse_module_spec(),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={"length": SweepSpec(label="Delay (us)")},
-            extra={"uniform": ScalarSpec(label="Uniform (linear) sweep", type=bool)},
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(
-                reps=1000,
-                rounds=100,
-                relax_delay=proper_relax(ctx),
-                uniform=True,
+            MeasureCfgBuilder()
+            .reset("reset", optional=True)
+            .pulse("pi_pulse", role_id="pi_pulse")
+            .readout()
+            .relax_delay(
+                scaled_md("t1", factor=5.0, fallback_value=100.0),
             )
-            .role("modules.pi_pulse", "pi_pulse")
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
             .sweep(
-                "sweep.length",
-                SweepValue(
+                "length",
+                label="Delay (us)",
+                default=SweepDefault(
                     start=0.0,
-                    stop=md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0),
+                    # Existing md_eval_scaled fallback was factor * 100.0.
+                    stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
                     expts=101,
                 ),
             )
+            .bool(
+                "uniform",
+                label="Uniform (linear) sweep",
+                default=True,
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

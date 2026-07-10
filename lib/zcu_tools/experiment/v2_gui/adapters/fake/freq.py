@@ -30,10 +30,10 @@ from zcu_tools.experiment.v2.onetone.freq import (
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_readout_module_spec,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    custom,
     md_get_float,
 )
 from zcu_tools.gui.app.main.adapter import (
@@ -52,9 +52,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
     SweepValue,
 )
 from zcu_tools.liveplot import LivePlot1D
@@ -130,6 +127,18 @@ class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 FakeFreqRunResult: TypeAlias = FreqResult
+
+
+def _freq_sweep_default(ctx: ExpContext) -> SweepValue:
+    r_f = md_get_float(ctx, "r_f", 6000.0)
+    rf_w_raw = ctx.md.get("rf_w")
+    rf_w = float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
+    half_span = rf_w * 5.0 if rf_w is not None else 200.0
+    return SweepValue(
+        start=r_f - half_span,
+        stop=r_f + half_span,
+        expts=201,
+    )
 
 
 @dataclass
@@ -309,46 +318,23 @@ class FakeFreqAdapter(
         self._persist_data = persist_data
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        # No 'model' block: the simulated resonance is fixed at adapter
-        # construction (model_type + params), hidden from the cfg, so the
-        # sweep below scans blind and the analysis must find the dip.
-        return build_exp_spec(
-            modules={
-                # Mirrors onetone/freq: the freq sweep owns the readout
-                # frequency, so lock it off the form (the sim reads the
-                # sweep range directly and ignores this field anyway).
-                "readout": make_readout_module_spec()
-                .lock_literal("pulse_cfg.freq", 0.0)
-                .lock_literal("ro_cfg.ro_freq", 0.0),
-            },
-            sweep={"freq": SweepSpec(label="Freq (MHz)")},
-            relax_delay=False,
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rf_w_raw = ctx.md.get("rf_w")
-        rf_w: float | None = (
-            float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
-        )
-
-        # Sweep range: ±5× linewidth around r_f, or ±200 MHz if rf_w unknown.
-        # This is set from r_f independently of the simulated resonance freq
-        # (held in __init__); the two only coincide by default, so a test that
-        # constructs a different params.freq forces a genuine blind sweep.
-        half_span = (rf_w * 5.0) if rf_w is not None else 200.0
-        freq_start = r_f - half_span
-        freq_stop = r_f + half_span
-
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=100, rounds=100)
-            .role("modules.readout", "readout", RoleInit.INLINE)
-            .sweep(
-                "sweep.freq",
-                SweepValue(start=freq_start, stop=freq_stop, expts=201),
+            MeasureCfgBuilder()
+            .readout(
+                init=ModuleInit.INLINE,
+                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
             )
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=custom(
+                    _freq_sweep_default,
+                    description="fake resonator blind frequency range",
+                ),
+            )
+            .reps(100)
+            .rounds(100)
             .build()
         )
 

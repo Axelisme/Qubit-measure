@@ -65,6 +65,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
+    CfgSchemaAssembler,
     CfgSectionSpec,
     CfgSectionValue,
     ChoiceSectionSpec,
@@ -141,6 +142,39 @@ def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> ExpCont
 _BUILDERS: tuple[Builder, ...] = builders()
 
 _BUILDER_IDS = [builder.name for builder in _BUILDERS]
+
+
+def test_node_builder_shared_assembler_extraction_preserves_paired_schema() -> None:
+    node = (
+        NodeSchemaBuilder(label="Extraction")
+        .int("reps", "generation.reps", label="Reps", default=10)
+        .sweep(
+            "freq",
+            "sweep.freq",
+            label="Freq",
+            default=SweepValue(100.0, 200.0, expts=11),
+        )
+        .build()
+    )
+    assembler = CfgSchemaAssembler(
+        label="Extraction",
+        section_labeler=lambda key: {
+            "generation": "Generation overrides",
+            "sweep": "Sweep",
+        }.get(key, key.replace("_", " ").title()),
+    )
+    assembler.declare("generation.reps", IntSpec(label="Reps"), 10)
+    assembler.declare(
+        "sweep.freq",
+        SweepSpec(label="Freq"),
+        SweepValue(100.0, 200.0, expts=11),
+    )
+
+    assert node.schema == assembler.build()
+    assert node.logical_paths == {
+        "reps": "generation.reps",
+        "freq": "sweep.freq",
+    }
 
 
 def test_pi_pulse_library_aliases_prefer_length_calibrated_pulse() -> None:

@@ -6,13 +6,10 @@ from typing import Any, ClassVar, TypeAlias
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    proper_qub_freq_range,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    qub_freq_range,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -21,9 +18,6 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
 )
 from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    SweepSpec,
     SweepValue,
 )
 
@@ -77,34 +71,30 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                # Both sweep axes own qubit-drive freq + gain (set_param
-                # at run); lock so the form hides the silently-overwritten
-                # fields.
-                "qub_pulse": make_pulse_module_spec()
-                .lock_literal("freq", 0.0)
-                .lock_literal("gain", 0.0),
-                "readout": make_readout_module_spec(),
-            },
-            sweep={
-                "gain": SweepSpec(label="Gain (a.u.)"),
-                "freq": SweepSpec(label="Freq (MHz)"),
-            },
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(reps=1000, rounds=100, relax_delay=1.0)
-            # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.qub_pulse", "qub_probe", RoleInit.INLINE)
-            .role("modules.readout", "readout")
-            .sweep("sweep.gain", SweepValue(start=0.001, stop=1.0, expts=101))
-            .sweep("sweep.freq", proper_qub_freq_range(ctx, 201))
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse(
+                "qub_pulse",
+                role_id="qub_probe",
+                init=ModuleInit.INLINE,
+                locked={"freq": 0.0, "gain": 0.0},
+            )
+            .readout()
+            .relax_delay(1.0)
+            .sweep(
+                "gain",
+                label="Gain (a.u.)",
+                default=SweepValue(start=0.001, stop=1.0, expts=101),
+            )
+            .sweep(
+                "freq",
+                label="Freq (MHz)",
+                default=qub_freq_range(expts=201),
+            )
+            .reps(1000)
+            .rounds(100)
             .build()
         )
 

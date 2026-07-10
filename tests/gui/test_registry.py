@@ -62,10 +62,6 @@ class _DummyAdapter:
     exp_cls = _DummyExp
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return CfgSectionSpec()
-
-    @classmethod
     def guide(cls) -> AdapterGuide:
         return AdapterGuide(
             behavior="dummy",

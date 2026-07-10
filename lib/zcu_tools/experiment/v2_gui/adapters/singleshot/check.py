@@ -7,26 +7,17 @@ from typing import Any, ClassVar, TypeAlias
 from zcu_tools.experiment.v2.singleshot import CheckCfg, CheckExp
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
-    CfgBuilder,
     FigureOnlyAnalyzeResult,
-    RoleInit,
-    build_exp_spec,
-    make_pulse_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    proper_relax,
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+    scaled_md,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     ExpContext,
     NoAnalyzeParams,
-)
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    IntSpec,
-    LiteralSpec,
 )
 
 from ._shared import read_ge_centers
@@ -82,35 +73,22 @@ class CheckAdapter(
     )
 
     @classmethod
-    def cfg_spec(cls) -> CfgSectionSpec:
-        return build_exp_spec(
-            # Module field order mirrors CheckModuleCfg: reset, init_pulse,
-            # probe_pulse, readout.
-            modules={
-                "reset": make_reset_module_spec(optional=True),
-                "init_pulse": make_pulse_module_spec(optional=True),
-                "probe_pulse": make_pulse_module_spec(label="Probe Pulse"),
-                "readout": make_readout_module_spec(),
-            },
-            # Single-shot has no swept axis; the shot count is the run-only knob
-            # the domain copies into reps (mirrors singleshot/ge).
-            extra={"shots": IntSpec(label="Shots")},
-            # The domain overwrites reps (← shots) and rounds (← 1) at run, so lock
-            # them off the form (mirrors singleshot/ge).
-            reps=LiteralSpec(value=1, label="Reps"),
-            rounds=LiteralSpec(value=1, label="Rounds"),
-        )
-
-    def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
+    def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            CfgBuilder(ctx, self.cfg_spec())
-            .scalars(shots=5000)
-            .set("relax_delay", proper_relax(ctx))
-            .role("modules.probe_pulse", "qub_probe", RoleInit.INLINE)
-            .role("modules.readout", "readout")
-            # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", RoleInit.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
+            MeasureCfgBuilder()
+            .reset(optional=True)
+            .pulse("init_pulse", role_id="pi_pulse", optional=True)
+            .pulse(
+                "probe_pulse",
+                role_id="qub_probe",
+                label="Probe Pulse",
+                init=ModuleInit.INLINE,
+            )
+            .readout()
+            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .int("shots", label="Shots", default=5000)
+            .reps(1, locked=True)
+            .rounds(1, locked=True)
             .build()
         )
 
