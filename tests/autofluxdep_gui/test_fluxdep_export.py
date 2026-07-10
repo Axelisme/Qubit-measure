@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.services.fluxdep_export import (
     export_qubit_freq_fluxdep_spectrum,
 )

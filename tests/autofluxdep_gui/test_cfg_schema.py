@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-import zcu_tools.gui.app.autofluxdep.nodes.utils.schema as node_schema_module
+import zcu_tools.gui.app.autofluxdep.experiments._support.utils.schema as node_schema_module
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePath,
@@ -32,33 +32,36 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     validate_override_plan_base_cfg,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
-from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
-from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
     PI_PULSE_LIBRARY_ALIASES,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.readout_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.readout_defaults import (
     seed_readout_freq,
     seed_readout_gain,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
-from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils import NodeSchemaBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.utils.module_values import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils import NodeSchemaBuilder
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils.module_values import (
     pulse_length,
     pulse_product,
 )
-from zcu_tools.gui.app.autofluxdep.registry import NODE_BUILDERS, create_placement
+from zcu_tools.gui.app.autofluxdep.experiments.catalog import (
+    builders,
+    create_placement,
+)
+from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
+from zcu_tools.gui.app.autofluxdep.experiments.mist import MistBuilder
+from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
+from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
+from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
+from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
+from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
+from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
+from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -135,15 +138,7 @@ def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> ExpCont
     )
 
 
-_BUILDERS: tuple[Builder, ...] = (
-    QubitFreqBuilder(),
-    LenRabiBuilder(),
-    RoOptimizeBuilder(),
-    T1Builder(),
-    T2RamseyBuilder(),
-    T2EchoBuilder(),
-    MistBuilder(),
-)
+_BUILDERS: tuple[Builder, ...] = builders()
 
 _BUILDER_IDS = [builder.name for builder in _BUILDERS]
 
@@ -2329,7 +2324,7 @@ def test_cfg_value_commit_types_and_fast_fails():
 # --- 2e. run-time override plan contract ---------------------------------------
 
 
-@pytest.mark.parametrize("builder", NODE_BUILDERS.values(), ids=NODE_BUILDERS)
+@pytest.mark.parametrize("builder", _BUILDERS, ids=_BUILDER_IDS)
 def test_run_snapshot_accepts_every_registered_builder_default_leaf_type(
     builder: Builder,
 ) -> None:

@@ -14,17 +14,17 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema
-from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
-from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import (
-    QubitFreqBuilder,
-    QubitFreqCfgTemplate,
-)
-from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
 )
+from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
+    QubitFreqBuilder,
+    QubitFreqCfgTemplate,
+)
+from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
+from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -126,7 +126,7 @@ def test_qubit_freq_make_cfg_composes_prediction_correction():
 
 
 def test_qubit_freq_make_cfg_uses_recovery_overlay_before_correction():
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
         QubitFreqRecoveryState,
     )
     from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
@@ -250,7 +250,7 @@ def test_qubit_freq_produce_fast_fails_when_context_unconfigured():
 
 
 def test_lenrabi_make_cfg_lowers_context():
-    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import (
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import (
         LenRabiBuilder,
         LenRabiCfgTemplate,
     )
@@ -295,7 +295,7 @@ def test_lenrabi_make_cfg_lowers_context():
 
 
 def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
-    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
 
     ml = _ml()
     builder = LenRabiBuilder()
@@ -323,7 +323,7 @@ def test_lenrabi_make_cfg_uses_controller_proposal_with_use_site_clamp():
 
 
 def test_lenrabi_controller_proposal_smoothly_reverts_to_open_loop_gain():
-    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
 
     ml = _ml()
     builder = LenRabiBuilder()
@@ -361,7 +361,7 @@ def test_lenrabi_controller_proposal_smoothly_reverts_to_open_loop_gain():
 
 
 def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
-    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
 
     ml = _ml()
     ml.register_module(
@@ -399,7 +399,7 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
 
 
 def test_lenrabi_make_cfg_uses_seed_and_expected_setpoint_without_feedback():
-    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
 
     ml = _ml()
     builder = LenRabiBuilder()
@@ -438,7 +438,7 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
     # is None — make_cfg cannot lower the rabi drive pulse.
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
 
     builder = LenRabiBuilder()
     params = {
@@ -454,12 +454,12 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
 
 
 def test_ro_optimize_make_cfg_lowers_context():
-    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
-    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import (
+    from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import (
         RoOptimizeBuilder,
         RoOptimizeCfgTemplate,
     )
+    from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
     from zcu_tools.meta_tool import ModuleLibrary
 
     ml = ModuleLibrary()
@@ -530,7 +530,7 @@ def test_ro_optimize_make_cfg_lowers_context():
 
 
 def test_ro_optimize_first_point_uses_default_search_ranges():
-    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
 
     ml = _ml()
     pi_pulse = {
@@ -566,7 +566,7 @@ def test_ro_optimize_first_point_uses_default_search_ranges():
 
 def test_ro_optimize_make_cfg_can_fix_center_and_relax_delay():
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
 
     ml = _ml()
     pi_pulse = {
@@ -607,7 +607,7 @@ def test_ro_optimize_make_cfg_can_fix_center_and_relax_delay():
 
 def test_ro_optimize_init_result_uses_window_params():
     import numpy as np
-    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
 
     builder = RoOptimizeBuilder()
     schema = _schema(
@@ -629,7 +629,7 @@ def test_ro_optimize_init_result_uses_window_params():
 
 def test_ro_optimize_init_result_can_use_default_sweep_width():
     import numpy as np
-    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
 
     builder = RoOptimizeBuilder()
     schema = _schema(
@@ -655,7 +655,7 @@ def test_ro_optimize_init_result_can_use_default_sweep_width():
 def test_ro_optimize_init_result_uses_fixed_center_params():
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
 
     builder = RoOptimizeBuilder()
     schema = _schema(
@@ -681,7 +681,7 @@ def test_ro_optimize_produce_fast_fails_when_context_unconfigured():
     # is None — make_cfg cannot lower the swept readout pulse.
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.ro_optimize import RoOptimizeBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.ro_optimize import RoOptimizeBuilder
 
     builder = RoOptimizeBuilder()
     params = {
@@ -722,9 +722,9 @@ _T1_PI_PULSE = {
 
 
 def test_t1_make_cfg_lowers_context():
+    from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder, T1CfgTemplate
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder, T1CfgTemplate
     from zcu_tools.meta_tool import ModuleLibrary
 
     env = RunEnv(
@@ -761,7 +761,7 @@ def test_t1_make_cfg_lowers_context():
 
 
 def test_t1_nonuniform_axis_preserves_window_and_clusters_points():
-    from zcu_tools.gui.app.autofluxdep.nodes.t1 import t1_delay_axis
+    from zcu_tools.gui.app.autofluxdep.experiments.t1 import t1_delay_axis
 
     axis = t1_delay_axis(start=0.5, stop=60.0, expts=11, uniform=False)
 
@@ -773,7 +773,7 @@ def test_t1_nonuniform_axis_preserves_window_and_clusters_points():
 
 
 def test_t1_make_init_result_uses_nonuniform_axis():
-    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder, t1_delay_axis
+    from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder, t1_delay_axis
 
     builder = T1Builder()
     schema = _schema(
@@ -794,7 +794,7 @@ def test_t1_make_init_result_uses_nonuniform_axis():
 
 
 def test_t1_make_cfg_can_fix_sweep_range_and_relax_delay():
-    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
+    from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
     from zcu_tools.meta_tool import ModuleLibrary
 
     env = RunEnv(
@@ -861,7 +861,7 @@ class _ProgramBuilderProbe:
 def _patch_t1_fast_produce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, object]:
-    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+    import zcu_tools.gui.app.autofluxdep.experiments.t1 as t1_mod
 
     captured: dict[str, object] = {}
 
@@ -903,7 +903,7 @@ def _patch_t1_fast_produce(
 
 
 def test_t1_nonuniform_produce_uses_delay_table(monkeypatch: pytest.MonkeyPatch):
-    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+    import zcu_tools.gui.app.autofluxdep.experiments.t1 as t1_mod
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
     from zcu_tools.program.v2 import DelayAuto, LoadValue
@@ -953,7 +953,7 @@ def test_t1_nonuniform_produce_uses_delay_table(monkeypatch: pytest.MonkeyPatch)
 def test_t1_nonuniform_produce_auto_mode_honors_max_length(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+    import zcu_tools.gui.app.autofluxdep.experiments.t1 as t1_mod
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
     from zcu_tools.program.v2 import DelayAuto, LoadValue
@@ -1003,7 +1003,7 @@ def test_t1_nonuniform_produce_auto_mode_honors_max_length(
 def test_t1_nonuniform_produce_rejects_collapsed_cycles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
+    import zcu_tools.gui.app.autofluxdep.experiments.t1 as t1_mod
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 
@@ -1042,8 +1042,8 @@ def test_t1_produce_fast_fails_when_context_unconfigured():
     # is None — make_cfg cannot lower the pi_pulse + readout.
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-    from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
 
     times = np.linspace(0.5, 60.0, 101)
     result = Sweep1DResult.allocate(np.array([0.5]), times, x_label="relax time (us)")
@@ -1094,7 +1094,7 @@ def _t2ramsey_pi2_pulse(ml: ModuleLibrary):
 
 
 def test_t2ramsey_make_cfg_lowers_context():
-    from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import (
+    from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import (
         T2RamseyBuilder,
         T2RamseyCfgTemplate,
     )
@@ -1135,7 +1135,7 @@ def test_t2ramsey_make_cfg_lowers_context():
 
 
 def test_t2ramsey_make_cfg_can_fix_sweep_range_and_relax_delay():
-    from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 
     ml = _t2ramsey_ml()
     env = RunEnv(
@@ -1168,8 +1168,8 @@ def test_t2ramsey_produce_fast_fails_when_context_unconfigured():
     # is None — make_cfg cannot lower the pi/2 pulse + readout.
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-    from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 
     flux = np.linspace(0.0, 1.0, 11)
     times = np.linspace(0.0, 25.0, 61)
@@ -1222,7 +1222,7 @@ def _t2echo_pulses(ml: ModuleLibrary):
 
 
 def _t2echo_env(ml: ModuleLibrary) -> RunEnv:
-    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
 
     return RunEnv(
         flux=0.0,
@@ -1233,7 +1233,7 @@ def _t2echo_env(ml: ModuleLibrary) -> RunEnv:
 
 
 def test_t2echo_make_cfg_lowers_context():
-    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import (
+    from zcu_tools.gui.app.autofluxdep.experiments.t2echo import (
         T2EchoBuilder,
         T2EchoCfgTemplate,
     )
@@ -1275,7 +1275,7 @@ def test_t2echo_make_cfg_lowers_context():
 
 
 def test_t2echo_make_cfg_can_fix_sweep_range_and_relax_delay():
-    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
 
     ml = _ml()
     pi_pulse, pi2_pulse = _t2echo_pulses(ml)
@@ -1313,8 +1313,8 @@ def test_t2echo_produce_fast_fails_when_context_unconfigured():
     # is None — make_cfg cannot lower the pi / pi2 drive pulses + readout.
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-    from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
 
     pi_pulse, pi2_pulse = _t2echo_pulses(_ml())
     flux_arr = np.linspace(0.0, 1.0, 11)
@@ -1366,7 +1366,7 @@ def _mist_ml() -> ModuleLibrary:
 
 
 def _mist_env(ml: ModuleLibrary, **result_tools) -> RunEnv:
-    from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
+    from zcu_tools.gui.app.autofluxdep.experiments.mist import MistBuilder
 
     return RunEnv(
         flux=0.0,
@@ -1388,7 +1388,10 @@ def _mist_env(ml: ModuleLibrary, **result_tools) -> RunEnv:
 
 
 def test_mist_make_cfg_lowers_context():
-    from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder, MistCfgTemplate
+    from zcu_tools.gui.app.autofluxdep.experiments.mist import (
+        MistBuilder,
+        MistCfgTemplate,
+    )
 
     snap = Snapshot(
         {"success": 1.0},
@@ -1413,8 +1416,8 @@ def test_mist_produce_fast_fails_when_context_unconfigured():
 
     import numpy as np
     import pytest
-    from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
-    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.experiments.mist import MistBuilder
 
     gains = np.linspace(0.0, 1.0, 21)
     result = Sweep1DResult.allocate(np.array([0.0]), gains, x_label="gain")

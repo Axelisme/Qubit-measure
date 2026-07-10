@@ -9,12 +9,12 @@ from typing import Any
 import h5py
 import numpy as np
 import pytest
-from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
-from zcu_tools.gui.app.autofluxdep.nodes.result import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
     QubitFreqResult,
     Sweep1DResult,
     Sweep2DResult,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
 from zcu_tools.gui.app.autofluxdep.services import run_store as run_store_module
 from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (

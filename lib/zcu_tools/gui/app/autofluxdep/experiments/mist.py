@@ -43,7 +43,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
-from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     DEFAULT_ACQUIRE_RETRY,
     acquire_retry,
     acquire_to_complex,
@@ -51,27 +51,31 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     require_flux_device,
     set_flux_by_name,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
     missing_module_value,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
     PI_PULSE_LIBRARY_ALIASES,
     READOUT_LIBRARY_ALIASES,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
-from zcu_tools.gui.app.autofluxdep.nodes.readout_defaults import seed_readout_freq
-from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.utils import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+    ColormapLinePlotter,
+)
+from zcu_tools.gui.app.autofluxdep.experiments._support.readout_defaults import (
+    seed_readout_freq,
+)
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils.override_plan import (
     pulse_module_patches,
     readout_module_patches,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
@@ -373,3 +377,6 @@ class MistBuilder(Builder):
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg.pop("sweep", None)
         return ml.make_cfg(raw_cfg, MistCfgTemplate)
+
+
+EXPERIMENT = MistBuilder()

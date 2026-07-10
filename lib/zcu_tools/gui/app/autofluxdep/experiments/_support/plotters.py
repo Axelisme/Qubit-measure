@@ -31,7 +31,10 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult, Sweep2DResult
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+    Sweep1DResult,
+    Sweep2DResult,
+)
 
 
 class Decay1DPlotter:

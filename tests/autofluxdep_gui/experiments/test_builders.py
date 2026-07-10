@@ -1,9 +1,9 @@
-"""Per-experiment Builder structural tests — registry + Plotter layout.
+"""Per-experiment Builder structural tests — catalog + Plotter layout.
 
 The Nodes' real produce path (set flux device -> acquire -> fit) is covered
 end-to-end against the flux-aware MockSoc by the ``test_*_acquire.py`` integration
 tests. These tests stay at the structural level the integration tests do not
-touch: the registry exposes every experiment type, and each Builder's Plotter
+touch: the catalog exposes every experiment type, and each Builder's Plotter
 embeds the runner module's subplot layout (the matching number of matplotlib
 axes).
 """
@@ -13,13 +13,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-# --- registry exposes all migrated measurement types ---
+# --- catalog exposes all measurement types ---
 
 
-def test_registry_exposes_all_experiments():
-    from zcu_tools.gui.app.autofluxdep.registry import available_node_types
+def test_catalog_exposes_all_experiments():
+    from zcu_tools.gui.app.autofluxdep.experiments.catalog import names
 
-    types = set(available_node_types())
+    types = set(names())
     assert types == {
         "qubit_freq",
         "lenrabi",
@@ -50,7 +50,7 @@ def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
     # each experiment's Plotter embeds the same LivePlot panels the runner module
     # draws, so the figure has the matching number of axes.
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.registry import create_placement
+    from zcu_tools.gui.app.autofluxdep.experiments.catalog import create_placement
 
     builder = create_placement(type_name).builder
     figure = Figure()
@@ -61,8 +61,12 @@ def test_make_plotter_builds_aligned_subplots(type_name, n_axes):
 
 def test_ro_optimize_plotter_marks_latest_best_point():
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
-    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
+    from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+        Landscape2DPlotter,
+    )
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+        Sweep2DResult,
+    )
 
     result = Sweep2DResult.allocate(
         np.array([0.0, 0.1, 0.2]),
@@ -93,8 +97,10 @@ def test_ro_optimize_plotter_marks_latest_best_point():
 
 def test_qubit_freq_plotter_title_shows_current_snr():
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqPlotter
-    from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+        QubitFreqResult,
+    )
+    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqPlotter
 
     result = QubitFreqResult.allocate(
         np.array([0.0, 0.1]),
@@ -112,8 +118,12 @@ def test_qubit_freq_plotter_title_shows_current_snr():
 
 def test_sweep1d_plotter_title_shows_current_snr():
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
-    from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+    from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+        ColormapLinePlotter,
+    )
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
+        Sweep1DResult,
+    )
 
     result = Sweep1DResult.allocate(
         np.array([0.0, 0.1]),

@@ -30,9 +30,9 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStartedPayload,
     RunStoppedPayload,
 )
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
-from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
 from zcu_tools.gui.app.autofluxdep.services.run_store import (

@@ -16,9 +16,9 @@ from typing import Any
 
 import numpy as np
 
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
-from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
 from zcu_tools.gui.app.autofluxdep.services.artifact_paths import (
     relative_to_artifact,

@@ -12,9 +12,9 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     RunCfgSnapshot,
     apply_override_patches,
 )
-from zcu_tools.gui.app.autofluxdep.nodes import acquire as acquire_mod
+from zcu_tools.gui.app.autofluxdep.experiments._support import acquire as acquire_mod
+from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 from zcu_tools.program.v2 import SweepCfg
 
 

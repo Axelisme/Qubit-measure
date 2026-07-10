@@ -24,7 +24,7 @@ from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
-from ._helpers import (
+from .._helpers import (
     connect_mock,
     high_snr_simparams,
     mock_flux_predictor,
@@ -191,9 +191,9 @@ def test_plotter_update_runs_after_a_real_produce():
     # then redraw — the LivePlot-backed update path must not raise (existed_axes +
     # host draw). Uses the same flux-aware mock context as the fit test above.
     from matplotlib.figure import Figure
+    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 
     ctrl = build_core()
     sim_params = high_snr_simparams()
@@ -239,9 +239,9 @@ def test_plotter_update_runs_after_a_real_produce():
 def test_good_fit_observes_prediction_residual_by_default():
     # Fixed-bias default: a good real-acquire fit leaves the raw predictor alone
     # and records the run-local residual correction in the generic estimator.
+    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
     from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
 
     ctrl = build_core()
@@ -318,9 +318,9 @@ def _mocked_qubit_freq_produce_env(
     predictor: Any | None = None,
     schema_overrides: dict[str, Any] | None = None,
 ) -> tuple[Any, Any, Any, Any]:
-    from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq as qf_mod
+    import zcu_tools.gui.app.autofluxdep.experiments.qubit_freq as qf_mod
+    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
     from zcu_tools.gui.app.autofluxdep.tools import SimplePredictor, Tools
 
     ctrl = build_core()
@@ -423,12 +423,12 @@ def test_medium_fit_observes_residual_without_hard_calibration(monkeypatch):
 
 
 def test_success_after_fail_reseed_skips_duplicate_residual_observe(monkeypatch):
-    from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq_recovery as recovery_mod
-    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+    import zcu_tools.gui.app.autofluxdep.experiments.qubit_freq as recovery_mod
+    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
         QubitFreqRecoveryState,
         TrustedFrequencyPoint,
     )
+    from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
     from zcu_tools.simulate.fluxonium.physical_fit import (
         FluxoniumLocalFitResult,
         FluxoniumModelSnapshot,
@@ -511,7 +511,9 @@ def test_poor_fit_skips_patch_and_predictor_calibration(monkeypatch):
 
 
 def test_linewidth_gate_rejects_invalid_width_and_window_bounds():
-    from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import _is_trusted_linewidth_fit
+    from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
+        _is_trusted_linewidth_fit,
+    )
 
     detunes = np.linspace(-5.0, 5.0, 11)
     fit_curve = np.linspace(0.0, 1.0, detunes.size)

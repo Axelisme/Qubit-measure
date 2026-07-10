@@ -48,6 +48,7 @@ from zcu_tools.gui.app.autofluxdep.events.workflow import (
     FluxChangedPayload,
     WorkflowChangedPayload,
 )
+from zcu_tools.gui.app.autofluxdep.experiments.catalog import create_placement
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.operation_gate import OperationGate, OperationKind
 from zcu_tools.gui.app.autofluxdep.orchestrator import (
@@ -55,7 +56,6 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
     ModuleSource,
     Notify,
 )
-from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.app.autofluxdep.run_locks import (
     GuardedContextControl,
     GuardedDeviceControl,

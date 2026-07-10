@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from ._helpers import (
+from .._helpers import (
     ACQUIRE_READOUT,
     connect_mock,
     high_snr_simparams,

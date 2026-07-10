@@ -37,8 +37,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
-from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
-from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     DEFAULT_ACQUIRE_RETRY,
     SnrProbe,
     acquire_retry,
@@ -51,24 +50,25 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     set_flux_by_name,
     signal2real_flip,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
     missing_info_value,
     missing_module_value,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
-from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
-from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
-from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep, Need
-from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
+    READOUT_LIBRARY_ALIASES,
+)
+from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+    ColormapLinePlotter,
+)
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
     auto_sweep_stop,
     fixed_sweep_range,
     seed_md_float,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
     ctx_md_float,
@@ -76,10 +76,16 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     pulse_length,
     pulse_product,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils.override_plan import (
     readout_module_patches,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils.timing import pop_sweep_range
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils.timing import (
+    pop_sweep_range,
+)
+from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
+from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep, Need
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
@@ -769,3 +775,6 @@ class LenRabiBuilder(Builder):
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
         return ml.make_cfg(raw_cfg, LenRabiCfgTemplate)
+
+
+EXPERIMENT = LenRabiBuilder()

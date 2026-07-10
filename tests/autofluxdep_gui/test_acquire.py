@@ -1,4 +1,4 @@
-"""Shared real-acquire helper tests (``nodes/acquire.py``).
+"""Shared real-acquire helper tests (``experiments/_support/acquire.py``).
 
 The fit-quality gate has no hardware dependency, so it is unit-tested here
 directly (the Nodes' real acquire path is covered by the ``test_*_acquire.py``
@@ -10,12 +10,12 @@ calibrate).
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     fill_decay_fit_or_skip,
     is_good_fit,
     is_trusted_decay_scalar_fit,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
 
 # --- is_good_fit: accepts a clean fit, rejects an all-noise (dead-point) fit ---
 

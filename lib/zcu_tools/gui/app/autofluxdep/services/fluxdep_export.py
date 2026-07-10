@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
 from zcu_tools.utils.datasaver import save_labber_data
 
 

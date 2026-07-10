@@ -10,11 +10,11 @@ import pandas as pd
 import pytest
 from qtpy.QtCore import QCoreApplication, QThread  # type: ignore[attr-defined]
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import QubitFreqResult
+from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
+from zcu_tools.gui.app.autofluxdep.experiments.t2echo import T2EchoBuilder
+from zcu_tools.gui.app.autofluxdep.experiments.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
-from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
-from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
-from zcu_tools.gui.app.autofluxdep.nodes.t2echo import T2EchoBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.t2ramsey import T2RamseyBuilder
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore
 from zcu_tools.gui.app.autofluxdep.services import (
     sample_table_export as sample_table_export_module,

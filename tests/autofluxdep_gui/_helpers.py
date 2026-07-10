@@ -15,9 +15,8 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
 from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePlan,
@@ -626,7 +625,7 @@ def make_measurement_builder(name: str) -> Builder:
     auto-follow) without a real experiment's acquire — the run path under test is
     the UI's, not the physics. Provides nothing (UI tests don't assert deps)."""
     import numpy as np
-    from zcu_tools.gui.app.autofluxdep.nodes.result import (
+    from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
         QubitFreqResult,
         Sweep1DResult,
     )

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
+from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.app.autofluxdep.feedback import (
     FeedbackRuntime,
     FeedbackSample,
@@ -13,8 +15,6 @@ from zcu_tools.gui.app.autofluxdep.feedback import (
     LogStepController,
     build_feedback_runtime,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 
 
 def test_last_good_estimator_returns_latest_observation_for_any_flux():

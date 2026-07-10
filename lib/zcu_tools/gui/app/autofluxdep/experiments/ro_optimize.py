@@ -52,44 +52,48 @@ from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
-from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.acquire import (
     DEFAULT_ACQUIRE_RETRY,
     acquire_retry,
     axis_to_sweep,
     require_flux_device,
     set_flux_by_name,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.dependency_defaults import (
     missing_info_value,
     missing_module_value,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.module_aliases import (
     PI_PULSE_LIBRARY_ALIASES,
     READOUT_LIBRARY_ALIASES,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.plotters import Landscape2DPlotter
-from zcu_tools.gui.app.autofluxdep.nodes.readout_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.plotters import (
+    Landscape2DPlotter,
+)
+from zcu_tools.gui.app.autofluxdep.experiments._support.readout_defaults import (
     seed_readout_freq,
     seed_readout_gain,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep2DResult
-from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
-from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep2DResult
+from zcu_tools.gui.app.autofluxdep.experiments._support.timing_defaults import (
     auto_relax_delay_from_t1,
     seed_md_float,
     snapshot_float,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils.override_plan import (
     pulse_module_patches,
     readout_module_patches,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.utils.timing import pop_sweep_ranges
+from zcu_tools.gui.app.autofluxdep.experiments._support.utils.timing import (
+    pop_sweep_ranges,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
+from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
+from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
 from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.program.v2 import (
@@ -853,3 +857,6 @@ class RoOptimizeBuilder(Builder):
         raw_cfg["freq_range"] = ranges["freq"]
         raw_cfg["gain_range"] = ranges["gain"]
         return ml.make_cfg(raw_cfg, RoOptimizeCfgTemplate)
+
+
+EXPERIMENT = RoOptimizeBuilder()

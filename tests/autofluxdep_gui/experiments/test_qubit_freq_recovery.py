@@ -5,16 +5,14 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
-from zcu_tools.gui.app.autofluxdep.nodes import qubit_freq_recovery as recovery_mod
-from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
+import zcu_tools.gui.app.autofluxdep.experiments.qubit_freq as recovery_mod
+from zcu_tools.gui.app.autofluxdep.experiments.qubit_freq import (
     DEFAULT_PHYSICAL_RECOVERY_MAX_CENTER_SHIFT_MHZ,
     DEFAULT_PHYSICAL_RECOVERY_MAX_POINTS,
     DEFAULT_PHYSICAL_RECOVERY_MAX_RMS_MHZ,
     DEFAULT_PHYSICAL_RECOVERY_MIN_POINTS,
     PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
+    QubitFreqBuilder,
     QubitFreqRecoveryState,
     TrustedFrequencyPoint,
     on_fit_failed,
@@ -22,6 +20,8 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
     recovery_config_from_knobs,
     select_fit_points,
 )
+from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
+from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.tools import FluxoniumPredictorAdapter, Tools
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.simulate.fluxonium.physical_fit import (
@@ -270,7 +270,6 @@ def test_fail_triggered_recovery_fits_first_fail_and_first_success(monkeypatch):
 
 
 def test_recovery_accepts_overlay_without_correction_estimator(monkeypatch):
-    builder = QubitFreqBuilder()
     schema = _schema()
     tools = Tools(predictor=_FakePredictor())
     state = tools.recovery_state("qubit_freq", QubitFreqRecoveryState)

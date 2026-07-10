@@ -14,15 +14,15 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import zcu_tools.gui.app.autofluxdep.experiments.lenrabi as lenrabi_mod
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.nodes import lenrabi as lenrabi_mod
+from zcu_tools.gui.app.autofluxdep.experiments._support.result import Sweep1DResult
+from zcu_tools.gui.app.autofluxdep.experiments.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
-from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg
 
-from ._helpers import (
+from .._helpers import (
     ACQUIRE_READOUT,
     connect_mock,
     high_snr_simparams,

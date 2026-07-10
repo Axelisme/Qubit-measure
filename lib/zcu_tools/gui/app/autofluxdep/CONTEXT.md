@@ -1,5 +1,7 @@
 # autofluxdep-gui
 
+**Last updated:** 2026-07-11 — experiment package ownership
+
 A control-type GUI that runs an automated flux-dependence workflow: a sweep over
 flux × an ordered list of measurement Nodes, each Node declaring its
 dependencies and the information it produces. Replaces the notebook-style
@@ -51,13 +53,39 @@ never aborted). Offline, the acquire runs against the **flux-aware MockSoc**
 (`connect_mock` provisions `fake_flux`); since the SimEngine reads the operating
 flux live, the acquired signal varies with the swept flux. The shared
 real-acquire helpers (set-flux / stop condition / fit-quality gate / axis parse)
-live in `nodes/acquire.py`.
+live in `experiments/_support/acquire.py`.
+
+## Experiment authoring and package boundary
+
+User-editable measurement definitions live in `experiments/`. Each registered
+experiment has exactly one authoritative module named after its `Builder.name`:
+`qubit_freq.py`, `lenrabi.py`, `ro_optimize.py`, `t1.py`, `t2ramsey.py`,
+`t2echo.py`, or `mist.py`. The module owns its cfg/schema declaration,
+short-lived Node, acquire/fit/Patch policy, Result/Plotter factories, and any
+policy used only by that experiment; it exports one module-level `EXPERIMENT`
+Builder singleton. Concrete experiment modules do not import one another.
+
+`experiments/catalog.py` is the only composition root that imports all concrete
+experiments. Its immutable explicit order controls the GUI add menu only. The
+orchestrator still executes the persisted placement list in user order and does
+not topologically sort it. The package `__init__.py` is docstring-only; callers
+that need composition import `experiments.catalog` explicitly, so importing a
+single support module does not load the catalog or concrete experiments. Adding an experiment means adding one same-named
+module, exporting `EXPERIMENT`, registering it once in the catalog, and adding
+focused tests; `experiments/README.md` carries the complete checklist.
+
+`experiments/_support/` contains mechanics shared by at least two measurement
+experiments, including acquire helpers, generic Result/Plotter types, defaults,
+schema helpers, and cfg override mechanics. It may depend on `nodes/` contracts
+but never imports a concrete experiment or the catalog. `nodes/` remains the
+stable ADR-0018 execution seam (`builder.py`, `io.py`, `spec.py`) plus the
+pure-compute predictor Service; it does not own measurement experiments.
 
 ## Language
 
 **Builder**:
-The kind of provider — one subclass per experiment (qubit_freq, ro_optimize, t1,
-predictor, ...), **stateless**. It holds the type-level declarations (provides /
+The kind of provider — one subclass per measurement experiment (qubit_freq,
+ro_optimize, t1, ...) or pure-compute Service (predictor), **stateless**. It holds the type-level declarations (provides /
 requires), the sweep-lived factories called once at Run start
 (`make_init_result`, `make_plotter`), and a per-flux-point factory `build_node`.
 The Builder is how the **environment is curried into the Node**: the execution
