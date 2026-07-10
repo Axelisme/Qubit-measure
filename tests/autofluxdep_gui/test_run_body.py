@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, OverridePath, OverridePlan
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
@@ -28,6 +28,7 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_manifest,
 )
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
+from zcu_tools.gui.cfg import FloatSpec
 
 from ._helpers import (
     connect_mock,

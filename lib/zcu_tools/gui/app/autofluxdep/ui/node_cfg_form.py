@@ -31,14 +31,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    OverridePath,
+    OverridePlan,
+)
+from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
+from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    OverridePath,
-    OverridePlan,
     make_default_value,
 )
-from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.gui.widgets.cfg import CfgFormWidget, FieldDecorationPatch

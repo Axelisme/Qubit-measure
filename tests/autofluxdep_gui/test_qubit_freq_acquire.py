@@ -20,8 +20,8 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import CenteredSweepValue
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
+from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
 from ._helpers import (

@@ -18,18 +18,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    CenteredSweepSpec,
-    CenteredSweepValue,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
     NodeCfgSchema,
     OverridePlan,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
@@ -41,9 +31,19 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeSpec,
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
     ReferenceSpec,
     ReferenceValue,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
     select_ref_value_spec,
 )
 

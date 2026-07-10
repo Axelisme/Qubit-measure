@@ -32,10 +32,7 @@ from qtpy.QtCore import (
     Signal,  # type: ignore[attr-defined]
 )
 
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    CfgSectionValue,
-    RunCfgSnapshot,
-)
+from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -110,6 +107,7 @@ from zcu_tools.gui.app.autofluxdep.state import (
 )
 from zcu_tools.gui.app.autofluxdep.tools import Tools
 from zcu_tools.gui.background import BackgroundRunner
+from zcu_tools.gui.cfg import CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import BasePayload
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport

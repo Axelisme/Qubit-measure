@@ -13,9 +13,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
+from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from ._helpers import ACQUIRE_READOUT, connect_mock, make_acquire_env, node_schema

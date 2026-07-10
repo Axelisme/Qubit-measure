@@ -50,10 +50,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    CenteredSweepValue,
-    OverridePlan,
-)
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     DEFAULT_ACQUIRE_RETRY,
@@ -94,6 +91,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.utils.timing import pop_sweep_ranges
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
+from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,

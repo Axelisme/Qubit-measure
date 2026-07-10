@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import SweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
+from zcu_tools.gui.cfg import SweepValue
 
 from ._helpers import (
     ACQUIRE_READOUT,

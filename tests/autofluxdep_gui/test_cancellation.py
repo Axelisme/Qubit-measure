@@ -20,7 +20,6 @@ import pytest
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import ScalarSpec
 from zcu_tools.gui.app.autofluxdep.events.run import (
     PointDonePayload,
     RunContinuedPayload,
@@ -42,6 +41,7 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 )
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.cfg import ScalarSpec
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from ._helpers import (

@@ -30,14 +30,9 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    CenteredSweepValue,
-    DirectValue,
-    FloatSpec,
-    IntSpec,
     NodeCfgSchema,
     OverridePath,
     OverridePlan,
-    ScalarSpec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
@@ -50,6 +45,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import (
     NODE_FIELD_LABEL_MAX_WIDTH,
     NodeCfgForm,
+)
+from zcu_tools.gui.cfg import (
+    CenteredSweepValue,
+    DirectValue,
+    FloatSpec,
+    IntSpec,
+    ScalarSpec,
 )
 from zcu_tools.gui.cfg.binding import SectionField
 from zcu_tools.gui.session.events import SessionEvent

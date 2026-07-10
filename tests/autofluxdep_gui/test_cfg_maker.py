@@ -13,11 +13,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    CenteredSweepValue,
-    NodeCfgSchema,
-    SweepValue,
-)
+from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema
 from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -29,6 +25,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_relax_delay_from_t1,
     auto_stop_sweep_range,
 )
+from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 

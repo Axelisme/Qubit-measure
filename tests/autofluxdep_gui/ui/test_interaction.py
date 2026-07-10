@@ -28,7 +28,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, EvalValue
 from zcu_tools.gui.app.autofluxdep.controller import FLUX_PROGRESS_LABEL
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -42,6 +41,7 @@ from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
     PersistedPredictorDialogState,
 )
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow, _RunBridge
+from zcu_tools.gui.cfg import DirectValue, EvalValue
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,

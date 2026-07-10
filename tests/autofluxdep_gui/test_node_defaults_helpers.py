@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    SweepValue,
-    module_leaf_patches,
-)
+from zcu_tools.gui.app.autofluxdep.cfg import module_leaf_patches
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
     is_lowerable_pulse_module,
     missing_info_value,
@@ -32,6 +29,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils.timing import (
     pop_sweep_range,
     pop_sweep_ranges,
 )
+from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg

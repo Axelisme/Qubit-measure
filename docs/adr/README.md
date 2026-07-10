@@ -33,7 +33,7 @@
 - [0012 — CfgBuilder value assembly](0012-cfgbuilder-value-layer-fluent-assembly.md)：adapter default value 透過 fluent builder 與 role table 組裝。
 - [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter 顯式宣告 capabilities，import-time validation 抓宣告與 hook 不一致。
 - [0043 — Autofluxdep runtime cfg override plan](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、runtime patch enforcement、remote/artifact exposure 與 cfg form decoration。
-- [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有Qt-free core，`gui.widgets.cfg`擁有instance-registry Qt renderer；lowering暫留安排由 [[0046]] 取代。
+- [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有Qt-free core，`gui.widgets.cfg`擁有instance-registry Qt renderer，autoflux cfg barrel只暴露app-owned API；lowering ports見 [[0046]]。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：finished-cfg algorithm由shared core擁有，app以expression/reference/range三個窄port提供runtime policy。
 
 ## Remote / Transport

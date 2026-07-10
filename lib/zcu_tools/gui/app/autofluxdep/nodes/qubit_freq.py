@@ -27,10 +27,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    CenteredSweepValue,
-    OverridePlan,
-)
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
@@ -69,6 +66,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils import (
 from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
     readout_module_patches,
 )
+from zcu_tools.gui.cfg import CenteredSweepValue
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
     ModularProgramV2,

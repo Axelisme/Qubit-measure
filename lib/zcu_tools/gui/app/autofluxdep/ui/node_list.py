@@ -26,10 +26,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, EvalValue, ScalarSpec
 from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.registry import available_node_types
+from zcu_tools.gui.cfg import DirectValue, EvalValue, ScalarSpec
 from zcu_tools.gui.cfg.binding import ScalarField
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 from zcu_tools.gui.widgets.cfg.fields import ScalarWidget

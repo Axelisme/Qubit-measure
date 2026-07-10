@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    FloatSpec,
     OverridePath,
     OverridePlan,
     RunCfgSnapshot,
@@ -38,6 +37,7 @@ from zcu_tools.gui.app.autofluxdep.orchestrator import (
     SkipReason,
     resolve_provider_snapshot,
 )
+from zcu_tools.gui.cfg import FloatSpec
 
 from ._helpers import make_builder, place
 

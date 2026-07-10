@@ -47,10 +47,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
-from zcu_tools.gui.app.autofluxdep.cfg import (
-    OverridePlan,
-    SweepValue,
-)
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePlan
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     DEFAULT_ACQUIRE_RETRY,
@@ -95,6 +92,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
     readout_module_patches,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.utils.timing import pop_sweep_range
+from zcu_tools.gui.cfg import SweepValue
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,

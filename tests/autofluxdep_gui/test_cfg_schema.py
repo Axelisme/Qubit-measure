@@ -22,22 +22,9 @@ from typing import Any, cast
 import pytest
 import zcu_tools.gui.app.autofluxdep.nodes.utils.schema as node_schema_module
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    CenteredSweepSpec,
-    CenteredSweepValue,
-    CfgSectionSpec,
-    CfgSectionValue,
-    ChoiceSectionSpec,
-    DirectValue,
-    EvalValue,
-    FloatSpec,
-    IntSpec,
     NodeCfgSchema,
     OverridePath,
     OverridePlan,
-    ReferenceSpec,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
     apply_override_patches,
     override_plan_to_wire,
     str_choice_spec,
@@ -71,7 +58,22 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils.module_values import (
     pulse_product,
 )
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
-from zcu_tools.gui.cfg import LiteralSpec
+from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
+    CfgSectionSpec,
+    CfgSectionValue,
+    ChoiceSectionSpec,
+    DirectValue,
+    EvalValue,
+    FloatSpec,
+    IntSpec,
+    LiteralSpec,
+    ReferenceSpec,
+    ScalarSpec,
+    SweepSpec,
+    SweepValue,
+)
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg

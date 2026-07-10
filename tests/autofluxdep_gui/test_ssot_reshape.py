@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import CenteredSweepValue
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
+from zcu_tools.gui.cfg import CenteredSweepValue
 
 
 def test_placement_holds_schema_not_params():

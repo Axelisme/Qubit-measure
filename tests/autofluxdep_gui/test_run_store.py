@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
-from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan, ScalarSpec
+from zcu_tools.gui.app.autofluxdep.cfg import OverridePath, OverridePlan
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult, Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.orchestrator import InfoStore, SkipReason
@@ -24,6 +24,7 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.cfg import ScalarSpec
 
 from ._helpers import make_builder, place, run_controller_to_completion
 
