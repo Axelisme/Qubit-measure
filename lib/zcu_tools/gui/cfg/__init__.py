@@ -7,6 +7,13 @@ from .inheritance import (
     make_default_value,
     select_ref_value_spec,
 )
+from .lowering import (
+    ExpressionResolver,
+    RangeFactory,
+    ReferenceResolver,
+    lower_finished_cfg,
+    validate_finished_cfg,
+)
 from .model import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -48,11 +55,14 @@ __all__ = [
     "DeviceRefSpec",
     "DirectValue",
     "EvalValue",
+    "ExpressionResolver",
     "FloatSpec",
     "IntSpec",
     "LiteralSpec",
     "ModuleRefSpec",
     "ModuleRefValue",
+    "RangeFactory",
+    "ReferenceResolver",
     "ScalarLeafInput",
     "ScalarSpec",
     "ScalarValue",
@@ -64,8 +74,10 @@ __all__ = [
     "align_locked_literals",
     "default_value_for_type",
     "inherit_from",
+    "lower_finished_cfg",
     "make_default_value",
     "raw_to_schema",
     "schema_to_raw",
     "select_ref_value_spec",
+    "validate_finished_cfg",
 ]

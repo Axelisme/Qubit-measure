@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-10 — shared cfg core ownership
+**Last updated:** 2026-07-10 — shared cfg lowering ports
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -9,8 +9,8 @@ framework 只看 `ExpAdapterProtocol`。
 
 ## Package Boundaries
 
-- `adapter/`：framework-facing contract、finished-cfg lowering、analyze params、adapter
-  validation，以及 shared cfg public identity 的暫時 compatibility re-export。
+- `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
+  adapter validation，以及 shared cfg public identity re-export。
 - `specs/`：program module cfg 的 GUI spec factory。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
@@ -28,7 +28,7 @@ framework 只看 `ExpAdapterProtocol`。
 Shared layers:
 
 - `zcu_tools.gui.cfg`：Qt-free Spec/Value model、`CfgSchema` data carrier、inheritance、
-  persistence codec；不擁有 linked-reference lowering。
+  persistence codec與generic finished-cfg validation/lowering ports。
 - `zcu_tools.gui.session`：context、SoC、device、startup、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
@@ -145,9 +145,10 @@ against current `MetaDict` when a field is set or lowered. `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
 
-static/dynamic validation與 linked Module/Waveform reference resolution仍由 measure
-adapter lowering負責；measure adapter package re-export `zcu_tools.gui.cfg` identities，
-不保留 app-local model/inheritance/codec implementation（ADR-0045）。
+generic static/dynamic validation與lowering由`zcu_tools.gui.cfg`擁有；measure adapter只把
+current `MetaDict` expression evaluator、measure-owned module/waveform shape conversion與
+`SweepCfg` factory組成三個窄ports。adapter package re-export shared cfg identities，不保留
+第二份algorithm或model/inheritance/codec implementation（ADR-0045、ADR-0046）。
 
 Sweep-like fields keep their UI value model until this lowering boundary:
 `SweepSpec` stores `start` / `stop` / `expts`, while `CenteredSweepSpec` stores

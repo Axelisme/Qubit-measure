@@ -8,9 +8,8 @@ Three families of test:
 2. **Defaults** — default schemas lower through the same schema/helper paths as
    production. Tests assert invariants and derive expected values from production
    schemas/helpers instead of duplicating default tables.
-3. **Seam invariant** — only the ``cfg/`` seam (``__init__.py`` / ``schema.py`` /
-   ``form.py``) may import ``zcu_tools.gui.app.main`` from inside the autofluxdep
-   package.
+3. **Seam invariant** — only ``cfg/form.py`` may import
+   ``zcu_tools.gui.app.main`` from inside the autofluxdep package.
 """
 
 from __future__ import annotations
@@ -2177,14 +2176,6 @@ def test_autoflux_measure_app_imports_match_transitional_allowlist():
         "lib/zcu_tools/gui/app/autofluxdep"
     )
     allowed: dict[pathlib.Path, set[str]] = {
-        pkg / "cfg" / "__init__.py": {
-            "zcu_tools.gui.app.main.cfg_schemas",
-            "zcu_tools.gui.app.main.specs.pulse",
-            "zcu_tools.gui.app.main.specs.readout",
-        },
-        pkg / "cfg" / "schema.py": {
-            "zcu_tools.gui.app.main.adapter.lowering",
-        },
         pkg / "cfg" / "form.py": {
             "zcu_tools.gui.app.main.live_model",
             "zcu_tools.gui.app.main.ui.cfg_form",

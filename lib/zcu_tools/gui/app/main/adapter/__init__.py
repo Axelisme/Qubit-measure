@@ -44,7 +44,6 @@ from zcu_tools.gui.session.types import (
 )
 
 from .analyze_params import ParamMeta, describe_analyze_params, reconstruct_params
-from .lowering import find_allowed_spec
 from .protocol import ExpAdapterProtocol
 from .types import (
     AdapterCapabilities,

@@ -1,15 +1,11 @@
-"""Local cfg seam for autofluxdep node schemas and measure-owned conversions.
+"""Local cfg seam for autofluxdep node schemas and app-owned conversions.
 
 The generic spec/value model, inheritance helpers, and persistence codec come
 from ``zcu_tools.gui.cfg``. Pulse/readout spec construction and module conversion
-remain measure-app responsibilities in this slice.
+remain autoflux app responsibilities.
 """
 
 from __future__ import annotations
-
-from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
-from zcu_tools.gui.app.main.specs.readout import make_pulse_readout_spec
 
 # Re-exported shared spec/value model — pure data, no experiment knowledge.
 from zcu_tools.gui.cfg import (
@@ -36,6 +32,10 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 
+from .module_adapter import (
+    pulse_module_ref_spec,
+    pulse_readout_module_ref_spec,
+)
 from .override_plan import (
     OverrideMode,
     OverridePath,
@@ -52,27 +52,6 @@ from .schema import (
     empty_node_schema,
     str_choice_spec,
 )
-
-
-def pulse_module_ref_spec(
-    label: str = "Pulse", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
-        allowed=[make_pulse_spec()],
-        label=label,
-        optional=optional,
-    )
-
-
-def pulse_readout_module_ref_spec(
-    label: str = "Readout", optional: bool = False
-) -> ModuleRefSpec:
-    return ModuleRefSpec(
-        allowed=[make_pulse_readout_spec()],
-        label=label,
-        optional=optional,
-    )
-
 
 __all__ = [
     "CfgSchema",
@@ -104,7 +83,6 @@ __all__ = [
     "empty_node_schema",
     "make_default_value",
     "module_leaf_patches",
-    "module_cfg_to_value",
     "module_override_paths",
     "override_plan_to_wire",
     "pulse_module_ref_spec",

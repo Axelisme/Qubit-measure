@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.main.adapter.lowering import (
     schema_to_raw_dict,
-    validate_dynamic_schema,
     validate_schema,
 )
 from zcu_tools.gui.cfg import (
@@ -75,21 +74,17 @@ def test_lowering_non_optional_unset_still_raises() -> None:
         schema_to_raw_dict(CfgSchema(spec=spec, value=val), None, None)
 
 
-def test_validate_dynamic_allows_optional_none() -> None:
+def test_lowering_with_context_allows_optional_none() -> None:
     val = make_default_value(_spec())
     # md present → dynamic validation runs; optional None must not raise.
-    validate_dynamic_schema(
-        CfgSchema(spec=_spec(), value=val), MetaDict(), ModuleLibrary()
-    )
+    schema_to_raw_dict(CfgSchema(spec=_spec(), value=val), MetaDict(), ModuleLibrary())
 
 
-def test_validate_dynamic_non_optional_none_raises() -> None:
+def test_lowering_with_context_rejects_non_optional_none() -> None:
     spec = CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=float)})
     val = make_default_value(spec).with_field("x", DirectValue(value=None))
     with pytest.raises(RuntimeError, match="unset"):
-        validate_dynamic_schema(
-            CfgSchema(spec=spec, value=val), MetaDict(), ModuleLibrary()
-        )
+        schema_to_raw_dict(CfgSchema(spec=spec, value=val), MetaDict(), ModuleLibrary())
 
 
 def test_codec_round_trips_optional_none() -> None:

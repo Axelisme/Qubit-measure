@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, Final, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -40,6 +39,8 @@ from zcu_tools.gui.cfg import (
     raw_to_schema,
     schema_to_raw,
 )
+
+from .lowering import schema_to_raw_dict
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary

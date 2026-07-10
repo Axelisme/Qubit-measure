@@ -1,4 +1,4 @@
-"""Measure-app adapters for shared finished-cfg lowering ports."""
+"""Autoflux-local adapters for shared finished-cfg lowering ports."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from zcu_tools.gui.cfg import (
     ExpressionResolver,
     ReferenceResolver,
     lower_finished_cfg,
-    validate_finished_cfg,
 )
 from zcu_tools.program.v2 import SweepCfg
+
+from .module_adapter import module_cfg_shape_label, waveform_cfg_shape_label
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -27,25 +28,16 @@ def _make_expression_resolver(md: MetaDict) -> ExpressionResolver:
 
 
 def _make_reference_resolver(ml: ModuleLibrary) -> ReferenceResolver:
-    from zcu_tools.gui.app.main.cfg_schemas import (
-        module_cfg_to_value,
-        waveform_cfg_to_value,
-    )
-
     def resolve_reference(
         kind: Literal["module", "waveform"], key: str, /
     ) -> str | None:
         if kind == "module":
             if key not in ml.modules:
                 return None
-            spec, _ = module_cfg_to_value(ml.modules[key])
-            return spec.label
-        if kind == "waveform":
-            if key not in ml.waveforms:
-                return None
-            spec, _ = waveform_cfg_to_value(ml.waveforms[key])
-            return spec.label
-        raise RuntimeError(f"Unsupported reference kind {kind!r}")
+            return module_cfg_shape_label(ml.modules[key])
+        if key not in ml.waveforms:
+            return None
+        return waveform_cfg_shape_label(ml.waveforms[key])
 
     return resolve_reference
 
@@ -75,20 +67,11 @@ def _make_sweep_range(start: float, stop: float, /, *, expts: int) -> SweepCfg:
     )
 
 
-def validate_schema(schema: CfgSchema, ml: ModuleLibrary | None) -> None:
-    """Validate the static contract using the current measure library."""
-    validate_finished_cfg(
-        schema,
-        resolve_reference=None if ml is None else _make_reference_resolver(ml),
-    )
-
-
 def schema_to_raw_dict(
     schema: CfgSchema,
     md: MetaDict | None,
     ml: ModuleLibrary | None,
 ) -> dict[str, object]:
-    """Lower through the shared algorithm with measure-owned runtime policy."""
     return lower_finished_cfg(
         schema,
         resolve_expression=None if md is None else _make_expression_resolver(md),

@@ -34,8 +34,9 @@ md/ml 算預設值）、`run` / `analyze` / `get_writeback_items`，並在同一
 concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
 assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active
 `ml/md` 綁進長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
-這是 shared `CfgSchema` data carrier extraction後的過渡 app-local seam；role/module conversion
-仍在 experiment/measure domain，不下沉到 `zcu_tools.gui.cfg`。
+generic validation/lowering由`zcu_tools.gui.cfg`擁有；measure entry point只組current md
+expression、measure module shape與`SweepCfg` ports。role/module conversion policy仍在
+experiment/measure domain，不下沉到shared core（ADR-0046）。
 
 Adapter default value 由 `CfgBuilder` 組裝。`.role(path, role)` 預設採 `Init.ADOPT`：優先引用
 ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline blank；`.role(..., Init.INLINE)`

@@ -31,10 +31,10 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     SweepSpec,
     SweepValue,
     align_locked_literals,
-    module_cfg_to_value,
     module_leaf_patches,
     module_override_paths,
 )
+from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import module_cfg_to_value
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 

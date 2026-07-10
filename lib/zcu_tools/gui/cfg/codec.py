@@ -375,7 +375,7 @@ def _select_allowed_spec(
     distinct ``LiteralSpec``). Some live form refresh paths omit locked literal
     leaves, so the shape can also be recovered from the non-literal field set
     when that is unambiguous. Both routes keep this codec pure, unlike
-    ``find_allowed_spec`` which consults a ``ModuleLibrary``.
+    finished-cfg reference selection, which consults a live library resolver.
 
     Fast-fails on no match rather than silently defaulting to ``allowed[0]`` —
     that default mis-shaped a multi-shape ref (e.g. a readout LINKED to a library

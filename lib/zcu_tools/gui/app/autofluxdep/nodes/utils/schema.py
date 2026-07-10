@@ -29,9 +29,9 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     WaveformRefValue,
     align_locked_literals,
     make_default_value,
-    module_cfg_to_value,
     str_choice_spec,
 )
+from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import module_cfg_to_value
 from zcu_tools.gui.session.types import ExpContext
 
 _MISSING = object()
