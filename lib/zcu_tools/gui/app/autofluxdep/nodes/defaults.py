@@ -1,9 +1,9 @@
-"""Adapter-shaped default cfg schemas for autofluxdep nodes.
+"""Legacy schema compatibility and Default cfg patch helpers for nodes.
 
-Fresh autofluxdep placements reuse the corresponding measure-gui adapter's spec
-and copy its default value tree, then apply node-local runtime defaults before the
-UI sees it. Autofluxdep adds its run-time ``generation`` section and a logical
-projection for the node builder.
+Experiment nodes build fresh schemas with ``nodes.utils.NodeSchemaBuilder``.
+This module keeps older adapter-shaped helpers for compatibility tests and owns
+the shared patch helpers that translate concrete dependency modules into
+declared Default cfg leaf patches.
 """
 
 from __future__ import annotations
@@ -38,6 +38,18 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
+from .utils import (
+    ctx_md_float,
+    ctx_module,
+    nested_get,
+    pulse_gain,
+    pulse_length,
+    pulse_product,
+    readout_pulse_freq,
+    readout_pulse_gain,
+)
+from .utils.override_plan import PULSE_MODULE_LEAF_PATHS, READOUT_FALLBACK_LEAF_PATHS
+
 GENERATION_GROUP_LABELS: dict[str, str] = {
     "acquisition": "Acquisition guardrails",
     "drive_gain": "Drive-gain adaptation",
@@ -58,22 +70,6 @@ GENERATION_GROUP_LABELS: dict[str, str] = {
     "safety": "Safety gates",
 }
 
-PULSE_MODULE_LEAF_PATHS: tuple[str, ...] = (
-    "type",
-    "ch",
-    "nqz",
-    "freq",
-    "gain",
-    "waveform",
-)
-
-READOUT_FALLBACK_LEAF_PATHS: tuple[str, ...] = (
-    "pulse_cfg.freq",
-    "pulse_cfg.gain",
-    "pulse_cfg.waveform.length",
-    "ro_cfg.ro_freq",
-    "ro_cfg.ro_length",
-)
 PULSE_READOUT_REF_LABELS: tuple[str, ...] = ("Pulse Readout",)
 
 
@@ -313,30 +309,6 @@ def _generation_choice_binding(
     return ChoiceBinding(choice.selector_key, variants)
 
 
-def ctx_md_float(ctx: Any | None, key: str) -> float | None:
-    """Return a numeric MetaDict value from ``ctx`` when present."""
-    if not isinstance(ctx, ExpContext):
-        return None
-    value = ctx.md.get(key)
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
-
-
-def ctx_module(ctx: Any | None, *names: str) -> Any | None:
-    """Return the first ModuleLibrary module found in ``ctx`` under ``names``."""
-    if not isinstance(ctx, ExpContext):
-        return None
-    for name in names:
-        try:
-            module = ctx.ml.get_module(name)
-        except (KeyError, ValueError):
-            module = None
-        if module is not None:
-            return module
-    return None
-
-
 def module_ref_value_from_ctx(ctx: Any | None, *names: str) -> ModuleRefValue | None:
     """Return a linked module ref for the first named module present in ``ctx``."""
     if not isinstance(ctx, ExpContext):
@@ -350,55 +322,6 @@ def module_ref_value_from_ctx(ctx: Any | None, *names: str) -> ModuleRefValue | 
             continue
         _, value = module_cfg_to_value(module)
         return ModuleRefValue(chosen_key=name, value=value)
-    return None
-
-
-def nested_get(value: Any, *path: str) -> Any | None:
-    """Read a nested attr/dict path from raw dicts or cfg objects."""
-    cur = value
-    for part in path:
-        if isinstance(cur, Mapping):
-            cur = cur.get(part)
-        else:
-            cur = getattr(cur, part, None)
-        if cur is None:
-            return None
-    return cur
-
-
-def pulse_gain(module: Any) -> float | None:
-    value = nested_get(module, "gain")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
-
-
-def pulse_length(module: Any) -> float | None:
-    value = nested_get(module, "waveform", "length")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
-
-
-def pulse_product(module: Any) -> float | None:
-    length = pulse_length(module)
-    gain = pulse_gain(module)
-    if length is None or gain is None:
-        return None
-    return length * gain
-
-
-def readout_pulse_freq(module: Any) -> float | None:
-    value = nested_get(module, "pulse_cfg", "freq")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
-
-
-def readout_pulse_gain(module: Any) -> float | None:
-    value = nested_get(module, "pulse_cfg", "gain")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
     return None
 
 

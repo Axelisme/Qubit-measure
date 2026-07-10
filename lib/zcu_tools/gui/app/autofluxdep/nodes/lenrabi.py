@@ -34,46 +34,31 @@ from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import LenRabiAdapter
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    FloatSpec,
-    OverridePath,
     OverridePlan,
     SweepValue,
-    str_choice_spec,
+    pulse_module_ref_spec,
+    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
-from zcu_tools.gui.app.autofluxdep.feedback import (
-    FeedbackSlotDecl,
-    feedback_generation_choice,
-    feedback_generation_fields,
-)
+from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    DEFAULT_ACQUIRE_RETRY,
     SnrProbe,
-    acquire_retry_generation_field,
+    acquire_retry,
     acquire_to_complex,
     axis_to_sweep,
     build_stop_condition,
     is_good_fit,
     make_signal_update,
     require_flux_device,
-    run_schedule_acquire,
     set_flux_by_name,
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    PULSE_READOUT_REF_LABELS,
-    adapter_node_schema,
-    ctx_md_float,
-    ctx_module,
-    generation_choice,
-    logical_generation_field,
-    module_ref_value_from_ctx,
     pop_sweep_range,
-    pulse_length,
-    pulse_product,
-    readout_module_override_paths,
     readout_module_patches,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
@@ -92,6 +77,17 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     fixed_sweep_range,
     seed_md_float,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.utils import (
+    NodeOverridePlan,
+    NodeSchemaBuilder,
+    ctx_md_float,
+    ctx_module,
+    module_ref_default,
+    module_ref_value_from_ctx,
+    pulse_length,
+    pulse_product,
+)
+from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -105,14 +101,6 @@ from zcu_tools.utils.fitting import fit_rabi
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_EARLYSTOP_SNR = 30.0
-_DEFAULT_T1 = 10.0
-_DEFAULT_EXPECTED_PI_LENGTH = 1.0
-_DEFAULT_SWEEP_START = 0.05
-_DEFAULT_SWEEP_STOP_FACTOR = 5.0
-_DEFAULT_RELAX_FACTOR = 3.0
-_DEFAULT_RELAX_MIN = 0.0
-_DEFAULT_PI_PRODUCT_FACTOR = 1.2
 _DRIVE_GAIN_CAP = 1.0
 _MIN_TRUSTED_PI_LENGTH = 0.03
 _MAX_PI_SWEEP_FRACTION = 0.9
@@ -183,54 +171,6 @@ def _optional_positive_finite(name: str, value: Any) -> float | None:
     return _require_positive_finite(name, value)
 
 
-def _seed_t1(ctx: Any | None) -> float:
-    return seed_md_float(ctx, "t1", _DEFAULT_T1)
-
-
-def _seed_pi_length(ctx: Any | None) -> float:
-    md_value = ctx_md_float(ctx, "pi_len")
-    if md_value is not None:
-        return md_value
-    module = ctx_module(ctx, *_PI_PULSE_SEED_NAMES)
-    return pulse_length(module) or _DEFAULT_EXPECTED_PI_LENGTH
-
-
-def _seed_pi_product(ctx: Any | None) -> float:
-    module = ctx_module(ctx, *_PI_PULSE_SEED_NAMES)
-    return pulse_product(module) or _seed_pi_length(ctx)
-
-
-def _resolve_cfg_sweep_range(
-    mode: str, *, pi_length: float, fixed: Any, knobs: dict[str, Any]
-) -> tuple[float, float]:
-    if mode == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
-        return (
-            float(fixed.start),
-            auto_sweep_stop(
-                pi_length,
-                stop_factor=float(knobs["sweep_stop_factor"]),
-                stop_min=None,
-            ),
-        )
-    if mode == _SWEEP_RANGE_MODE_FIXED:
-        return fixed_sweep_range(fixed)
-    raise RuntimeError(f"unsupported lenrabi sweep_range_mode: {mode!r}")
-
-
-def _resolve_cfg_relax_delay(
-    mode: str, *, t1: float, fixed: float, knobs: dict[str, Any]
-) -> float:
-    if mode == _RELAX_DELAY_MODE_AUTO_T1:
-        return auto_relax_delay_from_t1(
-            t1,
-            factor=float(knobs["relax_factor"]),
-            minimum=float(knobs["relax_min_us"]),
-        )
-    if mode == _RELAX_DELAY_MODE_FIXED:
-        return float(fixed)
-    raise RuntimeError(f"unsupported lenrabi relax_delay_mode: {mode!r}")
-
-
 def _drive_gain_from_pi_product(
     pi_product: float, target_pi_length: float, *, factor: float, drive_gain_cap: float
 ) -> float:
@@ -239,25 +179,6 @@ def _drive_gain_from_pi_product(
     gain_factor = _require_positive_finite("pi_product_factor", factor)
     gain_cap = _require_positive_finite("drive_gain_cap", drive_gain_cap)
     return min(gain_cap, product / (gain_factor * target))
-
-
-def _resolve_drive_gain(
-    mode: str,
-    *,
-    pi_product: float,
-    target_pi_length: float,
-    fixed: float,
-) -> float:
-    if mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
-        return _drive_gain_from_pi_product(
-            pi_product,
-            target_pi_length,
-            factor=_DEFAULT_PI_PRODUCT_FACTOR,
-            drive_gain_cap=_DRIVE_GAIN_CAP,
-        )
-    if mode == _DRIVE_GAIN_MODE_FIXED:
-        return float(fixed)
-    raise RuntimeError(f"unsupported lenrabi drive_gain_mode: {mode!r}")
 
 
 def _clamp_drive_gain(value: float) -> float:
@@ -479,19 +400,9 @@ class LenRabiNode(Node):
         result.flux[idx] = env.flux
 
         probe = SnrProbe()
-        stop_condition = build_stop_condition(env, probe, signal2real_flip)
-        acquired = run_schedule_acquire(
-            env=env,
-            cfg=cfg,
-            signal_shape=result.signal[idx].shape,
+        signal_buffer = SignalBuffer(
+            result.signal[idx].shape,
             dtype=np.complex128,
-            configure_builder=lambda builder: builder.add(
-                [
-                    Pulse("rabi_pulse", cfg.modules.rabi_pulse),
-                    Readout("readout", cfg.modules.readout),
-                ]
-            ).declare_sweep("length", length_sweep),
-            raw2signal_fn=acquire_to_complex,
             on_update=make_signal_update(
                 result,
                 idx,
@@ -499,14 +410,45 @@ class LenRabiNode(Node):
                 env.round_hook,
                 probe=probe,
             ),
-            program_cls=ModularProgramV2,
-            stop_condition=stop_condition,
+            update_interval=None,
         )
-        if acquired.stopped:
+        with Schedule(cfg, signal_buffer) as sched:
+            builder = sched.prog_builder(
+                env.soc,
+                env.soccfg,
+                cfg=cfg,
+                program_cls=ModularProgramV2,
+            )
+            builder.add(
+                [
+                    Pulse("rabi_pulse", cfg.modules.rabi_pulse),
+                    Readout("readout", cfg.modules.readout),
+                ]
+            ).declare_sweep("length", length_sweep)
+            signal = builder.build_and_acquire(
+                raw2signal_fn=acquire_to_complex,
+                retry=acquire_retry(env),
+                progress=False,
+                progress_label=f"{env.node_name or 'lenrabi'} flux {idx + 1} rounds",
+                progress_leave=False,
+                stop_condition=build_stop_condition(env, probe, signal2real_flip),
+            )
+            outcome = sched.outcome
+
+        if outcome.status == "stopped":
             return Patch()
-        if acquired.signal is None:
-            raise RuntimeError("lenrabi Schedule acquire completed without signal")
-        real = signal2real_flip(np.asarray(acquired.signal, dtype=np.complex128))
+        if outcome.status == "failed":
+            reason = outcome.reason or "lenrabi Schedule acquire failed"
+            raise RuntimeError(reason) from outcome.exception
+        if outcome.status == "interrupted":
+            reason = outcome.reason or "lenrabi Schedule acquire interrupted"
+            raise RuntimeError(reason) from outcome.exception
+        if outcome.status != "completed":
+            raise RuntimeError(
+                f"unsupported lenrabi Schedule outcome: {outcome.status!r}"
+            )
+
+        real = signal2real_flip(np.asarray(signal, dtype=np.complex128))
 
         fit = _fit_lenrabi(lengths, real)
 
@@ -553,182 +495,152 @@ class LenRabiBuilder(Builder):
     feedback_slots = (_DRIVE_GAIN_SLOT,)
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
-        """Adapter-backed default cfg plus autofluxdep generation controls."""
-        t1_seed = _seed_t1(ctx)
-        pi_len_seed = _seed_pi_length(ctx)
-        rabi_pulse_seed = module_ref_value_from_ctx(ctx, *_PI_PULSE_SEED_NAMES)
-        default_overrides: dict[str, Any] = {
-            "rounds": 10,
-            "relax_delay": auto_relax_delay_from_t1(
-                t1_seed,
-                factor=_DEFAULT_RELAX_FACTOR,
-                minimum=_DEFAULT_RELAX_MIN,
-            ),
-            "sweep_range": SweepValue(
-                *auto_stop_sweep_range(
-                    pi_len_seed,
-                    start=_DEFAULT_SWEEP_START,
-                    stop_factor=_DEFAULT_SWEEP_STOP_FACTOR,
-                    stop_min=None,
+        """Default cfg plus autofluxdep generation controls."""
+        t1_seed = seed_md_float(ctx, "t1", 10.0)
+        pi_seed_module = ctx_module(ctx, *_PI_PULSE_SEED_NAMES)
+        pi_len_seed = ctx_md_float(ctx, "pi_len") or pulse_length(pi_seed_module) or 1.0
+        pi_product_seed = pulse_product(pi_seed_module) or pi_len_seed
+        relax_factor = 3.0
+        relax_min_us = 0.0
+        sweep_start_us = 0.05
+        sweep_stop_factor = 5.0
+
+        qub_ch = 0
+        if isinstance(ctx, ExpContext):
+            value = ctx.md.get("qub_ch")
+            if isinstance(value, int) and not isinstance(value, bool):
+                qub_ch = value
+
+        rabi_pulse_spec = pulse_module_ref_spec(label="Rabi Pulse")
+        readout_spec = pulse_readout_module_ref_spec(label="Readout")
+        rabi_pulse_default = module_ref_value_from_ctx(
+            ctx, *_PI_PULSE_SEED_NAMES, accepted_types=("pulse",)
+        )
+        if rabi_pulse_default is None:
+            rabi_pulse_default = module_ref_value_from_ctx(
+                ctx, "rabi_pulse", accepted_types=("pulse",)
+            )
+        if rabi_pulse_default is None:
+            rabi_pulse_default = module_ref_default(ctx, rabi_pulse_spec)
+            if rabi_pulse_default is None:
+                raise RuntimeError("lenrabi pulse default is unexpectedly empty")
+            rabi_pulse_default.with_field("ch", qub_ch)
+            rabi_pulse_default.with_field("gain", 0.3)
+        rabi_pulse_default.with_field("waveform.length", 1.0)
+
+        return (
+            NodeSchemaBuilder(label="Length Rabi")
+            .field(
+                "rabi_pulse",
+                "modules.rabi_pulse",
+                spec=rabi_pulse_spec,
+                default=rabi_pulse_default,
+            )
+            .field(
+                "readout",
+                "modules.readout",
+                spec=readout_spec,
+                default=module_ref_default(
+                    ctx,
+                    readout_spec,
+                    *READOUT_LIBRARY_ALIASES,
+                    accepted_types=("readout/pulse",),
                 ),
-                expts=101,
-            ),
-        }
-        if rabi_pulse_seed is not None:
-            default_overrides["rabi_pulse"] = rabi_pulse_seed
-        return adapter_node_schema(
-            LenRabiAdapter,
-            ctx,
-            logical_paths={
-                "rabi_pulse": "modules.rabi_pulse",
-                "qub_ch": "modules.rabi_pulse.ch",
-                "qub_nqz": "modules.rabi_pulse.nqz",
-                "qub_gain": "modules.rabi_pulse.gain",
-                "readout": "modules.readout",
-                "relax_delay": "relax_delay",
-                "reps": "reps",
-                "rounds": "rounds",
-                "sweep_range": "sweep.length",
-            },
-            generation_fields=(
-                logical_generation_field(
-                    "earlystop_snr",
-                    FloatSpec(
-                        label="earlystop_snr",
-                        optional=True,
-                        tooltip="Stop averaging once completed-round SNR reaches this value.",
-                    ),
-                    _DEFAULT_EARLYSTOP_SNR,
-                    group="acquisition",
-                ),
-                acquire_retry_generation_field(),
-                logical_generation_field(
-                    "relax_delay_mode",
-                    str_choice_spec(
-                        "delay_mode",
-                        (_RELAX_DELAY_MODE_AUTO_T1, _RELAX_DELAY_MODE_FIXED),
-                        tooltip="Auto derives relax delay from T1; fixed keeps Default cfg delay.",
-                    ),
-                    _RELAX_DELAY_MODE_AUTO_T1,
-                    group="relax",
-                ),
-                logical_generation_field(
-                    "t1_seed_us",
-                    FloatSpec(
-                        label="initial_t1_us",
-                        tooltip="Initial T1 before measured feedback exists.",
-                    ),
+            )
+            .float(
+                "relax_delay",
+                "relax_delay",
+                label="Relax delay (us)",
+                default=auto_relax_delay_from_t1(
                     t1_seed,
-                    group="relax",
+                    factor=relax_factor,
+                    minimum=relax_min_us,
                 ),
-                logical_generation_field(
-                    "relax_factor",
-                    FloatSpec(
-                        label="factor",
-                        tooltip="Multiplier applied to T1 for auto relax delay.",
+                decimals=3,
+            )
+            .sweep(
+                "sweep_range",
+                "sweep.length",
+                label="Length (us)",
+                default=SweepValue(
+                    *auto_stop_sweep_range(
+                        pi_len_seed,
+                        start=sweep_start_us,
+                        stop_factor=sweep_stop_factor,
+                        stop_min=None,
                     ),
-                    _DEFAULT_RELAX_FACTOR,
-                    group="relax",
+                    expts=101,
                 ),
-                logical_generation_field(
-                    "relax_min_us",
-                    FloatSpec(
-                        label="min_us",
-                        tooltip="Minimum auto relax delay.",
-                    ),
-                    _DEFAULT_RELAX_MIN,
-                    group="relax",
+            )
+            .int("reps", "reps", label="Reps", default=1000)
+            .int("rounds", "rounds", label="Rounds", default=10)
+            .logical("qub_ch", "modules.rabi_pulse.ch")
+            .logical("qub_nqz", "modules.rabi_pulse.nqz")
+            .logical("qub_gain", "modules.rabi_pulse.gain")
+            .acquisition(earlystop_snr=30.0, acquire_retry=DEFAULT_ACQUIRE_RETRY)
+            .auto_relax_from_t1(
+                seed_us=t1_seed,
+                factor=relax_factor,
+                minimum_us=relax_min_us,
+            )
+            .choice(
+                "sweep_range_mode",
+                "generation.sweep.sweep_range_mode",
+                label="range_mode",
+                choices=(_SWEEP_RANGE_MODE_AUTO_PI_LENGTH, _SWEEP_RANGE_MODE_FIXED),
+                default=_SWEEP_RANGE_MODE_AUTO_PI_LENGTH,
+                tooltip=(
+                    "Auto derives the Rabi sweep stop from pi-length feedback; "
+                    "start/expts stay in Default cfg."
                 ),
-                logical_generation_field(
-                    "sweep_range_mode",
-                    str_choice_spec(
-                        "range_mode",
-                        (_SWEEP_RANGE_MODE_AUTO_PI_LENGTH, _SWEEP_RANGE_MODE_FIXED),
-                        tooltip=(
-                            "Auto derives the Rabi sweep stop from pi-length feedback; "
-                            "start/expts stay in Default cfg."
-                        ),
-                    ),
-                    _SWEEP_RANGE_MODE_AUTO_PI_LENGTH,
-                    group="sweep",
-                    group_label="Rabi sweep window",
-                ),
-                logical_generation_field(
-                    "expected_pi_length",
-                    FloatSpec(
-                        label="target_pi_length_us",
-                        tooltip="Pi-length setpoint for drive gain feedback.",
-                    ),
-                    pi_len_seed,
-                    group="sweep",
-                ),
-                logical_generation_field(
-                    "sweep_stop_factor",
-                    FloatSpec(
-                        label="stop_factor",
-                        tooltip="Pi-length multiplier for the auto sweep stop.",
-                    ),
-                    _DEFAULT_SWEEP_STOP_FACTOR,
-                    group="sweep",
-                ),
-                logical_generation_field(
-                    "drive_gain_mode",
-                    str_choice_spec(
-                        "mode",
-                        (_DRIVE_GAIN_MODE_AUTO_PI_PRODUCT, _DRIVE_GAIN_MODE_FIXED),
-                        tooltip="Auto uses pi-product history; fixed keeps Default cfg gain.",
-                    ),
-                    _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT,
-                    group="drive_gain",
-                    group_label="Drive-gain baseline",
-                ),
-                logical_generation_field(
-                    "pi_product_seed",
-                    FloatSpec(
-                        label="initial_pi_product",
-                        tooltip="Initial pi-length times gain before feedback exists.",
-                    ),
-                    _seed_pi_product(ctx),
-                    group="drive_gain",
-                ),
-                *feedback_generation_fields(_DRIVE_GAIN_SLOT, group="pi_feedback"),
-            ),
-            generation_choices=(
-                generation_choice(
-                    "relax",
-                    "relax_delay_mode",
-                    {
-                        _RELAX_DELAY_MODE_FIXED: (),
-                        _RELAX_DELAY_MODE_AUTO_T1: (
-                            "t1_seed_us",
-                            "relax_factor",
-                            "relax_min_us",
-                        ),
-                    },
-                ),
-                generation_choice(
-                    "sweep",
-                    "sweep_range_mode",
-                    {
-                        _SWEEP_RANGE_MODE_FIXED: (),
-                        _SWEEP_RANGE_MODE_AUTO_PI_LENGTH: ("sweep_stop_factor",),
-                    },
-                ),
-                generation_choice(
-                    "drive_gain",
-                    "drive_gain_mode",
-                    {
-                        _DRIVE_GAIN_MODE_FIXED: (),
-                        _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT: ("pi_product_seed",),
-                    },
-                ),
-                feedback_generation_choice(_DRIVE_GAIN_SLOT, group="pi_feedback"),
-            ),
-            default_overrides=default_overrides,
-            path_renames={"modules.qub_pulse": "modules.rabi_pulse"},
-            label_overrides={"modules.rabi_pulse": "Rabi Pulse"},
-            drop_paths=("modules.reset",),
-            module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
+            )
+            .float(
+                "expected_pi_length",
+                "generation.sweep.expected_pi_length",
+                label="target_pi_length_us",
+                default=pi_len_seed,
+                tooltip="Pi-length setpoint for drive gain feedback.",
+            )
+            .float(
+                "sweep_stop_factor",
+                "generation.sweep.sweep_stop_factor",
+                label="stop_factor",
+                default=sweep_stop_factor,
+                tooltip="Pi-length multiplier for the auto sweep stop.",
+            )
+            .choice_group(
+                "generation.sweep",
+                "sweep_range_mode",
+                {
+                    _SWEEP_RANGE_MODE_FIXED: (),
+                    _SWEEP_RANGE_MODE_AUTO_PI_LENGTH: ("sweep_stop_factor",),
+                },
+            )
+            .choice(
+                "drive_gain_mode",
+                "generation.drive_gain.drive_gain_mode",
+                label="mode",
+                choices=(_DRIVE_GAIN_MODE_AUTO_PI_PRODUCT, _DRIVE_GAIN_MODE_FIXED),
+                default=_DRIVE_GAIN_MODE_AUTO_PI_PRODUCT,
+                tooltip="Auto uses pi-product history; fixed keeps Default cfg gain.",
+            )
+            .float(
+                "pi_product_seed",
+                "generation.drive_gain.pi_product_seed",
+                label="initial_pi_product",
+                default=pi_product_seed,
+                tooltip="Initial pi-length times gain before feedback exists.",
+            )
+            .choice_group(
+                "generation.drive_gain",
+                "drive_gain_mode",
+                {
+                    _DRIVE_GAIN_MODE_FIXED: (),
+                    _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT: ("pi_product_seed",),
+                },
+            )
+            .feedback_slot(_DRIVE_GAIN_SLOT, group="pi_feedback")
+            .build()
         )
 
     def make_init_result(
@@ -752,48 +664,33 @@ class LenRabiBuilder(Builder):
 
     def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
         knobs = schema.read_knobs()
-        paths: list[OverridePath] = [
-            OverridePath(
-                "modules.rabi_pulse.freq",
-                "all_points",
-                "qubit_freq",
-                "rabi pulse frequency is generated from qubit_freq dependency",
-            )
-        ]
-        if knobs.get("drive_gain_mode") == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
-            paths.append(
-                OverridePath(
-                    "modules.rabi_pulse.gain",
-                    "all_points",
-                    "generation.drive_gain.drive_gain_mode",
-                    "rabi drive gain is generated from pi-length feedback",
-                )
-            )
-        if knobs.get("relax_delay_mode") == _RELAX_DELAY_MODE_AUTO_T1:
-            paths.append(
-                OverridePath(
-                    "relax_delay",
-                    "all_points",
-                    "generation.relax.relax_delay_mode",
-                    "relax delay is generated from T1 feedback",
-                )
-            )
-        if knobs.get("sweep_range_mode") == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
-            paths.append(
-                OverridePath(
-                    "sweep.length.stop",
-                    "all_points",
-                    "generation.sweep.sweep_range_mode",
-                    "Rabi sweep stop is generated from pi-length feedback",
-                )
-            )
-        paths.extend(
-            readout_module_override_paths(
-                source="opt_readout module dependency",
-                reason="readout module is resolved from workflow/module-library dependency",
-            )
+        plan = NodeOverridePlan()
+        plan.generated_if(
+            True,
+            "modules.rabi_pulse.freq",
+            source="qubit_freq",
+            reason="rabi pulse frequency is generated from qubit_freq dependency",
         )
-        return OverridePlan(tuple(paths))
+        plan.generated_if(
+            knobs.get("drive_gain_mode") == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT,
+            "modules.rabi_pulse.gain",
+            source="generation.drive_gain.drive_gain_mode",
+            reason="rabi drive gain is generated from pi-length feedback",
+        )
+        plan.generated_if(
+            knobs.get("relax_delay_mode") == _RELAX_DELAY_MODE_AUTO_T1,
+            "relax_delay",
+            source="generation.relax.relax_delay_mode",
+            reason="relax delay is generated from T1 feedback",
+        )
+        plan.generated_if(
+            knobs.get("sweep_range_mode") == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH,
+            "sweep.length.stop",
+            source="generation.sweep.sweep_range_mode",
+            reason="Rabi sweep stop is generated from pi-length feedback",
+        )
+        plan.readout_dependency(source="opt_readout module dependency")
+        return plan.build()
 
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> LenRabiCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
@@ -825,12 +722,19 @@ class LenRabiBuilder(Builder):
         feedback = _resolve_feedback_inputs(snapshot, knobs)
 
         drive_gain_mode = str(knobs["drive_gain_mode"])
-        drive_gain = _resolve_drive_gain(
-            drive_gain_mode,
-            pi_product=feedback.feedback_pi_product,
-            target_pi_length=feedback.target_pi_length,
-            fixed=float(knobs["qub_gain"]),
-        )
+        if drive_gain_mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
+            drive_gain = _drive_gain_from_pi_product(
+                feedback.feedback_pi_product,
+                feedback.target_pi_length,
+                factor=1.2,
+                drive_gain_cap=_DRIVE_GAIN_CAP,
+            )
+        elif drive_gain_mode == _DRIVE_GAIN_MODE_FIXED:
+            drive_gain = float(knobs["qub_gain"])
+        else:
+            raise RuntimeError(
+                f"unsupported lenrabi drive_gain_mode: {drive_gain_mode!r}"
+            )
         if (
             env.feedback is not None
             and drive_gain_mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT
@@ -851,22 +755,40 @@ class LenRabiBuilder(Builder):
         if drive_gain_mode == _DRIVE_GAIN_MODE_AUTO_PI_PRODUCT:
             patches["modules.rabi_pulse.gain"] = drive_gain
         patches.update(readout_module_patches(readout))
-        relax_delay = _resolve_cfg_relax_delay(
-            str(knobs["relax_delay_mode"]),
-            t1=t1,
-            fixed=float(knobs["relax_delay"]),
-            knobs=knobs,
-        )
-        if str(knobs["relax_delay_mode"]) == _RELAX_DELAY_MODE_AUTO_T1:
+
+        relax_delay_mode = str(knobs["relax_delay_mode"])
+        if relax_delay_mode == _RELAX_DELAY_MODE_AUTO_T1:
+            relax_delay = auto_relax_delay_from_t1(
+                t1,
+                factor=float(knobs["relax_factor"]),
+                minimum=float(knobs["relax_min_us"]),
+            )
             patches["relax_delay"] = relax_delay
-        sweep_range = _resolve_cfg_sweep_range(
-            str(knobs["sweep_range_mode"]),
-            pi_length=feedback.range_pi_length,
-            fixed=knobs["sweep_range"],
-            knobs=knobs,
-        )
-        if str(knobs["sweep_range_mode"]) == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
+        elif relax_delay_mode == _RELAX_DELAY_MODE_FIXED:
+            relax_delay = float(knobs["relax_delay"])
+        else:
+            raise RuntimeError(
+                f"unsupported lenrabi relax_delay_mode: {relax_delay_mode!r}"
+            )
+
+        sweep_range_mode = str(knobs["sweep_range_mode"])
+        if sweep_range_mode == _SWEEP_RANGE_MODE_AUTO_PI_LENGTH:
+            fixed_sweep = knobs["sweep_range"]
+            sweep_range = (
+                float(fixed_sweep.start),
+                auto_sweep_stop(
+                    feedback.range_pi_length,
+                    stop_factor=float(knobs["sweep_stop_factor"]),
+                    stop_min=None,
+                ),
+            )
             patches["sweep.length.stop"] = sweep_range[1]
+        elif sweep_range_mode == _SWEEP_RANGE_MODE_FIXED:
+            sweep_range = fixed_sweep_range(knobs["sweep_range"])
+        else:
+            raise RuntimeError(
+                f"unsupported lenrabi sweep_range_mode: {sweep_range_mode!r}"
+            )
         raw_cfg = self.point_cfg(env, patches)
         raw_cfg["sweep_range"] = pop_sweep_range(raw_cfg, "length", node_name=self.name)
         return ml.make_cfg(raw_cfg, LenRabiCfgTemplate)

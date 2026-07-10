@@ -26,40 +26,29 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2_gui.adapters.twotone.freq import FreqAdapter
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    CenteredSweepSpec,
     CenteredSweepValue,
-    FloatSpec,
-    OverridePath,
     OverridePlan,
-    str_choice_spec,
+    pulse_module_ref_spec,
+    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
-from zcu_tools.gui.app.autofluxdep.feedback import (
-    FeedbackSlotDecl,
-    feedback_generation_choice,
-    feedback_generation_fields,
-)
+from zcu_tools.gui.app.autofluxdep.feedback import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
+    DEFAULT_ACQUIRE_RETRY,
     SnrProbe,
-    acquire_retry_generation_field,
+    acquire_retry,
     acquire_to_complex,
     axis_to_sweep,
     build_stop_condition,
     is_good_fit,
     make_signal_update,
     require_flux_device,
-    run_schedule_acquire,
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    PULSE_READOUT_REF_LABELS,
-    adapter_node_schema,
-    generation_choice,
-    logical_generation_field,
-    readout_module_override_paths,
     readout_module_patches,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
@@ -78,6 +67,13 @@ from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq_recovery import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.utils import (
+    NodeOverridePlan,
+    NodeSchemaBuilder,
+    module_ref_default,
+    module_ref_value_from_ctx,
+)
+from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -90,9 +86,6 @@ from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_EARLYSTOP_SNR = 50.0
-_DEFAULT_DETUNE_SWEEP = CenteredSweepValue(center=0.0, span=100.0, expts=201)
-_QFW_TARGET_KAPPA = 6.5
 _DRIVE_GAIN_CAP = 1.0
 _FREQ_FIT_RESIDUAL_RATIO = 0.2
 _LINEWIDTH_FIT_RESIDUAL_RATIO = 0.1
@@ -143,26 +136,6 @@ def _drive_gain_from_qfw_factor(
             "qubit_freq.make_cfg needs positive qfw_factor to derive drive gain"
         )
     return min(float(drive_gain_cap), float(target_kappa) / factor)
-
-
-def _resolve_drive_gain(
-    mode: str,
-    qfw_factor: Any | None,
-    initial_gain: float,
-    *,
-    target_kappa: float,
-    drive_gain_cap: float,
-) -> float:
-    if mode == _DRIVE_GAIN_MODE_ADAPTIVE:
-        return _drive_gain_from_qfw_factor(
-            qfw_factor,
-            initial_gain,
-            target_kappa=target_kappa,
-            drive_gain_cap=drive_gain_cap,
-        )
-    if mode == _DRIVE_GAIN_MODE_FIXED:
-        return float(initial_gain)
-    raise RuntimeError(f"unsupported qubit_freq drive_gain_mode: {mode!r}")
 
 
 def _predict_freq_correction(env: RunEnv) -> float:
@@ -285,20 +258,9 @@ class QubitFreqNode(Node):
         # liveplot settles round by round. The SNR probe + stop poll are evaluated
         # as a completed-round stop condition.
         probe = SnrProbe()
-        stop_condition = build_stop_condition(env, probe, _signal2real)
-        acquired = run_schedule_acquire(
-            env=env,
-            cfg=cfg,
-            signal_shape=result.signal[idx].shape,
+        signal_buffer = SignalBuffer(
+            result.signal[idx].shape,
             dtype=np.complex128,
-            configure_builder=lambda builder: builder.add(
-                [
-                    Pulse("init_pulse", cfg.modules.init_pulse, tag="init_pulse"),
-                    Pulse("qubit_pulse", cfg.modules.qub_pulse, tag="qub_pulse"),
-                    Readout("readout", cfg.modules.readout),
-                ]
-            ).declare_sweep("detune", detune_sweep),
-            raw2signal_fn=acquire_to_complex,
             on_update=make_signal_update(
                 result,
                 idx,
@@ -306,14 +268,46 @@ class QubitFreqNode(Node):
                 env.round_hook,
                 probe=probe,
             ),
-            program_cls=ModularProgramV2,
-            stop_condition=stop_condition,
+            update_interval=None,
         )
-        if acquired.stopped:
+        with Schedule(cfg, signal_buffer) as sched:
+            builder = sched.prog_builder(
+                env.soc,
+                env.soccfg,
+                cfg=cfg,
+                program_cls=ModularProgramV2,
+            )
+            builder.add(
+                [
+                    Pulse("init_pulse", cfg.modules.init_pulse, tag="init_pulse"),
+                    Pulse("qubit_pulse", cfg.modules.qub_pulse, tag="qub_pulse"),
+                    Readout("readout", cfg.modules.readout),
+                ]
+            ).declare_sweep("detune", detune_sweep)
+            signal = builder.build_and_acquire(
+                raw2signal_fn=acquire_to_complex,
+                retry=acquire_retry(env),
+                progress=False,
+                progress_label=f"{env.node_name or 'qubit_freq'} flux {idx + 1} rounds",
+                progress_leave=False,
+                stop_condition=build_stop_condition(env, probe, _signal2real),
+            )
+            outcome = sched.outcome
+
+        if outcome.status == "stopped":
             return Patch()
-        if acquired.signal is None:
-            raise RuntimeError("qubit_freq Schedule acquire completed without signal")
-        real = _signal2real(np.asarray(acquired.signal, dtype=np.complex128))
+        if outcome.status == "failed":
+            reason = outcome.reason or "qubit_freq Schedule acquire failed"
+            raise RuntimeError(reason) from outcome.exception
+        if outcome.status == "interrupted":
+            reason = outcome.reason or "qubit_freq Schedule acquire interrupted"
+            raise RuntimeError(reason) from outcome.exception
+        if outcome.status != "completed":
+            raise RuntimeError(
+                f"unsupported qubit_freq Schedule outcome: {outcome.status!r}"
+            )
+
+        real = _signal2real(np.asarray(signal, dtype=np.complex128))
 
         # fit the fully-averaged signal
         freq, _, fwhm, _, fit_curve, _ = fit_qubit_freq(freqs, real)
@@ -475,106 +469,107 @@ class QubitFreqBuilder(Builder):
     feedback_slots = (_PREDICT_FREQ_CORRECTION_SLOT,)
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
-        """Adapter-backed default cfg plus autofluxdep generation controls."""
-        return adapter_node_schema(
-            FreqAdapter,
-            ctx,
-            logical_paths={
-                "qub_pulse": "modules.qub_pulse",
-                "qub_ch": "modules.qub_pulse.ch",
-                "qub_nqz": "modules.qub_pulse.nqz",
-                "qub_gain": "modules.qub_pulse.gain",
-                "qub_length": "modules.qub_pulse.waveform.length",
-                "readout": "modules.readout",
-                "relax_delay": "relax_delay",
-                "reps": "reps",
-                "rounds": "rounds",
-                "detune_sweep": "sweep.freq",
-            },
-            generation_fields=(
-                logical_generation_field(
-                    "earlystop_snr",
-                    FloatSpec(
-                        label="earlystop_snr",
-                        optional=True,
-                        tooltip="Stop averaging once completed-round SNR reaches this value.",
-                    ),
-                    _DEFAULT_EARLYSTOP_SNR,
-                    group="acquisition",
+        """Default cfg plus autofluxdep generation controls."""
+        qub_ch = 0
+        if isinstance(ctx, ExpContext):
+            value = ctx.md.get("qub_ch")
+            if isinstance(value, int) and not isinstance(value, bool):
+                qub_ch = value
+
+        qub_pulse_spec = pulse_module_ref_spec(label="Probe Pulse")
+        readout_spec = pulse_readout_module_ref_spec(label="Readout")
+        qub_pulse_default = module_ref_value_from_ctx(
+            ctx, "qub_probe", accepted_types=("pulse",)
+        )
+        if qub_pulse_default is None:
+            qub_pulse_default = module_ref_default(ctx, qub_pulse_spec)
+            if qub_pulse_default is None:
+                raise RuntimeError("qubit_freq pulse default is unexpectedly empty")
+        qub_pulse_default.with_field("ch", qub_ch)
+        qub_pulse_default.with_field("freq", 0.0)
+        qub_pulse_default.with_field("gain", 0.1)
+        qub_pulse_default.with_field("waveform.length", 5.0)
+
+        return (
+            NodeSchemaBuilder(label="Qubit Frequency")
+            .field(
+                "qub_pulse",
+                "modules.qub_pulse",
+                spec=qub_pulse_spec,
+                default=qub_pulse_default,
+            )
+            .field(
+                "readout",
+                "modules.readout",
+                spec=readout_spec,
+                default=module_ref_default(
+                    ctx,
+                    readout_spec,
+                    *READOUT_LIBRARY_ALIASES,
+                    accepted_types=("readout/pulse",),
                 ),
-                acquire_retry_generation_field(),
-                logical_generation_field(
-                    "physical_recovery_mode",
-                    str_choice_spec(
-                        "mode",
-                        (
-                            PHYSICAL_RECOVERY_MODE_OFF,
-                            PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
-                        ),
-                        tooltip="Run-local physical-model recovery after trusted frequency fits fail.",
-                    ),
+            )
+            .float("relax_delay", "relax_delay", label="Relax delay (us)", default=1.0)
+            .int("reps", "reps", label="Reps", default=1000)
+            .int("rounds", "rounds", label="Rounds", default=10)
+            .centered_sweep(
+                "detune_sweep",
+                "sweep.freq",
+                label="Freq (MHz)",
+                default=CenteredSweepValue(center=0.0, span=100.0, expts=201),
+                center_editable=False,
+                center_badge="generated",
+                locked_center=0.0,
+                center_tooltip=(
+                    "Detune-window center is fixed to the generated drive center; "
+                    "edit span/expts to control the search window."
+                ),
+                tooltip="Detune search window around the generated qubit drive center.",
+            )
+            .logical("qub_ch", "modules.qub_pulse.ch")
+            .logical("qub_nqz", "modules.qub_pulse.nqz")
+            .logical("qub_gain", "modules.qub_pulse.gain")
+            .logical("qub_length", "modules.qub_pulse.waveform.length")
+            .acquisition(earlystop_snr=50.0, acquire_retry=DEFAULT_ACQUIRE_RETRY)
+            .choice(
+                "physical_recovery_mode",
+                "generation.freq_recovery.physical_recovery_mode",
+                label="mode",
+                choices=(
+                    PHYSICAL_RECOVERY_MODE_OFF,
                     PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
-                    group="freq_recovery",
                 ),
-                logical_generation_field(
-                    "drive_gain_mode",
-                    str_choice_spec(
-                        "mode",
-                        (
-                            _DRIVE_GAIN_MODE_ADAPTIVE,
-                            _DRIVE_GAIN_MODE_FIXED,
-                        ),
-                        tooltip="Adaptive uses linewidth feedback; fixed keeps Default cfg gain.",
-                    ),
-                    _DRIVE_GAIN_MODE_ADAPTIVE,
-                    group="drive_gain",
-                ),
-                logical_generation_field(
-                    "target_kappa",
-                    FloatSpec(
-                        label="target_kappa",
-                        tooltip="Target linewidth in MHz for adaptive drive gain.",
-                    ),
-                    _QFW_TARGET_KAPPA,
-                    group="drive_gain",
-                ),
-                *feedback_generation_fields(
-                    _PREDICT_FREQ_CORRECTION_SLOT,
-                    group="predictor_correction",
-                ),
-            ),
-            generation_choices=(
-                generation_choice(
-                    "drive_gain",
-                    "drive_gain_mode",
-                    {
-                        _DRIVE_GAIN_MODE_FIXED: (),
-                        _DRIVE_GAIN_MODE_ADAPTIVE: ("target_kappa",),
-                    },
-                ),
-                feedback_generation_choice(
-                    _PREDICT_FREQ_CORRECTION_SLOT,
-                    group="predictor_correction",
-                ),
-            ),
-            spec_overrides={
-                "sweep.freq": CenteredSweepSpec(
-                    label="Freq (MHz)",
-                    center_editable=False,
-                    center_badge="generated",
-                    locked_center=0.0,
-                    center_tooltip=(
-                        "Detune-window center is fixed to the generated drive center; "
-                        "edit span/expts to control the search window."
-                    ),
-                    tooltip=(
-                        "Detune search window around the generated qubit drive center."
-                    ),
-                )
-            },
-            default_overrides={"detune_sweep": _DEFAULT_DETUNE_SWEEP, "rounds": 10},
-            drop_paths=("modules.reset",),
-            module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
+                default=PHYSICAL_RECOVERY_MODE_FAIL_TRIGGERED_FIT,
+                tooltip="Run-local physical-model recovery after trusted frequency fits fail.",
+            )
+            .choice(
+                "drive_gain_mode",
+                "generation.drive_gain.drive_gain_mode",
+                label="mode",
+                choices=(_DRIVE_GAIN_MODE_ADAPTIVE, _DRIVE_GAIN_MODE_FIXED),
+                default=_DRIVE_GAIN_MODE_ADAPTIVE,
+                tooltip="Adaptive uses linewidth feedback; fixed keeps Default cfg gain.",
+            )
+            .float(
+                "target_kappa",
+                "generation.drive_gain.target_kappa",
+                label="target_kappa",
+                default=6.5,
+                tooltip="Target linewidth in MHz for adaptive drive gain.",
+            )
+            .choice_group(
+                "generation.drive_gain",
+                "drive_gain_mode",
+                {
+                    _DRIVE_GAIN_MODE_FIXED: (),
+                    _DRIVE_GAIN_MODE_ADAPTIVE: ("target_kappa",),
+                },
+            )
+            .feedback_slot(
+                _PREDICT_FREQ_CORRECTION_SLOT,
+                group="predictor_correction",
+            )
+            .build()
         )
 
     def make_init_result(
@@ -592,30 +587,22 @@ class QubitFreqBuilder(Builder):
 
     def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
         knobs = schema.read_knobs()
-        paths: list[OverridePath] = [
-            OverridePath(
-                "modules.qub_pulse.freq",
-                "all_points",
-                "predict_freq",
-                "qubit drive frequency is generated from predictor feedback",
-            )
-        ]
-        if knobs.get("drive_gain_mode") == _DRIVE_GAIN_MODE_ADAPTIVE:
-            paths.append(
-                OverridePath(
-                    "modules.qub_pulse.gain",
-                    "after_first_point",
-                    "generation.drive_gain.drive_gain_mode",
-                    "adaptive drive gain is generated from linewidth feedback after the initial point",
-                )
-            )
-        paths.extend(
-            readout_module_override_paths(
-                source="readout module dependency",
-                reason="readout module is resolved from workflow/module-library dependency",
-            )
+        plan = NodeOverridePlan()
+        plan.generated_if(
+            True,
+            "modules.qub_pulse.freq",
+            source="predict_freq",
+            reason="qubit drive frequency is generated from predictor feedback",
         )
-        return OverridePlan(tuple(paths))
+        plan.generated_if(
+            knobs.get("drive_gain_mode") == _DRIVE_GAIN_MODE_ADAPTIVE,
+            "modules.qub_pulse.gain",
+            source="generation.drive_gain.drive_gain_mode",
+            reason="adaptive drive gain is generated from linewidth feedback after the initial point",
+            mode="after_first_point",
+        )
+        plan.readout_dependency(source="readout module dependency")
+        return plan.build()
 
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> QubitFreqCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
@@ -649,16 +636,18 @@ class QubitFreqBuilder(Builder):
         patches: dict[str, object] = {
             "modules.qub_pulse.freq": predict_freq,
         }
-        if (
-            str(knobs["drive_gain_mode"]) == _DRIVE_GAIN_MODE_ADAPTIVE
-            and env.flux_idx > 0
-        ):
-            patches["modules.qub_pulse.gain"] = _resolve_drive_gain(
-                str(knobs["drive_gain_mode"]),
-                snapshot.get("qfw_factor"),
-                float(knobs["qub_gain"]),
-                target_kappa=float(knobs["target_kappa"]),
-                drive_gain_cap=_DRIVE_GAIN_CAP,
+        drive_gain_mode = str(knobs["drive_gain_mode"])
+        if drive_gain_mode == _DRIVE_GAIN_MODE_ADAPTIVE:
+            if env.flux_idx > 0:
+                patches["modules.qub_pulse.gain"] = _drive_gain_from_qfw_factor(
+                    snapshot.get("qfw_factor"),
+                    float(knobs["qub_gain"]),
+                    target_kappa=float(knobs["target_kappa"]),
+                    drive_gain_cap=_DRIVE_GAIN_CAP,
+                )
+        elif drive_gain_mode != _DRIVE_GAIN_MODE_FIXED:
+            raise RuntimeError(
+                f"unsupported qubit_freq drive_gain_mode: {drive_gain_mode!r}"
             )
         patches.update(readout_module_patches(readout))
         raw_cfg = self.point_cfg(env, patches)

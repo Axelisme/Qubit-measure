@@ -35,9 +35,14 @@ from zcu_tools.gui.app.main.adapter import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    WaveformRefSpec,
+    WaveformRefValue,
     align_locked_literals,
+    make_default_value,
 )
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+from zcu_tools.gui.app.main.specs.readout import make_pulse_readout_spec
 
 from .override_plan import (
     OverrideMode,
@@ -55,6 +60,27 @@ from .schema import (
     empty_node_schema,
     str_choice_spec,
 )
+
+
+def pulse_module_ref_spec(
+    label: str = "Pulse", optional: bool = False
+) -> ModuleRefSpec:
+    return ModuleRefSpec(
+        allowed=[make_pulse_spec()],
+        label=label,
+        optional=optional,
+    )
+
+
+def pulse_readout_module_ref_spec(
+    label: str = "Readout", optional: bool = False
+) -> ModuleRefSpec:
+    return ModuleRefSpec(
+        allowed=[make_pulse_readout_spec()],
+        label=label,
+        optional=optional,
+    )
+
 
 __all__ = [
     "CfgSchema",
@@ -79,13 +105,18 @@ __all__ = [
     "ScalarSpec",
     "SweepSpec",
     "SweepValue",
+    "WaveformRefSpec",
+    "WaveformRefValue",
     "align_locked_literals",
     "apply_override_patches",
     "empty_node_schema",
+    "make_default_value",
     "module_leaf_patches",
     "module_cfg_to_value",
     "module_override_paths",
     "override_plan_to_wire",
+    "pulse_module_ref_spec",
+    "pulse_readout_module_ref_spec",
     "str_choice_spec",
     "validate_override_plan_base_cfg",
 ]

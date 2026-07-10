@@ -17,26 +17,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, MutableMapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
-from numpy.typing import DTypeLike, NDArray
+from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.runner import ProgramBuilder, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import estimate_snr, snr_checker
-from zcu_tools.gui.app.autofluxdep.cfg import IntSpec
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    GenerationField,
-    logical_generation_field,
-)
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
-from zcu_tools.program.v2 import ModularProgramV2, SweepCfg
+from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.utils.process import rotate2real
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.autofluxdep.cfg import NodeCfgSchema
 
 logger = logging.getLogger(__name__)
 _ROUND_HOOK_PERF = PerfStats("worker.round_hook", logger, slow_ms=20.0)
@@ -45,33 +35,9 @@ _DECAY_SCALAR_MAX_SWEEP_FACTOR = 2.0
 DEFAULT_ACQUIRE_RETRY = 3
 
 
-@dataclass(frozen=True)
-class ScheduleAcquireResult:
-    """Node-facing result of a Schedule-backed program acquire."""
-
-    signal: NDArray[Any] | None
-    stopped: bool = False
-
-
-def acquire_retry_generation_field(
-    *, group: str = "acquisition", group_label: str | None = None
-) -> GenerationField:
-    """Return the common node-level acquire retry generation knob."""
-    return logical_generation_field(
-        "acquire_retry",
-        IntSpec(
-            label="retry",
-            tooltip="Retries for transient program build or acquire failures.",
-        ),
-        DEFAULT_ACQUIRE_RETRY,
-        group=group,
-        group_label=group_label,
-    )
-
-
 def acquire_retry(env: RunEnv) -> int:
     """Return this node's acquire retry budget, Fast Failing invalid values."""
-    value = env.knobs().get("acquire_retry", DEFAULT_ACQUIRE_RETRY)
+    value = env.knob("acquire_retry", DEFAULT_ACQUIRE_RETRY)
     if isinstance(value, bool) or not isinstance(value, int):
         raise RuntimeError(
             f"{env.node_name or 'node'} acquire_retry must be an integer, got {value!r}"
@@ -81,66 +47,6 @@ def acquire_retry(env: RunEnv) -> int:
             f"{env.node_name or 'node'} acquire_retry must be non-negative, got {value}"
         )
     return value
-
-
-def run_schedule_acquire(
-    *,
-    env: RunEnv,
-    cfg: object,
-    signal_shape: int | tuple[int, ...],
-    dtype: DTypeLike,
-    configure_builder: Callable[[ProgramBuilder[Any]], object],
-    raw2signal_fn: Callable[[Any], NDArray[Any]],
-    on_update: Callable[[NDArray[Any]], None] | None = None,
-    program_cls: Callable[..., Any] = ModularProgramV2,
-    stop_condition: Callable[[], bool] | None = None,
-    progress_label: str | None = None,
-    **acquire_kwargs: object,
-) -> ScheduleAcquireResult:
-    """Acquire one node row through ``Schedule`` / ``ProgramBuilder``.
-
-    Device setup and cfg lowering intentionally stay outside this helper. Only
-    program build/acquire is retried, matching the node-level safety knob.
-    """
-    signal_buffer = SignalBuffer(
-        signal_shape,
-        dtype=dtype,
-        on_update=on_update,
-        update_interval=None,
-    )
-    label = progress_label or (
-        f"{env.node_name or 'node'} flux {env.flux_idx + 1} rounds"
-    )
-    with Schedule(cfg, signal_buffer) as sched:
-        builder = sched.prog_builder(
-            env.soc,
-            env.soccfg,
-            cfg=cfg,
-            program_cls=program_cls,
-        )
-        configure_builder(builder)
-        signal = builder.build_and_acquire(
-            raw2signal_fn=raw2signal_fn,
-            retry=acquire_retry(env),
-            progress=False,
-            progress_label=label,
-            progress_leave=False,
-            stop_condition=stop_condition,
-            **acquire_kwargs,
-        )
-        outcome = sched.outcome
-
-    if outcome.status == "completed":
-        return ScheduleAcquireResult(signal=np.asarray(signal))
-    if outcome.status == "stopped":
-        return ScheduleAcquireResult(signal=None, stopped=True)
-    if outcome.status == "failed":
-        reason = outcome.reason or "Schedule acquire failed"
-        raise RuntimeError(reason) from outcome.exception
-    if outcome.status == "interrupted":
-        reason = outcome.reason or "Schedule acquire interrupted"
-        raise RuntimeError(reason) from outcome.exception
-    raise RuntimeError(f"unsupported Schedule outcome: {outcome.status!r}")
 
 
 def is_good_fit(
@@ -279,17 +185,6 @@ class SnrProbe:
     snr: float = np.nan
 
 
-def earlystop_snr(schema: NodeCfgSchema, md: Any = None) -> float | None:
-    """The SNR early-stop threshold from a Node's schema, or None (no early-stop).
-
-    Mirrors the lower-layer task's ``earlystop_snr``. The knob is an optional
-    ``FloatSpec``: unset → the lowered dict omits the key → None (no early-stop).
-    A node type without the knob (ro_optimize) likewise yields None. No text
-    parsing — the schema already lowered it to ``float | None``.
-    """
-    return schema.lower(None, md=md).get("earlystop_snr")
-
-
 def build_stop_condition(
     env: RunEnv,
     probe: SnrProbe,
@@ -300,7 +195,7 @@ def build_stop_condition(
     The runner calls this after the completed round has updated ``SignalBuffer``, so
     the SNR checker sees the same running average that was just painted in Result.
     """
-    threshold = earlystop_snr(env.schema, md=env.md)
+    threshold = env.knob("earlystop_snr", None)
     if threshold is None:
         return None
     check_snr = snr_checker(probe, threshold, signal2real_fn)

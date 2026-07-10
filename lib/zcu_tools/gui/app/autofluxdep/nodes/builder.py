@@ -42,6 +42,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 # round_hook(whole_trace): called each acquire round with the running-averaged
 # trace; the Node fills its Result row + the env notifies the main thread.
 RoundHook = Callable[[Any], None]
+_MISSING = object()
 
 
 @dataclass
@@ -92,12 +93,27 @@ class RunEnv:
             self.base_cfg = self.schema.lower_raw(self.ml, md=self.md)
 
     def knobs(self) -> dict[str, Any]:
-        """Return the run-start lowered knob snapshot for this point's node."""
+        """Return a mutable copy of this point's run-start lowered knob snapshot."""
+        return dict(self.knobs_view())
+
+    def knobs_view(self) -> Mapping[str, Any]:
+        """Return this point's run-start lowered knob snapshot."""
         if self.knobs_snapshot is None:
             raise RuntimeError(
                 f"RunEnv for {self.node_name or '<unnamed>'!r} has no knob snapshot"
             )
-        return dict(self.knobs_snapshot)
+        return self.knobs_snapshot
+
+    def knob(self, key: str, default: Any = _MISSING) -> Any:
+        """Return one run-start knob value, optionally falling back to ``default``."""
+        knobs = self.knobs_view()
+        if key in knobs:
+            return knobs[key]
+        if default is not _MISSING:
+            return default
+        raise KeyError(
+            f"RunEnv for {self.node_name or '<unnamed>'!r} has no knob {key!r}"
+        )
 
     def point_cfg(self, patches: Mapping[str, object]) -> dict[str, object]:
         """Build this flux point's raw cfg from the run-start base snapshot."""

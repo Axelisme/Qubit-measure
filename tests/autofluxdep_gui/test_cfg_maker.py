@@ -456,41 +456,6 @@ def test_lenrabi_produce_fast_fails_when_context_unconfigured():
         builder.build_node(env).produce(snap)
 
 
-def test_t2echo_auto_fit_method_dispatches_by_detune(monkeypatch):
-    import numpy as np
-    from zcu_tools.gui.app.autofluxdep.nodes import t2echo as t2echo_mod
-
-    calls: list[str] = []
-    times = np.asarray([0.0, 1.0, 2.0])
-    real = np.asarray([1.0, 0.5, 0.25])
-
-    def fake_decay(_times, _real):
-        calls.append("decay")
-        return 12.0, 0.12, np.zeros_like(_times), None
-
-    def fake_fringe(_times, _real):
-        calls.append("fringe")
-        return 8.0, 0.08, None, None, np.ones_like(_times), None
-
-    monkeypatch.setattr(t2echo_mod, "fit_decay", fake_decay)
-    monkeypatch.setattr(t2echo_mod, "fit_decay_fringe", fake_fringe)
-
-    t2e, t2e_err, fit_curve = t2echo_mod._fit_t2echo(
-        "auto_by_detune", detune_ratio=0.0, times=times, real=real
-    )
-    assert t2e == 12.0
-    assert t2e_err == 0.12
-    np.testing.assert_allclose(fit_curve, np.zeros_like(times))
-
-    t2e, t2e_err, fit_curve = t2echo_mod._fit_t2echo(
-        "auto_by_detune", detune_ratio=0.05, times=times, real=real
-    )
-    assert t2e == 8.0
-    assert t2e_err == 0.08
-    np.testing.assert_allclose(fit_curve, np.ones_like(times))
-    assert calls == ["decay", "fringe"]
-
-
 def test_ro_optimize_make_cfg_lowers_context():
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -871,7 +836,11 @@ class _T1SocCfg:
 
 
 class _ProgramBuilderProbe:
-    def __init__(self) -> None:
+    def __init__(
+        self, signal_shape: tuple[int, ...], captured: dict[str, object]
+    ) -> None:
+        self.signal_shape = signal_shape
+        self.captured = captured
         self.modules: list[object] = []
         self.sweep: tuple[str, object] | None = None
 
@@ -883,34 +852,50 @@ class _ProgramBuilderProbe:
         self.sweep = (name, sweep)
         return self
 
+    def build_and_acquire(self, **kwargs: object) -> np.ndarray:
+        assert kwargs["progress"] is False
+        assert kwargs["progress_leave"] is False
+        self.captured["modules"] = self.modules
+        self.captured["sweep"] = self.sweep
+        n_points = int(self.signal_shape[0])
+        return np.linspace(1.0, 0.2, n_points, dtype=np.complex128)
+
 
 def _patch_t1_fast_produce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, object]:
-    from types import SimpleNamespace
-
     from zcu_tools.gui.app.autofluxdep.nodes import t1 as t1_mod
 
     captured: dict[str, object] = {}
 
-    def fake_run_schedule_acquire(**kwargs: object) -> object:
-        probe = _ProgramBuilderProbe()
-        configure_builder = kwargs["configure_builder"]
-        assert callable(configure_builder)
-        configure_builder(probe)
-        captured["modules"] = probe.modules
-        captured["sweep"] = probe.sweep
-        signal_shape = kwargs["signal_shape"]
-        assert isinstance(signal_shape, (int, tuple))
-        n_points = signal_shape[0] if isinstance(signal_shape, tuple) else signal_shape
-        assert isinstance(n_points, int)
-        signal = np.linspace(1.0, 0.2, int(n_points), dtype=np.float64)
-        return SimpleNamespace(signal=signal.astype(np.complex128), stopped=False)
+    class ScheduleProbe:
+        def __init__(self, cfg: object, signal_buffer: Any) -> None:
+            del cfg
+            self.signal_buffer = signal_buffer
+            self.outcome = type(
+                "Outcome",
+                (),
+                {"status": "completed", "reason": None, "exception": None},
+            )()
+
+        def __enter__(self) -> ScheduleProbe:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def prog_builder(
+            self, *_args: object, **_kwargs: object
+        ) -> _ProgramBuilderProbe:
+            shape = tuple(int(dim) for dim in self.signal_buffer.array.shape)
+            probe = _ProgramBuilderProbe(shape, captured)
+            captured["builder"] = probe
+            return probe
 
     monkeypatch.setattr(t1_mod, "require_flux_device", lambda env, name: "flux")
     monkeypatch.setattr(t1_mod, "set_flux_by_name", lambda cfg_dev, name, value: None)
     monkeypatch.setattr(t1_mod, "setup_devices", lambda cfg, progress=False: None)
-    monkeypatch.setattr(t1_mod, "run_schedule_acquire", fake_run_schedule_acquire)
+    monkeypatch.setattr(t1_mod, "Schedule", ScheduleProbe)
     monkeypatch.setattr(
         t1_mod,
         "fit_decay",

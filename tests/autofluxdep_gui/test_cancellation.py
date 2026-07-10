@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.cfg import ScalarSpec
 from zcu_tools.gui.app.autofluxdep.events.run import (
@@ -31,7 +32,6 @@ from zcu_tools.gui.app.autofluxdep.events.run import (
     RunStoppedPayload,
 )
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
-from zcu_tools.gui.app.autofluxdep.nodes import acquire as acquire_mod
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import QubitFreqResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
@@ -411,16 +411,28 @@ def test_schedule_acquire_failure_inside_run_session_does_not_emit_run_stopped()
 
     def produce(env, snapshot):
         del snapshot
-        acquire_mod.run_schedule_acquire(
-            env=env,
-            cfg=ProgramV2Cfg(rounds=1),
-            signal_shape=(1,),
-            dtype=np.float64,
-            configure_builder=lambda builder: builder.add(FakeModule("readout")),
-            raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
-            program_cls=FailingProgram,
-        )
-        raise AssertionError("run_schedule_acquire should raise on failed outcome")
+        cfg = ProgramV2Cfg(rounds=1)
+        signal_buffer = SignalBuffer((1,), dtype=np.float64)
+        with Schedule(cfg, signal_buffer) as sched:
+            builder = sched.prog_builder(
+                env.soc,
+                env.soccfg,
+                cfg=cfg,
+                program_cls=FailingProgram,
+            )
+            builder.add(FakeModule("readout"))
+            builder.build_and_acquire(
+                raw2signal_fn=lambda raw: np.asarray(raw, dtype=np.float64),
+                retry=3,
+                progress=False,
+                progress_label="probe failure",
+                progress_leave=False,
+            )
+            outcome = sched.outcome
+        if outcome.status == "failed":
+            reason = outcome.reason or "probe Schedule acquire failed"
+            raise RuntimeError(reason) from outcome.exception
+        raise AssertionError("Schedule acquire should raise on failed outcome")
 
     ctrl.state.nodes = []
     ctrl.add_node(make_builder("probe", produce_fn=produce))

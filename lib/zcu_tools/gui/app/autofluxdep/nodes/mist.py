@@ -40,27 +40,26 @@ from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import MistPowerAdapter
+from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    OverridePath,
+    EvalValue,
     OverridePlan,
+    SweepValue,
+    pulse_module_ref_spec,
+    pulse_readout_module_ref_spec,
 )
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgSchema, sweepcfg_to_axis
 from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
-    acquire_retry_generation_field,
+    DEFAULT_ACQUIRE_RETRY,
+    acquire_retry,
     acquire_to_complex,
     axis_to_sweep,
     require_flux_device,
-    run_schedule_acquire,
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    PULSE_READOUT_REF_LABELS,
-    adapter_node_schema,
-    pulse_module_override_paths,
     pulse_module_patches,
-    readout_module_override_paths,
     readout_module_patches,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
@@ -72,8 +71,16 @@ from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import (
     READOUT_LIBRARY_ALIASES,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.plotters import ColormapLinePlotter
+from zcu_tools.gui.app.autofluxdep.nodes.readout_defaults import seed_readout_freq
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
+from zcu_tools.gui.app.autofluxdep.nodes.utils import (
+    NodeOverridePlan,
+    NodeSchemaBuilder,
+    module_ref_default,
+    module_ref_value_from_ctx,
+)
+from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -83,11 +90,6 @@ from zcu_tools.program.v2 import (
 )
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_MIST_WAVEFORM = "mist_waveform"
-_DEFAULT_MIST_CH = 0
-_DEFAULT_MIST_FREQ = 6000.0
-_DEFAULT_RELAX_DELAY = 20.5
 
 
 def _mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -182,27 +184,47 @@ class MistNode(Node):
             if env.round_hook is not None:
                 env.round_hook(idx)
 
-        acquired = run_schedule_acquire(
-            env=env,
-            cfg=cfg,
-            signal_shape=result.signal[idx].shape,
+        signal_buffer = SignalBuffer(
+            result.signal[idx].shape,
             dtype=np.float64,
-            configure_builder=lambda builder: builder.add(
+            on_update=on_update,
+            update_interval=None,
+        )
+        with Schedule(cfg, signal_buffer) as sched:
+            builder = sched.prog_builder(
+                env.soc,
+                env.soccfg,
+                cfg=cfg,
+                program_cls=ModularProgramV2,
+            )
+            builder.add(
                 [
                     Pulse("pi_pulse", cfg.modules.pi_pulse),
                     Pulse("mist_pulse", cfg.modules.mist_pulse),
                     Readout("readout", cfg.modules.readout),
                 ]
-            ).declare_sweep("gain", gain_sweep),
-            raw2signal_fn=lambda raw: _mist_signal2real(acquire_to_complex(raw)),
-            on_update=on_update,
-            program_cls=ModularProgramV2,
-        )
-        if acquired.stopped:
+            ).declare_sweep("gain", gain_sweep)
+            signal = builder.build_and_acquire(
+                raw2signal_fn=lambda raw: _mist_signal2real(acquire_to_complex(raw)),
+                retry=acquire_retry(env),
+                progress=False,
+                progress_label=f"{env.node_name or 'mist'} flux {idx + 1} rounds",
+                progress_leave=False,
+            )
+            outcome = sched.outcome
+
+        if outcome.status == "stopped":
             return Patch()
-        if acquired.signal is None:
-            raise RuntimeError("mist Schedule acquire completed without signal")
-        curve = np.asarray(acquired.signal, dtype=np.float64)
+        if outcome.status == "failed":
+            reason = outcome.reason or "mist Schedule acquire failed"
+            raise RuntimeError(reason) from outcome.exception
+        if outcome.status == "interrupted":
+            reason = outcome.reason or "mist Schedule acquire interrupted"
+            raise RuntimeError(reason) from outcome.exception
+        if outcome.status != "completed":
+            raise RuntimeError(f"unsupported mist Schedule outcome: {outcome.status!r}")
+
+        curve = np.asarray(signal, dtype=np.float64)
         np.copyto(result.signal[idx], curve)
 
         logger.debug(
@@ -241,30 +263,79 @@ class MistBuilder(Builder):
     )
 
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
-        """Adapter-backed default cfg for the MIST power sweep."""
-        return adapter_node_schema(
-            MistPowerAdapter,
-            ctx,
-            logical_paths={
-                "pi_pulse": "modules.pi_pulse",
-                "mist_pulse": "modules.mist_pulse",
-                "mist_ch": "modules.mist_pulse.ch",
-                "mist_nqz": "modules.mist_pulse.nqz",
-                "mist_freq": "modules.mist_pulse.freq",
-                "mist_gain": "modules.mist_pulse.gain",
-                "mist_length": "modules.mist_pulse.waveform.length",
-                "readout": "modules.readout",
-                "relax_delay": "relax_delay",
-                "reps": "reps",
-                "rounds": "rounds",
-                "gain_sweep": "sweep.gain",
-            },
-            generation_fields=(acquire_retry_generation_field(),),
-            duplicate_paths={"modules.probe_pulse": "modules.pi_pulse"},
-            path_renames={"modules.probe_pulse": "modules.mist_pulse"},
-            drop_paths=("modules.init_pulse", "modules.reset"),
-            module_ref_labels={"modules.readout": PULSE_READOUT_REF_LABELS},
-            default_overrides={"rounds": 10},
+        """Default cfg for the MIST power sweep."""
+        pi_pulse_spec = pulse_module_ref_spec(label="Pi Pulse")
+        mist_pulse_spec = pulse_module_ref_spec(label="MIST Pulse")
+        readout_spec = pulse_readout_module_ref_spec(label="Readout")
+
+        mist_pulse_default = module_ref_value_from_ctx(
+            ctx, "res_probe", accepted_types=("pulse",)
+        )
+        if mist_pulse_default is None:
+            mist_pulse_default = module_ref_default(ctx, mist_pulse_spec)
+            if mist_pulse_default is None:
+                raise RuntimeError("MIST pulse default is unexpectedly empty")
+            mist_pulse_default.with_field("ch", 0)
+            mist_pulse_default.with_field("nqz", 1).with_field("gain", 0.0)
+            mist_pulse_default.with_field("waveform.length", 1.0)
+        mist_pulse_default.with_field("freq", seed_readout_freq(ctx, fallback=6000.0))
+
+        relax_delay_default: float | EvalValue = 30.5
+        if isinstance(ctx, ExpContext) and ctx.md.get("t1") is not None:
+            relax_delay_default = EvalValue("5.0 * t1")
+
+        return (
+            NodeSchemaBuilder(label="MIST")
+            .field(
+                "pi_pulse",
+                "modules.pi_pulse",
+                spec=pi_pulse_spec,
+                default=module_ref_default(
+                    ctx,
+                    pi_pulse_spec,
+                    *PI_PULSE_LIBRARY_ALIASES,
+                    accepted_types=("pulse",),
+                ),
+            )
+            .field(
+                "mist_pulse",
+                "modules.mist_pulse",
+                spec=mist_pulse_spec,
+                default=mist_pulse_default,
+            )
+            .field(
+                "readout",
+                "modules.readout",
+                spec=readout_spec,
+                default=module_ref_default(
+                    ctx,
+                    readout_spec,
+                    *READOUT_LIBRARY_ALIASES,
+                    accepted_types=("readout/pulse",),
+                ),
+            )
+            .float(
+                "relax_delay",
+                "relax_delay",
+                label="Relax delay (us)",
+                default=relax_delay_default,
+                decimals=3,
+            )
+            .sweep(
+                "gain_sweep",
+                "sweep.gain",
+                label="Probe gain (a.u.)",
+                default=SweepValue(start=0.0, stop=1.0, expts=151),
+            )
+            .int("reps", "reps", label="Reps", default=1000)
+            .int("rounds", "rounds", label="Rounds", default=10)
+            .logical("mist_ch", "modules.mist_pulse.ch")
+            .logical("mist_nqz", "modules.mist_pulse.nqz")
+            .logical("mist_freq", "modules.mist_pulse.freq")
+            .logical("mist_gain", "modules.mist_pulse.gain")
+            .logical("mist_length", "modules.mist_pulse.waveform.length")
+            .acquire_retry(DEFAULT_ACQUIRE_RETRY)
+            .build()
         )
 
     def make_init_result(
@@ -283,21 +354,10 @@ class MistBuilder(Builder):
         return MistNode(env, self)
 
     def override_plan(self, schema: NodeCfgSchema) -> OverridePlan:
-        paths: list[OverridePath] = []
-        paths.extend(
-            pulse_module_override_paths(
-                "pi_pulse",
-                source="pi_pulse module dependency",
-                reason="pi pulse is resolved from workflow/module-library dependency",
-            )
-        )
-        paths.extend(
-            readout_module_override_paths(
-                source="opt_readout module dependency",
-                reason="readout module is resolved from workflow/module-library dependency",
-            )
-        )
-        return OverridePlan(tuple(paths))
+        plan = NodeOverridePlan()
+        plan.pulse_module_dependency("pi_pulse")
+        plan.readout_dependency(source="opt_readout module dependency")
+        return plan.build()
 
     def make_cfg(self, env: RunEnv, snapshot: Snapshot) -> MistCfgTemplate:
         """Lower the active context + this point's snapshot into the base run cfg.
