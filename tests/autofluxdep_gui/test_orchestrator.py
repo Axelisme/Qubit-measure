@@ -259,6 +259,52 @@ def test_module_dep_prefers_produced_module_over_library_alias():
     assert snap.module("readout") is produced
 
 
+def test_orchestrator_keeps_library_fallback_at_run_start_across_points():
+    source = _ModuleSource({"readout": {"gain": 0.25}})
+    seen: list[float] = []
+
+    def consume(env, snapshot):
+        seen.append(float(snapshot.module("readout")["gain"]))
+        if env.flux_idx == 0:
+            source._modules["readout"] = {"gain": 0.9}
+        return Patch()
+
+    consumer = place(
+        make_builder(
+            "consumer",
+            requires_modules=(ModuleDep("readout"),),
+            produce_fn=consume,
+        )
+    )
+
+    Orchestrator([consumer], ml=source).run([0.0, 1.0])
+
+    assert seen == [0.25, 0.25]
+
+
+def test_orchestrator_module_fallback_copy_isolated_from_consumer_mutation():
+    source = _ModuleSource({"readout": {"gain": 0.25}})
+    seen: list[float] = []
+
+    def consume(_env, snapshot):
+        module = snapshot.module("readout")
+        seen.append(float(module["gain"]))
+        module["gain"] = 0.9
+        return Patch()
+
+    consumer = place(
+        make_builder(
+            "consumer",
+            requires_modules=(ModuleDep("readout"),),
+            produce_fn=consume,
+        )
+    )
+
+    Orchestrator([consumer], ml=source).run([0.0, 1.0])
+
+    assert seen == [0.25, 0.25]
+
+
 def test_now_module_without_fallback_does_not_use_prev_or_library():
     p = place(
         make_builder(

@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -64,6 +65,34 @@ class ModuleSource(Protocol):
     """
 
     def get_module(self, name: str) -> Any: ...
+
+
+class _RunModuleFallbacks:
+    """Run-start snapshot of the library modules declared as fallbacks.
+
+    ``RunEnv.ml`` remains the complete ModuleLibrary used by node cfg lowering.
+    This narrower source exists only for dependency resolution, so a live source
+    mutation cannot change a later point's fallback and a consumer cannot mutate
+    the stored module for a subsequent resolution.
+    """
+
+    def __init__(self, source: ModuleSource, providers: list[PlacedNode]) -> None:
+        modules: dict[str, Any] = {}
+        for provider in providers:
+            for dep in provider.all_module_deps():
+                if dep.fallback is not ModuleFallback.LIBRARY:
+                    continue
+                for name in dep.aliases or (dep.name,):
+                    if name in modules:
+                        continue
+                    module = source.get_module(name)
+                    if module is not None:
+                        modules[name] = deepcopy(module)
+        self._modules = modules
+
+    def get_module(self, name: str) -> Any:
+        module = self._modules.get(name)
+        return None if module is None else deepcopy(module)
 
 
 class DepDeclaring(Protocol):
@@ -293,8 +322,9 @@ class Orchestrator:
     ``tools`` is the sweep-lived stateful service container injected into Nodes
     (predictor, feedback runtime), owned for the whole sweep so state persists.
 
-    ``ml`` is the read-only module library: when a declared module is not
-    produced by any Node, the snapshot falls back to ``ml.get_module(name)``.
+    ``ml`` is the complete run-local module library. It is curried into
+    ``RunEnv`` for cfg lowering, while declared module fallbacks are captured
+    once into a private run-level source.
 
     ``soc`` is the connected board curried into measurement Nodes. ``results``
     maps a provider's name → its pre-allocated sweep Result (built on the main
@@ -339,6 +369,9 @@ class Orchestrator:
         if self._smoothing is None:
             specs = [s for p in self.providers for s in p.smooth_specs()]
             self._smoothing = SmoothingService.from_specs(specs) if specs else None
+        self._module_fallbacks = (
+            None if self.ml is None else _RunModuleFallbacks(self.ml, self.providers)
+        )
         # The run's cooperative cancel poll, set at the start of ``run`` so
         # ``_make_env`` can curry it into each RunEnv for flux/provider-boundary
         # cancellation. None until ``run`` is entered.
@@ -454,7 +487,11 @@ class Orchestrator:
                     logger.info("sweep stopped within flux idx %d", idx)
                     provider_loop_completed = False
                     break
-                resolution = resolve_provider_snapshot(provider, run_info, self.ml)
+                resolution = resolve_provider_snapshot(
+                    provider,
+                    run_info,
+                    self._module_fallbacks,
+                )
                 if resolution.snapshot is None:
                     if resolution.skip_reason is not None:
                         run_observer.on_skip(provider.name, idx, resolution.skip_reason)

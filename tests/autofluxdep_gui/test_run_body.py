@@ -23,12 +23,15 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency
 from zcu_tools.gui.app.autofluxdep.nodes.t1 import T1Builder
 from zcu_tools.gui.app.autofluxdep.services.result_io import load_node_result
+from zcu_tools.gui.app.autofluxdep.services.run_setup import MlModuleSource
 from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_journal_events,
     load_manifest,
 )
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.cfg import FloatSpec
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from ._helpers import (
     connect_mock,
@@ -553,6 +556,57 @@ def test_run_readiness_allows_bare_number_flux_sweep(qapp):
 
     assert ctrl.get_flux_device() is None
     assert ctrl.run_readiness() is None
+
+
+def test_create_run_session_clones_ml_for_cfg_snapshots_and_module_source(
+    tmp_path, monkeypatch
+):
+    ctrl = build_core(project=_project(tmp_path))
+    original_ml = ctrl.state.exp_context.ml
+    original_ml.register_module(
+        drive=PulseCfg(
+            waveform=ConstWaveformCfg(length=0.1),
+            ch=3,
+            nqz=2,
+            freq=5000.0,
+            gain=0.25,
+        )
+    )
+    ctrl.add_node(
+        make_builder(
+            "probe",
+            schema_fields=(("gain", FloatSpec("Gain"), 0.25),),
+        )
+    )
+    ctrl.set_flux_values([0.0])
+    node = ctrl._enabled_nodes()[0]
+    lower_raw = node.schema.lower_raw
+    lower = node.schema.lower
+    raw_ml_args: list[object] = []
+    knob_ml_args: list[object] = []
+
+    def record_lower_raw(ml, md=None):
+        raw_ml_args.append(ml)
+        return lower_raw(ml, md)
+
+    def record_lower(ml, md=None):
+        knob_ml_args.append(ml)
+        return lower(ml, md)
+
+    monkeypatch.setattr(node.schema, "lower_raw", record_lower_raw)
+    monkeypatch.setattr(node.schema, "lower", record_lower)
+
+    session = ctrl._create_run_session(None)
+
+    assert isinstance(session.ml, MlModuleSource)
+    run_ml = session.ml._ml
+    assert run_ml is not original_ml
+    assert raw_ml_args == [run_ml]
+    assert knob_ml_args == [run_ml]
+
+    original_ml.update_module("drive", {"gain": 0.9})
+
+    assert session.ml.get_module("drive").gain == pytest.approx(0.25)
 
 
 def test_ml_module_source_returns_none_on_absent():

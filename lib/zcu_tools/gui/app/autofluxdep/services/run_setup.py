@@ -95,14 +95,17 @@ def allocate_run_results(
 def build_run_cfg_snapshots(
     state: AutoFluxDepState,
     enabled_nodes: Sequence[PlacedNode],
+    *,
+    ml: Any | None = None,
 ) -> dict[str, RunCfgSnapshot]:
     """Lower each enabled node's run-start cfg and validate override paths."""
     ctx = state.exp_context
+    lowering_ml = ctx.ml if ml is None else ml
     snapshots: dict[str, RunCfgSnapshot] = {}
     for node in enabled_nodes:
-        base_cfg = node.schema.lower_raw(ctx.ml, ctx.md)
+        base_cfg = node.schema.lower_raw(lowering_ml, ctx.md)
         override_plan = node.builder.override_plan(node.schema)
-        knobs = node.schema.lower(ctx.ml, ctx.md)
+        knobs = node.schema.lower(lowering_ml, ctx.md)
         validate_override_plan_base_cfg(
             override_plan,
             base_cfg,
@@ -128,6 +131,7 @@ def create_run_session(
 ) -> RunSession:
     """Create the sweep-lived RunSession from the current State snapshot."""
     ctx = state.exp_context
+    run_ml = ctx.ml.clone()
     enabled_names = {node.name for node in enabled_nodes}
     if not state.run_results or not set(state.run_results).issubset(enabled_names):
         state.run_results = allocate_run_results(state, enabled_nodes, flux_values)
@@ -136,7 +140,7 @@ def create_run_session(
     tools = build_run_tools(state, providers)
     state.run_predictor = tools.predictor
     flux_device = state.flux_device_name
-    cfg_snapshots = build_run_cfg_snapshots(state, enabled_nodes)
+    cfg_snapshots = build_run_cfg_snapshots(state, enabled_nodes, ml=run_ml)
     store = RunStore.create(
         project=project,
         flux_values=flux_values,
@@ -156,7 +160,7 @@ def create_run_session(
         cfg_snapshots=cfg_snapshots,
         store=store,
         tools=tools,
-        ml=MlModuleSource(ctx.ml),
+        ml=MlModuleSource(run_ml),
         soc=ctx.soc,
         soccfg=ctx.soccfg,
         md=ctx.md,
@@ -179,9 +183,11 @@ def run_dry(
     providers = build_run_providers(enabled_nodes)
     ctx = state.exp_context
     run_ml = ml
-    if run_ml is None and ctx.ml is not None:
-        run_ml = MlModuleSource(ctx.ml)
-    cfg_snapshots = build_run_cfg_snapshots(state, enabled_nodes)
+    lowering_ml = ctx.ml
+    if run_ml is None:
+        lowering_ml = ctx.ml.clone()
+        run_ml = MlModuleSource(lowering_ml)
+    cfg_snapshots = build_run_cfg_snapshots(state, enabled_nodes, ml=lowering_ml)
     orch = Orchestrator(
         providers=providers,
         tools=tools or build_run_tools(state, providers),

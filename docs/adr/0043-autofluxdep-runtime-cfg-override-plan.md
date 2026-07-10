@@ -13,11 +13,11 @@ autofluxdep 以 `OverridePlan` 作為 runtime cfg override 的公開契約。每
 
 `OverridePlan` 屬於 node runtime contract，由 builder 宣告，不放入 `NodeCfgSchema`。`NodeCfgSchema` 仍只負責 typed spec/value tree、logical-key projection、lowering 與 persistence，不承載 experiment-specific generation semantics。
 
-Run start 對每個 enabled runnable node 建立 run-start snapshot：
+Run start 在任何 node cfg lowering 前 clone active `ModuleLibrary` 一次，並對每個 enabled runnable node 建立 run-start snapshot：
 
-- `base_cfg`：以當下 md/ml lower 的 Default cfg raw dict，排除 `generation` section。
+- `base_cfg`：以 run-local ml 與當下 md lower 的 Default cfg raw dict，排除 `generation` section。
 - `override_plan`：該 node builder 在同一 schema 上宣告的 wire-safe plan。
-- `knobs`：同一時間 lower 的 logical-key knob snapshot；runtime 以 `RunEnv.knob(key)` 讀單鍵，以 `RunEnv.knobs_view()` 取得多鍵只讀 view。
+- `knobs`：以同一 run-local ml lower 的 logical-key knob snapshot；runtime 以 `RunEnv.knob(key)` 讀單鍵，以 `RunEnv.knobs_view()` 取得多鍵只讀 view。
 
 `RunCfgSnapshot`以closed-world immutable representation保存run-start truth：containers遞迴
 凍結，`SweepCfg`轉為read-compatible frozen value，numeric ndarray使用immutable bytes backing；
@@ -38,6 +38,7 @@ Cfg form 的 generic decoration seam 以 full value-tree path 計算 `FieldDecor
 - `fallback` 是唯一可省略 patch 的 runtime mode；它仍必須由 builder 宣告 path、source、reason，且 path 必須存在於 run-start `base_cfg`。Artifact / remote consumer 必須把它視為 public wire/artifact mode，而不是 UI-only badge。
 - Remote/MCP 仍 read-only；`override_plan` 只讓 agent 觀測 contract，不授權 agent 修改 workflow 或 run control。
 - Artifact consumer 應以 `base_cfg` + `override_plan` 作為 run-start cfg truth；workflow memento 仍是 GUI 下一次開啟的 editable state。
+- run-local ml 也提供 `RunEnv` 的 `make_cfg` / waveform lookup；dependency resolver 只保存實際 `ModuleDep` fallback names/aliases 的 deep-copied modules，不保存整個 library 到 artifact，並保留 node-produced precedence 與 missing semantics。
 - 新增run snapshot leaf type時必須在freeze/thaw contract明確登記並由production builder registry
   coverage驗證；不得靠generic `deepcopy`暴露未知mutable object。
 
