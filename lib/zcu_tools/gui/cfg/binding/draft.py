@@ -68,8 +68,8 @@ class CfgDraft:
         if self._closed:
             raise RuntimeError("CfgDraft is closed")
 
-    def _on_root_change(self, value: object) -> None:
-        self.on_change.emit(value)
+    def _on_root_change(self) -> None:
+        self.on_change.emit()
 
     def _on_root_validity_changed(self, valid: bool) -> None:
         self.on_validity_changed.emit(valid)

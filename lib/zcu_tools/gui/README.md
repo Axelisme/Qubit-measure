@@ -31,6 +31,9 @@ Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`
 `zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。
 `CfgDraft`集中snapshot、validity、refresh與close lifecycle；field只依賴expression evaluator、
 opaque option provider與reference catalog三個窄ports，不持controller/environment aggregate。
+scalar field在建構與修改時依宣告型別Fast Fail；section/reference的whole-value更新先完成純資料
+key檢查與replacement build，再一次提交，不會留下partial tree或中間validity event。leaf edit只
+沿ancestor傳遞dirty event，`CfgFormWidget`在UI boundary materialize一次`CfgSchema`。
 close會遞迴關閉整棵field tree並清callbacks，close前cached的root/child之後讀寫或refresh都
 Fast Fail。reference catalog以shape label與optional materialized value精確區分missing、
 unsupported與corrupt。widget只attach draft並render `draft.root`，detach不會close

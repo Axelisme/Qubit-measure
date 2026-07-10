@@ -6,7 +6,7 @@ reshape's behavioural contract:
 
 - a placement has a ``schema`` (and *no* ``params`` / the Builder *no*
   ``base_params``);
-- a write through ``set_field`` / ``set_node_params`` reflects in the lowered
+- a typed value-tree commit reflects in the lowered
   knobs (``schema.lower``), i.e. the SSOT is the schema, not a side dict;
 - two placements of the same Builder hold *independent* schemas;
 - the run-time read-only lock keeps the form's values visible but uneditable.
@@ -23,6 +23,8 @@ from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, PlacedNode
 from zcu_tools.gui.app.autofluxdep.nodes.qubit_freq import QubitFreqBuilder
 from zcu_tools.gui.cfg import CenteredSweepValue
+
+from ._helpers import set_node_cfg_knobs
 
 
 def test_placement_holds_schema_not_params():
@@ -64,25 +66,27 @@ def test_two_placements_have_independent_schemas():
     assert b.schema.lower(None)["reps"] == expected_reps
 
 
-def test_set_node_params_writes_schema_and_bumps_version():
+def test_cfg_value_commit_writes_schema_and_bumps_version():
     ctrl = build_core()
     node = ctrl.add_node_by_type("qubit_freq")
     index = ctrl.state.nodes.index(node)
     before = ctrl.state.version.get("workflow")
 
-    ctrl.set_node_params(index, {"qub_gain": "0.9"})
+    set_node_cfg_knobs(ctrl, index, {"qub_gain": "0.9"})
 
     assert node.schema.lower(None)["qub_gain"] == 0.9
     assert ctrl.state.version.get("workflow") > before
 
 
-def test_set_node_params_accepts_sweep_value():
+def test_cfg_value_commit_accepts_sweep_value():
     ctrl = build_core()
     node = ctrl.add_node_by_type("qubit_freq")
     index = ctrl.state.nodes.index(node)
 
-    ctrl.set_node_params(
-        index, {"detune_sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11)}
+    set_node_cfg_knobs(
+        ctrl,
+        index,
+        {"detune_sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11)},
     )
     detune = node.schema.lower(None)["detune_sweep"]
     assert (float(detune.start), float(detune.stop), int(detune.expts)) == (

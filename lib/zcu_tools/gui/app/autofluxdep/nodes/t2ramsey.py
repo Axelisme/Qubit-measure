@@ -401,10 +401,6 @@ class T2RamseyBuilder(Builder):
             .build()
         )
 
-    def detune_ratio(self, schema: NodeCfgSchema, md: Any = None) -> float:
-        """The activate-detune ratio for this placement (typed knob, default 0.05)."""
-        return float(schema.lower(None, md=md)["detune_ratio"])
-
     def make_init_result(
         self, schema: NodeCfgSchema, flux: Any, md: Any = None
     ) -> Sweep1DResult:

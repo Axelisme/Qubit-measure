@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -37,6 +38,46 @@ def _shape() -> CfgSectionSpec:
 
 def _value(gain: float) -> CfgSectionValue:
     return CfgSectionValue({"type": DirectValue("pulse"), "gain": DirectValue(gain)})
+
+
+def _failing_reference_spec(*, optional: bool = False) -> ReferenceSpec:
+    return ReferenceSpec(
+        "module",
+        [
+            CfgSectionSpec(
+                label="Good",
+                fields={
+                    "type": LiteralSpec("good"),
+                    "value": ScalarSpec("Value", int),
+                },
+            ),
+            CfgSectionSpec(
+                label="Bad",
+                fields={
+                    "type": LiteralSpec("bad"),
+                    "mode": ScalarSpec(
+                        "Mode",
+                        str,
+                        choices_source="missing",
+                    ),
+                },
+            ),
+        ],
+        label="Failure probe",
+        optional=optional,
+    )
+
+
+def _good_reference_value(key: str = "<Custom:Good>") -> ReferenceValue:
+    return ReferenceValue(
+        key,
+        CfgSectionValue(
+            {
+                "type": DirectValue("good"),
+                "value": DirectValue(1),
+            }
+        ),
+    )
 
 
 def _draft(
@@ -229,6 +270,341 @@ class _ExplodingCatalog(BindingPorts):
         if self.error is not None:
             raise self.error
         return super().resolve(kind, key)
+
+
+class _CountingCatalog(BindingPorts):
+    resolve_count: int = 0
+
+    def resolve(self, kind: str, key: str) -> ResolvedReference | None:
+        self.resolve_count += 1
+        return super().resolve(kind, key)
+
+
+class _AllCountingPorts(BindingPorts):
+    def __init__(self) -> None:
+        super().__init__()
+        self.keys_count = 0
+        self.resolve_count = 0
+        self.options_count = 0
+        self.evaluate_count = 0
+
+    def reset_counts(self) -> None:
+        self.keys_count = 0
+        self.resolve_count = 0
+        self.options_count = 0
+        self.evaluate_count = 0
+
+    def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
+        self.keys_count += 1
+        return super().keys(kind, allowed_labels)
+
+    def resolve(self, kind: str, key: str) -> ResolvedReference | None:
+        self.resolve_count += 1
+        return super().resolve(kind, key)
+
+    def provide(self, source_id: str) -> Sequence[object]:
+        self.options_count += 1
+        return super().provide(source_id)
+
+    def evaluate(self, expression: str) -> int | float:
+        self.evaluate_count += 1
+        return super().evaluate(expression)
+
+
+def test_reference_payload_unknown_key_has_zero_side_effects() -> None:
+    ports = _AllCountingPorts()
+    draft = _draft(
+        ports,
+        ReferenceValue("<Custom:Pulse>", _value(0.25)),
+    )
+    field = _field(draft)
+    old_sub_field = field.sub_field
+    assert old_sub_field is not None
+    old_value = field.get_value()
+    old_binding_state = field._binding_state
+    old_sub_change_callbacks = tuple(old_sub_field.on_change._callbacks)
+    old_sub_validity_callbacks = tuple(old_sub_field.on_validity_changed._callbacks)
+    field_changed = MagicMock()
+    root_changed = MagicMock()
+    draft_changed = MagicMock()
+    field.on_change.connect(field_changed)
+    draft.root.on_change.connect(root_changed)
+    draft.on_change.connect(draft_changed)
+    ports.reset_counts()
+
+    with pytest.raises(KeyError, match="unknown field.*'missing'"):
+        draft.root.set_value(
+            CfgSectionValue(
+                {
+                    "drive": ReferenceValue(
+                        "<Custom:Pulse>",
+                        CfgSectionValue(
+                            {
+                                "type": DirectValue("pulse"),
+                                "gain": DirectValue(0.5),
+                                "missing": DirectValue(1),
+                            }
+                        ),
+                    )
+                }
+            )
+        )
+
+    assert (
+        ports.keys_count,
+        ports.resolve_count,
+        ports.options_count,
+        ports.evaluate_count,
+    ) == (0, 0, 0, 0)
+    assert field.get_value() == old_value
+    assert field._binding_state is old_binding_state
+    assert field.sub_field is old_sub_field
+    assert tuple(old_sub_field.on_change._callbacks) == old_sub_change_callbacks
+    assert (
+        tuple(old_sub_field.on_validity_changed._callbacks)
+        == old_sub_validity_callbacks
+    )
+    field_changed.assert_not_called()
+    root_changed.assert_not_called()
+    draft_changed.assert_not_called()
+
+
+def test_direct_reference_constructor_rejects_payload_before_all_ports() -> None:
+    ports = _AllCountingPorts()
+
+    with pytest.raises(KeyError, match="unknown field.*'missing'"):
+        ReferenceField(
+            ReferenceSpec("module", [_shape()], label="Drive"),
+            evaluate_expression=ports.evaluate,
+            provide_options=ports.provide,
+            references=ports,
+            initial_val=ReferenceValue(
+                "<Custom:Pulse>",
+                CfgSectionValue(
+                    {
+                        "type": DirectValue("pulse"),
+                        "gain": DirectValue(0.5),
+                        "missing": DirectValue(1),
+                    }
+                ),
+            ),
+        )
+
+    assert (
+        ports.keys_count,
+        ports.resolve_count,
+        ports.options_count,
+        ports.evaluate_count,
+    ) == (0, 0, 0, 0)
+
+
+def test_direct_reference_setter_rejects_payload_with_zero_side_effects() -> None:
+    ports = _AllCountingPorts()
+    field = ReferenceField(
+        ReferenceSpec("module", [_shape()], label="Drive"),
+        evaluate_expression=ports.evaluate,
+        provide_options=ports.provide,
+        references=ports,
+        initial_val=ReferenceValue("<Custom:Pulse>", _value(0.25)),
+    )
+    old_sub_field = field.sub_field
+    assert old_sub_field is not None
+    old_value = field.get_value()
+    old_binding_state = field._binding_state
+    old_change_callbacks = tuple(old_sub_field.on_change._callbacks)
+    old_validity_callbacks = tuple(old_sub_field.on_validity_changed._callbacks)
+    changed = MagicMock()
+    enabled_changed = MagicMock()
+    validity_changed = MagicMock()
+    field.on_change.connect(changed)
+    field.on_enabled_changed.connect(enabled_changed)
+    field.on_validity_changed.connect(validity_changed)
+    ports.reset_counts()
+
+    with pytest.raises(KeyError, match="unknown field.*'missing'"):
+        field.set_value(
+            ReferenceValue(
+                "<Custom:Pulse>",
+                CfgSectionValue(
+                    {
+                        "type": DirectValue("pulse"),
+                        "gain": DirectValue(0.5),
+                        "missing": DirectValue(1),
+                    }
+                ),
+            )
+        )
+
+    assert (
+        ports.keys_count,
+        ports.resolve_count,
+        ports.options_count,
+        ports.evaluate_count,
+    ) == (0, 0, 0, 0)
+    assert field.get_value() == old_value
+    assert field._binding_state is old_binding_state
+    assert field.is_enabled
+    assert not field.has_missing_library_ref()
+    assert field.sub_field is old_sub_field
+    assert tuple(old_sub_field.on_change._callbacks) == old_change_callbacks
+    assert tuple(old_sub_field.on_validity_changed._callbacks) == old_validity_callbacks
+    changed.assert_not_called()
+    enabled_changed.assert_not_called()
+    validity_changed.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["set_chosen_key", "set_value"])
+def test_direct_reference_failed_rebuild_preserves_state_callbacks_and_events(
+    operation: str,
+) -> None:
+    ports = BindingPorts()
+    field = ReferenceField(
+        _failing_reference_spec(optional=True),
+        evaluate_expression=ports.evaluate,
+        provide_options=ports.provide,
+        references=ports,
+        initial_val=_good_reference_value(),
+    )
+    field.set_enabled(False)
+    old_sub_field = field.sub_field
+    assert old_sub_field is not None
+    old_sub_value = old_sub_field.get_value()
+    old_change_callbacks = tuple(old_sub_field.on_change._callbacks)
+    old_validity_callbacks = tuple(old_sub_field.on_validity_changed._callbacks)
+    changed = MagicMock()
+    enabled_changed = MagicMock()
+    validity_changed = MagicMock()
+    field.on_change.connect(changed)
+    field.on_enabled_changed.connect(enabled_changed)
+    field.on_validity_changed.connect(validity_changed)
+
+    with pytest.raises(RuntimeError, match="unknown option source 'missing'"):
+        if operation == "set_chosen_key":
+            field.set_chosen_key("<Custom:Bad>")
+        else:
+            field.set_value(
+                ReferenceValue(
+                    "<Custom:Bad>",
+                    CfgSectionValue({"mode": DirectValue("bad")}),
+                )
+            )
+
+    assert field.get_chosen_key() == "<Custom:Good>"
+    assert field._binding_state is LibraryBindingState.CUSTOM
+    assert not field.has_missing_library_ref()
+    assert not field.is_enabled
+    assert field.sub_field is old_sub_field
+    assert old_sub_field.get_value() == old_sub_value
+    assert tuple(old_sub_field.on_change._callbacks) == old_change_callbacks
+    assert tuple(old_sub_field.on_validity_changed._callbacks) == old_validity_callbacks
+    changed.assert_not_called()
+    enabled_changed.assert_not_called()
+    validity_changed.assert_not_called()
+
+
+def test_catalog_rebuild_failure_preserves_reference_and_resolves_once() -> None:
+    ports = _CountingCatalog()
+    ports.references[("module", "entry")] = ResolvedReference(
+        "Good",
+        _good_reference_value().value,
+    )
+    field = _field(
+        _draft(
+            ports,
+            _good_reference_value("entry"),
+            reference_spec=_failing_reference_spec(),
+        )
+    )
+    old_sub_field = field.sub_field
+    assert old_sub_field is not None
+    old_value = field.get_value()
+    old_change_callbacks = tuple(old_sub_field.on_change._callbacks)
+    old_validity_callbacks = tuple(old_sub_field.on_validity_changed._callbacks)
+    changed = MagicMock()
+    field.on_change.connect(changed)
+    ports.references[("module", "entry")] = ResolvedReference(
+        "Bad",
+        CfgSectionValue(
+            {
+                "type": DirectValue("bad"),
+                "mode": DirectValue("bad"),
+            }
+        ),
+    )
+    ports.resolve_count = 0
+
+    with pytest.raises(RuntimeError, match="unknown option source 'missing'"):
+        field.refresh_references("module")
+
+    assert ports.resolve_count == 1
+    assert field.get_chosen_key() == "entry"
+    assert field._binding_state is LibraryBindingState.LINKED
+    assert not field.has_missing_library_ref()
+    assert field.is_enabled
+    assert field.sub_field is old_sub_field
+    assert field.get_value() == old_value
+    assert tuple(old_sub_field.on_change._callbacks) == old_change_callbacks
+    assert tuple(old_sub_field.on_validity_changed._callbacks) == old_validity_callbacks
+    changed.assert_not_called()
+
+
+def test_nested_section_reference_build_failure_preserves_live_tree() -> None:
+    ports = BindingPorts()
+    draft = _draft(
+        ports,
+        _good_reference_value(),
+        reference_spec=_failing_reference_spec(),
+    )
+    field = _field(draft)
+    old_sub_field = field.sub_field
+    assert old_sub_field is not None
+    old_root_value = draft.root.get_value()
+    old_change_callbacks = tuple(old_sub_field.on_change._callbacks)
+    old_validity_callbacks = tuple(old_sub_field.on_validity_changed._callbacks)
+    field_changed = MagicMock()
+    root_changed = MagicMock()
+    draft_changed = MagicMock()
+    field.on_change.connect(field_changed)
+    draft.root.on_change.connect(root_changed)
+    draft.on_change.connect(draft_changed)
+
+    with pytest.raises(RuntimeError, match="unknown option source 'missing'"):
+        draft.root.set_value(
+            CfgSectionValue(
+                {
+                    "drive": ReferenceValue(
+                        "<Custom:Bad>",
+                        CfgSectionValue({"mode": DirectValue("bad")}),
+                    )
+                }
+            )
+        )
+
+    assert draft.root.get_value() == old_root_value
+    assert field.get_chosen_key() == "<Custom:Good>"
+    assert field._binding_state is LibraryBindingState.CUSTOM
+    assert not field.has_missing_library_ref()
+    assert field.is_enabled
+    assert field.sub_field is old_sub_field
+    assert tuple(old_sub_field.on_change._callbacks) == old_change_callbacks
+    assert tuple(old_sub_field.on_validity_changed._callbacks) == old_validity_callbacks
+    field_changed.assert_not_called()
+    root_changed.assert_not_called()
+    draft_changed.assert_not_called()
+
+
+def test_reference_catalog_refresh_resolves_linked_key_once() -> None:
+    ports = _CountingCatalog()
+    ports.references[("module", "drive_lib")] = ResolvedReference(
+        "Pulse",
+        _value(0.25),
+    )
+    field = _field(_draft(ports, ReferenceValue("drive_lib", _value(0.25))))
+    ports.resolve_count = 0
+
+    field.refresh_references("module")
+
+    assert ports.resolve_count == 1
 
 
 def test_catalog_resolver_exception_is_not_downgraded_to_missing() -> None:

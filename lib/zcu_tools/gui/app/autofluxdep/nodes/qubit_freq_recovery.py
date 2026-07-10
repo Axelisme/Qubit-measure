@@ -122,7 +122,7 @@ def on_fit_failed(
     snapshot_predict_freq: float,
     estimator_key: str,
 ) -> None:
-    knobs = env.knobs()
+    knobs = env.knobs_view()
     cfg = recovery_config_from_knobs(knobs)
     if not cfg.enabled or env.tools is None:
         return
@@ -146,7 +146,7 @@ def on_fit_succeeded(
     snapshot_predict_freq: float,
     estimator_key: str,
 ) -> bool:
-    knobs = env.knobs()
+    knobs = env.knobs_view()
     cfg = recovery_config_from_knobs(knobs)
     if not cfg.enabled or env.tools is None:
         return False

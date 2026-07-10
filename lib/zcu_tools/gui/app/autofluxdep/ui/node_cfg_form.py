@@ -129,19 +129,23 @@ class NodeCfgForm(QWidget):
             self._generation_group = generation_group
             root.addWidget(generation_group, 1)
 
-    def _on_default_schema_changed(self, schema: object) -> None:
+    def _on_default_schema_changed(self, schema: CfgSchema) -> None:
         """Commit the form draft into the placement schema SSOT.
 
-        ``schema`` is a fresh ``CfgSchema`` snapshot of the CfgDraft; its value
-        leaves (DirectValue / SweepValue) are written through the controller's
-        typed entry, which coerces + fast-fails and bumps the workflow version.
+        ``schema`` is the changed default-side snapshot. Only the untouched
+        generation side needs a snapshot before the controller receives the full
+        root value tree.
         """
-        del schema
-        self._ctrl.set_node_cfg_value(self._index, self._combined_value())
+        self._ctrl.set_node_cfg_value(
+            self._index,
+            self._combined_value(default_schema=schema),
+        )
 
-    def _on_generation_schema_changed(self, schema: object) -> None:
-        del schema
-        self._ctrl.set_node_cfg_value(self._index, self._combined_value())
+    def _on_generation_schema_changed(self, schema: CfgSchema) -> None:
+        self._ctrl.set_node_cfg_value(
+            self._index,
+            self._combined_value(generation_schema=schema),
+        )
         self._refresh_default_decoration_provider()
 
     def _default_decoration_provider(self) -> _OverridePlanDecorationProvider:
@@ -154,11 +158,26 @@ class NodeCfgForm(QWidget):
         self._default_override_plan = plan
         self._default_form.set_decoration_provider(self._default_decoration_provider())
 
-    def _combined_value(self) -> CfgSectionValue:
+    def _combined_value(
+        self,
+        *,
+        default_schema: CfgSchema | None = None,
+        generation_schema: CfgSchema | None = None,
+    ) -> CfgSectionValue:
         """Merge the split UI drafts back into the schema's full root value tree."""
-        fields = dict(self._default_draft.snapshot().value.fields)
+        default_value = (
+            default_schema.value
+            if default_schema is not None
+            else self._default_draft.snapshot().value
+        )
+        fields = dict(default_value.fields)
         if self._generation_draft is not None:
-            fields["generation"] = self._generation_draft.snapshot().value
+            generation_value = (
+                generation_schema.value
+                if generation_schema is not None
+                else self._generation_draft.snapshot().value
+            )
+            fields["generation"] = generation_value
         return CfgSectionValue(fields=fields)
 
     def set_read_only(self, read_only: bool) -> None:

@@ -36,6 +36,8 @@ from zcu_tools.gui.session.services.startup import StartupProjectRequest
 from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.utils.datasaver import get_datafolder_path
 
+from ..._helpers import set_node_cfg_knobs
+
 
 class _StubAdapter:
     """Minimal stand-in for the read-only remote adapter."""
@@ -276,7 +278,7 @@ def test_disabling_node_clears_remote_result_views():
 def test_node_cfg_reports_knobs():
     adapter = _adapter()
     node = adapter.ctrl.add_node_by_type("qubit_freq")
-    adapter.ctrl.set_node_params(0, {"reps": 512})
+    set_node_cfg_knobs(adapter.ctrl, 0, {"reps": 512})
 
     cfg = _call(adapter, "node.cfg", {"name": node.name})
     assert cfg["name"] == node.name

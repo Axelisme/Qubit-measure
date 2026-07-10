@@ -36,6 +36,10 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     apply_override_patches,
     empty_node_schema,
 )
+from zcu_tools.gui.app.autofluxdep.cfg.override_plan import (
+    mutable_snapshot_mapping,
+    readonly_snapshot_mapping,
+)
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 
@@ -89,12 +93,13 @@ class RunEnv:
     def __post_init__(self) -> None:
         if self.knobs_snapshot is None:
             self.knobs_snapshot = self.schema.lower(self.ml, md=self.md)
+        self.knobs_snapshot = readonly_snapshot_mapping(self.knobs_snapshot)
         if self.base_cfg is None and self.ml is not None:
             self.base_cfg = self.schema.lower_raw(self.ml, md=self.md)
 
     def knobs(self) -> dict[str, Any]:
         """Return a mutable copy of this point's run-start lowered knob snapshot."""
-        return dict(self.knobs_view())
+        return mutable_snapshot_mapping(self.knobs_view())
 
     def knobs_view(self) -> Mapping[str, Any]:
         """Return this point's run-start lowered knob snapshot."""

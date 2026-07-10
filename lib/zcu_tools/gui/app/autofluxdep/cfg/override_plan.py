@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, TypeAlias, cast
+
+import numpy as np
+
+from zcu_tools.program.v2.sweep import SweepCfg
 
 OverrideMode: TypeAlias = Literal["after_first_point", "all_points", "fallback"]
 _VALID_MODES: frozenset[str] = frozenset(
@@ -79,11 +83,71 @@ class RunCfgSnapshot:
     override_plan: OverridePlan
     knobs: Mapping[str, Any]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "base_cfg", readonly_snapshot_mapping(self.base_cfg))
+        object.__setattr__(self, "knobs", readonly_snapshot_mapping(self.knobs))
+
     def to_wire(self) -> dict[str, object]:
         return {
-            "base_cfg": deepcopy(dict(self.base_cfg)),
+            "base_cfg": mutable_snapshot_mapping(self.base_cfg),
             "override_plan": override_plan_to_wire(self.override_plan),
         }
+
+
+class _FrozenList(tuple[object, ...]):
+    """Tuple-backed marker that restores to a list in a mutable snapshot copy."""
+
+
+@dataclass(frozen=True)
+class _FrozenSweepCfg:
+    """Read-compatible immutable representation of one ``SweepCfg`` leaf."""
+
+    start: float
+    stop: float
+    expts: int
+    step: float
+
+
+class _FrozenMapping(Mapping[Any, Any]):
+    """Internal marker for a recursively frozen run snapshot mapping."""
+
+    __slots__ = ("__values",)
+
+    def __init__(self, values: dict[Any, Any]) -> None:
+        self.__values = MappingProxyType(values)
+
+    def __getitem__(self, key: Any) -> Any:
+        return self.__values[key]
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self.__values)
+
+    def __len__(self) -> int:
+        return len(self.__values)
+
+
+def readonly_snapshot_mapping(source: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Defensively freeze an external mapping or reuse an internal frozen snapshot.
+
+    Run-start cfg and knobs are canonical truth. Their outer mapping and nested
+    mappings, lists, and sets therefore cannot be mutated through a runtime view.
+    """
+
+    if isinstance(source, _FrozenMapping):
+        return cast(Mapping[str, Any], source)
+    frozen = _freeze_snapshot_value(source)
+    if not isinstance(frozen, Mapping):  # pragma: no cover - dict input guarantees this
+        raise TypeError("run snapshot root must remain a mapping")
+    return frozen
+
+
+def mutable_snapshot_mapping(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Return an independent mutable copy of a frozen run-start mapping."""
+
+    copied = _copy_snapshot_value(source)
+    if not isinstance(copied, dict):  # pragma: no cover - Mapping input guarantees this
+        raise TypeError("run snapshot root must materialize as a dict")
+    return copied
 
 
 def override_plan_to_wire(plan: OverridePlan) -> list[dict[str, str]]:
@@ -135,6 +199,12 @@ def apply_override_patches(
             f"node {node_name!r} produced undeclared override path(s): "
             + ", ".join(sorted(unknown))
         )
+    module_roots = sorted(path for path in patches if _is_module_root_path(path))
+    if module_roots:
+        raise ValueError(
+            f"override path {module_roots[0]!r} for node {node_name!r} targets a "
+            "module root; whole-module replacement is not allowed"
+        )
     required = {
         entry.path
         for entry in plan.paths
@@ -148,7 +218,7 @@ def apply_override_patches(
             + ", ".join(sorted(missing))
         )
 
-    point_cfg = deepcopy(dict(base_cfg))
+    point_cfg = mutable_snapshot_mapping(base_cfg)
     for path, value in patches.items():
         entry = by_path[path]
         if entry.mode == "after_first_point" and flux_idx == 0:
@@ -194,6 +264,74 @@ def module_leaf_patches(
         if found:
             patches[f"{prefix}.{leaf_path}"] = value
     return patches
+
+
+def _freeze_snapshot_value(value: Any) -> Any:
+    if isinstance(value, _FrozenMapping):
+        return value
+    if isinstance(value, Mapping):
+        return _FrozenMapping(
+            {key: _freeze_snapshot_value(child) for key, child in value.items()}
+        )
+    if isinstance(value, list):
+        return _FrozenList(_freeze_snapshot_value(child) for child in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_snapshot_value(child) for child in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_snapshot_value(child) for child in value)
+    if isinstance(value, _FrozenSweepCfg):
+        return value
+    if isinstance(value, SweepCfg):
+        return _FrozenSweepCfg(
+            start=value.start,
+            stop=value.stop,
+            expts=value.expts,
+            step=value.step,
+        )
+    if isinstance(value, np.ndarray):
+        if value.dtype.hasobject:
+            raise TypeError("run snapshot ndarray with object dtype is unsupported")
+        return np.frombuffer(value.tobytes(order="C"), dtype=value.dtype).reshape(
+            value.shape
+        )
+    if isinstance(value, np.generic):
+        return deepcopy(value)
+    if isinstance(value, (type(None), bool, int, float, complex, str, bytes)):
+        return value
+    raise TypeError(
+        "unsupported run snapshot leaf type "
+        f"{type(value).__module__}.{type(value).__qualname__}"
+    )
+
+
+def _copy_snapshot_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _copy_snapshot_value(child) for key, child in value.items()}
+    if isinstance(value, _FrozenList):
+        return [_copy_snapshot_value(child) for child in value]
+    if isinstance(value, tuple):
+        return tuple(_copy_snapshot_value(child) for child in value)
+    if isinstance(value, frozenset):
+        return {_copy_snapshot_value(child) for child in value}
+    if isinstance(value, _FrozenSweepCfg):
+        return SweepCfg(
+            start=value.start,
+            stop=value.stop,
+            expts=value.expts,
+            step=value.step,
+        )
+    if isinstance(value, SweepCfg):
+        return value.model_copy(deep=True)
+    if isinstance(value, np.ndarray):
+        return np.array(value, copy=True, order="C")
+    if isinstance(value, np.generic):
+        return deepcopy(value)
+    if isinstance(value, (type(None), bool, int, float, complex, str, bytes)):
+        return value
+    raise TypeError(
+        "unsupported run snapshot leaf type "
+        f"{type(value).__module__}.{type(value).__qualname__}"
+    )
 
 
 def _validate_path(path: str) -> None:

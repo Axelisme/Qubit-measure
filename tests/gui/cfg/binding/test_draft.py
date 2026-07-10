@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.cfg import (
@@ -21,6 +22,7 @@ from zcu_tools.gui.cfg.binding import (
     CfgDraft,
     ReferenceField,
     ScalarField,
+    SectionField,
     SweepField,
 )
 
@@ -167,6 +169,59 @@ def test_close_invalidates_reference_public_surface_and_nested_field() -> None:
     for operation in operations:
         with pytest.raises(RuntimeError, match="closed"):
             operation()
+
+
+def test_nested_section_transaction_has_no_transient_draft_validity_event() -> None:
+    ports = BindingPorts()
+    nested_spec = CfgSectionSpec(
+        fields={
+            "left": ScalarSpec("Left", int),
+            "right": ScalarSpec("Right", int),
+        }
+    )
+    spec = CfgSectionSpec(fields={"nested": nested_spec})
+    draft = _new_draft(
+        ports,
+        spec,
+        CfgSectionValue(
+            {
+                "nested": CfgSectionValue(
+                    {
+                        "left": DirectValue(None),
+                        "right": DirectValue(2),
+                    }
+                )
+            }
+        ),
+    )
+    nested = cast(SectionField, draft.root.fields["nested"])
+    nested_validity = MagicMock()
+    root_validity = MagicMock()
+    draft_validity = MagicMock()
+    root_changed = MagicMock()
+    draft_changed = MagicMock()
+    nested.on_validity_changed.connect(nested_validity)
+    draft.root.on_validity_changed.connect(root_validity)
+    draft.on_validity_changed.connect(draft_validity)
+    draft.root.on_change.connect(root_changed)
+    draft.on_change.connect(draft_changed)
+
+    nested.set_value(
+        CfgSectionValue(
+            {
+                "left": DirectValue(1),
+                "right": DirectValue(None),
+            }
+        )
+    )
+
+    assert not nested.is_valid()
+    assert not draft.is_valid()
+    nested_validity.assert_not_called()
+    root_validity.assert_not_called()
+    draft_validity.assert_not_called()
+    root_changed.assert_called_once_with()
+    draft_changed.assert_called_once_with()
 
 
 def test_section_constructor_closes_completed_children_on_later_failure(

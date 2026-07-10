@@ -216,15 +216,10 @@ class CfgFormWidget(QWidget):
             return None
         return self._find_first_invalid(self._draft.root, path="")
 
-    def _emit_schema_changed(self, *_: object) -> None:
-        if self._draft is None:
-            return
-        self.schema_changed.emit(self.read_schema())
-
     def _on_draft_changed(self, *_: object) -> None:
         if self._draft is None:
             return
-        self.schema_changed.emit(self.read_schema())
+        self.schema_changed.emit(self._draft.snapshot())
         state = _choice_state_for_model(self._draft.root)
         if state == self._choice_state:
             return

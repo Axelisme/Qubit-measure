@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
@@ -32,7 +32,6 @@ from qtpy.QtCore import (
     Signal,  # type: ignore[attr-defined]
 )
 
-from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.events.run import (
     NodeEnteredPayload,
@@ -85,9 +84,6 @@ from zcu_tools.gui.app.autofluxdep.services.run_setup import (
     build_run_providers,
     build_run_tools,
     run_dry,
-)
-from zcu_tools.gui.app.autofluxdep.services.run_setup import (
-    build_run_cfg_snapshots as make_run_cfg_snapshots,
 )
 from zcu_tools.gui.app.autofluxdep.services.run_setup import (
     create_run_session as create_session_from_setup,
@@ -790,28 +786,6 @@ class Controller(SessionControllerMixin):
         logger.debug("set_node_enabled[%d] (%r): %s", index, node.name, enabled)
         self._commit_workflow_edit(changed_name=node.name)
 
-    def set_node_params(self, index: int, params: Mapping[str, Any]) -> None:
-        """Testing/support entry: write Node knob leaves into its schema SSOT.
-
-        Each incoming key writes directly into the placement's own
-        ``NodeCfgSchema`` (the per-placement value tree, the SSOT). A scalar value
-        is coerced to the field's declared type; a ``SweepValue`` is accepted for a
-        ``SweepSpec`` knob.
-        An unknown key fast-fails — the form only renders declared knobs, so an
-        undeclared key is a real typo, not a silent extra. State writes happen on
-        the main thread (the UI calls this), preserving the State main-thread
-        invariant; the workflow version bumps + a ``WorkflowChangedPayload`` fires
-        so dependents refresh, exactly as before.
-        """
-        self._require_workflow_editable()
-        node = self._state.nodes[index]
-        for key, value in params.items():
-            node.schema.set_field(key, value)  # fast-fails unknown key / wrong type
-        logger.debug(
-            "set_node_params[%d] (%r): keys=%s", index, node.name, list(params)
-        )
-        self._commit_workflow_edit(changed_name=node.name)
-
     def set_node_cfg_value(self, index: int, value: CfgSectionValue) -> None:
         """Replace one Node's complete cfg value tree from the typed form draft."""
         self._require_workflow_editable()
@@ -1147,11 +1121,6 @@ class Controller(SessionControllerMixin):
             event_sink=self._run_events,
             progress_label=FLUX_PROGRESS_LABEL,
         )
-
-    def _build_run_cfg_snapshots(
-        self, enabled_nodes: list[PlacedNode]
-    ) -> dict[str, RunCfgSnapshot]:
-        return make_run_cfg_snapshots(self._state, enabled_nodes)
 
     def _begin_run_segment(self, session: RunSession, *, continuing: bool) -> int:
         if self._active_run_token is not None:

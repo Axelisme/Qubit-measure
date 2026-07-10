@@ -19,6 +19,11 @@ Run start 對每個 enabled runnable node 建立 run-start snapshot：
 - `override_plan`：該 node builder 在同一 schema 上宣告的 wire-safe plan。
 - `knobs`：同一時間 lower 的 logical-key knob snapshot；runtime 以 `RunEnv.knob(key)` 讀單鍵，以 `RunEnv.knobs_view()` 取得多鍵只讀 view。
 
+`RunCfgSnapshot`以closed-world immutable representation保存run-start truth：containers遞迴
+凍結，`SweepCfg`轉為read-compatible frozen value，numeric ndarray使用immutable bytes backing；
+unknown mutable leaf與object-dtype ndarray Fast Fail。`RunEnv`重用同一份frozen mapping，只有
+wire、`knobs()`與point cfg materialization才還原真正`SweepCfg`與writable ndarray。
+
 每個 flux point 從 `base_cfg` deep copy 開始，只套用 builder-declared `override_plan` 內允許的 patches。未宣告 path、`after_first_point` 在 flux index 0 被 patch、或 target 不存在都會 Fast Fail。`all_points` path 每個 flux point 都必須提供 patch；`after_first_point` path 在 flux index 0 使用 `base_cfg`，後續 flux point 都必須提供 patch；`fallback` path 可在任一 flux point 省略，省略時保留 `base_cfg` value，提供 patch 時套用 patch。`modules.<name>` whole-module replacement 一律禁止；像 `modules.pi_pulse.waveform` 這類 module 內 discriminated sub-object 可被宣告並整體 patch，避免把 `waveform.style` 改成 `flat_top` 卻漏掉 `raise_waveform` 的非法半狀態。
 
 Remote `node.cfg` 是只讀觀測面，回傳 `{name, type, knobs, override_plan}`。Run artifact manifest 的 workflow node entry 同時保存 persisted workflow `cfg`/`cfg_hash` 與 run truth `base_cfg`/`override_plan`，讓事後審查能分辨「workflow 編輯值」與「本次 run 開始時 lower 出來的 Default cfg」。
@@ -33,6 +38,8 @@ Cfg form 的 generic decoration seam 以 full value-tree path 計算 `FieldDecor
 - `fallback` 是唯一可省略 patch 的 runtime mode；它仍必須由 builder 宣告 path、source、reason，且 path 必須存在於 run-start `base_cfg`。Artifact / remote consumer 必須把它視為 public wire/artifact mode，而不是 UI-only badge。
 - Remote/MCP 仍 read-only；`override_plan` 只讓 agent 觀測 contract，不授權 agent 修改 workflow 或 run control。
 - Artifact consumer 應以 `base_cfg` + `override_plan` 作為 run-start cfg truth；workflow memento 仍是 GUI 下一次開啟的 editable state。
+- 新增run snapshot leaf type時必須在freeze/thaw contract明確登記並由production builder registry
+  coverage驗證；不得靠generic `deepcopy`暴露未知mutable object。
 
 ## 拒絕的替代方案
 

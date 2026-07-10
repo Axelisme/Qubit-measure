@@ -99,8 +99,8 @@ class NodeDetailPane(QWidget):
         """Show ``node`` at workflow ``index`` and optionally build its edit form.
 
         ``controller`` is the typed-form's commit target + LiveModel env (None only
-        when clearing the selection). ``index`` is the placement's list position —
-        the key ``set_node_params`` writes through on edit.
+        when clearing the selection). ``index`` is the placement's list position
+        that receives the form's complete cfg value tree on edit.
 
         Run auto-follow uses ``build_edit_form=False`` so navigation can keep the
         run canvas/title current without rebuilding a hidden edit form on every

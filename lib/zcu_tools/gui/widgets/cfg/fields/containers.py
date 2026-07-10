@@ -29,17 +29,15 @@ from zcu_tools.gui.cfg.binding import (
 
 from ..decoration import FieldDecorationProtocol
 from ..registry import FieldRenderContext, FieldWidgetProtocol
+from ._decoration import (
+    apply_decoration,
+    apply_widget_decoration,
+    decorated_label_text,
+)
 from .common import (
     BaseLiveWidget,
     ElidedLabel,
 )
-
-_TONE_STYLES = {
-    "muted": "color: #6b7280;",
-    "info": "color: #2563eb;",
-    "warning": "color: #8a5a00;",
-    "error": "color: #b00020;",
-}
 
 
 class _CollapsibleSection(QWidget):
@@ -256,10 +254,10 @@ class SectionWidget(BaseLiveWidget):
             decoration = self._decoration_for_path(path, child_field)
         if decoration is not None and decoration.hidden:
             return
-        label = _decorated_label_text(child_field.spec.label or key, decoration)
+        label = decorated_label_text(child_field.spec.label or key, decoration)
         widget = cast(QWidget, w)
         if isinstance(child_field, SectionField):
-            _apply_widget_decoration(widget, decoration)
+            apply_widget_decoration(widget, decoration)
             form.addRow(widget)
             return
         if isinstance(child_field, (SweepField, CenteredSweepField)):
@@ -268,7 +266,7 @@ class SectionWidget(BaseLiveWidget):
                 f"{label}:",
                 max_width=self._field_label_max_width,
             )
-            _apply_decoration(label_widget, widget, decoration)
+            apply_decoration(label_widget, widget, decoration)
             form.addRow(label_widget)
             form.addRow(widget)
         else:
@@ -276,7 +274,7 @@ class SectionWidget(BaseLiveWidget):
                 f"{label}:",
                 max_width=self._field_label_max_width,
             )
-            _apply_decoration(label_widget, widget, decoration)
+            apply_decoration(label_widget, widget, decoration)
             form.addRow(label_widget, widget)
 
     def teardown(self) -> None:
@@ -527,54 +525,3 @@ class ReferenceWidget(BaseLiveWidget):
         self._combo.setStyleSheet(style)
         self._expand_btn.setStyleSheet("" if valid else "color: red;")
         self._refresh_missing_ref_hint()
-
-
-def _decorated_label_text(
-    label: str, decoration: FieldDecorationProtocol | None
-) -> str:
-    if decoration is None:
-        return label
-    label_suffix = decoration.label_suffix
-    badge = decoration.badge
-    text = f"{label}{label_suffix}"
-    if badge:
-        text = f"{text} [{badge}]"
-    return text
-
-
-def _apply_decoration(
-    label_widget: QLabel,
-    value_widget: QWidget,
-    decoration: FieldDecorationProtocol | None,
-) -> None:
-    if decoration is None:
-        return
-    enabled, tooltip, style = _decoration_widget_state(decoration)
-    label_widget.setEnabled(enabled)
-    value_widget.setEnabled(enabled)
-    if tooltip:
-        label_widget.setToolTip(tooltip)
-        value_widget.setToolTip(tooltip)
-    if style:
-        label_widget.setStyleSheet(style)
-
-
-def _apply_widget_decoration(
-    value_widget: QWidget, decoration: FieldDecorationProtocol | None
-) -> None:
-    if decoration is None:
-        return
-    enabled, tooltip, _style = _decoration_widget_state(decoration)
-    value_widget.setEnabled(enabled)
-    if tooltip:
-        value_widget.setToolTip(tooltip)
-
-
-def _decoration_widget_state(
-    decoration: FieldDecorationProtocol,
-) -> tuple[bool, str, str]:
-    enabled = decoration.enabled
-    tooltip = decoration.tooltip
-    tone = decoration.tone or "normal"
-    style = _TONE_STYLES.get(tone, "")
-    return enabled, tooltip, style

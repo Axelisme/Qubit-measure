@@ -202,8 +202,8 @@ class NodeCfgSchema:
     """A node's typed param SSOT plus stable logical-key projection.
 
     Owns the defaults (in the value tree) and the types (in the spec). The node's
-    ``make_cfg`` lowers it to a flat dict; the set_node_params bridge writes leaves
-    through it; a placement's stored param dict seeds it via ``with_overrides``.
+    ``make_cfg`` lowers it to a flat dict; ``set_node_cfg_value`` commits a complete
+    typed value tree; a placement's stored param dict seeds it via ``with_overrides``.
     """
 
     schema: CfgSchema

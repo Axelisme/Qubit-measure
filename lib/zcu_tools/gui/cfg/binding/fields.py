@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import cast
 
-from ..inheritance import make_default_value
+from ..inheritance import make_default_value, select_ref_value_spec
 from ..model import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -18,6 +18,7 @@ from ..model import (
     EvalValue,
     LiteralSpec,
     ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     ScalarValue,
     SweepSpec,
@@ -117,14 +118,16 @@ class ScalarField(CfgField):
         super().__init__(spec)
         self._evaluate_expression = evaluate_expression
         self._provide_options = provide_options
-        self._dynamic_options: tuple[object, ...] | None = None
-        if spec.choices_source:
-            self._dynamic_options = self._load_dynamic_options()
-
         if isinstance(initial_val, (DirectValue, EvalValue)):
             self._value: ScalarValue = initial_val
         else:
             self._value = DirectValue(initial_val)
+        if isinstance(self._value, DirectValue):
+            self._validate_direct_value(self._value)
+
+        self._dynamic_options: tuple[object, ...] | None = None
+        if spec.choices_source:
+            self._dynamic_options = self._load_dynamic_options()
         if isinstance(self._value, EvalValue):
             self._resolve_expression(emit_change=False)
         self._refresh_validity()
@@ -139,6 +142,8 @@ class ScalarField(CfgField):
             new_value: ScalarValue = value
         else:
             new_value = DirectValue(value)
+        if isinstance(new_value, DirectValue):
+            self._validate_direct_value(new_value)
         if isinstance(new_value, EvalValue):
             new_value = self._resolved_eval_value(new_value)
 
@@ -148,6 +153,16 @@ class ScalarField(CfgField):
             self.on_change.emit(self.get_value())
         else:
             self._refresh_validity()
+
+    def _validate_direct_value(self, value: DirectValue) -> None:
+        raw = value.value
+        if raw is None:
+            return
+        if type(raw) is not self.spec.type:
+            raise TypeError(
+                f"ScalarField {self.spec.label!r} expects "
+                f"{self.spec.type.__name__}, got {type(raw).__name__}"
+            )
 
     def available_options(self) -> tuple[object, ...] | None:
         self._require_open()
@@ -542,6 +557,12 @@ class SectionField(CfgField):
         initial_val: CfgSectionValue | None = None,
     ) -> None:
         super().__init__(spec)
+        if initial_val is not None:
+            _validate_section_keys(spec, initial_val)
+        self._evaluate_expression = evaluate_expression
+        self._provide_options = provide_options
+        self._references = references
+        self._updating = False
         self.fields: dict[str, CfgField] = {}
         default_value = make_default_value(spec)
         provided_value = initial_val if initial_val is not None else default_value
@@ -584,9 +605,36 @@ class SectionField(CfgField):
             raise TypeError(
                 f"SectionField expects CfgSectionValue, got {type(value).__name__}"
             )
-        for key, child in self.fields.items():
-            if key in value.fields:
-                child.set_value(value.fields[key])
+        _validate_section_keys(self.spec, value)
+        self._preflight(value)
+        previous_value = self.get_value()
+        self._updating = True
+        try:
+            for key, child in self.fields.items():
+                if key in value.fields:
+                    child.set_value(value.fields[key])
+        finally:
+            self._updating = False
+        self._refresh_validity()
+        if self.get_value() != previous_value:
+            self.on_change.emit()
+
+    def _preflight(self, value: CfgSectionValue) -> None:
+        """Validate the complete update against an isolated candidate tree."""
+        candidate_value = self.get_value()
+        candidate = SectionField(
+            self.spec,
+            evaluate_expression=self._evaluate_expression,
+            provide_options=self._provide_options,
+            references=self._references,
+            initial_val=candidate_value,
+        )
+        try:
+            for key, child in candidate.fields.items():
+                if key in value.fields:
+                    child.set_value(value.fields[key])
+        finally:
+            candidate.teardown()
 
     def refresh_expressions(self) -> None:
         self._require_open()
@@ -614,13 +662,46 @@ class SectionField(CfgField):
         super().teardown()
 
     def _on_child_change(self, *_: object) -> None:
-        self.on_change.emit(self.get_value())
+        if not self._updating:
+            self.on_change.emit()
 
     def _on_child_validity_change(self, *_: object) -> None:
-        self._refresh_validity()
+        if not self._updating:
+            self._refresh_validity()
 
     def _refresh_validity(self) -> None:
         self._set_valid(all(child.is_valid() for child in self.fields.values()))
+
+
+def _validate_section_keys(
+    spec: CfgSectionSpec,
+    value: CfgSectionValue,
+    *,
+    path: str = "",
+) -> None:
+    unknown = sorted(value.fields.keys() - spec.fields.keys())
+    if unknown:
+        location = path or spec.label or "<root>"
+        joined = ", ".join(repr(key) for key in unknown)
+        raise KeyError(f"Section {location!r} has unknown field(s): {joined}")
+
+    for key, child_value in value.fields.items():
+        child_spec = spec.fields[key]
+        if isinstance(child_spec, CfgSectionSpec) and isinstance(
+            child_value, CfgSectionValue
+        ):
+            child_path = f"{path}.{key}" if path else key
+            _validate_section_keys(child_spec, child_value, path=child_path)
+        elif isinstance(child_spec, ReferenceSpec) and isinstance(
+            child_value, ReferenceValue
+        ):
+            child_path = f"{path}.{key}" if path else key
+            chosen_spec = select_ref_value_spec(child_spec, child_value)
+            _validate_section_keys(
+                chosen_spec,
+                child_value.value,
+                path=child_path,
+            )
 
 
 def create_field(

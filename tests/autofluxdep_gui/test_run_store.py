@@ -26,7 +26,12 @@ from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.cfg import ScalarSpec
 
-from ._helpers import make_builder, place, run_controller_to_completion
+from ._helpers import (
+    make_builder,
+    place,
+    run_controller_to_completion,
+    set_node_cfg_knobs,
+)
 
 
 def _project(tmp_path: Path) -> ProjectInfo:
@@ -151,7 +156,7 @@ def test_manifest_workflow_round_trips_from_persisted_raw_cfg_and_hash(tmp_path)
     )
     ctrl = build_core(project=_project(tmp_path))
     node = ctrl.add_node(builder)
-    ctrl.set_node_params(0, {"freq": 7.25})
+    set_node_cfg_knobs(ctrl, 0, {"freq": 7.25})
     ctrl.set_flux_values([0.0, 0.5])
 
     run_controller_to_completion(ctrl)

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -39,12 +40,9 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
-    ReferenceSpec,
-    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    select_ref_value_spec,
 )
 
 if TYPE_CHECKING:
@@ -222,11 +220,6 @@ def sectioned_node_schema(sections: tuple[NodeSectionSpec, ...]) -> NodeCfgSchem
     )
 
 
-def read_value_tree(schema: NodeCfgSchema) -> dict[str, Any]:
-    """Return a JSON-friendly value tree for white-box test assertions."""
-    return _jsonify_value_tree(schema.schema.spec, schema.schema.value)
-
-
 def _default_value_for(spec: CfgNodeSpec, default: Any) -> Any:
     if isinstance(spec, CenteredSweepSpec):
         if not isinstance(default, CenteredSweepValue):
@@ -331,71 +324,6 @@ def _ensure_unique(kind: str, values: Any) -> None:
         seen.add(value)
     if duplicates:
         raise ValueError(f"Duplicate {kind}: {', '.join(sorted(duplicates))}")
-
-
-def _jsonify_value_node(spec: CfgNodeSpec, value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, CfgSectionValue):
-        if not isinstance(spec, CfgSectionSpec):
-            raise TypeError(
-                f"CfgSectionValue requires CfgSectionSpec, got {type(spec).__name__}"
-            )
-        return _jsonify_value_tree(spec, value)
-    if isinstance(spec, ReferenceSpec) and isinstance(value, ReferenceValue):
-        value_spec = select_ref_value_spec(spec, value)
-        return {
-            "__kind": f"{spec.kind}_ref",
-            "chosen_key": value.chosen_key,
-            "is_overridden": bool(value.is_overridden),
-            "value": _jsonify_value_tree(value_spec, value.value),
-        }
-    if isinstance(value, SweepValue):
-        return {
-            "start": _knob_scalar_value(value.start),
-            "stop": _knob_scalar_value(value.stop),
-            "expts": int(value.expts),
-        }
-    if isinstance(value, CenteredSweepValue):
-        return {
-            "center": _knob_scalar_value(value.center),
-            "span": float(value.span),
-            "expts": int(value.expts),
-        }
-    if isinstance(value, DirectValue):
-        return _knob_scalar_value(value.value)
-    if isinstance(value, EvalValue):
-        return _knob_eval_value(value)
-    raise TypeError(
-        f"Unexpected node cfg value-tree leaf {type(value).__name__}; "
-        "expected CfgSectionValue, DirectValue, EvalValue, SweepValue, or "
-        "CenteredSweepValue"
-    )
-
-
-def _jsonify_value_tree(spec: CfgSectionSpec, value: CfgSectionValue) -> dict[str, Any]:
-    return {
-        key: _jsonify_value_node(spec.fields[key], child)
-        for key, child in value.fields.items()
-        if child is not None and key in spec.fields
-    }
-
-
-def _knob_scalar_value(value: object) -> object:
-    if isinstance(value, EvalValue):
-        return _knob_eval_value(value)
-    if isinstance(value, np.generic):
-        return cast(np.generic, value).item()
-    return value
-
-
-def _knob_eval_value(value: EvalValue) -> dict[str, object]:
-    data: dict[str, object] = {"__kind": "eval", "expr": value.expr}
-    if value.resolved is not None:
-        data["resolved"] = value.resolved
-    if value.error is not None:
-        data["error"] = value.error
-    return data
 
 
 def ensure_test_project(ctrl: Controller) -> ProjectInfo:
@@ -658,6 +586,19 @@ def node_schema(builder: Builder, params: Any = None) -> NodeCfgSchema:
     if params:
         schema.with_overrides(params)
     return schema
+
+
+def set_node_cfg_knobs(ctrl: Controller, index: int, params: Mapping[str, Any]) -> None:
+    """Apply test knob edits through the public complete-value-tree commit path."""
+
+    node = ctrl.state.nodes[index]
+    draft = deepcopy(node.schema.schema.value)
+    draft_schema = NodeCfgSchema(
+        CfgSchema(spec=node.schema.schema.spec, value=draft),
+        logical_paths=node.schema.logical_paths,
+    )
+    draft_schema.with_overrides(params)
+    ctrl.set_node_cfg_value(index, draft)
 
 
 class _TrivialPlotter:

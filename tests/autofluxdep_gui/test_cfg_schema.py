@@ -25,6 +25,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     NodeCfgSchema,
     OverridePath,
     OverridePlan,
+    RunCfgSnapshot,
     apply_override_patches,
     override_plan_to_wire,
     str_choice_spec,
@@ -57,7 +58,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils.module_values import (
     pulse_length,
     pulse_product,
 )
-from zcu_tools.gui.app.autofluxdep.registry import create_placement
+from zcu_tools.gui.app.autofluxdep.registry import NODE_BUILDERS, create_placement
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -70,10 +71,12 @@ from zcu_tools.gui.cfg import (
     IntSpec,
     LiteralSpec,
     ReferenceSpec,
+    ReferenceValue,
     ScalarSpec,
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.gui.cfg.tree import read_value_path
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
@@ -85,8 +88,8 @@ from ._helpers import (
     node_path,
     node_section,
     path_node_schema,
-    read_value_tree,
     sectioned_node_schema,
+    set_node_cfg_knobs,
 )
 
 _READOUT = {
@@ -169,12 +172,13 @@ def test_node_schema_builder_pulse_uses_first_compatible_library_key() -> None:
         .build()
     )
 
-    drive = read_value_tree(schema)["modules"]["drive"]
-    assert drive["chosen_key"] == "first"
-    assert drive["value"]["ch"] == 4
-    assert drive["value"]["nqz"] == 1
-    assert drive["value"]["gain"] == pytest.approx(0.25)
-    assert drive["value"]["freq"] == pytest.approx(5123.0)
+    drive = read_value_path(schema.schema.value, "modules.drive")
+    assert isinstance(drive, ReferenceValue)
+    assert drive.chosen_key == "first"
+    assert cast(DirectValue, drive.value.fields["ch"]).value == 4
+    assert cast(DirectValue, drive.value.fields["nqz"]).value == 1
+    assert cast(DirectValue, drive.value.fields["gain"]).value == pytest.approx(0.25)
+    assert cast(DirectValue, drive.value.fields["freq"]).value == pytest.approx(5123.0)
 
 
 def test_node_schema_builder_pulse_applies_both_override_modes() -> None:
@@ -191,12 +195,13 @@ def test_node_schema_builder_pulse_applies_both_override_modes() -> None:
         .build()
     )
 
-    drive = read_value_tree(schema)["modules"]["drive"]
-    assert drive["chosen_key"] == "<Custom:Pulse>"
-    assert drive["value"]["ch"] == 7
-    assert drive["value"]["nqz"] == 1
-    assert drive["value"]["gain"] == pytest.approx(0.4)
-    assert drive["value"]["freq"] == pytest.approx(5100.0)
+    drive = read_value_path(schema.schema.value, "modules.drive")
+    assert isinstance(drive, ReferenceValue)
+    assert drive.chosen_key == "<Custom:Pulse>"
+    assert cast(DirectValue, drive.value.fields["ch"]).value == 7
+    assert cast(DirectValue, drive.value.fields["nqz"]).value == 1
+    assert cast(DirectValue, drive.value.fields["gain"]).value == pytest.approx(0.4)
+    assert cast(DirectValue, drive.value.fields["freq"]).value == pytest.approx(5100.0)
 
 
 def test_node_schema_builder_readout_declares_literal_locks() -> None:
@@ -288,7 +293,9 @@ def test_node_schema_builder_pulse_rejects_custom_type_discriminator_before_moun
         overrides={"freq": 5100.0},
     ).build()
     assert schema.logical_paths == {"drive": "modules.drive"}
-    assert read_value_tree(schema)["modules"]["drive"]["chosen_key"] == "<Custom:Pulse>"
+    drive = read_value_path(schema.schema.value, "modules.drive")
+    assert isinstance(drive, ReferenceValue)
+    assert drive.chosen_key == "<Custom:Pulse>"
 
 
 def test_node_schema_builder_pulse_rejects_linked_type_discriminator_before_seed() -> (
@@ -317,9 +324,10 @@ def test_node_schema_builder_pulse_rejects_linked_type_discriminator_before_seed
         library_keys=("pi",),
         overrides={"freq": 5100.0},
     ).build()
-    drive = read_value_tree(schema)["modules"]["drive"]
-    assert drive["chosen_key"] == "pi"
-    assert drive["value"]["freq"] == pytest.approx(5100.0)
+    drive = read_value_path(schema.schema.value, "modules.drive")
+    assert isinstance(drive, ReferenceValue)
+    assert drive.chosen_key == "pi"
+    assert cast(DirectValue, drive.value.fields["freq"]).value == pytest.approx(5100.0)
 
 
 @pytest.mark.parametrize(
@@ -1135,17 +1143,17 @@ def test_path_schema_renders_raw_cfg_tree_while_lowering_logical_keys():
         },
     )
 
-    value_tree = read_value_tree(schema)
+    persisted = schema.to_persisted_raw()
 
-    assert value_tree == {
+    assert persisted == {
         "modules": {
             "qub_pulse": {
-                "gain": 0.05,
+                "gain": {"__kind": "direct", "value": 0.05},
             },
         },
-        "reps": 1000,
+        "reps": {"__kind": "direct", "value": 1000},
         "generation": {
-            "drive_gain_mode": "adaptive",
+            "drive_gain_mode": {"__kind": "direct", "value": "adaptive"},
         },
     }
     assert schema.logical_paths["qub_gain"] == "modules.qub_pulse.gain"
@@ -1210,9 +1218,11 @@ def test_generation_groups_keep_logical_knobs_flat():
     assert "drive_gain" not in knobs
     assert "freq_recovery" not in knobs
     assert "acquisition" not in knobs
-    assert read_value_tree(schema)["generation"]["drive_gain"]["drive_gain_mode"] == (
-        "adaptive"
+    drive_gain_mode = read_value_path(
+        schema.schema.value, "generation.drive_gain.drive_gain_mode"
     )
+    assert isinstance(drive_gain_mode, DirectValue)
+    assert drive_gain_mode.value == "adaptive"
 
 
 def test_generation_display_labels_drop_redundant_group_prefixes():
@@ -1341,9 +1351,11 @@ def test_generation_persistence_uses_flat_logical_keys():
     assert "physical_recovery_max_center_shift_mhz" not in knobs
     assert knobs["earlystop_snr"] == pytest.approx(12.5)
     assert knobs["acquire_retry"] == 2
-    assert read_value_tree(restored)["generation"]["drive_gain"]["drive_gain_mode"] == (
-        "fixed"
+    drive_gain_mode = read_value_path(
+        restored.schema.value, "generation.drive_gain.drive_gain_mode"
     )
+    assert isinstance(drive_gain_mode, DirectValue)
+    assert drive_gain_mode.value == "fixed"
 
 
 def test_generation_restore_rejects_unknown_flat_persisted_key():
@@ -1439,10 +1451,9 @@ def test_path_schema_scalar_default_preserves_eval_value():
     )
 
     assert schema.read_knobs()["qub_gain"] == {"__kind": "eval", "expr": "gain"}
-    assert read_value_tree(schema)["modules"]["qub_pulse"]["gain"] == {
-        "__kind": "eval",
-        "expr": "gain",
-    }
+    gain = read_value_path(schema.schema.value, "modules.qub_pulse.gain")
+    assert isinstance(gain, EvalValue)
+    assert gain.expr == "gain"
     assert schema.lower(None, md=md)["qub_gain"] == 0.25
 
 
@@ -1477,7 +1488,7 @@ def test_sectioned_schema_read_knobs_is_flat_json_friendly():
     _assert_no_value_objects(knobs)
 
 
-def test_sectioned_schema_read_value_tree_is_nested_json_friendly():
+def test_sectioned_schema_persistence_is_nested_json_friendly():
     schema = _sectioned_test_schema()
     schema.set_field("qub_gain", EvalValue("gain"))
     schema.set_field(
@@ -1489,21 +1500,21 @@ def test_sectioned_schema_read_value_tree_is_nested_json_friendly():
         ),
     )
 
-    knobs = read_value_tree(schema)
+    raw = cast(dict[str, Any], schema.to_persisted_raw())
 
-    assert set(knobs) == {"sweep", "acquire", "drive"}
-    assert knobs["sweep"]["detune"]["start"] == {
+    assert set(raw) == {"sweep", "acquire", "drive"}
+    assert raw["sweep"]["detune"]["start"] == {
         "__kind": "eval",
         "expr": "center - 2",
     }
-    assert knobs["sweep"]["detune"]["stop"] == {
+    assert raw["sweep"]["detune"]["stop"] == {
         "__kind": "eval",
         "expr": "center + 2",
     }
-    assert knobs["sweep"]["detune"]["expts"] == 5
-    assert knobs["acquire"]["reps"] == 1000
-    assert knobs["drive"]["gain"] == {"__kind": "eval", "expr": "gain"}
-    _assert_no_value_objects(knobs)
+    assert raw["sweep"]["detune"]["expts"] == 5
+    assert raw["acquire"]["reps"] == {"__kind": "direct", "value": 1000}
+    assert raw["drive"]["gain"] == {"__kind": "eval", "expr": "gain"}
+    _assert_no_value_objects(raw)
 
 
 def test_sectioned_schema_unknown_logical_key_fast_fails():
@@ -2214,10 +2225,11 @@ def test_scalar_eval_value_lowers_against_md():
         "__kind": "eval",
         "expr": "gain",
     }
-    assert read_value_tree(schema)["modules"]["qub_pulse"]["value"]["gain"] == {
-        "__kind": "eval",
-        "expr": "gain",
-    }
+    qub_pulse = read_value_path(schema.schema.value, "modules.qub_pulse")
+    assert isinstance(qub_pulse, ReferenceValue)
+    gain = read_value_path(qub_pulse.value, "gain")
+    assert isinstance(gain, EvalValue)
+    assert gain.expr == "gain"
 
 
 def test_sweep_eval_edges_lower_against_md():
@@ -2253,10 +2265,10 @@ def test_sweep_eval_edges_lower_against_md():
         "__kind": "eval",
         "expr": "center",
     }
-    assert read_value_tree(schema)["sweep"]["freq"]["center"] == {
-        "__kind": "eval",
-        "expr": "center",
-    }
+    sweep = read_value_path(schema.schema.value, "sweep.freq")
+    assert isinstance(sweep, CenteredSweepValue)
+    assert isinstance(sweep.center, EvalValue)
+    assert sweep.center.expr == "center"
 
 
 def test_set_field_unknown_key_fast_fails():
@@ -2271,10 +2283,10 @@ def test_with_overrides_unknown_key_fast_fails():
         schema.with_overrides({"bogus": 1})
 
 
-# --- 2d. set_node_params (controller typed entry): type, sweep, fast-fail -------
+# --- 2d. complete cfg-value commit: type, sweep, fast-fail ----------------------
 
 
-def test_set_node_params_types_and_fast_fails():
+def test_cfg_value_commit_types_and_fast_fails():
     from zcu_tools.gui.app.autofluxdep.app import build_core
 
     ctrl = build_core()
@@ -2283,7 +2295,7 @@ def test_set_node_params_types_and_fast_fails():
 
     # scalar values are coerced to the declared types and written into the schema
     # SSOT (read back via the lowered knobs)
-    ctrl.set_node_params(index, {"reps": "250", "qub_gain": "0.2", "qub_ch": "3"})
+    set_node_cfg_knobs(ctrl, index, {"reps": "250", "qub_gain": "0.2", "qub_ch": "3"})
     knobs = node.schema.lower(None)
     assert knobs["reps"] == 250 and isinstance(knobs["reps"], int)
     assert knobs["qub_gain"] == 0.2
@@ -2291,8 +2303,10 @@ def test_set_node_params_types_and_fast_fails():
 
     # qubit_freq detune sweep accepts the centered value model the widget edits,
     # but its generated center is locked to the relative detune origin.
-    ctrl.set_node_params(
-        index, {"detune_sweep": CenteredSweepValue(center=0.0, span=70.0, expts=71)}
+    set_node_cfg_knobs(
+        ctrl,
+        index,
+        {"detune_sweep": CenteredSweepValue(center=0.0, span=70.0, expts=71)},
     )
     detune = node.schema.lower(None)["detune_sweep"]
     assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
@@ -2301,17 +2315,34 @@ def test_set_node_params_types_and_fast_fails():
         71,
     )
     with pytest.raises(ValueError, match="locked to 0.0"):
-        ctrl.set_node_params(
+        set_node_cfg_knobs(
+            ctrl,
             index,
             {"detune_sweep": CenteredSweepValue(center=5.0, span=70.0, expts=71)},
         )
 
     # an unknown key fast-fails (a real typo — the form only renders declared knobs)
     with pytest.raises(KeyError, match="Unknown node param"):
-        ctrl.set_node_params(index, {"not_a_knob": 1})
+        set_node_cfg_knobs(ctrl, index, {"not_a_knob": 1})
 
 
 # --- 2e. run-time override plan contract ---------------------------------------
+
+
+@pytest.mark.parametrize("builder", NODE_BUILDERS.values(), ids=NODE_BUILDERS)
+def test_run_snapshot_accepts_every_registered_builder_default_leaf_type(
+    builder: Builder,
+) -> None:
+    ctx = _ctx()
+    schema = builder.make_default_schema(ctx)
+
+    snapshot = RunCfgSnapshot(
+        base_cfg=schema.lower_raw(ctx.ml, ctx.md),
+        override_plan=builder.override_plan(schema),
+        knobs=schema.lower(ctx.ml, ctx.md),
+    )
+
+    assert isinstance(snapshot.to_wire()["base_cfg"], dict)
 
 
 def test_override_plan_serializes_and_validates_base_cfg_leaf_paths():

@@ -44,6 +44,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
+    missing_info_value,
     missing_module_value,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
@@ -105,14 +106,6 @@ class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel):
     and the dev carries this flux point's value), mirroring the lower-layer
     ``experiment/v2/autofluxdep`` QubitFreqCfgTemplate.
     """
-
-
-# --- default external bindings (project metadata can override) ---
-def _default_qfw_factor() -> None:
-    # First point has no previous linewidth/gain feedback; use the operator's
-    # schema drive gain. Later points read the smoothed qfw_factor from the
-    # orchestrator, mirroring notebook ``info.last.get("qfw_factor", ...)``.
-    return None
 
 
 def _drive_gain_from_qfw_factor(
@@ -451,8 +444,10 @@ class QubitFreqBuilder(Builder):
     requires = (Dependency("predict_freq"),)
     optional = (
         # consumer-declared smoothing: read qfw_factor *smoothed* (same key). The
-        # orchestrator builds the SmoothingService from this declaration alone.
-        Dependency("qfw_factor", smooth="step_weighted", default=_default_qfw_factor),
+        # first point uses the schema drive gain; later points follow the notebook's
+        # step-weighted linewidth/gain feedback. The orchestrator builds the
+        # SmoothingService from this declaration alone.
+        Dependency("qfw_factor", smooth="step_weighted", default=missing_info_value),
     )
     # the readout module: Node-produced → calibrated ml preset → default.
     optional_modules = (

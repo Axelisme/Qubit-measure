@@ -676,8 +676,8 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)
     try:
-        # drive the int knob the way a spin-box edit would (model.set_value →
-        # schema_changed → controller.set_node_params → schema SSOT)
+        # Drive the int knob through the form draft; schema_changed commits the
+        # complete value tree through controller.set_node_cfg_value.
         form._default_draft.root.fields["reps"].set_value(DirectValue(value=321))
         qub_pulse = _ref_subsection(_section(form, "modules"), "qub_pulse")
         qub_pulse.fields["gain"].set_value(DirectValue(value=0.42))
@@ -686,6 +686,42 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
         assert knobs["reps"] == 321 and isinstance(knobs["reps"], int)
         assert knobs["qub_gain"] == 0.42
         assert knobs["drive_gain_mode"] == "fixed"
+    finally:
+        form.teardown()
+
+
+def test_node_cfg_form_snapshots_only_the_unchanged_side(
+    ctrl_node,
+    qapp,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ctrl, node, index = ctrl_node
+    form = NodeCfgForm(ctrl, node, index)
+    generation_draft = form._generation_draft
+    assert generation_draft is not None
+    snapshot_counts = {"default": 0, "generation": 0}
+    default_snapshot = form._default_draft.snapshot
+    generation_snapshot = generation_draft.snapshot
+
+    def count_default_snapshot():
+        snapshot_counts["default"] += 1
+        return default_snapshot()
+
+    def count_generation_snapshot():
+        snapshot_counts["generation"] += 1
+        return generation_snapshot()
+
+    monkeypatch.setattr(form._default_draft, "snapshot", count_default_snapshot)
+    monkeypatch.setattr(generation_draft, "snapshot", count_generation_snapshot)
+    try:
+        form._default_draft.root.fields["reps"].set_value(DirectValue(321))
+
+        assert snapshot_counts == {"default": 1, "generation": 1}
+
+        snapshot_counts = {"default": 0, "generation": 0}
+        _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
+
+        assert snapshot_counts == {"default": 1, "generation": 1}
     finally:
         form.teardown()
 

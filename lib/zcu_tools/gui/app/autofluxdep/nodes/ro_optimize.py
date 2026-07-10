@@ -250,14 +250,6 @@ class RoOptimizeCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
 
-def _default_best_freq() -> None:
-    return None
-
-
-def _default_best_gain() -> None:
-    return None
-
-
 def _center_of(sweep: Any) -> float:
     return 0.5 * (float(sweep.start) + float(sweep.stop))
 
@@ -441,8 +433,8 @@ class RoOptimizeBuilder(Builder):
     provides_modules = ("opt_readout",)
     optional = (
         Dependency("t1", smooth="ewma", default=missing_info_value),
-        Dependency("best_ro_freq", default=_default_best_freq),
-        Dependency("best_ro_gain", default=_default_best_gain),
+        Dependency("best_ro_freq", default=missing_info_value),
+        Dependency("best_ro_gain", default=missing_info_value),
     )
     requires_modules = (ModuleDep("pi_pulse", aliases=PI_PULSE_LIBRARY_ALIASES),)
     optional_modules = (

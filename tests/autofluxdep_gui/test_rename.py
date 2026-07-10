@@ -17,7 +17,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
 from zcu_tools.gui.app.autofluxdep.nodes.result import Sweep1DResult
 from zcu_tools.gui.cfg import FloatSpec
 
-from ._helpers import make_builder, run_controller_to_completion
+from ._helpers import make_builder, run_controller_to_completion, set_node_cfg_knobs
 
 
 def _make_filling_builder(name: str):
@@ -100,7 +100,7 @@ def test_cfg_edits_emit_workflow_changed_for_edited_node():
     seen = []
     ctrl.bus.subscribe(WorkflowChangedPayload, lambda p: seen.append(p.name))
 
-    ctrl.set_node_params(0, {"gain": 2.0})
+    set_node_cfg_knobs(ctrl, 0, {"gain": 2.0})
     ctrl.set_node_cfg_value(0, node.schema.schema.value)
 
     assert seen == ["cfg_node", "cfg_node"]

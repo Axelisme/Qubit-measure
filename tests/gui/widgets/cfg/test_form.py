@@ -871,6 +871,39 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     assert emitted
 
 
+def test_nested_edit_materializes_schema_once_at_form_boundary(
+    qapp, ctrl, monkeypatch: pytest.MonkeyPatch
+):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    schema = _schema(
+        {"nested": CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)})},
+        {"nested": CfgSectionValue({"reps": DirectValue(10)})},
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    form.attach(draft)
+    snapshot_count = 0
+    original_snapshot = draft.snapshot
+
+    def count_snapshot() -> CfgSchema:
+        nonlocal snapshot_count
+        snapshot_count += 1
+        return original_snapshot()
+
+    monkeypatch.setattr(draft, "snapshot", count_snapshot)
+    try:
+        nested = cast(SectionField, draft.root.fields["nested"])
+        reps = cast(ScalarField, nested.fields["reps"])
+
+        reps.set_value(11)
+
+        assert snapshot_count == 1
+    finally:
+        form.detach()
+        draft.close()
+
+
 def test_cfg_form_does_not_subscribe_bus(qapp, ctrl):
     """Attach/detach never registers an EventBus subscription."""
     from zcu_tools.gui.widgets.cfg import CfgFormWidget

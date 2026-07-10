@@ -41,16 +41,14 @@ from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 from ..decoration import FieldDecorationProtocol
 from ..registry import TextInputEnhancer
+from ._decoration import (
+    apply_decoration,
+    decorated_label_text,
+    decoration_enabled,
+)
 
 FIELD_INPUT_MIN_WIDTH = 20
 FIELD_LABEL_MAX_WIDTH = 80
-
-_TONE_STYLES = {
-    "muted": "color: #6b7280;",
-    "info": "color: #2563eb;",
-    "warning": "color: #8a5a00;",
-    "error": "color: #b00020;",
-}
 
 
 class ElidedLabel(QLabel):
@@ -251,45 +249,6 @@ def _edge_decoration(
     if not path or decoration_for_path is None:
         return None
     return decoration_for_path(f"{path}.{edge}", edge_field)
-
-
-def _decorated_label_text(
-    label: str, decoration: FieldDecorationProtocol | None
-) -> str:
-    if decoration is None:
-        return label
-    label_suffix = decoration.label_suffix
-    badge = decoration.badge
-    text = f"{label}{label_suffix}"
-    if badge:
-        text = f"{text} [{badge}]"
-    return text
-
-
-def _decoration_enabled(decoration: FieldDecorationProtocol | None) -> bool:
-    if decoration is None:
-        return True
-    return decoration.enabled
-
-
-def _apply_edge_decoration(
-    label_widget: QLabel,
-    value_widget: QWidget,
-    decoration: FieldDecorationProtocol | None,
-) -> None:
-    if decoration is None:
-        return
-    enabled = decoration.enabled
-    tooltip = decoration.tooltip
-    tone = decoration.tone or "normal"
-    style = _TONE_STYLES.get(tone, "")
-    label_widget.setEnabled(enabled)
-    value_widget.setEnabled(enabled)
-    if tooltip:
-        label_widget.setToolTip(tooltip)
-        value_widget.setToolTip(tooltip)
-    if style:
-        label_widget.setStyleSheet(style)
 
 
 def _dynamic_choices_for_scalar(field: ScalarField, current: Any) -> list | None:
@@ -662,15 +621,15 @@ class SweepWidget(BaseLiveWidget):
         stop_decoration = _edge_decoration(
             path, "stop", field.stop_field, decoration_for_path
         )
-        self._start_widget.setEnabled(enabled and _decoration_enabled(start_decoration))
-        self._stop_widget.setEnabled(enabled and _decoration_enabled(stop_decoration))
+        self._start_widget.setEnabled(enabled and decoration_enabled(start_decoration))
+        self._stop_widget.setEnabled(enabled and decoration_enabled(stop_decoration))
         self._expts.setEnabled(enabled)
         self._step.setEnabled(enabled)
 
-        start_label = QLabel(_decorated_label_text("start", start_decoration))
-        stop_label = QLabel(_decorated_label_text("stop", stop_decoration))
-        _apply_edge_decoration(start_label, self._start_widget, start_decoration)
-        _apply_edge_decoration(stop_label, self._stop_widget, stop_decoration)
+        start_label = QLabel(decorated_label_text("start", start_decoration))
+        stop_label = QLabel(decorated_label_text("stop", stop_decoration))
+        apply_decoration(start_label, self._start_widget, start_decoration)
+        apply_decoration(stop_label, self._stop_widget, stop_decoration)
 
         layout.addWidget(
             _sweep_pair(start_label, self._start_widget, stop_label, self._stop_widget),

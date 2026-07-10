@@ -30,6 +30,8 @@ from zcu_tools.gui.session.services.startup import (
     StartupProjectRequest,
 )
 
+from ._helpers import set_node_cfg_knobs
+
 
 def _list_labels(win: MainWindow) -> list[str]:
     labels: list[str] = []
@@ -54,7 +56,8 @@ def test_workflow_persistence_roundtrip(tmp_path: Path):
     ctrl = build_core()
     ctrl.add_node_by_type("qubit_freq")
     ctrl.rename_node(0, "freq_scan")
-    ctrl.set_node_params(
+    set_node_cfg_knobs(
+        ctrl,
         0,
         {
             "qub_gain": "0.2",
