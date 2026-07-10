@@ -26,6 +26,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefSpec,
     WaveformRefValue,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.live_model import (
     CenteredSweepLiveField,
     SectionLiveField,
@@ -88,7 +89,7 @@ def test_sweep_value_uses_expts_as_canonical():
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=1.0, stop=2.0, expts=5, step=999.0)},
     )
-    result = schema.to_raw_dict(None, ml)
+    result = schema_to_raw_dict(schema, None, ml)
     assert isinstance(result["f"], SweepCfg)
     assert result["f"].expts == 5
     assert result["f"].step == pytest.approx(0.25)
@@ -102,7 +103,7 @@ def test_sweep_value_step_mode():
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
-    result = schema.to_raw_dict(None, ml)
+    result = schema_to_raw_dict(schema, None, ml)
     sweep = result["f"]
     assert isinstance(sweep, SweepCfg)
     assert sweep.step == pytest.approx(0.1)

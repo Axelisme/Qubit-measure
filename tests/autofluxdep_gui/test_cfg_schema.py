@@ -2169,27 +2169,47 @@ def test_real_builders_restrict_generated_readout_to_pulse_shape():
         assert [spec.label for spec in readout.allowed] == ["Pulse Readout"]
 
 
-# --- 3. seam invariant: only cfg/ imports gui.app.main from the package ---------
+# --- 3. seam invariant: cfg app imports use an exact transitional allowlist -----
 
 
-def test_only_cfg_seam_imports_measure_app():
+def test_autoflux_measure_app_imports_match_transitional_allowlist():
     pkg = pathlib.Path(__file__).resolve().parents[2] / (
         "lib/zcu_tools/gui/app/autofluxdep"
     )
-    allowed = {
-        pkg / "cfg" / "__init__.py",
-        pkg / "cfg" / "schema.py",
-        pkg / "cfg" / "form.py",
+    allowed: dict[pathlib.Path, set[str]] = {
+        pkg / "cfg" / "__init__.py": {
+            "zcu_tools.gui.app.main.cfg_schemas",
+            "zcu_tools.gui.app.main.specs.pulse",
+            "zcu_tools.gui.app.main.specs.readout",
+        },
+        pkg / "cfg" / "schema.py": {
+            "zcu_tools.gui.app.main.adapter.lowering",
+        },
+        pkg / "cfg" / "form.py": {
+            "zcu_tools.gui.app.main.live_model",
+            "zcu_tools.gui.app.main.ui.cfg_form",
+            "zcu_tools.gui.app.main.ui.fields.common",
+        },
     }
-    offenders: list[str] = []
+    actual: dict[pathlib.Path, set[str]] = {}
     for py in pkg.rglob("*.py"):
-        tree = ast.parse(py.read_text())
+        tree = ast.parse(py.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            mod = None
+            modules: list[str] = []
             if isinstance(node, ast.ImportFrom):
-                mod = node.module
+                if node.module is not None:
+                    modules.append(node.module)
             elif isinstance(node, ast.Import):
-                mod = ";".join(a.name for a in node.names)
-            if mod and "zcu_tools.gui.app.main" in mod and py not in allowed:
-                offenders.append(f"{py.relative_to(pkg)}: {mod}")
-    assert not offenders, "non-seam imports of gui.app.main:\n" + "\n".join(offenders)
+                modules.extend(alias.name for alias in node.names)
+            for module in modules:
+                if not module.startswith("zcu_tools.gui.app.main"):
+                    continue
+                actual.setdefault(py, set()).add(module)
+
+    actual_relative = {
+        str(path.relative_to(pkg)): modules for path, modules in actual.items()
+    }
+    allowed_relative = {
+        str(path.relative_to(pkg)): modules for path, modules in allowed.items()
+    }
+    assert actual_relative == allowed_relative

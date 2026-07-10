@@ -36,6 +36,7 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter import (
     SweepValue as GuiSweepValue,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, PulseReadoutCfg, SweepCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -62,7 +63,7 @@ def _make_req(ml: MagicMock | None = None) -> RunRequest:
 
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
-    return schema.to_raw_dict(None, req.ml)
+    return schema_to_raw_dict(schema, None, req.ml)
 
 
 def _ctx_with_md(**md_values: float) -> MagicMock:
@@ -168,7 +169,7 @@ def _assert_readout_dpm_schema(
     )
     assert _direct_float(ro_cfg.fields["ro_length"]) == pytest.approx(length)
 
-    raw = item.edit_schema.to_raw_dict(MetaDict(), ModuleLibrary())
+    raw = schema_to_raw_dict(item.edit_schema, MetaDict(), ModuleLibrary())
     assert raw["type"] == "readout/pulse"
     raw_pulse = cast(dict[str, Any], raw["pulse_cfg"])
     raw_ro = cast(dict[str, Any], raw["ro_cfg"])

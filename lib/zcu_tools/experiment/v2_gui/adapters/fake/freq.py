@@ -53,6 +53,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     AbsReadoutCfg,
@@ -351,7 +352,7 @@ class FakeFreqAdapter(
     def run(self, req: RunRequest, schema: CfgSchema) -> FakeFreqRunResult:
         import dataclasses
 
-        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FakeFreqExp(self._model_type, self._params).run(cfg)
         freq_cfg = FreqCfg(

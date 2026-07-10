@@ -1,14 +1,15 @@
-"""Tests for the session cfg codec (raw↔live), WorkspaceService's internal
-capture/apply implementation. Disk I/O + payload-shape validation now live in
-the PersistenceCaretaker / pydantic memento (test_caretaker / test_persistence_
-types); this file covers only the cfg lowering / rebuild transforms."""
+"""Tests for the shared cfg raw↔live persistence codec.
+
+Disk I/O and memento validation stay in app persistence services; this file
+covers the exact cfg payload and value-tree rebuild transforms.
+"""
 
 from __future__ import annotations
 
 from typing import cast
 
 import pytest
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgSchema,
@@ -21,13 +22,11 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleRefSpec,
     ModuleRefValue,
     ScalarSpec,
+    SessionCodecError,
     SweepSpec,
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
-)
-from zcu_tools.gui.app.main.services.session_codec import (
-    SessionCodecError,
     raw_to_schema,
     schema_to_raw,
 )

@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
+
 from .types import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    CfgSchema,
-    CfgSectionSpec,
     ExpContext,
     InteractiveHost,
     InteractiveSession,

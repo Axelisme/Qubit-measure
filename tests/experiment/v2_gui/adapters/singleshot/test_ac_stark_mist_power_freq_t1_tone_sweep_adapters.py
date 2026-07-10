@@ -2,7 +2,7 @@
 
 Covers:
 - cfg_spec structure (2D = two sweep axes; t1_tone_sweep = length + one outer)
-  + make_default_cfg().validate(ml) + filename stem
+  + validate_schema(make_default_cfg(), ml) + filename stem
 - run override: md has GE centres → correct domain run call (mock)
 - run override: md missing centres → fast-fail
 - ac_stark analyze: chi/rf_w present → forwarded into (chi positional, kappa kw);
@@ -51,6 +51,10 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import (
+    schema_to_raw_dict,
+    validate_schema,
+)
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.utils.datasaver import load_labber_data
 
@@ -79,8 +83,8 @@ def test_ac_stark_cfg_validates_2d_sweep() -> None:
     ml = _make_ml()
     adapter = SsAcStarkAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     modules = cast(dict[str, Any], raw["modules"])
     assert "stark_pulse1" in modules
     assert "stark_pulse2" in modules
@@ -118,8 +122,8 @@ def test_mist_power_freq_cfg_validates_2d_sweep() -> None:
     ml = _make_ml()
     adapter = MistPowerFreqAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     modules = cast(dict[str, Any], raw["modules"])
     assert "probe_pulse" in modules
     assert "readout" in modules
@@ -173,8 +177,8 @@ def test_t1_tone_sweep_cfg_has_one_outer_sweep(
     ml = _make_ml()
     adapter = adapter_cls()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     sweep = cast(dict[str, Any], raw["sweep"])
     assert set(sweep) == {"length", outer_key}
     # uniform extra present, default True (domain default).
@@ -379,7 +383,7 @@ def test_t1_tone_sweep_uniform_default_true(adapter_cls: Any) -> None:
     # No user override → uniform defaults to True (domain default for this exp).
     ml = _make_ml()
     schema = adapter_cls().make_default_cfg(_make_ctx(ml))
-    raw = schema.to_raw_dict(None, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     assert raw["uniform"] is True
 
 
@@ -390,7 +394,7 @@ def test_t1_tone_sweep_pops_uniform_before_lowering(adapter_cls: Any) -> None:
     ml = _make_ml()
     adapter = adapter_cls()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    raw = schema.to_raw_dict(None, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     adapter.build_exp_cfg(raw, _run_req(_md_with_centers(), ml))
     passed_dict = ml.make_cfg.call_args[0][0]
     assert "uniform" not in passed_dict

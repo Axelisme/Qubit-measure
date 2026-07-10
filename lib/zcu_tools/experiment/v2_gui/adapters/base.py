@@ -33,6 +33,10 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
+from zcu_tools.gui.app.main.adapter.lowering import (
+    schema_to_raw_dict,
+    validate_schema,
+)
 
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list
 # (Cfg, Result, AnalyzeResult, AnalyzeParams).
@@ -386,7 +390,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         the offending adapter rather than surfacing as a later lowering error.
         """
         schema = CfgSchema(spec=self.cfg_spec(), value=self.make_default_value(ctx))
-        schema.validate(ctx.ml)
+        validate_schema(schema, ctx.ml)
         return schema
 
     @classmethod
@@ -416,7 +420,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return ret
 
     def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
-        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         if self.capabilities.requires_soc:
             soc, soccfg = require_soc_handles(req)

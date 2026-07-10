@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError, CfgEditorService
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.value_lookup import ValueInfo
@@ -45,11 +46,11 @@ def ctrl(ml, md):
     c.has_soc.return_value = False
 
     def _set_module(name, schema):
-        raw = schema.to_raw_dict(md, ml)
+        raw = schema_to_raw_dict(schema, md, ml)
         ml.register_module(**{name: ModuleCfgFactory.from_raw(raw, ml=ml)})
 
     def _set_waveform(name, schema):
-        raw = schema.to_raw_dict(md, ml)
+        raw = schema_to_raw_dict(schema, md, ml)
         ml.register_waveform(**{name: WaveformCfgFactory.from_raw(raw, ml=ml)})
 
     c.set_ml_module_from_schema.side_effect = _set_module

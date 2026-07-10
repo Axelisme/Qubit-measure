@@ -29,6 +29,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepSpec,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,7 @@ class FakeAdapter(
         )
 
     def run(self, req: RunRequest, schema: CfgSchema) -> FakeRunResult:
-        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         return FakeExp().run(cfg)
 

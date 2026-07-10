@@ -27,6 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 
 from ._helpers import make_ctx as _make_ctx
 from ._helpers import make_ml as _make_ml
@@ -37,7 +38,7 @@ def _make_req(ml: MagicMock | None = None) -> RunRequest:
 
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
-    return schema.to_raw_dict(None, req.ml)
+    return schema_to_raw_dict(schema, None, req.ml)
 
 
 def _fake_signals(n: int = 16) -> NDArray[np.complex128]:

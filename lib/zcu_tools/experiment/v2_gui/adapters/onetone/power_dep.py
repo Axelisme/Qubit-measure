@@ -29,6 +29,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepSpec,
     require_soc_handles,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 
 OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 
@@ -125,7 +126,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
 
     def run(self, req: RunRequest, schema: CfgSchema) -> OneTonePowerDepRunResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         earlystop_snr = self._earlystop_snr(raw_cfg)
         return PowerDepExp().run(soc, soccfg, cfg, earlystop_snr=earlystop_snr)

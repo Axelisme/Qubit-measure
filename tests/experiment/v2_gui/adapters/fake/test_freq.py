@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
 from zcu_tools.gui.app.main.adapter import CfgSchema, RunRequest
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.meta_tool import MetaDict
 
 
@@ -34,7 +35,7 @@ def _make_req(ml=None):
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict:
 
-    return schema.to_raw_dict(None, req.ml)
+    return schema_to_raw_dict(schema, None, req.ml)
 
 
 def test_fakefreq_build_exp_cfg_basic():

@@ -55,6 +55,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     require_soc_handles,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 
 from ._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
 
@@ -156,7 +157,7 @@ class _SsT1ToneSweepBase(
     def run(self, req: RunRequest, schema: CfgSchema) -> SsT1ToneSweepRunResult:
         # Override standard run: domain run needs GE centres + uniform kwarg.
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         g_center, e_center, radius = read_ge_centers(req.md)
         uniform = self._uniform(raw_cfg)

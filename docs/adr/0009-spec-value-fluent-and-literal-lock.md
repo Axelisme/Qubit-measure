@@ -15,7 +15,7 @@ status: accepted
 
 ### 1. 鎖定屬於 Spec 樹，用 `LiteralSpec`
 
-證據：`types.py` 契約「Spec tree — static, never mutated」「Value tree — mutable」；`editable` 在 `ScalarSpec`、value 節點碰不到。`LiteralSpec` 已用於 spec 樹（`"type": LiteralSpec("readout/pulse")`），`LiteralLiveField` 已實作「value 永遠=spec.value、set_value no-op」。
+證據：`zcu_tools.gui.cfg.model` 契約「Spec tree — static, never mutated」「Value tree — mutable」；`editable` 在 `ScalarSpec`、value 節點碰不到。`LiteralSpec` 已用於 spec 樹（`"type": LiteralSpec("readout/pulse")`），`LiteralLiveField` 已實作「value 永遠=spec.value、set_value no-op」。
 
 → 鎖定 = `cfg_spec()` 內把該葉宣告/替換為 `LiteralSpec(value)`。**spec-only、不跨樹、不碰 value**。`lock_literal` **必須在 `cfg_spec()` 內呼叫且結果被 `return`**——鎖是 spec 契約的一部分，在 `cfg_spec()` 外對其回傳值鎖會讓 spec 不再是 SSOT。
 

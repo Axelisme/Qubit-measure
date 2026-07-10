@@ -16,6 +16,13 @@ from zcu_tools.gui.app.main.services.guard import (
     WritebackPermit,
 )
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    ScalarSpec,
+)
 
 
 def _make_state(
@@ -36,11 +43,13 @@ def _make_state(
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(requires_soc=requires_soc)
 
-    schema = MagicMock()
     if lowering_raises:
-        schema.to_raw_dict.side_effect = RuntimeError("field 'gain' is unset")
+        schema = CfgSchema(
+            spec=CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
+            value=CfgSectionValue(fields={"gain": DirectValue(None)}),
+        )
     else:
-        schema.to_raw_dict.return_value = {"ok": True}
+        schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
     tab = Session(adapter_name="any", adapter=adapter, cfg_schema=schema)
     tab.run_result = run_result

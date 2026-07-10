@@ -189,12 +189,12 @@ GUI app state 的單檔存讀者。由 `MeasureGuiBehavior.before_show` 在 app 
 _Avoid_: 讓 Caretaker 訂 event / 碰 State / 認識 cfg、把「只在關閉寫」當成 Caretaker 的不變式（是當前唯一觸發、非設計上限）
 
 **AppPersistedState memento**（`persistence_types.py`，pydantic v2 frozen）:
-整個 GUI app state 的不可變快照——`{version, startup: PersistedStartup, session: PersistedSession}`，存單一 `gui_state_v1.json`。**單一 top-level `APP_STATE_VERSION`**（不分 startup/session 子版本）;`model_validate` 做 load 驗證（壞檔/版本不符 Fast-Fail→default），`model_dump` 產 JSON。是「選擇性投影」——capture 當下從 State/View 造出，**非 State 全量序列化**（State 可含不可序列化活物件，投影只取可序列化的偏好/tabs）。`cfg_raw` 對 Caretaker 不透明（其 raw↔live codec 是 WorkspaceService 內部實作 `session_codec`）。
+整個 GUI app state 的不可變快照——`{version, startup: PersistedStartup, session: PersistedSession}`，存單一 `gui_state_v1.json`。**單一 top-level `APP_STATE_VERSION`**（不分 startup/session 子版本）;`model_validate` 做 load 驗證（壞檔/版本不符 Fast-Fail→default），`model_dump` 產 JSON。是「選擇性投影」——capture 當下從 State/View 造出，**非 State 全量序列化**（State 可含不可序列化活物件，投影只取可序列化的偏好/tabs）。`cfg_raw` 對 Caretaker 不透明（raw↔live transform 由 shared `zcu_tools.gui.cfg.codec` 擁有，WorkspaceService 在 capture/apply 使用）。
 _Avoid_: 讓 memento 帶 live/不可序列化物件、startup/session 各自版本號、把 cfg codec 洩漏進 Caretaker
 
 **三層 capture/restore**（Originator 鏈）:
-持久化是一條 `Caretaker（I/O）↔ Controller（單一 Originator，彙整/派發）↔ 各 service（capture/restore，序列化內化）` 的鏈。Controller `capture_persisted_state()`/`restore_persisted_state()` 是 Memento Originator 面;各 service（Workspace `capture_session`/`apply_session`、Startup `capture_startup`/`restore_startup`）各自吐/吃自己那半的 memento，序列化邏輯（cfg lowering、device 投影）內化於此、不外露。
-_Avoid_: 讓 Caretaker reach into 各 service / State（god 依賴）、把 codec/投影抽成獨立物件（它是 service capture/restore 的內部實作）
+持久化是一條 `Caretaker（I/O）↔ Controller（單一 Originator，彙整/派發）↔ 各 service（capture/restore）` 的鏈。Controller `capture_persisted_state()`/`restore_persisted_state()` 是 Memento Originator 面;各 service（Workspace `capture_session`/`apply_session`、Startup `capture_startup`/`restore_startup`）各自吐/吃自己那半的 memento。WorkspaceService 擁有 capture/apply workflow，cfg raw↔live transform 委派 shared `zcu_tools.gui.cfg.codec`；device 等 app-specific 投影仍內化於 owner service、不外露。
+_Avoid_: 讓 Caretaker reach into各 service / State（god依賴）、讓 Caretaker認識 cfg codec、把 app-specific 投影責任洩漏出 owner service、在 app service 重複實作 shared codec
 
 **startup 預填值 `State.startup_prefs`**:
 「記住的 startup 偏好」（project chip/qub/res/dir/db + ip/port + left_panel_width），**與 active `ExpContext` 分開的一塊 State**。語意是「下次該預填什麼」非「當前 active 什麼」。**連線值與預填值不分**——因為重啟不自動連線，套用/連線時就把用過的值同步寫進 `startup_prefs`（寫入當下），capture 只讀它，restore 寫它且**不自動套 active context**（project 等 user 在 setup dialog 套用）。device 記憶集**不**進 startup_prefs（它在 `State.devices` 的 `remember` 旗標，capture 時即時投影）。

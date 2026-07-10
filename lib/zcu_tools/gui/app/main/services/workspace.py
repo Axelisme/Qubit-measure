@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.events.tab import TabAddedPayload, TabClosedPayload
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.cfg import SessionCodecError, raw_to_schema, schema_to_raw
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from .persistence_types import PersistedSession, PersistedTab
 from .ports import RestoreIssue, RestoreReport, TabSnapshot
-from .session_codec import SessionCodecError, raw_to_schema, schema_to_raw
 
 if TYPE_CHECKING:
     from .ports import TabLifecyclePort
@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 class WorkspaceService:
     """Own tab lifecycle and tab-session capture/apply workflow.
 
-    The cfg raw↔live codec (``session_codec``) is this service's internal
-    implementation of capturing/applying a session; the PersistenceCaretaker
+    The shared cfg raw↔live codec is this service's implementation dependency for
+    capturing/applying a session; the PersistenceCaretaker
     only ever sees the resulting ``PersistedSession`` memento (opaque cfg_raw).
     """
 

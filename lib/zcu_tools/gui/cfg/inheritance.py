@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger(__name__)
-
-from .types import (
+from .model import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeValue,
@@ -23,6 +21,8 @@ from .types import (
     WaveformRefValue,
     default_value_for_type,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:

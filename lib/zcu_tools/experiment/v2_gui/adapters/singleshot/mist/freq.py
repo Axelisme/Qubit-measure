@@ -28,6 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     SweepSpec,
     require_soc_handles,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 
 from .._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
 
@@ -113,7 +114,7 @@ class MistFreqAdapter(
         # Override the standard run path: the domain run needs the GE
         # classification trio (not in cfg) — read it from md and forward it.
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema.to_raw_dict(req.md, req.ml)
+        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         g_center, e_center, radius = read_ge_centers(req.md)
         return FreqDepExp().run(soc, soccfg, cfg, g_center, e_center, radius)

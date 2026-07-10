@@ -9,9 +9,9 @@ from zcu_tools.gui.app.main.services.persistence_types import (
     PersistedSession,
     PersistedTab,
 )
-from zcu_tools.gui.app.main.services.session_codec import SessionCodecError
 from zcu_tools.gui.app.main.services.workspace import WorkspaceService
 from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.cfg import SessionCodecError
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 

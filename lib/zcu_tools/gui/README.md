@@ -1,10 +1,23 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-09 (runtime entrypoint contract)
+**Last updated:** 2026-07-10（shared cfg core ownership）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 `plotting`, `remote`, `session`, `widgets`) are shared by every app.
+
+## Shared Config Core (`cfg/`)
+
+`zcu_tools.gui.cfg` 擁有 Qt-free 的 Spec/Value tree、`CfgSchema` data carrier、
+default/inheritance helpers 與 raw persistence codec。此 package 不 import
+`gui.app.*`、`experiment.*`、Qt 或 `meta_tool`；measure adapter 只 re-export同一組
+public identity，不保留第二份 model/inheritance/codec implementation。
+
+finished-cfg validation/lowering仍位於
+`gui.app.main.adapter.lowering`，因 linked Module/Waveform reference 需要
+measure-owned `ModuleLibrary` shape conversion。autofluxdep 直接使用 shared model/codec，
+但本 slice 仍明名呼叫 measure lowering，pulse/readout conversion 與 Qt form seam 也仍是
+app coupling；generic resolver seam 尚未下沉（ADR-0045）。
 
 ## Process Runtime (`runtime.py`)
 

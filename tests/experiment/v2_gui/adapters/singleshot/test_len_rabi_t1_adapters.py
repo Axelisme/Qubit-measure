@@ -1,7 +1,7 @@
 """Tests for the len_rabi, t1, and t1_tone singleshot adapters.
 
 Covers:
-- cfg_spec structure + make_default_cfg().validate(ml) + filename stem
+- cfg_spec structure + validate_schema(make_default_cfg(), ml) + filename stem
 - run override: md has GE centres → correct domain run call (mock)
 - run override: md missing centres → fast-fail
 - uniform kwarg is correctly extracted from raw cfg and forwarded (t1 / t1_tone)
@@ -46,6 +46,10 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import (
+    schema_to_raw_dict,
+    validate_schema,
+)
 from zcu_tools.meta_tool import MetaDict
 
 from ._helpers import (
@@ -73,8 +77,8 @@ def test_ss_len_rabi_cfg_validates() -> None:
     ml = _make_ml()
     adapter = SsLenRabiAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     modules = cast(dict[str, Any], raw["modules"])
     assert "qub_pulse" in modules
     assert "readout" in modules
@@ -122,7 +126,7 @@ def test_ss_len_rabi_build_exp_cfg_passes_correct_model() -> None:
     ml = _make_ml()
     adapter = SsLenRabiAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    raw = schema.to_raw_dict(None, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     cfg = adapter.build_exp_cfg(raw, _run_req(_md_with_centers(), ml))
     assert isinstance(cfg, LenRabiCfg)
 
@@ -131,8 +135,8 @@ def test_ss_t1_cfg_validates() -> None:
     ml = _make_ml()
     adapter = SsT1Adapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     modules = cast(dict[str, Any], raw["modules"])
     assert "pi_pulse" in modules
     assert "readout" in modules
@@ -148,7 +152,7 @@ def test_ss_t1_build_exp_cfg_pops_uniform() -> None:
     ml = _make_ml()
     adapter = SsT1Adapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    raw = schema.to_raw_dict(None, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     assert "uniform" in raw  # present before build
     adapter.build_exp_cfg(raw, _run_req(_md_with_centers(), ml))
     # make_cfg must not have received ``uniform`` in its first positional arg (dict).
@@ -162,8 +166,8 @@ def test_ss_t1_tone_cfg_validates() -> None:
     ml = _make_ml()
     adapter = SsT1ToneAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     modules = cast(dict[str, Any], raw["modules"])
     assert "pi_pulse" in modules
     assert "probe_pulse" in modules
@@ -198,7 +202,7 @@ def test_ss_t1_tone_build_exp_cfg_pops_uniform() -> None:
     ml = _make_ml()
     adapter = SsT1ToneAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    raw = schema.to_raw_dict(None, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     adapter.build_exp_cfg(raw, _run_req(_md_with_centers(), ml))
     call_args = ml.make_cfg.call_args
     passed_dict = call_args[0][0]

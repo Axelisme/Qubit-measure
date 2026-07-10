@@ -31,7 +31,7 @@ WorkspaceService.capture_session/apply_session、StartupService.capture_startup/
 - **單檔 `gui_state_v1.json` + 單一 `APP_STATE_VERSION`**：`AppPersistedState{version, startup, session}`，pydantic v2 frozen，`model_validate`/`model_dump` 取代手刻驗證。一次 atomic write（無「半套」狀態）；壞/舊版→default。
 - **關閉才寫**：移除 `DEVICE_CHANGED` 訂閱 + diff-guard + 所有 runtime 即寫。`flush()` 在 close（`_perform_close`/`app.shutdown`），`restore_all()` 在 `MeasureGuiBehavior.before_show` 啟動。crash 丟失可接受（startup 設定多是方便性記憶）。
 - **狀態進 State**：startup 偏好移入 `State.startup_prefs`（[[0004]] 兩軸：除 owner 外 setup dialog 也讀 → 進 State），`StartupService` 回歸無狀態。套用/連線時同步寫 prefs（寫入當下），capture 只讀。
-- **codec 不搬家**：tabs 的 raw↔live `session_codec` 是 WorkspaceService capture/apply 的**內部實作**，Caretaker 只見不透明 `cfg_raw`。
+- **codec ownership**：tabs 的 raw↔live transform 由 shared `zcu_tools.gui.cfg.codec` 擁有；WorkspaceService 在 capture/apply 使用它，Caretaker 只見不透明 `cfg_raw`。
 
 ## flush 觸發點開放擴充（不寫死 lifecycle-only）
 
@@ -47,7 +47,7 @@ WorkspaceService.capture_session/apply_session、StartupService.capture_startup/
 
 ## 後果
 
-- 刪 `SessionPersistenceService` + `StartupPersistenceService` + `StartupStorePort`/`SessionStorePort`；新增 `caretaker.py`/`persistence_types.py`/`session_codec.py`；`RestoreReport`/`RestoreIssue` 移 `ports.py`。
+- 不使用 `SessionPersistenceService` + `StartupPersistenceService` + `StartupStorePort`/`SessionStorePort`；Caretaker/persistence types 與 shared `gui.cfg.codec` 分工；`RestoreReport`/`RestoreIssue` 位於 `ports.py`。
 - Controller 多 `attach_caretaker`/`capture_persisted_state`/`restore_persisted_state`/`restore_all`/`persist_all`；移除 `restore_tabs_from_session`/`persist_tabs_session`/`restore_startup_settings`/`get/save_persisted_left_panel_width`。保留 `apply_startup_project`/`remember_startup_connection`/`get_persisted_startup`（寫改成更新 `startup_prefs`）。
 - RemoteControlAdapter 移除 `session.persist`/`session.restore`（WIRE 16→17、GUI 13→14、MCP 18→19）。
 - `_on_device_changed` 投影邏輯延到 `capture_startup`（flush 時即時從 `State.list_devices()` 投影 remember 集）。

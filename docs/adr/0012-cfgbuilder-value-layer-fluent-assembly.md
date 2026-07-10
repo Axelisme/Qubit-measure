@@ -27,7 +27,7 @@ grill 過程定錨的事實（推翻 HANDOFF 對 backlog 2 的舊描述）：
 
 ### 1. 三層分工：L1 blank / L2 role default / L3 CfgBuilder
 
-- **L1** `make_default_value(spec)`（gui 框架層，`inheritance.py`，不動）：吃 spec，回結構完整、值中性
+- **L1** `make_default_value(spec)`（shared GUI cfg 層，`zcu_tools.gui.cfg.inheritance`）：吃 spec，回結構完整、值中性
   骨架（scalar→0/0.0/""、optional ref→None、required ref→`allowed[0]` blank）。
 - **L2** role default（領域層 `shared/defaults/`）：每角色一個 `RoleDef` literal（`role_table.py`
   的 `ROLE_TABLE`），由 `role_blank` / `role_ref` 兩個泛型 builder 消費，產單角色

@@ -42,6 +42,10 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleRefValue,
     SweepValue,
 )
+from zcu_tools.gui.app.main.adapter.lowering import (
+    schema_to_raw_dict,
+    validate_schema,
+)
 from zcu_tools.meta_tool import MetaDict
 
 from ._helpers import (
@@ -118,8 +122,8 @@ def test_mist_cfg_validates_and_delegates(
 
     ml = _make_ml()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     modules = cast(dict[str, Any], raw["modules"])
     assert "probe_pulse" in modules
     assert "readout" in modules
@@ -181,8 +185,8 @@ def test_check_cfg_validates_and_has_shots() -> None:
     ml = _make_ml()
     adapter = CheckAdapter()
     schema = adapter.make_default_cfg(_make_ctx(ml))
-    schema.validate(ml)
-    raw = schema.to_raw_dict(None, ml)
+    validate_schema(schema, ml)
+    raw = schema_to_raw_dict(schema, None, ml)
     assert raw["shots"] == 5000
     modules = cast(dict[str, Any], raw["modules"])
     assert "probe_pulse" in modules and "readout" in modules

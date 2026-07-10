@@ -12,6 +12,7 @@ from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     WaveformRefValue,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
@@ -84,7 +85,7 @@ def test_module_cfg_to_value_direct_readout_preserves_gen_ch_round_trip():
 
     assert cast(DirectValue, val.fields["gen_ch"]).value == 9
 
-    raw = CfgSchema(spec=spec, value=val).to_raw_dict(md=None, ml=None)
+    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), md=None, ml=None)
     assert raw["gen_ch"] == 9
 
 
@@ -100,7 +101,7 @@ def test_module_cfg_to_value_direct_readout_missing_gen_ch_lowers_omitted():
 
     assert cast(DirectValue, val.fields["gen_ch"]).value is None
 
-    raw = CfgSchema(spec=spec, value=val).to_raw_dict(md=None, ml=None)
+    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), md=None, ml=None)
     assert "gen_ch" not in raw
 
 
@@ -187,7 +188,7 @@ def test_module_cfg_to_value_pulse_round_trip():
     }
     spec, val = module_cfg_to_value(cfg)
     schema = CfgSchema(spec=spec, value=val)
-    out = schema.to_raw_dict(md=None, ml=None)
+    out = schema_to_raw_dict(schema, md=None, ml=None)
 
     assert out["freq"] == 5000.0
     assert out["gain"] == 0.5

@@ -51,7 +51,7 @@ status: accepted
 
 - 動 value 型別系統：刪 `DisabledRefValue`（從 `CfgNodeValue` union 移除）、`DirectValue` 刪 `is_unset` + value 改 `Optional`、`CfgSectionValue.fields` 改 `dict[str, Optional[CfgNodeValue]]`。
 - `live_model`：`ModuleRefLiveField.get_value/set_value` 對停用回/收 `None`；`SectionLiveField` 父層不再 reach-in；`ScalarLiveField` 未填存 `None` 不再填占位。
-- `session_codec`：停用 ref↔`{"__kind":"disabled"}`↔`None`；scalar 不寫 is_unset，未填 `value:null`；缺 optional ref key 經完整 `make_default_value` 兜底自動得 `None`（bug 還原端自動修復）。
+- `zcu_tools.gui.cfg.codec`：停用 ref↔`{"__kind":"disabled"}`↔`None`；scalar 不寫 is_unset，未填 `value:null`；缺 optional ref key 經完整 `make_default_value` 兜底自動得 `None`（bug 還原端自動修復）。
 - `lowering`：`None` 統一處理（optional 省略 / required raise）；邏輯變簡單。
 - `make_*_ref_default(optional=True)`（8 個工廠，`experiment/v2_gui`）改回 `None`；lookback **無需改**（省略 key 經 helper 完整兜底自動得 `None`）。
 - persistence 格式微調（scalar 去 is_unset、停用 ref 用 `disabled` marker）：舊檔走 strict fallback（[[0015]]），可接受一次性遷移；屬同 GUI_VERSION 內（無 wire/RPC 語意改動）。

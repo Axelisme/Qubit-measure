@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-09 - remote writeback control facet
+**Last updated:** 2026-07-10 — shared cfg core ownership
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -9,8 +9,8 @@ framework 只看 `ExpAdapterProtocol`。
 
 ## Package Boundaries
 
-- `adapter/`：framework-facing contract、Spec/Value type tree、lowering、analyze
-  params、adapter validation。
+- `adapter/`：framework-facing contract、finished-cfg lowering、analyze params、adapter
+  validation，以及 shared cfg public identity 的暫時 compatibility re-export。
 - `specs/`：program module cfg 的 GUI spec factory。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
@@ -27,6 +27,8 @@ framework 只看 `ExpAdapterProtocol`。
 
 Shared layers:
 
+- `zcu_tools.gui.cfg`：Qt-free Spec/Value model、`CfgSchema` data carrier、inheritance、
+  persistence codec；不擁有 linked-reference lowering。
 - `zcu_tools.gui.session`：context、SoC、device、startup、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
@@ -137,10 +139,15 @@ The GUI uses a two-tree model:
 - Spec tree: static shape, labels, variants, literal locks, optional/ref rules.
 - Value tree: mutable draft data shown by the editor.
 
-`CfgSchema.to_raw_dict(md, ml)` is the lowering boundary. `EvalValue` resolves
+`adapter.lowering.schema_to_raw_dict(schema, md, ml)` is the finished-cfg lowering
+boundary. `CfgSchema` 本身只保存 shared spec/value data。`EvalValue` resolves
 against current `MetaDict` when a field is set or lowered. `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
+
+static/dynamic validation與 linked Module/Waveform reference resolution仍由 measure
+adapter lowering負責；measure adapter package re-export `zcu_tools.gui.cfg` identities，
+不保留 app-local model/inheritance/codec implementation（ADR-0045）。
 
 Sweep-like fields keep their UI value model until this lowering boundary:
 `SweepSpec` stores `start` / `stop` / `expts`, while `CenteredSweepSpec` stores

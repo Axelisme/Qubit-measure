@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any, Final, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeSpec,
@@ -31,13 +32,11 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleRefSpec,
     ModuleRefValue,
     ScalarSpec,
+    SessionCodecError,
     SweepSpec,
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
-)
-from zcu_tools.gui.app.main.services.session_codec import (
-    SessionCodecError,
     raw_to_schema,
     schema_to_raw,
 )
@@ -329,7 +328,7 @@ class NodeCfgSchema:
         self, ml: ModuleLibrary | None, md: MetaDict | None = None
     ) -> dict[str, Any]:
         """Lower the full adapter-shaped cfg tree, omitting autofluxdep-only knobs."""
-        raw = self.schema.to_raw_dict(md=md, ml=ml)
+        raw = schema_to_raw_dict(self.schema, md=md, ml=ml)
         raw.pop("generation", None)
         return raw
 
@@ -622,10 +621,14 @@ def _lower_value_at_path(
 ) -> Any:
     value = _get_value_at_path(value_tree, path)
     try:
-        raw = CfgSchema(
-            spec=CfgSectionSpec(fields={"value": spec}),
-            value=CfgSectionValue(fields={"value": value}),
-        ).to_raw_dict(md=md, ml=ml)
+        raw = schema_to_raw_dict(
+            CfgSchema(
+                spec=CfgSectionSpec(fields={"value": spec}),
+                value=CfgSectionValue(fields={"value": value}),
+            ),
+            md=md,
+            ml=ml,
+        )
     except RuntimeError as exc:
         raise RuntimeError(_rewrite_single_value_lower_error(str(exc), path)) from exc
     return raw.get("value", _MISSING)

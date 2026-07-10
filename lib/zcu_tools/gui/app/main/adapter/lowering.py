@@ -4,13 +4,10 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any
 
-logger = logging.getLogger(__name__)
-
-_LOCKED_CENTER_ABS_TOL = 1e-12
-
-from .types import (
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     DeviceRefSpec,
@@ -26,8 +23,38 @@ from .types import (
     WaveformRefValue,
 )
 
+logger = logging.getLogger(__name__)
+
+_LOCKED_CENTER_ABS_TOL = 1e-12
+
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+
+def validate_schema(schema: CfgSchema, ml: ModuleLibrary | None) -> None:
+    """Validate the static contract at a finished-cfg boundary."""
+    validate_section(schema.spec, schema.value, ml, [])
+
+
+def validate_dynamic_schema(
+    schema: CfgSchema,
+    md: MetaDict,
+    ml: ModuleLibrary | None,
+) -> None:
+    """Validate that a finished cfg can resolve against the current context."""
+    validate_dynamic_section(schema.spec, schema.value, md, ml, [])
+
+
+def schema_to_raw_dict(
+    schema: CfgSchema,
+    md: MetaDict | None,
+    ml: ModuleLibrary | None,
+) -> dict[str, object]:
+    """Lower a finished cfg while preserving the established validation order."""
+    validate_schema(schema, ml)
+    if md is not None:
+        validate_dynamic_schema(schema, md, ml)
+    return _section_to_dict_inner(schema.spec, schema.value, ml, [], md)
 
 
 def _resolve_eval(

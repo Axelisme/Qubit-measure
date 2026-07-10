@@ -64,14 +64,13 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import (
     SingleToneLengthAdapter,
 )
 from zcu_tools.gui.app.main.adapter import (
-    CfgSchema,
-    CfgSectionValue,
     MetaDictWriteback,
-    ModuleRefValue,
     ModuleWriteback,
     RunRequest,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue, ModuleRefValue
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import PulseCfg, SweepCfg
 from zcu_tools.program.v2.modules import (
@@ -108,13 +107,14 @@ def _make_req(ml: MagicMock | None = None) -> RunRequest:
 
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
-    return schema.to_raw_dict(None, req.ml)
+    return schema_to_raw_dict(schema, None, req.ml)
 
 
 def _pulse_ref_section(node: object) -> CfgSectionValue:
     assert isinstance(node, ModuleRefValue)
-    assert isinstance(node.value, CfgSectionValue)
-    return node.value
+    ref = cast(ModuleRefValue, node)
+    assert isinstance(ref.value, CfgSectionValue)
+    return ref.value
 
 
 def _make_pulse(freq: float = 100.0, gain: float = 0.5) -> PulseCfg:

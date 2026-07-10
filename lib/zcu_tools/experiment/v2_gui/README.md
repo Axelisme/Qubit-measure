@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-08 — T1 non-uniform sweep controls
+**Last updated:** 2026-07-10 — shared cfg lowering seam
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -29,10 +29,13 @@ md/ml 算預設值）、`run` / `analyze` / `get_writeback_items`，並在同一
 `gui/app/main/README.md`。
 
 `BaseAdapter.build_exp_cfg` 是 GUI run path 的 cfg materialization seam：adapter 先用
-`schema.to_raw_dict(req.md, req.ml)` 在 GUI adapter 層完成 EvalValue / md lowering，再把
+`gui.app.main.adapter.lowering.schema_to_raw_dict(schema, req.md, req.ml)` 在 GUI adapter
+層完成 EvalValue / md lowering，再把
 concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
 assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active
 `ml/md` 綁進長壽 service object，也不要讓 `ModuleLibrary` store 擁有 live device snapshot。
+這是 shared `CfgSchema` data carrier extraction後的過渡 app-local seam；role/module conversion
+仍在 experiment/measure domain，不下沉到 `zcu_tools.gui.cfg`。
 
 Adapter default value 由 `CfgBuilder` 組裝。`.role(path, role)` 預設採 `Init.ADOPT`：優先引用
 ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline blank；`.role(..., Init.INLINE)`

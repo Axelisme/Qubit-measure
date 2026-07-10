@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from .adapter.types import CenteredSweepValue, EvalValue, SweepValue
+from zcu_tools.gui.cfg import CenteredSweepValue, EvalValue, SweepValue
 
 
 class SweepEditor:

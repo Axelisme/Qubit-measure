@@ -1,20 +1,17 @@
-"""Session cfg codec — pure raw↔live transforms for tab cfg persistence.
+"""Pure raw↔live transforms for shared GUI cfg persistence.
 
-WorkspaceService's internal implementation of capturing/restoring a tab's cfg:
-``schema_to_raw`` lowers a live ``CfgSchema`` to a JSON-able dict (``cfg_raw`` in
-the memento); ``raw_to_schema`` rebuilds the live value tree from that dict given
-the adapter's base spec. Pure functions, no I/O, no state — the persisted
-``cfg_raw`` is opaque to the Caretaker; only this codec knows its shape.
-
-Moved out of the former ``SessionPersistenceService`` (Phase 126): the disk I/O
-went to the Caretaker, this codec stays as WorkspaceService's helper.
+``schema_to_raw`` encodes a live ``CfgSchema`` as a JSON-compatible dict;
+``raw_to_schema`` rebuilds the value tree against a base spec. The codec owns no
+I/O or app state, and both measure workspace persistence and autofluxdep node
+persistence use the same wire shape.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
-from zcu_tools.gui.app.main.adapter import (
+from .inheritance import make_default_value
+from .model import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgNodeSpec,
@@ -33,7 +30,6 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
     WaveformRefSpec,
     WaveformRefValue,
-    make_default_value,
 )
 
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ def lower_module(schema: CfgSchema, ml: ModuleLibrary, md: MetaDict) -> object:
     """
     from zcu_tools.program.v2 import ModuleCfgFactory
 
-    raw = schema.to_raw_dict(md, ml)
+    raw = schema_to_raw_dict(schema, md, ml)
     try:
         return ModuleCfgFactory.from_raw(raw, ml=ml)
     except Exception as exc:  # noqa: BLE001 — surface as an expected validation error
@@ -44,7 +45,7 @@ def lower_waveform(schema: CfgSchema, ml: ModuleLibrary, md: MetaDict) -> object
     """
     from zcu_tools.program.v2 import WaveformCfgFactory
 
-    raw = schema.to_raw_dict(md, ml)
+    raw = schema_to_raw_dict(schema, md, ml)
     try:
         return WaveformCfgFactory.from_raw(raw, ml=ml)
     except Exception as exc:  # noqa: BLE001 — surface as an expected validation error

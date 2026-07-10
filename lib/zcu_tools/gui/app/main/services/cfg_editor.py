@@ -28,7 +28,8 @@ for exactly this reason.
 
 ``EvalValue`` fields (md-reference expressions, e.g. ``r_f - 0.1``) are carried
 on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}`` and
-resolved against the live MetaDict at ``commit`` time (``schema.to_raw_dict`` lowers
+resolved against the live MetaDict at ``commit`` time (the app-local
+``schema_to_raw_dict`` seam lowers
 ``EvalValue`` to its concrete ``resolved`` number), because ModuleLibrary stores
 concrete numbers, never md references. ``value_ref`` tags are different: they are
 resolved once at ``set_field`` time and stored only as ``DirectValue`` snapshots.

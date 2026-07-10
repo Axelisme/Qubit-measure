@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from zcu_tools.gui.app.autofluxdep.cfg import (
@@ -40,7 +40,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import (
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     CfgNodeSpec,
     ModuleRefValue,
     WaveformRefValue,
@@ -386,7 +386,7 @@ def _knob_scalar_value(value: object) -> object:
     if isinstance(value, EvalValue):
         return _knob_eval_value(value)
     if isinstance(value, np.generic):
-        return value.item()
+        return cast(np.generic, value).item()
     return value
 
 

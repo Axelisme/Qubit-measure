@@ -29,6 +29,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformRefValue,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueKey, ValueRegistry
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import (
@@ -73,7 +74,7 @@ def _make_req(
 
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
-    return schema.to_raw_dict(None, req.ml)
+    return schema_to_raw_dict(schema, None, req.ml)
 
 
 def _make_pulse_readout(
@@ -168,7 +169,7 @@ def _assert_readout_rf_schema(
         waveform_length
     )
 
-    raw = item.edit_schema.to_raw_dict(MetaDict(), ModuleLibrary())
+    raw = schema_to_raw_dict(item.edit_schema, MetaDict(), ModuleLibrary())
     assert raw["type"] == "readout/pulse"
     raw_pulse = cast(dict[str, Any], raw["pulse_cfg"])
     raw_ro = cast(dict[str, Any], raw["ro_cfg"])

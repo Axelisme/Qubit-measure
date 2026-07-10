@@ -33,6 +33,7 @@
 - [0012 — CfgBuilder value assembly](0012-cfgbuilder-value-layer-fluent-assembly.md)：adapter default value 透過 fluent builder 與 role table 組裝。
 - [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter 顯式宣告 capabilities，import-time validation 抓宣告與 hook 不一致。
 - [0043 — Autofluxdep runtime cfg override plan](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、runtime patch enforcement、remote/artifact exposure 與 cfg form decoration。
+- [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有純 Spec/Value、inheritance、codec；finished-cfg lowering暫留 measure app。
 
 ## Remote / Transport
 

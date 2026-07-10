@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# CfgSchema.validate — adapter 必回傳完整合法 value 樹，靜態檢查在成品邊界
+# Finished-cfg validation — adapter 必回傳完整合法 value 樹，靜態檢查在成品邊界
 
 ## 脈絡
 
@@ -18,7 +18,10 @@ choices、LiteralSpec 與 spec 矛盾）能一路通過 lowering 進 exp cfg。
 
 ## 決策
 
-**新增 `CfgSchema.validate(ml)`，在「成品邊界」顯式呼叫，強制 value 樹完整且靜態合法。**
+**`validate_schema(schema, ml)` 在「成品邊界」顯式呼叫，強制 value 樹完整且靜態合法。**
+
+`CfgSchema` 由 `zcu_tools.gui.cfg.model` 擁有，只保存 spec/value；validation 與
+linked-reference resolution 位於 measure-owned `gui.app.main.adapter.lowering`（[[0045]]）。
 
 ### validate 的契約（靜態，不需 md）
 
@@ -33,13 +36,14 @@ choices、LiteralSpec 與 spec 矛盾）能一路通過 lowering 進 exp cfg。
 
 ### 呼叫點 = 成品邊界（不放 `__post_init__`）
 
-- **`BaseAdapter.make_default_cfg`**：產 schema 後 `validate(ctx.ml)` → adapter 漏/錯當場 raise，
+- **`BaseAdapter.make_default_cfg`**：產 schema 後 `validate_schema(schema, ctx.ml)` → adapter 漏/錯當場 raise，
   責任明確指向那 adapter，**框架不補齊**。一處守 ~20 adapter。
-- **`CfgSchema.to_raw_dict`（lower）**：lower 前 `self.validate(ml)` → 任何要 lower 的 cfg 先過驗證。
+- **`schema_to_raw_dict(schema, md, ml)`（lower）**：lower 前先呼叫
+  `validate_schema(schema, ml)` → 任何要 lower 的 cfg 先過驗證。
 
 **不放 `CfgSchema.__post_init__`**：`CfgSchema` 被大量「合法的編輯中間態」建構（cfg_form 每次按鍵、
 editor draft、codec restore），值可暫時不合法（清空欄位、舊檔）。`__post_init__` 一視同仁會誤傷。
-validate 是成品邊界的**顯式動作**，不是型別的隱性負擔。
+validation 是成品邊界的**顯式動作**，不是型別的隱性負擔。
 
 ### 靜態 vs 動態分界
 
@@ -61,8 +65,8 @@ validate 是成品邊界的**顯式動作**，不是型別的隱性負擔。
 
 ## Consequences
 
-- `CfgSchema.validate(ml)`（薄 wrapper）→ `lowering.validate_section`（遞迴，復用 `find_allowed_spec`）。
-- `make_default_cfg` + `to_raw_dict` 加 validate 呼叫。
+- `validate_schema(schema, ml)`（薄 wrapper）→ `lowering.validate_section`（遞迴，復用 `find_allowed_spec`）。
+- `make_default_cfg` + `schema_to_raw_dict` 加 static validation 呼叫。
 - ~20 adapter：lookback 補 `reps`/`init_pulse`/`reset` entry；onetone/freq 在 value 端 `.with_field`
   覆寫 lock_literal 的 freq/ro_freq=0.0；其餘本就完整不動。
 - 移除 codec `_default_node_value` 回退（value 樹保證完整後不需要；非 ref None 改 fast-fail）。

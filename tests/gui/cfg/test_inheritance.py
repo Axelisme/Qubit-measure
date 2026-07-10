@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.main.specs.readout import (
+    make_direct_readout_spec,
+    make_pulse_readout_spec,
+)
+from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
     CfgSectionSpec,
@@ -19,10 +23,6 @@ from zcu_tools.gui.app.main.adapter import (
     align_locked_literals,
     inherit_from,
     make_default_value,
-)
-from zcu_tools.gui.app.main.specs.readout import (
-    make_direct_readout_spec,
-    make_pulse_readout_spec,
 )
 
 # ---------------------------------------------------------------------------

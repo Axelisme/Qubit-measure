@@ -10,6 +10,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     require_soc_handles,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.session.types import ContextReadiness
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,7 @@ class GuardService:
 
         # Lowering verifies committed cfg validity (fail-fast before any worker).
         try:
-            raw_cfg = tab.cfg_schema.to_raw_dict(ctx.md, ctx.ml)
+            raw_cfg = schema_to_raw_dict(tab.cfg_schema, ctx.md, ctx.ml)
         except Exception as exc:
             raise GuardError(
                 f"Config invalid: {exc}", reason_code="invalid_cfg"

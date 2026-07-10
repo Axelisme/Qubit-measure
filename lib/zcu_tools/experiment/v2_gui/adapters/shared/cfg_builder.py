@@ -35,7 +35,7 @@ Layering (ADR-0012):
   refs), so an adapter never restates a locked value, and ``.set()`` on a locked
   path Fast-Fails (the spec owns that value).
 - ``.build()`` does **not** validate — validation stays at the cfg boundary
-  (``BaseAdapter.make_default_cfg`` / ``CfgSchema.to_raw_dict``).
+  (``BaseAdapter.make_default_cfg`` / app-local ``schema_to_raw_dict``).
 
 Every method Fast-Fails on a bad path / kind / type mismatch, pointing at the
 offending call rather than surfacing as a later lowering error.
