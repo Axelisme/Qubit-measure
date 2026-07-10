@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
+from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
+from zcu_tools.gui.app.autofluxdep.nodes.utils.module_values import (
     ctx_md_float,
     ctx_module,
     readout_pulse_freq,
     readout_pulse_gain,
 )
-from zcu_tools.gui.app.autofluxdep.nodes.module_aliases import READOUT_LIBRARY_ALIASES
 
 
 def seed_readout_freq(ctx: Any | None, fallback: float) -> float:

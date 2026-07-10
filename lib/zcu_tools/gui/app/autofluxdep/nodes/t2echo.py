@@ -60,11 +60,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     signal2real_flip,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    pop_sweep_range,
-    pulse_module_patches,
-    readout_module_patches,
-)
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
     is_lowerable_pulse_module,
     missing_info_value,
@@ -91,6 +86,11 @@ from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
 )
+from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
+    pulse_module_patches,
+    readout_module_patches,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.utils.timing import pop_sweep_range
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,

@@ -8,6 +8,7 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverrideMode,
     OverridePath,
     OverridePlan,
+    module_leaf_patches,
     module_override_paths,
 )
 
@@ -27,6 +28,22 @@ READOUT_FALLBACK_LEAF_PATHS: tuple[str, ...] = (
     "ro_cfg.ro_freq",
     "ro_cfg.ro_length",
 )
+
+
+def pulse_module_patches(module_name: str, module: object) -> dict[str, object]:
+    return module_leaf_patches(
+        prefix=f"modules.{module_name}",
+        module=module,
+        leaf_paths=PULSE_MODULE_LEAF_PATHS,
+    )
+
+
+def readout_module_patches(readout: object) -> dict[str, object]:
+    return module_leaf_patches(
+        prefix="modules.readout",
+        module=readout,
+        leaf_paths=READOUT_FALLBACK_LEAF_PATHS,
+    )
 
 
 class NodeOverridePlan:
@@ -92,4 +109,6 @@ __all__ = [
     "NodeOverridePlan",
     "PULSE_MODULE_LEAF_PATHS",
     "READOUT_FALLBACK_LEAF_PATHS",
+    "pulse_module_patches",
+    "readout_module_patches",
 ]

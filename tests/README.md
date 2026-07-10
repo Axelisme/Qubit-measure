@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-10 — autofluxdep node builder contracts
+**Last updated:** 2026-07-10 — autofluxdep node helper ownership
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -259,7 +259,7 @@ interaction.
 
 ### Autofluxdep GUI tests
 
-`tests/autofluxdep_gui/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
+`tests/autofluxdep_gui/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
 
 `tests/autofluxdep_gui/test_labber_browser_export.py` 覆蓋 Labber Browser sidecar contract、fixed-axis sidecar live streaming row writes 與 terminal qubit_freq sidecar export。
 

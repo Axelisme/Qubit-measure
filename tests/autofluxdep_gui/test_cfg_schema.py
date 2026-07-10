@@ -46,7 +46,6 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
 from zcu_tools.gui.app.autofluxdep.cfg.schema import NodeCfgPersistenceError
 from zcu_tools.gui.app.autofluxdep.feedback.runtime import FeedbackSlotDecl
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import pulse_length, pulse_product
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.lenrabi import LenRabiBuilder
 from zcu_tools.gui.app.autofluxdep.nodes.mist import MistBuilder
@@ -67,6 +66,10 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     auto_stop_sweep_range,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.utils import NodeSchemaBuilder
+from zcu_tools.gui.app.autofluxdep.nodes.utils.module_values import (
+    pulse_length,
+    pulse_product,
+)
 from zcu_tools.gui.app.autofluxdep.registry import create_placement
 from zcu_tools.gui.cfg import LiteralSpec
 from zcu_tools.gui.session.types import ExpContext

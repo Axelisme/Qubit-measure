@@ -14,14 +14,6 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 import numpy as np
 
-from zcu_tools.gui.app.autofluxdep.cfg import FloatSpec, IntSpec
-from zcu_tools.gui.app.autofluxdep.cfg.schema import str_choice_spec
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    GenerationChoice,
-    GenerationField,
-    generation_choice,
-    generation_field,
-)
 from zcu_tools.utils.math import IDWInterpolation
 
 FeedbackKind = Literal["estimator", "controller"]
@@ -108,109 +100,6 @@ class FeedbackSlotDecl:
 
     def field_name(self, suffix: str) -> str:
         return f"{self.prefix}_{suffix}"
-
-
-def feedback_generation_fields(
-    slot: FeedbackSlotDecl, *, group: str = "feedback", group_label: str | None = None
-) -> tuple[GenerationField, ...]:
-    """Return generation fields for ``slot`` under the requested group."""
-
-    fields: list[GenerationField] = []
-    if slot.kind == "estimator":
-        fields.extend(
-            (
-                generation_field(
-                    slot.field_name("strategy"),
-                    slot.field_name("strategy"),
-                    str_choice_spec(
-                        "strategy",
-                        (STRATEGY_OFF, "idw", "last_good"),
-                        tooltip="Select how trusted samples estimate the next value.",
-                    ),
-                    str(slot.default_strategy),
-                    group=group,
-                    group_label=group_label,
-                ),
-                generation_field(
-                    slot.field_name("idw_k"),
-                    slot.field_name("idw_k"),
-                    IntSpec(
-                        label="idw_k",
-                        tooltip="Nearest trusted samples used by IDW estimation.",
-                    ),
-                    slot.default_idw_k,
-                    group=group,
-                    group_label=group_label,
-                ),
-                generation_field(
-                    slot.field_name("idw_epsilon"),
-                    slot.field_name("idw_epsilon"),
-                    FloatSpec(
-                        label="idw_epsilon",
-                        tooltip="Small distance floor for IDW weighting.",
-                    ),
-                    slot.default_idw_epsilon,
-                    group=group,
-                    group_label=group_label,
-                ),
-                generation_field(
-                    slot.field_name("decay_points"),
-                    slot.field_name("decay_points"),
-                    FloatSpec(
-                        label="decay_points",
-                        tooltip="Flux queries before stale estimates fade out.",
-                    ),
-                    slot.default_decay_points,
-                    group=group,
-                    group_label=group_label,
-                ),
-            )
-        )
-    else:
-        fields.append(
-            generation_field(
-                slot.field_name("strategy"),
-                slot.field_name("strategy"),
-                str_choice_spec(
-                    "strategy",
-                    (STRATEGY_OFF, "log_step"),
-                    tooltip="Select whether controller feedback adjusts the next value.",
-                ),
-                str(slot.default_strategy),
-                group=group,
-                group_label=group_label,
-            )
-        )
-    return tuple(fields)
-
-
-def feedback_generation_choice(
-    slot: FeedbackSlotDecl, *, group: str = "feedback"
-) -> GenerationChoice:
-    """Return ChoiceSectionSpec binding metadata for ``slot`` strategy fields."""
-
-    if slot.kind == "estimator":
-        return generation_choice(
-            group,
-            slot.field_name("strategy"),
-            {
-                STRATEGY_OFF: (),
-                "idw": (
-                    slot.field_name("idw_k"),
-                    slot.field_name("idw_epsilon"),
-                    slot.field_name("decay_points"),
-                ),
-                "last_good": (slot.field_name("decay_points"),),
-            },
-        )
-    return generation_choice(
-        group,
-        slot.field_name("strategy"),
-        {
-            STRATEGY_OFF: (),
-            "log_step": (),
-        },
-    )
 
 
 def _finite(name: str, value: Any) -> float:

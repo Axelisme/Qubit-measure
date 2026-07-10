@@ -46,9 +46,6 @@ from zcu_tools.gui.app.autofluxdep.nodes.acquire import (
     set_flux_by_name,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    readout_module_patches,
-)
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
     missing_module_value,
 )
@@ -68,6 +65,9 @@ from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.nodes.utils import (
     NodeOverridePlan,
     NodeSchemaBuilder,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
+    readout_module_patches,
 )
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.program.v2 import (

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import ctx_md_float
+from zcu_tools.gui.app.autofluxdep.nodes.utils.module_values import ctx_md_float
 
 
 def seed_md_float(ctx: Any | None, key: str, fallback: float) -> float:

@@ -15,8 +15,6 @@ from .runtime import (
     ScalarController,
     ScalarEstimator,
     build_feedback_runtime,
-    feedback_generation_choice,
-    feedback_generation_fields,
 )
 
 __all__ = [
@@ -30,6 +28,4 @@ __all__ = [
     "ScalarController",
     "ScalarEstimator",
     "build_feedback_runtime",
-    "feedback_generation_choice",
-    "feedback_generation_fields",
 ]

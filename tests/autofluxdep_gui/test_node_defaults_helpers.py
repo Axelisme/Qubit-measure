@@ -2,19 +2,8 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg import (
-    FloatSpec,
     SweepValue,
     module_leaf_patches,
-    module_override_paths,
-)
-from zcu_tools.gui.app.autofluxdep.nodes.defaults import (
-    PULSE_MODULE_LEAF_PATHS,
-    READOUT_FALLBACK_LEAF_PATHS,
-    logical_generation_field,
-    pulse_module_override_paths,
-    pulse_module_patches,
-    readout_module_override_paths,
-    readout_module_patches,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.dependency_defaults import (
     is_lowerable_pulse_module,
@@ -31,6 +20,17 @@ from zcu_tools.gui.app.autofluxdep.nodes.timing_defaults import (
     fixed_sweep_range,
     seed_md_float,
     snapshot_float,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.utils.override_plan import (
+    PULSE_MODULE_LEAF_PATHS,
+    READOUT_FALLBACK_LEAF_PATHS,
+    NodeOverridePlan,
+    pulse_module_patches,
+    readout_module_patches,
+)
+from zcu_tools.gui.app.autofluxdep.nodes.utils.timing import (
+    pop_sweep_range,
+    pop_sweep_ranges,
 )
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -111,52 +111,18 @@ def test_seed_helpers_use_md_or_fallback():
     assert seed_readout_gain(ctx, 0.5) == 0.5
 
 
-def test_logical_generation_field_reuses_key_for_logical_and_field_path():
-    field = logical_generation_field(
-        "relax_factor",
-        FloatSpec(label="relax_factor"),
-        3.0,
-        group="timing",
-    )
-
-    assert field.logical_key == "relax_factor"
-    assert field.field_key == "relax_factor"
-    assert field.group_key == "timing"
-    assert field.group_label == "Timing / relax"
-
-
-def test_module_override_helpers_preserve_paths_source_and_reason():
-    assert pulse_module_override_paths(
-        "pi_pulse",
-        source="pi_pulse module dependency",
-        reason="pi pulse is resolved from workflow/module-library dependency",
-    ) == module_override_paths(
-        prefix="modules.pi_pulse",
-        leaf_paths=PULSE_MODULE_LEAF_PATHS,
-        source="pi_pulse module dependency",
-        reason="pi pulse is resolved from workflow/module-library dependency",
-    )
-    assert readout_module_override_paths(
-        source="opt_readout module dependency",
-        reason="readout module is resolved from workflow/module-library dependency",
-    ) == module_override_paths(
-        prefix="modules.readout",
-        leaf_paths=READOUT_FALLBACK_LEAF_PATHS,
-        source="opt_readout module dependency",
-        reason="readout module is resolved from workflow/module-library dependency",
-        mode="fallback",
-    )
-
-
 def test_module_patch_helpers_preserve_leaf_outputs():
     pulse = _pulse_module()
     readout = _readout_module()
 
-    assert pulse_module_patches("pi_pulse", pulse) == module_leaf_patches(
-        prefix="modules.pi_pulse",
-        module=pulse,
-        leaf_paths=PULSE_MODULE_LEAF_PATHS,
-    )
+    assert pulse_module_patches("pi_pulse", pulse) == {
+        "modules.pi_pulse.type": "pulse",
+        "modules.pi_pulse.ch": 1,
+        "modules.pi_pulse.nqz": 2,
+        "modules.pi_pulse.freq": 5135.0,
+        "modules.pi_pulse.gain": 0.25,
+        "modules.pi_pulse.waveform": {"style": "const", "length": 0.1},
+    }
     assert readout_module_patches(readout) == module_leaf_patches(
         prefix="modules.readout",
         module=readout,
@@ -169,6 +135,75 @@ def test_module_patch_helpers_preserve_leaf_outputs():
         "modules.readout.ro_cfg.ro_freq": 7444.6,
         "modules.readout.ro_cfg.ro_length": 0.9,
     }
+
+
+def test_module_override_plan_preserves_dependency_metadata():
+    plan = (
+        NodeOverridePlan()
+        .pulse_module_dependency("pi_pulse")
+        .readout_dependency()
+        .build()
+    )
+
+    pulse_paths = [
+        path for path in plan.paths if path.path.startswith("modules.pi_pulse")
+    ]
+    readout_paths = [
+        path for path in plan.paths if path.path.startswith("modules.readout")
+    ]
+    assert len(pulse_paths) == len(PULSE_MODULE_LEAF_PATHS)
+    assert {(path.mode, path.source, path.reason) for path in pulse_paths} == {
+        (
+            "all_points",
+            "pi_pulse module dependency",
+            "pi pulse is resolved from workflow/module-library dependency",
+        )
+    }
+    assert len(readout_paths) == len(READOUT_FALLBACK_LEAF_PATHS)
+    assert {(path.mode, path.source, path.reason) for path in readout_paths} == {
+        (
+            "fallback",
+            "readout module dependency",
+            "readout module is resolved from workflow/module-library dependency",
+        )
+    }
+
+
+def test_pop_sweep_range_extracts_range_and_removes_sweep_section():
+    raw_cfg = {
+        "sweep": {"length": SweepValue(start=1.0, stop=4.0, expts=7)},
+        "reps": 100,
+    }
+
+    assert pop_sweep_range(raw_cfg, "length", node_name="lenrabi") == (1.0, 4.0)
+    assert raw_cfg == {"reps": 100}
+
+
+def test_pop_sweep_ranges_accepts_range_objects_and_tuples():
+    raw_cfg = {
+        "sweep": {
+            "freq": SweepValue(start=7000.0, stop=7100.0, expts=11),
+            "gain": (0.1, 0.3),
+        }
+    }
+
+    assert pop_sweep_ranges(raw_cfg, ("freq", "gain"), node_name="ro_optimize") == {
+        "freq": (7000.0, 7100.0),
+        "gain": (0.1, 0.3),
+    }
+    assert raw_cfg == {}
+
+
+def test_pop_sweep_ranges_fast_fails_missing_section_or_key():
+    with pytest.raises(RuntimeError, match="t1 raw cfg has no sweep section"):
+        pop_sweep_range({}, "length", node_name="t1")
+
+    with pytest.raises(RuntimeError, match=r"ro_optimize raw cfg has no sweep\.gain"):
+        pop_sweep_ranges(
+            {"sweep": {"freq": (7000.0, 7100.0)}},
+            ("freq", "gain"),
+            node_name="ro_optimize",
+        )
 
 
 @pytest.mark.parametrize(
