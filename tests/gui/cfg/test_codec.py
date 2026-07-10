@@ -15,7 +15,6 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -543,27 +542,43 @@ def test_rejects_legacy_scalar_eval_expr():
         raw_to_schema(base, {"freq": "=r_f + 10"})
 
 
-def test_device_ref_value_must_be_string():
+def test_device_selector_uses_generic_scalar_direct_codec():
     base = CfgSchema(
-        spec=CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")}),
+        spec=CfgSectionSpec(
+            fields={
+                "dev": ScalarSpec(
+                    label="Device",
+                    type=str,
+                    choices_source="devices",
+                    required=True,
+                )
+            }
+        ),
         value=CfgSectionValue(fields={}),
     )
-    with pytest.raises(
-        SessionCodecError, match="Device reference value must be string"
-    ):
-        raw_to_schema(
-            base,
-            {"dev": {"__kind": "direct", "value": 123}},
-        )
+    decoded = raw_to_schema(
+        base,
+        {"dev": {"__kind": "direct", "value": 123}},
+    )
+    assert decoded.value.fields["dev"] == DirectValue(123)
 
 
-def test_device_ref_must_use_direct_encoding():
+def test_device_selector_accepts_generic_scalar_shorthand():
     base = CfgSchema(
-        spec=CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")}),
+        spec=CfgSectionSpec(
+            fields={
+                "dev": ScalarSpec(
+                    label="Device",
+                    type=str,
+                    choices_source="devices",
+                    required=True,
+                )
+            }
+        ),
         value=CfgSectionValue(fields={}),
     )
-    with pytest.raises(SessionCodecError, match="Device reference must use direct"):
-        raw_to_schema(base, {"dev": "lo_device"})
+    decoded = raw_to_schema(base, {"dev": "lo_device"})
+    assert decoded.value.fields["dev"] == DirectValue("lo_device")
 
 
 def test_complete_literal_key_round_trips():

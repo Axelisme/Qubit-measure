@@ -143,8 +143,8 @@ def _h_tab_get_cfg(
         )
     raw_prefix = params.get("prefix")
     prefix = str(raw_prefix) if raw_prefix else None
-    root = adapter.ctrl.get_cfg_editor_root(editor_id)
-    return {"tree": build_settable_tree(root, prefix=prefix)}
+    draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
+    return {"tree": build_settable_tree(draft, prefix=prefix)}
 
 
 def _h_tab_set_cfg(

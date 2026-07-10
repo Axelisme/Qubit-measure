@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 if TYPE_CHECKING:
-    from ..live_model import LiveField
+    from zcu_tools.gui.cfg.binding import CfgField
 
 
 @runtime_checkable
@@ -13,7 +13,7 @@ class FieldWidgetProtocol(Protocol):
     """Protocol for UI widgets that represent a LiveField."""
 
     @property
-    def field(self) -> LiveField: ...
+    def field(self) -> CfgField: ...
     def refresh_section(self, path: str) -> bool: ...
     def teardown(self) -> None: ...
 
@@ -49,7 +49,7 @@ def register_widget(field_cls: Any):
     return wrapper
 
 
-def get_widget_cls(field: LiveField) -> type[FieldWidgetProtocol]:
+def get_widget_cls(field: CfgField) -> type[FieldWidgetProtocol]:
     cls = type(field)
     if cls in WIDGET_REGISTRY:
         return WIDGET_REGISTRY[cls]

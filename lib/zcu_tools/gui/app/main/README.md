@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-10 — generic reference model
+**Last updated:** 2026-07-10 — Qt-free cfg binding ownership
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -104,7 +104,7 @@ Key ownership rules:
 ## Run / Analyze Workflow
 
 1. A tab is created from a registered experiment adapter.
-2. The tab owns a cfg editor draft backed by `LiveModel`.
+2. The tab owns a service-managed cfg editor session backed by `CfgDraft`.
 3. `GuardService` validates static preconditions and materializes a permit.
 4. The operation policy builds worker thunks with the needed ambient scopes:
    plotting, progress, `Schedule` cancellation, and device setup cancellation.
@@ -152,7 +152,12 @@ current `MetaDict` expression evaluator、measure-owned module/waveform shape co
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
-LiveModel與widget依`spec.kind`選擇ModuleLibrary store/converter；shared cfg不認識這些policy。
+`MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/converter，並提供expression、
+dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些
+app-local policy。device selector是required string `ScalarSpec`，wire value維持`DirectValue(str)`。
+measure composition另以generic `QLineEdit -> keepalive object` enhancer seam安裝
+`ValueSourceInputController`，保留eval input的completion與resolve-on-space；shared binding仍
+不import ValueRef或session。
 
 Sweep-like fields keep their UI value model until this lowering boundary:
 `SweepSpec` stores `start` / `stop` / `expts`, while `CenteredSweepSpec` stores
@@ -185,7 +190,7 @@ the owning controller/runtime.
 `CfgFormWidget.set_editing_enabled()` locks only the rendered form content, not
 the widget shell or its `QScrollArea`. Busy/read-only hosts keep the cfg pane
 scrollable while child editor controls are disabled, and the desired editing
-state persists across `detach()` / `attach()` swaps of the service-owned model.
+state persists across `detach()` / `attach()` swaps of the service-owned draft.
 
 Nested `CfgSectionSpec` fields render as full-width collapsible sections and do
 not get an additional parent-row label. The section header is the label, which
@@ -200,7 +205,7 @@ fields rendered for each selector value. `CfgFormWidget` refreshes only the
 affected section subtree when a selector changes, while hidden inactive fields
 keep their values in the model and lower/persist through the normal section
 path. Decoration-provider changes follow the same section-local refresh path
-instead of reattaching the full LiveModel-backed form. Field widgets expose a
+instead of reattaching the full `CfgDraft`-backed form. Field widgets expose a
 typed `refresh_section(path) -> bool` surface, and decoration state is consumed
 through the shared `FieldDecoration` surface rather than ad-hoc attribute probing.
 Unknown `ChoiceSectionSpec` selector values fast-fail instead of hiding all

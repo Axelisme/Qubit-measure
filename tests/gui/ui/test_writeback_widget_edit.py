@@ -151,7 +151,7 @@ def test_edit_cfg_item_can_change_target_name(qapp):
     item.editor_id = "editor-9"
 
     ctrl = MagicMock()
-    ctrl.get_cfg_editor_root.return_value = MagicMock()
+    ctrl.get_cfg_editor_draft.return_value = MagicMock()
     widget = WritebackWidget(ctrl)
     widget.populate([item])
 

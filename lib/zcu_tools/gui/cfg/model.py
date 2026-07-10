@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import InitVar, dataclass, field, replace
-from typing import Any, Literal, Self, TypeAlias
+from typing import Any, Self, TypeAlias
 
 
 def default_value_for_type(type_: type) -> object:
@@ -50,7 +50,7 @@ class ScalarSpec:
     type: type
     editable: bool = True
     choices: list | None = None
-    choices_source: Literal["", "arb_waveforms"] = ""
+    choices_source: str = ""
     decimals: int | None = None
     required: bool = False
     # ``optional``: the field may be left empty (value ``None``) and is *valid*
@@ -332,13 +332,6 @@ class ChoiceSectionSpec(CfgSectionSpec):
                     )
 
 
-@dataclass(frozen=True)
-class DeviceRefSpec:
-    """A field that selects a registered device by name."""
-
-    label: str = "Device"
-
-
 CfgNodeSpec = (
     ScalarSpec
     | LiteralSpec
@@ -347,7 +340,6 @@ CfgNodeSpec = (
     | ReferenceSpec
     | CfgSectionSpec
     | ChoiceSectionSpec
-    | DeviceRefSpec
 )
 
 

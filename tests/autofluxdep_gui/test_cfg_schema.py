@@ -2177,7 +2177,6 @@ def test_autoflux_measure_app_imports_match_transitional_allowlist():
     )
     allowed: dict[pathlib.Path, set[str]] = {
         pkg / "cfg" / "form.py": {
-            "zcu_tools.gui.app.main.live_model",
             "zcu_tools.gui.app.main.ui.cfg_form",
             "zcu_tools.gui.app.main.ui.fields.common",
         },

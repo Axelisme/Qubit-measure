@@ -26,7 +26,6 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import DeviceRefSpec
 
 
 def _ml() -> MagicMock:
@@ -159,29 +158,56 @@ def test_centered_sweep_eval_center_fails():
         schema_to_raw_dict(schema, _md(), _ml())
 
 
-# --- DeviceRefSpec ------------------------------------------------------------
+# --- Required device selector -------------------------------------------------
 
 
 def test_device_empty_raises():
-    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Flux Device")})
+    spec = CfgSectionSpec(
+        fields={
+            "dev": ScalarSpec(
+                label="Flux Device",
+                type=str,
+                choices_source="devices",
+                required=True,
+            )
+        }
+    )
     schema = CfgSchema(
         spec=spec, value=CfgSectionValue(fields={"dev": DirectValue("")})
     )
-    with pytest.raises(RuntimeError, match="device not selected"):
+    with pytest.raises(RuntimeError, match="required and must not be empty"):
         schema_to_raw_dict(schema, _md(), _ml())
 
 
 def test_device_none_raises():
-    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Flux Device")})
+    spec = CfgSectionSpec(
+        fields={
+            "dev": ScalarSpec(
+                label="Flux Device",
+                type=str,
+                choices_source="devices",
+                required=True,
+            )
+        }
+    )
     schema = CfgSchema(
         spec=spec, value=CfgSectionValue(fields={"dev": DirectValue(None)})
     )
-    with pytest.raises(RuntimeError, match="device not selected"):
+    with pytest.raises(RuntimeError, match="unset"):
         schema_to_raw_dict(schema, _md(), _ml())
 
 
 def test_device_selected_passes():
-    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Flux Device")})
+    spec = CfgSectionSpec(
+        fields={
+            "dev": ScalarSpec(
+                label="Flux Device",
+                type=str,
+                choices_source="devices",
+                required=True,
+            )
+        }
+    )
     schema = CfgSchema(
         spec=spec, value=CfgSectionValue(fields={"dev": DirectValue("YOKO_1")})
     )

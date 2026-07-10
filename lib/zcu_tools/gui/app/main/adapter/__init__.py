@@ -13,7 +13,6 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     ChoiceBinding,
     ChoiceSectionSpec,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     FloatSpec,

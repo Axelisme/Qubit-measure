@@ -1,6 +1,6 @@
-"""CfgEditorService — stateful LiveModel editing sessions shared by clients.
+"""CfgEditorService — stateful cfg draft editing sessions shared by clients.
 
-A session owns one ``SectionLiveField`` (a cfg draft) keyed by a server-issued
+A session owns one ``CfgDraft`` keyed by a server-issued
 ``editor_id``. The service owns *every* model; a ``CfgFormWidget`` is a pluggable
 viewer that ``attach``es to a model (renders + reflects it) and ``detach``es
 without tearing it down — so an agent edit and a user view converge on the same
@@ -34,7 +34,7 @@ resolved against the live MetaDict at ``commit`` time (the app-local
 concrete numbers, never md references. ``value_ref`` tags are different: they are
 resolved once at ``set_field`` time and stored only as ``DirectValue`` snapshots.
 
-All methods run on the Qt main thread (the LiveModel and ModuleLibrary live
+All methods run on the Qt main thread (the cfg draft and ModuleLibrary live
 there); the remote service marshals handler calls accordingly.
 """
 
@@ -52,22 +52,23 @@ from zcu_tools.gui.app.main.adapter import (
     EvalValue,
     make_default_value,
 )
+from zcu_tools.gui.app.main.cfg_binding import (
+    MeasureCfgBindingHost,
+    MeasureCfgBindings,
+)
 from zcu_tools.gui.app.main.cfg_schemas import (
     _MODULE_SPEC_FACTORIES,
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
-from zcu_tools.gui.app.main.live_model import (
-    ControllerProtocol,
-    LiveModelEnv,
-    SectionLiveField,
-)
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueLookupError, decode_value_ref
 
 from .ports import ContextWritePort
 from .remote.path_resolver import (
+    ValueRefResolver,
     list_settable_paths_full,
     resolve_and_set,
 )
@@ -90,17 +91,7 @@ ChangeListener = Callable[[str, str, dict], None]
 _MAX_HEADLESS_EDITORS = 16
 
 
-class _EditorCtrl(ControllerProtocol, Protocol):
-    """Reactive-env surface a CfgEditor LiveModel needs.
-
-    This is the LiveModel reactive environment (md/ml/device/bus reads) shared by
-    every LiveField — see docs/adr/0007 (a legitimate narrow Port for "needs the
-    owner's reactive env"). ML *writes* at commit time go through the separate
-    ``ContextWritePort``, not this protocol.
-    """
-
-
-class CfgEditorHost(_EditorCtrl, ContextReadPort, ContextWritePort, Protocol):
+class CfgEditorHost(MeasureCfgBindingHost, ContextReadPort, ContextWritePort, Protocol):
     """Composition-root surface for ``CfgEditorService`` — the facets it needs,
     all provided by the Controller: the reactive env (``_EditorCtrl``), the
     context read port (``ContextReadPort``, to seed from_name) + context write
@@ -123,7 +114,7 @@ class CfgEditorError(RuntimeError):
 class CfgEditorSession:
     """Aggregate root: one cfg-editing draft and **all logic to operate it**.
 
-    Holds the ``SectionLiveField`` draft tree and owns the behaviour over it
+    Holds the ``CfgDraft`` and owns the behaviour over it
     (set_field / get / validity / commit). Outside code reaches the draft only
     through this session (it is the gateway), and identifies it by ``editor_id``
     (DDD: reference aggregates by id). This replaces the old anemic dataclass
@@ -137,7 +128,8 @@ class CfgEditorSession:
     """
 
     editor_id: str
-    root: SectionLiveField
+    draft: CfgDraft
+    resolve_value_ref: ValueRefResolver
     # True: agent-opened, reclaimed by LRU / RPC-disconnect (orphan protection).
     # False: UI-owned (tab / inspect / writeback) — only the owner tears it down.
     gc: bool
@@ -163,7 +155,7 @@ class CfgEditorSession:
         draft go through the nested tree (``editor.get`` / ``tab.get_cfg``),
         not this flat list.
         """
-        return list_settable_paths_full(self.root)
+        return list_settable_paths_full(self.draft)
 
     def set_field(self, path: str, value: object) -> dict[str, object]:
         """Mutate one field; return draft validity + which paths a ref switch
@@ -177,14 +169,19 @@ class CfgEditorSession:
         whole draft) tell the agent exactly which paths disappeared / appeared,
         so it need not re-list the whole tab after a variant switch.
         """
-        before = {str(e["path"]) for e in list_settable_paths_full(self.root)}
+        before = {str(e["path"]) for e in list_settable_paths_full(self.draft)}
         try:
-            resolve_and_set(self.root, path, _decode_value(value))
+            resolve_and_set(
+                self.draft,
+                path,
+                _decode_value(value),
+                resolve_value_ref=self.resolve_value_ref,
+            )
         except ValueLookupError as exc:
             raise CfgEditorError(str(exc)) from exc
-        after = {str(e["path"]) for e in list_settable_paths_full(self.root)}
+        after = {str(e["path"]) for e in list_settable_paths_full(self.draft)}
         return {
-            "valid": bool(self.root.is_valid()),
+            "valid": bool(self.draft.is_valid()),
             "removed": sorted(before - after),
             "added": sorted(after - before),
         }
@@ -203,7 +200,7 @@ class CfgEditorSession:
                 f"{self.editor_id!r} is a seeded session (no item_kind); commit "
                 "applies only to ml-entry sessions"
             )
-        return CfgSchema(spec=self.root.spec, value=self.root.get_value())
+        return self.draft.snapshot()
 
 
 class CfgEditorService:
@@ -226,14 +223,14 @@ class CfgEditorService:
 
     def __init__(
         self,
-        env_ctrl: _EditorCtrl,
+        env_ctrl: MeasureCfgBindingHost,
         read_port: ContextReadPort,
         write_port: ContextWritePort,
         version_bump: Callable[[str], None],
         version_drop: Callable[[str], None],
         bus: EventBus,
     ) -> None:
-        self._env = LiveModelEnv(ctrl=env_ctrl)
+        self._bindings = MeasureCfgBindings(env_ctrl)
         self._read = read_port
         self._write = write_port
         self._version_bump = version_bump
@@ -241,9 +238,8 @@ class CfgEditorService:
         self._editors: dict[str, CfgEditorSession] = {}
         self._seq = itertools.count()
         self._listener: ChangeListener | None = None
-        # ADR-0008/0004 Reaction: the service owns every cfg model, so it (not the
-        # widget) refreshes their EvalValue snapshots when md/ml/context/device
-        # change. Subscribe once; refresh_all fans out to every owned model.
+        # ADR-0008/0004 Reaction: the service owns every cfg draft, so refresh
+        # payloads map explicitly to the three narrow binding refresh operations.
         from zcu_tools.gui.session.events import (
             ContextSwitchedPayload,
             DeviceChangedPayload,
@@ -251,16 +247,12 @@ class CfgEditorService:
             MlChangedPayload,
         )
 
-        for payload_type in (
-            MdChangedPayload,
-            MlChangedPayload,
-            ContextSwitchedPayload,
-            DeviceChangedPayload,
-        ):
-            bus.subscribe(
-                payload_type,
-                lambda payload: self.refresh_all(payload.EVENT),
-            )
+        bus.subscribe(MdChangedPayload, lambda _payload: self.refresh_expressions())
+        bus.subscribe(MlChangedPayload, lambda _payload: self.refresh_references())
+        bus.subscribe(
+            DeviceChangedPayload, lambda _payload: self.refresh_options("devices")
+        )
+        bus.subscribe(ContextSwitchedPayload, lambda _payload: self.refresh_all())
 
     def set_change_listener(self, listener: ChangeListener | None) -> None:
         """Inject the per-session push listener (remote layer wires this).
@@ -331,11 +323,12 @@ class CfgEditorService:
         gc: bool,
         owner_key: str | None,
     ) -> tuple[str, list[dict[str, object]]]:
-        root = SectionLiveField(spec, self._env, value)
+        draft = self._bindings.new_draft(CfgSchema(spec=spec, value=value))
         editor_id = self._new_id(owner_key)
         session = CfgEditorSession(
             editor_id=editor_id,
-            root=root,
+            draft=draft,
+            resolve_value_ref=self._bindings.resolve_value_ref,
             gc=gc,
             item_kind=item_kind,
             owner_key=owner_key,
@@ -363,14 +356,14 @@ class CfgEditorService:
         session = self._editors.get(editor_id)
         return session.owner_key if session is not None else None
 
-    def get_root(self, editor_id: str) -> SectionLiveField:
-        """Return the live ``SectionLiveField`` for ``editor_id``.
+    def get_draft(self, editor_id: str) -> CfgDraft:
+        """Return the service-owned ``CfgDraft`` for ``editor_id``.
 
         Exposed so the owning widget can ``attach`` to a service-owned model
         (ADR-0008). The widget renders + reflects this model but never owns its
         lifetime (the service does).
         """
-        return self._require(editor_id).root
+        return self._require(editor_id).draft
 
     def set_field(self, editor_id: str, path: str, value: object) -> dict[str, object]:
         return self._require(editor_id).set_field(path, value)
@@ -465,7 +458,7 @@ class CfgEditorService:
             )
 
         session.change_cb = _on_change
-        session.root.on_change.connect(_on_change)
+        session.draft.on_change.connect(_on_change)
 
     def _emit(self, editor_id: str, event_name: str, payload: dict) -> None:
         if self._listener is None:
@@ -480,10 +473,10 @@ class CfgEditorService:
         if session is None:
             return
         if session.change_cb is not None:
-            session.root.on_change.disconnect(session.change_cb)
+            session.draft.on_change.disconnect(session.change_cb)
             session.change_cb = None
         if teardown:
-            session.root.teardown()
+            session.draft.close()
         # Forget the session's resource version (symmetric to tab/device drop):
         # a later stale dependency on this gone editor reads version 0 and the
         # guard treats it as stale, rather than spuriously matching a retained
@@ -505,18 +498,23 @@ class CfgEditorService:
     # External refresh (md/ml change → refresh every owned model's EvalValue)
     # ------------------------------------------------------------------
 
-    def refresh_all(self, event: object) -> None:
-        """Refresh every owned model against an md/ml/context/device change.
-
-        ADR-0008 / ADR-0004 Reaction: the service owns the models, so refreshing
-        their ``EvalValue`` snapshots when md/ml change is the owner's job (it
-        moved here from the widget when ownership inverted). An attached widget
-        repaints for free via the model's bubbling ``on_change``.
-        """
-        # Snapshot values() — refresh_external may bubble on_change which our
-        # change stream observes, but it does not mutate the editors dict.
+    def refresh_expressions(self) -> None:
         for session in list(self._editors.values()):
-            session.root.refresh_external(event)
+            session.draft.refresh_expressions()
+
+    def refresh_options(self, source_id: str | None = None) -> None:
+        for session in list(self._editors.values()):
+            session.draft.refresh_options(source_id)
+
+    def refresh_references(self, kind: str | None = None) -> None:
+        for session in list(self._editors.values()):
+            session.draft.refresh_references(kind)
+
+    def refresh_all(self) -> None:
+        for session in list(self._editors.values()):
+            session.draft.refresh_expressions()
+            session.draft.refresh_options()
+            session.draft.refresh_references()
 
     def _require(self, editor_id: str) -> CfgEditorSession:
         session = self._editors.get(editor_id)

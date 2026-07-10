@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.main.adapter import CfgSchema
+from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
@@ -80,10 +81,8 @@ class _MlModifyDialog(QDialog):
         editor_id, _ = self._ctrl.open_cfg_editor(
             item_kind, from_name=name, gc=False, owner_key=self._cfg_editor_owner
         )
-        root = self._ctrl.get_cfg_editor_root(editor_id)
-        discriminator = self._read_discriminator(
-            CfgSchema(spec=root.spec, value=root.get_value())
-        )
+        draft = self._ctrl.get_cfg_editor_draft(editor_id)
+        discriminator = self._read_discriminator(draft.snapshot())
 
         form = QFormLayout()
         form.addRow("Name:", QLabel(name))
@@ -96,7 +95,9 @@ class _MlModifyDialog(QDialog):
         self._scroll.setWidgetResizable(True)
         # CfgFormWidget attaches to the service-owned LiveModel (ADR-0008); edits
         # land in that draft and enter the live ModuleLibrary only on commit.
-        self._form_widget = CfgFormWidget()
+        self._form_widget = CfgFormWidget(
+            text_input_enhancer=make_value_source_input_enhancer(ctrl)
+        )
         self._scroll.setWidget(self._form_widget)
         layout.addWidget(self._scroll, stretch=1)
 
@@ -117,7 +118,7 @@ class _MlModifyDialog(QDialog):
         # Detach + tear down the service-owned model when the dialog closes.
         self.finished.connect(self._close_cfg_editor)
 
-        self._form_widget.attach(root)
+        self._form_widget.attach(draft)
         self._validate()
 
     def _close_cfg_editor(self, *_: Any) -> None:

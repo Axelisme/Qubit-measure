@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, CfgSchema
+from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
@@ -213,7 +214,9 @@ class ExpTabWidget(QWidget):
         cfg_top_strip.addWidget(self.reset_btn)
         config_layout.addLayout(cfg_top_strip)
 
-        self.cfg_form = CfgFormWidget()
+        self.cfg_form = CfgFormWidget(
+            text_input_enhancer=make_value_source_input_enhancer(ctrl)
+        )
         self.cfg_form.validity_changed.connect(self._on_cfg_validity_changed)
         config_layout.addWidget(self.cfg_form, stretch=1)
 
@@ -543,7 +546,7 @@ class ExpTabWidget(QWidget):
             schema, gc=False, owner_key=self.tab_id
         )
         self._cfg_editor_id = editor_id
-        self.cfg_form.attach(ctrl.get_cfg_editor_root(editor_id))
+        self.cfg_form.attach(ctrl.get_cfg_editor_draft(editor_id))
 
     def read_schema(self) -> CfgSchema:
         return self.cfg_form.read_schema()
@@ -695,7 +698,7 @@ class ExpTabWidget(QWidget):
             schema, gc=False, owner_key=self.tab_id
         )
         self._cfg_editor_id = editor_id
-        self.cfg_form.attach(self._ctrl.get_cfg_editor_root(editor_id))
+        self.cfg_form.attach(self._ctrl.get_cfg_editor_draft(editor_id))
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         # A render snapshot (get_tab_snapshot) always fills the live fields; only

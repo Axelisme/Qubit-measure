@@ -27,13 +27,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.autofluxdep.cfg import DirectValue, EvalValue, ScalarSpec
+from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.cfg.form import (
-    LiveModelEnv,
-    ScalarLiveField,
     ScalarWidget,
 )
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.registry import available_node_types
+from zcu_tools.gui.cfg.binding import ScalarField
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 
 RunUiState = Literal["idle", "running", "pausing", "paused"]
@@ -58,9 +58,11 @@ class _FluxScalarEditor(QWidget):
         self._label = label
         self._type = type_
         self._torn_down = False
-        self._field = ScalarLiveField(
+        bindings = AutofluxCfgBindings(ctrl)
+        self._field = ScalarField(
             ScalarSpec(label=label, type=type_, decimals=6 if type_ is float else None),
-            LiveModelEnv(ctrl=ctrl),
+            bindings.evaluate_expression,
+            bindings.provide_options,
             initial_val=_flux_value_from_text(text, type_),
         )
         self._field.on_change.connect(self._on_field_changed)

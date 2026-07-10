@@ -33,8 +33,48 @@ def test_gui_cfg_import_is_app_experiment_meta_and_qt_clean() -> None:
             or name.startswith("zcu_tools.notebook.")
             or name == "zcu_tools.device"
             or name.startswith("zcu_tools.device.")
+            or name == "zcu_tools.gui.event_bus"
+            or name.startswith("zcu_tools.gui.event_bus.")
+            or name == "zcu_tools.gui.session"
+            or name.startswith("zcu_tools.gui.session.")
         )
         assert not leaked, f"importing zcu_tools.gui.cfg leaked: {{leaked}}"
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_gui_cfg_binding_import_is_runtime_and_qt_clean() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script = textwrap.dedent(
+        f"""
+        import sys
+        sys.path.insert(0, {str(repo_root / "lib")!r})
+        import zcu_tools.gui.cfg.binding  # noqa: F401
+
+        forbidden = (
+            "zcu_tools.gui.app",
+            "zcu_tools.experiment",
+            "zcu_tools.meta_tool",
+            "zcu_tools.gui.event_bus",
+            "zcu_tools.gui.session",
+            "zcu_tools.notebook",
+            "zcu_tools.device",
+            "qtpy",
+            "PyQt",
+            "PySide",
+        )
+        leaked = sorted(
+            name for name in sys.modules if name.startswith(forbidden)
+        )
+        assert not leaked, f"importing cfg.binding leaked: {{leaked}}"
         """
     )
     proc = subprocess.run(
@@ -53,6 +93,8 @@ def test_gui_cfg_source_has_no_forbidden_runtime_imports() -> None:
         "zcu_tools.gui.app",
         "zcu_tools.experiment",
         "zcu_tools.meta_tool",
+        "zcu_tools.gui.event_bus",
+        "zcu_tools.gui.session",
         "zcu_tools.notebook",
         "zcu_tools.device",
         "qtpy",
@@ -76,6 +118,32 @@ def test_gui_cfg_source_has_no_forbidden_runtime_imports() -> None:
                         f"{path.relative_to(cfg_dir)}:{getattr(node, 'lineno', 0)}: "
                         f"forbidden import {module}"
                     )
+    assert not offenders, "\n".join(offenders)
+
+
+def test_gui_cfg_binding_source_has_no_app_option_source_literals() -> None:
+    binding_dir = (
+        Path(__file__).resolve().parents[3]
+        / "lib"
+        / "zcu_tools"
+        / "gui"
+        / "cfg"
+        / "binding"
+    )
+    forbidden_literals = {"devices", "arb_waveforms"}
+    offenders: list[str] = []
+    for path in sorted(binding_dir.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value in forbidden_literals
+            ):
+                offenders.append(
+                    f"{path.relative_to(binding_dir)}:{getattr(node, 'lineno', 0)}: "
+                    f"forbidden source literal {node.value!r}"
+                )
     assert not offenders, "\n".join(offenders)
 
 

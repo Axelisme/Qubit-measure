@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# CfgEditor session —— service-owned headless LiveModel + 可插拔 widget viewer
+# CfgEditor session —— service-owned headless CfgDraft + 可插拔 widget viewer
 
 **狀態：** accepted（已實作）。
 **關聯：** external-refresh 是 [[0004]] Reaction 標準模式；commit 的 ml/md 寫入歸 [[0006]] 單一權威；tab cfg 讀寫收斂見 [[0013]] F11；agent 樂觀模型見 [[0002]]。
@@ -17,13 +17,13 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 
 ## 決策
 
-**LiveModel 永遠由 `CfgEditorService` 以 headless 模式持有；`CfgFormWidget` 是可插拔 viewer。** agent 與 widget 都只持 `editor_id`、是平級 client。
+**`CfgDraft` 永遠由 `CfgEditorService` 以 headless 模式持有；`CfgFormWidget` 是可插拔 viewer。** agent 與 widget 都只持 `editor_id`、是平級 client。
 
-- **attach/detach**：`CfgFormWidget.attach(model)` 接一棵 service-owned `SectionLiveField`、build widget tree；`detach()` disconnect + `deleteLater`，**不 teardown model**。widget 的 Qt 重畫經 model `on_change` 免費取得。
+- **attach/detach**：`CfgFormWidget.attach(draft)` 接一個 service-owned `CfgDraft`、從 `draft.root` build widget tree；`detach()` disconnect + `deleteLater`，**不 close draft**。widget 的 Qt 重畫經 draft/field `on_change` 取得。
 - **gc 生命週期**：`open(..., gc)`。`gc=True`（agent 自開 ml-entry）受 LRU + 斷線回收；`gc=False`（UI-owned：tab / inspect / writeback）只由 owner 顯式 `teardown`。tab cfg / writeback 草稿種子用 `open_seeded`（無 item_kind → teardown-only、拒絕 commit）。
 - **draft / committed**：session = draft，`State.cfg_schema` = committed（run/save/persist 讀的 SSOT）。tab session 改動經 auto-commit（widget `on_change` → `schema_changed` → `update_tab_cfg`）即時同步進 State；run/save 前一道**強制 commit = valid 驗證閘**（draft invalid → fail-fast）。
 - **commit 只交 CfgSchema 快照**：`CfgEditorSession.commit` 不 lower、不 register，只交出**未-lower 的 `CfgSchema`**；`CfgEditorService.commit(editor_id, name)` 把它交給 ContextService 經 write port 落地（lowering + register 歸 ContextService，見 [[0006]]）。
-- **external refresh 歸 service**（[[0004]] Reaction）：service 訂閱 `MD/ML/CONTEXT/DEVICE_CHANGED`，對其持有的每一棵 model 呼叫 `refresh_external`（刷 EvalValue）。職責跟著 model 所有權從 widget 移到 service。
+- **external refresh 歸 service**（[[0004]] Reaction）：service 訂閱 `MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到每個 draft 的 `refresh_expressions()`、`refresh_references()` 與 `refresh_options(source_id)`。職責跟著 draft 所有權從 widget 移到 service。
 - **eval value** 以 tagged 形式 `{"__kind":"eval","expr":...}` 上 wire；**ref 切換漸進**：`editor.set_field` 回「以被改 path 為根的子樹 paths」+ valid，讓 agent 探索切換後新浮現的結構；commit 失敗保留 session。
 - **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不帶 reason 區分**（修復動作都是重開）。
 - **editor 專屬變更流**（`editor_changed{editor_id, paths}` / `editor_closed{editor_id, reason}`，**不走全域 EventBus**）：機制在 RPC/GUI 端完整保留（GUI 內部用）；但 **agent 不 subscribe**（[[0002]] Phase 120c）——agent 改為「下次 `editor.set_field` 撞 `unknown editor session` 才知 session 沒了」，與樂觀模型一致（撞牆→重開）。
@@ -35,7 +35,7 @@ analyze 後一次算出 items 存 `TabState.writeback_items`；每個 module/wav
 
 **agent 編 writeback 草稿的入口統一在 writeback 面（`editor_id` 內部化）：** agent 改一個 module/waveform writeback item 的 cfg，走 `tab.writeback_set`（單一 writeback 編輯面，`edits=[{path,value}]`），**不**外露該 item 的 `editor_id`、不要求 agent 先持 editor handle。handler 由 `(tab_id, session_id)` 找到 item，在 service 層解析 item 持有的 `editor_id`，逐筆呼 `CfgEditorPort.set_field`；`editor_id` 是純內部 seam、不上 wire。`edits` 的語義對齊 tab cfg 的 batch 寫入（ordered、fail-fast、ref-switch 先行），回傳折 `{valid, removed?, added?}`。metadict item 仍走同一面的 `value` facet（`value` 與 `edits` 互斥，以 None 區辨 kind）。**界線**：此收斂只涵蓋 writeback 的 module/waveform 草稿；`editor.*` RPC 對 ModuleLibrary ml-entry 的編輯仍外露 `editor_id`（agent 先 `editor.open` 取得 handle 再 `editor.set`），不受影響——ml-entry 編輯沒有「外層 item 持 editor_id」的封裝層可內部化。
 
-此收斂依賴在 `CfgEditorPort` 上新增 `set_field(editor_id, path, value) -> dict` port 方法（簽名對齊 concrete `CfgEditorService.set_field`）：`WritebackService` 原僅依賴 port 的 `open_seeded`/`teardown`/`get_root`，要在 service 層替 agent 改草稿就需把寫入也納入 port，維持「依賴 port 而非 concrete service」的耦合界線（[[0005]]）。底層仍是同一棵 service-owned model，故 WYSIWYG 安全保證不變——user 的 Edit dialog 與 agent 寫的是同一棵 model。
+此收斂依賴在 `CfgEditorPort` 上新增 `set_field(editor_id, path, value) -> dict` port 方法（簽名對齊 concrete `CfgEditorService.set_field`）：`WritebackService` 原僅依賴 port 的 `open_seeded`/`teardown`/`get_draft`，要在 service 層替 agent 改草稿就需把寫入也納入 port，維持「依賴 port 而非 concrete service」的耦合界線（[[0005]]）。底層仍是同一個 service-owned draft，故 WYSIWYG 安全保證不變——user 的 Edit dialog 與 agent 寫的是同一個 draft。
 
 ## 安全保證（核心動機）
 
@@ -46,7 +46,7 @@ analyze 後一次算出 items 存 `TabState.writeback_items`；每個 module/wav
 CfgEditor session 經兩次轉向才到現行形狀：
 
 1. **headless-only（RPC 專用、不綁 tab/View）**：最初定為「不讓 GUI 操作走它、不加逾時」。**翻轉**——agent 用 `editor.*` 改 tab cfg 時 user 完全看不到過程（headless、無 widget 綁定，commit 後才可見）。於是升為「被多 client 共享的 cfg draft SSOT」，widget 與 agent 平級。
-2. **delegated（委派型）**：widget `populate` 時自建 LiveModel、委派 service 換 id，「widget 先 populate 才有 session」。**翻轉**——tab/dialog 沒開就沒 widget、沒 model，agent 無從編輯（writeback / 未開 tab 尤其卡）；且 external refresh 綁在 widget 的 EventBus 訂閱、無 widget 不刷，agent-only 編輯讀到 stale EvalValue。改為現行「LiveModel 永遠 service-owned headless、widget 只 attach」。
+2. **delegated（委派型）**：widget `populate` 時自建 field tree、委派 service 換 id，「widget 先 populate 才有 session」。**翻轉**——tab/dialog 沒開就沒 widget、沒 draft，agent 無從編輯（writeback / 未開 tab 尤其卡）；且 external refresh 綁在 widget 的 EventBus 訂閱、無 widget 不刷，agent-only 編輯讀到 stale EvalValue。改為現行「`CfgDraft` 永遠 service-owned headless、widget 只 attach」。
 
 兩次轉向都圍繞同一動機：把「agent 改必對 user 可見」從*希望*變成*結構保證*。
 

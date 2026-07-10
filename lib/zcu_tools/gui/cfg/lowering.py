@@ -13,7 +13,6 @@ from .model import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -393,14 +392,6 @@ def _lower_section(
                 path=[*path, key],
             )
 
-        elif isinstance(node_spec, DeviceRefSpec):
-            assert isinstance(node_value, DirectValue)
-            if not isinstance(node_value.value, str) or not node_value.value:
-                label = node_spec.label or key
-                full_path = ".".join([*path, key])
-                raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
-            result[key] = node_value.value
-
         elif isinstance(node_spec, CfgSectionSpec):
             assert isinstance(node_value, CfgSectionValue)
             result[key] = _lower_section(
@@ -493,14 +484,6 @@ def _validate_static_node(
         _validate_centered_sweep_contract(spec, node_value, full_path)
         return
 
-    if isinstance(spec, DeviceRefSpec):
-        if not isinstance(node_value, DirectValue):
-            raise RuntimeError(
-                f"Config field '{full_path}' (device ref) must be a DirectValue, "
-                f"got {type(node_value).__name__}"
-            )
-        return
-
     if isinstance(spec, ReferenceSpec):
         if not isinstance(node_value, ReferenceValue):
             raise RuntimeError(
@@ -539,6 +522,10 @@ def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) 
     value = node_value.value
     if value is None:
         return
+    if spec.required and value == "":
+        raise RuntimeError(
+            f"Config field '{full_path}' ({spec.label}) is required and must not be empty"
+        )
     if spec.type is bool:
         valid = isinstance(value, bool)
     elif spec.type is int:
@@ -663,15 +650,6 @@ def _validate_dynamic_node(
                 )
                 _validate_centered_sweep_contract(
                     spec, node_value, full_path, center=center
-                )
-        return
-
-    if isinstance(spec, DeviceRefSpec):
-        if isinstance(node_value, DirectValue):
-            if not isinstance(node_value.value, str) or not node_value.value:
-                label = spec.label or full_path.rsplit(".", 1)[-1]
-                raise RuntimeError(
-                    f"Config field '{full_path}' ({label}) device not selected"
                 )
         return
 

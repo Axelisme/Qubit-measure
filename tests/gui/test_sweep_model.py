@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main import (
-    CenteredSweepEditor,
+from zcu_tools.gui.cfg import (
     CenteredSweepValue,
     EvalValue,
-    SweepEditor,
     SweepValue,
 )
+from zcu_tools.gui.cfg.binding import CenteredSweepEditor, SweepEditor
 
 
 def test_canonicalize_derives_step_from_numeric_bounds() -> None:

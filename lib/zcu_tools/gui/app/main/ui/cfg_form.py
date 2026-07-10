@@ -1,6 +1,6 @@
 """CfgFormWidget — renders a CfgSchema as an interactive reactive Qt form.
 
-Uses LiveModel as the active data layer and delegates field rendering to
+Uses CfgDraft as the active data layer and delegates field rendering to
 lib/zcu_tools/gui/ui/fields/.
 """
 
@@ -23,7 +23,6 @@ from zcu_tools.gui.app.main.adapter import (
     CfgNodeValue,
     CfgSectionSpec,
     ChoiceSectionSpec,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -31,16 +30,17 @@ from zcu_tools.gui.app.main.adapter import (
     ScalarSpec,
     SweepSpec,
 )
-
-from ..live_model import (
-    CenteredSweepLiveField,
-    LiveField,
-    ReferenceLiveField,
-    ScalarLiveField,
-    SectionLiveField,
-    SweepLiveField,
+from zcu_tools.gui.cfg.binding import (
+    CenteredSweepField,
+    CfgDraft,
+    CfgField,
+    ReferenceField,
+    ScalarField,
+    SectionField,
+    SweepField,
 )
-from .fields import SectionWidget
+
+from .fields import SectionWidget, TextInputEnhancer
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import CfgSchema, CfgSectionValue
@@ -103,9 +103,9 @@ class FieldDecorationProvider(Protocol):
 
 
 class CfgFormWidget(QWidget):
-    """A pluggable viewer over a service-owned cfg LiveModel (ADR-0008).
+    """A pluggable viewer over a service-owned CfgDraft (ADR-0008).
 
-    The widget does *not* own a LiveModel — it ``attach``es to one that the
+    The widget does *not* own a CfgDraft — it ``attach``es to one that the
     ``CfgEditorService`` owns (renders it + reflects its changes) and
     ``detach``es without tearing it down. This makes an agent edit and a user
     view converge on the same model (WYSIWYG), and lets a model outlive the
@@ -128,12 +128,14 @@ class CfgFormWidget(QWidget):
         *,
         field_label_max_width: int | None = None,
         decoration_provider: FieldDecorationProvider | None = None,
+        text_input_enhancer: TextInputEnhancer | None = None,
     ) -> None:
         super().__init__(parent)
-        self._model: SectionLiveField | None = None
+        self._draft: CfgDraft | None = None
         self._root_widget: SectionWidget | None = None
         self._field_label_max_width = field_label_max_width
         self._decoration_provider = decoration_provider
+        self._text_input_enhancer = text_input_enhancer
         self._field_decorations: dict[str, FieldDecoration] = {}
         self._choice_state: tuple[tuple[str, str], ...] = ()
         self._pending_section_refresh_paths: set[str] = set()
@@ -154,8 +156,8 @@ class CfgFormWidget(QWidget):
         self._inner_layout.addStretch()
         scroll.setWidget(self._inner)
 
-    def attach(self, model: SectionLiveField) -> None:
-        """Render + reflect a service-owned ``SectionLiveField``.
+    def attach(self, draft: CfgDraft) -> None:
+        """Render + reflect a service-owned ``CfgDraft``.
 
         Connects to the model's signals and builds the widget tree. The widget
         does NOT own the model — ``detach`` (and Qt destruction) never tears it
@@ -163,25 +165,26 @@ class CfgFormWidget(QWidget):
         """
         self.detach()
 
-        self._model = model
+        self._draft = draft
         self._field_decorations = {}
-        self._choice_state = _choice_state_for_model(model)
-        model.on_validity_changed.connect(self.validity_changed.emit)
-        model.on_change.connect(self._on_model_changed)
+        self._choice_state = _choice_state_for_model(draft.root)
+        draft.on_validity_changed.connect(self.validity_changed.emit)
+        draft.on_change.connect(self._on_draft_changed)
 
         self._root_widget = SectionWidget(
-            model,
+            draft.root,
             top_level=True,
             field_label_max_width=self._field_label_max_width,
             decoration_for_path=self._resolve_decoration,
+            text_input_enhancer=self._text_input_enhancer,
         )
         self._apply_editing_enabled()
         self._inner_layout.insertWidget(
             self._inner_layout.count() - 1, self._root_widget
         )
 
-        self.validity_changed.emit(model.is_valid())
-        logger.debug("CfgFormWidget.attach: built reactive form over owned model")
+        self.validity_changed.emit(draft.is_valid())
+        logger.debug("CfgFormWidget.attach: built reactive form over owned draft")
 
     def set_editing_enabled(self, enabled: bool) -> None:
         """Enable or disable editing without disabling the scroll container."""
@@ -194,10 +197,10 @@ class CfgFormWidget(QWidget):
         The model is service-owned and may outlive this widget (agent still
         editing it); only its signal bindings + the Qt widget tree go away.
         """
-        if self._model is not None:
-            self._model.on_change.disconnect(self._on_model_changed)
-            self._model.on_validity_changed.disconnect(self.validity_changed.emit)
-            self._model = None  # NOTE: never self._model.teardown()
+        if self._draft is not None:
+            self._draft.on_change.disconnect(self._on_draft_changed)
+            self._draft.on_validity_changed.disconnect(self.validity_changed.emit)
+            self._draft = None  # NOTE: detach never closes a service-owned draft.
 
         if self._root_widget:
             self._root_widget.teardown()
@@ -216,11 +219,11 @@ class CfgFormWidget(QWidget):
 
     def set_decoration_provider(self, provider: FieldDecorationProvider | None) -> None:
         self._decoration_provider = provider
-        model = self._model
-        if model is None or self._root_widget is None:
+        draft = self._draft
+        if draft is None or self._root_widget is None:
             return
         changed_paths = _changed_decoration_paths(
-            self._field_decorations, self._decoration_state_for_model(model)
+            self._field_decorations, self._decoration_state_for_model(draft.root)
         )
         self._queue_section_refresh(_parent_section_paths(changed_paths))
 
@@ -237,9 +240,9 @@ class CfgFormWidget(QWidget):
 
     def read_values(self) -> CfgSectionValue:
         """Return a new CfgSectionValue from current model state."""
-        if self._model is None:
+        if self._draft is None:
             raise RuntimeError("attach() must be called before read_values()")
-        return self._model.get_value()
+        return self._draft.snapshot().value
 
     def read_schema(self) -> CfgSchema:
         """Snapshot the LiveModel draft as a fresh ``CfgSchema``.
@@ -249,51 +252,40 @@ class CfgFormWidget(QWidget):
         local-draft hosts (inspect / writeback dialogs) that need to capture
         the unsaved draft at their own Apply boundary.
         """
-        from zcu_tools.gui.app.main.adapter import CfgSchema
-
-        if self._model is None:
+        if self._draft is None:
             raise RuntimeError("attach() must be called before read_schema()")
-        return CfgSchema(spec=self._model.spec, value=self.read_values())
-
-    def get_live_root(self) -> SectionLiveField | None:
-        """Return the live ``SectionLiveField`` root, or ``None`` if unpopulated.
-
-        Exposed so the remote-control path resolver (Phase 81b) can mutate
-        the draft tree directly — preserving WYSIWYG with the form widget,
-        which auto-commits via ``schema_changed`` exactly as a UI edit would.
-        """
-        return self._model
+        return self._draft.snapshot()
 
     def is_valid(self) -> bool:
-        return self._model.is_valid() if self._model else True
+        return self._draft.is_valid() if self._draft else True
 
     def first_invalid_reason(self) -> str | None:
-        if self._model is None:
+        if self._draft is None:
             return None
-        return self._find_first_invalid(self._model, path="")
+        return self._find_first_invalid(self._draft.root, path="")
 
     def _emit_schema_changed(self, *_: object) -> None:
-        if self._model is None:
+        if self._draft is None:
             return
         self.schema_changed.emit(self.read_schema())
 
-    def _on_model_changed(self, *_: object) -> None:
-        if self._model is None:
+    def _on_draft_changed(self, *_: object) -> None:
+        if self._draft is None:
             return
         self.schema_changed.emit(self.read_schema())
-        state = _choice_state_for_model(self._model)
+        state = _choice_state_for_model(self._draft.root)
         if state == self._choice_state:
             return
         changed_selectors = _changed_choice_selector_paths(self._choice_state, state)
         self._choice_state = state
         self._queue_section_refresh(_parent_section_paths(changed_selectors))
 
-    def _resolve_decoration(self, path: str, field: LiveField) -> FieldDecoration:
+    def _resolve_decoration(self, path: str, field: CfgField) -> FieldDecoration:
         decoration = self._decoration_for_field(path, field)
         self._field_decorations[path] = decoration
         return decoration
 
-    def _decoration_for_field(self, path: str, field: LiveField) -> FieldDecoration:
+    def _decoration_for_field(self, path: str, field: CfgField) -> FieldDecoration:
         spec = cast(CfgNodeSpec, field.spec)
         value = cast(CfgNodeValue | None, field.get_value())
         provider = self._decoration_provider
@@ -301,28 +293,28 @@ class CfgFormWidget(QWidget):
         return default_decoration_for_spec(spec).merge(patch)
 
     def _decoration_state_for_model(
-        self, model: SectionLiveField
+        self, model: SectionField
     ) -> dict[str, FieldDecoration]:
         state: dict[str, FieldDecoration] = {}
         self._collect_decoration_state(model, "", state)
         return state
 
     def _collect_decoration_state(
-        self, field: LiveField, path: str, state: dict[str, FieldDecoration]
+        self, field: CfgField, path: str, state: dict[str, FieldDecoration]
     ) -> None:
         if path:
             state[path] = self._decoration_for_field(path, field)
-        if isinstance(field, SectionLiveField):
+        if isinstance(field, SectionField):
             for key, child in field.fields.items():
                 child_path = f"{path}.{key}" if path else key
                 self._collect_decoration_state(child, child_path, state)
             return
-        if isinstance(field, ReferenceLiveField) and field.sub_field is not None:
+        if isinstance(field, ReferenceField) and field.sub_field is not None:
             for key, child in field.sub_field.fields.items():
                 child_path = f"{path}.{key}" if path else key
                 self._collect_decoration_state(child, child_path, state)
             return
-        if isinstance(field, SweepLiveField):
+        if isinstance(field, SweepField):
             for edge, child in (
                 ("start", field.start_field),
                 ("stop", field.stop_field),
@@ -356,8 +348,8 @@ class CfgFormWidget(QWidget):
             self._drop_decorations_under(path)
             if not root.refresh_section(path):
                 # A stale or unsupported path should not leave the form half-updated.
-                if self._model is not None:
-                    self.attach(self._model)
+                if self._draft is not None:
+                    self.attach(self._draft)
                 return
 
     def _drop_decorations_under(self, section_path: str) -> None:
@@ -371,8 +363,8 @@ class CfgFormWidget(QWidget):
             if not path.startswith(prefix)
         }
 
-    def _find_first_invalid(self, field: LiveField, *, path: str) -> str | None:
-        if isinstance(field, ScalarLiveField):
+    def _find_first_invalid(self, field: CfgField, *, path: str) -> str | None:
+        if isinstance(field, ScalarField):
             if field.is_valid():
                 return None
             val = field.get_value()
@@ -380,7 +372,7 @@ class CfgFormWidget(QWidget):
                 return f"{path or field.spec.label}: {val.error}"
             return f"{path or field.spec.label}: invalid scalar value"
 
-        if isinstance(field, SweepLiveField):
+        if isinstance(field, SweepField):
             if field.start_field.is_valid() and field.stop_field.is_valid():
                 return None
             start_reason = self._find_first_invalid(
@@ -394,7 +386,7 @@ class CfgFormWidget(QWidget):
                 path=f"{path}.stop" if path else "sweep.stop",
             )
 
-        if isinstance(field, CenteredSweepLiveField):
+        if isinstance(field, CenteredSweepField):
             if field.center_field.is_valid():
                 return None
             return self._find_first_invalid(
@@ -402,7 +394,7 @@ class CfgFormWidget(QWidget):
                 path=f"{path}.center" if path else "sweep.center",
             )
 
-        if isinstance(field, ReferenceLiveField):
+        if isinstance(field, ReferenceField):
             if field.is_valid():
                 return None
             key = field.get_chosen_key()
@@ -417,7 +409,7 @@ class CfgFormWidget(QWidget):
                     return nested
             return f"{label}: invalid module reference '{key}'"
 
-        if isinstance(field, SectionLiveField):
+        if isinstance(field, SectionField):
             for key, child in field.fields.items():
                 child_path = f"{path}.{key}" if path else key
                 reason = self._find_first_invalid(child, path=child_path)
@@ -436,7 +428,7 @@ def default_decoration_for_spec(spec: CfgNodeSpec) -> FieldDecoration:
         return FieldDecoration(hidden=True, enabled=False)
     if isinstance(spec, (ScalarSpec, SweepSpec, CenteredSweepSpec)):
         return FieldDecoration(enabled=bool(spec.editable), tooltip=spec.tooltip)
-    if isinstance(spec, (ReferenceSpec, DeviceRefSpec, CfgSectionSpec)):
+    if isinstance(spec, (ReferenceSpec, CfgSectionSpec)):
         return FieldDecoration(enabled=True)
     raise TypeError(f"Unsupported cfg spec type {type(spec).__name__}")
 
@@ -451,14 +443,14 @@ __all__ = [
 ]
 
 
-def _choice_state_for_model(model: SectionLiveField) -> tuple[tuple[str, str], ...]:
+def _choice_state_for_model(model: SectionField) -> tuple[tuple[str, str], ...]:
     state: list[tuple[str, str]] = []
     _collect_choice_state(model, "", state)
     return tuple(sorted(state))
 
 
 def _collect_choice_state(
-    field: SectionLiveField, path: str, state: list[tuple[str, str]]
+    field: SectionField, path: str, state: list[tuple[str, str]]
 ) -> None:
     spec = field.spec
     if isinstance(spec, ChoiceSectionSpec):
@@ -471,7 +463,7 @@ def _collect_choice_state(
             )
             state.append((selector_path, choice))
     for key, child in field.fields.items():
-        if isinstance(child, SectionLiveField):
+        if isinstance(child, SectionField):
             child_path = f"{path}.{key}" if path else key
             _collect_choice_state(child, child_path, state)
 

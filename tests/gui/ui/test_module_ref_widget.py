@@ -1,18 +1,10 @@
-"""Tests — ReferenceWidget combo auto-refresh on library change.
-
-Bug: adding a module to the library after the widget was shown did not update
-the combo — the widget only subscribed to model on_change (which only fires when
-*this field's* referenced entry changes, not when the library set grows).
-
-Fix: the widget now also subscribes to MlChangedPayload on the shared EventBus
-so that any library-set mutation triggers a combo rebuild.
-"""
+"""ReferenceWidget consumes options and refresh notifications from ReferenceField."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from collections.abc import Sequence
 
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -20,19 +12,12 @@ from zcu_tools.gui.app.main.adapter import (
     ReferenceValue,
     ScalarSpec,
 )
-from zcu_tools.gui.app.main.live_model import LiveModelEnv, ReferenceLiveField
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.session.events import MlChangedPayload
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+from zcu_tools.gui.cfg.binding import ReferenceField, ResolvedReference
 
 _INNER_LABEL = "readout_rf"
 
 
 def _inner_spec() -> CfgSectionSpec:
-    """Minimal module spec whose label matches _INNER_LABEL."""
     return CfgSectionSpec(
         label=_INNER_LABEL,
         fields={"freq": ScalarSpec(label="Freq", type=float)},
@@ -43,112 +28,72 @@ def _inner_value() -> CfgSectionValue:
     return CfgSectionValue(fields={"freq": DirectValue(1000.0)})
 
 
-def _ref_spec() -> ReferenceSpec:
-    """ReferenceSpec allowing one custom shape whose label is _INNER_LABEL."""
-    return ReferenceSpec(kind="module", allowed=[_inner_spec()])
+class _Catalog:
+    def __init__(self) -> None:
+        self.entries: dict[str, ResolvedReference] = {}
+
+    def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
+        assert kind == "module"
+        return tuple(
+            key
+            for key, resolved in self.entries.items()
+            if resolved.label in allowed_labels
+        )
+
+    def resolve(self, kind: str, key: str) -> ResolvedReference | None:
+        assert kind == "module"
+        return self.entries.get(key)
 
 
-def _ctrl(bus: EventBus, ml: MagicMock | None = None) -> MagicMock:
-    c = MagicMock()
-    c.get_bus.return_value = bus
-    c.get_current_md.return_value = MagicMock()
-    c.get_current_ml.return_value = ml
-    return c
-
-
-def _make_field(ctrl: MagicMock) -> ReferenceLiveField:
-    spec = _ref_spec()
+def _make_field(catalog: _Catalog) -> ReferenceField:
+    spec = ReferenceSpec(kind="module", allowed=[_inner_spec()])
     value = ReferenceValue(
         chosen_key=f"<Custom:{_INNER_LABEL}>",
         value=_inner_value(),
-        is_overridden=False,
     )
-    return ReferenceLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+    return ReferenceField(
+        spec,
+        evaluate_expression=lambda expression: 0,
+        provide_options=lambda source_id: (),
+        references=catalog,
+        initial_val=value,
+    )
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
-def test_module_ref_widget_combo_refreshes_on_ml_changed(qapp):
-    """Emitting MlChangedPayload causes the combo to include the new library entry."""
-    bus = EventBus()
-    ml = MagicMock()
-    # Start with an empty library — the widget shows only the custom-spec entry.
-    ml.modules = {}
-    ctrl = _ctrl(bus, ml)
-    field = _make_field(ctrl)
-
+def test_module_ref_widget_combo_refreshes_from_field_catalog(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
-    w = ReferenceWidget(field)
-    count_before = w._combo.count()
+    catalog = _Catalog()
+    field = _make_field(catalog)
+    widget = ReferenceWidget(field)
+    count_before = widget._combo.count()
 
-    # Simulate adding "my_module" to the library: the ctrl now returns a ml
-    # with one entry.  We patch module_cfg_to_value so the test does not need
-    # a real ModuleCfg — the function is an internal implementation detail of
-    # _refresh_combo_items and is tested separately.
-    fake_cfg = object()
-    ml.modules = {"my_module": fake_cfg}
+    catalog.entries["my_module"] = ResolvedReference(_INNER_LABEL, _inner_value())
+    field.refresh_references("module")
 
-    with patch(
-        "zcu_tools.gui.app.main.cfg_schemas.module_cfg_to_value",
-        return_value=(_inner_spec(), _inner_value()),
-    ):
-        # Dispatch the library-change event that ContextService emits.
-        bus.emit(MlChangedPayload(ml=ml))
-
-    count_after = w._combo.count()
-    # The separator + the new library item should have been added.
-    assert count_after > count_before, (
-        f"Expected combo to grow after MlChangedPayload, "
-        f"before={count_before} after={count_after}"
-    )
-    # The new entry must actually appear in the combo.
-    texts = [w._combo.itemText(i) for i in range(w._combo.count())]
-    assert any("my_module" in t for t in texts), (
-        f"'my_module' not found in combo items: {texts}"
-    )
-
-    w.teardown()
+    assert widget._combo.count() > count_before
+    assert "Lib: my_module" in [
+        widget._combo.itemText(index) for index in range(widget._combo.count())
+    ]
+    widget.teardown()
 
 
-def test_module_ref_widget_teardown_removes_bus_subscription(qapp):
-    """After teardown, MlChangedPayload no longer triggers _refresh_combo_items."""
-    bus = EventBus()
-    ml = MagicMock()
-    ml.modules = {}
-    ctrl = _ctrl(bus, ml)
-    field = _make_field(ctrl)
-
+def test_module_ref_widget_teardown_disconnects_field_callbacks(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
-    w = ReferenceWidget(field)
-    w.teardown()
+    field = _make_field(_Catalog())
+    widget = ReferenceWidget(field)
+    widget.teardown()
 
-    # After teardown: adding to the bus and emitting should not raise (stale
-    # callback would cause AttributeError on a partially-torn-down widget or
-    # silently succeed — we only need to confirm the subscriber count is zero).
-    subscribers_after = bus._subs.get(MlChangedPayload, [])
-    assert w._on_ml_changed not in subscribers_after, (
-        "Stale subscription found after teardown — unsubscribe was not called"
-    )
+    assert widget._on_model_changed not in field.on_change._callbacks
 
 
-def test_module_ref_widget_initial_combo_without_ml(qapp):
-    """When ml is None, combo shows only the custom-spec entry (no library section)."""
-    bus = EventBus()
-    # ctrl returns None for ml → no library section in combo
-    ctrl = _ctrl(bus, ml=None)
-    field = _make_field(ctrl)
-
+def test_module_ref_widget_initial_combo_without_catalog_keys(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
-    w = ReferenceWidget(field)
+    widget = ReferenceWidget(_make_field(_Catalog()))
 
-    texts = [w._combo.itemText(i) for i in range(w._combo.count())]
-    # Only the single custom spec entry should be present.
-    assert texts == [_INNER_LABEL], f"Unexpected combo items: {texts}"
-
-    w.teardown()
+    assert [
+        widget._combo.itemText(index) for index in range(widget._combo.count())
+    ] == [_INNER_LABEL]
+    widget.teardown()

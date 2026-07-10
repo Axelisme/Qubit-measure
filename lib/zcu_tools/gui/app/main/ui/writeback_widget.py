@@ -25,6 +25,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformWriteback,
     WritebackItem,
 )
+from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
 
 from .cfg_form import CfgFormWidget
 
@@ -228,8 +229,10 @@ class WritebackWidget(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        form_widget = CfgFormWidget()
-        form_widget.attach(self._ctrl.get_cfg_editor_root(item.editor_id))
+        form_widget = CfgFormWidget(
+            text_input_enhancer=make_value_source_input_enhancer(self._ctrl)
+        )
+        form_widget.attach(self._ctrl.get_cfg_editor_draft(item.editor_id))
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 

@@ -263,8 +263,7 @@ class WritebackService:
         ``edit_schema`` when there is no model.
         """
         if item.editor_id is not None:
-            root = self._cfg_editor.get_root(item.editor_id)
-            return CfgSchema(spec=root.spec, value=root.get_value())
+            return self._cfg_editor.get_draft(item.editor_id).snapshot()
         schema = item.edit_schema
         if schema is None:
             raise RuntimeError(f"writeback '{item.session_id}' has no editable schema")

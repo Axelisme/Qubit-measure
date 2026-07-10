@@ -8,7 +8,6 @@ from .model import (
     CfgNodeValue,
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -59,8 +58,6 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 fields[key] = ReferenceValue(
                     f"<Custom:{label}>", make_default_value(first)
                 )
-        elif isinstance(node_spec, DeviceRefSpec):
-            fields[key] = DirectValue("")
         elif isinstance(node_spec, CfgSectionSpec):
             fields[key] = make_default_value(node_spec)
     return CfgSectionValue(fields=fields)
@@ -244,15 +241,6 @@ def inherit_from(
                 new_fields[key] = ReferenceValue(
                     f"<Custom:{label}>", make_default_value(first)
                 )
-            continue
-
-        if isinstance(new_node_spec, DeviceRefSpec):
-            if isinstance(old_node_spec, DeviceRefSpec) and isinstance(
-                old_node_val, DirectValue
-            ):
-                new_fields[key] = old_node_val
-            else:
-                new_fields[key] = DirectValue("")
             continue
 
         if isinstance(new_node_spec, CfgSectionSpec):

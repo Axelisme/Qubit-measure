@@ -15,7 +15,6 @@ from zcu_tools.gui.app.main.adapter import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     MetaDictWriteback,
@@ -610,32 +609,59 @@ def test_non_optional_missing_raises():
 
 
 # ---------------------------------------------------------------------------
-# DeviceRefSpec lowering
+# Device selector lowering
 # ---------------------------------------------------------------------------
 
 
-def test_device_ref_normal_path_produces_device_name():
-    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
+def test_device_selector_normal_path_produces_device_name():
+    spec = CfgSectionSpec(
+        fields={
+            "dev": ScalarSpec(
+                label="Device",
+                type=str,
+                choices_source="devices",
+                required=True,
+            )
+        }
+    )
     val = CfgSectionValue(fields={"dev": DirectValue("lo_device")})
     s = CfgSchema(spec=spec, value=val)
     result = schema_to_raw_dict(s, None, _make_ml())
     assert result["dev"] == "lo_device"
 
 
-def test_device_ref_is_unset_raises():
-    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
+def test_device_selector_required_empty_raises():
+    spec = CfgSectionSpec(
+        fields={
+            "dev": ScalarSpec(
+                label="Device",
+                type=str,
+                choices_source="devices",
+                required=True,
+            )
+        }
+    )
     # An empty device ref is unset → lowering raises (ADR-0010: no is_unset flag).
     val = CfgSectionValue(fields={"dev": DirectValue(value="")})
     s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(RuntimeError, match="unset"):
+    with pytest.raises(RuntimeError, match="required and must not be empty"):
         schema_to_raw_dict(s, None, _make_ml())
 
 
-def test_device_ref_empty_string_raises():
-    spec = CfgSectionSpec(fields={"dev": DeviceRefSpec(label="Device")})
+def test_device_selector_empty_string_raises():
+    spec = CfgSectionSpec(
+        fields={
+            "dev": ScalarSpec(
+                label="Device",
+                type=str,
+                choices_source="devices",
+                required=True,
+            )
+        }
+    )
     val = CfgSectionValue(fields={"dev": DirectValue(value="")})
     s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(RuntimeError, match="unset"):
+    with pytest.raises(RuntimeError, match="required and must not be empty"):
         schema_to_raw_dict(s, None, _make_ml())
 
 

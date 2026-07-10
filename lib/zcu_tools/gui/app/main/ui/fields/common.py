@@ -1,4 +1,4 @@
-"""Common widgets for LiveFields."""
+"""Common widgets for shared cfg binding fields."""
 
 from __future__ import annotations
 
@@ -24,20 +24,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.session.ui.value_source_input import (
-    SessionValueSourceInputHost,
-    ValueSourceInputController,
+from zcu_tools.gui.cfg.binding import (
+    CenteredSweepField,
+    CfgField,
+    LiteralField,
+    ScalarField,
+    SweepField,
 )
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 from ...adapter import DirectValue, EvalValue, default_value_for_type
-from ...live_model import (
-    CenteredSweepLiveField,
-    LiteralLiveField,
-    LiveField,
-    ScalarLiveField,
-    SweepLiveField,
-)
 from .registry import FieldDecorationProtocol, register_widget
 
 if TYPE_CHECKING:
@@ -46,6 +42,7 @@ if TYPE_CHECKING:
 
 FIELD_INPUT_MIN_WIDTH = 20
 FIELD_LABEL_MAX_WIDTH = 80
+TextInputEnhancer = Callable[[QLineEdit], object | None]
 
 _TONE_STYLES = {
     "muted": "color: #6b7280;",
@@ -247,7 +244,7 @@ def _sweep_pair(
 def _edge_decoration(
     path: str,
     edge: str,
-    edge_field: LiveField,
+    edge_field: CfgField,
     decoration_for_path: Callable[[str, Any], FieldDecorationProtocol] | None,
 ) -> FieldDecorationProtocol | None:
     if not path or decoration_for_path is None:
@@ -294,27 +291,14 @@ def _apply_edge_decoration(
         label_widget.setStyleSheet(style)
 
 
-def _dynamic_choices_for_scalar(field: ScalarLiveField, current: Any) -> list | None:
-    spec = field.spec
-    if spec.choices_source == "":
-        return spec.choices
-    if spec.choices_source == "arb_waveforms":
-        list_arb_waveforms = getattr(field.env.ctrl, "list_arb_waveforms", None)
-        if not callable(list_arb_waveforms):
-            choices = []
-        else:
-            raw_choices = list_arb_waveforms()
-            choices = (
-                [str(choice) for choice in raw_choices]
-                if isinstance(raw_choices, list)
-                else []
-            )
-        if not spec.required and "" not in choices:
-            choices.insert(0, "")
-        if current not in (None, "") and current not in choices:
-            choices.insert(0, current)
-        return choices
-    raise RuntimeError(f"Unsupported ScalarSpec choices_source {spec.choices_source!r}")
+def _dynamic_choices_for_scalar(field: ScalarField, current: Any) -> list | None:
+    options = field.available_options()
+    if options is None:
+        return None
+    choices = list(options)
+    if current not in (None, "") and current not in choices:
+        choices.insert(0, current)
+    return choices
 
 
 def read_scalar_widget(w: QWidget, spec: ScalarSpec) -> Any:
@@ -345,12 +329,12 @@ def _widget_default_for_direct_value(value: DirectValue, spec: ScalarSpec) -> An
 class BaseLiveWidget(QWidget):
     """Base class implementing FieldWidgetProtocol."""
 
-    def __init__(self, field: LiveField, parent: QWidget | None = None):
+    def __init__(self, field: CfgField, parent: QWidget | None = None):
         super().__init__(parent)
         self._field = field
 
     @property
-    def field(self) -> LiveField:
+    def field(self) -> CfgField:
         return self._field
 
     def teardown(self) -> None:
@@ -361,11 +345,11 @@ class BaseLiveWidget(QWidget):
         return False
 
 
-@register_widget(LiteralLiveField)
+@register_widget(LiteralField)
 class LiteralWidget(QLineEdit):
     """Read-only display for fixed literal values when a view reveals them."""
 
-    def __init__(self, field: LiteralLiveField, parent: QWidget | None = None):
+    def __init__(self, field: LiteralField, parent: QWidget | None = None):
         super().__init__(parent)
         self._field = field
         self.setText(str(field.spec.value))
@@ -374,7 +358,7 @@ class LiteralWidget(QLineEdit):
         self.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
 
     @property
-    def field(self) -> LiveField:
+    def field(self) -> CfgField:
         return self._field
 
     def teardown(self) -> None:
@@ -385,16 +369,23 @@ class LiteralWidget(QLineEdit):
         return False
 
 
-@register_widget(ScalarLiveField)
+@register_widget(ScalarField)
 class ScalarWidget(BaseLiveWidget):
-    """Generic input widget for ScalarLiveField."""
+    """Generic input widget for ScalarField."""
 
-    def __init__(self, field: ScalarLiveField, parent: QWidget | None = None):
+    def __init__(
+        self,
+        field: ScalarField,
+        parent: QWidget | None = None,
+        *,
+        text_input_enhancer: TextInputEnhancer | None = None,
+    ) -> None:
         super().__init__(field, parent)
         self._updating = False
         self._input: QWidget | None = None
         self._ghost: QLabel | None = None
-        self._source_input: ValueSourceInputController | None = None
+        self._text_input_enhancer = text_input_enhancer
+        self._input_enhancement: object | None = None
         self._mode = ""
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -404,9 +395,6 @@ class ScalarWidget(BaseLiveWidget):
         field.on_change.connect(self._on_model_changed)
 
     def teardown(self) -> None:
-        if self._source_input is not None:
-            self._source_input.detach()
-            self._source_input = None
         self._field.on_change.disconnect(self._on_model_changed)
 
     def _on_ui_changed(self, *_: Any) -> None:
@@ -414,7 +402,7 @@ class ScalarWidget(BaseLiveWidget):
             return
         self._updating = True
         try:
-            field = cast(ScalarLiveField, self._field)
+            field = cast(ScalarField, self._field)
             inp = self._input
             assert inp is not None
             if isinstance(field.get_value(), EvalValue):
@@ -457,9 +445,14 @@ class ScalarWidget(BaseLiveWidget):
 
             if not isinstance(val, DirectValue):
                 return
-            field = cast(ScalarLiveField, self._field)
+            field = cast(ScalarField, self._field)
             raw = _widget_default_for_direct_value(val, field.spec)
             if isinstance(inp, QComboBox):
+                choices = _dynamic_choices_for_scalar(field, raw) or []
+                current_choices = [inp.itemText(i) for i in range(inp.count())]
+                if current_choices != [str(choice) for choice in choices]:
+                    self._rebuild_ui()
+                    return
                 idx = inp.findText(str(raw))
                 if idx >= 0:
                     inp.setCurrentIndex(idx)
@@ -476,7 +469,8 @@ class ScalarWidget(BaseLiveWidget):
 
     def _rebuild_ui(self) -> None:
         self._clear_layout()
-        field = cast(ScalarLiveField, self._field)
+        self._input_enhancement = None
+        field = cast(ScalarField, self._field)
         value = field.get_value()
         self._mode = "eval" if isinstance(value, EvalValue) else "direct"
         self._ghost = None
@@ -487,12 +481,8 @@ class ScalarWidget(BaseLiveWidget):
             inp.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
             inp.setEnabled(field.spec.editable)
             inp.textChanged.connect(self._on_ui_changed)
-            self._source_input = ValueSourceInputController(
-                inp,
-                SessionValueSourceInputHost(field.env.ctrl),
-                parent=inp,
-            )
-            self._source_input.resolve_failed.connect(inp.setToolTip)  # type: ignore[attr-defined]
+            if self._text_input_enhancer is not None:
+                self._input_enhancement = self._text_input_enhancer(inp)
             self._layout.addWidget(inp, stretch=1)
 
             self._ghost = QLabel()
@@ -514,9 +504,6 @@ class ScalarWidget(BaseLiveWidget):
         self._install_context_menu(self._input)
 
     def _clear_layout(self) -> None:
-        if self._source_input is not None:
-            self._source_input.detach()
-            self._source_input = None
         while self._layout.count():
             item = self._layout.takeAt(0)
             if item is None:
@@ -545,7 +532,7 @@ class ScalarWidget(BaseLiveWidget):
             self._ghost.setToolTip(value.error or "Expression is unresolved")
             self._ghost.setStyleSheet("color: red; font-style: italic;")
             return
-        spec = cast(ScalarLiveField, self._field).spec
+        spec = cast(ScalarField, self._field).spec
         if spec.type is float and isinstance(value.resolved, (int, float)):
             decimals = spec.decimals if spec.decimals is not None else 6
             raw = f"{value.resolved:.{decimals}f}"
@@ -582,7 +569,7 @@ class ScalarWidget(BaseLiveWidget):
         menu, mode_action = self._build_context_menu(line_edit)
         if mode_action is None:
             return
-        field = cast(ScalarLiveField, self._field)
+        field = cast(ScalarField, self._field)
         chosen = cast(Any, menu).exec_(global_pos)
         if chosen is not mode_action:
             return
@@ -606,29 +593,35 @@ class ScalarWidget(BaseLiveWidget):
             return menu, None
         if menu.actions():
             menu.addSeparator()
-        value = cast(ScalarLiveField, self._field).get_value()
+        value = cast(ScalarField, self._field).get_value()
         if isinstance(value, EvalValue):
             return menu, menu.addAction("Use direct value")
         return menu, menu.addAction("Use expression")
 
     def _supports_eval_mode(self) -> bool:
-        spec = cast(ScalarLiveField, self._field).spec
-        return spec.editable and spec.choices is None and spec.type in {int, float}
+        field = cast(ScalarField, self._field)
+        spec = field.spec
+        return (
+            spec.editable
+            and field.available_options() is None
+            and spec.type in {int, float}
+        )
 
 
-@register_widget(SweepLiveField)
+@register_widget(SweepField)
 class SweepWidget(BaseLiveWidget):
     """Inline 2x2 input for start/stop/expts/step with synchronized updates."""
 
     def __init__(
         self,
-        field: SweepLiveField,
+        field: SweepField,
         parent: QWidget | None = None,
         *,
         path: str = "",
         decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
         | None = None,
-    ):
+        text_input_enhancer: TextInputEnhancer | None = None,
+    ) -> None:
         super().__init__(field, parent)
         self._updating = False
 
@@ -640,8 +633,16 @@ class SweepWidget(BaseLiveWidget):
 
         decimals = field.spec.decimals
 
-        self._start_widget = ScalarWidget(field.start_field, self)
-        self._stop_widget = ScalarWidget(field.stop_field, self)
+        self._start_widget = ScalarWidget(
+            field.start_field,
+            self,
+            text_input_enhancer=text_input_enhancer,
+        )
+        self._stop_widget = ScalarWidget(
+            field.stop_field,
+            self,
+            text_input_enhancer=text_input_enhancer,
+        )
 
         self._expts = QSpinBox()
         self._expts.setRange(1, 2**31 - 1)
@@ -687,7 +688,7 @@ class SweepWidget(BaseLiveWidget):
         field.on_change.connect(self._on_model_changed)
 
     def teardown(self) -> None:
-        field = cast(SweepLiveField, self._field)
+        field = cast(SweepField, self._field)
         field.on_change.disconnect(self._on_model_changed)
         self._start_widget.teardown()
         self._stop_widget.teardown()
@@ -695,12 +696,12 @@ class SweepWidget(BaseLiveWidget):
     def _on_expts_changed(self, expts: int) -> None:
         if self._updating:
             return
-        cast(SweepLiveField, self._field).update_expts(expts)
+        cast(SweepField, self._field).update_expts(expts)
 
     def _on_step_changed(self, step: float) -> None:
         if self._updating:
             return
-        cast(SweepLiveField, self._field).update_step(step)
+        cast(SweepField, self._field).update_step(step)
 
     def _on_model_changed(self, val: Any) -> None:
         if self._updating:
@@ -718,11 +719,17 @@ class SweepWidget(BaseLiveWidget):
             self._updating = False
 
 
-@register_widget(CenteredSweepLiveField)
+@register_widget(CenteredSweepField)
 class CenteredSweepWidget(BaseLiveWidget):
     """Inline 2x2 input for center/span/expts/step with synchronized updates."""
 
-    def __init__(self, field: CenteredSweepLiveField, parent: QWidget | None = None):
+    def __init__(
+        self,
+        field: CenteredSweepField,
+        parent: QWidget | None = None,
+        *,
+        text_input_enhancer: TextInputEnhancer | None = None,
+    ) -> None:
         super().__init__(field, parent)
         self._updating = False
 
@@ -733,7 +740,11 @@ class CenteredSweepWidget(BaseLiveWidget):
         sv = field.get_value()
         decimals = field.spec.decimals
 
-        self._center_widget = ScalarWidget(field.center_field, self)
+        self._center_widget = ScalarWidget(
+            field.center_field,
+            self,
+            text_input_enhancer=text_input_enhancer,
+        )
 
         self._span = TrimDoubleSpinBox()
         self._span.setRange(0.0, 1e12)
@@ -781,7 +792,7 @@ class CenteredSweepWidget(BaseLiveWidget):
         field.on_change.connect(self._on_model_changed)
 
     def teardown(self) -> None:
-        field = cast(CenteredSweepLiveField, self._field)
+        field = cast(CenteredSweepField, self._field)
         field.on_change.disconnect(self._on_model_changed)
         self._center_widget.teardown()
 
@@ -789,30 +800,28 @@ class CenteredSweepWidget(BaseLiveWidget):
         if self._updating:
             return
         self._try_update(
-            lambda: cast(CenteredSweepLiveField, self._field).update_span(span)
+            lambda: cast(CenteredSweepField, self._field).update_span(span)
         )
 
     def _on_expts_changed(self, expts: int) -> None:
         if self._updating:
             return
         self._try_update(
-            lambda: cast(CenteredSweepLiveField, self._field).update_expts(expts)
+            lambda: cast(CenteredSweepField, self._field).update_expts(expts)
         )
 
     def _on_step_changed(self, step: float) -> None:
         if self._updating:
             return
         self._try_update(
-            lambda: cast(CenteredSweepLiveField, self._field).update_step(step)
+            lambda: cast(CenteredSweepField, self._field).update_step(step)
         )
 
     def _try_update(self, update: Callable[[], None]) -> None:
         try:
             update()
         except ValueError:
-            self._on_model_changed(
-                cast(CenteredSweepLiveField, self._field).get_value()
-            )
+            self._on_model_changed(cast(CenteredSweepField, self._field).get_value())
 
     def _on_model_changed(self, val: Any) -> None:
         if self._updating:

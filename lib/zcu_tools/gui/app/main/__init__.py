@@ -27,7 +27,6 @@ from .adapter import (
 )
 from .registry import Registry
 from .state import Session, State
-from .sweep_model import CenteredSweepEditor, SweepEditor
 
 __all__ = [
     "CfgNodeSpec",
@@ -35,7 +34,6 @@ __all__ = [
     "CfgSchema",
     "CfgSectionSpec",
     "CfgSectionValue",
-    "CenteredSweepEditor",
     "CenteredSweepSpec",
     "CenteredSweepValue",
     "DirectValue",
@@ -51,7 +49,6 @@ __all__ = [
     "ScalarValue",
     "State",
     "SweepSpec",
-    "SweepEditor",
     "SweepValue",
     "Session",
     "WaveformWriteback",

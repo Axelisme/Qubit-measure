@@ -26,7 +26,7 @@
 
 ## Cfg / Value Model
 
-- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI widget 與 agent 共用 service-owned LiveModel draft。
+- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI widget 與 agent 共用 service-owned `CfgDraft`。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec tree 靜態、Value tree 可變；locked literal 只在 spec 宣告。
 - [0010 — Complete value tree + None for empty](0010-value-tree-complete-none-for-empty.md)：Value tree 永遠完整；optional empty 統一用 `None`。
 - [0011 — CfgSchema validate boundary](0011-cfgschema-validate-boundary.md)：成品邊界做靜態結構驗證。

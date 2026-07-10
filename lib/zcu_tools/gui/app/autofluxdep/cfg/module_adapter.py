@@ -112,7 +112,6 @@ def _make_arb_waveform_spec() -> CfgSectionSpec:
             "data": ScalarSpec(
                 label="Data key",
                 type=str,
-                choices_source="arb_waveforms",
             ),
         },
     )

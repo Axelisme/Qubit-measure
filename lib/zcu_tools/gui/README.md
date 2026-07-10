@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-10（generic reference model）
+**Last updated:** 2026-07-10（Qt-free cfg binding ownership）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -17,8 +17,17 @@ Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`
 轉送的app-local opaque id。module/waveform factory、resolver與converter policy留在各app，
 既有`module_ref`/`waveform_ref` persistence wire shape不變。
 
+`zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。
+`CfgDraft`集中snapshot、validity、refresh與close lifecycle；field只依賴expression evaluator、
+opaque option provider與reference catalog三個窄ports，不持controller/environment aggregate。
+close會遞迴關閉整棵field tree並清callbacks，close前cached的root/child之後讀寫或refresh都
+Fast Fail。reference catalog以shape label與optional materialized value精確區分missing、
+unsupported與corrupt。widget只attach draft並render `draft.root`，detach不會close
+service-owned draft。
+
 此package不import `gui.app.*`、`experiment.*`、Qt、`meta_tool`、`notebook`或`device`，
-也沒有broad environment object或global resolver registry。measure與autofluxdep各自提供
+也沒有broad environment object或global resolver registry。scalar option source與reference
+kind都是shared只轉送的opaque string；measure與autofluxdep各自提供
 app-local ports與module shape policy；autofluxdep不經measure lowering/conversion。
 
 ## Process Runtime (`runtime.py`)

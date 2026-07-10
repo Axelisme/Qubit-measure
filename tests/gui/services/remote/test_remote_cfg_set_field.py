@@ -14,11 +14,40 @@ cases (sweep edges, literal rejection, unknown paths) each get a focused case.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
+from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.main.services.remote.path_resolver import (
+    resolve_and_set as _resolve_and_set,
+)
+from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue, DirectValue
+from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.session.value_lookup import ValueRef
 
 from ._helpers import Fixture, call, open_client
+
+
+def _make_draft(
+    ctrl: MagicMock, spec: CfgSectionSpec, value: CfgSectionValue
+) -> CfgDraft:
+    return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value))
+
+
+def _reject_value_ref(ref: ValueRef, target_type: type) -> NoReturn:
+    del ref, target_type
+    raise AssertionError("direct path-resolver tests do not accept ValueRef")
+
+
+def _set(draft: CfgDraft, path: str, value: object) -> None:
+    _resolve_and_set(
+        draft,
+        path,
+        value,
+        resolve_value_ref=_reject_value_ref,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixture: open a real seeded cfg-editor session owned by one tab
@@ -57,8 +86,8 @@ class _LiveFixture(Fixture):
             list_settable_paths_full,
         )
 
-        root = self.ctrl.get_cfg_editor_root(self.editor_id)
-        for entry in list_settable_paths_full(root):
+        draft = self.ctrl.get_cfg_editor_draft(self.editor_id)
+        for entry in list_settable_paths_full(draft):
             if entry["path"] == path:
                 return entry["value"]
         raise KeyError(path)
@@ -152,34 +181,28 @@ def test_set_field_sweep_expts_non_integer_rejected(lf):
 
 
 def _centered_sweep_root():
-    from unittest.mock import MagicMock
-
     from zcu_tools.gui.app.main.adapter import (
         CenteredSweepSpec,
         CenteredSweepValue,
         CfgSectionSpec,
         CfgSectionValue,
     )
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     ctrl = MagicMock()
     spec = CfgSectionSpec(fields={"sweep": CenteredSweepSpec(label="Freq")})
     value = CfgSectionValue(
         fields={"sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11)}
     )
-    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+    return _make_draft(ctrl, spec, value)
 
 
 def _locked_centered_sweep_root():
-    from unittest.mock import MagicMock
-
     from zcu_tools.gui.app.main.adapter import (
         CenteredSweepSpec,
         CenteredSweepValue,
         CfgSectionSpec,
         CfgSectionValue,
     )
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     ctrl = MagicMock()
     spec = CfgSectionSpec(
@@ -192,26 +215,23 @@ def _locked_centered_sweep_root():
     value = CfgSectionValue(
         fields={"sweep": CenteredSweepValue(center=0.0, span=10.0, expts=11)}
     )
-    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+    return _make_draft(ctrl, spec, value)
 
 
 def _single_point_centered_sweep_root():
-    from unittest.mock import MagicMock
-
     from zcu_tools.gui.app.main.adapter import (
         CenteredSweepSpec,
         CenteredSweepValue,
         CfgSectionSpec,
         CfgSectionValue,
     )
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     ctrl = MagicMock()
     spec = CfgSectionSpec(fields={"sweep": CenteredSweepSpec(label="Freq")})
     value = CfgSectionValue(
         fields={"sweep": CenteredSweepValue(center=0.0, span=0.0, expts=1)}
     )
-    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+    return _make_draft(ctrl, spec, value)
 
 
 def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
@@ -223,9 +243,9 @@ def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
 
     root = _centered_sweep_root()
 
-    resolve_and_set(root, "sweep.center", 5.0)
-    resolve_and_set(root, "sweep.span", 20.0)
-    resolve_and_set(root, "sweep.sweep.expts", 5)
+    _set(root, "sweep.center", 5.0)
+    _set(root, "sweep.span", 20.0)
+    _set(root, "sweep.sweep.expts", 5)
 
     entries = {
         entry["path"]: entry["value"] for entry in list_settable_paths_full(root)
@@ -249,7 +269,7 @@ def test_resolver_centered_sweep_rejects_start_stop_edges(qapp):  # noqa: ARG001
     root = _centered_sweep_root()
 
     with pytest.raises(RemoteError) as exc:
-        resolve_and_set(root, "sweep.start", 1.0)
+        _set(root, "sweep.start", 1.0)
 
     assert exc.value.code == ErrorCode.INVALID_PARAMS
     assert "centered sweep edge" in exc.value.message
@@ -265,7 +285,7 @@ def test_resolver_centered_sweep_rejects_locked_center_mismatch(qapp):  # noqa: 
     root = _locked_centered_sweep_root()
 
     with pytest.raises(RemoteError) as exc:
-        resolve_and_set(root, "sweep.center", 5.0)
+        _set(root, "sweep.center", 5.0)
 
     assert exc.value.code == ErrorCode.INVALID_PARAMS
     assert "locked to 0.0" in exc.value.message
@@ -295,7 +315,7 @@ def test_resolver_centered_sweep_value_errors_are_remote_errors(
     root = _centered_sweep_root()
 
     with pytest.raises(RemoteError) as exc:
-        resolve_and_set(root, path, value)
+        _set(root, path, value)
 
     assert exc.value.code == ErrorCode.INVALID_PARAMS
     assert match in exc.value.message
@@ -313,7 +333,7 @@ def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
     root = _single_point_centered_sweep_root()
 
     with pytest.raises(RemoteError) as exc:
-        resolve_and_set(root, "sweep.expts", 2)
+        _set(root, "sweep.expts", 2)
 
     assert exc.value.code == ErrorCode.INVALID_PARAMS
     assert "span" in exc.value.message
@@ -692,7 +712,7 @@ def test_tree_moduleref_only_chosen_variant_expanded(qapp):  # noqa: ARG001
     root = _fakefreq_root()
     # Switch to the 'Direct Readout' variant; the tree must now expand THAT
     # variant's sub-tree, not the previous one.
-    resolve_and_set(root, "modules.readout.ref", "Direct Readout")
+    _set(root, "modules.readout.ref", "Direct Readout")
     readout = _node(build_settable_tree(root), "modules.readout")
     assert readout["$ref"]["current"] == "<Custom:Direct Readout>"
     # Direct Readout has no pulse_cfg sub-section (it is a different shape).
@@ -710,16 +730,15 @@ def test_tree_omits_immutable_literal_fields(qapp):  # noqa: ARG001
     assert "freq" not in pulse_cfg
 
 
-def test_tree_deviceref_node_current_and_options(qapp):  # noqa: ARG001
+def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import build_settable_tree
 
     root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
     flux_dev = _node(build_settable_tree(root, "dev"), "flux_dev")
-    # A device ref is a leaf selector: $ref with current + the live device list,
-    # no settable sub-tree.
-    assert flux_dev["$ref"]["current"] == "flux_yoko"
-    assert flux_dev["$ref"]["options"] == ["flux_yoko", "flux_yoko_2"]
-    assert set(flux_dev) == {"$ref"}
+    assert flux_dev == {
+        "$value": "flux_yoko",
+        "$choices": ["flux_yoko", "flux_yoko_2"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -733,11 +752,8 @@ def test_tree_deviceref_node_current_and_options(qapp):  # noqa: ARG001
 
 
 def _fakefreq_root():
-    from unittest.mock import MagicMock
-
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
     ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
@@ -745,8 +761,7 @@ def _fakefreq_root():
     ctrl = MagicMock()
     ctrl.get_current_ml.return_value = ctx.ml
     ctrl.get_current_md.return_value = ctx.md
-    env = LiveModelEnv(ctrl=ctrl)
-    return SectionLiveField(cfg.spec, env, initial_val=cfg.value)
+    return _make_draft(ctrl, cfg.spec, cfg.value)
 
 
 def test_unknown_field_suggests_matching_descendant_path(qapp):  # noqa: ARG001
@@ -755,7 +770,7 @@ def test_unknown_field_suggests_matching_descendant_path(qapp):  # noqa: ARG001
 
     root = _fakefreq_root()
     with pytest.raises(RemoteError) as exc:
-        resolve_and_set(root, "modules.readout.gain", 0.25)
+        _set(root, "modules.readout.gain", 0.25)
 
     assert exc.value.code == ErrorCode.INVALID_PARAMS
     assert "modules.readout.pulse_cfg.gain" in exc.value.message
@@ -769,7 +784,7 @@ def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
 
     root = _fakefreq_root()
     # Bare label, exactly as tab.get_cfg advertises in 'choices'.
-    resolve_and_set(root, "modules.readout.ref", "Direct Readout")
+    _set(root, "modules.readout.ref", "Direct Readout")
 
     entry = next(
         e for e in list_settable_paths_full(root) if e["path"] == "modules.readout.ref"
@@ -786,7 +801,7 @@ def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
 
     root = _fakefreq_root()
     # An already-tagged key is stored verbatim (no double-wrapping).
-    resolve_and_set(root, "modules.readout.ref", "<Custom:Direct Readout>")
+    _set(root, "modules.readout.ref", "<Custom:Direct Readout>")
 
     entry = next(
         e for e in list_settable_paths_full(root) if e["path"] == "modules.readout.ref"
@@ -795,24 +810,16 @@ def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# DeviceRef path resolution — list_paths advertises a DeviceRef as
-# '<path>.device' (mirroring a ModuleRef's '.ref'); the resolver must accept
-# that exact advertised path. Regression: the '.device' suffix was advertised
-# but the resolver had no branch for it, so set_field('dev.flux_dev.device')
-# failed "descends into non-container DeviceRefLiveField" while list_paths told
-# the agent to use it (discovery and setter were out of sync). onetone/flux_dep
-# has a 'dev' section with a flux-device ref defaulting to 'flux_yoko'.
+# Device selectors are ordinary required dynamic scalar fields. Their wire path
+# is the scalar leaf itself; there is no device-ref alias segment.
 # ---------------------------------------------------------------------------
 
 
 def _fluxdep_root(device_names: list[str]):
-    from unittest.mock import MagicMock
-
     from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
         OneToneFluxDepAdapter,
     )
     from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
     ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
@@ -821,11 +828,10 @@ def _fluxdep_root(device_names: list[str]):
     ctrl.get_current_ml.return_value = ctx.ml
     ctrl.get_current_md.return_value = ctx.md
     ctrl.list_device_names.return_value = list(device_names)
-    env = LiveModelEnv(ctrl=ctrl)
-    return SectionLiveField(cfg.spec, env, initial_val=cfg.value)
+    return _make_draft(ctrl, cfg.spec, cfg.value)
 
 
-def _deviceref_value(root, path: str = "dev.flux_dev.device"):
+def _device_value(root, path: str = "dev.flux_dev"):
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
         list_settable_paths_full,
     )
@@ -833,52 +839,38 @@ def _deviceref_value(root, path: str = "dev.flux_dev.device"):
     return next(e for e in list_settable_paths_full(root) if e["path"] == path)["value"]
 
 
-def test_deviceref_advertised_path_is_dotted_device(qapp):  # noqa: ARG001
-    """list_paths advertises the DeviceRef as '<path>.device' (kind deviceref)."""
+def test_device_selector_advertises_scalar_leaf_path(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
         list_settable_paths_full,
     )
 
     root = _fluxdep_root(["flux_yoko"])
     entry = next(
-        e for e in list_settable_paths_full(root) if e["path"] == "dev.flux_dev.device"
+        e for e in list_settable_paths_full(root) if e["path"] == "dev.flux_dev"
     )
-    assert entry["kind"] == "deviceref"
+    assert entry["kind"] == "scalar"
+    assert entry["choices"] == ["flux_yoko"]
 
 
-def test_deviceref_device_path_resolves(qapp):  # noqa: ARG001
-    """The advertised '<path>.device' path round-trips through resolve_and_set."""
-    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
-
+def test_device_selector_scalar_path_resolves(qapp):  # noqa: ARG001
     root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
-    resolve_and_set(root, "dev.flux_dev.device", "flux_yoko_2")
-    assert _deviceref_value(root) == "flux_yoko_2"
+    _set(root, "dev.flux_dev", "flux_yoko_2")
+    assert _device_value(root) == "flux_yoko_2"
 
 
-def test_deviceref_bare_leaf_path_also_resolves(qapp):  # noqa: ARG001
-    """The bare-leaf form '<path>' (no '.device') is accepted as an alias."""
-    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
-
-    root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
-    resolve_and_set(root, "dev.flux_dev", "flux_yoko_2")
-    assert _deviceref_value(root) == "flux_yoko_2"
-
-
-def test_deviceref_non_string_value_rejected(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+def test_device_selector_non_string_value_rejected(qapp):  # noqa: ARG001
     from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
     root = _fluxdep_root(["flux_yoko"])
     with pytest.raises(RemoteError) as exc:
-        resolve_and_set(root, "dev.flux_dev.device", 42)
+        _set(root, "dev.flux_dev", 42)
     assert exc.value.code == ErrorCode.INVALID_PARAMS
 
 
-def test_deviceref_bad_trailing_segment_rejected(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
+def test_device_selector_has_no_legacy_alias_segment(qapp):  # noqa: ARG001
     from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
     root = _fluxdep_root(["flux_yoko"])
     with pytest.raises(RemoteError) as exc:
-        resolve_and_set(root, "dev.flux_dev.bogus", "flux_yoko")
+        _set(root, "dev.flux_dev.device", "flux_yoko")
     assert exc.value.code == ErrorCode.INVALID_PARAMS

@@ -33,8 +33,8 @@ if TYPE_CHECKING:
         SavePaths,
         WritebackItem,
     )
-    from zcu_tools.gui.app.main.live_model import SectionLiveField
     from zcu_tools.gui.app.main.state import Session, TabInteractionState
+    from zcu_tools.gui.cfg.binding import CfgDraft
     from zcu_tools.gui.session.types import ExpContext
 
     from .persistence_types import AppPersistedState
@@ -218,7 +218,7 @@ class CfgEditorPort(Protocol):
 
     def teardown(self, editor_id: str, *, reason: str = ...) -> None: ...
 
-    def get_root(self, editor_id: str) -> SectionLiveField: ...
+    def get_draft(self, editor_id: str) -> CfgDraft: ...
 
     # On the port so WritebackService can apply an agent's module/waveform draft
     # edit through the item's editor session (ADR-0008): the writeback editing

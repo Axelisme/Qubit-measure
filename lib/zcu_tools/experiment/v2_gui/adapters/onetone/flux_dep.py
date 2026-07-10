@@ -29,13 +29,13 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     EvalValue,
     ExpContext,
     InteractiveHost,
     InteractiveSession,
     MetaDictWriteback,
     RunRequest,
+    ScalarSpec,
     SweepSpec,
     WritebackItem,
     WritebackRequest,
@@ -125,7 +125,14 @@ class OneToneFluxDepAdapter(
                 .lock_literal("pulse_cfg.freq", 0.0)
                 .lock_literal("ro_cfg.ro_freq", 0.0),
             },
-            dev={"flux_dev": DeviceRefSpec(label="Flux Device")},
+            dev={
+                "flux_dev": ScalarSpec(
+                    label="Flux Device",
+                    type=str,
+                    choices_source="devices",
+                    required=True,
+                )
+            },
             sweep={
                 "flux": SweepSpec(label="Flux device value", decimals=6),
                 "freq": SweepSpec(label="Freq (MHz)"),

@@ -1,8 +1,8 @@
 """Phase 160b — NodeCfgForm: typed cfg form over a PlacedNode's schema SSOT.
 
 The node detail pane's edit form is now the measure CfgFormWidget (reused via the
-``cfg/form`` seam) bound to a ``SectionLiveField`` over the placement's schema.
-These tests drive the LiveModel the form renders (the same surface a user spin /
+``cfg/form`` seam) bound to a ``CfgDraft`` over the placement's schema.
+These tests drive the binding fields the form renders (the same surface a user spin /
 line-edit drives) and assert:
 
 - the rendered field set == the node's declared knob keys (spec keys);
@@ -40,11 +40,10 @@ from zcu_tools.gui.app.autofluxdep.cfg import (
     OverridePlan,
     ScalarSpec,
 )
+from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.cfg.form import (
     CfgFormWidget,
     FieldDecorationPatch,
-    LiveModelEnv,
-    SectionLiveField,
 )
 from zcu_tools.gui.app.autofluxdep.nodes.builder import (
     Builder,
@@ -58,6 +57,7 @@ from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import (
     NodeCfgForm,
 )
 from zcu_tools.gui.app.main.ui.fields.common import ElidedLabel
+from zcu_tools.gui.cfg.binding import SectionField
 from zcu_tools.gui.session.events import SessionEvent
 
 from .._helpers import node_field, node_section, sectioned_node_schema
@@ -131,43 +131,43 @@ def ctrl_node():
     ctrl._background_svc.quiesce()
 
 
-def _section(form: NodeCfgForm, key: str) -> SectionLiveField:
-    field = form._default_model.fields[key]
-    assert isinstance(field, SectionLiveField)
-    return cast(SectionLiveField, field)
+def _section(form: NodeCfgForm, key: str) -> SectionField:
+    field = form._default_draft.root.fields[key]
+    assert isinstance(field, SectionField)
+    return cast(SectionField, field)
 
 
-def _subsection(section: SectionLiveField, key: str) -> SectionLiveField:
+def _subsection(section: SectionField, key: str) -> SectionField:
     field = section.fields[key]
-    assert isinstance(field, SectionLiveField)
-    return cast(SectionLiveField, field)
+    assert isinstance(field, SectionField)
+    return cast(SectionField, field)
 
 
-def _ref_subsection(section: SectionLiveField, key: str) -> SectionLiveField:
+def _ref_subsection(section: SectionField, key: str) -> SectionField:
     field = section.fields[key]
     sub_field = getattr(field, "sub_field", None)
-    assert isinstance(sub_field, SectionLiveField)
+    assert isinstance(sub_field, SectionField)
     return sub_field
 
 
-def _generation(form: NodeCfgForm) -> SectionLiveField:
-    field = form._generation_model
-    assert isinstance(field, SectionLiveField)
-    return field
+def _generation(form: NodeCfgForm) -> SectionField:
+    draft = form._generation_draft
+    assert draft is not None
+    return draft.root
 
 
-def _generation_group(form: NodeCfgForm, key: str) -> SectionLiveField:
+def _generation_group(form: NodeCfgForm, key: str) -> SectionField:
     return _subsection(_generation(form), key)
 
 
 def _generation_leaf(form: NodeCfgForm, key: str) -> Any:
     for group in _generation(form).fields.values():
-        if isinstance(group, SectionLiveField) and key in group.fields:
+        if isinstance(group, SectionField) and key in group.fields:
             return group.fields[key]
     raise AssertionError(f"generation leaf {key!r} not found")
 
 
-def _field_labels(section: SectionLiveField) -> dict[str, str]:
+def _field_labels(section: SectionField) -> dict[str, str]:
     return {key: cast(Any, field).spec.label for key, field in section.fields.items()}
 
 
@@ -202,7 +202,7 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
     try:
         # Default cfg and generation behavior render as separate editor blocks; the
         # schema keeps logical keys.
-        assert set(form._default_model.fields.keys()) == {
+        assert set(form._default_draft.root.fields.keys()) == {
             "modules",
             "relax_delay",
             "reps",
@@ -218,7 +218,7 @@ def test_rendered_fields_match_spec_keys(ctrl_node, qapp):
         assert isinstance(nqz_spec, ScalarSpec)
         assert ch_spec.optional is False
         assert nqz_spec.choices == [1, 2]
-        assert "qub_gain" not in form._default_model.fields
+        assert "qub_gain" not in form._default_draft.root.fields
         assert set(_generation(form).fields.keys()) == {
             "acquisition",
             "drive_gain",
@@ -395,15 +395,14 @@ def test_generation_choices_render_only_active_readout_search_fields(qapp):
 def test_cfg_form_decoration_provider_collects_nested_paths(qapp):
     ctrl = build_core()
     schema = _SectionedBuilder().make_default_schema()
-    env = LiveModelEnv(ctrl=ctrl)
-    model = SectionLiveField(schema.schema.spec, env, schema.schema.value)
+    draft = AutofluxCfgBindings(ctrl).new_draft(schema.schema)
     provider = _DecorationProvider()
     form = CfgFormWidget(
         decoration_provider=provider,
         field_label_max_width=500,
     )
     try:
-        form.attach(model)
+        form.attach(draft)
 
         assert set(form.decoration_paths()) == {
             "acquire",
@@ -429,7 +428,7 @@ def test_cfg_form_decoration_provider_collects_nested_paths(qapp):
             form.decoration_for_path("missing")
     finally:
         form.detach()
-        model.teardown()
+        draft.close()
         ctrl._background_svc.quiesce()
 
 
@@ -631,29 +630,42 @@ def test_default_and_generation_blocks_share_vertical_space(ctrl_node, qapp):
         form.teardown()
 
 
-def test_session_refresh_updates_split_live_models(ctrl_node, qapp, monkeypatch):
+def test_session_refresh_updates_split_drafts(ctrl_node, qapp, monkeypatch):
     ctrl, node, index = ctrl_node
     form = NodeCfgForm(ctrl, node, index)
     seen: list[tuple[str, object]] = []
     try:
-        generation = form._generation_model
+        generation = form._generation_draft
         assert generation is not None
-        monkeypatch.setattr(
-            form._default_model,
-            "refresh_external",
-            lambda event: seen.append(("default", event)),
-        )
-        monkeypatch.setattr(
-            generation,
-            "refresh_external",
-            lambda event: seen.append(("generation", event)),
-        )
+        for name, draft in (
+            ("default", form._default_draft),
+            ("generation", generation),
+        ):
+            monkeypatch.setattr(
+                draft,
+                "refresh_expressions",
+                lambda owner=name: seen.append((owner, "expressions")),
+            )
+            monkeypatch.setattr(
+                draft,
+                "refresh_options",
+                lambda _source=None, owner=name: seen.append((owner, "options")),
+            )
+            monkeypatch.setattr(
+                draft,
+                "refresh_references",
+                lambda _kind=None, owner=name: seen.append((owner, "references")),
+            )
 
         form.refresh_external(SessionEvent.CONTEXT_SWITCHED)
 
         assert seen == [
-            ("default", SessionEvent.CONTEXT_SWITCHED),
-            ("generation", SessionEvent.CONTEXT_SWITCHED),
+            ("default", "expressions"),
+            ("default", "options"),
+            ("default", "references"),
+            ("generation", "expressions"),
+            ("generation", "options"),
+            ("generation", "references"),
         ]
     finally:
         form.teardown()
@@ -665,7 +677,7 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
     try:
         # drive the int knob the way a spin-box edit would (model.set_value →
         # schema_changed → controller.set_node_params → schema SSOT)
-        form._default_model.fields["reps"].set_value(DirectValue(value=321))
+        form._default_draft.root.fields["reps"].set_value(DirectValue(value=321))
         qub_pulse = _ref_subsection(_section(form, "modules"), "qub_pulse")
         qub_pulse.fields["gain"].set_value(DirectValue(value=0.42))
         _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
@@ -701,8 +713,8 @@ def test_sectioned_form_commit_projects_to_logical_keys(qapp):
     index = ctrl.state.nodes.index(node)
     form = NodeCfgForm(ctrl, node, index)
     try:
-        assert set(form._default_model.fields) == {"acquire", "drive"}
-        assert form._generation_model is None
+        assert set(form._default_draft.root.fields) == {"acquire", "drive"}
+        assert form._generation_draft is None
         assert node.schema.keys == ("reps", "qub_gain")
 
         _section(form, "acquire").fields["reps"].set_value(DirectValue(value=432))
@@ -779,7 +791,7 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
         )
         assert generation_editor is not None and not generation_editor.isEnabled()
         # the model (values) is untouched — "what this run used" stays visible
-        reps_value = form._default_model.fields["reps"].get_value()
+        reps_value = form._default_draft.root.fields["reps"].get_value()
         assert isinstance(reps_value, DirectValue) and reps_value.value == expected_reps
         form.set_read_only(False)
         assert form._default_form.isEnabled()

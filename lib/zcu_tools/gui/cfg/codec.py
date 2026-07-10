@@ -19,7 +19,6 @@ from .model import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -132,9 +131,6 @@ def _node_value_to_raw(
             "expts": value.expts,
             "step": value.step,
         }
-    if isinstance(spec, DeviceRefSpec):
-        assert isinstance(value, DirectValue)
-        return {"__kind": "direct", "value": _to_json_compatible(value.value)}
     if isinstance(spec, CfgSectionSpec):
         assert isinstance(value, CfgSectionValue)
         return _section_value_to_raw(
@@ -237,12 +233,6 @@ def _node_value_from_raw(
                 step=step,
             )
         raise RuntimeError("Centered sweep payload must be an object")
-    if isinstance(spec, DeviceRefSpec):
-        if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            value = raw.get("value")
-            if not isinstance(value, str):
-                raise RuntimeError("Device reference value must be string")
-            return DirectValue(value)
         raise RuntimeError("Device reference must use direct payload encoding")
     if isinstance(spec, CfgSectionSpec):
         if not isinstance(raw, dict):

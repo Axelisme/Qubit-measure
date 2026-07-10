@@ -44,36 +44,40 @@ def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
     ctrl.get_current_ml.return_value = ml
     ctrl.get_current_md.return_value = None
     ctrl.get_bus.return_value = MagicMock()
+    ctrl.list_device_names.return_value = []
+    ctrl.list_arb_waveforms.return_value = []
     _wire_cfg_editor(ctrl)
     return ctrl
 
 
 def _wire_cfg_editor(ctrl: MagicMock) -> None:
-    """Simulate the CfgEditorService open/open_seeded/commit/get_root contract.
+    """Simulate the CfgEditorService open/commit/get_draft contract.
 
     The modify dialog opens a *committable* session from the live ml
     (open_cfg_editor with from_name; ADR-0006) and commits via commit_cfg_editor;
-    seeded sessions still exist for tab/writeback. Build a real SectionLiveField
+    seeded sessions still exist for tab/writeback. Build a real CfgDraft
     per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
     commit (records last commit), and teardown.
     """
+    from zcu_tools.gui.app.main.adapter import CfgSchema
+    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.app.main.cfg_schemas import (
         module_cfg_to_value,
         waveform_cfg_to_value,
     )
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+    from zcu_tools.gui.cfg.binding import CfgDraft
 
     ml = ctrl.get_current_ml.return_value
-    roots: dict[str, SectionLiveField] = {}
+    drafts: dict[str, CfgDraft] = {}
     owner_to_id: dict[str, str] = {}
     counter = {"n": 0}
 
     def _register(spec, value, owner_key) -> str:
         if owner_key is not None and owner_key in owner_to_id:
-            roots.pop(owner_to_id.pop(owner_key), None)
+            drafts.pop(owner_to_id.pop(owner_key), None)
         counter["n"] += 1
         eid = f"editor-{counter['n']}"
-        roots[eid] = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), value)
+        drafts[eid] = MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value))
         if owner_key is not None:
             owner_to_id[owner_key] = eid
         return eid
@@ -93,8 +97,8 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
         return _register(spec, value, owner_key), []
 
     def _commit(editor_id, name):
-        ctrl.committed = (name, roots[editor_id])  # record for assertions
-        roots.pop(editor_id, None)
+        ctrl.committed = (name, drafts[editor_id])  # record for assertions
+        drafts.pop(editor_id, None)
         for owner, eid in list(owner_to_id.items()):
             if eid == editor_id:
                 owner_to_id.pop(owner)
@@ -102,9 +106,9 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     ctrl.open_seeded_cfg_editor.side_effect = _open_seeded
     ctrl.open_cfg_editor.side_effect = _open
     ctrl.commit_cfg_editor.side_effect = _commit
-    ctrl.get_cfg_editor_root.side_effect = lambda eid: roots[eid]
+    ctrl.get_cfg_editor_draft.side_effect = lambda eid: drafts[eid]
     ctrl.editor_id_for_owner.side_effect = lambda owner: owner_to_id.get(owner)
-    ctrl.teardown_cfg_editor.side_effect = lambda eid: roots.pop(eid, None)
+    ctrl.teardown_cfg_editor.side_effect = lambda eid: drafts.pop(eid, None)
 
 
 def test_inspect_dialog_init_and_refresh(qapp):

@@ -1,17 +1,16 @@
 """Dotted-path resolver for remote ``cfg.set_field``.
 
-Walks a live ``SectionLiveField`` tree and mutates a single leaf using the
+Walks a ``CfgDraft`` field tree and mutates a single leaf using the
 field's existing public mutation surface, so a remote edit behaves exactly
 like a user edit (auto-commit via the form's ``on_change`` -> ``schema_changed``
 -> ``Controller.update_tab_cfg`` chain).
 
 Path grammar (segments split on ``.``):
 
-  - Scalar leaf:        ``section.sub.field``           -> ``ScalarLiveField.set_value(value)``
+  - Scalar leaf:        ``section.sub.field``           -> ``ScalarField.set_value(value)``
   - Sweep sub-field:    ``...path.sweep.start|stop|expts|step``
   - ModuleRef key:      ``...path.ref``                  -> ``set_chosen_key(value)``
   - ModuleRef sub:      ``...path.<sub>...``             -> recurse into ``.sub_field``
-  - DeviceRef:          ``...path.device``               -> ``set_chosen_name(value)``
   - Literal:            rejected (immutable)
 
 ModuleRef sub-fields descend directly (no ``value`` wrapper segment); a path
@@ -23,51 +22,64 @@ Unknown paths, type mismatches, and immutable targets raise
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from collections.abc import Callable
+from typing import cast
 
 from zcu_tools.gui.app.main.adapter import (
     DirectValue,
     EvalValue,
 )
-from zcu_tools.gui.app.main.live_model import (
-    CenteredSweepLiveField,
-    DeviceRefLiveField,
-    LiteralLiveField,
-    ReferenceLiveField,
-    ScalarLiveField,
-    SectionLiveField,
-    SweepLiveField,
+from zcu_tools.gui.cfg.binding import (
+    CenteredSweepEditor,
+    CenteredSweepField,
+    CfgDraft,
+    CfgField,
+    LiteralField,
+    ReferenceField,
+    ScalarField,
+    SectionField,
+    SweepEditor,
+    SweepField,
 )
-from zcu_tools.gui.app.main.sweep_model import CenteredSweepEditor, SweepEditor
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.live_model import LiveField
+from zcu_tools.gui.session.value_lookup import ValueRef
 
 _SWEEP_EDGES = {"start", "stop", "expts", "step"}
 _CENTERED_SWEEP_EDGES = {"center", "span", "expts", "step"}
 _MAX_UNKNOWN_FIELD_SUGGESTIONS = 3
 
 
-def resolve_and_set(root: SectionLiveField, path: str, value: object) -> None:
+ValueRefResolver = Callable[[ValueRef, type], DirectValue]
+
+
+def resolve_and_set(
+    draft: CfgDraft,
+    path: str,
+    value: object,
+    *,
+    resolve_value_ref: ValueRefResolver,
+) -> None:
     """Resolve ``path`` against ``root`` and set the leaf to ``value``.
 
-    ``root`` must be the live tab ``SectionLiveField``; mutations propagate
-    through its existing ``on_change`` bubbling.
+    Mutations propagate through the draft's existing ``on_change`` bubbling.
     """
     if not path:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "empty path")
     segments = path.split(".")
-    _set_recursive(root, segments, path, value)
+    _set_recursive(draft.root, segments, path, value, resolve_value_ref)
 
 
 def _set_recursive(
-    field: LiveField, segments: list[str], full_path: str, value: object
+    field: CfgField,
+    segments: list[str],
+    full_path: str,
+    value: object,
+    resolve_value_ref: ValueRefResolver,
 ) -> None:
     head = segments[0]
     rest = segments[1:]
 
-    if isinstance(field, SectionLiveField):
+    if isinstance(field, SectionField):
         child = field.fields.get(head)
         if child is None:
             raise RemoteError(
@@ -75,26 +87,22 @@ def _set_recursive(
                 _unknown_field_message(field, head, segments, full_path),
             )
         if not rest:
-            _set_leaf(child, full_path, value)
+            _set_leaf(child, full_path, value, resolve_value_ref)
             return
-        _set_recursive(child, rest, full_path, value)
+        _set_recursive(child, rest, full_path, value, resolve_value_ref)
         return
 
     # Reached a non-section field but still have segments to consume.
-    if isinstance(field, SweepLiveField):
+    if isinstance(field, SweepField):
         _set_sweep_edge(field, head, rest, full_path, value)
         return
 
-    if isinstance(field, CenteredSweepLiveField):
+    if isinstance(field, CenteredSweepField):
         _set_centered_sweep_edge(field, head, rest, full_path, value)
         return
 
-    if isinstance(field, ReferenceLiveField):
-        _set_moduleref(field, head, rest, full_path, value)
-        return
-
-    if isinstance(field, DeviceRefLiveField):
-        _set_deviceref(field, head, rest, full_path, value)
+    if isinstance(field, ReferenceField):
+        _set_moduleref(field, head, rest, full_path, value, resolve_value_ref)
         return
 
     raise RemoteError(
@@ -104,7 +112,7 @@ def _set_recursive(
 
 
 def _unknown_field_message(
-    section: SectionLiveField, head: str, segments: list[str], full_path: str
+    section: SectionField, head: str, segments: list[str], full_path: str
 ) -> str:
     msg = f"unknown field {head!r} in path {full_path!r}"
     suggestions = _same_subtree_leaf_suggestions(section, head, segments, full_path)
@@ -115,7 +123,7 @@ def _unknown_field_message(
 
 
 def _same_subtree_leaf_suggestions(
-    section: SectionLiveField, leaf_name: str, segments: list[str], full_path: str
+    section: SectionField, leaf_name: str, segments: list[str], full_path: str
 ) -> list[str]:
     """Suggest legal descendant paths when a skipped section is unambiguous."""
     full_segments = full_path.split(".")
@@ -132,42 +140,48 @@ def _same_subtree_leaf_suggestions(
     return unique
 
 
-def _set_leaf(field: LiveField, full_path: str, value: object) -> None:
-    if isinstance(field, LiteralLiveField):
+def _set_leaf(
+    field: CfgField,
+    full_path: str,
+    value: object,
+    resolve_value_ref: ValueRefResolver,
+) -> None:
+    if isinstance(field, LiteralField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets an immutable literal field",
         )
-    if isinstance(field, ScalarLiveField):
-        field.set_value(value)
-        return
-    if isinstance(field, DeviceRefLiveField):
-        if not isinstance(value, str):
+    if isinstance(field, ScalarField):
+        if isinstance(value, ValueRef):
+            value = resolve_value_ref(value, field.spec.type)
+        elif not isinstance(
+            value, (DirectValue, EvalValue)
+        ) and not _matches_scalar_type(value, field.spec.type):
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
-                f"device ref at {full_path!r} expects a string name",
+                f"scalar at {full_path!r} expects {field.spec.type.__name__}",
             )
-        field.set_chosen_name(value)
+        field.set_value(value)
         return
-    if isinstance(field, ReferenceLiveField):
+    if isinstance(field, ReferenceField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets a module ref; set "
             f"'{full_path}.ref' (key) or '{full_path}.<sub>' instead",
         )
-    if isinstance(field, SweepLiveField):
+    if isinstance(field, SweepField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets a sweep; set "
             f"'{full_path}.start|stop|expts|step' instead",
         )
-    if isinstance(field, CenteredSweepLiveField):
+    if isinstance(field, CenteredSweepField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets a centered sweep; set "
             f"'{full_path}.center|span|expts|step' instead",
         )
-    if isinstance(field, SectionLiveField):
+    if isinstance(field, SectionField):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"path {full_path!r} targets a section; descend to a leaf field",
@@ -178,8 +192,20 @@ def _set_leaf(field: LiveField, full_path: str, value: object) -> None:
     )
 
 
+def _matches_scalar_type(value: object, type_: type) -> bool:
+    if value is None:
+        return True
+    if type_ is bool:
+        return isinstance(value, bool)
+    if type_ is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if type_ is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, type_)
+
+
 def _set_sweep_edge(
-    sweep: SweepLiveField,
+    sweep: SweepField,
     edge: str,
     rest: list[str],
     full_path: str,
@@ -236,7 +262,7 @@ def _set_sweep_edge(
 
 
 def _set_centered_sweep_edge(
-    sweep: CenteredSweepLiveField,
+    sweep: CenteredSweepField,
     edge: str,
     rest: list[str],
     full_path: str,
@@ -297,11 +323,12 @@ def _set_centered_sweep_edge(
 
 
 def _set_moduleref(
-    ref: ReferenceLiveField,
+    ref: ReferenceField,
     head: str,
     rest: list[str],
     full_path: str,
     value: object,
+    resolve_value_ref: ValueRefResolver,
 ) -> None:
     if head == "ref":
         if rest:
@@ -347,32 +374,7 @@ def _set_moduleref(
             f"module ref at {full_path!r} has no editable sub-fields for "
             "the current key",
         )
-    _set_recursive(sub, [head, *rest], full_path, value)
-
-
-def _set_deviceref(
-    ref: DeviceRefLiveField,
-    head: str,
-    rest: list[str],
-    full_path: str,
-    value: object,
-) -> None:
-    # list_settable_paths advertises a DeviceRef as '<path>.device' (mirroring a
-    # ModuleRef's '.ref' selector), so the advertised path must resolve here —
-    # 'device' is the only valid trailing segment, and the value is the device
-    # name. (The bare-leaf form '<path>' is also accepted via _set_leaf.)
-    if head != "device" or rest:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"device ref at {full_path!r} takes only a trailing '.device' "
-            "segment set to a device name",
-        )
-    if not isinstance(value, str):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"device ref at {full_path!r} expects a string name",
-        )
-    ref.set_chosen_name(value)
+    _set_recursive(sub, [head, *rest], full_path, value, resolve_value_ref)
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +382,7 @@ def _set_deviceref(
 # ---------------------------------------------------------------------------
 
 
-def _scalar_wire_value(field: ScalarLiveField) -> object:
+def _scalar_wire_value(field: ScalarField) -> object:
     """Return a JSON-safe current value for a scalar field.
 
     DirectValue → its value (or None when unset); EvalValue → its expression
@@ -394,19 +396,20 @@ def _scalar_wire_value(field: ScalarLiveField) -> object:
     return None
 
 
-def _scalar_entry(path: str, field: ScalarLiveField) -> dict[str, object]:
+def _scalar_entry(path: str, field: ScalarField) -> dict[str, object]:
     entry: dict[str, object] = {
         "path": path,
         "kind": "scalar",
         "value": _scalar_wire_value(field),
         "type": field.spec.type.__name__,
     }
-    if field.spec.choices is not None:
-        entry["choices"] = list(field.spec.choices)
+    options = field.available_options()
+    if options is not None:
+        entry["choices"] = list(options)
     return entry
 
 
-def _sweep_entries(path: str, field: SweepLiveField) -> list[dict[str, object]]:
+def _sweep_entries(path: str, field: SweepField) -> list[dict[str, object]]:
     sweep = field.get_value()
     edges = {
         "start": sweep.start,
@@ -429,7 +432,7 @@ def _sweep_entries(path: str, field: SweepLiveField) -> list[dict[str, object]]:
 
 
 def _centered_sweep_entries(
-    path: str, field: CenteredSweepLiveField
+    path: str, field: CenteredSweepField
 ) -> list[dict[str, object]]:
     sweep = field.get_value()
     edges = {
@@ -452,33 +455,27 @@ def _centered_sweep_entries(
     return out
 
 
-def _list_field(path: str, field: LiveField) -> list[dict[str, object]]:
-    """Recurse one LiveField, returning the settable leaves beneath it."""
-    if isinstance(field, LiteralLiveField):
+def _list_field(path: str, field: CfgField) -> list[dict[str, object]]:
+    """Recurse one CfgField, returning the settable leaves beneath it."""
+    if isinstance(field, LiteralField):
         return []  # immutable — resolve_and_set rejects it
-    if isinstance(field, ScalarLiveField):
+    if isinstance(field, ScalarField):
         return [_scalar_entry(path, field)]
-    if isinstance(field, SweepLiveField):
+    if isinstance(field, SweepField):
         return _sweep_entries(path, field)
-    if isinstance(field, CenteredSweepLiveField):
+    if isinstance(field, CenteredSweepField):
         return _centered_sweep_entries(path, field)
-    if isinstance(field, DeviceRefLiveField):
-        return [
-            {
-                "path": f"{path}.device",
-                "kind": "deviceref",
-                "value": field.get_chosen_name(),
-                "type": "string",
-            }
-        ]
-    if isinstance(field, ReferenceLiveField):
+    if isinstance(field, ReferenceField):
         out = [
             {
                 "path": f"{path}.ref",
                 "kind": "moduleref_key",
                 "value": field.get_chosen_key(),
                 "type": "string",
-                "choices": [s.label for s in field.spec.allowed],
+                "choices": [
+                    *(spec.label for spec in field.spec.allowed),
+                    *field.available_keys(),
+                ],
             }
         ]
         sub = field.sub_field
@@ -486,7 +483,7 @@ def _list_field(path: str, field: LiveField) -> list[dict[str, object]]:
             for key, child in sub.fields.items():
                 out.extend(_list_field(f"{path}.{key}", child))
         return out
-    if isinstance(field, SectionLiveField):
+    if isinstance(field, SectionField):
         out = []
         for key, child in field.fields.items():
             out.extend(_list_field(f"{path}.{key}" if path else key, child))
@@ -515,7 +512,7 @@ def _filter_by_prefix(
 
 
 def list_settable_paths(
-    root: SectionLiveField,
+    draft: CfgDraft,
     under: str | None = None,
     prefix: str | None = None,
 ) -> list[dict[str, object]]:
@@ -538,24 +535,24 @@ def list_settable_paths(
     Both ``under`` and ``prefix`` output full dotted path strings.
     """
     if under:
-        field, base_path = _navigate(root, under.split("."))
+        field, base_path = _navigate(draft.root, under.split("."))
         entries = _list_field(base_path, field)
     else:
-        entries = _list_field("", root)
+        entries = _list_field("", draft.root)
     if prefix:
         entries = _filter_by_prefix(entries, prefix)
     return entries
 
 
 def list_settable_paths_full(
-    root: SectionLiveField, under: str | None = None
+    draft: CfgDraft, under: str | None = None
 ) -> list[dict[str, object]]:
     """``list_settable_paths`` typed as the dict-entry list.
 
     Internal callers (diffing, sub-tree re-list) want a non-union return type;
     this thin wrapper preserves that call-site stability.
     """
-    return list_settable_paths(root, under=under)
+    return list_settable_paths(draft, under=under)
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +572,7 @@ def list_settable_paths_full(
 # ---------------------------------------------------------------------------
 
 
-def _tree_sweep(field: SweepLiveField) -> dict[str, object]:
+def _tree_sweep(field: SweepField) -> dict[str, object]:
     """A sweep node as a sub-tree of bare scalar edges (start/stop/expts/step)."""
     sweep = field.get_value()
     edges = {
@@ -590,7 +587,7 @@ def _tree_sweep(field: SweepLiveField) -> dict[str, object]:
     }
 
 
-def _tree_centered_sweep(field: CenteredSweepLiveField) -> dict[str, object]:
+def _tree_centered_sweep(field: CenteredSweepField) -> dict[str, object]:
     """A centered sweep node as bare scalar edges (center/span/expts/step)."""
     sweep = field.get_value()
     edges = {
@@ -612,8 +609,8 @@ def _tree_centered_sweep(field: CenteredSweepLiveField) -> dict[str, object]:
 _NO_NODE = object()
 
 
-def _tree_field(field: LiveField) -> object:
-    """Build the nested value tree for one LiveField (see module section header).
+def _tree_field(field: CfgField) -> object:
+    """Build the nested value tree for one CfgField (see module section header).
 
     Returns the node that represents ``field``: a bare scalar value, an enum
     ``{$value, $choices}`` leaf, a sweep sub-tree, a ``$ref`` node (with the
@@ -621,27 +618,19 @@ def _tree_field(field: LiveField) -> object:
     the ``_NO_NODE`` sentinel for an immutable/unsupported field so the parent
     drops it.
     """
-    if isinstance(field, LiteralLiveField):
+    if isinstance(field, LiteralField):
         return _NO_NODE  # immutable — not a settable path (flat lister drops it)
-    if isinstance(field, ScalarLiveField):
+    if isinstance(field, ScalarField):
         value = _scalar_wire_value(field)
-        if field.spec.choices is not None:
-            return {"$value": value, "$choices": list(field.spec.choices)}
+        options = field.available_options()
+        if options is not None:
+            return {"$value": value, "$choices": list(options)}
         return value
-    if isinstance(field, SweepLiveField):
+    if isinstance(field, SweepField):
         return _tree_sweep(field)
-    if isinstance(field, CenteredSweepLiveField):
+    if isinstance(field, CenteredSweepField):
         return _tree_centered_sweep(field)
-    if isinstance(field, DeviceRefLiveField):
-        # A device ref is a leaf selector (no settable sub-tree); ``options`` is
-        # the live registered-device list, not a static spec list.
-        return {
-            "$ref": {
-                "current": field.get_chosen_name(),
-                "options": list(field.env.ctrl.list_device_names()),
-            }
-        }
-    if isinstance(field, ReferenceLiveField):
+    if isinstance(field, ReferenceField):
         # Only the currently-bound variant is expanded; ``options`` lists the
         # allowed variant labels (bare), while ``current`` is the chosen key (a
         # built-in variant reads as the tagged ``<Custom:label>`` form, mirroring
@@ -649,19 +638,22 @@ def _tree_field(field: LiveField) -> object:
         node: dict[str, object] = {
             "$ref": {
                 "current": field.get_chosen_key(),
-                "options": [s.label for s in field.spec.allowed],
+                "options": [
+                    *(spec.label for spec in field.spec.allowed),
+                    *field.available_keys(),
+                ],
             }
         }
         sub = field.sub_field
         if sub is not None:
             node.update(_tree_section_children(sub))
         return node
-    if isinstance(field, SectionLiveField):
+    if isinstance(field, SectionField):
         return _tree_section_children(field)
     return _NO_NODE
 
 
-def _tree_section_children(section: SectionLiveField) -> dict[str, object]:
+def _tree_section_children(section: SectionField) -> dict[str, object]:
     """Recurse a section's fields into a sub-tree, dropping ``_NO_NODE`` ones."""
     out: dict[str, object] = {}
     for key, child in section.fields.items():
@@ -672,7 +664,7 @@ def _tree_section_children(section: SectionLiveField) -> dict[str, object]:
 
 
 def build_settable_tree(
-    root: SectionLiveField, prefix: str | None = None
+    draft: CfgDraft, prefix: str | None = None
 ) -> dict[str, object]:
     """Build the nested current-value tree for the live cfg draft.
 
@@ -684,11 +676,11 @@ def build_settable_tree(
     ``{}`` (graceful, not a fast-fail).
     """
     if not prefix:
-        tree = _tree_field(root)
-        # ``root`` is a SectionLiveField, so _tree_field always returns a dict.
+        tree = _tree_field(draft.root)
+        # ``root`` is a SectionField, so _tree_field always returns a dict.
         return cast("dict[str, object]", tree)
     try:
-        field, _ = _navigate(root, prefix.split("."))
+        field, _ = _navigate(draft.root, prefix.split("."))
     except RemoteError:
         # An unresolvable prefix yields an empty sub-tree, matching the flat
         # lister's "no match → empty" contract rather than raising.
@@ -711,7 +703,7 @@ def build_settable_tree(
 # ---------------------------------------------------------------------------
 
 
-def _navigate(root: SectionLiveField, segments: list[str]) -> tuple[LiveField, str]:
+def _navigate(root: SectionField, segments: list[str]) -> tuple[CfgField, str]:
     """Walk ``segments`` from ``root`` to the addressed field and its root path.
 
     Returns ``(field, base_path)`` where ``base_path`` is the dotted path that
@@ -721,12 +713,12 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple[LiveField, s
     key rebuilds the whole ref sub-tree — that is what callers want re-listed.
     Other segments descend into the bound sub-section directly (no ``value``).
     """
-    field: LiveField = root
+    field: CfgField = root
     consumed: list[str] = []
     i = 0
     while i < len(segments):
         head = segments[i]
-        if isinstance(field, SectionLiveField):
+        if isinstance(field, SectionField):
             child = field.fields.get(head)
             if child is None:
                 raise RemoteError(
@@ -739,7 +731,7 @@ def _navigate(root: SectionLiveField, segments: list[str]) -> tuple[LiveField, s
             consumed.append(head)
             i += 1
             continue
-        if isinstance(field, ReferenceLiveField):
+        if isinstance(field, ReferenceField):
             if head == "ref":
                 # The key segment maps back to the ref field itself; its
                 # sub-tree is re-listed at the ref's own base path.

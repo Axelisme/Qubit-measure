@@ -12,7 +12,6 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     LiteralSpec,
@@ -54,7 +53,9 @@ def test_lowers_scalar_literal_optional_section_and_device() -> None:
             "count": ScalarSpec("Count", int),
             "optional": ScalarSpec("Optional", float, optional=True),
             "section": CfgSectionSpec(fields={"enabled": ScalarSpec("Enabled", bool)}),
-            "device": DeviceRefSpec("Device"),
+            "device": ScalarSpec(
+                "Device", str, choices_source="devices", required=True
+            ),
         },
         {
             "literal": DirectValue("fixed"),

@@ -22,7 +22,6 @@ from zcu_tools.experiment.v2_gui.adapters.shared.cfg_builder import CfgBuilder, 
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     DirectValue,
     EvalValue,
     ExpContext,
@@ -194,7 +193,14 @@ def _device_spec() -> CfgSectionSpec:
     return CfgSectionSpec(
         fields={
             "dev": CfgSectionSpec(
-                fields={"flux_dev": DeviceRefSpec(label="Flux Device")}
+                fields={
+                    "flux_dev": ScalarSpec(
+                        label="Flux Device",
+                        type=str,
+                        choices_source="devices",
+                        required=True,
+                    )
+                }
             )
         }
     )

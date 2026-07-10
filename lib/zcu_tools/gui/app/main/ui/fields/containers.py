@@ -1,4 +1,4 @@
-"""Container widgets for LiveFields (Section/ModuleRef)."""
+"""Container widgets for shared cfg binding sections and references."""
 
 from __future__ import annotations
 
@@ -20,17 +20,22 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.session.events import MlChangedPayload
+from zcu_tools.gui.cfg.binding import (
+    CenteredSweepField,
+    ReferenceField,
+    SectionField,
+    SweepField,
+)
 
 from ...adapter import ChoiceSectionSpec, DirectValue, LiteralSpec
-from ...live_model import (
-    CenteredSweepLiveField,
-    DeviceRefLiveField,
-    ReferenceLiveField,
-    SectionLiveField,
-    SweepLiveField,
+from .common import (
+    BaseLiveWidget,
+    CenteredSweepWidget,
+    ElidedLabel,
+    ScalarWidget,
+    SweepWidget,
+    TextInputEnhancer,
 )
-from .common import BaseLiveWidget, ElidedLabel, SweepWidget
 from .registry import (
     FieldDecorationProtocol,
     FieldWidgetProtocol,
@@ -116,23 +121,25 @@ class _CollapsibleSection(QWidget):
             self._toggle_btn.setStyleSheet(style)
 
 
-@register_widget(SectionLiveField)
+@register_widget(SectionField)
 class SectionWidget(BaseLiveWidget):
     def __init__(
         self,
-        field: SectionLiveField,
+        field: SectionField,
         top_level: bool = False,
         no_header: bool = False,
         field_label_max_width: int | None = None,
         path: str = "",
         decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
         | None = None,
+        text_input_enhancer: TextInputEnhancer | None = None,
         parent: QWidget | None = None,
-    ):
+    ) -> None:
         super().__init__(field, parent)
         self._field_label_max_width = field_label_max_width
         self._path = path
         self._decoration_for_path = decoration_for_path
+        self._text_input_enhancer = text_input_enhancer
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -152,7 +159,7 @@ class SectionWidget(BaseLiveWidget):
         self._on_validity_changed(field.is_valid())
 
     def _build_children(self) -> None:
-        field = cast(SectionLiveField, self._field)
+        field = cast(SectionField, self._field)
         visible_keys = _choice_visible_keys(field)
         # Fields carrying a non-empty ScalarSpec.group render together under a
         # collapsed sub-header (e.g. "Advanced"), AFTER the ungrouped fields.
@@ -184,23 +191,36 @@ class SectionWidget(BaseLiveWidget):
             widget_cls = get_widget_cls(child_field)
             if widget_cls is SectionWidget:
                 w = SectionWidget(
-                    cast(SectionLiveField, child_field),
+                    cast(SectionField, child_field),
                     field_label_max_width=self._field_label_max_width,
                     path=child_path,
                     decoration_for_path=self._decoration_for_path,
+                    text_input_enhancer=self._text_input_enhancer,
                 )
             elif widget_cls is ReferenceWidget:
                 w = ReferenceWidget(
-                    cast(ReferenceLiveField, child_field),
+                    cast(ReferenceField, child_field),
                     path=child_path,
                     decoration_for_path=self._decoration_for_path,
                     field_label_max_width=self._field_label_max_width,
+                    text_input_enhancer=self._text_input_enhancer,
                 )
             elif widget_cls is SweepWidget:
                 w = SweepWidget(
-                    cast(SweepLiveField, child_field),
+                    cast(SweepField, child_field),
                     path=child_path,
                     decoration_for_path=self._decoration_for_path,
+                    text_input_enhancer=self._text_input_enhancer,
+                )
+            elif widget_cls is CenteredSweepWidget:
+                w = CenteredSweepWidget(
+                    cast(CenteredSweepField, child_field),
+                    text_input_enhancer=self._text_input_enhancer,
+                )
+            elif widget_cls is ScalarWidget:
+                w = ScalarWidget(
+                    cast(Any, child_field),
+                    text_input_enhancer=self._text_input_enhancer,
                 )
             else:
                 w = widget_cls(child_field)  # type: ignore
@@ -286,11 +306,11 @@ class SectionWidget(BaseLiveWidget):
             return
         label = _decorated_label_text(child_field.spec.label or key, decoration)
         widget = cast(QWidget, w)
-        if isinstance(child_field, SectionLiveField):
+        if isinstance(child_field, SectionField):
             _apply_widget_decoration(widget, decoration)
             form.addRow(widget)
             return
-        if isinstance(child_field, (SweepLiveField, CenteredSweepLiveField)):
+        if isinstance(child_field, (SweepField, CenteredSweepField)):
             # Sweep widgets get their own full-width row; label goes on the line above
             label_widget = ElidedLabel(
                 f"{label}:",
@@ -308,7 +328,7 @@ class SectionWidget(BaseLiveWidget):
             form.addRow(label_widget, widget)
 
     def teardown(self) -> None:
-        field = cast(SectionLiveField, self._field)
+        field = cast(SectionField, self._field)
         field.on_validity_changed.disconnect(self._on_validity_changed)
         self._clear_children()
 
@@ -316,7 +336,7 @@ class SectionWidget(BaseLiveWidget):
         self._container.set_invalid(not valid)
 
 
-def _choice_visible_keys(field: SectionLiveField) -> set[str] | None:
+def _choice_visible_keys(field: SectionField) -> set[str] | None:
     spec = field.spec
     if not isinstance(spec, ChoiceSectionSpec):
         return None
@@ -338,21 +358,23 @@ def _choice_visible_keys(field: SectionLiveField) -> set[str] | None:
     return visible
 
 
-@register_widget(ReferenceLiveField)
+@register_widget(ReferenceField)
 class ReferenceWidget(BaseLiveWidget):
     def __init__(
         self,
-        field: ReferenceLiveField,
+        field: ReferenceField,
         path: str = "",
         decoration_for_path: Callable[[str, Any], FieldDecorationProtocol]
         | None = None,
         field_label_max_width: int | None = None,
+        text_input_enhancer: TextInputEnhancer | None = None,
         parent: QWidget | None = None,
-    ):
+    ) -> None:
         super().__init__(field, parent)
         self._path = path
         self._decoration_for_path = decoration_for_path
         self._field_label_max_width = field_label_max_width
+        self._text_input_enhancer = text_input_enhancer
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -403,18 +425,13 @@ class ReferenceWidget(BaseLiveWidget):
             if not field.is_enabled:
                 self._sub_container.setEnabled(False)
 
-        # Subscribe to library-set changes so the combo refreshes when a new
-        # module/waveform is added — model.on_change only fires when *this
-        # field's referenced entry* changes, not when the library grows.
-        field.env.bus.subscribe(MlChangedPayload, self._on_ml_changed)
-
     _NONE_KEY = "<None>"
 
     def _refresh_combo_items(self) -> None:
         self._combo.blockSignals(True)
         self._combo.clear()
 
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         current = field.get_chosen_key()
 
         # 0. None option for optional fields
@@ -428,44 +445,16 @@ class ReferenceWidget(BaseLiveWidget):
             key = f"<Custom:{label}>"
             self._combo.addItem(label, key)
 
-        # 2. Named modules from Library if available, filtered to allowed spec labels
-        ml = field.env.ctrl.get_current_ml()
-        if ml:
-            from ...cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
-
-            if field.spec.kind == "module":
-                store = ml.modules
-                resolve_fn = module_cfg_to_value
-            elif field.spec.kind == "waveform":
-                store = ml.waveforms
-                resolve_fn = waveform_cfg_to_value
-            else:
-                raise RuntimeError(f"Unsupported reference kind {field.spec.kind!r}")
-            allowed_labels = {s.label for s in field.spec.allowed}
-            compatible: list[str] = []
-            for name, cfg in store.items():
-                try:
-                    entry_spec, _ = resolve_fn(cfg)
-                except Exception:
-                    # A malformed library entry is skipped from this dropdown
-                    # (it can't be offered as a choice) but must not silently
-                    # vanish — log it so a broken/corrupt entry is discoverable.
-                    logger.warning(
-                        "Reference combo: skipping unresolvable library entry %r",
-                        name,
-                        exc_info=True,
-                    )
-                    continue
-                if entry_spec.label in allowed_labels:
-                    compatible.append(name)
-            if compatible:
-                self._combo.insertSeparator(self._combo.count())
-                for name in sorted(compatible):
-                    if name == current and field.is_modified():
-                        self._combo.addItem(f"Lib: {name} (modified)", name)
-                        self._combo.addItem(f"Revert to Lib: {name}", name)
-                    else:
-                        self._combo.addItem(f"Lib: {name}", name)
+        # 2. App-local catalog keys, already filtered to compatible labels.
+        compatible = field.available_keys()
+        if compatible:
+            self._combo.insertSeparator(self._combo.count())
+            for name in compatible:
+                if name == current and field.is_modified():
+                    self._combo.addItem(f"Lib: {name} (modified)", name)
+                    self._combo.addItem(f"Revert to Lib: {name}", name)
+                else:
+                    self._combo.addItem(f"Lib: {name}", name)
 
         if field.spec.optional and not field.is_enabled:
             self._combo.setCurrentIndex(0)  # None option
@@ -479,16 +468,9 @@ class ReferenceWidget(BaseLiveWidget):
         self._combo.blockSignals(False)
         self._sync_expand_btn()
 
-    def _on_ml_changed(self, _payload: MlChangedPayload) -> None:
-        # Library set changed (entry added / removed / renamed): rebuild the combo
-        # list so newly added modules appear without requiring a re-open.
-        # _refresh_combo_items already blocks combo signals internally, so this
-        # cannot accidentally re-enter _on_combo_changed.
-        self._refresh_combo_items()
-
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         if key == self._NONE_KEY:
             field.set_enabled(False)
         else:
@@ -499,13 +481,13 @@ class ReferenceWidget(BaseLiveWidget):
             self._on_toggle_subsection(self._expand_btn.isChecked())
 
     def _should_expand_by_default(self) -> bool:
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         return field.get_chosen_key().startswith("<Custom:")
 
     def _on_model_enabled_changed(self, enabled: bool) -> None:
         self._combo.blockSignals(True)
         if enabled:
-            field = cast(ReferenceLiveField, self._field)
+            field = cast(ReferenceField, self._field)
             idx = self._combo.findData(field.get_chosen_key())
             if idx >= 0:
                 self._combo.setCurrentIndex(idx)
@@ -521,7 +503,7 @@ class ReferenceWidget(BaseLiveWidget):
         self._refresh_sub_widget()
 
     def _refresh_missing_ref_hint(self) -> None:
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         if field.has_missing_library_ref():
             key = field.get_chosen_key()
             self._missing_ref_hint.setText(
@@ -539,7 +521,7 @@ class ReferenceWidget(BaseLiveWidget):
         )
 
     def _sync_expand_btn(self) -> None:
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         has_subsection = self._sub_widget is not None
         visible = has_subsection and (not field.spec.optional or field.is_enabled)
         self._expand_btn.setVisible(visible)
@@ -554,7 +536,7 @@ class ReferenceWidget(BaseLiveWidget):
         )
 
     def _refresh_sub_widget(self) -> None:
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         sub_field = field.sub_field
 
         if self._sub_widget and self._sub_widget.field == sub_field:
@@ -576,6 +558,7 @@ class ReferenceWidget(BaseLiveWidget):
                     field_label_max_width=self._field_label_max_width,
                     path=self._path,
                     decoration_for_path=self._decoration_for_path,
+                    text_input_enhancer=self._text_input_enhancer,
                 )
             else:
                 w = widget_cls(sub_field)  # type: ignore
@@ -589,19 +572,16 @@ class ReferenceWidget(BaseLiveWidget):
         return self._sub_widget.refresh_section(path)
 
     def teardown(self) -> None:
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         field.on_change.disconnect(self._on_model_changed)
         field.on_validity_changed.disconnect(self._on_validity_changed)
         if field.spec.optional:
             field.on_enabled_changed.disconnect(self._on_model_enabled_changed)
-        # Mirror the subscribe in __init__; prevents stale callbacks when the
-        # widget is detached or the section is re-built (e.g. discriminator switch).
-        field.env.bus.unsubscribe(MlChangedPayload, self._on_ml_changed)
         if self._sub_widget:
             self._sub_widget.teardown()
 
     def _on_validity_changed(self, valid: bool) -> None:
-        field = cast(ReferenceLiveField, self._field)
+        field = cast(ReferenceField, self._field)
         logger.debug(
             "ReferenceWidget.validity_changed: key=%r valid=%r",
             field.get_chosen_key(),
@@ -662,47 +642,3 @@ def _decoration_widget_state(
     tone = decoration.tone or "normal"
     style = _TONE_STYLES.get(tone, "")
     return enabled, tooltip, style
-
-
-@register_widget(DeviceRefLiveField)
-class DeviceRefWidget(BaseLiveWidget):
-    """Combo box listing registered device names for DeviceRefLiveField."""
-
-    def __init__(
-        self, field: DeviceRefLiveField, parent: QWidget | None = None
-    ) -> None:
-        super().__init__(field, parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self._combo = QComboBox()
-        self._combo.setMinimumWidth(20)
-        layout.addWidget(self._combo, stretch=1)
-        self._refresh_combo()
-        self._combo.currentIndexChanged.connect(self._on_combo_changed)
-        field.on_change.connect(self._on_model_changed)
-        field.on_validity_changed.connect(self._on_validity_changed)
-
-    def _refresh_combo(self) -> None:
-        field = cast(DeviceRefLiveField, self._field)
-        self._combo.blockSignals(True)
-        self._combo.clear()
-        for name in field.env.ctrl.list_device_names():
-            self._combo.addItem(name)
-        idx = self._combo.findText(field.get_chosen_name())
-        self._combo.setCurrentIndex(idx if idx >= 0 else -1)
-        self._combo.blockSignals(False)
-
-    def _on_combo_changed(self, _index: int) -> None:
-        name = self._combo.currentText()
-        cast(DeviceRefLiveField, self._field).set_chosen_name(name)
-
-    def _on_model_changed(self, _val: object) -> None:
-        self._refresh_combo()
-
-    def _on_validity_changed(self, valid: bool) -> None:
-        self._combo.setStyleSheet("" if valid else "border: 1px solid red;")
-
-    def teardown(self) -> None:
-        field = cast(DeviceRefLiveField, self._field)
-        field.on_change.disconnect(self._on_model_changed)
-        field.on_validity_changed.disconnect(self._on_validity_changed)

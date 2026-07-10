@@ -48,33 +48,33 @@ _Avoid_: caller, frontend
 View 專用的便利 façade —— 事件回調、error dialog 呈現。**不再是 guard 的擁有者**（guard 下放至受保護 service 方法，憑 Permit 型別強制）。
 
 **View 渠道**（ADR-0013，取代舊 ViewQueryService）:
-Controller 對 View 的下行拆成三個接口，按 cardinality + 機制分：**DiagnosticSink**（多個，fan-out，`notify_diagnostic(severity∈error/info, title, message)`，**不經 EventBus**）、**RenderHost**（單一可選，pbar/container，run/analyze 用，headless 為 None）、**RenderView**（snapshot/screenshot/dialog 純讀，由 `RemoteControlAdapter` 持 `render_view` 直接拉、不經 Controller）。`MainWindow` 實作全三者；`RemoteControlAdapter` 是 DiagnosticSink + 持 RenderView。cfg 欄位編輯走 tab 的 `CfgEditorService` session（`editor.set_field`，ADR-0013 F11），與 form attach 同一棵 model；`tab.update_cfg`（codec-based、replace committed）是另一條語義。
+Controller 對 View 的下行拆成三個接口，按 cardinality + 機制分：**DiagnosticSink**（多個，fan-out，`notify_diagnostic(severity∈error/info, title, message)`，**不經 EventBus**）、**RenderHost**（單一可選，pbar/container，run/analyze 用，headless 為 None）、**RenderView**（snapshot/screenshot/dialog 純讀，由 `RemoteControlAdapter` 持 `render_view` 直接拉、不經 Controller）。`MainWindow` 實作全三者；`RemoteControlAdapter` 是 DiagnosticSink + 持 RenderView。cfg 欄位編輯走 tab 的 `CfgEditorService` session（`editor.set_field`，ADR-0013 F11），與 form attach 同一棵 draft；`tab.update_cfg`（codec-based、replace committed）是另一條語義。
 _Avoid_: 把診斷架在 EventBus 上、讓 Controller 當 render 查詢的二傳手、把「agent 該被動知道什麼」當 wire 機制（那是實驗語義，歸 mcp 端 default-subscribe）
 
-**LiveModel**（`SectionLiveField` 樹）:
-cfg 編輯的 runtime draft SSOT，**本身 Qt-free**（`on_change` 是純 `CallbackList`，非 Qt signal）。由 `SectionLiveField(spec, env, initial_val=...)` 從一份 spec 建立；`env`（`LiveModelEnv`）經 `ControllerProtocol` 取 md/ml/device。**model 永遠由 `CfgEditorService` 持有（ADR-0008）**；`CfgFormWidget` 是可插拔 viewer，`attach(model)` 顯示+反映、`detach()` 走但不 teardown。LiveModel 脫離 View 獨立存在；agent 與 user 都經這棵 session model 編輯（無第二條繞過 View-model 的路徑——ADR-0013 F11 移除了它）。
-_Avoid_: 把 LiveModel 當成 View 的一部分、讓 widget own/teardown model
+**CfgDraft**（`SectionField` root）:
+cfg 編輯的runtime draft SSOT，**本身Qt-free**（`on_change`是純`CallbackList`，非Qt signal）。`CfgDraft`只接expression evaluator、opaque option provider與reference catalog三個窄ports；measure policy集中在app-local `MeasureCfgBindings`，shared field不持controller/environment aggregate。close遞迴關閉root與所有cached child，之後所有field read/mutation/refresh都Fast Fail。**draft永遠由`CfgEditorService`持有（ADR-0008）**；`CfgFormWidget`是可插拔viewer，`attach(draft)`顯示`draft.root`，`detach()`只清Qt tree與subscriptions、不close draft。measure composition以generic text-input enhancer安裝app-local ValueSource completion/resolve-on-space。agent與user都經同一棵session draft編輯（無第二條繞過View-model的路徑——ADR-0013 F11移除了它）。
+_Avoid_: 把`CfgDraft`當成View的一部分、讓widget own/close draft、把controller/service locator塞進shared binding
 
 **CfgEditor session**（`CfgEditorService`，見 ADR-0008；其「演化」段記述並取代舊 delegated 設計）:
-一個由 `CfgEditorService` 持有、用 `editor_id` 索引的**有狀態 LiveModel 編輯 session**。所有 model 都 service-owned；widget 與 agent 都只持 `editor_id`、都 attach/編輯同一棵（WYSIWYG）。model 可在沒有任何 widget attach 時存在（agent 可先於/不需 widget 編輯）。
+一個由 `CfgEditorService` 持有、用 `editor_id` 索引的**有狀態 `CfgDraft` 編輯 session**。所有 draft 都 service-owned；widget 與 agent 都只持 `editor_id`、都 attach/編輯同一棵（WYSIWYG）。draft 可在沒有任何 widget attach 時存在（agent 可先於/不需 widget 編輯）。
 
 - **ml-entry 編輯（`open`，預設 gc=True）**:agent 跨多次 RPC 漸進編輯 ModuleLibrary entry，`commit` 時 lowering（EvalValue 解析 against md）後落地。受 LRU + 斷線回收（孤兒保護）。
 - **UI-owned 種子 session（`open_seeded`，gc=False）**:tab cfg（種子 = `State.cfg_schema`）、inspect、writeback 草稿（種子 = item 的 edit_schema）。無 item_kind → teardown-only（拒絕 commit）。**只由 owner 顯式 `teardown(editor_id)`**，不受 LRU、不受斷線回收。owner widget 先 `detach` 再讓 service teardown。
 
 **draft vs committed 關係**:session 是 **draft**，`State.cfg_schema` 是 **committed**（run/save/session-persist 讀的 SSOT）。tab session 的改動經 auto-commit **即時同步**進 `State.cfg_schema`；run/save 前另有一道**強制 commit = valid 驗證閘**。
 
-_Avoid_: 把「強制 commit」當成第二層 committed state、讓 widget 自建 model
+_Avoid_: 把「強制 commit」當成第二層 committed state、讓 widget 自建 draft
 
 - **為何有狀態（不可用瞬時取代）**：含 ref 切換（readout→pulse readout、waveform→const…），切換**動態改變後續可填欄位**（partial re-binding）。client 必須「切 ref → 看新欄位 → 再填」漸進進行。
 - **生命週期按 `gc` 分流**（取代舊的 headless/delegated 兩 kind）：`gc=True` 受 LRU + 斷線回收；`gc=False` owner 顯式 teardown。`open_seeded` 同 owner_key 再開會先 teardown 前一棵。
-- **external refresh 歸 service（ADR-0004 Reaction）**：service 訂 `MD/ML/CONTEXT/DEVICE_CHANGED`，對每棵 owned model 呼 `refresh_external` 刷 EvalValue；attached widget 經 model `on_change` 免費重畫。widget **不**碰 EventBus。
+- **external refresh 歸 service（ADR-0004 Reaction）**：service訂`MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到draft的`refresh_expressions()`、`refresh_references()`與`refresh_options(source_id)`；attached widget經draft/field `on_change`重畫。widget **不**碰EventBus。
 - **變更通知**：任一 client 改動 → session `on_change` 廣播。widget 經既有 `_updating` flag 斷回授；agent 經 **editor 專屬變更流**（只推給訂閱該 editor_id 的 client，**不走全域 EventBus**）。
 - **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / teardown / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不區分原因**。
 _Avoid_: 為失效原因加 reason、讓 cfg 欄位變更走全域 EventBus、把 gc=False session 也納入 LRU/斷線回收
 
 **Writeback persistent draft**（ADR-0008）:
-analyze 完成時一次算出 writeback items 存 `TabState.writeback_items`；preview/UI/agent/apply 全讀/改同一份（不重算，重算會丟編輯）。每個 module/waveform item 建一棵 gc=False session（種子=edit_schema）、持 `editor_id`；agent 經 `editor.set_field` 改、user 點 Edit 時 widget attach 同一 model。識別碼 `session_id`（`<kind>-<n>`）穩定且與套用目標名 `target_name`（可改）解耦。`writeback.set` 改 selected/target_name/proposed_value（cfg 走 editor.*）；`writeback.apply` 讀持久草稿、snapshot 各 item 的 model → lower、不收 selections。rerun/reanalyze 先 teardown 舊 model 再重算。
-_Avoid_: 每次 preview/apply 重算 items、讓 agent 直接改 State 繞過 model（user 會看到過期 cfg）、用 target_name 當識別碼
+analyze 完成時一次算出 writeback items 存 `TabState.writeback_items`；preview/UI/agent/apply 全讀/改同一份（不重算，重算會丟編輯）。每個 module/waveform item 建一棵 gc=False session（種子=edit_schema）、持 `editor_id`；agent 經 `editor.set_field` 改、user 點 Edit 時 widget attach 同一 draft。識別碼 `session_id`（`<kind>-<n>`）穩定且與套用目標名 `target_name`（可改）解耦。`writeback.set` 改 selected/target_name/proposed_value（cfg 走 editor.*）；`writeback.apply` 讀持久草稿、snapshot 各 item 的 draft → lower、不收 selections。rerun/reanalyze 先 teardown 舊 draft 再重算。
+_Avoid_: 每次 preview/apply 重算 items、讓 agent 直接改 State 繞過 draft（user 會看到過期 cfg）、用 target_name 當識別碼
 
 **Role template / `create_from_role`**（憑空建 ml entry，唯一 create 入口）:
 為每種角色提供具名 factory（`role_catalog`，gui 介面 + experiment 啟動填充，倒置同 `register_all`）。兩類 role：**md-aware**（res_probe/bath_reset…，eval 預設、lower 成 md **當前值**）＋ **`:blank`**（`<disc>:blank`，每 discriminator 一個，結構零值，涵蓋裸 pulse 與 drag/flat_top/gauss/arb 等無 md-aware role 的形狀）。「選 role + 給名字 = **一次性**建好落 ml（ml 只存 concrete）」，**建立時不編輯**；要改走 modify。**create=新建語義，撞名 fail-fast**（與 `editor.commit`/`set_ml_module` 的 upsert-覆寫區分）。雙端同一機制：user 經 inspect「Create…」、agent 經 `ml.list_roles` + `ml.create_from_role`。**create 與 modify 彻底分開**：`editor.open` 已 from_name-only（modify 既有），`discriminator` 從 RPC 移除（內部 seed 保留）；inspect `_MlConfigDialog` 拆成 `_MlCreateDialog`(role) + `_MlModifyDialog`(固定形狀,**不換 type**)。
@@ -97,7 +97,7 @@ _Avoid_: 期望 value 節點能表達「不可編輯」（那是 spec 的 `edita
 
 **「空」的表示（ADR-0010，取代舊 `DisabledRefValue`）**:
 value 樹裡一切「空」統一用 `None`，由 value 自述、不靠旁路 flag、不反推 spec：
-- **停用 optional `ModuleRef`/`WaveformRef`** = `fields[k] is None`（裸 `None`，無 payload；重新啟用走 helper 預設）。`make_*_ref_default(optional=True)` 庫無時回 `None`，adapter 直接放進 fields（免 `if x is not None`）。`ReferenceLiveField` 停用 `get_value()` 回 `None`、`set_value(None)` 設停用；父 `SectionLiveField` 無條件收集子層自述，不省略 key。
+- **停用 optional `ModuleRef`/`WaveformRef`** = `fields[k] is None`（裸 `None`，無 payload；重新啟用走 helper 預設）。`make_*_ref_default(optional=True)` 庫無時回 `None`，adapter 直接放進 fields（免 `if x is not None`）。`ReferenceField` 停用 `get_value()` 回 `None`、`set_value(None)` 設停用；父 `SectionField` 無條件收集子層自述，不省略 key。
 - **未填 scalar** = `DirectValue(value=None)`（**包裝層保留**以保 direct/eval 模式身份；scalar 型別合法值永不為 None，故 None 一義表未填，無 `is_unset` flag）。
 - **「停用→消失」只在 lowering**（run/save 出口 omit）；persist 忠實序列化停用 ref 為 `{"__kind":"disabled"}`、還原回 `None`。
 _Avoid_: 用 scalar 裸 `None`（抹掉 direct/eval 模式）；停用 ref 記 chosen_key（違無 payload）；改 `make_default_value` 全域行為去迁就單一 adapter 偏好（偏好走 OO 鏈式/工廠）；用 `None Reset` 表達停用（那是真 reset 選擇）

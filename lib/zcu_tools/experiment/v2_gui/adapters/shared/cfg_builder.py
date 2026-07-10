@@ -49,7 +49,6 @@ from typing import TYPE_CHECKING, Self, cast
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
-    DeviceRefSpec,
     LiteralSpec,
     ReferenceSpec,
     ReferenceValue,
@@ -338,11 +337,9 @@ class CfgBuilder:
                     f"type {leaf_spec.type.__name__!r}"
                 )
             return cast(ScalarType, leaf_spec.type)
-        if isinstance(leaf_spec, DeviceRefSpec):
-            return str
         raise RuntimeError(
             f"CfgBuilder.value_ref: spec at {path!r} is "
-            f"{type(leaf_spec).__name__}, not a scalar/device-ref leaf"
+            f"{type(leaf_spec).__name__}, not a scalar leaf"
         )
 
     @staticmethod

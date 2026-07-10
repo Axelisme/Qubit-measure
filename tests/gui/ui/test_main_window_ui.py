@@ -971,13 +971,14 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
 
 
 def _editor_wiring_ctrl() -> MagicMock:
-    """Mock ctrl that also satisfies LiveModelEnv for a real populate()."""
+    """Mock ctrl that supplies measure cfg binding ports for a real attach()."""
     ctrl = MagicMock()
     ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_current_md.return_value = MagicMock()
     ctrl.get_current_ml.return_value = MagicMock()
     ctrl.list_device_names.return_value = []
+    ctrl.list_arb_waveforms.return_value = []
     ctrl.has_soc.return_value = False
     # MainWindow reads both during bus-event handlers (ADR-0025 C3 gate).
     ctrl.active_operation_count.return_value = 0
@@ -985,15 +986,17 @@ def _editor_wiring_ctrl() -> MagicMock:
 
     # populate_cfg now opens a service-owned (gc=False) seeded session and
     # attaches the widget to the service-owned model (ADR-0008). Build a real
-    # SectionLiveField for get_cfg_editor_root so attach() works.
-    from zcu_tools.gui.app.main.adapter import make_default_value
+    # CfgDraft for get_cfg_editor_draft so attach() works.
+    from zcu_tools.gui.app.main.adapter import CfgSchema, make_default_value
+    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
-    model = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
+    draft = MeasureCfgBindings(ctrl).new_draft(
+        CfgSchema(spec, make_default_value(spec))
+    )
     ctrl.open_seeded_cfg_editor.return_value = ("editor-tab1", [])
-    ctrl.get_cfg_editor_root.return_value = model
+    ctrl.get_cfg_editor_draft.return_value = draft
     return ctrl
 
 
@@ -1022,7 +1025,7 @@ def test_exp_tab_opens_cfg_editor_on_attach(qapp):
     assert kwargs["owner_key"] == "tab-1"
     assert kwargs["gc"] is False
     assert tab._cfg_editor_id == "editor-tab1"
-    assert tab.cfg_form.get_live_root() is ctrl.get_cfg_editor_root.return_value
+    assert tab.cfg_form._draft is ctrl.get_cfg_editor_draft.return_value
 
 
 def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
@@ -1095,12 +1098,12 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
 
 
 def _make_pulse_model(ctrl):
-    from zcu_tools.gui.app.main.adapter import make_default_value
+    from zcu_tools.gui.app.main.adapter import CfgSchema, make_default_value
+    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
 
     spec = _MODULE_SPEC_FACTORIES["pulse"]()
-    return SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
+    return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, make_default_value(spec)))
 
 
 def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
@@ -1112,7 +1115,7 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
-    first_model = ctrl.get_cfg_editor_root.return_value
+    first_model = ctrl.get_cfg_editor_draft.return_value
     tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
@@ -1124,7 +1127,7 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
     ctrl.reset_tab_cfg.return_value = reset_schema
     ctrl.open_seeded_cfg_editor.reset_mock()
     ctrl.open_seeded_cfg_editor.return_value = ("editor-tab1-v2", [])
-    ctrl.get_cfg_editor_root.return_value = second_model
+    ctrl.get_cfg_editor_draft.return_value = second_model
 
     tab._on_reset_cfg_clicked()
 
@@ -1138,8 +1141,8 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
     assert kwargs["gc"] is False
     assert tab._cfg_editor_id == "editor-tab1-v2"
     # The form now views the new model (root widget rebuilt).
-    assert tab.cfg_form.get_live_root() is second_model
-    assert tab.cfg_form.get_live_root() is not first_model
+    assert tab.cfg_form._draft is second_model
+    assert tab.cfg_form._draft is not first_model
     assert actions.calls[-1] == ("refresh_interaction", "tab-1")
 
 
@@ -1205,14 +1208,14 @@ def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
     reset_schema = _pulse_schema()
     second_model = _make_pulse_model(ctrl)
     ctrl.reset_tab_cfg.return_value = reset_schema
-    ctrl.get_cfg_editor_root.return_value = second_model
+    ctrl.get_cfg_editor_draft.return_value = second_model
     tab._on_reset_cfg_clicked()
 
     # Drive a single field edit on the re-seeded model and count commits.
     ctrl.update_tab_cfg.reset_mock()
-    root = tab.cfg_form.get_live_root()
-    assert root is not None
-    scalar = root.fields["gain"]
+    draft = tab.cfg_form._draft
+    assert draft is not None
+    scalar = draft.root.fields["gain"]
     scalar.set_value(0.42)
 
     assert ctrl.update_tab_cfg.call_count == 1

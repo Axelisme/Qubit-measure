@@ -43,6 +43,7 @@ def ctrl(ml, md):
     c.get_current_md.return_value = md
     c.get_current_ml.return_value = ml
     c.list_device_names.return_value = []
+    c.list_arb_waveforms.return_value = []
     c.has_soc.return_value = False
 
     def _set_module(name, schema):
@@ -262,7 +263,7 @@ def test_ref_switch_returns_new_subtree_and_diff(service):
     )
 
     assert "waveform.sigma" in _paths(
-        list_settable_paths_full(service.get_root(editor_id))
+        list_settable_paths_full(service.get_draft(editor_id))
     )
 
 
@@ -284,7 +285,7 @@ def test_discard_removes_session(service):
     editor_id, _ = service.open("module", discriminator="pulse")
     service.discard(editor_id)
     with pytest.raises(CfgEditorError):
-        service.get_root(editor_id)
+        service.get_draft(editor_id)
 
 
 def test_discard_for_client_batch_ignores_unknown(service):
@@ -292,9 +293,9 @@ def test_discard_for_client_batch_ignores_unknown(service):
     id2, _ = service.open("waveform", discriminator="const")
     service.discard_for_client([id1, id2, "editor-unknown"])
     with pytest.raises(CfgEditorError):
-        service.get_root(id1)
+        service.get_draft(id1)
     with pytest.raises(CfgEditorError):
-        service.get_root(id2)
+        service.get_draft(id2)
 
 
 def test_commit_failure_keeps_session(service, ctrl):
@@ -303,7 +304,7 @@ def test_commit_failure_keeps_session(service, ctrl):
     with pytest.raises(RuntimeError):
         service.commit(editor_id, "bad")
     # session survives so the agent can fix and retry.
-    assert service.get_root(editor_id)
+    assert service.get_draft(editor_id)
 
 
 # ---------------------------------------------------------------------------
@@ -327,10 +328,10 @@ def test_open_seeded_owns_model_and_is_addressable(service):
     assert editor_id == "tab-1-ed"
     assert service.editor_id_for_owner("tab-1") == editor_id
 
-    # The widget attaches via get_root; an agent edit mutates the same model.
-    root = service.get_root(editor_id)
+    # The widget attaches via get_draft; an agent edit mutates the same draft.
+    draft = service.get_draft(editor_id)
     service.set_field(editor_id, "freq", 4321.0)
-    val = root.fields["freq"].get_value()
+    val = draft.root.fields["freq"].get_value()
     assert getattr(val, "value", None) == 4321.0
 
 
@@ -339,19 +340,19 @@ def test_teardown_seeded_session_drops_it(service):
     service.teardown(editor_id)
     assert service.editor_id_for_owner("tab-1") is None
     with pytest.raises(CfgEditorError):
-        service.get_root(editor_id)
+        service.get_draft(editor_id)
 
 
 def test_reopen_same_owner_tears_down_previous(service):
     id1, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
-    root1 = service.get_root(id1)
+    draft1 = service.get_draft(id1)
     id2, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     # Owner-keyed id is deterministic, so re-open reuses it — but the previous
     # session was torn down and replaced (a new draft tree), which is correct:
     # it is still that owner's editor, now pointing at the fresh draft.
     assert id2 == id1
     assert service.editor_id_for_owner("tab-1") == id2
-    assert service.get_root(id2) is not root1
+    assert service.get_draft(id2) is not draft1
 
 
 def test_teardown_unknown_is_noop(service):
@@ -370,7 +371,7 @@ def test_discard_for_client_skips_gc_false_sessions(service):
     service.discard_for_client([tab_id, gc_id])
     # gc=True reclaimed, gc=False (UI-owned) session untouched.
     with pytest.raises(CfgEditorError):
-        service.get_root(gc_id)
+        service.get_draft(gc_id)
     assert service.editor_id_for_owner("tab-1") == tab_id
 
 
@@ -389,9 +390,9 @@ def test_gc_lru_evicts_oldest(service):
     # Oldest 3 evicted; newest cap survive.
     for evicted in ids[:3]:
         with pytest.raises(CfgEditorError):
-            service.get_root(evicted)
+            service.get_draft(evicted)
     for alive in ids[3:]:
-        assert service.get_root(alive) is not None
+        assert service.get_draft(alive) is not None
 
 
 def test_lru_does_not_count_gc_false_sessions(service):
@@ -401,7 +402,7 @@ def test_lru_does_not_count_gc_false_sessions(service):
     for i in range(_MAX_HEADLESS_EDITORS + 5):
         service.open_seeded(_make_tab_seed(), gc=False, owner_key=f"tab-{i}")
     gc_id, _ = service.open("module", discriminator="pulse")
-    assert service.get_root(gc_id) is not None
+    assert service.get_draft(gc_id) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -455,24 +456,24 @@ def test_change_stream_no_listener_is_safe(service):
     service.teardown(editor_id)
 
 
-def test_closed_after_change_cb_disconnected(service):
-    """After teardown, the model's change hook is gone (no re-emit)."""
+def test_closed_draft_rejects_residual_field_edits(service):
+    """After teardown, cached fields fail fast and cannot re-emit."""
     events = []
     service.set_change_listener(
         lambda eid, ev, payload: events.append((eid, ev, payload))
     )
     editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
-    root = service.get_root(editor_id)
+    draft = service.get_draft(editor_id)
+    field = draft.root.fields["freq"]
     service.teardown(editor_id)
     events.clear()
-    # The service-owned root is torn down; the hook is disconnected so any
-    # residual edit emits nothing on a dead session.
-    root.fields["freq"].set_value(99.0)
+    with pytest.raises(RuntimeError, match="closed"):
+        field.set_value(99.0)
     assert events == []
 
 
-def _hook_count(root):
-    return len(root.on_change._cbs)
+def _hook_count(draft):
+    return len(draft.on_change._callbacks)
 
 
 def test_no_dangling_hook_after_every_removal_path(service):
@@ -483,17 +484,17 @@ def test_no_dangling_hook_after_every_removal_path(service):
     """
     # seeded: teardown
     eid, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-x")
-    root = service.get_root(eid)
-    assert _hook_count(root) == 1
+    draft = service.get_draft(eid)
+    assert _hook_count(draft) == 1
     service.teardown(eid)
-    assert _hook_count(root) == 0
+    assert _hook_count(draft) == 0
 
     # re-open same owner tears down the previous → its hook is gone.
     id1, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-y")
-    r1 = service.get_root(id1)
+    draft1 = service.get_draft(id1)
     id2, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-y")
-    assert _hook_count(r1) == 0  # previous root's hook gone
-    assert _hook_count(service.get_root(id2)) == 1  # new one live
+    assert _hook_count(draft1) == 0  # previous draft's hook gone
+    assert _hook_count(service.get_draft(id2)) == 1  # new one live
 
 
 def _service_with_version_table(ctrl):

@@ -687,15 +687,7 @@ class Controller(SessionControllerMixin):
     def get_project_root(self) -> str:
         return self._project_root
 
-    # -- cfg form (node detail pane): the LiveModel env contract --
-    # The reused measure LiveModel fields fetch their environment through this
-    # surface (ControllerProtocol). autofluxdep's node knobs are flat scalars /
-    # sweeps with no md-reference / module-ref / device-ref, so these two never
-    # fire for our schemas — they exist only so the controller structurally
-    # conforms to the shared LiveModelEnv contract.
-    def has_soc(self) -> bool:
-        return self._state.exp_context.has_soc()
-
+    # -- cfg binding option source --
     def list_device_names(self) -> list[str]:
         return [entry.name for entry in self._dev_svc.list_devices()]
 

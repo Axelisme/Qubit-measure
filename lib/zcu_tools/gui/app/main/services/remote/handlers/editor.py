@@ -37,8 +37,8 @@ def _h_editor_new(
     # tab.get_cfg / editor.get), so the open reply carries the freshly-opened
     # draft as {tree} rather than the flat current_paths the session also tracks
     # internally for change-push / set_field diffing.
-    root = adapter.ctrl.get_cfg_editor_root(editor_id)
-    return {"editor_id": editor_id, "tree": build_settable_tree(root)}
+    draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
+    return {"editor_id": editor_id, "tree": build_settable_tree(draft)}
 
 
 def _h_editor_set_field(
@@ -85,12 +85,12 @@ def _h_editor_get(
     # Build the nested current-value tree off the session's live root — the same
     # tree shape tab.get_cfg returns, so the agent reads every cfg view as a tree
     # and edits leaves via editor.set_field (dotted paths). An unknown
-    # editor_id raises CfgEditorError from get_cfg_editor_root → INVALID_PARAMS.
+    # editor_id raises CfgEditorError from get_cfg_editor_draft → INVALID_PARAMS.
     try:
-        root = adapter.ctrl.get_cfg_editor_root(editor_id)
+        draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
     except CfgEditorError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    return {"tree": build_settable_tree(root, prefix=prefix)}
+    return {"tree": build_settable_tree(draft, prefix=prefix)}
 
 
 def _h_editor_commit(

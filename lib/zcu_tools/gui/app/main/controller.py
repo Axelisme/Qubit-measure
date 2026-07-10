@@ -8,6 +8,7 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 logger = logging.getLogger(__name__)
 
+from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
@@ -1069,18 +1070,18 @@ class Controller(SessionControllerMixin):
         )
 
     def open_seeded_cfg_editor(
-        self, seed: Any, *, gc: bool = False, owner_key: str | None = None
+        self, seed: CfgSchema, *, gc: bool = False, owner_key: str | None = None
     ) -> tuple[str, list[dict[str, object]]]:
         """Open a service-owned cfg model seeded from an existing CfgSchema.
 
         Used by UI surfaces (tab cfg / writeback item) that own a non-ml-entry
-        draft; the owning widget then ``attach``es to ``get_cfg_editor_root``.
+        draft; the owning widget then ``attach``es to ``get_cfg_editor_draft``.
         """
         return self._cfg_editor_svc.open_seeded(seed, gc=gc, owner_key=owner_key)
 
-    def get_cfg_editor_root(self, editor_id: str) -> Any:
-        """Return the service-owned LiveModel for a widget to ``attach`` to."""
-        return self._cfg_editor_svc.get_root(editor_id)
+    def get_cfg_editor_draft(self, editor_id: str) -> CfgDraft:
+        """Return the service-owned CfgDraft for a widget to ``attach`` to."""
+        return self._cfg_editor_svc.get_draft(editor_id)
 
     def teardown_cfg_editor(self, editor_id: str) -> None:
         """Tear down a UI-owned (gc=False) cfg-editor session + its LiveModel."""

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,10 +25,13 @@ from zcu_tools.gui.app.main.adapter import (
     SweepValue,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.app.main.live_model import (
-    CenteredSweepLiveField,
-    SectionLiveField,
-    SweepLiveField,
+from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.cfg.binding import (
+    CenteredSweepField,
+    ReferenceField,
+    ScalarField,
+    SectionField,
+    SweepField,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
@@ -55,17 +58,27 @@ def _schema(spec_fields: dict, value_fields: dict) -> CfgSchema:
 
 
 def _attach(w, schema: CfgSchema, ctrl):
-    """Build a LiveModel from ``schema`` and attach the widget to it.
+    """Build a CfgDraft from ``schema`` and attach the widget to it.
 
     Mirrors the production flow where the CfgEditorService owns the model and the
     widget ``attach``es (ADR-0008). The model is returned for tests that drive it
     directly (e.g. external refresh, which the service performs in production).
     """
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    w.attach(draft)
+    return draft.root
 
-    model = SectionLiveField(schema.spec, LiveModelEnv(ctrl=ctrl), schema.value)
-    w.attach(model)
-    return model
+
+def _scalar_field(
+    ctrl: MagicMock, spec: ScalarSpec, initial_val: object
+) -> ScalarField:
+    bindings = MeasureCfgBindings(ctrl)
+    return ScalarField(
+        spec,
+        bindings.evaluate_expression,
+        bindings.provide_options,
+        initial_val,
+    )
 
 
 def _make_ctx():
@@ -146,7 +159,6 @@ def test_scalar_choices_widget_round_trip(qapp):
 
 def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox
-    from zcu_tools.gui.app.main.live_model import ScalarLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = ["asset_a", "asset_b"]
@@ -172,7 +184,7 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
 
     combo.setCurrentIndex(1)
 
-    field = cast(ScalarLiveField, model.fields["data"])
+    field = cast(ScalarField, model.fields["data"])
     value = field.get_value()
     assert isinstance(value, DirectValue)
     assert value.value == "asset_b"
@@ -181,7 +193,6 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
 
 def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
     from qtpy.QtWidgets import QComboBox
-    from zcu_tools.gui.app.main.live_model import ScalarLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
 
     ctrl.list_arb_waveforms.return_value = ["asset_a"]
@@ -204,10 +215,38 @@ def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
     assert combo.currentIndex() == 0
     assert w.is_valid()
 
-    field = cast(ScalarLiveField, model.fields["data"])
+    field = cast(ScalarField, model.fields["data"])
     value = field.get_value()
     assert isinstance(value, DirectValue)
     assert value.value == ""
+
+
+def test_dynamic_choice_renders_inactive_current_value_but_remains_invalid(qapp, ctrl):
+    from qtpy.QtWidgets import QComboBox
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
+
+    ctrl.list_arb_waveforms.return_value = []
+    schema = _schema(
+        {
+            "data": ScalarSpec(
+                label="Data key",
+                type=str,
+                required=True,
+                choices_source="arb_waveforms",
+            )
+        },
+        {"data": DirectValue("retired_asset")},
+    )
+    form = CfgFormWidget()
+    _attach(form, schema, ctrl)
+
+    combo = form.findChild(QComboBox)
+    assert combo is not None
+    assert [combo.itemText(index) for index in range(combo.count())] == [
+        "retired_asset"
+    ]
+    assert combo.currentText() == "retired_asset"
+    assert not form.is_valid()
 
 
 def test_scalar_editable_false_widget_disabled(qapp):
@@ -245,7 +284,6 @@ def test_optional_scalar_widget_round_trips_value(qapp):
 
 def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
     from zcu_tools.gui.app.main.adapter import make_default_value
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
     from zcu_tools.gui.app.main.ui.fields.containers import (
         SectionWidget,
         _CollapsibleSection,
@@ -259,7 +297,11 @@ def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
             ),
         }
     )
-    field = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), make_default_value(spec))
+    field = (
+        MeasureCfgBindings(ctrl)
+        .new_draft(CfgSchema(spec, make_default_value(spec)))
+        .root
+    )
     w = SectionWidget(field, top_level=True)
 
     # Both fields get widgets (grouping is presentation-only, not a value change).
@@ -285,17 +327,16 @@ def test_scalar_widget_minimum_width_reduced(qapp):
 
 
 def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
     from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
     md.r_f = 6000.0
     ctrl.get_current_md.return_value = md
-    field = ScalarLiveField(
+    field = _scalar_field(
+        ctrl,
         ScalarSpec(label="Freq", type=float),
-        LiveModelEnv(ctrl=ctrl),
-        initial_val=EvalValue("r_f"),
+        EvalValue("r_f"),
     )
 
     w = ScalarWidget(field)
@@ -304,15 +345,14 @@ def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
 
 
 def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
     from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
-    field = ScalarLiveField(
+    field = _scalar_field(
+        ctrl,
         ScalarSpec(label="Freq", type=float),
-        LiveModelEnv(ctrl=ctrl),
-        initial_val=EvalValue("missing"),
+        EvalValue("missing"),
     )
 
     w = ScalarWidget(field)
@@ -321,9 +361,10 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
     assert "red" in w._ghost.styleSheet()
 
 
-def test_scalar_widget_value_ref_text_resolves_on_space_in_eval_mode(qapp, ctrl):
+def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
+    from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
+    from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
     from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.gui.session.value_lookup import ValueInfo
     from zcu_tools.meta_tool import MetaDict
@@ -335,41 +376,42 @@ def test_scalar_widget_value_ref_text_resolves_on_space_in_eval_mode(qapp, ctrl)
         ValueInfo("device.flux.value", float, "device:flux"),
         0.125,
     )
-    field = ScalarLiveField(
-        ScalarSpec(label="Freq", type=float),
-        LiveModelEnv(ctrl=ctrl),
-        initial_val=EvalValue("r_f"),
+    schema = _schema(
+        {"freq": ScalarSpec(label="Freq", type=float)},
+        {"freq": EvalValue("r_f")},
     )
-    w = ScalarWidget(field)
-    edit = w.findChild(QLineEdit)
+    form = CfgFormWidget(text_input_enhancer=make_value_source_input_enhancer(ctrl))
+    root = _attach(form, schema, ctrl)
+    scalar_widget = form.findChild(ScalarWidget)
+    edit = form.findChild(QLineEdit)
+    assert scalar_widget is not None
     assert edit is not None
 
     edit.setText("@{device.flux.value} ")
     edit.setCursorPosition(len(edit.text()))
-    assert w._source_input is not None
-    w._source_input._on_text_edited(edit.text())
+    enhancer = scalar_widget._input_enhancement
+    assert enhancer is not None
+    cast(Any, enhancer)._on_text_edited(edit.text())
 
-    val = field.get_value()
-    assert isinstance(val, EvalValue)
-    assert val.expr == "0.125"
+    value = cast(ScalarField, root.fields["freq"]).get_value()
+    assert isinstance(value, EvalValue)
+    assert value.expr == "0.125"
     assert edit.text() == "0.125"
-    assert w._mode == "eval"
     ctrl.read_value_source.assert_called_once_with("device.flux.value")
 
 
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
     from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
     md.r_f = 6000.0
     ctrl.get_current_md.return_value = md
-    field = ScalarLiveField(
+    field = _scalar_field(
+        ctrl,
         ScalarSpec(label="Freq", type=float),
-        LiveModelEnv(ctrl=ctrl),
-        initial_val=EvalValue("r_f"),
+        EvalValue("r_f"),
     )
     w = ScalarWidget(field)
     edit = w.findChild(QLineEdit)
@@ -385,15 +427,14 @@ def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
 
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
     from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, ScalarLiveField
     from zcu_tools.gui.app.main.ui.fields.common import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
-    field = ScalarLiveField(
+    field = _scalar_field(
+        ctrl,
         ScalarSpec(label="Freq", type=float),
-        LiveModelEnv(ctrl=ctrl),
-        initial_val=EvalValue("missing"),
+        EvalValue("missing"),
     )
     w = ScalarWidget(field)
 
@@ -479,8 +520,10 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         assert w._root_widget is not None and not w._root_widget.isEnabled()
         assert not spin.isEnabled()
 
+        draft = w._draft
+        assert draft is not None
         w.detach()
-        w.attach(model)
+        w.attach(draft)
 
         assert w.isEnabled()
         assert scroll.isEnabled()
@@ -507,7 +550,6 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     test_cfg_editor) and assert the widget's read-back + schema_changed fire.
     """
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
-    from zcu_tools.gui.session.events import SessionEvent
     from zcu_tools.meta_tool import MetaDict
 
     md = MetaDict()
@@ -523,7 +565,7 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     model = _attach(w, schema, ctrl)
 
     md.r_f = 6100.0
-    model.refresh_external(SessionEvent.MD_CHANGED)  # the service does this in prod
+    model.refresh_expressions()  # the service does this in production
 
     val = w.read_values().fields["freq"]
     assert isinstance(val, EvalValue)
@@ -622,7 +664,7 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
     sweep_widget = w.findChild(CenteredSweepWidget)
     assert sweep_widget is not None
 
-    field = cast(CenteredSweepLiveField, model.fields["f"])
+    field = cast(CenteredSweepField, model.fields["f"])
     assert field.center_field.spec.editable is False
     assert sweep_widget._center_widget.isEnabled() is False
     for value_widget in (
@@ -740,7 +782,7 @@ def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
-    cast(SweepLiveField, sweep_widget._field).start_field.set_value(
+    cast(SweepField, sweep_widget._field).start_field.set_value(
         EvalValue(expr="r_f - 1", resolved=5999.0)
     )
     out = w.read_values()
@@ -845,7 +887,7 @@ def test_choice_section_renders_only_active_choice_fields(qapp, ctrl):
     assert "search.manual_value" not in paths
 
     search = model.fields["search"]
-    assert isinstance(search, SectionLiveField)
+    assert isinstance(search, SectionField)
     search.fields["mode"].set_value(DirectValue("fixed"))
 
     paths = set(w.decoration_paths())
@@ -910,7 +952,7 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
     assert "half_width" in search_widget._child_widgets
 
     search = model.fields["search"]
-    assert isinstance(search, SectionLiveField)
+    assert isinstance(search, SectionField)
     search.fields["mode"].set_value(DirectValue("fixed"))
     w.decoration_paths()
 
@@ -1388,7 +1430,6 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 
 
 def test_section_widget_no_header(qapp, ctrl):
-    from zcu_tools.gui.app.main.live_model import LiveModelEnv, SectionLiveField
     from zcu_tools.gui.app.main.ui.fields.containers import SectionWidget
 
     spec = CfgSectionSpec(
@@ -1396,7 +1437,7 @@ def test_section_widget_no_header(qapp, ctrl):
         fields={"val": ScalarSpec(label="Val", type=int)},
     )
     val = CfgSectionValue(fields={"val": DirectValue(10)})
-    field = SectionLiveField(spec, LiveModelEnv(ctrl=ctrl), val)
+    field = MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, val)).root
 
     # 1. no_header=False (default)
     w1 = SectionWidget(field, top_level=False, no_header=False)
@@ -1413,7 +1454,6 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from typing import Any, cast
 
     from qtpy.QtWidgets import QDoubleSpinBox
-    from zcu_tools.gui.app.main.live_model import ReferenceLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
     from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
     from zcu_tools.meta_tool import ModuleLibrary
@@ -1453,7 +1493,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert ref_widget._sub_container.isVisible() is False
     # 1. Initially unmodified
     assert ref_widget._combo.currentText() == "Lib: my_pulse"
-    assert cast(ReferenceLiveField, ref_widget._field).is_modified() is False
+    assert cast(ReferenceField, ref_widget._field).is_modified() is False
 
     # 2. Simulate user edits the inner value via spinbox
     spin = ref_widget.findChild(QDoubleSpinBox)
@@ -1461,7 +1501,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     spin.setValue(8000.0)
 
     # Verify is_modified is True and combobox text has (modified) suffix
-    assert cast(ReferenceLiveField, ref_widget._field).is_modified() is True
+    assert cast(ReferenceField, ref_widget._field).is_modified() is True
     assert ref_widget._combo.currentText() == "Lib: my_pulse (modified)"
 
     # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
@@ -1494,7 +1534,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert clean_idx >= 0
     ref_widget._combo.setCurrentIndex(clean_idx)
 
-    assert cast(ReferenceLiveField, ref_widget._field).is_modified() is False
+    assert cast(ReferenceField, ref_widget._field).is_modified() is False
     mod_val2 = w.read_values().fields["mod"]
     assert isinstance(mod_val2, ReferenceValue)
     freq_val2 = mod_val2.value.fields["ro_freq"]
@@ -1552,7 +1592,6 @@ def test_optional_module_ref_renders_none_option(qapp, ctrl):
 
 
 def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
-    from zcu_tools.gui.app.main.live_model import ReferenceLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
     from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
 
@@ -1562,7 +1601,7 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 
     module_widgets = w.findChildren(ReferenceWidget)
     mw = module_widgets[0]
-    field = cast(ReferenceLiveField, mw._field)
+    field = cast(ReferenceField, mw._field)
 
     assert field.is_enabled is True
 
@@ -1579,7 +1618,6 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
     """A LINKED ref to an absent library key shows the red missing-ref badge and
     is invalid (recoverable — re-adding the name re-links it)."""
     from zcu_tools.gui.app.main.adapter import LiteralSpec
-    from zcu_tools.gui.app.main.live_model import ReferenceLiveField
     from zcu_tools.gui.app.main.ui.cfg_form import CfgFormWidget
     from zcu_tools.gui.app.main.ui.fields.containers import ReferenceWidget
     from zcu_tools.meta_tool import ModuleLibrary
@@ -1610,7 +1648,7 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
 
     ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
-    field = cast(ReferenceLiveField, ref_widget._field)
+    field = cast(ReferenceField, ref_widget._field)
     assert field.has_missing_library_ref() is True
     assert field.is_valid() is False
     assert ref_widget._missing_ref_hint.isVisible() is True

@@ -35,7 +35,7 @@ def test_open_returns_editor_id_and_tree(monkeypatch):
     ctrl.open_cfg_editor.assert_called_once_with(
         "module", discriminator=None, from_name="readout_rf"
     )
-    ctrl.get_cfg_editor_root.assert_called_once_with("editor-abc")
+    ctrl.get_cfg_editor_draft.assert_called_once_with("editor-abc")
 
 
 def test_open_translates_cfg_editor_error():
@@ -73,7 +73,7 @@ def test_set_field_eval_value_passed_through():
 
 def test_get_wraps_tree(monkeypatch):
     # editor.get returns the session's nested current-value {tree}; the handler
-    # reads the live root via get_cfg_editor_root and wraps build_settable_tree's
+    # reads the draft via get_cfg_editor_draft and wraps build_settable_tree's
     # output. build_settable_tree is patched (mock-only wire-shape test).
     import zcu_tools.gui.app.main.services.remote.path_resolver as pr
 
@@ -87,17 +87,17 @@ def test_get_wraps_tree(monkeypatch):
     monkeypatch.setattr(pr, "build_settable_tree", _fake_tree)
     ctrl = MagicMock()
     sentinel_root = object()
-    ctrl.get_cfg_editor_root.return_value = sentinel_root
+    ctrl.get_cfg_editor_draft.return_value = sentinel_root
     res = _dispatch(ctrl, "editor.get", {"editor_id": "e", "prefix": "modules"})
     assert res == {"tree": {"freq": 5000.0}}
-    ctrl.get_cfg_editor_root.assert_called_once_with("e")
+    ctrl.get_cfg_editor_draft.assert_called_once_with("e")
     assert captured["root"] is sentinel_root
     assert captured["prefix"] == "modules"
 
 
 def test_get_unknown_editor_is_invalid_params():
     ctrl = MagicMock()
-    ctrl.get_cfg_editor_root.side_effect = CfgEditorError("unknown editor")
+    ctrl.get_cfg_editor_draft.side_effect = CfgEditorError("unknown editor")
     with pytest.raises(RemoteError) as ei:
         _dispatch(ctrl, "editor.get", {"editor_id": "ghost"})
     assert ei.value.code == ErrorCode.INVALID_PARAMS

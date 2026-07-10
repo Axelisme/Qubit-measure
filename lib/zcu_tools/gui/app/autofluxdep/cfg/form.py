@@ -1,18 +1,12 @@
 """Cfg-form seam for autofluxdep's typed node cfg editor.
 
 The sibling ``cfg/__init__`` seam re-exports the pure spec/value data model; this
-module re-exports the shared reactive Qt form and LiveModel types used by the
-node detail pane. Autofluxdep supplies a decoration provider for generated fields,
-but the rendering contract lives in the shared cfg form.
+module re-exports only the measure Qt widgets pending the shared-widget move.
+Autoflux binding and field types are imported from their owning packages.
 """
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.live_model import (
-    LiveModelEnv,
-    ScalarLiveField,
-    SectionLiveField,
-)
 from zcu_tools.gui.app.main.ui.cfg_form import (
     CfgFormWidget,
     FieldDecoration,
@@ -28,10 +22,7 @@ __all__ = [
     "FieldDecoration",
     "FieldDecorationPatch",
     "FieldDecorationProvider",
-    "LiveModelEnv",
-    "ScalarLiveField",
     "ScalarWidget",
-    "SectionLiveField",
     "Tone",
     "default_decoration_for_spec",
 ]

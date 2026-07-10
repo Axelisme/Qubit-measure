@@ -4,7 +4,7 @@ Replaces the prototype's text ``ParamForm`` (Phase 160b): the node's knobs are
 now a typed ``NodeCfgSchema`` (the per-placement SSOT), so the form reuses the
 measure-app cfg form machinery via the ``cfg/form`` seam. The placement's schema
 value tree is split into a main "Default cfg" form and, when present, a
-"Generation overrides" form, each backed by its own ``SectionLiveField`` and
+"Generation overrides" form, each backed by its own ``CfgDraft`` and
 rendered by ``CfgFormWidget``. This gives int/float spin widgets, a 3-field sweep
 editor, optional-blank → None, and adapter-native module/waveform refs for free,
 all WYSIWYG.
@@ -12,7 +12,7 @@ all WYSIWYG.
 Edits flow back to the SSOT: ``CfgFormWidget.schema_changed`` fires a fresh draft
 snapshot, and this widget writes the complete value tree into the placement schema
 through the controller (a main-thread State write that bumps the workflow version
-+ emits ``WorkflowChangedPayload``). The LiveModel is a local draft (like measure's
++ emits ``WorkflowChangedPayload``). The CfgDraft is local (like measure's
 inspect / writeback dialogs), not auto-committed by the framework — this widget
 owns the commit.
 
@@ -31,17 +31,20 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.autofluxdep.cfg import (
+    CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
     OverridePath,
     OverridePlan,
+    make_default_value,
 )
+from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.cfg.form import (
     CfgFormWidget,
     FieldDecorationPatch,
-    LiveModelEnv,
-    SectionLiveField,
 )
+from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.session.events import SessionEvent
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller
@@ -54,7 +57,7 @@ NODE_FIELD_LABEL_MAX_WIDTH = 180
 class NodeCfgForm(QWidget):
     """Typed cfg form for one PlacedNode.
 
-    Owns split ``SectionLiveField`` drafts over the placement's schema and
+    Owns split ``CfgDraft`` instances over the placement's schema and
     ``CfgFormWidget`` renderers for them; on edit it commits the merged leaves back
     to the placement's schema SSOT via ``controller.set_node_cfg_value``.
     """
@@ -83,16 +86,22 @@ class NodeCfgForm(QWidget):
             _split_generation_section(spec, value)
         )
 
-        # LiveModel draft over the placement's schema (spec + its current value
-        # tree). The env fetches md/value sources through the controller so
-        # numeric knobs can use the shared expression mode and @{...} resolver.
-        env = LiveModelEnv(ctrl=controller)
-        self._default_model = SectionLiveField(default_spec, env, default_value)
-        self._generation_model: SectionLiveField | None = (
-            SectionLiveField(generation_spec, env, generation_value)
-            if generation_spec is not None
-            else None
+        bindings = AutofluxCfgBindings(controller)
+        self._default_draft = bindings.new_draft(
+            CfgSchema(spec=default_spec, value=default_value)
         )
+        self._generation_draft: CfgDraft | None = None
+        if generation_spec is not None:
+            self._generation_draft = bindings.new_draft(
+                CfgSchema(
+                    spec=generation_spec,
+                    value=(
+                        generation_value
+                        if generation_value is not None
+                        else make_default_value(generation_spec)
+                    ),
+                )
+            )
 
         self._default_group = QGroupBox("Default cfg")
         default_layout = QVBoxLayout(self._default_group)
@@ -100,20 +109,20 @@ class NodeCfgForm(QWidget):
             field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH,
             decoration_provider=self._default_decoration_provider(),
         )
-        self._default_form.attach(self._default_model)
+        self._default_form.attach(self._default_draft)
         self._default_form.schema_changed.connect(self._on_default_schema_changed)
         default_layout.addWidget(self._default_form)
         root.addWidget(self._default_group, 1)
 
         self._generation_group: QGroupBox | None = None
         self._generation_form: CfgFormWidget | None = None
-        if self._generation_model is not None:
+        if self._generation_draft is not None:
             generation_group = QGroupBox("Generation overrides")
             generation_layout = QVBoxLayout(generation_group)
             self._generation_form = CfgFormWidget(
                 field_label_max_width=NODE_FIELD_LABEL_MAX_WIDTH
             )
-            self._generation_form.attach(self._generation_model)
+            self._generation_form.attach(self._generation_draft)
             self._generation_form.schema_changed.connect(
                 self._on_generation_schema_changed
             )
@@ -124,7 +133,7 @@ class NodeCfgForm(QWidget):
     def _on_default_schema_changed(self, schema: object) -> None:
         """Commit the form draft into the placement schema SSOT.
 
-        ``schema`` is a fresh ``CfgSchema`` snapshot of the LiveModel; its value
+        ``schema`` is a fresh ``CfgSchema`` snapshot of the CfgDraft; its value
         leaves (DirectValue / SweepValue) are written through the controller's
         typed entry, which coerces + fast-fails and bumps the workflow version.
         """
@@ -148,9 +157,9 @@ class NodeCfgForm(QWidget):
 
     def _combined_value(self) -> CfgSectionValue:
         """Merge the split UI drafts back into the schema's full root value tree."""
-        fields = dict(self._default_model.get_value().fields)
-        if self._generation_model is not None:
-            fields["generation"] = self._generation_model.get_value()
+        fields = dict(self._default_draft.snapshot().value.fields)
+        if self._generation_draft is not None:
+            fields["generation"] = self._generation_draft.snapshot().value
         return CfgSectionValue(fields=fields)
 
     def set_read_only(self, read_only: bool) -> None:
@@ -161,22 +170,33 @@ class NodeCfgForm(QWidget):
 
     def refresh_external(self, event: object) -> None:
         """Refresh expression/ref snapshots after context, md, ml, or device changes."""
-        self._default_model.refresh_external(event)
-        if self._generation_model is not None:
-            self._generation_model.refresh_external(event)
+        drafts = [self._default_draft]
+        if self._generation_draft is not None:
+            drafts.append(self._generation_draft)
+        for draft in drafts:
+            if event is SessionEvent.MD_CHANGED:
+                draft.refresh_expressions()
+            elif event is SessionEvent.ML_CHANGED:
+                draft.refresh_references()
+            elif event is SessionEvent.DEVICE_CHANGED:
+                draft.refresh_options("devices")
+            elif event is SessionEvent.CONTEXT_SWITCHED:
+                draft.refresh_expressions()
+                draft.refresh_options()
+                draft.refresh_references()
 
     def teardown(self) -> None:
-        """Detach the CfgFormWidget + drop the LiveModel draft."""
+        """Detach the CfgFormWidget and close the locally-owned drafts."""
         self._default_form.schema_changed.disconnect(self._on_default_schema_changed)
         self._default_form.detach()
-        self._default_model.teardown()
+        self._default_draft.close()
         if self._generation_form is not None:
             self._generation_form.schema_changed.disconnect(
                 self._on_generation_schema_changed
             )
             self._generation_form.detach()
-        if self._generation_model is not None:
-            self._generation_model.teardown()
+        if self._generation_draft is not None:
+            self._generation_draft.close()
 
 
 def _split_generation_section(
