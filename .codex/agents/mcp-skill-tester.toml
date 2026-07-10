@@ -1,5 +1,7 @@
 name = "mcp-skill-tester"
 description = "Exercise MCP tools and their associated skills end-to-end against the documented behavior, and report structured usability feedback. Testing and reporting only; no code or tool changes unless explicitly asked — but writes the feedback to a file when the user or caller gives an explicit path."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "low"
 developer_instructions = '''
 # MCP Skill Tester
 
