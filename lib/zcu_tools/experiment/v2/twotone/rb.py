@@ -111,7 +111,7 @@ CLIFFORD_GROUP: list[CliffordDecomp] = [
 ]
 
 
-# ---------- 6-state Bloch-sphere tracking -----------------------------------
+# ---------- 6-state Bloch-sphere permutation representation ------------------
 # States:  +X=0  -X=1  +Y=2  -Y=3  +Z=4  -Z=5
 # Each primitive gate is a permutation of these 6 cardinal states, derived
 # from the SO(3) rotation matrices of Rx, Ry, Rz at ±π/2 and π.
@@ -128,10 +128,70 @@ GATE_EFFECT_MAP = {
     "Z180": (MX, PX, MY, PY, PZ, MZ),
     "-Z90": (MY, PY, PX, MX, PZ, MZ),
 }
-# maps it back to +Z (= |0⟩).
-# use ("-Y90", "Y90", "X90", "-X90", "I", "X180")
-RECOVERY_INDEX = (9, 14, 21, 19, 0, 6)
 # fmt: on
+
+
+# ---------- Cayley table + inverse lookup ------------------------------------
+# The action of the 24-element Clifford quotient group on the 6 Bloch cardinal
+# states is faithful (the quotient is the chiral octahedral group ≅ S4), so
+# permutation equality is group-element equality and the multiplication table
+# can be synthesized from GATE_EFFECT_MAP alone.
+#
+# Order convention (must stay in sync with the accumulation in RB_Exp.run):
+# CAYLEY[i][j] = k  such that  perm_k == perm_i ∘ perm_j,  i.e. apply C_j
+# FIRST, then C_i.  Accumulating a sequence therefore reads
+# acc = CAYLEY[next][acc], and the full-inverse recovery (applied last) is
+# INVERSE_INDEX[acc] since CAYLEY[INVERSE_INDEX[acc]][acc] == 0 (identity).
+
+
+def _clifford_perm(ci: int) -> tuple[int, ...]:
+    perm: list[int] = []
+    for s in range(6):
+        st = s
+        for gate in CLIFFORD_GROUP[ci]:
+            st = GATE_EFFECT_MAP[gate][st]
+        perm.append(st)
+    return tuple(perm)
+
+
+def _build_cayley_and_inverse() -> tuple[list[list[int]], list[int]]:
+    perms = [_clifford_perm(i) for i in range(NUM_CLIFFORDS)]
+    perm_index: dict[tuple[int, ...], int] = {}
+    for i, p in enumerate(perms):
+        if p in perm_index:
+            raise ValueError(
+                "CLIFFORD_GROUP 6-state permutations are not faithful: "
+                f"C{perm_index[p]} and C{i} coincide"
+            )
+        perm_index[p] = i
+
+    def compose(pi: tuple[int, ...], pj: tuple[int, ...]) -> tuple[int, ...]:
+        # apply pj first, then pi
+        return tuple(pi[pj[s]] for s in range(6))
+
+    cayley = [[0] * NUM_CLIFFORDS for _ in range(NUM_CLIFFORDS)]
+    for i in range(NUM_CLIFFORDS):
+        for j in range(NUM_CLIFFORDS):
+            k = perm_index.get(compose(perms[i], perms[j]))
+            if k is None:
+                raise ValueError(f"Clifford product C{i}·C{j} is not in the group")
+            cayley[i][j] = k
+
+    inverse = [0] * NUM_CLIFFORDS
+    for i in range(NUM_CLIFFORDS):
+        invs = [j for j in range(NUM_CLIFFORDS) if cayley[i][j] == 0]
+        if len(invs) != 1 or cayley[invs[0]][i] != 0:
+            raise ValueError(f"Clifford C{i} has no unique two-sided inverse")
+        inverse[i] = invs[0]
+    return cayley, inverse
+
+
+CAYLEY, INVERSE_INDEX = _build_cayley_and_inverse()
+
+# The recovery Clifford decompositions contain at most 2 physical pulses
+# (Z gates are virtual), so the program uses exactly 2 recovery slots and
+# pads with BasicGate.Id.
+NUM_RECOVERY_SLOTS = 2
 
 
 def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -145,10 +205,31 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 def build_seed_program_tables(
     total_clifford_seq: list[int],
-    acc_states: list[int],
+    recovery_idx_by_pos: list[int],
     depths: NDArray[np.int64],
-) -> tuple[list[int], list[int], list[int]]:
+) -> tuple[list[int], list[int], list[int], list[int]]:
+    """Reduce a Clifford sequence to physical-gate dmem tables.
+
+    `recovery_idx_by_pos[d]` is the Clifford index of the full inverse of the
+    first `d` sequence Cliffords (one entry per position 0..len(seq)).
+    Returns `(rand_gate_seq, prefix_len_by_depth, recovery_gate0_by_depth,
+    recovery_gate1_by_depth)` — the recovery decomposition holds at most
+    NUM_RECOVERY_SLOTS physical pulses; missing slots are padded with
+    BasicGate.Id (slot 0 fires first).
+    """
     max_depth = int(np.max(depths))
+
+    if len(recovery_idx_by_pos) != len(total_clifford_seq) + 1:
+        raise ValueError(
+            "recovery_idx_by_pos must have one entry per position "
+            f"0..len(seq): expected {len(total_clifford_seq) + 1}, "
+            f"got {len(recovery_idx_by_pos)}"
+        )
+    if max_depth > len(total_clifford_seq):
+        raise ValueError(
+            f"max depth {max_depth} exceeds Clifford sequence length "
+            f"{len(total_clifford_seq)}"
+        )
 
     phase_axis: int = 0
 
@@ -178,25 +259,31 @@ def build_seed_program_tables(
 
     rand_gate_seq: list[int] = []
     prefix_len_all: list[int] = [0] * (max_depth + 1)
-    recovery_gate_all: list[int] = [0] * (max_depth + 1)
+    recovery_gate0_all: list[int] = [int(BasicGate.Id)] * (max_depth + 1)
+    recovery_gate1_all: list[int] = [int(BasicGate.Id)] * (max_depth + 1)
 
     for d in range(max_depth + 1):
         prefix_len_all[d] = len(rand_gate_seq)
 
-        recovery_idx = RECOVERY_INDEX[acc_states[d]]
+        # Recovery inherits the virtual-Z frame accumulated by the prefix;
+        # its own frame advance is discarded (nothing follows before readout).
         saved_phase = phase_axis
-        recovery_gate = None
-        for r_gate in CLIFFORD_GROUP[recovery_idx]:
+        recovery_gates: list[int] = []
+        for r_gate in CLIFFORD_GROUP[recovery_idx_by_pos[d]]:
             basic_gate = convert_gate(r_gate)
             if basic_gate is not None:
-                if recovery_gate is not None:
-                    raise ValueError(
-                        "RB recovery Clifford must map to exactly one physical BasicGate"
-                    )
-                recovery_gate = basic_gate
-        assert recovery_gate is not None
-        recovery_gate_all[d] = int(recovery_gate)
+                recovery_gates.append(int(basic_gate))
         phase_axis = saved_phase
+
+        if len(recovery_gates) > NUM_RECOVERY_SLOTS:
+            raise ValueError(
+                "recovery Clifford decomposition exceeds "
+                f"{NUM_RECOVERY_SLOTS} physical gates: {recovery_gates}"
+            )
+        if len(recovery_gates) >= 1:
+            recovery_gate0_all[d] = recovery_gates[0]
+        if len(recovery_gates) >= 2:
+            recovery_gate1_all[d] = recovery_gates[1]
 
         if d < max_depth:
             ci = total_clifford_seq[d]
@@ -206,13 +293,20 @@ def build_seed_program_tables(
                     rand_gate_seq.append(int(basic_gate))
 
     prefix_len_by_depth: list[int] = []
-    recovery_gate_by_depth: list[int] = []
+    recovery_gate0_by_depth: list[int] = []
+    recovery_gate1_by_depth: list[int] = []
     for depth_i64 in depths:
         d = int(depth_i64)
         prefix_len_by_depth.append(prefix_len_all[d])
-        recovery_gate_by_depth.append(recovery_gate_all[d])
+        recovery_gate0_by_depth.append(recovery_gate0_all[d])
+        recovery_gate1_by_depth.append(recovery_gate1_all[d])
 
-    return rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth
+    return (
+        rand_gate_seq,
+        prefix_len_by_depth,
+        recovery_gate0_by_depth,
+        recovery_gate1_by_depth,
+    )
 
 
 class RBModuleCfg(ConfigBase):
@@ -277,29 +371,34 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
 
             def build_seq_seed(
                 entropy: int,
-            ) -> tuple[int, list[int], list[int], list[int]]:
+            ) -> tuple[int, list[int], list[int], list[int], list[int]]:
                 child = np.random.SeedSequence(entropy)
                 rng = np.random.Generator(np.random.PCG64(child))
                 clifford_idxs = rng.integers(0, NUM_CLIFFORDS, size=max_depth)
 
-                # simulate the state evolution after each Clifford gate
-                state = PZ
-                cum_states: list[int] = [state]
+                # track the accumulated Clifford; the recovery at each depth is
+                # its full group inverse (acc = CAYLEY[next][acc]: next applied
+                # AFTER acc — see the CAYLEY order convention).
+                acc = 0
+                recovery_idx_by_pos: list[int] = [INVERSE_INDEX[acc]]
                 for ci in clifford_idxs:
-                    for gate in CLIFFORD_GROUP[ci]:
-                        state = GATE_EFFECT_MAP[gate][state]
-                    cum_states.append(state)
+                    acc = CAYLEY[int(ci)][acc]
+                    recovery_idx_by_pos.append(INVERSE_INDEX[acc])
 
-                rand_gate_seq, prefix_len_by_depth, recovery_gate_by_depth = (
-                    build_seed_program_tables(
-                        clifford_idxs.tolist(), cum_states, depths
-                    )
+                (
+                    rand_gate_seq,
+                    prefix_len_by_depth,
+                    recovery_gate0_by_depth,
+                    recovery_gate1_by_depth,
+                ) = build_seed_program_tables(
+                    clifford_idxs.tolist(), recovery_idx_by_pos, depths
                 )
                 return (
                     entropy,
                     rand_gate_seq,
                     prefix_len_by_depth,
-                    recovery_gate_by_depth,
+                    recovery_gate0_by_depth,
+                    recovery_gate1_by_depth,
                 )
 
             signals_buffer = SignalBuffer(
@@ -315,7 +414,8 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
                         seed,
                         rand_gate_seq,
                         prefix_len_by_depth,
-                        recovery_gate_by_depth,
+                        recovery_gate0_by_depth,
+                        recovery_gate1_by_depth,
                     ) = build_seq_seed(int(step.value))
                     builder = step.prog_builder(soc, soccfg)
                     if seed not in prog_cache:
@@ -358,10 +458,16 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
                                     val_reg="rand_len",
                                 ),
                                 LoadValue(
-                                    "load_recovery_gate",
-                                    values=recovery_gate_by_depth,
+                                    "load_recovery_gate_0",
+                                    values=recovery_gate0_by_depth,
                                     idx_reg="depth_idx",
-                                    val_reg="recovery_gate",
+                                    val_reg="recovery_gate_0",
+                                ),
+                                LoadValue(
+                                    "load_recovery_gate_1",
+                                    values=recovery_gate1_by_depth,
+                                    idx_reg="depth_idx",
+                                    val_reg="recovery_gate_1",
                                 ),
                                 Reset("reset", cfg=modules.reset),
                                 Repeat(
@@ -383,9 +489,17 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
                                         ),
                                     ]
                                 ),
+                                # Both recovery slots must share the full
+                                # gate_pulses so their total_length (max over
+                                # candidates) is depth-independent.
                                 ComputedPulse(
-                                    "recovery_gate",
-                                    val_reg="recovery_gate",
+                                    "recovery_gate_0",
+                                    val_reg="recovery_gate_0",
+                                    pulses=gate_pulses,
+                                ),
+                                ComputedPulse(
+                                    "recovery_gate_1",
+                                    val_reg="recovery_gate_1",
                                     pulses=gate_pulses,
                                 ),
                                 Readout("readout", cfg=modules.readout),
