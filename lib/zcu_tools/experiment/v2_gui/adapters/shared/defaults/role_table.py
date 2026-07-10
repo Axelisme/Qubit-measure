@@ -336,8 +336,8 @@ ROLE_TABLE: dict[str, RoleDef] = {
         _QUB_PULSE,
         lib=Lib(PulseCfg, ("pi2_amp", "pi2_len")),
     ),
-    # readout: "readout" is the library-aware pulse readout (Init.ADOPT prefers a
-    # calibrated library entry; Init.INLINE seeds a fresh inline pulse readout —
+    # readout: "readout" is the library-aware pulse readout (RoleInit.ADOPT prefers a
+    # calibrated library entry; RoleInit.INLINE seeds a fresh inline pulse readout —
     # the role formerly split out as "pulse_readout"). direct_readout / readout_dpm
     # are the other inline-only shapes.
     "readout": RoleDef(
@@ -377,8 +377,8 @@ ROLE_TABLE: dict[str, RoleDef] = {
         ),
         adopt_waveform="ro_waveform",
     ),
-    # reset: "reset" is the library-aware pulse reset (Init.ADOPT prefers a
-    # calibrated library entry; Init.INLINE seeds a fresh inline pulse reset — the
+    # reset: "reset" is the library-aware pulse reset (RoleInit.ADOPT prefers a
+    # calibrated library entry; RoleInit.INLINE seeds a fresh inline pulse reset — the
     # role formerly split out as "pulse_reset"). none / two_pulse / bath are the
     # other inline-only shapes.
     "reset": RoleDef(

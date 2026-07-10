@@ -462,25 +462,12 @@ class CfgSectionValue:
         built ``DirectValue``/``EvalValue``. Descends ``CfgSectionValue.fields``
         and ``ReferenceValue`` (into its ``.value``).
         """
-        parts = [p for p in path.split(".") if p]
-        if not parts:
-            raise RuntimeError("Value override path must not be empty")
-        node: CfgSectionValue = self
-        for seg in parts[:-1]:
-            child = node.fields.get(seg)
-            if isinstance(child, ReferenceValue):
-                node = child.value
-            elif isinstance(child, CfgSectionValue):
-                node = child
-            else:
-                raise RuntimeError(
-                    f"Value override path cannot descend into {type(child).__name__} "
-                    f"at segment {seg!r}"
-                )
+        from .tree import replace_value_path
+
         leaf_value: CfgNodeValue = (
             value if isinstance(value, (DirectValue, EvalValue)) else DirectValue(value)
         )
-        node.fields[parts[-1]] = leaf_value
+        replace_value_path(self, path, leaf_value)
         return self
 
 

@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-10（shared Qt cfg widget ownership）
+**Last updated:** 2026-07-10（shared cfg tree paths）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -12,6 +12,11 @@ own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 default/inheritance helpers、raw persistence codec，以及generic finished-cfg
 validation/lowering。lowering只依賴expression/reference/range三個callable ports，維持
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
+
+`gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
+allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與
+reference value且要求leaf已存在。這層不create、不wrap、不處理lock或domain policy；
+`CfgSectionValue.with_field`只保留scalar wrapping後委派replace。
 
 Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`是shared core只
 轉送的app-local opaque id。module/waveform factory、resolver與converter policy留在各app，

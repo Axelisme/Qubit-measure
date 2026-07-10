@@ -13,7 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
     FluxPickParams,
     FluxPickResult,
-    Init,
+    RoleInit,
     build_exp_spec,
     build_flux_pick_session,
     make_pulse_readout_module_spec,
@@ -149,12 +149,12 @@ class OneToneFluxDepAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=1, relax_delay=1.0)
-            .role("modules.readout", "readout", Init.INLINE)
+            .role("modules.readout", "readout", RoleInit.INLINE)
             .set("modules.readout.pulse_cfg.gain", 0.05)
             .set("modules.readout.ro_cfg.ro_length", ro_length)
-            .value_ref("dev.flux_dev", "device.flux.name", default="flux_yoko")
-            .set_sweep("sweep.flux", proper_flux_range(ctx, 101))
-            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 101, span_factor=1.0))
+            .value_source("dev.flux_dev", "device.flux.name", default="flux_yoko")
+            .sweep("sweep.flux", proper_flux_range(ctx, 101))
+            .sweep("sweep.freq", proper_res_freq_range(ctx, 101, span_factor=1.0))
             .build()
         )
 

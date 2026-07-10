@@ -11,7 +11,7 @@ from zcu_tools.experiment.v2.singleshot import AcStarkCfg, AcStarkExp
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -136,14 +136,14 @@ class SsAcStarkAdapter(
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=2)
             .set("relax_delay", proper_relax(ctx))
-            .role("modules.stark_pulse1", "qub_probe", Init.INLINE)
-            .role("modules.stark_pulse2", "qub_probe", Init.INLINE)
+            .role("modules.stark_pulse1", "qub_probe", RoleInit.INLINE)
+            .role("modules.stark_pulse2", "qub_probe", RoleInit.INLINE)
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", Init.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
-            .set_sweep("sweep.gain", SweepValue(start=0.0, stop=0.22, expts=301))
-            .set_sweep("sweep.freq", freq_sweep)
+            .role("modules.reset", "reset", RoleInit.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
+            .sweep("sweep.gain", SweepValue(start=0.0, stop=0.22, expts=301))
+            .sweep("sweep.freq", freq_sweep)
             .build()
         )
 

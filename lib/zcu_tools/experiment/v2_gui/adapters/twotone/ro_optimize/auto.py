@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -37,6 +37,7 @@ from zcu_tools.gui.app.main.adapter import (
     MetaDictWriteback,
     RunRequest,
     SweepSpec,
+    SweepValue,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
@@ -148,12 +149,12 @@ class RoOptAutoAdapter(
                 num_points=1001,
                 skew_penalty=0.0,
             )
-            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.reset", "reset", RoleInit.DISABLED)
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
-            .sweep("sweep.gain", 0.1, 0.25, 51)
-            .sweep("sweep.length", 5.0, 10.0, 51)
+            .sweep("sweep.freq", proper_res_freq_range(ctx, 51, span_factor=0.2))
+            .sweep("sweep.gain", SweepValue(start=0.1, stop=0.25, expts=51))
+            .sweep("sweep.length", SweepValue(start=5.0, stop=10.0, expts=51))
             .build()
         )
 

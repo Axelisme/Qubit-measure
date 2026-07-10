@@ -11,7 +11,7 @@ from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqResult
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -125,12 +125,12 @@ class FreqAdapter(
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=100, relax_delay=1.0)
             # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", Init.DISABLED)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
+            .role("modules.reset", "reset", RoleInit.DISABLED)
+            .role("modules.qub_pulse", "qub_probe", RoleInit.INLINE)
             .role("modules.readout", "readout")
             .set("modules.qub_pulse.waveform.length", 5.0)
             .set("modules.qub_pulse.gain", 0.1)
-            .set_sweep("sweep.freq", proper_qub_freq_range(ctx, 301))
+            .sweep("sweep.freq", proper_qub_freq_range(ctx, 301))
             .build()
         )
 

@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -35,6 +35,7 @@ from zcu_tools.gui.app.main.adapter import (
     MetaDictWriteback,
     ParamMeta,
     SweepSpec,
+    SweepValue,
     WritebackItem,
     WritebackRequest,
 )
@@ -137,13 +138,11 @@ class RoOptFreqGainAdapter(
                 relax_delay=proper_relax(ctx),
                 skew_penalty=0.0,
             )
-            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.reset", "reset", RoleInit.DISABLED)
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            .set_sweep(
-                "sweep.freq", proper_best_ro_freq_range(ctx, 31, span_factor=0.5)
-            )
-            .sweep("sweep.gain", 0.0, 0.2, 31)
+            .sweep("sweep.freq", proper_best_ro_freq_range(ctx, 31, span_factor=0.5))
+            .sweep("sweep.gain", SweepValue(start=0.0, stop=0.2, expts=31))
             .build()
         )
 

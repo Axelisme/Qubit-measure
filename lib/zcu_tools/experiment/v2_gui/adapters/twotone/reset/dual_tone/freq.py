@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2.twotone.reset.dual_tone.freq import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -148,10 +148,10 @@ class DualToneFreqAdapter(
             )
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", Init.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
-            .set_sweep("sweep.freq1", proper_reset_freq_axis(ctx, "reset_f1", 201))
-            .set_sweep("sweep.freq2", proper_reset_freq_axis(ctx, "reset_f2", 201))
+            .role("modules.reset", "reset", RoleInit.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
+            .sweep("sweep.freq1", proper_reset_freq_axis(ctx, "reset_f1", 201))
+            .sweep("sweep.freq2", proper_reset_freq_axis(ctx, "reset_f2", 201))
             .build()
         )
 

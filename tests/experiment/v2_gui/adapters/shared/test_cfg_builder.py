@@ -18,7 +18,10 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     make_readout_module_spec,
     make_reset_module_spec,
 )
-from zcu_tools.experiment.v2_gui.adapters.shared.cfg_builder import CfgBuilder, Init
+from zcu_tools.experiment.v2_gui.adapters.shared.cfg_builder import (
+    CfgBuilder,
+    RoleInit,
+)
 from zcu_tools.gui.app.main.adapter import (
     CfgSectionSpec,
     CfgSectionValue,
@@ -182,11 +185,11 @@ def test_set_overrides_scalar_inside_mounted_role():
 
 
 def test_set_bad_path_fast_fails():
-    with pytest.raises(RuntimeError, match="does not resolve"):
+    with pytest.raises(KeyError, match="not found"):
         CfgBuilder(_empty_ctx(), _spec()).set("modules.no_such.gain", 1.0)
 
 
-# --- .value_ref ---------------------------------------------------------------
+# --- .value_source ------------------------------------------------------------
 
 
 def _device_spec() -> CfgSectionSpec:
@@ -206,7 +209,7 @@ def _device_spec() -> CfgSectionSpec:
     )
 
 
-def test_value_ref_resolves_device_ref_to_direct_value():
+def test_value_source_resolves_device_ref_to_direct_value():
     registry = ValueRegistry()
     registry.register(
         ValueKey("device.flux.name", str),
@@ -216,7 +219,7 @@ def test_value_ref_resolves_device_ref_to_direct_value():
 
     v = (
         CfgBuilder(_ctx_with_values(registry), _device_spec())
-        .value_ref("dev.flux_dev", "device.flux.name")
+        .value_source("dev.flux_dev", "device.flux.name")
         .build()
     )
 
@@ -224,10 +227,10 @@ def test_value_ref_resolves_device_ref_to_direct_value():
     assert dev.fields["flux_dev"] == DirectValue("flux")
 
 
-def test_value_ref_uses_default_when_source_is_missing():
+def test_value_source_uses_default_when_source_is_missing():
     v = (
         CfgBuilder(_ctx_with_values(ValueRegistry()), _device_spec())
-        .value_ref("dev.flux_dev", "device.flux.name", default="flux_yoko")
+        .value_source("dev.flux_dev", "device.flux.name", default="flux_yoko")
         .build()
     )
 
@@ -257,19 +260,157 @@ def test_role_adopt_uses_library_match():
 
 def test_role_disabled_library_miss_mounts_none():
     # empty ml + disabled optional reset → None, not a blank ref (ADR-0010)
-    b = CfgBuilder(_empty_ctx(), _spec()).role("modules.reset", "reset", Init.DISABLED)
+    b = CfgBuilder(_empty_ctx(), _spec()).role(
+        "modules.reset", "reset", RoleInit.DISABLED
+    )
     v = b.build()
     assert v.fields["modules"].fields["reset"] is None  # type: ignore[union-attr]
 
 
 def test_role_inline_forces_blank_even_when_library_has_match():
     b = CfgBuilder(_ctx_with_library_readout(), _spec()).role(
-        "modules.readout", "readout", Init.INLINE
+        "modules.readout", "readout", RoleInit.INLINE
     )
     v = b.build()
     node = v.fields["modules"].fields["readout"]  # type: ignore[union-attr]
     assert isinstance(node, ReferenceValue)
     assert node.chosen_key == "<Custom:Pulse Readout>"
+
+
+def test_role_blank_overrides_custom_inline_value() -> None:
+    value = (
+        CfgBuilder(_ctx_with_library_readout(), _spec())
+        .role(
+            "modules.readout",
+            "readout",
+            RoleInit.INLINE,
+            blank_overrides={"pulse_cfg.gain": 0.75},
+        )
+        .build()
+    )
+
+    modules = cast(CfgSectionValue, value.fields["modules"])
+    readout = cast(ReferenceValue, modules.fields["readout"])
+    pulse_cfg = cast(CfgSectionValue, readout.value.fields["pulse_cfg"])
+    assert pulse_cfg.fields["gain"] == DirectValue(0.75)
+
+
+def test_role_blank_overrides_adopt_fallback_blank() -> None:
+    value = (
+        CfgBuilder(_empty_ctx(), _spec())
+        .role(
+            "modules.readout",
+            "readout",
+            blank_overrides={"pulse_cfg.gain": 0.6},
+        )
+        .build()
+    )
+
+    modules = cast(CfgSectionValue, value.fields["modules"])
+    readout = cast(ReferenceValue, modules.fields["readout"])
+    pulse_cfg = cast(CfgSectionValue, readout.value.fields["pulse_cfg"])
+    assert readout.chosen_key == "<Custom:Pulse Readout>"
+    assert pulse_cfg.fields["gain"] == DirectValue(0.6)
+
+
+def test_role_blank_overrides_ignore_linked_library_value() -> None:
+    value = (
+        CfgBuilder(_ctx_with_library_readout(), _spec())
+        .role(
+            "modules.readout",
+            "readout",
+            blank_overrides={"pulse_cfg.gain": 0.9},
+        )
+        .build()
+    )
+
+    modules = cast(CfgSectionValue, value.fields["modules"])
+    readout = cast(ReferenceValue, modules.fields["readout"])
+    pulse_cfg = cast(CfgSectionValue, readout.value.fields["pulse_cfg"])
+    assert readout.chosen_key == "readout_rf"
+    assert pulse_cfg.fields["gain"] == DirectValue(0.2)
+
+
+def test_role_blank_overrides_reject_locked_path_without_mounting() -> None:
+    builder = CfgBuilder(_empty_ctx(), _locked_spec())
+
+    with pytest.raises(RuntimeError, match="locked literal"):
+        builder.role(
+            "modules.readout",
+            "readout",
+            RoleInit.INLINE,
+            blank_overrides={"pulse_cfg.freq": 5.0},
+        )
+
+    modules = cast(CfgSectionValue, builder.build().fields["modules"])
+    readout = cast(ReferenceValue, modules.fields["readout"])
+    assert readout.chosen_key == "<Custom:Direct Readout>"
+
+
+def test_role_blank_overrides_reject_unknown_path() -> None:
+    with pytest.raises(KeyError, match="not found"):
+        CfgBuilder(_empty_ctx(), _spec()).role(
+            "modules.readout",
+            "readout",
+            RoleInit.INLINE,
+            blank_overrides={"pulse_cfg.missing": 1.0},
+        )
+
+
+def test_role_blank_overrides_validate_all_before_mounting() -> None:
+    builder = CfgBuilder(_empty_ctx(), _spec())
+
+    with pytest.raises(KeyError, match="not found"):
+        builder.role(
+            "modules.readout",
+            "readout",
+            RoleInit.INLINE,
+            blank_overrides={"pulse_cfg.gain": 0.8, "pulse_cfg.missing": 1.0},
+        )
+
+    modules = cast(CfgSectionValue, builder.build().fields["modules"])
+    readout = cast(ReferenceValue, modules.fields["readout"])
+    assert readout.chosen_key == "<Custom:Direct Readout>"
+
+
+@pytest.mark.parametrize("relative_path", ["pulse_cfg", "pulse_cfg.waveform"])
+def test_role_blank_overrides_reject_non_scalar_target_before_mounting(
+    relative_path: str,
+) -> None:
+    builder = CfgBuilder(_empty_ctx(), _spec())
+
+    with pytest.raises(RuntimeError, match="not a scalar leaf"):
+        builder.role(
+            "modules.readout",
+            "readout",
+            RoleInit.INLINE,
+            blank_overrides={relative_path: 1.0},
+        )
+
+    modules = cast(CfgSectionValue, builder.build().fields["modules"])
+    readout = cast(ReferenceValue, modules.fields["readout"])
+    assert readout.chosen_key == "<Custom:Direct Readout>"
+
+
+def test_role_blank_overrides_reject_sweep_target_before_mounting() -> None:
+    spec = _spec()
+    modules_spec = cast(CfgSectionSpec, spec.fields["modules"])
+    readout_spec = cast(ReferenceSpec, modules_spec.fields["readout"])
+    for allowed in readout_spec.allowed:
+        allowed.fields["test_sweep"] = SweepSpec(label="Test sweep")
+    builder = CfgBuilder(_empty_ctx(), spec)
+
+    with pytest.raises(RuntimeError, match="not a scalar leaf"):
+        builder.role(
+            "modules.readout",
+            "readout",
+            RoleInit.INLINE,
+            blank_overrides={"test_sweep": 1.0},
+        )
+
+    modules = cast(CfgSectionValue, builder.build().fields["modules"])
+    readout = cast(ReferenceValue, modules.fields["readout"])
+    assert readout.chosen_key == "<Custom:Direct Readout>"
 
 
 def test_role_unknown_id_fast_fails():
@@ -312,22 +453,22 @@ def test_role_rejects_module_role_for_waveform_spec_at_mount() -> None:
 
 
 def test_role_disabled_on_required_ref_fast_fails():
-    # qub_pulse spec ref is NOT optional → Init.DISABLED must raise
+    # qub_pulse spec ref is NOT optional → RoleInit.DISABLED must raise
     with pytest.raises(RuntimeError, match="not optional"):
         CfgBuilder(_empty_ctx(), _spec()).role(
-            "modules.qub_pulse", "qub_probe", Init.DISABLED
+            "modules.qub_pulse", "qub_probe", RoleInit.DISABLED
         )
 
 
 def test_role_disabled_blank_only_role_fast_fails():
     with pytest.raises(RuntimeError, match="has no library-aware"):
         CfgBuilder(_empty_ctx(), _spec()).role(
-            "modules.reset", "none_reset", Init.DISABLED
+            "modules.reset", "none_reset", RoleInit.DISABLED
         )
 
 
 def test_role_invalid_init_fast_fails():
-    with pytest.raises(RuntimeError, match="init must be an Init"):
+    with pytest.raises(RuntimeError, match="init must be a RoleInit"):
         CfgBuilder(_empty_ctx(), _spec()).role(
             "modules.readout",
             "readout",
@@ -335,40 +476,31 @@ def test_role_invalid_init_fast_fails():
         )
 
 
-# --- .sweep / .set_sweep -----------------------------------------------------
+# --- .sweep -------------------------------------------------------------------
 
 
-def test_sweep_literal_math():
-    b = CfgBuilder(_empty_ctx(), _spec()).sweep("sweep.freq", 0.0, 10.0, 11)
+def test_sweep_mounts_explicit_value():
+    sweep = SweepValue(start=0.0, stop=10.0, expts=11)
+    b = CfgBuilder(_empty_ctx(), _spec()).sweep("sweep.freq", sweep)
     v = b.build()
     sw = cast(SweepValue, v.fields["sweep"].fields["freq"])  # type: ignore[union-attr]
     assert sw.start == 0.0 and sw.stop == 10.0 and sw.expts == 11
     assert sw.step == pytest.approx(1.0)  # (10-0)/(11-1)
 
 
-def test_sweep_rejects_eval_edge():
-    with pytest.raises(RuntimeError, match="EvalValue edge requires set_sweep"):
-        CfgBuilder(_empty_ctx(), _spec()).sweep(
-            "sweep.freq",
-            EvalValue(expr="q_f"),  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
-            10.0,
-            11,
-        )
-
-
-def test_set_sweep_accepts_eval_edges():
+def test_sweep_accepts_eval_edges():
     sw = SweepValue(
         start=EvalValue(expr="q_f - 20"), stop=EvalValue(expr="q_f + 20"), expts=301
     )
-    b = CfgBuilder(_empty_ctx(), _spec()).set_sweep("sweep.freq", sw)
+    b = CfgBuilder(_empty_ctx(), _spec()).sweep("sweep.freq", sw)
     v = b.build()
     mounted = v.fields["sweep"].fields["freq"]  # type: ignore[union-attr]
     assert mounted is sw
 
 
-def test_set_sweep_on_non_sweep_spec_fast_fails():
+def test_sweep_on_non_sweep_spec_fast_fails():
     with pytest.raises(RuntimeError, match="not a SweepSpec"):
-        CfgBuilder(_empty_ctx(), _spec()).set_sweep(
+        CfgBuilder(_empty_ctx(), _spec()).sweep(
             "reps", SweepValue(start=0.0, stop=1.0, expts=11)
         )
 
@@ -380,7 +512,7 @@ def test_build_fills_locked_literal_inside_mounted_ref():
     # .role mounts an L2 readout whose pulse_cfg.freq carries the md value;
     # build() must overwrite it with the spec's locked 0.0.
     b = CfgBuilder(_empty_ctx(), _locked_spec()).role(
-        "modules.readout", "readout", Init.INLINE
+        "modules.readout", "readout", RoleInit.INLINE
     )
     v = b.build()
     readout = cast(ReferenceValue, v.fields["modules"].fields["readout"])  # type: ignore[union-attr]
@@ -397,8 +529,31 @@ def test_build_fills_top_level_locked_literal():
 def test_set_on_locked_path_fast_fails():
     with pytest.raises(RuntimeError, match="locked literal"):
         CfgBuilder(_empty_ctx(), _locked_spec()).role(
-            "modules.readout", "readout", Init.INLINE
+            "modules.readout", "readout", RoleInit.INLINE
         ).set("modules.readout.pulse_cfg.freq", 5.0)
+
+
+def test_set_rejects_inconsistent_allowed_shape_leaf_types() -> None:
+    spec = CfgSectionSpec(
+        fields={
+            "module": ReferenceSpec(
+                kind="module",
+                allowed=[
+                    CfgSectionSpec(
+                        label="Writable",
+                        fields={"value": ScalarSpec(label="Value", type=float)},
+                    ),
+                    CfgSectionSpec(
+                        label="Locked",
+                        fields={"value": LiteralSpec(value=0.0)},
+                    ),
+                ],
+            )
+        }
+    )
+
+    with pytest.raises(TypeError, match="inconsistent spec types"):
+        CfgBuilder(_empty_ctx(), spec).set("module.value", 1.0)
 
 
 # --- one-shot ----------------------------------------------------------------

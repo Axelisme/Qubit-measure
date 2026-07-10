@@ -63,7 +63,7 @@ Source references use a sibling concept to `EvalValue`, not an extension of
   registered key closes with `}`. A trailing space after `@{full.key} ` resolves
   once and replaces the token with the current value formatted as text. Plain
   strings in the wire contract are not globally interpreted.
-- Adapter default generation may use `CfgBuilder.value_ref(...)`; role-default
+- Adapter default generation may use `CfgBuilder.value_source(...)`; role-default
   seeds may use `Source(...)`. Both resolve through `ExpContext.values` during
   default construction and store ordinary direct values in the cfg tree.
 

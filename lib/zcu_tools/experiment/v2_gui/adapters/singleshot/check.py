@@ -9,7 +9,7 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
     FigureOnlyAnalyzeResult,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -104,11 +104,11 @@ class CheckAdapter(
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(shots=5000)
             .set("relax_delay", proper_relax(ctx))
-            .role("modules.probe_pulse", "qub_probe", Init.INLINE)
+            .role("modules.probe_pulse", "qub_probe", RoleInit.INLINE)
             .role("modules.readout", "readout")
             # optional → None (disabled) when no library entry (ADR-0010)
-            .role("modules.reset", "reset", Init.DISABLED)
-            .role("modules.init_pulse", "pi_pulse", Init.DISABLED)
+            .role("modules.reset", "reset", RoleInit.DISABLED)
+            .role("modules.init_pulse", "pi_pulse", RoleInit.DISABLED)
             .build()
         )
 

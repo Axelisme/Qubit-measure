@@ -35,6 +35,9 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
     raw_to_schema,
+    read_value_path,
+    replace_value_path,
+    resolve_spec_path,
     schema_to_raw,
     select_ref_value_spec,
 )
@@ -237,14 +240,14 @@ class NodeCfgSchema:
           spec default or a node's Fast-Fail guard applies).
         """
         path = self._require_logical_path(key)
-        spec = _resolve_spec_at_path(self.schema.spec, path)
+        spec = resolve_spec_path(self.schema.spec, path)
         if isinstance(spec, SweepSpec):
             if not isinstance(value, SweepValue):
                 raise TypeError(
                     f"Param {key!r} is a sweep; expected a SweepValue, "
                     f"got {type(value).__name__}"
                 )
-            _assign_value_at_path(self.schema.value, path, value)
+            replace_value_path(self.schema.value, path, value)
             return
         if isinstance(spec, CenteredSweepSpec):
             if not isinstance(value, CenteredSweepValue):
@@ -253,27 +256,27 @@ class NodeCfgSchema:
                     f"CenteredSweepValue, got {type(value).__name__}"
                 )
             _ensure_centered_sweep_assignment(key, spec, value)
-            _assign_value_at_path(self.schema.value, path, value)
+            replace_value_path(self.schema.value, path, value)
             return
         if isinstance(spec, ReferenceSpec):
             if value is None and spec.optional:
-                _assign_value_at_path(self.schema.value, path, None)
+                replace_value_path(self.schema.value, path, None)
                 return
             if not isinstance(value, ReferenceValue):
                 raise TypeError(
                     f"Param {key!r} is a {spec.kind} ref; expected a ReferenceValue, "
                     f"got {type(value).__name__}"
                 )
-            _assign_value_at_path(self.schema.value, path, value)
+            replace_value_path(self.schema.value, path, value)
             return
         if not isinstance(spec, ScalarSpec):
             raise TypeError(
                 f"Param {key!r} maps to unsupported spec {type(spec).__name__}"
             )
         if isinstance(value, (DirectValue, EvalValue)):
-            _assign_value_at_path(self.schema.value, path, value)
+            replace_value_path(self.schema.value, path, value)
             return
-        _assign_value_at_path(
+        replace_value_path(
             self.schema.value,
             path,
             DirectValue(_coerce_scalar(value, spec.type)),
@@ -304,7 +307,7 @@ class NodeCfgSchema:
         """
         knobs: dict[str, Any] = {}
         for logical_key, path in self.logical_paths.items():
-            spec = _resolve_spec_at_path(self.schema.spec, path)
+            spec = resolve_spec_path(self.schema.spec, path)
             if ml is None and isinstance(spec, ReferenceSpec):
                 continue
             value = _lower_value_at_path(self.schema.value, spec, path, ml, md)
@@ -335,9 +338,9 @@ class NodeCfgSchema:
         """
         knobs: dict[str, Any] = {}
         for logical_key, path in self.logical_paths.items():
-            spec = _resolve_spec_at_path(self.schema.spec, path)
+            spec = resolve_spec_path(self.schema.spec, path)
             knobs[logical_key] = _jsonify_value_node(
-                spec, _get_value_at_path(self.schema.value, path)
+                spec, read_value_path(self.schema.value, path)
             )
         return knobs
 
@@ -381,7 +384,7 @@ def _validate_logical_paths(spec: CfgSectionSpec, paths: Mapping[str, str]) -> N
     _ensure_unique("node logical path", paths.values())
     for logical_key, path in paths.items():
         _validate_path_part("logical key", logical_key)
-        leaf_spec = _resolve_spec_at_path(spec, path)
+        leaf_spec = resolve_spec_path(spec, path)
         if not isinstance(
             leaf_spec,
             (
@@ -398,97 +401,6 @@ def _validate_logical_paths(spec: CfgSectionSpec, paths: Mapping[str, str]) -> N
             )
 
 
-def _split_path(path: str) -> tuple[str, ...]:
-    parts = tuple(part for part in path.split(".") if part)
-    if not parts:
-        raise RuntimeError("Node field path must not be empty")
-    return parts
-
-
-def _resolve_spec_at_path(spec: CfgSectionSpec, path: str) -> CfgNodeSpec:
-    node_spec: CfgNodeSpec = spec
-    parts = _split_path(path)
-    for idx, part in enumerate(parts):
-        if isinstance(node_spec, CfgSectionSpec):
-            if part not in node_spec.fields:
-                raise KeyError(
-                    f"Node field path {path!r} segment {part!r} not found; "
-                    f"available: {', '.join(node_spec.fields)}"
-                )
-            node_spec = node_spec.fields[part]
-            continue
-        if isinstance(node_spec, ReferenceSpec):
-            remaining = ".".join(parts[idx:])
-            node_spec = _resolve_ref_spec_at_path(node_spec, remaining)
-            break
-        else:
-            raise RuntimeError(
-                f"Node field path {path!r} cannot descend into "
-                f"{type(node_spec).__name__} at {part!r}"
-            )
-    return node_spec
-
-
-def _resolve_ref_spec_at_path(spec: ReferenceSpec, path: str) -> CfgNodeSpec:
-    matches: list[CfgNodeSpec] = []
-    for allowed in spec.allowed:
-        try:
-            matches.append(_resolve_spec_at_path(allowed, path))
-        except (KeyError, RuntimeError):
-            continue
-    if not matches:
-        allowed = ", ".join(shape.label for shape in spec.allowed)
-        raise KeyError(
-            f"Node ref path segment {path!r} not found in any allowed shape "
-            f"(allowed: {allowed})"
-        )
-    first = matches[0]
-    if not all(type(match) is type(first) for match in matches):
-        raise TypeError(
-            f"Node ref path {path!r} resolves to inconsistent spec types: "
-            + ", ".join(type(match).__name__ for match in matches)
-        )
-    return first
-
-
-def _get_value_at_path(value: CfgSectionValue, path: str) -> Any:
-    section = value
-    parts = _split_path(path)
-    for part in parts[:-1]:
-        child = section.fields.get(part)
-        if isinstance(child, ReferenceValue):
-            section = child.value
-        elif isinstance(child, CfgSectionValue):
-            section = child
-        else:
-            raise RuntimeError(
-                f"Node field path {path!r} cannot descend into "
-                f"{type(child).__name__} at {part!r}"
-            )
-    if parts[-1] not in section.fields:
-        raise KeyError(f"Node field path {path!r} leaf {parts[-1]!r} not found")
-    return section.fields[parts[-1]]
-
-
-def _assign_value_at_path(value: CfgSectionValue, path: str, leaf: Any) -> None:
-    section = value
-    parts = _split_path(path)
-    for part in parts[:-1]:
-        child = section.fields.get(part)
-        if isinstance(child, ReferenceValue):
-            section = child.value
-        elif isinstance(child, CfgSectionValue):
-            section = child
-        else:
-            raise RuntimeError(
-                f"Node field path {path!r} cannot descend into "
-                f"{type(child).__name__} at {part!r}"
-            )
-    if parts[-1] not in section.fields:
-        raise KeyError(f"Node field path {path!r} leaf {parts[-1]!r} not found")
-    section.fields[parts[-1]] = leaf
-
-
 _MISSING: Final = object()
 
 
@@ -497,7 +409,7 @@ def _generation_logical_paths(
 ) -> dict[str, tuple[str, ...]]:
     paths: dict[str, tuple[str, ...]] = {}
     for logical_key, path in logical_paths.items():
-        parts = _split_path(path)
+        parts = tuple(part for part in path.split(".") if part)
         if parts[0] == "generation":
             paths[logical_key] = parts
     return paths
@@ -606,7 +518,7 @@ def _lower_value_at_path(
     ml: ModuleLibrary | None,
     md: MetaDict | None,
 ) -> Any:
-    value = _get_value_at_path(value_tree, path)
+    value = read_value_path(value_tree, path)
     try:
         raw = schema_to_raw_dict(
             CfgSchema(

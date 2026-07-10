@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-10 — generic reference model
+**Last updated:** 2026-07-10 — CfgBuilder final API
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -42,11 +42,16 @@ Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
 `ReferenceSpec(kind="module" | "waveform")`與`ReferenceValue`。kind由domain factory顯式
 設定，role/default assembly不再依兩套平行shared class分派。
 
-Adapter default value 由 `CfgBuilder` 組裝。`.role(path, role)` 預設採 `Init.ADOPT`：優先引用
-ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline blank；`.role(..., Init.INLINE)`
-明確要求 inline blank，不 adopt library；`.role(..., Init.DISABLED)` 只用於 optional ref，library miss
-時產生 `None`（disabled）。spec 的 `optional=True` 是結構能力，`Init.DISABLED` 是 adapter default
-初始化選擇，兩者需同時成立。
+Adapter default value 由 `CfgBuilder` 組裝。`.role(path, role)` 預設採 `RoleInit.ADOPT`：優先引用
+ModuleLibrary / WaveformLibrary 的 calibrated entry，缺項時退回 inline blank；
+`.role(..., RoleInit.INLINE)`明確要求 inline blank，不 adopt library；
+`.role(..., RoleInit.DISABLED)`只用於 optional ref，library miss時產生 `None`（disabled）。spec 的
+`optional=True` 是結構能力，`RoleInit.DISABLED` 是 adapter default初始化選擇，兩者需同時成立。
+
+`.role(..., blank_overrides={relative_path: scalar})`只修改custom/fallback blank，linked library與
+disabled `None`完全忽略；所有relative paths先驗存在且非locked literal，再transactionally套用，
+所以失敗不會留下partial mount。`.sweep(path, value)`只接受顯式`SweepValue`；跨session value source
+用`.value_source(...)` resolve once後寫入普通direct value。
 
 Adapter defaults 以 notebook bring-up seed 與目前 MetaDict 校準值共同定義：有可信 md 時保持
 md-linked expression，缺校準時退回保守 notebook seed；guide prose 需描述這個 operator-facing
@@ -55,8 +60,9 @@ fallback policy，而不是臆測固定硬體值。
 qubit 類 Pulse role 的 channel seed 依 setup alias fallback `qub_ch → qub_1_4_ch → qub_4_5_ch`
 解析，最後才退回 `0`。Rabi 專用 drive pulse 預設採 ModuleLibrary `pi_len → pi_amp`，讓
 `len_rabi` / `amp_rabi` 優先沿用已校準的 pi pulse，再由各 adapter 的 spec lock 覆寫 sweep-owned
-欄位（`len_rabi` 覆寫 waveform length，`amp_rabi` 覆寫 gain）；library 缺項時才使用 blank pulse
-與 notebook fallback seed。一般 state-prep pi pulse role 維持 `pi_amp → pi_len`。Pi/2 pulse role
+欄位（`len_rabi` 覆寫 waveform length，`amp_rabi` 覆寫 gain）；library 缺項時才由
+`blank_overrides`套用blank pulse的notebook fallback seed。一般 state-prep pi pulse role維持
+`pi_amp → pi_len`。Pi/2 pulse role
 只採 `pi2_amp → pi2_len`，不降級到 pi pulse role。
 
 `bath_reset` role 的 `cavity_tone_cfg`、`qubit_tone_cfg`、`pi2_cfg` 都是 nested pulse refs：
@@ -75,7 +81,7 @@ ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內
 sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，但把 sweep
 分布交給底層 non-uniform T1 run path。
 
-跨 session 狀態的少數 default 走 `CfgBuilder.value_ref(path, key, type_name?, default?)`，透過
+跨 session 狀態的少數 default 走 `CfgBuilder.value_source(path, key, type_name?, default?)`，透過
 `ctx.values` 立即讀取 registered value source，成功後寫入普通 direct value，不把 lazy ref 放進
 cfg tree。role default table 的同類入口是 `Source(key, type_name?)` seed；只用於來源多變、
 強型別 helper 反而會拉寬依賴的情境。device source 只發布具名 device 資訊，不推論 flux

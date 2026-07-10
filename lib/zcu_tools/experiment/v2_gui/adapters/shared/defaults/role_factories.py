@@ -11,10 +11,10 @@ The factory pair for each role is generated from the declarative ``ROLE_TABLE``
 (``role_table.py``): ``role_blank`` / ``role_ref`` close over the role's
 ``RoleDef``.
 
-The ``CfgBuilder.role()`` verb selects an initialization mode: ``Init.ADOPT``
-calls the *ref* factory (library-aware, the common case), ``Init.INLINE`` forces
+The ``CfgBuilder.role()`` verb selects an initialization mode: ``RoleInit.ADOPT``
+calls the *ref* factory (library-aware, the common case), ``RoleInit.INLINE`` forces
 the *blank* factory (e.g. a twotone readout that must stay inline, never adopting
-a library ``readout_dpm``), and ``Init.DISABLED`` takes the *ref* factory's
+a library ``readout_dpm``), and ``RoleInit.DISABLED`` takes the *ref* factory's
 optional path (library miss → ``None``). ``RoleCatalog`` always uses the *blank*
 factory (creating from a role seeds a fresh entry, it never references an
 existing library entry).

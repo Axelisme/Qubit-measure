@@ -16,7 +16,7 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -35,7 +35,6 @@ from zcu_tools.gui.app.main.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
-    ReferenceValue,
     RunRequest,
     SweepSpec,
     SweepValue,
@@ -46,16 +45,6 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
 
 LenRabiRunResult: TypeAlias = LenRabiResult
-
-
-def _uses_blank_qub_pulse(value: CfgSectionValue) -> bool:
-    modules = value.fields.get("modules")
-    if not isinstance(modules, CfgSectionValue):
-        raise RuntimeError("LenRabi default value is missing modules section")
-    qub_pulse = modules.fields.get("qub_pulse")
-    if not isinstance(qub_pulse, ReferenceValue):
-        raise RuntimeError("LenRabi default value is missing qub_pulse module ref")
-    return qub_pulse.chosen_key == "<Custom:Pulse>"
 
 
 @dataclass
@@ -145,16 +134,20 @@ class LenRabiAdapter(
         )
 
     def make_default_value(self, ctx: ExpContext) -> CfgSectionValue:
-        value = (
+        return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx, fallback=30.5)
             )
             # optional → None (disabled) when no library reset (ADR-0010)
-            .role("modules.reset", "reset", Init.DISABLED)
-            .role("modules.qub_pulse", "rabi_pulse")
+            .role("modules.reset", "reset", RoleInit.DISABLED)
+            .role(
+                "modules.qub_pulse",
+                "rabi_pulse",
+                blank_overrides={"gain": 0.3},
+            )
             .role("modules.readout", "readout")
-            .set_sweep(
+            .sweep(
                 "sweep.length",
                 SweepValue(
                     start=0.03,
@@ -166,9 +159,6 @@ class LenRabiAdapter(
             )
             .build()
         )
-        if _uses_blank_qub_pulse(value):
-            value.with_field("modules.qub_pulse.gain", 0.3)
-        return value
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         cfg = self.build_exp_cfg(raw_cfg, req)

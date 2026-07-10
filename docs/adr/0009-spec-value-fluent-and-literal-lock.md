@@ -42,7 +42,7 @@ value 容器（`CfgSectionValue`/`ModuleRefValue`）**維持可變、`with_*` in
 
 ### 5. 角色 default 是 `ROLE_TABLE` 資料 + 兩個泛型 builder
 
-`defaults/role_table.py` 的 `ROLE_TABLE: dict[role_id, RoleDef]` 為每個角色（qub_probe / res_probe / pi_pulse / pi2_pulse / readout / readout_dpm / reset 各形狀 / qub_waveform / res_waveform …）宣告一個 `RoleDef` literal（pulse / ro / waveform 的 md-linked 種子值，含公式以 `Md(..., expr=)` 或 `TRIG` 表達）。兩個泛型 builder 消費它：`role_blank`（blank：md-linked 預設，永不查庫、永不 `None`）、`role_ref`（查庫 preferred → fallback blank，optional 無 lib 時回 `None`，見 [[0010]]）。共用 patch helper 收進 `defaults/helpers.py`。生成的 `ROLE_FACTORIES`（`{role_id: RoleFactorySpec(blank, ref)}`）是 RoleCatalog 與 CfgBuilder 的單一 source：RoleCatalog 用 `.blank`；adapter 透過 [[0012]] 的 `CfgBuilder.role(..., Init.ADOPT/INLINE/DISABLED)` 選 ref / blank / disabled。
+`defaults/role_table.py` 的 `ROLE_TABLE: dict[role_id, RoleDef]` 為每個角色（qub_probe / res_probe / pi_pulse / pi2_pulse / readout / readout_dpm / reset 各形狀 / qub_waveform / res_waveform …）宣告一個 `RoleDef` literal（pulse / ro / waveform 的 md-linked 種子值，含公式以 `Md(..., expr=)` 或 `TRIG` 表達）。兩個泛型 builder 消費它：`role_blank`（blank：md-linked 預設，永不查庫、永不 `None`）、`role_ref`（查庫 preferred → fallback blank，optional 無 lib 時回 `None`，見 [[0010]]）。共用 patch helper 收進 `defaults/helpers.py`。生成的 `ROLE_FACTORIES`（`{role_id: RoleFactorySpec(blank, ref)}`）是 RoleCatalog 與 CfgBuilder 的單一 source：RoleCatalog 用 `.blank`；adapter 透過 [[0012]] 的 `CfgBuilder.role(..., RoleInit.ADOPT/INLINE/DISABLED)` 選 ref / blank / disabled。
 
 **default factory 零鎖定（職責邊界）**：default factory 只產 value 樹預設，**不預設鎖任何欄位**，即使是高頻場景。鎖定 100% 由 adapter 在 `cfg_spec()` 裡 `lock_literal` 宣告——鎖定屬 spec 層（決策 1）、default factory 屬 value 層；「高頻」不是放進 factory 的理由。
 

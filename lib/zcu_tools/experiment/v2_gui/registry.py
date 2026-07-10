@@ -187,7 +187,7 @@ def _blank_entries() -> list[RoleEntry]:
 # entry, never a library reference (the blank builder never adopts). The
 # library-aware roles "readout" / "reset" therefore appear here too: their blank
 # IS the pulse shape, so they double as the "create an inline pulse readout/reset"
-# templates (Init.ADOPT only matters on the CfgBuilder side, not in the catalog).
+# templates (RoleInit.ADOPT only matters on the CfgBuilder side, not in the catalog).
 # default_name is the create dialog's naming-convention suggestion.
 _CATALOG_ROLES: list[tuple[str, str, RoleItemKind, str]] = [
     ("res_probe", "Resonator probe", "module", "readout_rf"),

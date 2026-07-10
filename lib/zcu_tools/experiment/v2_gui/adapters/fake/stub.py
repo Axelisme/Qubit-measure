@@ -27,6 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     ScalarSpec,
     SweepSpec,
+    SweepValue,
     WritebackRequest,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
@@ -114,7 +115,7 @@ class FakeAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=10, gain=0.1, noise_scale=0.1)
-            .sweep("sweep", 5.0, 6.0, 11)
+            .sweep("sweep", SweepValue(start=5.0, stop=6.0, expts=11))
             .build()
         )
 

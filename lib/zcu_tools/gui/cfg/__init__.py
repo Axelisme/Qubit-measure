@@ -39,6 +39,7 @@ from .model import (
     SweepValue,
     default_value_for_type,
 )
+from .tree import read_value_path, replace_value_path, resolve_spec_path
 
 __all__ = [
     "CenteredSweepSpec",
@@ -72,6 +73,9 @@ __all__ = [
     "lower_finished_cfg",
     "make_default_value",
     "raw_to_schema",
+    "read_value_path",
+    "replace_value_path",
+    "resolve_spec_path",
     "schema_to_raw",
     "select_ref_value_spec",
     "validate_finished_cfg",

@@ -13,7 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
     FigureOnlyAnalyzeResult,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -106,13 +106,11 @@ class SsLenRabiAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=100, relax_delay=50.5)
-            .role("modules.qub_pulse", "qub_probe", Init.INLINE)
+            .role("modules.qub_pulse", "qub_probe", RoleInit.INLINE)
             .set("modules.qub_pulse.gain", 1.0)
             .role("modules.readout", "readout")
-            .role("modules.reset", "reset", Init.DISABLED)
-            .set_sweep(
-                "sweep.length", SweepValue(start=0.03, stop=sweep_stop, expts=51)
-            )
+            .role("modules.reset", "reset", RoleInit.DISABLED)
+            .sweep("sweep.length", SweepValue(start=0.03, stop=sweep_stop, expts=51))
             .build()
         )
 

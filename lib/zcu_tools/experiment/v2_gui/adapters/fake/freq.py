@@ -31,7 +31,7 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_readout_module_spec,
     md_get_float,
@@ -50,6 +50,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     SaveDataRequest,
     SweepSpec,
+    SweepValue,
     WritebackItem,
     WritebackRequest,
 )
@@ -341,8 +342,11 @@ class FakeFreqAdapter(
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=100, rounds=100)
-            .role("modules.readout", "readout", Init.INLINE)
-            .sweep("sweep.freq", freq_start, freq_stop, 201)
+            .role("modules.readout", "readout", RoleInit.INLINE)
+            .sweep(
+                "sweep.freq",
+                SweepValue(start=freq_start, stop=freq_stop, expts=201),
+            )
             .build()
         )
 

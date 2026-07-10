@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.power import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -34,6 +34,7 @@ from zcu_tools.gui.app.main.adapter import (
     MetaDictWriteback,
     ParamMeta,
     SweepSpec,
+    SweepValue,
     WritebackItem,
     WritebackRequest,
 )
@@ -129,10 +130,10 @@ class RoOptPowerAdapter(
             .scalars(
                 reps=1000, rounds=100, relax_delay=proper_relax(ctx), skew_penalty=0.0
             )
-            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.reset", "reset", RoleInit.DISABLED)
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            .sweep("sweep.gain", 0.001, 0.2, 101)
+            .sweep("sweep.gain", SweepValue(start=0.001, stop=0.2, expts=101))
             .build()
         )
 

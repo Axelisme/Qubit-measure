@@ -11,7 +11,7 @@ from zcu_tools.experiment.v2.onetone.power_dep import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_readout_module_spec,
     proper_res_freq_range,
@@ -27,6 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
     FloatSpec,
     RunRequest,
     SweepSpec,
+    SweepValue,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
@@ -104,9 +105,9 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         return (
             CfgBuilder(ctx, self.cfg_spec())
             .scalars(reps=1000, rounds=100, relax_delay=1.0, earlystop_snr=0.0)
-            .role("modules.readout", "readout", Init.INLINE)
-            .sweep("sweep.gain", 0.001, 1.0, 101)
-            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 201))
+            .role("modules.readout", "readout", RoleInit.INLINE)
+            .sweep("sweep.gain", SweepValue(start=0.001, stop=1.0, expts=101))
+            .sweep("sweep.freq", proper_res_freq_range(ctx, 201))
             .build()
         )
 

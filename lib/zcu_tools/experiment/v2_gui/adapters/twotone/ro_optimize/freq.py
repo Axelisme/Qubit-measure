@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq import (
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.shared import (
     CfgBuilder,
-    Init,
+    RoleInit,
     build_exp_spec,
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -129,10 +129,10 @@ class RoOptFreqAdapter(
                 relax_delay=proper_relax(ctx, fallback=30.5),
                 skew_penalty=0.0,
             )
-            .role("modules.reset", "reset", Init.DISABLED)
+            .role("modules.reset", "reset", RoleInit.DISABLED)
             .role("modules.qub_pulse", "pi_pulse")
             .role("modules.readout", "readout")
-            .set_sweep("sweep.freq", proper_res_freq_range(ctx, 301, span_factor=1.0))
+            .sweep("sweep.freq", proper_res_freq_range(ctx, 301, span_factor=1.0))
             .build()
         )
 
