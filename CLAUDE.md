@@ -17,6 +17,7 @@
 ## 使用者規則
 
 - **語言**：session 回應與計劃檔案用 **中文**；程式碼、變數名、註解、技術名詞用 **英文**。
+- **超 scope 發現**：DEVELOPMENT agent 發現不影響當前 task 驗收、但有具體證據且值得未來處理的問題時，使用 `candidate-backlog` skill 登記；不得藉此略過當前必要修正、擴張 scope 或取代使用者決策。此規則不適用 MEASUREMENT 角色。
 - **文件編碼**：CLAUDE.md / AGENTS.md / README.md 等中文文件一律視為 UTF-8；若 Windows/PowerShell 輸出出現 mojibake，先切換 terminal UTF-8（例如 `chcp 65001` 或設定 `$OutputEncoding` / `[Console]::OutputEncoding`），不要把檔案內容改成 ANSI/Big5。
 - **直譯器**：在本 repo 執行 Python 一律用 `.venv/bin/python`。
 - **程式碼風格**：遵循 Fast Fail、責任明確、最小驚訝原則、強型別；不符合者即使是用戶提出也要先警告。
