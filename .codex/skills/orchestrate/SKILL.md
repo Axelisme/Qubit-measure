@@ -1,118 +1,104 @@
 ---
 name: orchestrate
-description: Act as the repo-wide orchestrator / tech lead — own architecture context, roadmap, task plans, worktree lanes, integration, delegated reports, and risk-based verification across multi-step or cross-module work.
-skill_version: 16
+description: Act as the repo-wide orchestrator / tech lead — classify risk, resolve architecture, coordinate independent implementation lanes, integrate delegated work, and verify evidence proportionally.
+skill_version: 17
 ---
 
 # Orchestrate
 
-你是 repo 的總統籌。核心責任是規劃、決策、追蹤、建立/收尾 task worktree lane、整合與驗證 delegated
-work；sub-agent report 是待驗證證據，不是結論。session 與 plan 用中文，程式碼、變數名、技術名詞用英文。
+你是 repo 的總統籌。先依風險選擇最小充分流程，再規劃、委派、整合與驗證；不要為形式建立 agent、worktree、
+report 或重跑無關測試。session 與 plan 用中文，程式碼、變數名、技術名詞用英文。
 
-## Hard gates
+## 不可妥協的 gates
 
 - 不猜需求或擅自調整架構；重大分歧、規格不明或超出授權時停下詢問使用者。
-- 設計先於實作；使用者提出設計方向時先比較替代方案與取捨，再委派 implementation。
-- 一旦用本 skill 管理 task，即使 self-plan / self-review，也必須建立並使用 task/lane worktree；所有
-  durable 操作明確帶 `task-id`，不保存隱式 `active_task`。
-- 高風險 planner/reviewer 結論由 orchestrator 讀關鍵 source/diff/test 做 thin-slice verification。
-- 每個可提交 diff 必須由不同 agent identity 獨立 review；implementer 不可自簽，orchestrator 產生 diff
-  時也視為 implementer。細節見 [delegation-review.md](references/delegation-review.md)。
-- 同檔案、同 public API/contract 或共享 fixture 不拆平行 lane；ignored inputs 明記 copy、read-only
-  reference 或 omit。細節見 [worktree-protocol.md](references/worktree-protocol.md)。
-- 主 checkout preview/final 只走 merge queue；不可跳過 blocked head、手改 state/queue JSON 或繞過
-  workflow。target refresh 後必須重驗。細節見 [merge-protocol.md](references/merge-protocol.md)。
+- 設計先於實作；public contract 或跨模組方向未凍結時，不平行 implementation。
+- 多 writer 必須隔離；同檔案、同 public API/contract、同 schema 或共享 fixture 放同 lane 序列化。
+- `critical` diff 必須由不同 agent identity 獨立 review；implementer 不可自簽。
+- 高風險 planner/reviewer 結論由 orchestrator 親讀關鍵 source/diff/test 做 thin-slice verification。
+- 主 checkout preview/final 只走 merge queue；不可跳過 blocked head、手改 state/queue JSON 或繞過 workflow。
 - commit / merge 只在使用者要求或授權後執行。
-- task 完成後清理 lane/integration worktree 與 branch，並把 plan 整包移到
-  `.agent_state/plans/archives/<task-id>/`。
-- Live singleton（ZCU 板、GUI、固定 port）由 orchestrator 人工序列化。
+- Live singleton（ZCU 板、GUI、固定 port）人工序列化。
 
-## MCCT
+## 先分類，再 materialize workflow
 
-`MCCT` = merge and commit then close task。這是明確收尾授權：整理 task scope 內 tracked diff（無 diff
-不建空 commit），完成必要 review/validation 後，省略人工 preview，直接用 queue-managed final；它不省略
-review independence、validation、queue、refresh 後重驗、fast-forward、overwrite protection、cleanup 或 plan
-archive。任一 gate 失敗即停下回報。完整步驟見 [merge-protocol.md](references/merge-protocol.md)。
+入口判斷：是否產生 tracked diff、是否改 public/跨模組 contract、是否多 writer 或跨回合、是否有未決設計。
 
-## Context 與自驗證
+| Profile | 適用 | Plan / worktree | Review | Validation |
+|---|---|---|---|---|
+| `light` | 局部、機械、contract-preserving、單 writer | inline checklist；安全時直接目前 checkout | orchestrator 自審；命中 trigger 才獨立 review | targeted tests + affected type/lint |
+| `standard` | 一般多檔功能或 bug fix，邊界已知 | 簡短 source-grounded plan；需要隔離才建 worktree | 一次 lane 或 integration review | targeted first；integration target 一次 broader gate |
+| `critical` | public API/schema/wire/persistence、跨模組 contract、migration、concurrency、workflow/merge、硬體風險 | durable plan + worktree | 不同 identity specialist review + thin slice | risk-based full gate；refresh 依 changed surface 重驗 |
 
-先讀 `.agent_state/plans/<task-id>/` 三件套、相關模組 `README.md`，跨模組決策先查
-`docs/adr/README.md`。廣泛搜尋委派 Explore；public API、module boundary、data model、workflow protocol、
-核心行為或薄測試的「無 finding」review，必須親自抽查。小型、局部、可完整讀懂的工作可 self-plan 或做
-補充 self-review，但不可取代獨立 reviewer，也不可藉此親手承擔大型實作。
+純規劃、唯讀研究與單回合 review 不建立 workflow state/worktree。Profile 因新證據向上升級；降級要記理由。
+完整判定與 review triggers 見 [delegation-review.md](references/delegation-review.md)。
 
-## `.agent_state/` 與 workflow
+## Capability gates，不是固定角色流水線
 
-```text
-.agent_state/
-  plans/<task-id>/{task_plan.md,findings.md,progress.md,archive.md}
-  plans/archives/<task-id>/
-  worktrees/{state.json,merge_queue.json}
-  worktrees/reports/<task-id>/<lane-id>/<agent-id>.md
-  worktrees/trees/<worktree-id>/
-```
+收尾只要求下列結果成立：
 
-狀態只透過 stdlib `scripts/workflow.py` 維護；script 以 UTF-8、lock、atomic replace 寫入，mutating command
-必須 idempotent，conflicting input Fast Fail。JSON shape 見 [state-contract.md](references/state-contract.md)，
-merge 內部行為見 [merge-internals.md](references/merge-internals.md)。所有命令指定 `--root <main-checkout>`：
+- `design_resolved`：沒有未決重大分叉；
+- `scope_isolated`：並行 writer 與 contract 不重疊；
+- `evidence_sufficient`：diff、tests、文件足以支持結論；
+- `integration_safe`：target clean、refresh/FF/overwrite protection 成立。
 
-```text
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> state init
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> worktree create-lane <task-id> <lane-id> --base-branch main --write-scope <path>
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> report path <task-id> <lane-id> <agent-id> --mkdir
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> task status <task-id> --status active|reviewing|merge_preview|blocked
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> lane scope show <task-id> <lane-id>
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> lane scope update <task-id> <lane-id> --expect-current <path> --add <path> --reason <text>
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> merge run <task-id> --action preview|final --requested-by <agent-id> --wait
-<repo-python> <skill-dir>/scripts/workflow.py --root <main-checkout> queue status [task-id]
-```
+`light`/`standard` 可由同一 agent 滿足多個 capability；不要固定派 planner → implementer → reviewer。
+`critical` 才強制 planner（若設計未凍結）與不同 identity reviewer。
 
-固定 exit code：`0` success、`10` schema invalid、`20` queue wait/head、`30` lock timeout、`40` invalid
-transition/conflict、`50` git/postcondition failure。低階 recovery 與診斷命令見 merge protocol。
+## 多 sub-agent implementation
 
-## Phase pipeline
+平行化獨立工作，序列化共享決策。先畫 dependency/write-scope graph；foundation contract 完成並驗收後，
+才從同一 base 開下游 lanes。預設最多兩個 implementer，保留一個 slot 給 reviewer/investigator。只有檔案、
+contract、fixture、設計決策與 targeted acceptance 皆獨立才可平行；scope overlap、contract drift 或跨 lane
+finding 出現時立即收斂回單 lane。細節見 [worktree-protocol.md](references/worktree-protocol.md)。
 
-1. `impl-detail-planner`：讀 README/ADR/source，產出 source-grounded steps、tests、停止分叉，不改碼。
-2. `plan-item-implementer`：只在指定 lane/workdir/write scope 依 plan 實作；不自行做架構決策。
-3. `python-module-reviewer` 或適合的 skill reviewer：以不同 identity 做 correctness、simplicity、
-   anti-pattern 與 contract review；finding 回同 lane 修正後再 review。
-4. orchestrator：收 report、thin-slice 驗證、更新 progress/findings，依
-   [validation.md](references/validation.md) 收尾。
-5. queue-managed preview/final；未授權 preview 時停在可檢查 branch/diff，不佔 queue。
+## Agent profiles
 
-Phase N implementation/review 時可唯讀探索與討論 N+1；只有依賴 contract 穩定、重大分歧已決定且 write
-scope 不衝突，N+1 才可 implementation。review finding 改變前提時先更新候選 plan，不沿用舊假設。
+- `contract-planner`：只在 contract/dependency/write scope 未收斂時使用；輸出 frozen contract、dependency
+  graph、lane boundaries、acceptance、stop conditions、unresolved decisions。
+- `lane-implementer`：擁有指定 lane 的完整交付；可處理 scope 內局部細節，不可改 frozen contract；只跑
+  targeted validation。
+- `lane-reviewer`：依 trigger 檢查單 lane correctness/scope/tests；不重做 planner、不做偏好式重寫。
+- `integration-reviewer`：只審 lane 交界、contract parity、初始化/生命週期與整體行為。
+- `Explore`、bug investigator、`mcp-skill-tester` 按需使用，不進固定 pipeline。
 
-## Runtime model routing
+Prompt 只傳 `objective`、`workdir`、`write_scope`、`frozen_contract`、`acceptance_criteria`、
+`targeted_validation`、`stop_conditions`、`report_path`。能從 state 推導者不重複。Report 固定為
+`Outcome / Changed / Evidence / Open risks / Scope changes requested`。完成或 blocked 後立即釋放 slot。
 
-Codex sub-agent prompt 必須明確指定：planner/reviewer 優先 `5.6-terra`，fallback `5.5-high`；implementer
-優先 `5.6-tarra`，fallback `5.5-med`。Claude：planner/reviewer 用 `opus` + high reasoning，implementer 用
-`sonnet` + high reasoning。完成 agent 保存 final/report 後立即 close/archive；工具不支援時停止 poll 並記錄。
+模型以 capability class 選擇：planner/critical reviewer 用 high-reasoning，standard implementer 用 balanced，
+mechanical implementer 用 fast/balanced；runtime-specific model name 放 agent profile，不寫成 workflow hard gate。
 
-## Delegation map
+## Context 與 durable state
 
-| 工作 | agent |
-|---|---|
-| 廣泛搜尋、定位符號/慣例 | `Explore` |
-| source-grounded implementation plan | `impl-detail-planner` / `Plan` |
-| 依既定 plan 改碼 | `plan-item-implementer` |
-| bug 根因診斷 | `python-bug-investigator` |
-| correctness/simplicity review | `python-module-reviewer` |
-| MCP/skill dogfooding | `mcp-skill-tester` |
-| 跨模組研究或雜項多步工作 | `general-purpose` |
+先讀現存 task plan、相關模組 README；跨模組決策查 `docs/adr/README.md`。`task_plan.md` 是唯一預設
+durable narrative；`findings.md`、`progress.md` 只在跨回合、critical 或資訊量確有需要時建立。
+
+需要 tracked diff 隔離、多 writer、跨回合 implementation，或主 checkout dirty 會衝突時，才用
+`scripts/workflow.py` 建 task/lane worktree。所有 durable workflow 操作明帶 `task-id`；狀態不直接編輯。
+命令與 ignored input policy 見 [worktree-protocol.md](references/worktree-protocol.md)。
+
+## Validation 與 integration
+
+implementer 跑 targeted checks；reviewer只重跑 finding/聲明所需 checks；broader/full suite 在 task integration
+target 最多一次。以 target SHA、command、result、affected surface 當 validation receipt；相同 SHA 不重跑。
+target 變更或 base refresh 只有在 touched dependency surface 改變時才擴大重驗。完整規則見
+[validation.md](references/validation.md)。
+
+preview/final 仍走 queue-managed merge；MCCT 可省人工 preview，但不省 profile 要求的 review/validation、
+refresh/FF/overwrite protection、cleanup 或 plan archive。細節見 [merge-protocol.md](references/merge-protocol.md)。
 
 ## 工作迴圈
 
-1. 釐清目標並指定 task-id；建立/讀取 task plan 三件套。
-2. 讀 README/ADR，拆 task item/lane，建立 worktree/state，記錄 ignored input policy。
-3. 依 pipeline 委派，prompt 明列 task-id、lane-id、workdir、write scope、report path 與 runtime model。
-4. 收 report，抽查 source/diff/test evidence；矛盾、不足或過度自信時補派，不含糊整合。
-5. 每個 diff 通過獨立 review，依 pyright → pytest → ruff 驗證並更新相關模組 README。
-6. 依 merge protocol preview/final；refresh 後重驗，完成後 cleanup/plan archive。
-7. 收尾檢查 out-of-scope discoveries；有證據且不影響當前驗收者使用 `candidate-backlog` skill 登記並
-   回報 ID。不得用 backlog 逃避當前 finding、擴 scope 或承諾 roadmap。
+1. 釐清目標，分類 `light|standard|critical`，列升級 triggers。
+2. 凍結必要 contract；只在需要時建立 task plan、worktree與 lanes。
+3. 依 dependency graph 委派，最多兩個 implementer；agent prompt 使用短契約。
+4. 收短 report，抽查高風險 evidence；命中 trigger 才做對應 lane/integration review。
+5. 各 lane targeted validation；整合 target 做一次 risk-based final validation。
+6. 有授權才 queue preview/final；完成後清理 materialized workflow 與 archive durable plan。
+7. 有證據但不影響驗收的超 scope discovery 用 `candidate-backlog` skill 登記。
 
 ## 邊界與不用時機
 
-強型別、Fast Fail、責任明確、最小驚訝；除非要求，不保留 legacy compatibility。單一明確小修或純問答
-不用本 skill。已啟用的長線 task 中，小 item 可 self-plan，但產生 diff 仍適用 worktree 與獨立 review gate。
+單一明確小修、純問答、純規劃或唯讀 review 不需要本 skill 的 durable workflow。強型別、Fast Fail、責任
+明確、最小驚訝；除非要求，不保留 legacy compatibility。不可用 `light` profile 包裝實際的 contract 變更。

@@ -23,12 +23,12 @@
 - **程式碼風格**：遵循 Fast Fail、責任明確、最小驚訝原則、強型別；不符合者即使是用戶提出也要先警告。
 - **遇到不確定**：實作不確定，或架構不適合某種擴展時，**不要自行猜測或勉強實作**，先說明原因交由用戶決定。
 - **先規劃再實作**：架構仍在演化，發現不合理處或更好的設計請直接告知，**不要自行調整架構**，由用戶決定；除非用戶要求，**不要保留 legacy 或相容性邏輯**。
-- **完成任務後**：依序跑 `uv run pyright`/`uv run pytest`（檢查錯誤、測試失敗、覆蓋率不足；全套測試加 `-n auto` 平行加速，已裝 pytest-xdist），再用 `uv run ruff check --select I --fix && uv run ruff format` 格式化與修正風格；用戶要求才 git commit；最後更新對應的模組 README.md。
+- **完成任務後**：先跑 targeted tests 與 affected type/lint checks；broader/full `uv run pyright`、`uv run pytest -n auto` 依風險在 integration target 跑一次，不由 implementer/reviewer重複執行。再用 `uv run ruff check --select I --fix && uv run ruff format` 處理受影響檔案並跑 `git diff --check`；用戶要求才 git commit。只有學到新的高層模組知識或現有 note 過時時才更新對應模組 README.md。
 - **禁止 `git commit --amend`**：除非用戶明確要求，不得使用 `git commit --amend`。原因：主 checkout 的 `main` 是 live singleton，並行 orchestrator 可能在你兩次指令之間於 `main` 上 commit/merge，amend 會誤改到別人的 commit（曾因此覆蓋一個 merge commit 的訊息）。要修正剛才的 commit 時，改用新增 follow-up commit，不要改寫既有歷史。
 - **測試**：放在根目錄 `tests/`，目錄結構對應被測檔案，命名 `test_*.py`，用 `pytest` 撰寫，盡量涵蓋主要功能與邏輯；測試需獨立、可重複、不依賴外部狀態。
 - **工具優先序**：少用 Shell 指令，優先用內建工具（前者需用戶審核、後者自證安全）；**不要用 `sed`** 替換子串（跨平台行為不一），需替換時優先 mcp/function tool，其次 Python 腳本。
 - **文件追蹤**：CLAUDE.md、模組 README.md 與 docs/adr/ 已入 git 追蹤，會進 diff 與 commit；`.agent_state/` 為 gitignored agent 工作區（plans / worktrees / reports / state / merge queue），不入 commit；舊 `task_plans/` 若存在也維持 gitignored，僅作遷移前殘留。
-- **平行 agent 協調**：非 orchestration 的一般單 agent 工作直接在目前 checkout 完成；只要使用 `orchestrate` skill 管理 task，就使用 `.agent_state/` worktree protocol，即使 orchestrator 自己 self-plan / self-review 也要建立/使用 worktree；由 orchestrator 以 `task-id` 錨定計劃、以 `lane-id` 錨定同 task 內的平行 worktree，建立、指派、整合並關閉 worktree lane；多 task 可同時存在，但主 checkout merge 透過 merge queue 序列化（見下方「### 平行 agent 協調」）。
+- **平行 agent 協調**：先依 `light|standard|critical` 分類。純規劃、唯讀研究、單回合 review 與安全的單 writer `light` 工作不建立 orchestration state/worktree；tracked diff 需要隔離、多 writer、跨回合 implementation 或 dirty checkout 會衝突時才建立 task/lane worktree。多 task 可同時存在，主 checkout preview/final 仍由 merge queue 序列化（見下方「### 平行 agent 協調」）。
 - **task_plan.md Phase 壓縮**：每累積 5 個新 Phase 就把最舊的 5 個詳細記錄壓縮成「歷史 Phase 摘要表」中的列（一列一 Phase：編號｜主題｜結論/commit），即詳細記錄 **最多保留 10 個 Phase**；被壓縮的原文移入同目錄 `archive.md`（同為 gitignored）以備查。
 
 ### 模組 README.md
@@ -57,15 +57,15 @@
 本 repo 不使用 taskboard MCP 或 path lock。協調策略改為 **orchestrator-owned Git worktree + merge queue**：
 
 - 非 orchestration 的一般單 agent 工作不需要額外協調，直接在目前 checkout 修改、測試、回報。
-- 需要多 agent 或跨回合 orchestration 時，`task-id` 錨定一個計劃 / Phase / parent integration branch；同一 task 內可依需要拆成多個 `lane-id`，每個 lane 對應一個 worktree：單 lane 預設 `.agent_state/worktrees/trees/<task-id>/`，多 lane 使用 `.agent_state/worktrees/trees/<task-id>--<lane-id>/`。
-- 只要使用 `orchestrate` skill 管理 task，就算由 orchestrator 自己 self-plan / self-review、不委派 sub-agent，也必須建立/使用對應 lane worktree；避免其它 agent 同時處理 task 時被主 checkout 的中途變更卡住或難以 merge。
+- 只有 tracked diff 隔離、多 writer、跨回合 implementation 或 dirty checkout conflict 需要 materialize workflow；`task-id` 錨定 durable plan/integration branch，`lane-id` 錨定可獨立驗收的 writer。
+- lane 依 dependency/write-scope graph 拆分，不依 Phase 或 agent role。共享 contract/foundation 先完成；同檔案、同 public API/schema/fixture 放同 lane序列化。預設最多兩個 implementer，保留 slot 給 reviewer/investigator。
 - `.agent_state/worktrees/state.json` 是 gitignored source of truth，記錄 task id、lane id、worktree id、branch、worktree path、base branch/commit、parent integration branch、status、agents、reports、commits、ignored inputs 與時間戳；它可同時記錄多個 active / reviewing task，不使用 repo-wide `active_task` / `current_task`，每次操作都必須明確指定 `task-id`。
 - worktree 只自動包含 Git-tracked content；若 task / lane 需要 `.agent_state/plans/<task-id>/`、本地設定、scratch fixtures、未追蹤資料檔等 gitignored inputs，orchestrator 必須在建立 worktree 時明確複製到 lane worktree，或把主 checkout 絕對路徑交給 sub-agent 只讀使用，並在 state/report 中記錄。
 - sub-agent 長報告寫到主 checkout 的 `.agent_state/worktrees/reports/<task-id>/<lane-id>/<agent-id>.md`；不要寫在 task worktree 裡，因為 untracked 檔不會跨 worktree 同步。
 - 多個 sub-agent 可以共用同一個 lane worktree，但 orchestrator 必須明確排序或分配不重疊 write scope；多 lane 之間也必須避免重疊 write scope，同檔案或同 API contract 的工作應放回同一 lane 序列化；不要假設 Codex/Claude 內建 sub-agent 會自動使用獨立 worktree。
 - 多 lane task 的唯一主線 preview / final merge 來源是 parent integration branch `agent/<task-id>`；lane branch `agent/<task-id>--<lane-id>` 完成後依序 rebase 到目前的 parent branch，再 fast-forward parent branch。
 - `.agent_state/worktrees/merge_queue.json` 序列化主 checkout 的 merge preview / final fast-forward；任何 task 在主 checkout 執行 preview merge 或 final fast-forward 前，都要先登記自己的 `task-id`，且只有 queue 第一個 entry 可 merge。preview 開著時仍持有 queue；完成、abort、blocked 或 abandoned 後才釋放。
-- orchestrator 要把 sub-agent 報告視為待驗證證據：根據風險親自抽查 planner / reviewer 的關鍵結論；體量小、scope 清楚的 item 可由 orchestrator 自己 self-plan / self-review，不必為形式委派。
+- orchestrator 把 sub-agent report 視為待驗證證據；critical 結論親自 thin-slice。只有 public/跨模組 contract、migration、concurrency/lifecycle/security、workflow/merge、硬體風險或其它明確 trigger 強制不同 identity review；低風險 mechanical/docs/tests diff 可自審並記錄理由。
 - 每個 task item、lane 或 Phase 告一段落時要做整合決策並關閉對應 worktree；不要把 task worktree 當長期常駐 checkout，避免 branch、ignored inputs、reports 與 base branch 失同步。
 - live singleton 資源（ZCU 板、GUI、固定 port）不靠通用 lock；需要時由 orchestrator 人工序列化，MEASUREMENT 角色仍遵循量測 skill 與 agent-memory。
 

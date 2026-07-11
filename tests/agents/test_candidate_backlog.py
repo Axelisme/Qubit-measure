@@ -311,11 +311,14 @@ def test_skill_trees_stay_byte_identical(skill_name: str) -> None:
 def test_orchestrate_main_skill_keeps_hard_gate_anchors() -> None:
     text = (SKILL_ROOTS[0] / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
     for anchor in (
-        "不同 agent identity 獨立 review",
+        "`critical` diff 必須由不同 agent identity 獨立 review",
         "主 checkout preview/final 只走 merge queue",
         "commit / merge 只在使用者要求或授權後執行",
-        "5.6-terra",
-        "5.6-tarra",
+        "`light`",
+        "`standard`",
+        "`critical`",
+        "lane-implementer",
+        "integration-reviewer",
         "candidate-backlog",
         "設計先於實作",
     ):

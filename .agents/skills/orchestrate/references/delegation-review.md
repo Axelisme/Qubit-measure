@@ -1,25 +1,27 @@
 # Delegation and Review
 
+## Profile classification
+
+`light` 必須同時是局部、contract-preserving、單 writer、可由 targeted checks 完整驗收。`critical` 包含
+public API/schema/wire/persistence、跨模組 contract、migration、concurrency/lifecycle/security、workflow/merge
+state、資料遺失或硬體風險。其餘為 `standard`。不確定時向上分類。
+
+## Independent review triggers
+
+以下任一成立即由不同 identity review：`critical` surface、跨模組 diff、測試薄弱、修改量超過可在單回合
+完整理解的範圍、implementer 明示不確定、validation 出現非預期行為。局部 tests/docs/mechanical refactor
+若 evidence 完整可由 orchestrator 自審，結案記錄免除理由。
+
 ## Thin-slice verification
 
-public API、module boundary、data model、workflow protocol、核心行為、薄測試或模糊 report 都由
-orchestrator 親讀關鍵 README/ADR/source/diff/test output。需要廣泛搜尋或長分析再委派。
+public contract、module boundary、data model、workflow protocol、核心行為、薄測試或模糊 report 由
+orchestrator 親讀關鍵 README/ADR/source/diff/test output。需要廣泛搜尋或長分析才委派。
 
-## Review Independence Gate
+## Agent contract
 
-每個含 implementation、test、文件規範或 workflow script diff 的 lane/task item 都必須有不同 identity
-的 reviewer。implementer 不能簽核自己；多 implementer lane 的 reviewer 必須與所有 implementer 不同；
-orchestrator 親自產生 diff 時也視為 implementer。self-review 只能補充，不能取代獨立 review。
+Prompt 只包含 objective、workdir、write scope、frozen contract、acceptance、targeted validation、stop
+conditions、report path。Agent 發現需跨 scope、改 contract、碰共享 fixture、acceptance 與 source 衝突或
+架構假設不成立時停止回報。Report 使用 `Outcome / Changed / Evidence / Open risks / Scope changes requested`。
 
-小型工作可 self-plan：scope 局部、必要 context 可在當回合讀完、風險主要是規則精準度。plan 應引用
-source、列可執行步驟/validation/停止分叉。若 review 後需大量修改，回到 implementer lane。
-
-## Runtime routing
-
-- Codex planner/reviewer：`5.6-terra`，fallback `5.5-high`。
-- Codex implementer：`5.6-tarra`，fallback `5.5-med`。
-- Claude planner/reviewer：`opus` + high reasoning。
-- Claude implementer：`sonnet` + high reasoning。
-
-prompt 同時提供 task-id、lane-id、workdir、write scope、report 絕對路徑、ignored input policy 與 model。
-report 保存於主 checkout；完成 agent 不長期占 slot。
+模型以能力選擇：contract planner/critical reviewer 用 high-reasoning；standard implementer 用 balanced；
+mechanical implementer 用 fast/balanced。runtime-specific name 由 agent profile 集中設定。

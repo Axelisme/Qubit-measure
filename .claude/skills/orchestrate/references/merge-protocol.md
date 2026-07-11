@@ -11,9 +11,10 @@ preview 是 main 上未提交驗收 merge，queue 維持 held；不要在 previe
 
 ## MCCT / final
 
-MCCT 先把 task scope diff 整理成清楚 commit（無 diff 不建空 commit），完成獨立 review 與 validation，
+MCCT 先把 task scope diff 整理成清楚 commit（無 diff 不建空 commit），完成 profile/trigger 要求的 review 與 validation，
 再直接 queue-managed final。它只省人工 preview，不省 queue、refresh、revalidation、FF、clean/untracked
-protection、cleanup、plan archive。缺 identity、unrelated dirty files、review/validation failure 或非 FF 即停。
+protection、cleanup、plan archive。只有 target 需要獨立 review 時缺 identity 才阻擋；unrelated dirty files、
+required review/validation failure 或非 FF 一律停止。
 
 ## Diagnostics and recovery
 

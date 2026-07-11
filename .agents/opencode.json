@@ -5,6 +5,46 @@
     "paths": [".agents/skills"]
   },
   "agent": {
+    "contract-planner": {
+      "description": "Resolve uncertain contracts and dependency graphs before implementation.",
+      "mode": "subagent",
+      "color": "info",
+      "options": {
+        "claude_model": "opus",
+        "claude_memory": "project",
+        "source": ".agents/agents/contract-planner.md"
+      }
+    },
+    "lane-implementer": {
+      "description": "Own one isolated implementation lane within a frozen contract.",
+      "mode": "subagent",
+      "color": "success",
+      "options": {
+        "claude_model": "sonnet",
+        "claude_memory": "project",
+        "source": ".agents/agents/lane-implementer.md"
+      }
+    },
+    "lane-reviewer": {
+      "description": "Independently review one completed implementation lane.",
+      "mode": "subagent",
+      "color": "warning",
+      "options": {
+        "claude_model": "opus",
+        "claude_memory": "project",
+        "source": ".agents/agents/lane-reviewer.md"
+      }
+    },
+    "integration-reviewer": {
+      "description": "Review the boundaries of an integrated multi-lane target.",
+      "mode": "subagent",
+      "color": "warning",
+      "options": {
+        "claude_model": "opus",
+        "claude_memory": "project",
+        "source": ".agents/agents/integration-reviewer.md"
+      }
+    },
     "mcp-skill-tester": {
       "description": "Exercises MCP tools and their associated skills end-to-end during development, validating behavior and gathering structured usability feedback.",
       "mode": "subagent",
