@@ -85,9 +85,7 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     def _open_seeded(seed, *, gc=False, owner_key=None):
         return _register(seed.spec, seed.value, owner_key), []
 
-    def _open(
-        item_kind, *, discriminator=None, from_name=None, gc=True, owner_key=None
-    ):
+    def _open(item_kind, *, from_name, gc=True, owner_key=None):
         # Load the existing entry's shape from the live ml (from_name path).
         store = ml.modules if item_kind == "module" else ml.waveforms
         to_value = (

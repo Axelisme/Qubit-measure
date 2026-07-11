@@ -1053,19 +1053,13 @@ class Controller(SessionControllerMixin):
         self,
         item_kind: str,
         *,
-        discriminator: str | None = None,
-        from_name: str | None = None,
+        from_name: str,
         gc: bool = True,
         owner_key: str | None = None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
-        """Open a CfgEditor session. The ``editor.new`` RPC only uses
-        ``from_name`` (edit an existing entry); ``discriminator`` (blank seed)
-        remains an internal seam — creating a blank goes through
-        ``create_from_role`` (``<disc>:blank`` roles), not the RPC.
-        """
+        """Open a modify-only CfgEditor session for an existing ml entry."""
         return self._cfg_editor_svc.open(
             item_kind,
-            discriminator=discriminator,
             from_name=from_name,
             gc=gc,
             owner_key=owner_key,

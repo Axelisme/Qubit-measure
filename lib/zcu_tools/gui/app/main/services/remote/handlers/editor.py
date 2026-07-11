@@ -20,9 +20,7 @@ def _h_editor_new(
     from_name = str(params["from_name"])
     # editor.new is modify-only: it edits an existing ml entry. Creating a blank
     # entry goes through context.ml_create_from_role (role_id='<disc>:blank').
-    editor_id, _ = adapter.ctrl.open_cfg_editor(
-        item_kind, discriminator=None, from_name=from_name
-    )
+    editor_id, _ = adapter.ctrl.open_cfg_editor(item_kind, from_name=from_name)
     # The agent reads every cfg view as a nested tree (same shape as
     # tab.get_cfg / editor.get), so the open reply carries the freshly-opened
     # draft as {tree} rather than the nominal current_targets snapshot

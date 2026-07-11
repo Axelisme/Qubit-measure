@@ -32,10 +32,8 @@ def test_open_returns_editor_id_and_tree(monkeypatch):
     )
     assert res["editor_id"] == "editor-abc"
     assert res["tree"] == {"freq": 0.0}
-    # editor.new is modify-only: from_name forwarded, discriminator always None.
-    ctrl.open_cfg_editor.assert_called_once_with(
-        "module", discriminator=None, from_name="readout_rf"
-    )
+    # editor.new is modify-only: from_name is the sole opening selector.
+    ctrl.open_cfg_editor.assert_called_once_with("module", from_name="readout_rf")
     ctrl.get_cfg_editor_draft.assert_called_once_with("editor-abc")
 
 

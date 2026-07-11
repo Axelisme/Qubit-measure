@@ -55,13 +55,11 @@ from zcu_tools.gui.app.main.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
-from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
     EvalValue,
     decode_eval_wire,
-    make_default_value,
 )
 from zcu_tools.gui.cfg.binding import (
     CfgDraft,
@@ -70,7 +68,6 @@ from zcu_tools.gui.cfg.binding import (
     SettableTargetKind,
 )
 from zcu_tools.gui.expected_error import InvalidInputError
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, UnknownProgramShapeError
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
@@ -294,8 +291,7 @@ class CfgEditorService:
         self,
         item_kind: str,
         *,
-        discriminator: str | None = None,
-        from_name: str | None = None,
+        from_name: str,
         gc: bool = True,
         owner_key: str | None = None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
@@ -312,7 +308,7 @@ class CfgEditorService:
             )
         if owner_key is not None:
             self._teardown_owner(owner_key)
-        spec, value = self._initial_schema(item_kind, discriminator, from_name)
+        spec, value = self._initial_schema(item_kind, from_name)
         return self._make_session(
             spec, value, item_kind=item_kind, gc=gc, owner_key=owner_key
         )
@@ -557,27 +553,16 @@ class CfgEditorService:
     def _initial_schema(
         self,
         item_kind: str,
-        discriminator: str | None,
-        from_name: str | None,
+        from_name: str,
     ):
-        if from_name is not None:
-            ml = self._read.get_current_ml()
-            if item_kind == "module":
-                if from_name not in ml.modules:
-                    raise CfgEditorError(f"unknown module: {from_name!r}")
-                return module_cfg_to_value(ml.modules[from_name])
-            if from_name not in ml.waveforms:
-                raise CfgEditorError(f"unknown waveform: {from_name!r}")
-            return waveform_cfg_to_value(ml.waveforms[from_name])
-
-        if discriminator is None:
-            raise CfgEditorError("either 'discriminator' or 'from_name' is required")
-        try:
-            shape = PROGRAM_SHAPES.get(item_kind, discriminator)  # type: ignore[arg-type]
-        except (KeyError, UnknownProgramShapeError) as exc:
-            raise CfgEditorError(str(exc)) from exc
-        spec = shape.make_spec(MAIN_PROGRAM_SPEC_POLICY)
-        return spec, make_default_value(spec)
+        ml = self._read.get_current_ml()
+        if item_kind == "module":
+            if from_name not in ml.modules:
+                raise CfgEditorError(f"unknown module: {from_name!r}")
+            return module_cfg_to_value(ml.modules[from_name])
+        if from_name not in ml.waveforms:
+            raise CfgEditorError(f"unknown waveform: {from_name!r}")
+        return waveform_cfg_to_value(ml.waveforms[from_name])
 
 
 def _decode_value(value: object) -> object:
