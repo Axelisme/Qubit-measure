@@ -258,6 +258,7 @@ def test_del_md_attr_emits_md_changed():
 
 def test_del_md_attr_missing_is_failed_precondition_without_mutation():
     state, svc = _make_active_state()
+    bus: MagicMock = svc._bus  # type: ignore[assignment]
     before = state.version.get("context")
 
     with pytest.raises(
@@ -266,7 +267,7 @@ def test_del_md_attr_missing_is_failed_precondition_without_mutation():
         svc.del_md_attr("missing")
 
     assert state.version.get("context") == before
-    svc._bus.emit.assert_not_called()
+    bus.emit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
