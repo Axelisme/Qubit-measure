@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — spec-driven program cfg materializer version
+**Last updated:** 2026-07-11 — stale-version recovery contract
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -135,6 +135,15 @@ MCP owns the agent baseline:
 
 Version numbers are a bridge concern. Agents see stale-resource descriptions, not
 raw counters.
+
+A stale guarded mutation has one wire-level recovery contract. The server returns
+`PRECONDITION_FAILED` with `data={"stale": [...]}`, where `stale` lists every
+resource whose current version no longer matches the caller baseline. The client
+must re-snapshot each listed resource through its corresponding read method,
+refresh those baselines, and then retry the mutation with fresh
+`expected_versions`. It must not retry against the old snapshots. Stale conflicts
+do not add another `ErrorCode`; a future Web adapter may translate this existing
+failure into an HTTP-specific status without changing the wire enum (ADR-0052).
 
 ## Method Surface
 

@@ -32,6 +32,8 @@ def _expected_versions() -> ParamSpec:
 
     The mcp layer attaches the resource->version map this op depends on; the
     server compares it atomically. Hidden from the agent-facing MCP schema.
+    Stale recovery follows the re-snapshot-then-retry contract in the
+    ``Resource-Version Guard`` section of this package's README.
     """
     return ParamSpec(
         "expected_versions",
