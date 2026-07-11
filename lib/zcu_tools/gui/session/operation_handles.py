@@ -31,8 +31,10 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
+
+from zcu_tools.gui.event_bus import EventOrigin
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +309,12 @@ class OperationChannel:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _OperationRecord:
+    channel: OperationChannel
+    origin: EventOrigin
+
+
 class OperationHandles:
     """Async-operation handles keyed by token: create / settle / await / poll /
     cancel (ADR-0019). Each operation gets its own ``OperationChannel`` (ADR-0025)
@@ -314,13 +322,15 @@ class OperationHandles:
 
     def __init__(self) -> None:
         self._next_token = 1
-        # Live (pending) operations: token -> OperationChannel.
-        self._live: dict[int, OperationChannel] = {}
+        # Live (pending) operations: token -> operation record.
+        self._live: dict[int, _OperationRecord] = {}
         # Settled operations, retained briefly (LRU) so a caller awaiting after
         # settle still returns the outcome immediately.
-        self._done: OrderedDict[int, OperationChannel] = OrderedDict()
+        self._done: OrderedDict[int, _OperationRecord] = OrderedDict()
 
-    def create(self, cancel_hook: CancelHook | None = None) -> int:
+    def create(
+        self, cancel_hook: CancelHook | None = None, *, origin: EventOrigin
+    ) -> int:
         """Mint an operation token and open its channel (pending).
 
         ``cancel_hook`` is the callable invoked by ``stop()`` after enqueueing
@@ -333,9 +343,22 @@ class OperationHandles:
         """
         token = self._next_token
         self._next_token += 1
-        self._live[token] = OperationChannel(cancel_hook)
+        self._live[token] = _OperationRecord(
+            channel=OperationChannel(cancel_hook), origin=origin
+        )
         logger.debug("operation create: token=%d", token)
         return token
+
+    def event_origin(self, token: int) -> EventOrigin:
+        """Return the captured origin projected onto this operation token.
+
+        Both live and retained-done records preserve attribution. Unknown or
+        evicted tokens fail fast instead of inventing a default origin.
+        """
+        record = self._record(token)
+        if record is None:
+            raise KeyError(f"unknown or evicted operation token: {token}")
+        return replace(record.origin, operation_id=str(token))
 
     def settle(self, token: int, outcome: OperationOutcome) -> None:
         """Mark the operation terminal: settle its channel and retain (LRU).
@@ -346,13 +369,13 @@ class OperationHandles:
         neither and falls through to the default 'finished' (which would
         misreport a cancelled/failed terminal). See ADR-0025.
         """
-        ch = self._live.get(token)
-        if ch is None:
+        record = self._live.get(token)
+        if record is None:
             # Already settled (idempotent) or never created — still delegate
             # to the retained channel if present (idempotent settle on channel).
-            ch = self._done.get(token)
-            if ch is not None:
-                ch.settle(outcome)
+            record = self._done.get(token)
+            if record is not None:
+                record.channel.settle(outcome)
             return
         if outcome.status == "finished":
             logger.info("operation settle: token=%d status=%s", token, outcome.status)
@@ -363,9 +386,9 @@ class OperationHandles:
                 outcome.status,
                 outcome.error,
             )
-        ch.settle(outcome)
+        record.channel.settle(outcome)
         # Publish to _done first, then retract from _live (never "neither").
-        self._done[token] = ch
+        self._done[token] = record
         self._live.pop(token, None)
         # The just-settled token is most-recent, so LRU eviction never drops it.
         while len(self._done) > _DONE_EVENT_LIMIT:
@@ -378,19 +401,19 @@ class OperationHandles:
         terminal outcome. A no-op for an unknown/settled token or one with no
         cancel_hook (e.g. connect has no cancellation point).
         """
-        ch = self._live.get(token)
-        if ch is not None:
+        record = self._live.get(token)
+        if record is not None:
             logger.info("operation cancel: token=%d", token)
-            ch.stop(None)
+            record.channel.stop(None)
 
     def message(self, token: int, text: str) -> None:
         """Deliver a nudge message to the operation's awaiter (non-terminal).
 
         A no-op for an unknown/settled token — the message has nowhere to go.
         """
-        ch = self._live.get(token)
-        if ch is not None:
-            ch.message(text)
+        record = self._live.get(token)
+        if record is not None:
+            record.channel.message(text)
 
     def stop(self, token: int, reason: str | None = None) -> None:
         """Request cancel with an optional reason string.
@@ -399,10 +422,10 @@ class OperationHandles:
         subsequent completed(cancelled) result (Send & Stop semantic).
         A no-op for an unknown/settled token.
         """
-        ch = self._live.get(token)
-        if ch is not None:
+        record = self._live.get(token)
+        if record is not None:
             logger.info("operation stop: token=%d reason=%r", token, reason)
-            ch.stop(reason)
+            record.channel.stop(reason)
 
     def cancel_all(self) -> list[int]:
         """Cancel every live operation; return their tokens (for poll/await)."""
@@ -430,13 +453,11 @@ class OperationHandles:
         A token with no live or retained channel is treated as already-done.
         """
         # Check live first, then retained.
-        ch = self._live.get(token)
-        if ch is None:
-            ch = self._done.get(token)
-        if ch is None:
+        record = self._record(token)
+        if record is None:
             # Unknown token: treat as already-done (finished).
             return AwaitResult(reason="completed", outcome=OperationOutcome("finished"))
-        return ch.consume(timeout)
+        return record.channel.consume(timeout)
 
     def poll(self, token: int) -> OperationOutcome | None:
         """Non-blocking: outcome if settled, None if still pending, default
@@ -444,12 +465,10 @@ class OperationHandles:
         source of truth) rather than dict membership, so the brief settle window
         where the token is in both ``_live`` and ``_done`` still reports the
         true outcome instead of a stale 'pending'."""
-        ch = self._live.get(token)
-        if ch is None:
-            ch = self._done.get(token)
-        if ch is None:
+        record = self._record(token)
+        if record is None:
             return OperationOutcome("finished")
-        return ch.settled_outcome()
+        return record.channel.settled_outcome()
 
     def has_cancel_hook(self, token: int) -> bool:
         """Return True when the token's channel has a cancel hook registered.
@@ -462,12 +481,16 @@ class OperationHandles:
         'Send & Stop' button without any op-kind knowledge in this layer
         (ADR-0025 §Stop-gating). Pure read — never triggers the hook.
         """
-        ch = self._live.get(token)
-        if ch is None:
-            ch = self._done.get(token)
-        if ch is None:
+        record = self._record(token)
+        if record is None:
             return False
-        return ch.can_cancel
+        return record.channel.can_cancel
+
+    def _record(self, token: int) -> _OperationRecord | None:
+        record = self._live.get(token)
+        if record is None:
+            record = self._done.get(token)
+        return record
 
     def live_count(self) -> int:
         """How many operations are live (pending) right now, of any facet —

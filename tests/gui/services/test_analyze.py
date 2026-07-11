@@ -24,6 +24,7 @@ from zcu_tools.gui.app.main.services.analyze import AnalyzeService
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
@@ -90,7 +91,7 @@ def _make_service(
     progress = ProgressService(DirectProgressTransport())
     writeback = MagicMock()
     writeback.compute_items_for_tab.return_value = []
-    runner = OperationRunner(MagicMock(), handles, progress, bg)  # type: ignore[arg-type]
+    runner = OperationRunner(MagicMock(), handles, progress, bg, bus)  # type: ignore[arg-type]
     svc = AnalyzeService(state, runner, bus, writeback, handles)
     return svc, bg
 
@@ -293,6 +294,36 @@ def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
     assert state.get_tab("tab1").analyze_result is fake_result
     assert state.get_tab("tab1").is_analyzing is False
     assert finished == [("tab1", fake_result)]
+
+
+def test_interactive_start_and_finish_keep_captured_operation_origin(
+    qapp,
+) -> None:  # noqa: ARG001
+    state = _make_state()
+    bus = EventBus()
+    svc, _ = _make_service(state, bus)
+    observed: list[tuple[TabInteractionFact, EventMeta]] = []
+    bus.subscribe_with_meta(
+        TabInteractionChangedPayload,
+        lambda payload, meta: observed.append((payload.fact, meta)),
+    )
+    session = MagicMock()
+    result = MagicMock()
+    result.figure = None
+    session.finish.return_value = result
+
+    with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
+        token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+    svc.finish_interactive("tab1", session)
+
+    assert [fact for fact, _meta in observed] == [
+        TabInteractionFact.PRIMARY_ANALYZE_STARTED,
+        TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED,
+    ]
+    assert [meta.origin for _fact, meta in observed] == [
+        EventOrigin(kind="agent", client_id="client-a", operation_id=str(token)),
+        EventOrigin(kind="agent", client_id="client-a", operation_id=str(token)),
+    ]
 
 
 # ---------------------------------------------------------------------------

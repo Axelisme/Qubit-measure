@@ -19,6 +19,7 @@ from zcu_tools.gui.app.main.services.caretaker import (
 from zcu_tools.gui.app.main.services.persistence_types import AppPersistedState
 from zcu_tools.gui.app.main.services.ports import RestoreReport
 from zcu_tools.gui.background import BackgroundRunner
+from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
@@ -49,7 +50,7 @@ def _pump_until(qapp, predicate, timeout: float = 2.0) -> None:
 
 def test_operation_settle_failure_logs_warning(caplog) -> None:
     handles = OperationHandles()
-    token = handles.create()
+    token = handles.create(origin=EventOrigin(kind="user"))
     with caplog.at_level(
         logging.DEBUG, logger="zcu_tools.gui.session.operation_handles"
     ):
@@ -62,7 +63,7 @@ def test_operation_settle_failure_logs_warning(caplog) -> None:
 
 def test_operation_settle_success_logs_info(caplog) -> None:
     handles = OperationHandles()
-    token = handles.create()
+    token = handles.create(origin=EventOrigin(kind="user"))
     with caplog.at_level(
         logging.DEBUG, logger="zcu_tools.gui.session.operation_handles"
     ):

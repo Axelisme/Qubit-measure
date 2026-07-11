@@ -120,7 +120,9 @@ class _StagedAnalyzeService(QObject):
         ``cancel_hook`` is forwarded to OperationChannel.create; pass None for
         FIT-analyze (not cancellable) or a teardown callable for interactive.
         """
-        token = self._handles.create(cancel_hook=cancel_hook)
+        token = self._handles.create(
+            cancel_hook=cancel_hook, origin=self._bus.current_origin
+        )
         self._active_tokens[tab_id] = token
         return token
 
@@ -130,10 +132,12 @@ class _StagedAnalyzeService(QObject):
         Shared tail of every start path (FIT worker, INTERACTIVE no-worker, post):
         the tab is busy for the duration so concurrent run/analyze is gated out.
         """
-        self._state.set_tab_analyzing(tab_id, True)
-        self._bus.emit(
-            TabInteractionChangedPayload(tab_id=tab_id, fact=self.STARTED_FACT)
-        )
+        token = self._active_tokens[tab_id]
+        with self._bus.origin(self._handles.event_origin(token)):
+            self._state.set_tab_analyzing(tab_id, True)
+            self._bus.emit(
+                TabInteractionChangedPayload(tab_id=tab_id, fact=self.STARTED_FACT)
+            )
 
     def _submit_with_runner(
         self,

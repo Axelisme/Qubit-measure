@@ -107,7 +107,7 @@ def _make_svc(
     handles = OperationHandles()
     fake_bg = bg or _FakeBg()
     progress = ProgressService(DirectProgressTransport())
-    runner = OperationRunner(real_gate, handles, progress, fake_bg)  # type: ignore[arg-type]
+    runner = OperationRunner(real_gate, handles, progress, fake_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, real_gate, handles, runner)
     return svc, fake_bg, handles
 
@@ -128,7 +128,7 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     loop = QEventLoop()
@@ -152,7 +152,7 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     loop = QEventLoop()
@@ -181,7 +181,7 @@ def test_start_connect_mock_sim_params_override_is_honoured(qapp):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     loop = QEventLoop()
@@ -208,7 +208,7 @@ def test_connect_bumps_soc_not_context_version(qapp):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     ctx_before = state.version.get("context")
@@ -344,7 +344,7 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     import zcu_tools.remote as remote
@@ -389,7 +389,7 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     fake_bg = _FakeBg()
-    runner = OperationRunner(gate, handles, progress, fake_bg)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, fake_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     # start_connect registers the exclusion lease and submits to fake_bg

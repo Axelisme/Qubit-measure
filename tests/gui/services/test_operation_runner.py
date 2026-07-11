@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.background import NO_RESULT
+from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
@@ -124,12 +125,13 @@ def _make_runner(
     handles: OperationHandles | None = None,
     progress: _FakeProgress | None = None,
     bg: _FakeBg | None = None,
+    bus: BaseEventBus | None = None,
 ) -> tuple[OperationRunner, _FakeGate, OperationHandles, _FakeProgress, _FakeBg]:
     g = gate or _FakeGate()
     h = handles or OperationHandles()
     p = progress or _FakeProgress()
     b = bg or _FakeBg()
-    runner = OperationRunner(g, h, p, b)  # type: ignore[arg-type]
+    runner = OperationRunner(g, h, p, b, bus or BaseEventBus())  # type: ignore[arg-type]
     return runner, g, h, p, b
 
 
@@ -156,6 +158,35 @@ def _noop_spec(
         run_in_pool=False,
         on_terminal=on_terminal,
     )
+
+
+def test_terminal_callback_restores_captured_operation_origin() -> None:
+    bus = BaseEventBus()
+    runner, _gate, _handles, _progress, bg = _make_runner(bus=bus)
+    observed: list[EventOrigin] = []
+
+    def on_terminal(_bg: BgResult, settle: SettleFn) -> None:
+        observed.append(bus.current_origin)
+        settle(OperationOutcome("finished"))
+
+    spec = OperationSpec(
+        exclusion=None,
+        owner_id="tab1",
+        wants_progress=False,
+        cancel_hook=None,
+        work=lambda _factory: None,
+        run_in_pool=False,
+        on_terminal=on_terminal,
+    )
+    with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
+        token = runner.begin(spec)
+
+    bg.deliver_result()
+
+    assert observed == [
+        EventOrigin(kind="agent", client_id="client-a", operation_id=str(token))
+    ]
+    assert bus.current_origin == EventOrigin(kind="user")
 
 
 # ---------------------------------------------------------------------------

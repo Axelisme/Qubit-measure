@@ -212,7 +212,8 @@ class RunService(QObject):
         # after begin() succeeds (a begin-raise means no worker started — ADR-0026).
         self._active_token = token
         self._state.set_tab_running(tab_id, True)
-        self._bus.emit(RunStartedPayload(tab_id=tab_id))
+        with self._bus.origin(self._handles.event_origin(token)):
+            self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
 
     @property

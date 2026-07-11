@@ -33,6 +33,7 @@ from zcu_tools.gui.app.main.services.remote.events import (
     _ser_tab_content_changed,
     _ser_tab_interaction_changed,
 )
+from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
@@ -564,16 +565,36 @@ def test_view_screenshot_roundtrip(fx):
 
 def test_run_lifecycle_pushes_run_started_then_finished(fx):
     sock = open_client(fx.service.port)
+    observed: list[tuple[object, EventMeta]] = []
+    fx.bus.subscribe_with_meta(
+        RunStartedPayload, lambda payload, meta: observed.append((payload, meta))
+    )
+    fx.bus.subscribe_with_meta(
+        RunFinishedPayload, lambda payload, meta: observed.append((payload, meta))
+    )
     try:
         call(sock, "events.subscribe", {"events": ["run_started", "run_finished"]})
         tab_id = call(sock, "tab.new", {"adapter_name": "fake"})["result"]["tab_id"]
-        call(sock, "tab.run_start", {"tab_id": tab_id})
+        result = call(sock, "tab.run_start", {"tab_id": tab_id})["result"]
         # One run_started, then one run_finished with outcome='finished'.
         started = recv_push(sock, "run_started")
         assert started["payload"]["tab_id"] == tab_id
         finished = recv_push(sock, "run_finished", timeout_s=5.0)
         assert finished["payload"]["tab_id"] == tab_id
         assert finished["payload"]["outcome"] == "finished"
+        assert [type(payload) for payload, _meta in observed] == [
+            RunStartedPayload,
+            RunFinishedPayload,
+        ]
+        assert [meta.origin.kind for _payload, meta in observed] == [
+            "agent",
+            "agent",
+        ]
+        assert [meta.origin.operation_id for _payload, meta in observed] == [
+            str(result["operation_id"]),
+            str(result["operation_id"]),
+        ]
+        assert all(meta.origin.client_id for _payload, meta in observed)
     finally:
         sock.close()
 

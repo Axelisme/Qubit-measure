@@ -61,11 +61,21 @@ class SaveService(QObject):
         the saving flag. The data path is already known synchronously by the
         caller; the worker only writes."""
         adapter = self._state.get_tab(tab_id).adapter
+        origin = self._bus.current_origin
+
+        def on_done(_result: object) -> None:
+            with self._bus.origin(origin):
+                self._on_save_finished(tab_id)
+
+        def on_error(error: Exception) -> None:
+            with self._bus.origin(origin):
+                self._on_save_failed(tab_id, error)
+
         self._bg.submit(
             lambda: adapter.save(req),
             run_in_pool=False,
-            on_done=lambda _result: self._on_save_finished(tab_id),
-            on_error=lambda exc: self._on_save_failed(tab_id, exc),
+            on_done=on_done,
+            on_error=on_error,
         )
 
     def start_save_data(

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
@@ -543,10 +544,11 @@ class Controller(SessionControllerMixin):
         """Dispatch a memento back to the sub-owners: seed startup prefs +
         register remembered devices, then rebuild tabs. Returns the session's
         per-tab restore report (presented to the user by ``restore_all``)."""
-        self._startup_svc.restore_startup(state.startup)
-        report = self._workspace_svc.apply_session(state.session)
-        self._present_restore_report(report)
-        return report
+        with self._bus.origin(EventOrigin(kind="system")):
+            self._startup_svc.restore_startup(state.startup)
+            report = self._workspace_svc.apply_session(state.session)
+            self._present_restore_report(report)
+            return report
 
     # -- lifecycle façade (runtime startup / MainWindow close) ---------------
 

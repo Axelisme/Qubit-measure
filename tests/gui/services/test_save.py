@@ -13,6 +13,7 @@ from zcu_tools.gui.app.main.services.guard import SavePermit
 from zcu_tools.gui.app.main.services.save import SaveResultOutcome, SaveService
 from zcu_tools.gui.app.main.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
@@ -89,6 +90,33 @@ def test_start_save_data_resolves_path_to_actual_hdf5(
     # immediately, not via a later diagnostic).
     assert returned.endswith("meas_1.hdf5")
     assert svc._active_paths["tab"] == returned
+
+
+def test_save_terminal_restores_agent_origin_without_operation_id(
+    qapp, tmp_path: Path
+) -> None:  # noqa: ARG001
+    svc, _state, bg = _make_service()
+    observed: list[EventMeta] = []
+    svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
+        TabInteractionChangedPayload,
+        lambda payload, meta: (
+            observed.append(meta)
+            if payload.fact is TabInteractionFact.SAVE_SUCCEEDED
+            else None
+        ),
+    )
+
+    with svc._bus.origin(EventOrigin(kind="agent", client_id="client-a")):  # type: ignore[attr-defined]
+        svc.start_save_data(SavePermit(tab_id="tab"), str(tmp_path / "save"))
+    on_done = bg.submit.call_args.kwargs["on_done"]
+    on_done(None)
+
+    assert observed == [
+        EventMeta(
+            seq=observed[0].seq,
+            origin=EventOrigin(kind="agent", client_id="client-a"),
+        )
+    ]
 
 
 def test_save_image_creates_parent_at_command_boundary(

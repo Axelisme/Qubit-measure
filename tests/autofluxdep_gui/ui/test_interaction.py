@@ -528,7 +528,9 @@ def test_main_window_close_removes_event_bus_subscriptions(app):
 def test_main_window_close_waits_for_live_operation(app):
     ctrl, win = app
     cancelled: list[bool] = []
-    token = ctrl._operation_handles.create(cancel_hook=lambda: cancelled.append(True))
+    token = ctrl._operation_handles.create(
+        cancel_hook=lambda: cancelled.append(True), origin=ctrl._bus.current_origin
+    )
     persist_all = MagicMock()
     ctrl.persist_all = persist_all  # type: ignore[method-assign]
     _dialogs(win).queue_confirm(True)
@@ -549,7 +551,9 @@ def test_main_window_close_waits_for_live_operation(app):
 
 def test_pending_live_operation_close_prompt_is_not_duplicated(app):
     ctrl, win = app
-    token = ctrl._operation_handles.create(cancel_hook=lambda: None)
+    token = ctrl._operation_handles.create(
+        cancel_hook=lambda: None, origin=ctrl._bus.current_origin
+    )
     dialogs = PendingConfirmPresenter()
     win._dialog_presenter = dialogs
 
@@ -578,7 +582,8 @@ def test_running_close_requests_terminal_stop_then_closes_after_run_done(
     stop_reasons: list[str] = []
     perform_close = MagicMock()
     token = ctrl._operation_handles.create(
-        cancel_hook=lambda: stop_reasons.append("cancelled")
+        cancel_hook=lambda: stop_reasons.append("cancelled"),
+        origin=ctrl._bus.current_origin,
     )
     ctrl._active_run_token = token
     _dialogs(win).queue_confirm(True)
@@ -627,7 +632,9 @@ def test_paused_close_finalizes_stopped_then_closes(app, monkeypatch):
 def test_force_close_prompt_only_closes_when_force_button_clicked(app, monkeypatch):
     ctrl, win = app
     perform_close = MagicMock()
-    token = ctrl._operation_handles.create(cancel_hook=lambda: None)
+    token = ctrl._operation_handles.create(
+        cancel_hook=lambda: None, origin=ctrl._bus.current_origin
+    )
     ctrl._active_run_token = token
     win._close_after_run_terminal = True
     monkeypatch.setattr(win, "_perform_close", perform_close)

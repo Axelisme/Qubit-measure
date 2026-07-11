@@ -127,7 +127,7 @@ def build_app_services(
     # OperationRunner: the kind-agnostic lifecycle mechanism (ADR-0026 §1).
     # Shared by run / FIT-analyze / post-analyze / device ops. Interactive analyze
     # does not use runner (main-thread-user-paced, stage2c_spec.md).
-    runner = OperationRunner(operation_gate, handles, progress, background)
+    runner = OperationRunner(operation_gate, handles, progress, background, bus)
     session = build_session_services(
         state=state,
         bus=bus,

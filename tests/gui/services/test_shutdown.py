@@ -6,6 +6,7 @@ drives OperationHandles (cancel_all / poll), not the exclusion gate (ADR-0019)."
 from __future__ import annotations
 
 import pytest
+from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
@@ -39,7 +40,9 @@ def test_waits_until_a_cancellable_operation_self_settles() -> None:
     handles = OperationHandles()
     clock = _FakeClock()
     hook_called: list[bool] = []
-    token = handles.create(cancel_hook=lambda: hook_called.append(True))
+    token = handles.create(
+        cancel_hook=lambda: hook_called.append(True), origin=EventOrigin(kind="user")
+    )
     coord = _coordinator(handles, clock)
 
     coord.begin()
@@ -56,7 +59,7 @@ def test_times_out_when_an_operation_never_settles() -> None:
     # only the deadline ends the wait.
     handles = OperationHandles()
     clock = _FakeClock()
-    handles.create()  # no stop_event
+    handles.create(origin=EventOrigin(kind="user"))  # no stop_event
     coord = _coordinator(handles, clock, timeout=5.0)
 
     coord.begin()
@@ -70,7 +73,7 @@ def test_times_out_when_an_operation_never_settles() -> None:
 def test_begin_is_idempotent_while_active() -> None:
     handles = OperationHandles()
     clock = _FakeClock()
-    handles.create(cancel_hook=lambda: None)
+    handles.create(cancel_hook=lambda: None, origin=EventOrigin(kind="user"))
     coord = _coordinator(handles, clock)
 
     coord.begin()

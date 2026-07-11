@@ -421,7 +421,8 @@ class DeviceService(QObject):
         self._state.put_device(
             replace(initial, status=DeviceStatus.CONNECTING, error=None)
         )
-        self._emit_device_changed(name)
+        with self._bus.origin(self._handles.event_origin(token)):
+            self._emit_device_changed(name)
         return token
 
     def start_reconnect_device(self, name: str) -> int:
@@ -511,7 +512,8 @@ class DeviceService(QObject):
         self._state.put_device(
             replace(current, status=DeviceStatus.DISCONNECTING, error=None)
         )
-        self._emit_device_changed(name)
+        with self._bus.origin(self._handles.event_origin(token)):
+            self._emit_device_changed(name)
         return token
 
     def start_setup_device(self, req: SetupDeviceRequest) -> int:
@@ -611,8 +613,9 @@ class DeviceService(QObject):
         self._state.put_device(
             replace(current, status=DeviceStatus.SETTING_UP, error=None)
         )
-        self._emit_device_changed(name)
-        self._bus.emit(DeviceSetupStartedPayload(name=name))
+        with self._bus.origin(self._handles.event_origin(token)):
+            self._emit_device_changed(name)
+            self._bus.emit(DeviceSetupStartedPayload(name=name))
         return token
 
     def cancel_device_operation(self, name: str) -> None:

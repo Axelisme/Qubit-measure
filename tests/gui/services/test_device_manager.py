@@ -86,9 +86,10 @@ def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(gate, handles, progress, bg)
+    bus = EventBus()
+    runner = OperationRunner(gate, handles, progress, bg, bus)
     svc = DeviceService(
-        EventBus(),
+        bus,
         State(MagicMock()),
         gate,
         bg,
@@ -181,9 +182,10 @@ def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(gate, handles, progress, bg)
+    bus = EventBus()
+    runner = OperationRunner(gate, handles, progress, bg, bus)
     svc = DeviceService(
-        EventBus(),
+        bus,
         State(MagicMock()),
         gate,
         bg,

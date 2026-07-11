@@ -105,7 +105,7 @@ from zcu_tools.gui.app.autofluxdep.tools import Tools
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.cfg import CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.event_bus import BasePayload, EventOrigin
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.events import PredictorChangedPayload
@@ -254,6 +254,7 @@ class Controller(SessionControllerMixin):
             self._operation_handles,
             self._progress_svc,
             self._background_svc,
+            bus,
         )
         session = build_session_services(
             state=state,
@@ -474,6 +475,10 @@ class Controller(SessionControllerMixin):
 
     def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
         """Apply a persisted workflow snapshot, rejecting only invalid nodes."""
+        with self._bus.origin(EventOrigin(kind="system")):
+            return self._restore_persisted_state(state)
+
+    def _restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
         rejected: list[RestoreIssue] = []
         predictor_issue: RestoreIssue | None = None
         restored_predictor = False
@@ -1020,7 +1025,10 @@ class Controller(SessionControllerMixin):
         if not session.request_pause():
             return False
         logger.info("pause requested (next boundary after flux idx %d)", self._cur_idx)
-        self._bus.emit(RunPauseRequestedPayload())
+        token = self._active_run_token
+        assert token is not None
+        with self._bus.origin(self._operation_handles.event_origin(token)):
+            self._bus.emit(RunPauseRequestedPayload())
         return True
 
     def continue_run(self) -> int:
@@ -1029,7 +1037,8 @@ class Controller(SessionControllerMixin):
         if session is None or session.status is not RunSessionStatus.PAUSED:
             raise RuntimeError("autofluxdep run is not paused")
         token = self._begin_run_segment(session, continuing=True)
-        self._bus.emit(RunContinuedPayload(next_flux_idx=session.next_flux_idx))
+        with self._bus.origin(self._operation_handles.event_origin(token)):
+            self._bus.emit(RunContinuedPayload(next_flux_idx=session.next_flux_idx))
         return token
 
     def _enabled_nodes(self) -> list[PlacedNode]:
@@ -1055,13 +1064,28 @@ class Controller(SessionControllerMixin):
 
     def _emit_point_done_on_main(self, idx: int) -> None:
         self._cur_idx = idx
-        self._bus.emit(PointDonePayload(idx=idx))
+        token = self._active_run_token
+        if token is None:
+            self._bus.emit(PointDonePayload(idx=idx))
+            return
+        with self._bus.origin(self._operation_handles.event_origin(token)):
+            self._bus.emit(PointDonePayload(idx=idx))
 
     def _emit_node_entered_on_main(self, name: str, idx: int) -> None:
-        self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
+        token = self._active_run_token
+        if token is None:
+            self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
+            return
+        with self._bus.origin(self._operation_handles.event_origin(token)):
+            self._bus.emit(NodeEnteredPayload(name=name, idx=idx))
 
     def _emit_predictor_changed_on_main(self) -> None:
-        self._bus.emit(PredictorChangedPayload())
+        token = self._active_run_token
+        if token is None:
+            self._bus.emit(PredictorChangedPayload())
+            return
+        with self._bus.origin(self._operation_handles.event_origin(token)):
+            self._bus.emit(PredictorChangedPayload())
 
     def _allocate_results(self, flux: Any) -> dict[str, Any]:
         """Pre-allocate each user provider's sweep Result on the main thread.
@@ -1101,7 +1125,8 @@ class Controller(SessionControllerMixin):
             self._clear_run_products()
             raise
         token = self._begin_run_segment(session, continuing=False)
-        self._bus.emit(RunStartedPayload())
+        with self._bus.origin(self._operation_handles.event_origin(token)):
+            self._bus.emit(RunStartedPayload())
         return token
 
     def _create_run_session(self, notify: Notify | None) -> RunSession:

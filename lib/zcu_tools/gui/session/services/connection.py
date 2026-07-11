@@ -181,21 +181,24 @@ class SoCConnectionService(QObject):
         # no cancellation point, so the token is a lease handle only (cancel_hook
         # None); it is settled + released in the finally regardless of outcome.
         self._gate.ensure_can_start(OperationKind.SOC_CONNECT, resource_id=None)
-        token = self._handles.create(cancel_hook=None)
+        token = self._handles.create(cancel_hook=None, origin=self._bus.current_origin)
         self._gate.register(token, OperationKind.SOC_CONNECT, owner_id="soc")
         self._active_token = token
         self._pending_is_mock = is_mock
-        try:
-            soc, soccfg = self._run_connect_work(req)
-            self._apply_connection(soc, soccfg, is_mock)
-            self._handles.settle(token, OperationOutcome("finished"))
-            return soc, soccfg
-        except Exception as exc:
-            self._handles.settle(token, OperationOutcome("failed", _format_error(exc)))
-            raise
-        finally:
-            self._active_token = None
-            self._gate.release(token)
+        with self._bus.origin(self._handles.event_origin(token)):
+            try:
+                soc, soccfg = self._run_connect_work(req)
+                self._apply_connection(soc, soccfg, is_mock)
+                self._handles.settle(token, OperationOutcome("finished"))
+                return soc, soccfg
+            except Exception as exc:
+                self._handles.settle(
+                    token, OperationOutcome("failed", _format_error(exc))
+                )
+                raise
+            finally:
+                self._active_token = None
+                self._gate.release(token)
 
     def start_connect(self, req: ConnectRequest) -> int:
         """Start a SoC connect; outcome always arrives via signals.

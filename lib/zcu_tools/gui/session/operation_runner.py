@@ -26,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.operation_handles import (
     NO_RESULT,
     CancelHook,
@@ -125,11 +126,13 @@ class OperationRunner:
         handles: OperationHandles,
         progress: ProgressHub,
         bg: BackgroundExecutor,
+        bus: BaseEventBus,
     ) -> None:
         self._gate = gate
         self._handles = handles
         self._progress = progress
         self._bg = bg
+        self._bus = bus
 
     def begin(self, spec: OperationSpec) -> int:
         """Synchronously open the operation and submit the work.
@@ -153,7 +156,9 @@ class OperationRunner:
                 spec.exclusion.kind, resource_id=spec.exclusion.resource_id
             )
 
-        token = self._handles.create(cancel_hook=spec.cancel_hook)
+        token = self._handles.create(
+            cancel_hook=spec.cancel_hook, origin=self._bus.current_origin
+        )
 
         if spec.exclusion is not None:
             self._gate.register(
@@ -176,11 +181,13 @@ class OperationRunner:
                 lambda: spec.work(factory),
                 run_in_pool=spec.run_in_pool,
                 on_done=lambda r: self._deliver_terminal(
+                    token,
                     spec,
                     settle,
                     BgResult(ok=True, result=r, error=None),
                 ),
                 on_error=lambda e: self._deliver_terminal(
+                    token,
                     spec,
                     settle,
                     BgResult(ok=False, result=NO_RESULT, error=e),
@@ -195,16 +202,18 @@ class OperationRunner:
 
     def _deliver_terminal(
         self,
+        token: int,
         spec: OperationSpec,
         settle: SettleFn,
         bg: BgResult,
     ) -> None:
         """Run the policy terminal callback without letting it escape Qt delivery."""
-        try:
-            spec.on_terminal(bg, settle)
-        except Exception as exc:
-            logger.exception("operation terminal callback failed")
-            settle(OperationOutcome("failed", str(exc)))
+        with self._bus.origin(self._handles.event_origin(token)):
+            try:
+                spec.on_terminal(bg, settle)
+            except Exception as exc:
+                logger.exception("operation terminal callback failed")
+                settle(OperationOutcome("failed", str(exc)))
 
     def _make_settle(self, spec: OperationSpec, token: int) -> SettleFn:
         """Build the call-once settle closure for this operation.

@@ -27,6 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     RunRequest,
 )
+from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -41,6 +42,7 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
@@ -160,17 +162,62 @@ def _make_run_service(
     state: State,
     *,
     fail_submit: bool = False,
+    mock_emit: bool = True,
 ) -> tuple[RunService, OperationGate, _FakeBg, OperationHandles]:
     bg = _FakeBg(fail_submit=fail_submit)
     bus = EventBus()
-    bus.emit = MagicMock()  # type: ignore[method-assign]
+    if mock_emit:
+        bus.emit = MagicMock()  # type: ignore[method-assign]
     gate = OperationGate()
     handles = OperationHandles()
     writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
-    runner = OperationRunner(gate, handles, progress, bg)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, bg, bus)  # type: ignore[arg-type]
     svc = RunService(state, runner, bus, handles, writeback)
     return svc, gate, bg, handles
+
+
+@pytest.mark.parametrize(
+    ("origin", "expected_kind"),
+    [
+        (EventOrigin(kind="user"), "user"),
+        (EventOrigin(kind="agent", client_id="client-a"), "agent"),
+    ],
+)
+def test_run_started_and_terminal_events_keep_operation_origin(
+    origin: EventOrigin, expected_kind: str
+) -> None:
+    state, tab_id, adapter = _make_state()
+    svc, _gate, bg, _handles = _make_run_service(state, mock_emit=False)
+    observed: list[tuple[object, EventMeta]] = []
+    svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
+        RunStartedPayload, lambda payload, meta: observed.append((payload, meta))
+    )
+    svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
+        RunFinishedPayload, lambda payload, meta: observed.append((payload, meta))
+    )
+
+    with svc._bus.origin(origin):  # type: ignore[attr-defined]
+        token = svc.start_run(_make_permit(state, tab_id, adapter))
+    assert bg.last_on_done is not None
+    bg.last_on_done(object())
+
+    assert [type(payload) for payload, _meta in observed] == [
+        RunStartedPayload,
+        RunFinishedPayload,
+    ]
+    assert [meta.origin.kind for _payload, meta in observed] == [
+        expected_kind,
+        expected_kind,
+    ]
+    assert [meta.origin.operation_id for _payload, meta in observed] == [
+        str(token),
+        str(token),
+    ]
+    assert [meta.origin.client_id for _payload, meta in observed] == [
+        origin.client_id,
+        origin.client_id,
+    ]
 
 
 # ---------------------------------------------------------------------------

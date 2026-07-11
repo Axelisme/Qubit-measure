@@ -16,12 +16,17 @@ from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
-from zcu_tools.gui.session.events import DeviceChangedPayload
+from zcu_tools.gui.session.events import (
+    DeviceChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
+)
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
@@ -92,10 +97,11 @@ def _make_svc(
     resolved_gate = gate or OperationGate()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(resolved_gate, handles, progress, bg)
+    bus = EventBus()
+    runner = OperationRunner(resolved_gate, handles, progress, bg, bus)
     return (
         DeviceService(
-            EventBus(),
+            bus,
             State(MagicMock()),
             resolved_gate,
             bg,
@@ -160,6 +166,40 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     drop_loop.exec()
     device.close.assert_called_once_with()
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.MEMORY_ONLY  # type: ignore[union-attr]
+
+
+def test_device_setup_started_and_finished_keep_operation_origin(qapp) -> None:
+    svc, device = _make_svc()
+    _connect(svc, _req())
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
+    observed: list[tuple[object, EventMeta]] = []
+    svc._bus.subscribe_with_meta(
+        DeviceSetupStartedPayload,
+        lambda payload, meta: observed.append((payload, meta)),
+    )
+    svc._bus.subscribe_with_meta(
+        DeviceSetupFinishedPayload,
+        lambda payload, meta: observed.append((payload, meta)),
+    )
+    loop = QEventLoop()
+    svc.setup_finished.connect(lambda _name: loop.quit())
+
+    with svc._bus.origin(EventOrigin(kind="agent", client_id="client-a")):
+        token = svc.start_setup_device(
+            SetupDeviceRequest(
+                name="dev1", info=FakeDeviceInfo(address="addr", value=1.0)
+            )
+        )
+    loop.exec()
+
+    assert [type(payload) for payload, _meta in observed] == [
+        DeviceSetupStartedPayload,
+        DeviceSetupFinishedPayload,
+    ]
+    assert [meta.origin for _payload, meta in observed] == [
+        EventOrigin(kind="agent", client_id="client-a", operation_id=str(token)),
+        EventOrigin(kind="agent", client_id="client-a", operation_id=str(token)),
+    ]
 
 
 def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp):
@@ -250,10 +290,11 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
     resolved_gate = OperationGate()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(resolved_gate, handles, progress, bg_svc)
+    bus = EventBus()
+    runner = OperationRunner(resolved_gate, handles, progress, bg_svc, bus)
     registry = FakeDeviceRegistry()
     svc = DeviceService(
-        EventBus(),
+        bus,
         State(MagicMock()),
         resolved_gate,
         bg_svc,
@@ -435,7 +476,7 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
     resolved_gate = OperationGate()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(resolved_gate, handles, progress, bg_svc)
+    runner = OperationRunner(resolved_gate, handles, progress, bg_svc, bus)
     svc = DeviceService(
         bus,
         State(MagicMock()),
@@ -770,10 +811,11 @@ def _make_multi_svc(
     resolved_gate = gate or OperationGate()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(resolved_gate, handles, progress, bg)
+    bus = EventBus()
+    runner = OperationRunner(resolved_gate, handles, progress, bg, bus)
     registry = FakeDeviceRegistry()
     svc = DeviceService(
-        EventBus(),
+        bus,
         State(MagicMock()),
         resolved_gate,
         bg,
@@ -947,10 +989,11 @@ def _make_svc_with_fake_registry(
     resolved_gate = gate or OperationGate()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(resolved_gate, handles, progress, bg)
+    bus = EventBus()
+    runner = OperationRunner(resolved_gate, handles, progress, bg, bus)
     registry = FakeDeviceRegistry()
     svc = DeviceService(
-        EventBus(),
+        bus,
         State(MagicMock()),
         resolved_gate,
         bg,

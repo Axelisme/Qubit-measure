@@ -153,8 +153,14 @@ class AnalyzeService(_StagedAnalyzeService):
         """The user finished the interactive pick (Done): build the result and run
         the SAME terminal path as a FIT analyze (writeback compute + State update +
         lease release + events), so the agent's analyze-result poll resolves."""
-        self._interactive_tabs.discard(tab_id)
-        self._on_analyze_finished(tab_id, session.finish())
+        token = self._active_tokens.get(tab_id)
+        if token is None:
+            self._interactive_tabs.discard(tab_id)
+            self._on_analyze_finished(tab_id, session.finish())
+            return
+        with self._bus.origin(self._handles.event_origin(token)):
+            self._interactive_tabs.discard(tab_id)
+            self._on_analyze_finished(tab_id, session.finish())
 
     def is_interactive_active(self, tab_id: str) -> bool:
         """Whether ``tab_id`` currently holds an in-flight INTERACTIVE picker
@@ -187,16 +193,18 @@ class AnalyzeService(_StagedAnalyzeService):
         """
         if tab_id not in self._interactive_tabs:
             return False
-        self._interactive_tabs.discard(tab_id)
-        logger.info("cancel_interactive: tab_id=%r", tab_id)
-        self._state.set_tab_analyzing(tab_id, False)
-        self._release(tab_id, OperationOutcome("cancelled"))
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.PRIMARY_ANALYZE_CANCELLED,
+        token = self._active_tokens[tab_id]
+        with self._bus.origin(self._handles.event_origin(token)):
+            self._interactive_tabs.discard(tab_id)
+            logger.info("cancel_interactive: tab_id=%r", tab_id)
+            self._state.set_tab_analyzing(tab_id, False)
+            self._release(tab_id, OperationOutcome("cancelled"))
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id=tab_id,
+                    fact=TabInteractionFact.PRIMARY_ANALYZE_CANCELLED,
+                )
             )
-        )
         return True
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:

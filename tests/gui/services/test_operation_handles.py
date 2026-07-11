@@ -15,14 +15,34 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 
 import pytest
+from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.operation_handles import (
     AwaitResult,
+    CancelHook,
     OperationChannel,
-    OperationHandles,
     OperationOutcome,
 )
+from zcu_tools.gui.session.operation_handles import (
+    OperationHandles as _OperationHandles,
+)
+
+_USER_ORIGIN = EventOrigin(kind="user")
+
+
+class OperationHandles(_OperationHandles):
+    """Existing lifecycle tests use a fixed explicit origin fixture."""
+
+    def create(
+        self,
+        cancel_hook: CancelHook | None = None,
+        *,
+        origin: EventOrigin = _USER_ORIGIN,
+    ) -> int:
+        return super().create(cancel_hook, origin=origin)
+
 
 # ---------------------------------------------------------------------------
 # OperationHandles basics (ADR-0019)
@@ -34,6 +54,24 @@ def test_create_mints_unique_increasing_tokens() -> None:
     assert handles.create() == 1
     assert handles.create() == 2
     assert handles.create() == 3
+
+
+def test_event_origin_is_retained_for_live_and_done_operation() -> None:
+    handles = OperationHandles()
+    captured = EventOrigin(kind="agent", client_id="client-a")
+    token = handles.create(origin=captured)
+    expected = EventOrigin(kind="agent", client_id="client-a", operation_id=str(token))
+
+    assert handles.event_origin(token) == expected
+    handles.settle(token, OperationOutcome("finished"))
+    assert handles.event_origin(token) == expected
+
+
+def test_event_origin_rejects_unknown_operation() -> None:
+    handles = OperationHandles()
+
+    with pytest.raises(KeyError, match="unknown or evicted"):
+        handles.event_origin(999)
 
 
 # ---------------------------------------------------------------------------
@@ -566,11 +604,11 @@ def test_settle_window_keeps_token_reachable() -> None:
     cancelled/failed terminal). This hand-constructs both in-flight windows."""
     handles = OperationHandles()
     token = handles.create()
-    ch = handles._live[token]
-    ch.settle(OperationOutcome("cancelled", "stopped"))
+    record = handles._live[token]
+    record.channel.settle(OperationOutcome("cancelled", "stopped"))
 
     # Window 1: published to _done, not yet retracted from _live (in BOTH).
-    handles._done[token] = ch
+    handles._done[token] = record
     assert handles.poll(token) == OperationOutcome("cancelled", "stopped")
     r = handles.await_outcome(token, timeout=0.5)
     assert r is not None and r.reason == "completed"

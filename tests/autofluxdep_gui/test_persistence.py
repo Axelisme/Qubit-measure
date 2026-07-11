@@ -9,6 +9,10 @@ from typing import Any, cast
 
 import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
+from zcu_tools.gui.app.autofluxdep.events.workflow import (
+    FluxChangedPayload,
+    WorkflowChangedPayload,
+)
 from zcu_tools.gui.app.autofluxdep.services import (
     APP_STATE_VERSION,
     AppPersistedState,
@@ -26,6 +30,7 @@ from zcu_tools.gui.app.autofluxdep.services import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
 from zcu_tools.gui.session.services.startup import (
     StartupConnectionRequest,
@@ -318,6 +323,31 @@ def test_restore_invalid_predictor_reports_issue_without_rejecting_workflow():
     assert report.predictor_issue.subject == "predictor"
     assert ctrl.state.node_names() == ["freq_scan"]
     assert ctrl.predictor_control.get_predictor_info() is None
+
+
+def test_restore_workflow_events_use_system_origin() -> None:
+    ctrl = build_core()
+    observed: list[EventMeta] = []
+    ctrl._bus.subscribe_with_meta(
+        WorkflowChangedPayload, lambda _payload, meta: observed.append(meta)
+    )
+    ctrl._bus.subscribe_with_meta(
+        FluxChangedPayload, lambda _payload, meta: observed.append(meta)
+    )
+    state = AppPersistedState(
+        workflow=PersistedWorkflow(
+            nodes=(PersistedNode(type_name="qubit_freq", name="freq_scan"),)
+        ),
+        flux=PersistedFluxSweep(values=(0.0,)),
+    )
+
+    ctrl.restore_persisted_state(state)
+
+    assert len(observed) == 2
+    assert [meta.origin for meta in observed] == [
+        EventOrigin(kind="system"),
+        EventOrigin(kind="system"),
+    ]
 
 
 def test_restore_without_predictor_defaults_none_and_default_dialog_state(

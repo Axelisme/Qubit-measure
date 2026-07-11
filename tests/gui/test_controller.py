@@ -42,6 +42,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
 )
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.routing import has_current_container
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
@@ -88,7 +89,9 @@ def _make_view() -> MagicMock:
 class ControllerFixture:
     """Holds all objects to prevent premature GC during tests."""
 
-    def __init__(self, cache_dir=None, project_root=None) -> None:
+    def __init__(
+        self, cache_dir=None, project_root=None, *, mock_emit: bool = True
+    ) -> None:
         self.state = State(_make_ctx())
         self.registry = Registry()
         register_all(self.registry)
@@ -100,7 +103,8 @@ class ControllerFixture:
         from zcu_tools.gui.event_bus import BaseEventBus
 
         self.bus = BaseEventBus()
-        self.bus.emit = MagicMock()
+        if mock_emit:
+            self.bus.emit = MagicMock()
         self.ctrl = Controller(
             state=self.state,
             registry=self.registry,
@@ -341,7 +345,9 @@ def test_can_cancel_active_operation_false_for_soc_connect(cf):
     we mock the op state directly).
     """
     # Mint an op without a cancel hook (simulates connect: cancel_hook=None).
-    token = cf.ctrl._operation_handles.create(cancel_hook=None)
+    token = cf.ctrl._operation_handles.create(
+        cancel_hook=None, origin=cf.ctrl._bus.current_origin
+    )
     # Force the controller's run taxonomy to skip run/analyze and reach
     # "device" via get_active_device_operations() — instead, directly inject
     # a live operation and verify has_cancel_hook on the handles.
@@ -825,6 +831,24 @@ def test_persist_then_restore_app_state(tmp_path):
     assert startup.ip == "10.0.0.2"
     assert startup.port == 7000
     assert cf_restored.state.exp_context.result_dir == "/tmp/zcu_result"
+
+
+def test_restore_tab_events_use_system_origin(tmp_path) -> None:
+    source = ControllerFixture(cache_dir=tmp_path / "source", mock_emit=False)
+    source.ctrl.new_tab("fake")
+    persisted = source.ctrl.capture_persisted_state()
+    restored = ControllerFixture(cache_dir=tmp_path / "restored", mock_emit=False)
+    observed: list[EventMeta] = []
+    from zcu_tools.gui.app.main.events.tab import TabAddedPayload
+
+    restored.bus.subscribe_with_meta(
+        TabAddedPayload, lambda _payload, meta: observed.append(meta)
+    )
+
+    restored.ctrl.restore_persisted_state(persisted)
+
+    assert len(observed) == 1
+    assert observed[0].origin == EventOrigin(kind="system")
 
 
 def test_restore_corrupt_file_is_visible_to_user(cf, tmp_path):

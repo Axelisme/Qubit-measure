@@ -41,8 +41,9 @@ import threading
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
-from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.event_bus import EventOrigin, EventSubscriptions
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -88,9 +89,10 @@ class SubscriptionCtx:
     (e.g. CfgEditor session ids) by subclassing and declaring more ``__slots__``.
     """
 
-    __slots__ = ("subscribed",)
+    __slots__ = ("client_id", "subscribed")
 
     def __init__(self) -> None:
+        self.client_id = uuid4().hex
         self.subscribed: set[str] = set()
 
 
@@ -376,6 +378,8 @@ class RemoteControlServiceBase:
 
     def _dispatch_on_main(self, link: ClientLink, rid, method, spec, params) -> None:
         holder: dict[str, object] = {}
+        bus = self._get_bus()
+        request_origin = EventOrigin(kind="agent", client_id=_ctx(link).client_id)
 
         if spec.off_main_thread:
             # Blocking handler (e.g. operation.await): run on THIS IO worker
@@ -384,7 +388,8 @@ class RemoteControlServiceBase:
             # the worker signal it awaits). It must only do thread-safe waiting
             # and must not touch the guard / post-success seams, so neither runs.
             try:
-                holder["result"] = spec.handler(self, params)
+                with bus.origin(request_origin):
+                    holder["result"] = spec.handler(self, params)
             except RemoteError as exc:
                 holder["remote_error"] = exc
             except ExpectedError as exc:
@@ -398,18 +403,19 @@ class RemoteControlServiceBase:
             def _run() -> None:
                 # Runs on the Qt main thread (where State + VersionTable live), so
                 # the guard's compare-and-act is atomic against any other GUI write.
-                try:
-                    self._guard(params)
-                    holder["result"] = spec.handler(self, params)
-                except RemoteError as exc:
-                    holder["remote_error"] = exc
-                except ExpectedError as exc:
-                    _store_expected_error(holder, exc, origin="handler")
-                except Exception as exc:  # noqa: BLE001 — Controller error envelope
-                    logger.exception("handler raised: %s", exc)
-                    holder["controller_error"] = exc
-                finally:
-                    done.set()
+                with bus.origin(request_origin):
+                    try:
+                        self._guard(params)
+                        holder["result"] = spec.handler(self, params)
+                    except RemoteError as exc:
+                        holder["remote_error"] = exc
+                    except ExpectedError as exc:
+                        _store_expected_error(holder, exc, origin="handler")
+                    except Exception as exc:  # noqa: BLE001 — Controller error envelope
+                        logger.exception("handler raised: %s", exc)
+                        holder["controller_error"] = exc
+                    finally:
+                        done.set()
 
             self._dispatcher.invoke.emit(_run)
             if not done.wait(timeout=spec.timeout_seconds):

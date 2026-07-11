@@ -72,9 +72,10 @@ def _make_svc(driver: object | None = None) -> DeviceService:
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    runner = OperationRunner(gate, handles, progress, bg)
+    bus = EventBus()
+    runner = OperationRunner(gate, handles, progress, bg, bus)
     return DeviceService(
-        EventBus(),
+        bus,
         State(MagicMock()),
         gate,
         bg,

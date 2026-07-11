@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 
 from qtpy.QtCore import QCoreApplication
+from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
 from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
@@ -45,7 +46,9 @@ def test_begin_waits_then_closes_when_operation_settles(qapp) -> None:
     del qapp
     handles = OperationHandles()
     hook_called: list[bool] = []
-    token = handles.create(cancel_hook=lambda: hook_called.append(True))
+    token = handles.create(
+        cancel_hook=lambda: hook_called.append(True), origin=EventOrigin(kind="user")
+    )
     driver = QtShutdownDriver(handles)
     closed: list[bool] = []
 
@@ -61,7 +64,7 @@ def test_timeout_forces_close(qapp) -> None:
     del qapp
     handles = OperationHandles()
     # A connect has no stop_event → never settles → only the timeout closes it.
-    handles.create()
+    handles.create(origin=EventOrigin(kind="user"))
     driver = QtShutdownDriver(handles, timeout=0.05)
     closed: list[bool] = []
 
