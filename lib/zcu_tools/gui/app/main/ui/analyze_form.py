@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.widgets.cfg.fields import (
-    connect_value_widget,
+    connect_committed_value_widget,
     make_value_widget,
     read_value_widget,
     write_value_widget,
@@ -160,7 +160,7 @@ class AnalyzeFormWidget(QWidget):
         return self._params_cls is not None
 
     def _connect_widget(self, widget: QWidget) -> None:
-        connect_value_widget(widget, self._emit_params_changed)
+        connect_committed_value_widget(widget, self._emit_params_changed)
 
     def _emit_params_changed(self, *_: object) -> None:
         if self._hydrating:

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — experiment-tab view boundary
+**Last updated:** 2026-07-11 — analyze edit commit boundary
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -96,6 +96,9 @@ while `MainWindowEventCoordinator` owns EventBus subscription and payload routin
 The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
 which refresh sequence a payload requires, but the window keeps widget ownership
 and concrete rendering methods.
+Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
+not trigger interaction refresh; choice, checkbox, and numeric controls retain
+immediate value-change commits. The shared cfg widget layer owns this signal policy.
 Tab interaction/content payloads carry mandatory closed domain facts. Producers
 describe lifecycle outcomes or committed resources; the coordinator owns the
 ordered reaction matrix and fetches one snapshot only when a reaction needs it.

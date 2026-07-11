@@ -209,6 +209,16 @@ def connect_value_widget(widget: QWidget, callback: Callable[..., object]) -> No
     raise TypeError(f"Unsupported value widget {type(widget).__name__}")
 
 
+def connect_committed_value_widget(
+    widget: QWidget, callback: Callable[..., object]
+) -> None:
+    """Connect committed text edits and immediate non-text value changes."""
+    if isinstance(widget, QLineEdit):
+        widget.editingFinished.connect(callback)
+        return
+    connect_value_widget(widget, callback)
+
+
 def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     """Build an input widget from a ScalarSpec and initial value."""
     return make_value_widget(

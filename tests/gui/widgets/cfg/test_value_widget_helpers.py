@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 from zcu_tools.gui.widgets.cfg.fields import (
+    connect_committed_value_widget,
     connect_value_widget,
     read_value_widget,
     write_value_widget,
@@ -53,6 +54,41 @@ def test_write_and_connect_combo_widget(qapp) -> None:  # noqa: ARG001
 
     assert read_value_widget(widget, str) == "b"
     callback.assert_called_once()
+
+
+def test_committed_value_widget_defers_line_edit_callback(qapp) -> None:  # noqa: ARG001
+    widget = QLineEdit()
+    callback = MagicMock()
+    connect_committed_value_widget(widget, callback)
+
+    widget.setText("partial")
+    callback.assert_not_called()
+
+    widget.editingFinished.emit()
+    callback.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("factory", "change"),
+    [
+        (lambda: QCheckBox(), lambda widget: widget.setChecked(True)),
+        (lambda: QSpinBox(), lambda widget: widget.setValue(1)),
+        (
+            lambda: QComboBox(),
+            lambda widget: (widget.addItems(["a", "b"]), widget.setCurrentIndex(1)),
+        ),
+    ],
+)
+def test_committed_value_widget_keeps_non_text_changes_immediate(
+    qapp, factory, change
+) -> None:  # noqa: ARG001
+    widget = factory()
+    callback = MagicMock()
+    connect_committed_value_widget(widget, callback)
+
+    change(widget)
+
+    callback.assert_called()
 
 
 def test_value_widget_helpers_reject_unsupported_widget(qapp) -> None:  # noqa: ARG001

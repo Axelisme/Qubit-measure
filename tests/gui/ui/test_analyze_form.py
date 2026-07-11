@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 import pytest
+from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.adapter import ParamMeta
 from zcu_tools.gui.app.main.ui.analyze_form import AnalyzeFormWidget
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
@@ -135,12 +136,25 @@ def test_analyze_form_user_edit_emits_params_changed(qapp):  # noqa: ARG001
     assert emitted[-1] == _TestParams(threshold=0.9, model="a")
 
 
+def test_analyze_form_text_edit_emits_only_when_committed(qapp):  # noqa: ARG001
+    form = AnalyzeFormWidget()
+    emitted: list[object] = []
+    form.populate(_OptionalParams(t0=None))
+    form.params_changed.connect(emitted.append)
+    edit = form.findChild(QLineEdit)
+    assert edit is not None
+
+    edit.setText("1.5")
+    assert emitted == []
+
+    edit.editingFinished.emit()
+    assert emitted == [_OptionalParams(t0=1.5)]
+
+
 # --- optional analyze fields (blank = None) --------------------------------
 
 
 def test_analyze_form_optional_blank_reads_none(qapp):  # noqa: ARG001
-    from qtpy.QtWidgets import QLineEdit
-
     form = AnalyzeFormWidget()
     form.populate(_OptionalParams(t0=None))
     # an optional float renders the "(none)" QLineEdit, starting empty
@@ -150,8 +164,6 @@ def test_analyze_form_optional_blank_reads_none(qapp):  # noqa: ARG001
 
 
 def test_analyze_form_optional_typed_value_reads_float(qapp):  # noqa: ARG001
-    from qtpy.QtWidgets import QLineEdit
-
     form = AnalyzeFormWidget()
     form.populate(_OptionalParams(t0=None))
     edit = form.findChild(QLineEdit)
