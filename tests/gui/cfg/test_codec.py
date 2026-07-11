@@ -24,13 +24,35 @@ from zcu_tools.gui.cfg import (
     SessionCodecError,
     SweepSpec,
     SweepValue,
+    decode_eval_wire,
     raw_to_schema,
     schema_to_raw,
 )
 
 
+def test_decode_eval_wire_carriers() -> None:
+    assert decode_eval_wire({"__kind": "eval", "expr": "x + 1"}) == EvalValue(
+        expr="x + 1"
+    )
+    assert decode_eval_wire({"__kind": "direct", "value": 2}) is None
+    assert decode_eval_wire(3) is None
+
+
+def test_decode_eval_wire_returns_none_for_malformed_eval() -> None:
+    assert decode_eval_wire({"__kind": "eval", "expr": 1}) is None
+
+
 def _empty(spec: CfgSectionSpec) -> CfgSchema:
     return CfgSchema(spec=spec, value=CfgSectionValue(fields={}))
+
+
+def test_malformed_eval_scalar_restores_as_direct_raw_payload() -> None:
+    spec = CfgSectionSpec(fields={"freq": ScalarSpec(label="Freq", type=float)})
+    malformed = {"__kind": "eval", "expr": 123}
+
+    restored = raw_to_schema(_empty(spec), {"freq": malformed})
+
+    assert restored.value.fields["freq"] == DirectValue(malformed)
 
 
 def test_rejects_legacy_sweep_step_none():

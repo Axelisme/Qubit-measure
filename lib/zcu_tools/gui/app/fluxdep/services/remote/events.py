@@ -13,8 +13,6 @@ the RPC method(s) the client may call to obtain current state.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     FitChangedPayload,
@@ -25,51 +23,49 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
+from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.remote.events import EventSerializer, WirePayload, wire_event_name
 
 # Wire payload type: a JSON-friendly mapping (never None for fluxdep — every
 # event carries something useful, but the type stays Optional for parity).
-WirePayload = Mapping[str, object] | None
-Serializer = Callable[[Payload], WirePayload]
-
-
 # ---------------------------------------------------------------------------
 # Per-event serializers
 # ---------------------------------------------------------------------------
 
 
-def _ser_spectrum_added(payload: Payload) -> WirePayload:
+def _ser_spectrum_added(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, SpectrumAddedPayload)
     return {"name": payload.name, "requery": ["spectrum.list"]}
 
 
-def _ser_spectrum_removed(payload: Payload) -> WirePayload:
+def _ser_spectrum_removed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, SpectrumRemovedPayload)
     return {"name": payload.name, "requery": ["spectrum.list"]}
 
 
-def _ser_spectrum_changed(payload: Payload) -> WirePayload:
+def _ser_spectrum_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, SpectrumChangedPayload)
     return {"name": payload.name, "requery": ["spectrum.list"]}
 
 
-def _ser_active_spectrum_changed(payload: Payload) -> WirePayload:
+def _ser_active_spectrum_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, ActiveSpectrumChangedPayload)
     return {"name": payload.name}
 
 
-def _ser_selection_changed(payload: Payload) -> WirePayload:
+def _ser_selection_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, SelectionChangedPayload)
     del payload
     return {"requery": ["selection.pointcloud"]}
 
 
-def _ser_project_changed(payload: Payload) -> WirePayload:
+def _ser_project_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, ProjectChangedPayload)
     del payload
     return {"requery": ["project.info"]}
 
 
-def _ser_fit_changed(payload: Payload) -> WirePayload:
+def _ser_fit_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, FitChangedPayload)
     return {"has_result": payload.has_result, "requery": ["fit.result"]}
 
@@ -79,7 +75,7 @@ def _ser_fit_changed(payload: Payload) -> WirePayload:
 # ---------------------------------------------------------------------------
 
 
-EVENT_SERIALIZERS: dict[type[Payload], Serializer] = {
+EVENT_SERIALIZERS: dict[type[Payload], EventSerializer] = {
     SpectrumAddedPayload: _ser_spectrum_added,
     SpectrumRemovedPayload: _ser_spectrum_removed,
     SpectrumChangedPayload: _ser_spectrum_changed,
@@ -88,8 +84,3 @@ EVENT_SERIALIZERS: dict[type[Payload], Serializer] = {
     ProjectChangedPayload: _ser_project_changed,
     FitChangedPayload: _ser_fit_changed,
 }
-
-
-def wire_event_name(payload_type: type[Payload]) -> str:
-    """Map a fluxdep ``Payload`` type to its lowercase wire event name."""
-    return payload_type.EVENT.value

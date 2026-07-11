@@ -59,7 +59,6 @@ def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
     tab.post_figure = Figure()
     tab.post_analyze_param_instance = object()
     tab.writeback_items = [MagicMock()]
-    tab.applied_session_ids.add("md-1")
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
     save_path_version = state.version.get(f"tab:{tab_id}:save_path")
     svc, emit, writeback = _service(state)
@@ -75,7 +74,6 @@ def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
     assert tab.post_figure is None
     assert tab.post_analyze_param_instance is None
     assert tab.writeback_items == []
-    assert tab.applied_session_ids == set()
     writeback.teardown_tab_items.assert_called_once_with(tab_id)
     emit.assert_not_called()
     assert outcome.result_type == type(loaded).__name__

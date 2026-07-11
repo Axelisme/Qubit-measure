@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QBuffer, QIODevice, Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.widgets import widget_to_png_bytes
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
@@ -136,14 +137,7 @@ class MainDialogRegistry:
             raise FailedPreconditionError(
                 f"dialog {dialog_name.value!r} is not currently open"
             )
-        pixmap = dialog.grab()
-        buffer = QBuffer()
-        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-        if not pixmap.save(buffer, "PNG"):
-            raise RuntimeError(
-                f"Qt failed to encode {dialog_name.value!r} dialog as PNG"
-            )
-        return bytes(buffer.data().data())  # type: ignore[arg-type]
+        return widget_to_png_bytes(dialog, subject=f"{dialog_name.value!r} dialog")
 
 
 __all__ = ["MainDialogRegistry"]

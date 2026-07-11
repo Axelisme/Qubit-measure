@@ -1,6 +1,9 @@
-**Last updated:** 2026-07-11 — typed expected-error taxonomy
+**Last updated:** 2026-07-11 — public scalar type vocabulary
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
+
+`value_lookup.name_from_type()`是`int`/`float`/`str`/`bool` scalar type name的公開唯一owner；
+app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep 共用這層。
 

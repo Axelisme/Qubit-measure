@@ -6,17 +6,19 @@ from typing import Any, get_type_hints
 
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QCheckBox,
     QComboBox,
     QFormLayout,
     QLineEdit,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from zcu_tools.gui.widgets.cfg.fields import make_value_widget, read_value_widget
-from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+from zcu_tools.gui.widgets.cfg.fields import (
+    connect_value_widget,
+    make_value_widget,
+    read_value_widget,
+    write_value_widget,
+)
 
 from ..adapter.analyze_params import _resolve_field_info, reconstruct_params
 
@@ -141,19 +143,7 @@ class AnalyzeFormWidget(QWidget):
                 if widget is None:
                     continue
                 value = getattr(instance, binding.name)
-                if isinstance(widget, QComboBox):
-                    idx = widget.findText(str(value))
-                    if idx >= 0:
-                        widget.setCurrentIndex(idx)
-                elif isinstance(widget, QCheckBox):
-                    widget.setChecked(bool(value))
-                elif isinstance(widget, QSpinBox):
-                    widget.setValue(int(value))
-                elif isinstance(widget, TrimDoubleSpinBox):
-                    widget.setValue(float(value))
-                elif isinstance(widget, QLineEdit):
-                    # An optional field's None shows as the empty "(none)" state.
-                    widget.setText("" if value is None else str(value))
+                write_value_widget(widget, value)
         finally:
             self._hydrating = False
 
@@ -170,14 +160,7 @@ class AnalyzeFormWidget(QWidget):
         return self._params_cls is not None
 
     def _connect_widget(self, widget: QWidget) -> None:
-        if isinstance(widget, QComboBox):
-            widget.currentIndexChanged.connect(self._emit_params_changed)
-        elif isinstance(widget, QCheckBox):
-            widget.toggled.connect(self._emit_params_changed)
-        elif isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
-            widget.valueChanged.connect(self._emit_params_changed)
-        elif isinstance(widget, QLineEdit):
-            widget.textChanged.connect(self._emit_params_changed)
+        connect_value_widget(widget, self._emit_params_changed)
 
     def _emit_params_changed(self, *_: object) -> None:
         if self._hydrating:

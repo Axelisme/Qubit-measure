@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
-
-from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-
-logger = logging.getLogger(__name__)
 
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
@@ -22,6 +19,7 @@ from zcu_tools.gui.session.services.connection import (
 )
 from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from .adapter import (
     AnalysisMode,
@@ -73,6 +71,21 @@ if TYPE_CHECKING:
     from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
     from .services.writeback_control import WritebackControlPort
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ActiveOperation:
+    token: int | None
+    kind: Literal["run", "analyze", "device"]
+    owner_id: str | None = None
+
+    def tag(self) -> str:
+        if self.owner_id is None:
+            return self.kind
+        return f"{self.kind}:{self.owner_id}"
 
 
 # A View has two distinct down-channels from the Controller (ADR-0013):
@@ -647,8 +660,8 @@ class Controller(SessionControllerMixin):
     def cancel_analyze(self, tab_id: str) -> bool:
         return self._run_analyze_control.cancel_analyze(tab_id)
 
-    def _active_operation(self) -> tuple[int | None, str | None]:
-        """Return (token, tag) for the single foreground in-flight operation.
+    def _active_operation(self) -> _ActiveOperation | None:
+        """Return the single foreground in-flight operation.
 
         Applies the same taxonomy as cancel_active_operation / send_feedback:
         run > interactive analyze > device (measure-gui drives one foreground
@@ -661,15 +674,19 @@ class Controller(SessionControllerMixin):
         """
         running = self._state.running_tab_id
         if running is not None:
-            return self._run_svc.active_token, "run"
+            return _ActiveOperation(self._run_svc.active_token, "run")
         tab = self._analyze_svc.active_interactive_tab()
         if tab is not None:
-            return self._analyze_svc.active_interactive_token(), f"analyze:{tab}"
+            return _ActiveOperation(
+                self._analyze_svc.active_interactive_token(), "analyze", tab
+            )
         ops = self.get_active_device_operations()
         if ops:
             name = ops[0].device_name
-            return self._dev_svc.active_operation_token(name), f"device:{name}"
-        return None, None
+            return _ActiveOperation(
+                self._dev_svc.active_operation_token(name), "device", name
+            )
+        return None
 
     def cancel_active_operation(self) -> str | None:
         """Cancel the single in-flight operation the docked feedback panel
@@ -700,10 +717,10 @@ class Controller(SessionControllerMixin):
         disconnect) should not show Stop (ADR-0025 §Stop-gating, ADR-0019).
         Returns False when no operation is active.
         """
-        token, _tag = self._active_operation()
-        if token is None:
+        operation = self._active_operation()
+        if operation is None or operation.token is None:
             return False
-        return self._operation_handles.has_cancel_hook(token)
+        return self._operation_handles.has_cancel_hook(operation.token)
 
     def send_feedback(self, message: str, *, stop: bool = False) -> str | None:
         """User->agent feedback from the GUI (ADR-0025).
@@ -718,25 +735,26 @@ class Controller(SessionControllerMixin):
 
         Returns the taxonomy tag of what was cancelled (stop=True only), or None.
         """
-        token, tag = self._active_operation()
-        if tag is None:
+        operation = self._active_operation()
+        if operation is None:
             return None
 
         # Interactive analyze requires View teardown before the hook fires;
         # run and device have no UI unmount step.
-        if stop and tag.startswith("analyze:"):
-            tab = tag[len("analyze:") :]
+        if stop and operation.kind == "analyze":
+            tab = operation.owner_id
+            assert tab is not None
             host = self._render_host
             if host is not None:
                 host.unmount_interactive_analysis(tab)
 
         if stop:
-            if token is not None:
-                self._operation_handles.stop(token, reason=message)
-            return tag
+            if operation.token is not None:
+                self._operation_handles.stop(operation.token, reason=message)
+            return operation.tag()
         else:
-            if token is not None:
-                self._operation_handles.message(token, message)
+            if operation.token is not None:
+                self._operation_handles.message(operation.token, message)
             return None
 
     # ------------------------------------------------------------------

@@ -104,7 +104,7 @@ class ValueInfo:
 
     @property
     def type_name(self) -> str:
-        return _name_from_type(self.type_)
+        return name_from_type(self.type_)
 
 
 @dataclass(frozen=True)
@@ -288,8 +288,8 @@ class ValueRegistry(ValueLookup):
             raise ValueTypeError(
                 requested.path,
                 f"Value source {requested.path!r} has type "
-                f"{_name_from_type(registered_type)!r}, requested "
-                f"{_name_from_type(requested_type)!r}",
+                f"{name_from_type(registered_type)!r}, requested "
+                f"{name_from_type(requested_type)!r}",
             )
         try:
             value = entry.provider()
@@ -377,8 +377,8 @@ def resolve_value_ref(
     if ref_type is not None and target_type is not None and ref_type is not target_type:
         raise ValueTypeError(
             ref.key,
-            f"Value source {ref.key!r} requested as {_name_from_type(ref_type)!r} "
-            f"but target expects {_name_from_type(target_type)!r}",
+            f"Value source {ref.key!r} requested as {name_from_type(ref_type)!r} "
+            f"but target expects {name_from_type(target_type)!r}",
         )
     resolved_type = target_type or ref_type or _registered_type(lookup, ref.key)
     return lookup.get_as(ref.key, resolved_type)
@@ -448,7 +448,7 @@ def _type_from_name(type_name: str, *, key: str) -> ScalarType:
         ) from exc
 
 
-def _name_from_type(type_: ScalarType) -> str:
+def name_from_type(type_: ScalarType) -> str:
     if type_ is int:
         return "int"
     if type_ is float:

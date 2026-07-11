@@ -753,14 +753,9 @@ class MainWindow(QMainWindow):
         the client area and are invisible to the per-dialog grab. Same
         main-thread Qt path as take_dialog_screenshot.
         """
-        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
+        from zcu_tools.gui.widgets import widget_to_png_bytes
 
-        pixmap = self.grab()
-        buf = QBuffer()
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        if not pixmap.save(buf, "PNG"):
-            raise RuntimeError("Qt failed to encode the main window as PNG")
-        return bytes(buf.data().data())  # type: ignore[arg-type]
+        return widget_to_png_bytes(self, subject="main window")
 
     def open_notify_prompt(self, token: int, message: str, timeout: float) -> None:
         """Open a non-modal NotifyUserDialog for an agent-initiated prompt.

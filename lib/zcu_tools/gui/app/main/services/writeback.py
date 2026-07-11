@@ -235,7 +235,6 @@ class WritebackService:
         self._write.apply_writes(
             ContextWrites(md=md, ml_modules=ml_modules, ml_waveforms=ml_waveforms)
         )
-        tab.applied_session_ids.update(applied_ids)
         logger.info(
             "writeback applied: tab_id=%r md=%d ml_modules=%d ml_waveforms=%d",
             tab_id,

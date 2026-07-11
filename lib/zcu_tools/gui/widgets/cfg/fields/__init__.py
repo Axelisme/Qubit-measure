@@ -9,10 +9,12 @@ from .common import (
     ScalarWidget,
     SweepWidget,
     TextInputEnhancer,
+    connect_value_widget,
     make_scalar_widget,
     make_value_widget,
     read_scalar_widget,
     read_value_widget,
+    write_value_widget,
 )
 from .containers import (
     ReferenceWidget,
@@ -31,7 +33,9 @@ __all__ = [
     "ReferenceWidget",
     "_CollapsibleSection",
     "make_value_widget",
+    "connect_value_widget",
     "read_value_widget",
+    "write_value_widget",
     "make_scalar_widget",
     "read_scalar_widget",
 ]

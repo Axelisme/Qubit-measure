@@ -170,6 +170,45 @@ def read_value_widget(w: QWidget, type_: type, fallback: Any = None) -> Any:
     return fallback
 
 
+def write_value_widget(widget: QWidget, value: object) -> None:
+    """Write a raw value to a supported scalar input widget."""
+    if isinstance(widget, QComboBox):
+        index = widget.findText(str(value))
+        if index >= 0:
+            widget.setCurrentIndex(index)
+        return
+    if isinstance(widget, QCheckBox):
+        widget.setChecked(bool(value))
+        return
+    if isinstance(widget, QSpinBox):
+        widget.setValue(int(cast(Any, value)))
+        return
+    if isinstance(widget, TrimDoubleSpinBox):
+        widget.setValue(float(cast(Any, value)))
+        return
+    if isinstance(widget, QLineEdit):
+        widget.setText("" if value is None else str(value))
+        return
+    raise TypeError(f"Unsupported value widget {type(widget).__name__}")
+
+
+def connect_value_widget(widget: QWidget, callback: Callable[..., object]) -> None:
+    """Connect the value-change signal of a supported scalar input widget."""
+    if isinstance(widget, QComboBox):
+        widget.currentIndexChanged.connect(callback)
+        return
+    if isinstance(widget, QCheckBox):
+        widget.toggled.connect(callback)
+        return
+    if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
+        widget.valueChanged.connect(callback)
+        return
+    if isinstance(widget, QLineEdit):
+        widget.textChanged.connect(callback)
+        return
+    raise TypeError(f"Unsupported value widget {type(widget).__name__}")
+
+
 def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     """Build an input widget from a ScalarSpec and initial value."""
     return make_value_widget(
@@ -473,14 +512,7 @@ class ScalarWidget(BaseLiveWidget):
     def _connect_direct_input(self) -> None:
         inp = self._input
         assert inp is not None
-        if isinstance(inp, QComboBox):
-            inp.currentIndexChanged.connect(self._on_ui_changed)
-        elif isinstance(inp, QCheckBox):
-            inp.toggled.connect(self._on_ui_changed)
-        elif isinstance(inp, (QSpinBox, TrimDoubleSpinBox)):
-            inp.valueChanged.connect(self._on_ui_changed)
-        elif isinstance(inp, QLineEdit):
-            inp.textChanged.connect(self._on_ui_changed)
+        connect_value_widget(inp, self._on_ui_changed)
 
     def _sync_eval_ghost(self, value: object) -> None:
         if self._ghost is None or not isinstance(value, EvalValue):

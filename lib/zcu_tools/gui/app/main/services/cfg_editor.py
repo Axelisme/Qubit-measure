@@ -60,6 +60,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
     EvalValue,
+    decode_eval_wire,
     make_default_value,
 )
 from zcu_tools.gui.cfg.binding import (
@@ -588,15 +589,15 @@ def _decode_value(value: object) -> object:
     value source. Everything else is a plain JSON scalar passed to the resolved
     binding target.
     """
-    if isinstance(value, dict) and value.get("__kind") == "eval":
-        expr = value.get("expr")
-        if not isinstance(expr, str):
-            raise CfgEditorError("eval value requires a string 'expr'")
-        return EvalValue(expr=expr)
     try:
         ref = decode_value_ref(value)
     except ValueError as exc:
         raise CfgEditorError(str(exc)) from exc
     if ref is not None:
         return ref
+    if isinstance(value, dict) and value.get("__kind") == "eval":
+        decoded = decode_eval_wire(value)
+        if decoded is None:
+            raise CfgEditorError("eval value requires a string 'expr'")
+        return decoded
     return value

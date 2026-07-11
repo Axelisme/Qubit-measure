@@ -22,8 +22,6 @@ Adding a new event:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
@@ -32,6 +30,7 @@ from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.remote.events import EventSerializer, WirePayload, wire_event_name
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
@@ -44,10 +43,6 @@ from zcu_tools.gui.session.events import (
 )
 
 # Wire payload type: a JSON-friendly mapping or ``None`` to drop the event.
-WirePayload = Mapping[str, object] | None
-Serializer = Callable[[BasePayload], WirePayload]
-
-
 # ---------------------------------------------------------------------------
 # Per-event serializers
 # ---------------------------------------------------------------------------
@@ -147,7 +142,7 @@ def _ser_soc_changed(payload: BasePayload) -> WirePayload:
 # ---------------------------------------------------------------------------
 
 
-EVENT_SERIALIZERS: dict[type[BasePayload], Serializer] = {
+EVENT_SERIALIZERS: dict[type[BasePayload], EventSerializer] = {
     TabAddedPayload: _ser_tab_added,
     TabClosedPayload: _ser_tab_closed,
     TabContentChangedPayload: _ser_tab_content_changed,
@@ -163,13 +158,3 @@ EVENT_SERIALIZERS: dict[type[BasePayload], Serializer] = {
     MlChangedPayload: _ser_ml_changed,
     SocChangedPayload: _ser_soc_changed,
 }
-
-
-def wire_event_name(payload_type: type[BasePayload]) -> str:
-    """Map a ``Payload`` type to its lowercase wire event name.
-
-    The enum value is the wire name (e.g. ``"tab_added"``); routing through
-    ``payload_type.EVENT`` keeps the wire schema explicit and lets future
-    renames stay coherent.
-    """
-    return payload_type.EVENT.value

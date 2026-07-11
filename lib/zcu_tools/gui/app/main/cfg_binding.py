@@ -22,7 +22,12 @@ from zcu_tools.gui.session.ui.value_source_input import (
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,
 )
-from zcu_tools.gui.session.value_lookup import ValueInfo, ValueRef, ValueTypeError
+from zcu_tools.gui.session.value_lookup import (
+    ValueInfo,
+    ValueRef,
+    ValueTypeError,
+    name_from_type,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
@@ -91,7 +96,14 @@ class MeasureCfgBindings:
         return ResolvedReference(label=spec.label, value=section_value)
 
     def resolve_value_ref(self, ref: ValueRef, target_type: type) -> DirectValue:
-        target_type_name = _value_ref_type_name(ref.key, target_type)
+        try:
+            target_type_name = name_from_type(target_type)  # type: ignore[arg-type]
+        except AssertionError as exc:
+            raise ValueTypeError(
+                ref.key,
+                f"Value source {ref.key!r} cannot target unsupported scalar field type "
+                f"{target_type.__name__!r}; only int, float, str, and bool fields are supported",
+            ) from exc
         if ref.type_name is not None and ref.type_name != target_type_name:
             raise ValueTypeError(
                 ref.key,
@@ -133,19 +145,3 @@ def make_value_source_input_enhancer(
         return controller
 
     return enhance
-
-
-def _value_ref_type_name(key: str, type_: type) -> str:
-    if type_ is int:
-        return "int"
-    if type_ is float:
-        return "float"
-    if type_ is str:
-        return "str"
-    if type_ is bool:
-        return "bool"
-    raise ValueTypeError(
-        key,
-        f"Value source {key!r} cannot target unsupported scalar field type "
-        f"{type_.__name__!r}; only int, float, str, and bool fields are supported",
-    )

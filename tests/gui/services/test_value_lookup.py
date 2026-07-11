@@ -16,9 +16,23 @@ from zcu_tools.gui.session.value_lookup import (
     ValueRegistry,
     ValueTypeError,
     decode_value_ref,
+    name_from_type,
     parse_value_ref_text,
     resolve_value_ref,
 )
+
+
+@pytest.mark.parametrize(
+    ("type_", "name"),
+    [(int, "int"), (float, "float"), (str, "str"), (bool, "bool")],
+)
+def test_name_from_type(type_, name) -> None:
+    assert name_from_type(type_) == name
+
+
+def test_name_from_type_rejects_unsupported_type() -> None:
+    with pytest.raises(AssertionError, match="Unsupported type"):
+        name_from_type(bytes)  # type: ignore[arg-type]
 
 
 def test_register_get_and_describe_value_source() -> None:

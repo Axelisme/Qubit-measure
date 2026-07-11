@@ -36,6 +36,15 @@ class SessionCodecError(RuntimeError):
     """Invalid persisted cfg payload encountered while rebuilding a live value."""
 
 
+def decode_eval_wire(raw: object) -> EvalValue | None:
+    """Decode a valid eval carrier, returning ``None`` for every other shape."""
+    if isinstance(raw, dict) and raw.get("__kind") == "eval":
+        expr = raw.get("expr")
+        if isinstance(expr, str):
+            return EvalValue(expr=expr, resolved=None, error=None)
+    return None
+
+
 def _to_json_compatible(value: object) -> object:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
@@ -195,14 +204,10 @@ def _node_value_from_raw(
         # Locked field: the value is canonical from the spec, ignore the payload.
         return DirectValue(spec.value)
     if isinstance(spec, ScalarSpec):
-        if (
-            isinstance(raw, dict)
-            and raw.get("__kind") == "eval"
-            and isinstance(raw.get("expr"), str)
-        ):
-            return EvalValue(expr=raw["expr"], resolved=None, error=None)
+        eval_value = decode_eval_wire(raw)
+        if eval_value is not None:
+            return eval_value
         if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            # ``value`` is None when the scalar is unset (ADR-0010).
             return DirectValue(value=raw.get("value"))
         if isinstance(raw, str) and raw.strip().startswith("="):
             raise RuntimeError("Legacy scalar '=expr' payload is unsupported")

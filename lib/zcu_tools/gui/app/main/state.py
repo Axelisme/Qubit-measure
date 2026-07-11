@@ -80,7 +80,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     # carry a gc=False CfgEditorService model (editor_id); cleared + torn down on
     # rerun / reanalyze.
     writeback_items: list[WritebackItem] = field(default_factory=list)
-    applied_session_ids: set[str] = field(default_factory=set)
     is_running: bool = False
     is_analyzing: bool = False
     is_saving_data: bool = False
@@ -219,12 +218,7 @@ class State(SessionState):
         tab = self.tabs[tab_id]
         tab.run_result = None
         tab.result_source_path = None
-        tab.analyze_result = None
-        tab.figure = None
-        tab.analyze_param_instance = None
-        tab.writeback_items = []
-        tab.applied_session_ids.clear()
-        self._invalidate_post_analyze(tab)
+        self._reset_tab_derived(tab)
         self.version.bump(f"tab:{tab_id}:result")
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
@@ -236,17 +230,7 @@ class State(SessionState):
         tab = self.tabs[tab_id]
         tab.run_result = result
         tab.result_source_path = None
-        tab.analyze_param_instance = None
-        # invalidate stale analyze results and figure from the previous run
-        tab.analyze_result = None
-        tab.figure = None
-        # New run → the previous run's writeback draft is stale. Callers must
-        # teardown the per-item editor models (WritebackService) before this.
-        tab.writeback_items = []
-        tab.applied_session_ids.clear()
-        # New run → any post-analysis built on the previous analyze result is also
-        # stale (post depends on the primary analyze, which is cleared above).
-        self._invalidate_post_analyze(tab)
+        self._reset_tab_derived(tab)
         self.version.bump(f"tab:{tab_id}:result")
         self.version.bump(f"tab:{tab_id}:post_analyze")
 
@@ -262,12 +246,7 @@ class State(SessionState):
         tab = self.tabs[tab_id]
         tab.run_result = result
         tab.result_source_path = source_path
-        tab.analyze_param_instance = None
-        tab.analyze_result = None
-        tab.figure = None
-        tab.writeback_items = []
-        tab.applied_session_ids.clear()
-        self._invalidate_post_analyze(tab)
+        self._reset_tab_derived(tab)
         self.version.bump(f"tab:{tab_id}:result")
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
@@ -291,7 +270,6 @@ class State(SessionState):
         # (the sink computes it via WritebackService). Per-item models from a
         # previous analyze must already have been torn down by the caller.
         tab.writeback_items = list(writeback_items or [])
-        tab.applied_session_ids.clear()
         # A re-analyze replaces the primary result the post-analysis depends on,
         # so any existing post result is now stale (方案 A invalidation).
         self._invalidate_post_analyze(tab)
@@ -299,6 +277,15 @@ class State(SessionState):
         # update_tab_result's tab:<id>:result bump.
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
+
+    @staticmethod
+    def _reset_tab_derived(tab: Session[Any, Any, Any, Any]) -> None:
+        """Clear state derived from a tab's current run result."""
+        tab.analyze_result = None
+        tab.figure = None
+        tab.analyze_param_instance = None
+        tab.writeback_items = []
+        State._invalidate_post_analyze(tab)
 
     @staticmethod
     def _invalidate_post_analyze(tab: Session[Any, Any, Any, Any]) -> None:

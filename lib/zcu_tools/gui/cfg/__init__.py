@@ -1,6 +1,6 @@
 """Pure, app-independent GUI configuration model, inheritance, and codec."""
 
-from .codec import SessionCodecError, raw_to_schema, schema_to_raw
+from .codec import SessionCodecError, decode_eval_wire, raw_to_schema, schema_to_raw
 from .inheritance import (
     align_locked_literals,
     inherit_from,
@@ -92,6 +92,7 @@ __all__ = [
     "USE_SPEC_DEFAULT",
     "align_locked_literals",
     "default_value_for_type",
+    "decode_eval_wire",
     "default_value_for_spec",
     "inherit_from",
     "is_custom_reference_key",

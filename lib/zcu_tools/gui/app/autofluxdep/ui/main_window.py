@@ -1079,14 +1079,9 @@ class MainWindow(QMainWindow):
 
     def take_window_screenshot(self) -> bytes:
         """Grab the main window as PNG bytes for the read-only remote view."""
-        from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
+        from zcu_tools.gui.widgets import widget_to_png_bytes
 
-        pixmap = self.grab()
-        buf = QBuffer()
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        if not pixmap.save(buf, "PNG"):
-            raise RuntimeError("Qt failed to encode the autofluxdep window as PNG")
-        return bytes(buf.data().data())  # type: ignore[arg-type]
+        return widget_to_png_bytes(self, subject="autofluxdep window")
 
     # --- session status / toolbar state ---
 

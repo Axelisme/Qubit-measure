@@ -352,11 +352,8 @@ def test_can_cancel_active_operation_false_for_soc_connect(cf):
     cf.ctrl._operation_handles.settle(token, OperationOutcome("finished"))
 
 
-def test_active_operation_helper_returns_none_none_when_idle(cf):
-    """_active_operation() returns (None, None) when no op is active."""
-    token, tag = cf.ctrl._active_operation()
-    assert token is None
-    assert tag is None
+def test_active_operation_helper_returns_none_when_idle(cf):
+    assert cf.ctrl._active_operation() is None
 
 
 def test_active_operation_helper_returns_tag_for_interactive(cf):
@@ -367,8 +364,11 @@ def test_active_operation_helper_returns_tag_for_interactive(cf):
     cf.state.update_tab_result(tab_id, object())
     cf.ctrl._analyze_svc.start_interactive(AnalyzePermit(tab_id=tab_id))
 
-    _token, tag = cf.ctrl._active_operation()
-    assert tag == f"analyze:{tab_id}"
+    operation = cf.ctrl._active_operation()
+    assert operation is not None
+    assert operation.kind == "analyze"
+    assert operation.owner_id == tab_id
+    assert operation.tag() == f"analyze:{tab_id}"
     # Cleanup.
     cf.ctrl.cancel_analyze(tab_id)
 
