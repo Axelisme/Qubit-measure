@@ -18,11 +18,44 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Generic, TypeVar
+from itertools import count
+from threading import Lock
+from typing import Any, ClassVar, Generic, Iterator, Literal, TypeVar
 
 logger = logging.getLogger(__name__)
+
+OriginKind = Literal["user", "agent", "system"]
+
+
+@dataclass(frozen=True)
+class EventOrigin:
+    """Identity of the frontend or lifecycle that caused an event."""
+
+    kind: OriginKind
+    client_id: str | None = None
+    operation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class EventMeta:
+    """Process-wide event ordering and origin stamped by the bus."""
+
+    seq: int
+    origin: EventOrigin
+
+
+_DEFAULT_ORIGIN = EventOrigin(kind="user")
+_PROCESS_SEQ = count(1)
+_PROCESS_SEQ_LOCK = Lock()
+
+
+def _next_process_seq() -> int:
+    with _PROCESS_SEQ_LOCK:
+        return next(_PROCESS_SEQ)
 
 
 @dataclass(frozen=True)
@@ -45,15 +78,19 @@ class EventSubscription(Generic[P]):
 
     _bus: BaseEventBus
     _payload_type: type[P]
-    _cb: Callable[[P], None]
+    _cb: Callable[..., None]
     _active: bool = True
+    _with_meta: bool = False
 
     def unsubscribe(self) -> None:
         """Remove this subscription once; safe to call repeatedly."""
         if not self._active:
             return
         self._active = False
-        self._bus.unsubscribe(self._payload_type, self._cb)
+        if self._with_meta:
+            self._bus.unsubscribe_with_meta(self._payload_type, self._cb)
+        else:
+            self._bus.unsubscribe(self._payload_type, self._cb)
 
 
 class EventSubscriptions:
@@ -70,6 +107,14 @@ class EventSubscriptions:
         self, bus: BaseEventBus, payload_type: type[P], cb: Callable[[P], None]
     ) -> EventSubscription[P]:
         return self.add(bus.subscribe(payload_type, cb))
+
+    def subscribe_with_meta(
+        self,
+        bus: BaseEventBus,
+        payload_type: type[P],
+        cb: Callable[[P, EventMeta], None],
+    ) -> EventSubscription[P]:
+        return self.add(bus.subscribe_with_meta(payload_type, cb))
 
     def unsubscribe_all(self, *_args: object) -> None:
         """Unsubscribe every handle; accepts Qt signal arguments."""
@@ -93,6 +138,28 @@ class BaseEventBus:
 
     def __init__(self) -> None:
         self._subs: dict[type[BasePayload], list[Callable[..., None]]] = {}
+        self._meta_subs: dict[type[BasePayload], list[Callable[..., None]]] = {}
+        self._origin: ContextVar[EventOrigin] = ContextVar(
+            f"event_origin_{id(self)}", default=_DEFAULT_ORIGIN
+        )
+
+    @property
+    def current_origin(self) -> EventOrigin:
+        return self._origin.get()
+
+    @contextmanager
+    def origin(self, origin: EventOrigin) -> Iterator[None]:
+        """Temporarily declare the origin for emits on this bus.
+
+        Context variables do not propagate to newly created threads. Worker
+        boundaries must capture and restore the origin explicitly through the
+        operation record instead of relying on this context manager.
+        """
+        token = self._origin.set(origin)
+        try:
+            yield
+        finally:
+            self._origin.reset(token)
 
     def subscribe(
         self, payload_type: type[P], cb: Callable[[P], None]
@@ -100,8 +167,21 @@ class BaseEventBus:
         self._subs.setdefault(payload_type, []).append(cb)
         return EventSubscription(self, payload_type, cb)
 
+    def subscribe_with_meta(
+        self, payload_type: type[P], cb: Callable[[P, EventMeta], None]
+    ) -> EventSubscription[P]:
+        self._meta_subs.setdefault(payload_type, []).append(cb)
+        return EventSubscription(self, payload_type, cb, _with_meta=True)
+
     def unsubscribe(self, payload_type: type[P], cb: Callable[[P], None]) -> None:
         subs = self._subs.get(payload_type)
+        if subs and cb in subs:
+            subs.remove(cb)
+
+    def unsubscribe_with_meta(
+        self, payload_type: type[P], cb: Callable[[P, EventMeta], None]
+    ) -> None:
+        subs = self._meta_subs.get(payload_type)
         if subs and cb in subs:
             subs.remove(cb)
 
@@ -110,9 +190,17 @@ class BaseEventBus:
 
         A subscriber raising does not stop the others (logged).
         """
-        for cb in list(self._subs.get(type(payload), ())):
+        meta = EventMeta(seq=_next_process_seq(), origin=self.current_origin)
+        callbacks = ((cb, False) for cb in list(self._subs.get(type(payload), ())))
+        meta_callbacks = (
+            (cb, True) for cb in list(self._meta_subs.get(type(payload), ()))
+        )
+        for cb, with_meta in (*callbacks, *meta_callbacks):
             try:
-                cb(payload)
+                if with_meta:
+                    cb(payload, meta)
+                else:
+                    cb(payload)
             except Exception:  # noqa: BLE001 — one bad subscriber must not break the rest
                 logger.exception(
                     "EventBus subscriber for %s raised", type(payload).__name__

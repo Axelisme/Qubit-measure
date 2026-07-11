@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from threading import Thread
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin, EventSubscriptions
 from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
@@ -116,3 +117,117 @@ def test_event_subscription_group_unsubscribes_all_repeatedly() -> None:
 
     assert md_received == []
     assert ml_received == []
+
+
+def test_event_meta_sequence_is_process_wide_and_strictly_increasing() -> None:
+    first_bus = EventBus()
+    second_bus = EventBus()
+    received: list[EventMeta] = []
+    first_bus.subscribe_with_meta(
+        MdChangedPayload, lambda _p, meta: received.append(meta)
+    )
+    second_bus.subscribe_with_meta(
+        MdChangedPayload, lambda _p, meta: received.append(meta)
+    )
+
+    first_bus.emit(MdChangedPayload(md=MetaDict()))
+    second_bus.emit(MdChangedPayload(md=MetaDict()))
+    first_bus.emit(MdChangedPayload(md=MetaDict()))
+
+    assert [meta.seq for meta in received] == sorted(meta.seq for meta in received)
+    assert len({meta.seq for meta in received}) == 3
+
+
+def test_event_origin_defaults_and_nested_scopes_restore() -> None:
+    bus = EventBus()
+    received: list[EventMeta] = []
+    bus.subscribe_with_meta(MdChangedPayload, lambda _p, meta: received.append(meta))
+    outer = EventOrigin(kind="agent", client_id="client-a")
+    inner = EventOrigin(kind="system", operation_id="restore")
+
+    bus.emit(MdChangedPayload(md=MetaDict()))
+    with bus.origin(outer):
+        bus.emit(MdChangedPayload(md=MetaDict()))
+        with bus.origin(inner):
+            bus.emit(MdChangedPayload(md=MetaDict()))
+        bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MdChangedPayload(md=MetaDict()))
+
+    assert [meta.origin for meta in received] == [
+        EventOrigin(kind="user"),
+        outer,
+        inner,
+        outer,
+        EventOrigin(kind="user"),
+    ]
+
+
+def test_event_origin_does_not_propagate_to_new_thread() -> None:
+    bus = EventBus()
+    received: list[EventMeta] = []
+    bus.subscribe_with_meta(MdChangedPayload, lambda _p, meta: received.append(meta))
+
+    with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
+        thread = Thread(target=lambda: bus.emit(MdChangedPayload(md=MetaDict())))
+        thread.start()
+        thread.join()
+
+    assert received == [EventMeta(seq=received[0].seq, origin=EventOrigin(kind="user"))]
+
+
+def test_legacy_and_meta_subscribers_coexist_with_one_stamp() -> None:
+    bus = EventBus()
+    legacy_received: list[MdChangedPayload] = []
+    meta_received: list[tuple[MdChangedPayload, EventMeta]] = []
+    second_meta: list[EventMeta] = []
+    bus.subscribe(MdChangedPayload, legacy_received.append)
+    bus.subscribe_with_meta(
+        MdChangedPayload, lambda payload, meta: meta_received.append((payload, meta))
+    )
+    bus.subscribe_with_meta(
+        MdChangedPayload, lambda _payload, meta: second_meta.append(meta)
+    )
+    payload = MdChangedPayload(md=MetaDict())
+
+    bus.emit(payload)
+
+    assert legacy_received == [payload]
+    assert meta_received == [(payload, second_meta[0])]
+    assert meta_received[0][1] is second_meta[0]
+
+
+def test_legacy_and_meta_subscriber_exceptions_are_isolated() -> None:
+    bus = EventBus()
+    later_legacy = MagicMock()
+    later_meta = MagicMock()
+    bus.subscribe(MdChangedPayload, MagicMock(side_effect=RuntimeError("legacy")))
+    bus.subscribe(MdChangedPayload, later_legacy)
+    bus.subscribe_with_meta(
+        MdChangedPayload, MagicMock(side_effect=RuntimeError("meta"))
+    )
+    bus.subscribe_with_meta(MdChangedPayload, later_meta)
+
+    bus.emit(MdChangedPayload(md=MetaDict()))
+
+    assert later_legacy.called
+    assert later_meta.called
+
+
+def test_meta_subscription_handles_and_group_cleanup_are_idempotent() -> None:
+    bus = EventBus()
+    group = EventSubscriptions()
+    received: list[EventMeta] = []
+    standalone = bus.subscribe_with_meta(
+        MdChangedPayload, lambda _payload, meta: received.append(meta)
+    )
+    group.subscribe_with_meta(
+        bus, MdChangedPayload, lambda _payload, meta: received.append(meta)
+    )
+
+    standalone.unsubscribe()
+    standalone.unsubscribe()
+    group.unsubscribe_all()
+    group.unsubscribe_all()
+    bus.emit(MdChangedPayload(md=MetaDict()))
+
+    assert received == []
