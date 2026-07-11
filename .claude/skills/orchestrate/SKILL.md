@@ -1,7 +1,7 @@
 ---
 name: orchestrate
 description: Act as the repo-wide orchestrator / tech lead — hold the architecture mental model, own the roadmap and progress, coordinate task plans, worktree lanes, integration branches, and sub-agent reports, and independently sanity-check delegated plans/reviews when risk warrants it. Use when asked to plan and push the whole repo forward, coordinate a multi-step / cross-module effort, manage a phase roadmap, or steer work across several sub-agents rather than do one concrete edit yourself.
-skill_version: 11
+skill_version: 12
 ---
 
 # orchestrate
@@ -269,11 +269,21 @@ git branch -d agent/<task-id>
 
 需要多 agent、長線 orchestration、或想隔離未提交 diff 的 Phase，預設使用以下流水線。若 Phase 體量小且符合「Orchestrator 自驗證與小型工作模式」，`impl-detail-planner` 可以由 orchestrator 親自執行；orchestrator 也可以做補充 self-review（獨立 review 規則見 Review Independence Gate）。`progress.md` 或回報要寫明 self-planning / self-review 的範圍、依據、獨立 reviewer 身分與剩餘風險。
 
+把 roadmap 視為「可重疊的 Phase pipeline」，不要等上一個 Phase 完全收尾才開始思考下一個。當 Phase N 已進入 implementation 或 review，orchestrator 建議在不干擾當前 write scope 與驗收的前提下，開始 Phase N+1 的 discovery、風險盤點與用戶討論。這種重疊是為了提前消除需求與架構不確定性，不是提前對未定稿方案實作。
+
 1. `impl-detail-planner`：先讀相關 README/ADR/source，把 Phase 目標拆成 source-grounded 實作步驟與測試計劃；只產出報告，不改碼。
 2. `plan-item-implementer`：在該 Phase 的 lane worktree 中照 planner 報告逐項實作；遇到架構不明或規格分叉時停下回報，不自行猜測。
 3. `python-module-reviewer`：針對 implementer 的變更做 correctness / simplicity / anti-pattern review（獨立性規則見 Review Independence Gate）。review finding 回到同一個 lane worktree 修正，必要時再跑一輪 reviewer。
 4. orchestrator：收齊三階段 reports，對 planner / reviewer 的關鍵結論做二次驗證，必要時再做補充 self-review，檢查 diff，更新 `.agent_state/plans/<task-id>/progress.md` / `findings.md`，依 `CLAUDE.md` 收尾驗證。orchestrator 的 self-review 不可取代第 3 步的獨立 reviewer sub-agent。
 5. queue-managed preview / 收尾：建立 worktree 時用 `workflow.py worktree create-lane` 或 `workflow.py task create` / `lane create` 記錄當前目標 branch / commit。Phase 變更完成後依「整合與線性收尾」執行 lane 整理、preview / final 與 worktree / branch 清理；未授權進入 preview 時停在可檢查 diff / branch commit，回報 task-id、lane-id、worktree path 與下一步。
+
+跨 Phase 重疊建議依下列 gate 進行：
+
+- Phase N 進入 implementation 後：可與用戶討論 Phase N+1 的目標、邊界、驗收標準與待決問題，並進行唯讀 discovery。
+- Phase N 進入 review 後：可產出 Phase N+1 的候選 plan，並請用戶確認會影響架構、scope 或產品行為的細節。
+- Phase N 的 review finding 若會改變 Phase N+1 前提：先更新候選 plan 與用戶共識，不得沿用過時假設。
+- Phase N+1 只有在依賴的 contract 穩定、用戶已決定重大分歧、且 write scope 不會與 Phase N 衝突時才進入 implementation；否則停在 discussion / planning-ready 狀態。
+- `task_plan.md` / `progress.md` 明確分開「當前執行 Phase」與「下一個候選 Phase」，記錄用戶已確認決策、未解問題、依賴 gate 與何時可升級為 active，避免把討論稿誤當成已承諾計畫。
 
 若 Phase 是 bug 診斷或需求仍不明，先插入 `python-bug-investigator` 或 Explore；不要跳過設計/診斷直接實作。
 
