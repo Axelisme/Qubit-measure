@@ -62,11 +62,12 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         clean: bool = False,
         project_root: str | None = None,
     ) -> None:
+        from zcu_tools.gui.app.main.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.main.utils.error_handler import (
             install_global_exception_hook,
         )
 
-        install_global_exception_hook()
+        install_global_exception_hook(show_error_dialog)
         self._registry, self._role_catalog = registry_factory()
         self._clean = clean
         self._project_root = project_root

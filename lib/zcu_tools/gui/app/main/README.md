@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-12 — hardware gate presence
+**Last updated:** 2026-07-12 — Qt UI adapter boundaries
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -190,7 +190,7 @@ measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="wa
 `MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
 dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些
 app-local policy。device selector是required string `ScalarSpec`，wire value維持`DirectValue(str)`。
-measure composition另以generic `QLineEdit -> keepalive object` enhancer seam安裝
+measure composition在`ui/cfg_binding.py`以generic `QLineEdit -> keepalive object` enhancer seam安裝
 `ValueSourceInputController`，保留eval input的completion與resolve-on-space；shared binding仍
 不import ValueRef或session，shared widget只接收generic enhancer callable。
 

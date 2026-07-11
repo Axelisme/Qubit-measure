@@ -578,7 +578,7 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
 
 def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
+    from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
     from zcu_tools.gui.session.value_lookup import ValueInfo
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget

@@ -27,8 +27,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase

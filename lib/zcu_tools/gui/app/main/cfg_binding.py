@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, cast
 
-from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -14,11 +12,6 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
 from zcu_tools.gui.measure_cfg import ProgramCfgKind, program_shape_for_input
 from zcu_tools.gui.session.expression import evaluate_numeric_expr
-from zcu_tools.gui.session.ui.value_source_input import (
-    SessionValueSourceInputHost,
-    SessionValueSourcePort,
-    ValueSourceInputController,
-)
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,
 )
@@ -36,7 +29,6 @@ _DEVICES_SOURCE = "devices"
 _ARB_WAVEFORMS_SOURCE = "arb_waveforms"
 
 _ReferenceConverter = Callable[[object], tuple[CfgSectionSpec, CfgSectionValue]]
-TextInputEnhancer = Callable[[QLineEdit], object | None]
 
 
 class MeasureCfgBindingHost(Protocol):
@@ -128,20 +120,3 @@ class MeasureCfgBindings:
         if kind == "waveform":
             return cast(_ReferenceConverter, waveform_cfg_to_value)
         raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
-
-
-def make_value_source_input_enhancer(
-    host: SessionValueSourcePort,
-) -> TextInputEnhancer:
-    source_host = SessionValueSourceInputHost(host)
-
-    def enhance(line_edit: QLineEdit) -> object:
-        controller = ValueSourceInputController(
-            line_edit,
-            source_host,
-            parent=line_edit,
-        )
-        controller.resolve_failed.connect(line_edit.setToolTip)  # type: ignore[attr-defined]
-        return controller
-
-    return enhance

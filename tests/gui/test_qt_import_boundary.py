@@ -12,10 +12,6 @@ KNOWN_QT_DEBT = frozenset(
     {
         # batch 3: isolate application bootstrap Qt ownership.
         Path("app/main/app.py"),
-        # batch 3: move cfg binding widget access into the UI layer.
-        Path("app/main/cfg_binding.py"),
-        # batch 3: replace utility-level Qt error presentation with a UI port.
-        Path("app/main/utils/error_handler.py"),
         # batch 3: isolate autofluxdep controller Qt ownership.
         Path("app/autofluxdep/controller.py"),
     }

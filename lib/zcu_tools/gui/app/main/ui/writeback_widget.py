@@ -25,7 +25,7 @@ from zcu_tools.gui.app.main.adapter import (
     WaveformWriteback,
     WritebackItem,
 )
-from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:

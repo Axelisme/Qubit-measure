@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
-from zcu_tools.gui.app.main.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
