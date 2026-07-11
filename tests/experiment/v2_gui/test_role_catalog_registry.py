@@ -13,6 +13,7 @@ from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
 from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+from zcu_tools.gui.cfg import DirectValue, make_custom_reference_key
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -38,6 +39,23 @@ def test_blank_roles_cover_every_discriminator():
     assert len(blanks) == 13
     for disc in _MODULE_SPEC_FACTORIES:
         assert f"{disc}:blank" in blanks
+
+
+def test_waveform_blank_roles_preserve_legacy_order_and_values() -> None:
+    waveform_blanks = [
+        entry
+        for entry in ALL_ROLE_ENTRIES
+        if entry.item_kind == "waveform" and entry.role_id.endswith(":blank")
+    ]
+    discriminators = ["const", "cosine", "gauss", "drag", "flat_top", "arb"]
+
+    assert [entry.role_id for entry in waveform_blanks] == [
+        f"{discriminator}:blank" for discriminator in discriminators
+    ]
+    for entry, discriminator in zip(waveform_blanks, discriminators, strict=True):
+        reference = entry.make_value(_empty_ctx())
+        assert reference.chosen_key == make_custom_reference_key(discriminator)
+        assert reference.value.fields["style"] == DirectValue(discriminator)
 
 
 @pytest.mark.parametrize("entry", ALL_ROLE_ENTRIES, ids=lambda e: e.role_id)

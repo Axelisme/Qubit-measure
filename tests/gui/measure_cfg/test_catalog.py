@@ -54,6 +54,16 @@ def test_catalog_has_exact_ordered_closed_vocabulary() -> None:
         ("reset/two_pulse", "Two-Pulse Reset"),
         ("reset/bath", "Bath Reset"),
     ]
+    assert [
+        (shape.discriminator, shape.label) for shape in PROGRAM_SHAPES.waveforms()
+    ] == [
+        ("const", "Const"),
+        ("cosine", "Cosine"),
+        ("gauss", "Gauss"),
+        ("drag", "DRAG"),
+        ("flat_top", "FlatTop"),
+        ("arb", "Arb"),
+    ]
 
 
 @pytest.mark.parametrize("attribute", ["_modules", "_waveforms", "_by_kind"])
@@ -62,16 +72,6 @@ def test_catalog_singleton_rejects_internal_collection_reassignment(
 ) -> None:
     with pytest.raises(FrozenInstanceError):
         setattr(PROGRAM_SHAPES, attribute, ())
-    assert [
-        (shape.discriminator, shape.label) for shape in PROGRAM_SHAPES.waveforms()
-    ] == [
-        ("const", "Const"),
-        ("cosine", "Cosine"),
-        ("gauss", "Gauss"),
-        ("drag", "DRAG"),
-        ("arb", "Arb"),
-        ("flat_top", "FlatTop"),
-    ]
 
 
 @pytest.mark.parametrize(
@@ -86,7 +86,7 @@ def test_catalog_singleton_rejects_internal_collection_reassignment(
         (
             "waveform",
             "unknown",
-            "const, cosine, gauss, drag, arb, flat_top",
+            "const, cosine, gauss, drag, flat_top, arb",
         ),
     ],
 )

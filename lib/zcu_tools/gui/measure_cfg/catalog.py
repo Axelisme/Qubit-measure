@@ -131,7 +131,7 @@ PROGRAM_SHAPES = ProgramShapeCatalog(
         ProgramShape("waveform", "cosine", "Cosine", _make_cosine_waveform_spec),
         ProgramShape("waveform", "gauss", "Gauss", _make_gauss_waveform_spec),
         ProgramShape("waveform", "drag", "DRAG", _make_drag_waveform_spec),
-        ProgramShape("waveform", "arb", "Arb", _make_arb_waveform_spec),
         ProgramShape("waveform", "flat_top", "FlatTop", _make_flat_top_waveform_spec),
+        ProgramShape("waveform", "arb", "Arb", _make_arb_waveform_spec),
     )
 )
