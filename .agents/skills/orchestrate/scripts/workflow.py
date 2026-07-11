@@ -1604,6 +1604,188 @@ def command_merge_retry_refresh(args: argparse.Namespace) -> None:
     )
 
 
+def command_merge_retry_final(args: argparse.Namespace) -> None:
+    validate_id(args.task_id, "task-id")
+    root = normalize_root(args.root)
+
+    with workflow_locks(root, args.lock_timeout):
+        state = load_state(root)
+        queue = load_queue(root)
+        task = require_task(state, args.task_id)
+        if task["status"] != "blocked":
+            raise OrchestrateError(
+                f"task {args.task_id} status is {task['status']}, expected blocked",
+                40,
+            )
+
+        entries = queue_entries(queue)
+        index, entry = find_queue_entry(queue, args.task_id)
+        if entry is None:
+            raise OrchestrateError(f"task {args.task_id} is not queued", 40)
+        if index != 0:
+            raise OrchestrateError(
+                f"task {args.task_id} does not hold queue head",
+                40,
+            )
+        if entry["status"] != "blocked":
+            raise OrchestrateError(
+                f"task {args.task_id} queue status is {entry['status']}, expected blocked",
+                40,
+            )
+
+        blocked_kind = entry.get("blocked_kind")
+        if blocked_kind is None:
+            raise OrchestrateError(
+                f"task {args.task_id} blocked provenance is unknown; "
+                "legacy blocked entries cannot use merge retry-final",
+                40,
+            )
+        if blocked_kind != "final_fast_forward_failed":
+            raise OrchestrateError(
+                f"task {args.task_id} blocked_kind is {blocked_kind}, expected "
+                "final_fast_forward_failed",
+                40,
+            )
+        if entry["action"] != "final":
+            raise OrchestrateError(
+                f"task {args.task_id} queue action is {entry['action']}, expected final",
+                40,
+            )
+        if entry["requested_by"] != args.requested_by:
+            raise OrchestrateError(
+                f"task {args.task_id} was requested by {entry['requested_by']}, "
+                f"not {args.requested_by}",
+                40,
+            )
+        if entry["branch"] != task["integration_branch"]:
+            raise OrchestrateError(
+                f"queue branch is {entry['branch']}, expected "
+                f"{task['integration_branch']}",
+                40,
+            )
+        if entry["base_branch"] != task["base_branch"]:
+            raise OrchestrateError(
+                f"queue base branch is {entry['base_branch']}, expected "
+                f"{task['base_branch']}",
+                40,
+            )
+        recorded_main = entry.get("main_worktree")
+        if not isinstance(recorded_main, str) or not recorded_main:
+            raise OrchestrateError("queue entry is missing main_worktree", 40)
+        recorded_main_path = Path(recorded_main).expanduser()
+        if not recorded_main_path.is_absolute():
+            recorded_main_path = root / recorded_main_path
+        if recorded_main_path.resolve() != root:
+            raise OrchestrateError(
+                f"queue main_worktree resolves to {recorded_main_path.resolve()}, "
+                f"expected {root}",
+                40,
+            )
+
+        ensure_on_base_branch(root, task)
+        ensure_no_merge_in_progress(root)
+        ensure_tracked_clean_worktree(root)
+        base_head = git_commit(root, "HEAD")
+        recorded_base = entry.get("base_head")
+        if not isinstance(recorded_base, str) or not recorded_base:
+            raise OrchestrateError("queue entry is missing base_head", 40)
+        if recorded_base != base_head:
+            raise OrchestrateError(
+                f"recorded base head is {recorded_base}, current HEAD is {base_head}",
+                40,
+            )
+
+        if not OBJECT_ID_PATTERN.fullmatch(args.expect_target):
+            raise OrchestrateError(
+                "--expect-target must be a 7-40 character hexadecimal object id "
+                "or abbreviation",
+                40,
+            )
+        expected = run_git(
+            root,
+            "rev-parse",
+            "--verify",
+            f"{args.expect_target}^{{commit}}",
+            check=False,
+        )
+        if expected.returncode != 0:
+            raise OrchestrateError(
+                f"--expect-target is not a commit: {args.expect_target}",
+                40,
+            )
+        expected_target = expected.stdout.strip()
+        recorded_target = require_pinned_target(entry)
+        if expected_target != recorded_target:
+            raise OrchestrateError(
+                f"expected target {expected_target}, recorded target is "
+                f"{recorded_target}",
+                40,
+            )
+        target_commit = git_commit(root, task["integration_branch"])
+        if target_commit != recorded_target:
+            raise OrchestrateError(
+                f"recorded target {recorded_target}, current integration target is "
+                f"{target_commit}",
+                40,
+            )
+        ensure_untracked_files_do_not_overlap_merge_target(root, target_commit)
+        if not git_is_ancestor(root, base_head, target_commit):
+            raise OrchestrateError(
+                f"integration target {target_commit} cannot fast-forward base "
+                f"{base_head}",
+                40,
+            )
+
+        confirmed_base, confirmed_target = read_merge_ref_snapshot(root, task)
+        if confirmed_base != base_head or confirmed_target != target_commit:
+            raise OrchestrateError(
+                "base or integration target changed while retry-final was checking "
+                "preconditions",
+                40,
+            )
+
+        result = run_git(
+            root,
+            "merge",
+            "--no-overwrite-ignore",
+            "--ff-only",
+            target_commit,
+            check=False,
+        )
+        if result.returncode != 0:
+            note = f"retry final fast-forward failed: {format_git_output(result)}"
+            block_entry(entry, note, kind="final_fast_forward_failed")
+            task["status"] = "blocked"
+            save_workflow(root, state, queue)
+            raise OrchestrateError(note, 50)
+
+        try:
+            head = git_commit(root, "HEAD")
+            if head != target_commit:
+                raise OrchestrateError(
+                    f"HEAD is {head}, expected {target_commit}",
+                    50,
+                )
+            ensure_no_merge_in_progress(root)
+            ensure_tracked_clean_worktree(root)
+        except OrchestrateError as exc:
+            note = f"retry final fast-forward postcondition failed: {exc}"
+            block_entry(entry, note, kind="final_fast_forward_failed")
+            task["status"] = "blocked"
+            save_workflow(root, state, queue)
+            raise OrchestrateError(note, 50) from exc
+
+        entries.pop(0)
+        del state["tasks"][args.task_id]
+        save_workflow(root, state, queue)
+
+    print_result(
+        args,
+        {"target_commit": target_commit, "task_id": args.task_id},
+        f"final fast-forward retry completed for {args.task_id} at {target_commit}",
+    )
+
+
 def command_merge_run(args: argparse.Namespace) -> None:
     validate_id(args.task_id, "task-id")
     validate_action(args.action)
@@ -2211,6 +2393,13 @@ def build_parser() -> argparse.ArgumentParser:
     merge_retry_refresh.add_argument("--expect-target", required=True)
     add_common_args(merge_retry_refresh)
     merge_retry_refresh.set_defaults(func=command_merge_retry_refresh)
+
+    merge_retry_final = merge_subparsers.add_parser("retry-final")
+    merge_retry_final.add_argument("task_id")
+    merge_retry_final.add_argument("--requested-by", required=True)
+    merge_retry_final.add_argument("--expect-target", required=True)
+    add_common_args(merge_retry_final)
+    merge_retry_final.set_defaults(func=command_merge_retry_final)
 
     worktree = subparsers.add_parser("worktree")
     worktree_subparsers = worktree.add_subparsers(

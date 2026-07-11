@@ -261,6 +261,29 @@ def retry_refresh(
     )
 
 
+def retry_final(
+    root: Path,
+    target_commit: str,
+    *,
+    requested_by: str = "agent-a",
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return run_script(
+        WORKFLOW_SCRIPT,
+        "--root",
+        str(root),
+        "merge",
+        "retry-final",
+        "demo-task",
+        "--requested-by",
+        requested_by,
+        "--expect-target",
+        target_commit,
+        "--json",
+        check=check,
+    )
+
+
 def load_workflow_module() -> Any:
     spec = importlib.util.spec_from_file_location(
         "orchestrate_workflow_under_test",
@@ -1510,6 +1533,290 @@ def test_retry_refresh_detects_second_snapshot_change_without_saving(
     assert save_calls == 0
     assert read_queue(tmp_path)[0]["status"] == "blocked"
     assert read_task(tmp_path)["status"] == "blocked"
+
+
+@pytest.mark.parametrize(
+    "blocked_kind",
+    [
+        None,
+        "manual",
+        "integration_refresh_failed",
+        "preview_abort_failed",
+        "merge_target_preflight_failed",
+        "preview_target_stale",
+        "preview_merge_failed",
+        "preview_postcondition_failed",
+        "final_postcondition_failed",
+    ],
+)
+def test_retry_final_rejects_other_blocked_provenance_without_changes(
+    tmp_path: Path,
+    blocked_kind: str | None,
+) -> None:
+    _, target_commit, _ = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind=blocked_kind,
+    )
+    state_file = tmp_path / ".agent_state" / "worktrees" / "state.json"
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
+    state_before = state_file.read_bytes()
+    queue_before = queue_file.read_bytes()
+
+    result = retry_final(tmp_path, target_commit, check=False)
+
+    assert result.returncode == 40
+    assert state_file.read_bytes() == state_before
+    assert queue_file.read_bytes() == queue_before
+
+
+def test_retry_final_rejects_legacy_missing_provenance_without_changes(
+    tmp_path: Path,
+) -> None:
+    _, target_commit, _ = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind=None,
+    )
+    queue = read_queue(tmp_path)
+    queue[0].pop("blocked_kind")
+    write_queue(tmp_path, queue)
+    state_file = tmp_path / ".agent_state" / "worktrees" / "state.json"
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
+    state_before = state_file.read_bytes()
+    queue_before = queue_file.read_bytes()
+
+    result = retry_final(tmp_path, target_commit, check=False)
+
+    assert result.returncode == 40
+    assert "blocked provenance is unknown" in result.stderr
+    assert state_file.read_bytes() == state_before
+    assert queue_file.read_bytes() == queue_before
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("preview_action", "queue action is preview, expected final"),
+        ("other_requester", "was requested by agent-a"),
+        ("other_branch", "queue branch is agent/other"),
+        ("other_base_branch", "queue base branch is other"),
+        ("other_main_worktree", "queue main_worktree resolves to"),
+        ("stale_base", "recorded base head"),
+        ("stale_target", "recorded target"),
+    ],
+)
+def test_retry_final_rejects_identity_drift_without_changes(
+    tmp_path: Path,
+    mutation: str,
+    expected: str,
+) -> None:
+    base_commit, target_commit, _ = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind="final_fast_forward_failed",
+    )
+    queue = read_queue(tmp_path)
+    entry = queue[0]
+    requested_by = "agent-a"
+    expected_target = target_commit
+    if mutation == "preview_action":
+        entry["action"] = "preview"
+    elif mutation == "other_requester":
+        requested_by = "agent-b"
+    elif mutation == "other_branch":
+        entry["branch"] = "agent/other"
+    elif mutation == "other_base_branch":
+        entry["base_branch"] = "other"
+    elif mutation == "other_main_worktree":
+        entry["main_worktree"] = "/tmp/not-this-repo"
+    elif mutation == "stale_base":
+        entry["base_head"] = target_commit
+    else:
+        expected_target = base_commit
+    write_queue(tmp_path, queue)
+    state_file = tmp_path / ".agent_state" / "worktrees" / "state.json"
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
+    state_before = state_file.read_bytes()
+    queue_before = queue_file.read_bytes()
+
+    result = retry_final(
+        tmp_path,
+        expected_target,
+        requested_by=requested_by,
+        check=False,
+    )
+
+    assert result.returncode == 40
+    assert expected in result.stderr
+    assert state_file.read_bytes() == state_before
+    assert queue_file.read_bytes() == queue_before
+
+
+def test_retry_final_rejects_non_head_without_reordering_queue(
+    tmp_path: Path,
+) -> None:
+    base_commit, target_commit, _ = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind="final_fast_forward_failed",
+    )
+    blocked_entry = read_queue(tmp_path)[0]
+    first_entry = queue_entry(
+        tmp_path,
+        "first-task",
+        action="final",
+        base_commit=base_commit,
+        status="queued",
+        target_commit=target_commit,
+    )
+    write_queue(tmp_path, [first_entry, blocked_entry])
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
+    queue_before = queue_file.read_bytes()
+
+    result = retry_final(tmp_path, target_commit, check=False)
+
+    assert result.returncode == 40
+    assert "does not hold queue head" in result.stderr
+    assert queue_file.read_bytes() == queue_before
+
+
+def test_retry_final_rejects_changed_integration_target_without_changes(
+    tmp_path: Path,
+) -> None:
+    _, target_commit, lane = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind="final_fast_forward_failed",
+    )
+    advanced_target = commit_file(lane, "extra.txt", "extra\n", "advance target")
+    queue_file = tmp_path / ".agent_state" / "worktrees" / "merge_queue.json"
+    queue_before = queue_file.read_bytes()
+
+    result = retry_final(tmp_path, target_commit, check=False)
+
+    assert result.returncode == 40
+    assert (
+        f"recorded target {target_commit}, current integration target is "
+        f"{advanced_target}" in result.stderr
+    )
+    assert queue_file.read_bytes() == queue_before
+
+
+@pytest.mark.parametrize("failure", ["wrong_branch", "main_dirty", "merge_head"])
+def test_retry_final_requires_clean_recorded_base_checkout(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    _, target_commit, _ = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind="final_fast_forward_failed",
+    )
+    if failure == "wrong_branch":
+        run_git(tmp_path, "checkout", "-b", "scratch-main")
+    elif failure == "main_dirty":
+        (tmp_path / "tracked.txt").write_text("dirty main\n", encoding="utf-8")
+    else:
+        (tmp_path / ".git" / "MERGE_HEAD").write_text(
+            f"{target_commit}\n",
+            encoding="utf-8",
+        )
+
+    result = retry_final(tmp_path, target_commit, check=False)
+
+    assert result.returncode == 40
+    assert read_queue(tmp_path)[0]["blocked_kind"] == "final_fast_forward_failed"
+    assert read_task(tmp_path)["status"] == "blocked"
+
+
+def test_retry_final_rejects_untracked_target_collision(tmp_path: Path) -> None:
+    base_commit = init_git_repo(tmp_path)
+    target_commit = create_file_branch(
+        tmp_path,
+        "demo-task",
+        "local.txt",
+        "target\n",
+    )
+    create_task_and_lane(tmp_path, base_commit=base_commit)
+    entry = queue_entry(
+        tmp_path,
+        "demo-task",
+        action="final",
+        base_commit=base_commit,
+        status="blocked",
+        target_commit=target_commit,
+    )
+    entry["blocked_kind"] = "final_fast_forward_failed"
+    write_queue(tmp_path, [entry])
+    set_task_status(tmp_path, "demo-task", "blocked")
+    (tmp_path / "local.txt").write_text("local\n", encoding="utf-8")
+
+    result = retry_final(tmp_path, target_commit, check=False)
+
+    assert result.returncode == 40
+    assert "untracked files overlap the merge target" in result.stderr
+    assert (tmp_path / "local.txt").read_text(encoding="utf-8") == "local\n"
+    assert read_queue(tmp_path)[0]["blocked_kind"] == "final_fast_forward_failed"
+
+
+def test_retry_final_fast_forwards_same_target_and_closes_task(tmp_path: Path) -> None:
+    _, target_commit, _ = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind="final_fast_forward_failed",
+    )
+
+    result = retry_final(tmp_path, target_commit[:12])
+
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "target_commit": target_commit,
+        "task_id": "demo-task",
+    }
+    assert git_stdout(tmp_path, "rev-parse", "HEAD") == target_commit
+    assert read_queue(tmp_path) == []
+    state = json.loads(
+        (tmp_path / ".agent_state" / "worktrees" / "state.json").read_text(
+            encoding="utf-8",
+        )
+    )
+    assert "demo-task" not in state["tasks"]
+
+
+def test_retry_final_repeated_failure_preserves_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target_commit, _ = prepare_blocked_retry(
+        tmp_path,
+        blocked_kind="final_fast_forward_failed",
+    )
+    module = load_workflow_module()
+    original_run_git = module.run_git
+
+    def fail_fast_forward(
+        root: Path,
+        *git_args: str,
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        if git_args[:3] == ("merge", "--no-overwrite-ignore", "--ff-only"):
+            return subprocess.CompletedProcess([], 1, "", "injected failure")
+        return original_run_git(root, *git_args, **kwargs)
+
+    monkeypatch.setattr(module, "run_git", fail_fast_forward)
+    args = Namespace(
+        root=str(tmp_path),
+        lock_timeout=10.0,
+        task_id="demo-task",
+        requested_by="agent-a",
+        expect_target=target_commit,
+        json=False,
+    )
+
+    for _ in range(2):
+        with pytest.raises(
+            module.OrchestrateError, match="retry final fast-forward failed"
+        ):
+            module.command_merge_retry_final(args)
+        entry = read_queue(tmp_path)[0]
+        assert entry["status"] == "blocked"
+        assert entry["blocked_kind"] == "final_fast_forward_failed"
+        assert read_task(tmp_path)["status"] == "blocked"
+        assert git_stdout(tmp_path, "rev-parse", "HEAD") != target_commit
 
 
 def test_merge_run_refresh_conflict_records_kind_and_recovers(

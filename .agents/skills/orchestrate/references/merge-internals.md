@@ -55,3 +55,22 @@ expected target與第二次ref snapshot。成功時只把同一entry更新成 `q
 原本的 `merge run`。其它 blocked kind與legacy missing/null provenance均Fast Fail；不得解析
 `note`或使用general-purpose unblock。`--expect-target`只接受7–40位hex object id / abbrev；branch、
 tag或其它live symbolic ref均拒絕，再由Git確認該object存在且為commit。
+
+## Final fast-forward operation failure 恢復
+
+若 final fast-forward 的 Git operation 失敗、queue head明確記錄
+`blocked_kind=final_fast_forward_failed`，且main與integration refs都未改變，使用：
+
+```text
+workflow.py merge retry-final <task-id> \\
+  --requested-by <same-agent-id> \\
+  --expect-target <recorded-7-to-40-hex-sha>
+```
+
+命令只接受`action=final`的blocked queue head，並在workflow locks內重驗task/entry/root/branch
+identity、recorded `base_head == HEAD`、recorded/expected/current integration target一致、main
+clean且無merge state、untracked path不會被target覆寫、fast-forward可行性與第二次ref snapshot。
+它不做integration refresh或preview；成功時直接以同一target完成fast-forward，驗證postcondition後
+移除queue head與task。retry operation或postcondition再次失敗時，entry/task維持blocked且
+`blocked_kind`仍為`final_fast_forward_failed`。其它blocked kind與legacy missing/null provenance均
+Fast Fail，不得由`note`推測failure site。

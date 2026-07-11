@@ -71,4 +71,6 @@ values：
 
 未知字串或非 blocked entry 的 non-null value 會 Fast Fail。舊版 blocked entry 缺少此欄位或值為
 `null` 時仍可由 `state validate` / `queue status` 讀取，但只代表 provenance unknown；
-`merge retry-refresh` 明確拒絕這類 entry，不從自由文字 `note` 推測或自動 migration。
+`merge retry-refresh`與`merge retry-final`明確拒絕這類 entry，不從自由文字 `note` 推測或
+自動 migration。前者只接受`integration_refresh_failed`；後者只接受`action=final`的
+`final_fast_forward_failed`，兩個 recovery transition 都不接受其它 provenance。

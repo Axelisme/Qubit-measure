@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — canonical program cfg catalog
+**Last updated:** 2026-07-11 — orchestrate final fast-forward recovery
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -346,7 +346,9 @@ orchestrate workflow script。Coverage包含queue failure provenance的closed ta
 legacy missing/null provenance的讀取相容性、refresh conflict解決後的窄幅requeue、對legacy與
 非refresh block的拒絕、queue order與main/integration Git preconditions。Recovery測試也鎖定
 `retry-refresh`只更新queue/task狀態、不直接merge，且新target必須先validation再回到既有
-`merge run`流程。
+`merge run`流程；`retry-final`則只接受同一queue head、base與target均未漂移的
+`final_fast_forward_failed`，成功直接完成同一target的fast-forward。測試明確拒絕refresh、preview、
+preflight、postcondition、manual與legacy provenance，並驗證retry再次失敗仍保留原failure kind。
 
 ### Golden / characterization tests
 
