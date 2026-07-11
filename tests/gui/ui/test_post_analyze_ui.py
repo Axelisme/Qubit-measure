@@ -255,9 +255,7 @@ def test_make_live_container_is_shared_by_post(qapp):
 
 
 def test_take_figure_screenshot_captures_post_figure(qapp):
-    """``take_figure_screenshot`` reads the shared ``_plot_stack`` current widget;
-    because the post figure now renders there, the screenshot path reaches it
-    (the Phase B dependency: a post run is screenshot-able like run/analyze)."""
+    """The tab's visible-figure boundary exposes a post figure for screenshots."""
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 

@@ -624,6 +624,45 @@ class ExpTabWidget(QWidget):
     def get_comment(self) -> str:
         return self._comment_edit.toPlainText()
 
+    def focus_result_panel(self) -> None:
+        """Show the Analysis/Save panel for this tab."""
+        self._left_tabs.setCurrentIndex(1)
+
+    def prepare_live_container(self) -> FigureContainer:
+        """Clear stale plot content and return the live-plot host."""
+        self.reset_plot()
+        return self._figure_container
+
+    def mount_interactive_widget(self, widget: QWidget) -> None:
+        """Mount an interactive analysis widget as the visible plot content."""
+        self._plot_stack.addWidget(widget)
+        self._plot_stack.setCurrentWidget(widget)
+
+    def unmount_interactive_widgets(self, widget_type: type[QWidget]) -> None:
+        """Remove interactive widgets of ``widget_type`` and show the placeholder."""
+        for index in reversed(range(self._plot_stack.count())):
+            widget = self._plot_stack.widget(index)
+            if isinstance(widget, widget_type):
+                self._plot_stack.removeWidget(widget)
+                widget.deleteLater()
+        self._plot_stack.setCurrentWidget(self._plot_placeholder)
+
+    def left_panel_width(self) -> int:
+        """Return the latest expanded left-panel width for persistence."""
+        return self._splitter_left_saved
+
+    def current_figure(self) -> Figure | None:
+        """Return the visible matplotlib figure, or ``None`` at the placeholder."""
+        from matplotlib.figure import Figure
+
+        canvas = self._plot_stack.currentWidget()
+        if canvas is None or canvas is self._plot_placeholder:
+            return None
+        figure = getattr(canvas, "figure", None)
+        if not isinstance(figure, Figure):
+            raise RuntimeError(f"tab {self.tab_id!r} canvas has no matplotlib figure")
+        return figure
+
     def reset_plot(self) -> None:
         """Remove all canvases from plot_stack, revert to placeholder.
 

@@ -1022,7 +1022,7 @@ def test_finished_run_auto_switches_to_analysis_tab(qapp):
 
     _emit_run_finished(bus, "tab-1", outcome="finished")
 
-    tab._left_tabs.setCurrentIndex.assert_called_once_with(1)
+    tab.focus_result_panel.assert_called_once_with()
 
 
 def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
@@ -1065,7 +1065,7 @@ def test_non_analysis_adapter_run_auto_switches_to_second_tab(qapp):
 
     _emit_run_finished(bus, "tab-1", outcome="finished")
 
-    tab._left_tabs.setCurrentIndex.assert_called_once_with(1)
+    tab.focus_result_panel.assert_called_once_with()
 
 
 def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):

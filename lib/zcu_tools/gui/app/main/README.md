@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — shared persistence mechanism
+**Last updated:** 2026-07-11 — experiment-tab view boundary
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -27,7 +27,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns tab-local rendering and receives tab actions through a
   narrow `TabActions` port; `MainWindow` adapts those actions to top-level
-  handlers.
+  handlers. Top-level orchestration invokes behavior-oriented tab methods for
+  result focus, plot hosting, interactive-widget lifecycle, figure reads, and
+  persisted panel geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。

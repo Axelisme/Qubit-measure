@@ -211,7 +211,7 @@ class MainWindow(QMainWindow):
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         assert snapshot.interaction is not None  # render snapshot fills live fields
         if snapshot.interaction.has_run_result:
-            tab_w._left_tabs.setCurrentIndex(1)
+            tab_w.focus_result_panel()
 
     # ------------------------------------------------------------------
     # Docked feedback panel (ADR-0025 C3)
@@ -391,8 +391,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        tab_w.reset_plot()  # clear prior liveplot before new run/analyze
-        return tab_w._figure_container
+        return tab_w.prepare_live_container()
 
     def mount_interactive_analysis(
         self,
@@ -418,8 +417,7 @@ class MainWindow(QMainWindow):
         widget = InteractiveAnalysisWidget(self._ctrl)
         session = session_factory(widget)  # the widget IS the InteractiveHost
         widget.bind(session, on_done=lambda: on_finish(session))
-        tab_w._plot_stack.addWidget(widget)
-        tab_w._plot_stack.setCurrentWidget(widget)
+        tab_w.mount_interactive_widget(widget)
 
     def unmount_interactive_analysis(self, tab_id: str) -> None:
         """RenderHost impl: remove the tab's mounted interactive picker (dual of
@@ -434,15 +432,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        stack = tab_w._plot_stack
-        for i in range(stack.count()):
-            widget = stack.widget(i)
-            if isinstance(widget, InteractiveAnalysisWidget):
-                stack.removeWidget(widget)
-                widget.deleteLater()
-        # Revert the visible pane to the placeholder; the cancelled analyze leaves
-        # no figure of its own behind.
-        stack.setCurrentWidget(tab_w._plot_placeholder)
+        tab_w.unmount_interactive_widgets(InteractiveAnalysisWidget)
 
     def current_left_panel_width(self) -> int:
         """RenderHost impl: the active tab's left-panel width (the single
@@ -452,7 +442,7 @@ class MainWindow(QMainWindow):
 
         current = self._tabs.currentWidget()
         if isinstance(current, ExpTabWidget):
-            return current._splitter_left_saved
+            return current.left_panel_width()
         return DEFAULT_LEFT_PANEL_WIDTH
 
     def notify_diagnostic(self, severity: str, title: str, message: str) -> None:
@@ -726,19 +716,14 @@ class MainWindow(QMainWindow):
         screenshot has the same window-independent geometry as a saved image,
         rather than tracking the current widget pixel size.
         """
-        from matplotlib.figure import Figure
-
         from zcu_tools.gui.app.main.figure_export import render_figure_png
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             raise FailedPreconditionError(f"unknown tab_id: {tab_id!r}")
-        canvas = tab_w._plot_stack.currentWidget()
-        if canvas is None or canvas is tab_w._plot_placeholder:
+        figure = tab_w.current_figure()
+        if figure is None:
             raise FailedPreconditionError(f"tab {tab_id!r} has no figure yet")
-        figure = getattr(canvas, "figure", None)
-        if not isinstance(figure, Figure):
-            raise RuntimeError(f"tab {tab_id!r} canvas has no matplotlib figure")
         return render_figure_png(figure)
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
