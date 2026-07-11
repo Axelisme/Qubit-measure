@@ -196,6 +196,65 @@ def test_legacy_and_meta_subscribers_coexist_with_one_stamp() -> None:
     assert meta_received[0][1] is second_meta[0]
 
 
+def test_nested_legacy_emit_preserves_meta_causal_order() -> None:
+    bus = EventBus()
+    outer = MdChangedPayload(md=MetaDict())
+    inner = MdChangedPayload(md=MetaDict())
+    meta_trace: list[tuple[str, str, int]] = []
+    legacy_trace: list[tuple[str, str]] = []
+
+    def payload_name(payload: MdChangedPayload) -> str:
+        return "outer" if payload is outer else "inner"
+
+    bus.subscribe_with_meta(
+        MdChangedPayload,
+        lambda payload, meta: meta_trace.append(
+            ("meta-first", payload_name(payload), meta.seq)
+        ),
+    )
+    bus.subscribe_with_meta(
+        MdChangedPayload,
+        lambda payload, meta: meta_trace.append(
+            ("meta-second", payload_name(payload), meta.seq)
+        ),
+    )
+
+    def legacy_first(payload: MdChangedPayload) -> None:
+        legacy_trace.append(("legacy-first", payload_name(payload)))
+        if payload is outer:
+            bus.emit(inner)
+
+    bus.subscribe(MdChangedPayload, legacy_first)
+    bus.subscribe(
+        MdChangedPayload,
+        lambda payload: legacy_trace.append(("legacy-second", payload_name(payload))),
+    )
+
+    bus.emit(outer)
+
+    assert [(subscriber, name) for subscriber, name, _seq in meta_trace] == [
+        ("meta-first", "outer"),
+        ("meta-second", "outer"),
+        ("meta-first", "inner"),
+        ("meta-second", "inner"),
+    ]
+    outer_seq = meta_trace[0][2]
+    inner_seq = meta_trace[2][2]
+    assert outer_seq < inner_seq
+    assert [seq for _subscriber, _name, seq in meta_trace] == [
+        outer_seq,
+        outer_seq,
+        inner_seq,
+        inner_seq,
+    ]
+    assert legacy_trace == [
+        ("legacy-first", "outer"),
+        ("legacy-first", "inner"),
+        ("legacy-second", "inner"),
+        ("legacy-second", "outer"),
+    ]
+
+
 def test_legacy_and_meta_subscriber_exceptions_are_isolated() -> None:
     bus = EventBus()
     later_legacy = MagicMock()

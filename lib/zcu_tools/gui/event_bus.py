@@ -191,16 +191,20 @@ class BaseEventBus:
         A subscriber raising does not stop the others (logged).
         """
         meta = EventMeta(seq=_next_process_seq(), origin=self.current_origin)
-        callbacks = ((cb, False) for cb in list(self._subs.get(type(payload), ())))
-        meta_callbacks = (
-            (cb, True) for cb in list(self._meta_subs.get(type(payload), ()))
-        )
-        for cb, with_meta in (*callbacks, *meta_callbacks):
+        # Deliver the stamp sidecar before legacy callbacks. A legacy callback
+        # may synchronously emit another payload; completing every meta callback
+        # first guarantees observers see the outer stamp before the nested one,
+        # while the legacy callback list keeps its existing re-entrant ordering.
+        for cb in list(self._meta_subs.get(type(payload), ())):
             try:
-                if with_meta:
-                    cb(payload, meta)
-                else:
-                    cb(payload)
+                cb(payload, meta)
+            except Exception:  # noqa: BLE001 — one bad subscriber must not break the rest
+                logger.exception(
+                    "EventBus subscriber for %s raised", type(payload).__name__
+                )
+        for cb in list(self._subs.get(type(payload), ())):
+            try:
+                cb(payload)
             except Exception:  # noqa: BLE001 — one bad subscriber must not break the rest
                 logger.exception(
                     "EventBus subscriber for %s raised", type(payload).__name__
