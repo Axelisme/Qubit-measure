@@ -15,8 +15,11 @@ from zcu_tools.experiment.v2.twotone.reset.dual_tone.freq import (
 from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
+    Seed,
+    custom,
     md,
-    reset_freq_axis,
+    md_get_float,
+    md_has_key,
     reset_module_writeback_items,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
@@ -35,11 +38,42 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
+    EvalValue,
+    SweepValue,
 )
 
 from ._shared import RESET_120_FIELD_MD_MAP
 
 DualToneFreqRunResult: TypeAlias = FreqResult
+
+
+def _reset_freq_axis(
+    center_key: Literal["reset_f1", "reset_f2"],
+) -> Seed[SweepValue]:
+    """Build one axis of this experiment's two-frequency reset map."""
+
+    def resolve(ctx: ExpContext) -> SweepValue:
+        width_key = f"{center_key}_w"
+        center = md_get_float(ctx, center_key, 3000.0)
+        if md_has_key(ctx, center_key) and md_has_key(ctx, width_key):
+            start: float | EvalValue = EvalValue(
+                expr=f"{center_key} - 1.5 * {width_key}"
+            )
+            stop: float | EvalValue = EvalValue(
+                expr=f"{center_key} + 1.5 * {width_key}"
+            )
+        elif md_has_key(ctx, center_key):
+            start = EvalValue(expr=f"{center_key} - 50.0")
+            stop = EvalValue(expr=f"{center_key} + 50.0")
+        else:
+            start = center - 50.0
+            stop = center + 50.0
+        return SweepValue(start=start, stop=stop, expts=201)
+
+    return custom(
+        resolve,
+        description=f"{center_key} reset frequency axis (201 points)",
+    )
 
 
 @dataclass
@@ -125,12 +159,12 @@ class DualToneFreqAdapter(
             .sweep(
                 "freq1",
                 label="Freq 1 (MHz)",
-                default=reset_freq_axis("reset_f1", expts=201),
+                default=_reset_freq_axis("reset_f1"),
             )
             .sweep(
                 "freq2",
                 label="Freq 2 (MHz)",
-                default=reset_freq_axis("reset_f2", expts=201),
+                default=_reset_freq_axis("reset_f2"),
             )
             .reps(100)
             .rounds(1000)

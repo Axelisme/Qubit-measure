@@ -14,7 +14,7 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgDefinition,
     ModuleInit,
     md,
-    readout_rf_writeback_items,
+    pulse_readout_module_writeback_items,
     res_freq_range,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
@@ -236,9 +236,15 @@ class OneToneFreqAdapter(
             ),
         ]
         items.extend(
-            readout_rf_writeback_items(
+            pulse_readout_module_writeback_items(
                 req.run_result.cfg_snapshot,
-                r_f=result.freq,
+                target="readout_rf",
+                desc="Readout at fitted resonator frequency",
+                field_updates=(
+                    ("pulse_cfg.freq", float(result.freq)),
+                    ("ro_cfg.ro_freq", float(result.freq)),
+                ),
+                role_id="readout",
             )
         )
         return items

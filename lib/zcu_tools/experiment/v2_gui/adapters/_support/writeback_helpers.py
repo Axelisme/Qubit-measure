@@ -77,7 +77,7 @@ def _resolve_readout_dpm_values(
     return best_ro_freq, best_ro_gain, best_ro_length
 
 
-def _pulse_readout_module_writeback_items(
+def pulse_readout_module_writeback_items(
     cfg_snapshot: _HasReadoutModules | None,
     *,
     target: str,
@@ -120,7 +120,7 @@ def readout_dpm_writeback_items(
         return []
 
     best_ro_freq, best_ro_gain, best_ro_length = resolved
-    return _pulse_readout_module_writeback_items(
+    return pulse_readout_module_writeback_items(
         cfg_snapshot,
         target="readout_dpm",
         desc="Optimized readout (DPM)",
@@ -135,23 +135,6 @@ def readout_dpm_writeback_items(
             ("ro_cfg.ro_length", best_ro_length),
         ),
         role_id="readout_dpm",
-    )
-
-
-def readout_rf_writeback_items(
-    cfg_snapshot: _HasReadoutModules | None,
-    *,
-    r_f: float,
-) -> list[ModuleWriteback]:
-    return _pulse_readout_module_writeback_items(
-        cfg_snapshot,
-        target="readout_rf",
-        desc="Readout at fitted resonator frequency",
-        field_updates=(
-            ("pulse_cfg.freq", float(r_f)),
-            ("ro_cfg.ro_freq", float(r_f)),
-        ),
-        role_id="readout",
     )
 
 

@@ -16,8 +16,10 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
+    custom,
     md,
-    reset_freq_range,
+    md_get_float,
+    md_has_key,
     reset_module_writeback_items,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
@@ -31,8 +33,24 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.cfg import EvalValue, SweepValue
 
 SingleToneFreqRunResult: TypeAlias = FreqResult
+
+
+def _reset_freq_range(ctx: ExpContext) -> SweepValue:
+    """Build this sideband-reset scan around its calibrated frequency."""
+    center = md_get_float(ctx, "reset_f", 3000.0)
+    if md_has_key(ctx, "reset_f") and md_has_key(ctx, "resetf_w"):
+        start: float | EvalValue = EvalValue(expr="reset_f - 1.5 * resetf_w")
+        stop: float | EvalValue = EvalValue(expr="reset_f + 1.5 * resetf_w")
+    elif md_has_key(ctx, "reset_f"):
+        start = EvalValue(expr="reset_f - 50.0")
+        stop = EvalValue(expr="reset_f + 50.0")
+    else:
+        start = center - 50.0
+        stop = center + 50.0
+    return SweepValue(start=start, stop=stop, expts=201)
 
 
 @dataclass
@@ -118,7 +136,10 @@ class SingleToneFreqAdapter(
             .sweep(
                 "freq",
                 label="Freq (MHz)",
-                default=reset_freq_range(expts=201),
+                default=custom(
+                    _reset_freq_range,
+                    description="single-tone reset frequency range (201 points)",
+                ),
             )
             .reps(1000)
             .rounds(100)

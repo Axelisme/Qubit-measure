@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — experiment adapter authoring boundary
+**Last updated:** 2026-07-11 — strict experiment policy ownership
 
 # measure experiment adapters
 
@@ -26,3 +26,6 @@ policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_valu
 3. 不以 forwarding wrapper 隱藏單行邏輯；不讓 `_support` 解讀 registry key 或實驗順序。
 4. 新增 adapter 時同步加入 `../registry.py`，並在 `tests/experiment/v2_gui/adapters/`
    對應路徑加入 observable contract tests。
+
+range centre/span/fallback、writeback target/description/role 等 experiment policy 直接寫在
+authoritative adapter；`_support` 只提供不含這些具體值的 parameterized mechanics。

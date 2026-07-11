@@ -18,12 +18,9 @@ from zcu_tools.gui.session.value_lookup import (
 
 from .ctx_helpers import (
     md_has_key,
-    proper_best_ro_freq_range,
     proper_flux_range,
     proper_qub_freq_range,
     proper_res_freq_range,
-    proper_reset_freq_axis,
-    proper_reset_freq_range,
 )
 
 if TYPE_CHECKING:
@@ -131,13 +128,6 @@ def res_freq_range(
     )
 
 
-def best_ro_freq_range(*, expts: int, span_factor: float = 1.5) -> Seed[SweepValue]:
-    return custom(
-        lambda ctx: proper_best_ro_freq_range(ctx, expts, span_factor=span_factor),
-        description=f"best readout frequency range ({expts} points)",
-    )
-
-
 def qub_freq_range(*, expts: int, span_factor: float = 1.5) -> Seed[SweepValue]:
     return custom(
         lambda ctx: proper_qub_freq_range(ctx, expts, span_factor=span_factor),
@@ -149,36 +139,6 @@ def flux_range(*, expts: int) -> Seed[SweepValue]:
     return custom(
         lambda ctx: proper_flux_range(ctx, expts),
         description=f"flux range ({expts} points)",
-    )
-
-
-def reset_freq_range(
-    *, expts: int, half_span_default: float = 50.0
-) -> Seed[SweepValue]:
-    return custom(
-        lambda ctx: proper_reset_freq_range(
-            ctx,
-            expts,
-            half_span_default=half_span_default,
-        ),
-        description=f"reset frequency range ({expts} points)",
-    )
-
-
-def reset_freq_axis(
-    center_key: str,
-    *,
-    expts: int,
-    half_span_default: float = 50.0,
-) -> Seed[SweepValue]:
-    return custom(
-        lambda ctx: proper_reset_freq_axis(
-            ctx,
-            center_key,
-            expts,
-            half_span_default=half_span_default,
-        ),
-        description=f"{center_key} reset frequency axis ({expts} points)",
     )
 
 
@@ -224,15 +184,12 @@ __all__ = [
     "NO_FALLBACK",
     "Seed",
     "SweepDefault",
-    "best_ro_freq_range",
     "custom",
     "flux_range",
     "literal",
     "md",
     "qub_freq_range",
     "res_freq_range",
-    "reset_freq_axis",
-    "reset_freq_range",
     "scaled_md",
     "value_source",
 ]

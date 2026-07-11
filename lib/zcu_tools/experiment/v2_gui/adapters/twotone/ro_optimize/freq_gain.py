@@ -15,7 +15,9 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import (
 from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    best_ro_freq_range,
+    custom,
+    md_get_float,
+    md_has_key,
     readout_dpm_writeback_items,
     scaled_md,
 )
@@ -31,10 +33,26 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import (
+    EvalValue,
     SweepValue,
 )
 
 RoOptFreqGainRunResult: TypeAlias = FreqGainResult
+
+
+def _best_ro_freq_range(ctx: ExpContext) -> SweepValue:
+    """Center this experiment's frequency scan on its latest trusted optimum."""
+    center_key = "best_ro_freq" if md_has_key(ctx, "best_ro_freq") else "r_f"
+    center = md_get_float(ctx, center_key, 6500.0)
+    width = md_get_float(ctx, "rf_w", 500.0)
+    if md_has_key(ctx, center_key) and md_has_key(ctx, "rf_w"):
+        start: float | EvalValue = EvalValue(expr=f"{center_key} - 0.5 * rf_w")
+        stop: float | EvalValue = EvalValue(expr=f"{center_key} + 0.5 * rf_w")
+    else:
+        half_span = 0.5 * width if width > 0.0 else 30.0
+        start = center - half_span
+        stop = center + half_span
+    return SweepValue(start=start, stop=stop, expts=31)
 
 
 @dataclass
@@ -120,7 +138,10 @@ class RoOptFreqGainAdapter(
             .sweep(
                 "freq",
                 label="Readout freq (MHz)",
-                default=best_ro_freq_range(expts=31, span_factor=0.5),
+                default=custom(
+                    _best_ro_freq_range,
+                    description="best readout frequency range (31 points)",
+                ),
             )
             .sweep(
                 "gain",

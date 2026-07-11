@@ -128,7 +128,7 @@ class _SsT1ToneSweepBase(
                 label="Delay (us)",
                 default=SweepDefault(
                     start=0.0,
-                    # Existing md_eval_scaled fallback was factor * 100.0.
+                    # The fallback is the fully scaled 5 * 100 us window.
                     stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
                     expts=51,
                 ),

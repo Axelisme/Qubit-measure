@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.cfg import (
-    DirectValue,
     EvalValue,
-    ScalarValue,
     SweepValue,
 )
 
@@ -22,80 +20,10 @@ def md_get_float(ctx: ExpContext, key: str, default: float) -> float:
     return default
 
 
-def md_get_int(ctx: ExpContext, key: str, default: int) -> int:
-    value = ctx.md.get(key)
-    if isinstance(value, int):
-        return value
-    return default
-
-
 def md_has_key(ctx: ExpContext, key: str) -> bool:
     sentinel = object()
     value = ctx.md.get(key, sentinel)
     return value is not sentinel and value is not None
-
-
-def md_eval_float(key: str) -> EvalValue:
-    return EvalValue(expr=key)
-
-
-def md_eval_int(key: str) -> EvalValue:
-    return EvalValue(expr=key)
-
-
-def md_scalar_float(ctx: ExpContext, key: str, default: float) -> ScalarValue:
-    if md_has_key(ctx, key):
-        return md_eval_float(key)
-    return DirectValue(default)
-
-
-def md_scalar_int(ctx: ExpContext, key: str, default: int) -> ScalarValue:
-    if md_has_key(ctx, key):
-        return md_eval_int(key)
-    return DirectValue(default)
-
-
-def md_eval_scaled(
-    ctx: ExpContext, key: str, factor: float, fallback: float
-) -> float | EvalValue:
-    """A ``factor * <key>`` sweep edge that stays md-linked.
-
-    When md has ``key`` the edge is an ``EvalValue(f"{factor} * {key}")`` so the
-    GUI keeps the live expression (re-derives if md changes); otherwise a plain
-    ``factor * fallback`` float. Use for ``SweepValue.start``/``stop`` edges
-    derived from an md quantity (e.g. ``stop = 5 * md.t1``). Returns the edge
-    value, not a whole SweepValue.
-    """
-    if md_has_key(ctx, key):
-        return EvalValue(expr=f"{factor} * {key}")
-    return factor * fallback
-
-
-def md_eval_scaled_or_value(
-    ctx: ExpContext, key: str, factor: float, fallback: float
-) -> float | EvalValue:
-    """A ``factor * <key>`` edge with a fixed fallback value.
-
-    Use this when the notebook default has a live calibrated expression if md is
-    present, but a separate fixed fallback when md is absent.
-    """
-    if md_has_key(ctx, key):
-        return EvalValue(expr=f"{factor} * {key}")
-    return fallback
-
-
-def proper_relax(
-    ctx: ExpContext, factor: float = 5.0, fallback: float = 100.0
-) -> ScalarValue:
-    """Default relax_delay value: ``factor * t1`` when md has t1, else fallback.
-
-    Mirrors the notebook idiom ``relax_delay = 5 * md.t1``. When ``t1`` is present
-    the result is an EvalValue (``f"{factor} * t1"``) so the GUI keeps the live
-    expression; otherwise a plain DirectValue fallback.
-    """
-    if md_has_key(ctx, "t1"):
-        return EvalValue(expr=f"{factor} * t1")
-    return DirectValue(fallback)
 
 
 def _freq_range(
@@ -137,78 +65,11 @@ def proper_res_freq_range(
     return _freq_range(ctx, "r_f", "rf_w", expts, span_factor, 6500.0, 500.0)
 
 
-def proper_best_ro_freq_range(
-    ctx: ExpContext, expts: int, *, span_factor: float = 1.5
-) -> SweepValue:
-    """Readout sweep range centered on ``best_ro_freq``, falling back to ``r_f``."""
-    if md_has_key(ctx, "best_ro_freq"):
-        return _freq_range(
-            ctx, "best_ro_freq", "rf_w", expts, span_factor, 6500.0, 500.0
-        )
-    return proper_res_freq_range(ctx, expts, span_factor=span_factor)
-
-
 def proper_qub_freq_range(
     ctx: ExpContext, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
     """Qubit frequency sweep range: ``q_f ± span_factor*qf_w``."""
     return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 5000.0, 1000.0)
-
-
-def proper_reset_freq_range(
-    ctx: ExpContext, expts: int, *, half_span_default: float = 50.0
-) -> SweepValue:
-    """Sideband-reset frequency sweep range: ``reset_f ± span``.
-
-    ``reset_f`` (= r_f - q_f) is the sweep centre. When md also has ``resetf_w``
-    the half-span is ``1.5*resetf_w`` and each edge stays an EvalValue (the GUI
-    re-derives if md changes); otherwise a fixed ``reset_f ± half_span_default``
-    (notebook single-tone reset: ``reset_f - 50`` .. ``reset_f + 50``). When
-    ``reset_f`` is absent the scan centres on 0.0.
-    """
-    center = md_get_float(ctx, "reset_f", 3000.0)
-    have_center = md_has_key(ctx, "reset_f")
-    if have_center and md_has_key(ctx, "resetf_w"):
-        start: float | EvalValue = EvalValue(expr="reset_f - 1.5 * resetf_w")
-        stop: float | EvalValue = EvalValue(expr="reset_f + 1.5 * resetf_w")
-    elif have_center:
-        start = EvalValue(expr=f"reset_f - {half_span_default}")
-        stop = EvalValue(expr=f"reset_f + {half_span_default}")
-    else:
-        start = center - half_span_default
-        stop = center + half_span_default
-    return SweepValue(start=start, stop=stop, expts=expts)
-
-
-def proper_reset_freq_axis(
-    ctx: ExpContext,
-    center_key: str,
-    expts: int,
-    *,
-    half_span_default: float = 50.0,
-) -> SweepValue:
-    """One axis of a dual-tone reset frequency map: ``<center_key> ± span``.
-
-    Mirrors ``proper_reset_freq_range`` but parameterised on the centre md key so
-    each of the two sweep axes (``reset_f1`` / ``reset_f2``) seeds from its own
-    centre. When the matching width key (``<center_key>_w``, e.g. ``reset_f1_w``)
-    is present the half-span is ``1.5*width`` and each edge stays an EvalValue (the
-    GUI re-derives if md changes); otherwise a fixed ``center ± half_span_default``.
-    When the centre key is absent the scan centres on 0.0.
-    """
-    width_key = f"{center_key}_w"
-    center = md_get_float(ctx, center_key, 3000.0)
-    have_center = md_has_key(ctx, center_key)
-    if have_center and md_has_key(ctx, width_key):
-        start: float | EvalValue = EvalValue(expr=f"{center_key} - 1.5 * {width_key}")
-        stop: float | EvalValue = EvalValue(expr=f"{center_key} + 1.5 * {width_key}")
-    elif have_center:
-        start = EvalValue(expr=f"{center_key} - {half_span_default}")
-        stop = EvalValue(expr=f"{center_key} + {half_span_default}")
-    else:
-        start = center - half_span_default
-        stop = center + half_span_default
-    return SweepValue(start=start, stop=stop, expts=expts)
 
 
 def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:

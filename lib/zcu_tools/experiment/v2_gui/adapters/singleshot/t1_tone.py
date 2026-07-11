@@ -18,7 +18,6 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     ModuleInit,
     SweepDefault,
     custom,
-    md_eval_scaled,
     md_has_key,
     scaled_md,
 )
@@ -51,7 +50,9 @@ SsT1ToneRunResult: TypeAlias = T1WithToneResult
 
 def _sweep_stop_default(ctx: ExpContext) -> float | EvalValue:
     key = "t1_with_tone" if md_has_key(ctx, "t1_with_tone") else "t1"
-    return md_eval_scaled(ctx, key, factor=5.0, fallback=100.0)
+    if md_has_key(ctx, key):
+        return EvalValue(expr=f"5.0 * {key}")
+    return 500.0
 
 
 @dataclass

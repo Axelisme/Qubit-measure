@@ -1,20 +1,15 @@
-"""Unit tests for proper_relax / proper_*_freq_range helpers."""
+"""Unit tests for cross-adapter frequency-range mechanics."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.v2_gui.adapters._support import (
-    md_eval_scaled,
-    md_eval_scaled_or_value,
-    proper_best_ro_freq_range,
+from zcu_tools.experiment.v2_gui.adapters._support.ctx_helpers import (
     proper_flux_range,
     proper_qub_freq_range,
-    proper_relax,
     proper_res_freq_range,
 )
 from zcu_tools.gui.cfg import (
-    DirectValue,
     EvalValue,
     SweepValue,
 )
@@ -25,75 +20,6 @@ def _ctx_with_md(values: dict) -> MagicMock:
     ctx.md.get.side_effect = lambda k, d=None: values.get(k, d)
     ctx.md.__contains__ = lambda self, k: k in values
     return ctx
-
-
-# --- proper_relax ----------------------------------------------------------
-
-
-def test_proper_relax_uses_eval_when_t1_present():
-    ctx = _ctx_with_md({"t1": 50.0})
-    result = proper_relax(ctx)
-    assert isinstance(result, EvalValue)
-    assert result.expr == "5.0 * t1"
-    # helpers no longer eagerly resolve; lowering owns resolution against md
-    assert result.resolved is None
-
-
-def test_proper_relax_custom_factor():
-    ctx = _ctx_with_md({"t1": 10.0})
-    result = proper_relax(ctx, factor=3.0)
-    assert isinstance(result, EvalValue)
-    assert result.expr == "3.0 * t1"
-    assert result.resolved is None
-
-
-def test_proper_relax_falls_back_without_t1():
-    ctx = _ctx_with_md({})
-    result = proper_relax(ctx)
-    assert isinstance(result, DirectValue)
-    assert result.value == 100.0
-
-
-def test_proper_relax_custom_fallback():
-    ctx = _ctx_with_md({})
-    result = proper_relax(ctx, fallback=42.0)
-    assert isinstance(result, DirectValue)
-    assert result.value == 42.0
-
-
-# --- md_eval_scaled (sweep-edge factor * key) -------------------------------
-
-
-def test_md_eval_scaled_uses_eval_when_md_present():
-    ctx = _ctx_with_md({"t1": 50.0})
-    edge = md_eval_scaled(ctx, "t1", factor=5.0, fallback=100.0)
-    assert isinstance(edge, EvalValue)
-    assert edge.expr == "5.0 * t1"
-    # lowering owns resolution against md
-    assert edge.resolved is None
-
-
-def test_md_eval_scaled_falls_back_to_scaled_float_without_md():
-    ctx = _ctx_with_md({})
-    edge = md_eval_scaled(ctx, "pi_amp", factor=2.0, fallback=0.5)
-    # the fallback is a plain float (a sweep edge, not a scalar field value),
-    # already multiplied by the factor.
-    assert edge == 1.0
-    assert not isinstance(edge, EvalValue)
-
-
-def test_md_eval_scaled_or_value_falls_back_to_fixed_float_without_md():
-    ctx = _ctx_with_md({})
-    edge = md_eval_scaled_or_value(ctx, "pi_len", factor=4.0, fallback=0.3)
-    assert edge == 0.3
-    assert not isinstance(edge, EvalValue)
-
-
-def test_md_eval_scaled_or_value_uses_eval_when_md_present():
-    ctx = _ctx_with_md({"pi_len": 0.05})
-    edge = md_eval_scaled_or_value(ctx, "pi_len", factor=4.0, fallback=0.3)
-    assert isinstance(edge, EvalValue)
-    assert edge.expr == "4.0 * pi_len"
 
 
 # --- proper_*_freq_range ----------------------------------------------------
@@ -134,23 +60,6 @@ def test_qub_freq_range_uses_qubit_md_keys():
     assert sv.start.expr == "q_f - 2.0 * qf_w"
     assert sv.start.resolved is None
     assert sv.expts == 201
-
-
-def test_best_ro_freq_range_prefers_best_ro_freq():
-    ctx = _ctx_with_md({"best_ro_freq": 6123.0, "r_f": 6000.0, "rf_w": 20.0})
-    sv = proper_best_ro_freq_range(ctx, 31, span_factor=0.5)
-    assert isinstance(sv.start, EvalValue)
-    assert sv.start.expr == "best_ro_freq - 0.5 * rf_w"
-    assert isinstance(sv.stop, EvalValue)
-    assert sv.stop.expr == "best_ro_freq + 0.5 * rf_w"
-    assert sv.expts == 31
-
-
-def test_best_ro_freq_range_falls_back_to_r_f():
-    ctx = _ctx_with_md({"r_f": 6000.0, "rf_w": 20.0})
-    sv = proper_best_ro_freq_range(ctx, 31, span_factor=0.5)
-    assert isinstance(sv.start, EvalValue)
-    assert sv.start.expr == "r_f - 0.5 * rf_w"
 
 
 # --- proper_flux_range ------------------------------------------------------
