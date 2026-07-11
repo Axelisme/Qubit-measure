@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-11 — private adapter support layout
+**Last updated:** 2026-07-11 — mandatory adapter run preflight contract
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -27,8 +27,9 @@ experiment/v2_gui/
 每個 adapter 實作 context-free `cfg_definition()`（static shape + deferred fresh-default recipe）、
 `run` / `analyze` / `get_writeback_items`，並在同一 class 以
 `guide_text: ClassVar[AdapterGuide]` 宣告 operator-facing prose；framework-facing `guide()`
-入口由 `BaseAdapter` 統一提供。需要 SoC-dependent
-但可預測的 run-time cfg 檢查時，覆寫 `validate_run_request(req, raw_cfg)` 做純 preflight
+入口由 `BaseAdapter` 統一提供。每個 adapter 都透過 Base 具備 mandatory
+`validate_run_request(req, raw_cfg)` preflight；只有需要 SoC-dependent
+但可預測的 run-time cfg 檢查時才覆寫，並維持純 preflight
 （例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
 `gui/app/main/README.md`。
 
@@ -120,7 +121,8 @@ analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default
 沿用 base default（回 `params_cls()`）。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作
 `get_post_analyze_params()` / `post_analyze()`；post-analysis 是第二層 CPU-only 探索/比較視圖，
 不更新 writeback draft，writeback 仍只由 primary `analyze()` result 經 `get_writeback_items()`
-產生。
+產生。`validate_run_request` 不受 capabilities 控制：Base 提供 no-op default，Protocol/Base exact
+signature 與 registry conformance tests 共同鎖定 framework mandatory surface。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，

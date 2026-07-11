@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from inspect import signature
 from typing import Any, ClassVar
 
 import pytest
@@ -12,6 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    ExpAdapterProtocol,
     NoAnalysisResult,
     NoAnalyzeParams,
     PostAnalyzeResultBase,
@@ -265,3 +267,28 @@ def test_registered_adapters_import_with_capability_validation() -> None:
 
     assert "singleshot/t1_tone_sweep_gain" in ADAPTERS
     assert "singleshot/t1_tone_sweep_freq" in ADAPTERS
+
+
+def test_run_preflight_protocol_and_base_signatures_match() -> None:
+    assert signature(ExpAdapterProtocol.validate_run_request) == signature(
+        BaseAdapter.validate_run_request
+    )
+
+
+def test_base_run_preflight_default_is_noop() -> None:
+    req: Any = object()
+    raw_cfg: dict[str, object] = {"sentinel": object()}
+
+    assert _MinimalNoAnalysisAdapter().validate_run_request(req, raw_cfg) is None
+    assert set(raw_cfg) == {"sentinel"}
+
+
+def test_registered_adapters_satisfy_framework_protocol() -> None:
+    from zcu_tools.experiment.v2_gui.registry import ADAPTERS
+
+    for name, adapter_cls in ADAPTERS.items():
+        adapter = adapter_cls()
+        assert isinstance(adapter, ExpAdapterProtocol), (
+            f"registered adapter {name!r} ({adapter_cls.__name__}) does not satisfy "
+            "ExpAdapterProtocol"
+        )

@@ -75,6 +75,10 @@ class ExpAdapterProtocol(Protocol):
         """Build the analyze parameter instance presented to the user."""
         ...
 
+    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+        """Validate adapter-specific run constraints before opening an operation."""
+        ...
+
     def run(self, req: RunRequest, schema: CfgSchema) -> Any:
         """Run the experiment and return its result."""
         ...

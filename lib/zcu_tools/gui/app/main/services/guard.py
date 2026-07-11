@@ -149,14 +149,12 @@ class GuardService:
             except RuntimeError as exc:
                 raise GuardError(str(exc), reason_code="no_soc") from exc
 
-        validate_run_request = getattr(tab.adapter, "validate_run_request", None)
-        if callable(validate_run_request):
-            try:
-                validate_run_request(req, raw_cfg)
-            except Exception as exc:
-                raise GuardError(
-                    f"Run config invalid: {exc}", reason_code="invalid_cfg"
-                ) from exc
+        try:
+            tab.adapter.validate_run_request(req, raw_cfg)
+        except Exception as exc:
+            raise GuardError(
+                f"Run config invalid: {exc}", reason_code="invalid_cfg"
+            ) from exc
 
         logger.debug("acquire_run_permit: tab_id=%r", tab_id)
         return RunPermit(

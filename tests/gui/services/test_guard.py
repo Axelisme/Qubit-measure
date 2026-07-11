@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -74,6 +75,22 @@ def test_run_permit_issued_for_active_valid_cfg():
     assert permit.schema is state.get_tab(tab_id).cfg_schema
     assert permit.request.soc is state.exp_context.soc
     assert permit.adapter is state.get_tab(tab_id).adapter
+    adapter = cast(MagicMock, permit.adapter)
+    adapter.validate_run_request.assert_called_once_with(permit.request, {})
+
+
+def test_run_permit_translates_adapter_preflight_error() -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
+    preflight_error = ValueError("bad preflight")
+    adapter.validate_run_request.side_effect = preflight_error
+    guard = GuardService(state)
+
+    with pytest.raises(GuardError, match="Run config invalid: bad preflight") as exc:
+        guard.acquire_run_permit(tab_id)
+
+    assert exc.value.reason_code == "invalid_cfg"
+    assert exc.value.__cause__ is preflight_error
 
 
 @pytest.mark.parametrize("readiness", [ContextReadiness.EMPTY, ContextReadiness.DRAFT])
@@ -106,20 +123,24 @@ def test_analyze_permit_reason_code_no_context():
 
 def test_run_permit_rejected_on_invalid_cfg():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, lowering_raises=True)
+    adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
     guard = GuardService(state)
 
     with pytest.raises(GuardError, match="Config invalid"):
         guard.acquire_run_permit(tab_id)
+    adapter.validate_run_request.assert_not_called()
 
 
 def test_run_permit_rejected_when_soc_required_but_missing():
     state, tab_id = _make_state(
         readiness=ContextReadiness.ACTIVE, soc_attached=False, requires_soc=True
     )
+    adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
     guard = GuardService(state)
 
     with pytest.raises(GuardError, match="soc"):
         guard.acquire_run_permit(tab_id)
+    adapter.validate_run_request.assert_not_called()
 
 
 def test_run_permit_issued_without_soc_when_capability_does_not_require():

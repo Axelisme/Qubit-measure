@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — dead surface pruning
+**Last updated:** 2026-07-11 — mandatory adapter run preflight contract
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -314,8 +314,10 @@ on the concrete controller.
 
 - Adapter `cfg_definition()` is context-free authoring; only fresh
   `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.
-- `validate_run_request(req, raw_cfg)` is the place for SoC-dependent preflight
-  that can fail before starting an operation.
+- `validate_run_request(req, raw_cfg)` is a mandatory framework member that
+  `GuardService` always calls before opening an async handle. `BaseAdapter`
+  supplies the no-op default; overrides are pure, predictable preflight only and
+  must not touch devices or mutate cfg/state.
 - Adapter `run()` receives a concrete config and performs the experiment.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
 - `get_writeback_items()` returns domain writeback candidates; writeback commit is

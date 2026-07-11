@@ -42,11 +42,25 @@ adapter 要對框架宣告自己支援哪些 lifecycle：要不要 SoC、analyze
 
 兩半是同一條規則的鏡像：**base 能產生 params ⟺ `params_cls` 全 default 可建構 ⟺ override 非必須**。靜態取型的 `analyze_params_cls()`：adapter 有覆寫 `get_analyze_params` 時讀其 return annotation；否則（多數 adapter 把常數折進欄位 default、不覆寫）落到 class 的第 4 個 generic arg `BaseAdapter[..., <Params>]`。
 
+### 5. Framework-called hook 明列為 mandatory Protocol surface
+
+framework 實際呼叫的 adapter hook 都在 generic-free `ExpAdapterProtocol` 明列。
+`validate_run_request(req, raw_cfg)` 是 mandatory surface、optional override：`BaseAdapter` 提供純
+no-op default，`GuardService` 永遠直接呼叫。所有 adapter 都能執行這個 preflight seam，因此它不是
+「支援／不支援」或 routing 差異，不加入 `AdapterCapabilities` bit。
+
+保障分為三層且責任不同：`BaseAdapter.__init_subclass__` 在 import-time 驗 capability 與 conditional
+hook 是否一致；pyright 驗 Protocol / Registry 的 structural signature compatibility；registry traversal runtime
+test 驗 mandatory member presence。Base subclass 若原本想 override 卻拼錯 method name，仍會合法繼承
+no-op default；本契約不宣稱能辨識這種實作者意圖。
+
 ## 後果
 
 - adapter 作者只填 `capabilities` + 對應 hooks；裝錯／忘記在 **import 時**就炸，不到 runtime。
 - 常數 analyze-params 不再需要樣板 override——值折進 params dataclass 欄位 default，base default 直接 `params_cls()`。
 - 驗證是泛型的（getattr-identity），不隨新增中間 base 或 helper 檔失效。
+- Guard 不保留 optional `getattr` compatibility branch；mandatory preflight 缺失由 structural contract
+  與 registry conformance test 揭露。
 - 取代 design_v2 reconciliation 中 DEC-1／DEC-3／DEC-4 對宣告機制的探索；analyze-params 規則放寬連動「常數折進 default」的去樣板批次。
 
 ## 替代方案（綜述）
@@ -56,3 +70,4 @@ adapter 要對框架宣告自己支援哪些 lifecycle：要不要 SoC、analyze
 | capability 宣告 | 顯式 `AdapterCapabilities` + import-time validation | class-body 物件 / `@fit` decorator / ii-a typed 屬性 |
 | 宣告↔實作 同步 | `__init_subclass__` Fast-Fail（getattr-identity） | runtime 才發現 / hardcode 中間 base 白名單 |
 | analyze-params override | 只在 params 無法全 default 建構時必須 | 凡非 `NoAnalyzeParams` 都強制 override（樣板） |
+| framework mandatory hook | Protocol 明列 + Base default + direct call | optional `getattr` / broad hook-name registry |

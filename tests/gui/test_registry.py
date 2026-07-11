@@ -11,6 +11,7 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
+    ExpAdapterProtocol,
     ExpContext,
     LoadDataRequest,
     MetaDictWriteback,
@@ -81,6 +82,9 @@ class _DummyAdapter:
     def get_analyze_params(self, result, ctx) -> _DummyAnalyzeParams:  # noqa: ARG002
         return _DummyAnalyzeParams()
 
+    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+        del req, raw_cfg
+
     def run(self, req: RunRequest, schema: CfgSchema):  # noqa: ARG002
         return object()
 
@@ -132,6 +136,7 @@ def test_register_and_create():
     reg.register("dummy", _DummyAdapter)
     adapter = reg.create("dummy")
     assert isinstance(adapter, _DummyAdapter)
+    assert isinstance(adapter, ExpAdapterProtocol)
 
 
 def test_create_unknown_raises_key_error():
