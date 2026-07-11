@@ -1,4 +1,4 @@
-"""BackgroundRunner — the app-agnostic OffMain execution mechanism (ADR-0019).
+"""Qt background executor for GUI composition roots (ADR-0019, ADR-0053).
 
 One runner owns "run a unit of work off the main thread, optionally inside a
 caller-supplied context manager, and deliver the outcome back on the main
@@ -18,8 +18,8 @@ Two execution substrates behind one ``submit``:
 worker), so callers settle State / handles there without touching worker-owned
 state — the State main-thread invariant.
 
-This module imports ONLY ``qtpy`` + stdlib; the app-specific scopes (routing,
-liveplot, stop scopes, pbar) live with the callers that need them.
+This adapter imports Qt plus the shared outcome sentinel; app-specific scopes
+(routing, liveplot, stop scopes, pbar) live with the callers that need them.
 """
 
 from __future__ import annotations

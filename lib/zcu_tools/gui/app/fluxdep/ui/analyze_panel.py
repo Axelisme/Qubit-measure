@@ -52,8 +52,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.services.fit import SearchResult
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
-from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.plotting import FigureContainer, routing_scope
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.progress_bar.interface import use_pbar_factory
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 

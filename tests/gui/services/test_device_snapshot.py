@@ -14,8 +14,8 @@ from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import DeviceState, DeviceStatus, State
-from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner

@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services

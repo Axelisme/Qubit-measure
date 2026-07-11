@@ -102,10 +102,10 @@ from zcu_tools.gui.app.autofluxdep.state import (
     ProjectInfo,
 )
 from zcu_tools.gui.app.autofluxdep.tools import Tools
-from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.cfg import CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import BasePayload, EventOrigin
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.events import PredictorChangedPayload

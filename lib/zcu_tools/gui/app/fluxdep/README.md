@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-09 — runtime entrypoint contract
+**Last updated:** 2026-07-12 — Qt background adapter boundary
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -111,7 +111,7 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   `aboutToQuit→set_shutting_down(True)` / adapter start-stop。`app.py` 的
   behavior 只做 controller/window/adapter wiring；process entrypoint 只在
   `script/run_fluxdep_gui.py`。
-- **FitPanel R4**：DB 搜尋經共用 `gui/background.py` `BackgroundRunner`（per-panel）提交，
+- **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
   `enter=` CM 組合 `routing_scope(diag_container)` + `use_pbar_factory(factory)`，由 runner
   在 worker 執行緒**於 thunk 內**進入（ContextVar 在 QThreadPool worker 裡看不到主執行緒的
   `.set()`，故必須在 worker 端設），避免 worker 裡 `plt.show()` 找不到 attached figure 或彈出獨立視窗。

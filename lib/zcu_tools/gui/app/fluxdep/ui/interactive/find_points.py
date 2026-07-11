@@ -32,7 +32,7 @@ from zcu_tools.analysis.fluxdep import (
     spectrum2d_findpoint,
     toggle_near_mask,
 )
-from zcu_tools.gui.background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
 from .base import InteractiveMplWidget
 from .display import contrast_limits

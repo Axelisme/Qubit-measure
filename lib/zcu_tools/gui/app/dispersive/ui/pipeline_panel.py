@@ -57,7 +57,7 @@ from zcu_tools.gui.app.dispersive.services.viz import (
     update_sample_dots,
 )
 from zcu_tools.gui.app.dispersive.state import PreprocessResult
-from zcu_tools.gui.background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
 from .error_messages import friendly_fit_message, friendly_io_message

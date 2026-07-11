@@ -1,10 +1,19 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-11（event attribution）
+**Last updated:** 2026-07-12（owner-loop execution adapters）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 `plotting`, `remote`, `session`, `widgets`) are shared by every app.
+
+## Owner-loop execution (`session/adapters/`)
+
+Core state belongs to one owner thread. `OwnerScheduler` is the marshal seam：Qt
+composition使用queued-signal adapter，headless/test composition使用explicitly pumped manual
+adapter。`BackgroundExecutor`與scheduler分離：Qt runtime使用QThread/QThreadPool adapter；
+headless runtime使用pure `ThreadPoolBackgroundExecutor`，並在worker完成後透過scheduler
+投遞唯一terminal callback。具體executor的`quiesce()`會停止新工作並等待worker與owner delivery
+ack，session services只依賴`submit` port。
 
 ## Expected Errors (`expected_error.py`)
 

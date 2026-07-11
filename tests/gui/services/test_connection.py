@@ -119,7 +119,7 @@ def _make_svc(
 
 def test_start_connect_mock_emits_finished_and_updates_context(qapp):
     """Mock connect triggers connection_finished and sets soc in state."""
-    from zcu_tools.gui.background import BackgroundRunner
+    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
     state = _make_state()
@@ -144,7 +144,7 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
 
 def test_start_connect_mock_soc_carries_default_simparam(qapp):
     """Mock-connect injects DEFAULT_SIMPARAM so the soc yields physical sim data."""
-    from zcu_tools.gui.background import BackgroundRunner
+    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
     state = _make_state()
     bus = EventBus()
@@ -172,7 +172,7 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
 
 def test_start_connect_mock_sim_params_override_is_honoured(qapp):
     """ConnectMockRequest(sim_params=...) propagates the override into the soc."""
-    from zcu_tools.gui.background import BackgroundRunner
+    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
     custom = DEFAULT_SIMPARAM.model_copy(update={"snr": 9999.0})
     state = _make_state()
@@ -200,7 +200,7 @@ def test_start_connect_mock_sim_params_override_is_honoured(qapp):
 
 def test_connect_bumps_soc_not_context_version(qapp):
     """Connect must bump soc version only; context version must stay unchanged."""
-    from zcu_tools.gui.background import BackgroundRunner
+    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
     state = _make_state()
     bus = EventBus()
@@ -336,7 +336,7 @@ def test_start_connect_rejected_while_run_active(qapp):
 
 def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
     """Remote connect failure: connection_failed emitted with 'nope' in message."""
-    from zcu_tools.gui.background import BackgroundRunner
+    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
     state = _make_state()
     bus = EventBus()

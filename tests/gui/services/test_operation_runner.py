@@ -17,9 +17,12 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.background import NO_RESULT
 from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
-from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.operation_handles import (
+    NO_RESULT,
+    OperationHandles,
+    OperationOutcome,
+)
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
     ExclusionRequest,

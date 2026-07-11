@@ -36,7 +36,7 @@ from zcu_tools.analysis.fluxdep import (
     downsample_points,
     points_in_normalized_brush,
 )
-from zcu_tools.gui.background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.notebook.persistance import SpectrumResult
 
 from .base import InteractiveMplWidget

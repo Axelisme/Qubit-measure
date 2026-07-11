@@ -115,10 +115,10 @@ class OwnerScheduler(Protocol):
 
 class BackgroundExecutor(Protocol):
     """Off-main execution seam a session service depends on. The app injects its
-    concrete ``BackgroundRunner``; the session service never constructs one.
+    runtime-specific executor; the session service never constructs one.
 
     ``submit`` runs ``work`` off-main, delivering its result to ``on_done`` or
-    its exception to ``on_error`` on the main thread. ``run_in_pool`` picks the
+    its exception to ``on_error`` on the owner thread. ``run_in_pool`` picks the
     shared pool vs a dedicated thread.  All ambient scopes must be built into
     ``work`` by the caller before this call (ADR-0026 §2).
     """

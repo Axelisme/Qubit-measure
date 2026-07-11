@@ -18,8 +18,8 @@ from zcu_tools.gui.app.main.services.caretaker import (
 )
 from zcu_tools.gui.app.main.services.persistence_types import AppPersistedState
 from zcu_tools.gui.app.main.services.ports import RestoreReport
-from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import EventOrigin
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
@@ -98,7 +98,9 @@ def test_background_worker_exception_logs_traceback(qapp, caplog) -> None:
     def boom() -> None:
         raise RuntimeError("worker-kaboom")
 
-    with caplog.at_level(logging.ERROR, logger="zcu_tools.gui.background"):
+    with caplog.at_level(
+        logging.ERROR, logger="zcu_tools.gui.session.adapters.qt_background"
+    ):
         bg.submit(
             boom,
             run_in_pool=False,
