@@ -32,12 +32,12 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 
+from .adapters._support import ROLE_FACTORIES
 from .adapters.fake.freq import FakeFreqAdapter
 from .adapters.lookback import LookbackAdapter
 from .adapters.onetone.flux_dep import OneToneFluxDepAdapter
 from .adapters.onetone.freq import OneToneFreqAdapter
 from .adapters.onetone.power_dep import OneTonePowerDepAdapter
-from .adapters.shared import ROLE_FACTORIES
 from .adapters.singleshot import (
     CheckAdapter,
     GEAdapter,

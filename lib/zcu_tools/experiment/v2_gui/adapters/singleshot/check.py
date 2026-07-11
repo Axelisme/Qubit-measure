@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.singleshot import CheckCfg, CheckExp
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
     scaled_md,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     md_eval_scaled,
     md_eval_scaled_or_value,
     proper_best_ro_freq_range,

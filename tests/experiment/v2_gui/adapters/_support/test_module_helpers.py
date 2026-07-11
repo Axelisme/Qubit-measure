@@ -7,11 +7,11 @@ if TYPE_CHECKING:
 
 from typing import cast
 
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     schema_from_module,
     select_named_module_value,
 )
-from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
+from zcu_tools.experiment.v2_gui.adapters._support.defaults.role_table import (
     ROLE_TABLE,
     role_ref,
 )

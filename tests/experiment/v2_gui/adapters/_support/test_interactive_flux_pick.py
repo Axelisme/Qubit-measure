@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     FluxPickParams,
     FluxPickResult,
     build_flux_pick_session,

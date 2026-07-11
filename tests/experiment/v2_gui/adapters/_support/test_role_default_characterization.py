@@ -21,7 +21,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_factories import (
+from zcu_tools.experiment.v2_gui.adapters._support.defaults.role_factories import (
     ROLE_FACTORIES,
 )
 from zcu_tools.gui.cfg import (

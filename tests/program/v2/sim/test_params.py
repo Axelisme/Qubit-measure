@@ -16,7 +16,7 @@ import math
 import numpy as np
 import pytest
 from pydantic import ValidationError
-from zcu_tools.experiment.v2_gui.adapters.shared.ctx_helpers import proper_flux_range
+from zcu_tools.experiment.v2_gui.adapters._support.ctx_helpers import proper_flux_range
 from zcu_tools.gui.cfg import (
     EvalValue,
     SweepValue,

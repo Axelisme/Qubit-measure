@@ -11,12 +11,12 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import GE_Result
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     scaled_md,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,

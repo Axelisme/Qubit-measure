@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from zcu_tools.experiment.v2_gui.adapters.shared.defaults.role_table import (
+from zcu_tools.experiment.v2_gui.adapters._support.defaults.role_table import (
     ROLE_TABLE,
     Pulse,
     RoleDef,

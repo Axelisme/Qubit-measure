@@ -97,4 +97,4 @@ status: accepted
 
 ## 範圍
 
-`gui/app/main/`(services / runner / ui)+ `experiment/v2_gui/adapters/`(`shared/interactive_flux_pick` 只呼 `host` port,不變)。Phase B 另涉 `device` / `connection` / `services/remote` dispatch。**adapter 與 wire 契約不變**。
+`gui/app/main/`(services / runner / ui)+ `experiment/v2_gui/adapters/`(`_support/interactive_flux_pick` 只呼 `host` port,不變)。Phase B 另涉 `device` / `connection` / `services/remote` dispatch。**adapter 與 wire 契約不變**。

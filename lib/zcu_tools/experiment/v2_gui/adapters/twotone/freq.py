@@ -8,13 +8,13 @@ from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 from matplotlib.figure import Figure
 
 from zcu_tools.experiment.v2.twotone.freq import FreqCfg, FreqExp, FreqResult
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
     qub_freq_range,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,

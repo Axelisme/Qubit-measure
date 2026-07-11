@@ -28,14 +28,14 @@ from zcu_tools.experiment.v2.onetone.freq import (
     FreqSweepCfg,
 )
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
     custom,
     md_get_float,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,

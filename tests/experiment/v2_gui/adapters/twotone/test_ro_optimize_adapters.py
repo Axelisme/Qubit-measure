@@ -10,7 +10,7 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.freq import FreqCfg
 from zcu_tools.experiment.v2.twotone.ro_optimize.freq_gain import FreqGainCfg
 from zcu_tools.experiment.v2.twotone.ro_optimize.length import LengthCfg
 from zcu_tools.experiment.v2.twotone.ro_optimize.power import PowerCfg
-from zcu_tools.experiment.v2_gui.adapters.shared import READOUT_DPM_PULSE_TAIL_US
+from zcu_tools.experiment.v2_gui.adapters._support import READOUT_DPM_PULSE_TAIL_US
 from zcu_tools.experiment.v2_gui.adapters.twotone.ro_optimize import (
     RoOptAutoAdapter,
     RoOptFreqAdapter,

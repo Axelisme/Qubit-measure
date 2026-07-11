@@ -37,7 +37,7 @@ from zcu_tools.gui.app.main.adapter.lowering import (
 from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
-    from zcu_tools.experiment.v2_gui.adapters.shared.schema_builder import (
+    from zcu_tools.experiment.v2_gui.adapters._support.schema_builder import (
         MeasureCfgDefinition,
     )
 

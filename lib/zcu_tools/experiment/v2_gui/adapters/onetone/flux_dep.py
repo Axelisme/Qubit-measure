@@ -8,8 +8,7 @@ from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepExp,
     FluxDepResult,
 )
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     FluxPickParams,
     FluxPickResult,
     MeasureCfgBuilder,
@@ -23,6 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.shared import (
     md_has_key,
     res_freq_range,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,

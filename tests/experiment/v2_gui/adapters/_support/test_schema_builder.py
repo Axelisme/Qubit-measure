@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     ModuleInit,
     SweepDefault,

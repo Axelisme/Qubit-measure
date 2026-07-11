@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from zcu_tools.experiment.v2_gui.adapters.shared import reset_module_writeback_items
+from zcu_tools.experiment.v2_gui.adapters._support import reset_module_writeback_items
 from zcu_tools.gui.app.main.adapter import ExpContext, ModuleWriteback
 
 if TYPE_CHECKING:
-    from zcu_tools.experiment.v2_gui.adapters.shared.writeback_helpers import (
+    from zcu_tools.experiment.v2_gui.adapters._support.writeback_helpers import (
         _HasModules,
     )
 

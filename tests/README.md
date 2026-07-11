@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — shared cfg assembler and measure definition coverage
+**Last updated:** 2026-07-11 — private measure adapter support coverage
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -242,7 +242,7 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 
 ### Experiment v2 GUI adapter tests
 
-`tests/experiment/v2_gui/adapters/shared/test_schema_builder.py`鎖定context-free
+`tests/experiment/v2_gui/adapters/_support/test_schema_builder.py`鎖定context-free
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
 `tests/gui/adapter/test_adapter_definition.py`是38-entry registry gate：empty/rich md/ml contexts都必須

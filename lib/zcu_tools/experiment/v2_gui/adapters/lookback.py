@@ -8,14 +8,14 @@ from typing import Annotated, Any, ClassVar, TypeAlias
 from matplotlib.figure import Figure
 
 from zcu_tools.experiment.v2.lookback import LookbackCfg, LookbackExp, LookbackResult
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
     custom,
     make_trig_offset,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalyzeRequest,

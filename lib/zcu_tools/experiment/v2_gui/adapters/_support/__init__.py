@@ -1,3 +1,5 @@
+"""Private mechanics shared by multiple measure experiment adapters."""
+
 from .analyze_results import FigureOnlyAnalyzeResult, run_figure_only_analyze
 from .ctx_helpers import (
     md_eval_scaled,

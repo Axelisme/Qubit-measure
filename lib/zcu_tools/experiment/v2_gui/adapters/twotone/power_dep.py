@@ -4,13 +4,13 @@ import time
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.v2.twotone.power_dep import PowerCfg, PowerExp, PowerResult
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.experiment.v2_gui.adapters.shared import (
+from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
     qub_freq_range,
 )
+from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,

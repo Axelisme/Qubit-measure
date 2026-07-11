@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from zcu_tools.experiment.v2_gui.adapters.shared.ctx_helpers import md_has_key
+from zcu_tools.experiment.v2_gui.adapters._support.ctx_helpers import md_has_key
 from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
