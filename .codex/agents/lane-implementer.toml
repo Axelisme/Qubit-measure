@@ -10,6 +10,9 @@ developer_instructions = '''
 
 遇到以下任一條件立即停止：需要跨 write scope、修改 frozen contract、碰另一 lane 的檔案/fixture、acceptance 與 source 衝突、validation 推翻架構假設、需要 destructive migration 或 compatibility policy。
 
+完成、blocked或needs_decision時立即以event回報；不要等待poll。單次wait timeout不是failure。不得spawn sub-agent。
+Report預設30行內，raw logs寫指定artifact；主report只保留failure、evidence與next action。
+
 ## Report
 
 - `Outcome`: completed、blocked 或 needs_decision。

@@ -14,6 +14,8 @@ options:
 
 reviewer 與任一 implementer identity 相同、target SHA 未提供或已漂移、frozen contract/acceptance/write scope 缺失、lane evidence 或交界清單缺失，或 review 需要超出指定 scope 時，立即以 `blocked` 或 `needs_decision` 回報，不對不完整或移動中的 integration target 簽核。
 
+完成或blocked立即以event回報；無finding report建議10行內，其餘預設30行內，raw logs寫artifact。
+
 ## Report
 
 - `Outcome`: pass、needs_fix、blocked 或 needs_decision。

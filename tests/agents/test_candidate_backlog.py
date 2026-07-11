@@ -328,6 +328,7 @@ def test_orchestrate_main_skill_keeps_hard_gate_anchors() -> None:
         "merge-protocol.md",
         "delegation-review.md",
         "validation.md",
+        "parallel-burst.md",
         "state-contract.md",
         "merge-internals.md",
     ):

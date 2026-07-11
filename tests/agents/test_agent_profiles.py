@@ -96,3 +96,73 @@ def test_mcct_uses_profile_review_gate() -> None:
     ).read_text()
     assert "profile/trigger 要求的 review" in text
     assert "只有 target 需要獨立 review 時缺 identity 才阻擋" in text
+
+
+def test_v18_parallel_burst_contract_is_stateless_and_bounded() -> None:
+    skill = (REPO_ROOT / ".agents" / "skills" / "orchestrate" / "SKILL.md").read_text()
+    burst = (
+        REPO_ROOT
+        / ".agents"
+        / "skills"
+        / "orchestrate"
+        / "references"
+        / "parallel-burst.md"
+    ).read_text()
+    validation = (
+        REPO_ROOT
+        / ".agents"
+        / "skills"
+        / "orchestrate"
+        / "references"
+        / "validation.md"
+    ).read_text()
+    for anchor in (
+        "skill_version: 18",
+        "`parallel-burst` 是無狀態",
+        "loop_authority",
+        "`refuse`、`adopt_existing` 或 `artifact_only`",
+    ):
+        assert anchor in skill
+    for anchor in (
+        "stateless execution capability",
+        "Parallel Burst",
+        "dependency matrix",
+        "Decided / Rejected / Risks / Files / Remaining",
+        "existing_authority_id",
+        "completion authority仍屬原owner",
+        "只產生plan/handoff artifact，不執行workers",
+        "只有既有authority或使用者可決定",
+    ):
+        assert anchor in burst
+    for anchor in (
+        "`implementation|contract|environment`",
+        "`light=1`",
+        "`standard=2`",
+        "`critical=3`",
+        "Behavioral evidence",
+        "舊review receipt失效",
+        "重審新SHA",
+        "不得以換reviewer關閉finding",
+        "Contract/environment failure不消耗implementation",
+    ):
+        assert anchor in validation
+
+
+def test_worker_profiles_use_events_and_context_budgets() -> None:
+    for name in PROFILE_NAMES:
+        bodies = [
+            _frontmatter(REPO_ROOT / root / "agents" / f"{name}.md")[1]
+            for root in (".agents", ".claude")
+        ]
+        bodies.append(
+            tomllib.loads(
+                (REPO_ROOT / ".codex" / "agents" / f"{name}.toml").read_text()
+            )["developer_instructions"]
+        )
+        for body in bodies:
+            assert "artifact" in body
+            if name != "contract-planner":
+                assert "event" in body
+        if name == "lane-implementer":
+            for body in bodies:
+                assert "不得spawn sub-agent" in body

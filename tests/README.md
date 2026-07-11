@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — risk-based orchestration and agent profiles
+**Last updated:** 2026-07-11 — parallel-burst orchestration contracts
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -9,6 +9,8 @@
 `tests/agents/` 驗證三套 skill tree 同步、orchestrate workflow state/merge safety，以及 Generic、Codex、
 Claude agent profiles 的平台 schema、registry 與核心派工契約；不同 runtime 格式不要求 byte-identical，
 但必須保有相同角色邊界、停止條件與短 report schema。
+`parallel-burst` contract tests另鎖定 stateless capability、wave/dependency planning、唯一 loop authority、
+bounded verify/fix、event-driven worker回報與context budget。
 
 ---
 
