@@ -18,7 +18,8 @@ framework 只看 `ExpAdapterProtocol`。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
-- `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators。
+- `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators；
+  `running_tab_id` 是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
 - `ui/`：Qt widgets、MainWindow top-level façade、tab-local `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns tab-local rendering and receives tab actions through a

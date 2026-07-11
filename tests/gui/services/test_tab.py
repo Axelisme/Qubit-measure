@@ -50,6 +50,33 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert state.get_tab("tab").analyze_param_instance is analyze_params
 
 
+def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
+    state = _active_state()
+    for tab_id in ("running", "idle"):
+        state.add_tab(
+            tab_id,
+            Session(
+                adapter_name="fake",
+                adapter=MagicMock(),
+                cfg_schema=MagicMock(),
+            ),
+        )
+    state.set_tab_running("running", True)
+    writeback = MagicMock()
+    writeback.get_tab_writeback_items.return_value = []
+    service = TabService(state, MagicMock(), writeback)
+
+    running = service.get_snapshot("running").interaction
+    idle = service.get_snapshot("idle").interaction
+
+    assert running is not None
+    assert running.is_running is True
+    assert running.global_run_active is False
+    assert idle is not None
+    assert idle.is_running is False
+    assert idle.global_run_active is True
+
+
 def _active_state() -> State:
     return State(
         ExpContext(

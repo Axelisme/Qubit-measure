@@ -54,15 +54,17 @@ class TabService:
         elsewhere (codec / restore) with the live fields left empty."""
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
+        is_running = self._state.is_tab_running(tab_id)
         interaction = TabInteractionState(
             # cross-cutting facts read directly off State's aggregates (no
             # app-service dependency — ADR-0005 violation 2 / ADR-0004 Query).
-            global_run_active=self._state.is_run_active() and not tab.is_running,
+            global_run_active=self._state.is_run_active() and not is_running,
             has_context=ctx.has_context(),
             has_active_context=ctx.is_active(),
             has_soc=ctx.has_soc(),
-            # tab-intrinsic facts are the tab aggregate's own predicates
-            is_running=tab.is_running,
+            # Running is projected from State's ownership aggregate; remaining
+            # tab-intrinsic facts come from the tab entity.
+            is_running=is_running,
             is_analyzing=tab.is_analyzing,
             is_saving_data=tab.is_saving_data,
             has_run_result=tab.has_run_result(),

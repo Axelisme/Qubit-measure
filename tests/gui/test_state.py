@@ -162,6 +162,33 @@ def test_set_tab_running_updates_running_tab_id():
     assert state.running_tab_id is None
 
 
+def test_set_tab_running_rejects_second_running_tab():
+    state = State(_make_ctx())
+    adapter = _make_adapter()
+    _add_tab(state, "t1", adapter)
+    _add_tab(state, "t2", adapter)
+    state.set_tab_running("t1", True)
+
+    with pytest.raises(RuntimeError, match="already running"):
+        state.set_tab_running("t2", True)
+
+    assert state.running_tab_id == "t1"
+
+
+def test_clear_non_running_tab_is_idempotent_and_bumps_version():
+    state = State(_make_ctx())
+    adapter = _make_adapter()
+    _add_tab(state, "t1", adapter)
+    _add_tab(state, "t2", adapter)
+    state.set_tab_running("t1", True)
+    version_before = state.version.get("tab:t2")
+
+    state.set_tab_running("t2", False)
+
+    assert state.running_tab_id == "t1"
+    assert state.version.get("tab:t2") == version_before + 1
+
+
 def test_is_tab_busy_checks_per_tab_flags():
     state = State(_make_ctx())
     adapter = _make_adapter()
@@ -171,6 +198,10 @@ def test_is_tab_busy_checks_per_tab_flags():
     state.set_tab_saving_data("t1", True)
     assert state.is_tab_busy("t1") is True
     assert state.is_tab_busy("t2") is False
+    state.set_tab_saving_data("t1", False)
+    state.set_tab_running("t2", True)
+    assert state.is_tab_busy("t1") is False
+    assert state.is_tab_busy("t2") is True
 
 
 def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
@@ -415,14 +446,11 @@ def test_tab_state_predicates():
         adapter=_make_adapter(),
         cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),
     )
-    assert tab.is_busy() is False
     assert tab.has_run_result() is False
     assert tab.has_analyze_result() is False
     assert tab.has_figure() is False
 
     tab.is_analyzing = True
-    assert tab.is_busy() is True
     tab.is_analyzing = False
     tab.run_result = object()
-    assert tab.is_busy() is False
     assert tab.has_run_result() is True

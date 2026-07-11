@@ -80,15 +80,10 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     # carry a gc=False CfgEditorService model (editor_id); cleared + torn down on
     # rerun / reanalyze.
     writeback_items: list[WritebackItem] = field(default_factory=list)
-    is_running: bool = False
     is_analyzing: bool = False
     is_saving_data: bool = False
 
     # -- predicates (the entity answers questions about itself) ------------
-
-    def is_busy(self) -> bool:
-        """Any per-tab operation in flight (run / analyze / save)."""
-        return self.is_running or self.is_analyzing or self.is_saving_data
 
     def has_run_result(self) -> bool:
         return self.run_result is not None
@@ -363,7 +358,7 @@ class State(SessionState):
 
     def set_tab_running(self, tab_id: str, running: bool) -> None:
         logger.debug("set_tab_running: tab_id=%r running=%s", tab_id, running)
-        tab = self.tabs[tab_id]
+        _ = self.tabs[tab_id]
         if (
             running
             and self.running_tab_id is not None
@@ -373,7 +368,6 @@ class State(SessionState):
                 f"Cannot mark tab {tab_id!r} running while "
                 f"{self.running_tab_id!r} is already running"
             )
-        tab.is_running = running
         if running:
             self.running_tab_id = tab_id
         elif self.running_tab_id == tab_id:
@@ -396,7 +390,8 @@ class State(SessionState):
         return self.running_tab_id is not None
 
     def is_tab_running(self, tab_id: str) -> bool:
-        return self.tabs[tab_id].is_running
+        _ = self.tabs[tab_id]
+        return self.running_tab_id == tab_id
 
     def is_tab_analyzing(self, tab_id: str) -> bool:
         return self.tabs[tab_id].is_analyzing
@@ -405,4 +400,5 @@ class State(SessionState):
         return self.tabs[tab_id].is_saving_data
 
     def is_tab_busy(self, tab_id: str) -> bool:
-        return self.tabs[tab_id].is_busy()
+        tab = self.tabs[tab_id]
+        return self.running_tab_id == tab_id or tab.is_analyzing or tab.is_saving_data
