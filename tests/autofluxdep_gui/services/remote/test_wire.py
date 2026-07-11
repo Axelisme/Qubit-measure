@@ -37,7 +37,7 @@ from zcu_tools.gui.app.autofluxdep.services.remote.wire_version import (
 
 def test_versions_track_workflow_enabled_contract():
     assert WIRE_VERSION == 6
-    assert GUI_VERSION == 9
+    assert GUI_VERSION == 10
 
 
 def test_every_payload_type_has_a_serializer():

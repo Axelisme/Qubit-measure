@@ -73,7 +73,7 @@ Only bounded wait handlers run off-main:
 - `notify.await`
 
 Off-main handlers only consume thread-safe channels. They do not read or mutate
-main-thread-owned state, version tables, controller objects, editor sessions, or
+owner-thread state, version tables, controller objects, editor sessions, or
 Qt widgets.
 
 ## Events And Diagnostics
@@ -87,7 +87,7 @@ RPC-side bookkeeping and is deliberately omitted. Diagnostic and cfg-editor
 pushes are not EventBus broadcasts and retain `{event, payload}`.
 Event serializers and NDJSON encoding run only when the endpoint finds a matching
 live subscriber. Recipient selection is two-phase: payload construction stays on
-the Qt main thread and outside the endpoint registry lock, then subscribe state
+the State owner thread and outside the endpoint registry lock, then subscribe state
 and link liveness are revalidated immediately before enqueue. One event is built
 once for any number of matching clients; unsubscribe/disconnect completed first
 cannot receive a late push.
@@ -133,7 +133,7 @@ reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
 The GUI maintains a monotonic resource version table for context, SoC, devices,
 tabs, results, save paths, and editor sessions. Guarded mutation methods accept
 wire-hidden `expected_versions`; the remote adapter compares them atomically on
-the main thread before calling the controller.
+the State owner thread before calling the controller.
 
 MCP owns the agent baseline:
 

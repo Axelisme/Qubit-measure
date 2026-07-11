@@ -107,6 +107,10 @@ class OwnerScheduler(Protocol):
     Implementations must preserve callback order for calls made by one producer.
     """
 
+    def is_owner_thread(self) -> bool:
+        """Return whether the caller is the State-owner thread."""
+        ...
+
     def post(self, callback: Callable[[], None]) -> None:
         """Enqueue ``callback`` for execution on the owner thread."""
         ...

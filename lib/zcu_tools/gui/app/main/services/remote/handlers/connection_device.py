@@ -59,7 +59,7 @@ def _h_soc_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Synchronous connect: runs on the Qt main thread (the IO worker blocks on the
-    # _dispatch_on_main marshal), so the connect work + ALL post-connect side
+    # _dispatch_on_owner marshal), so the connect work + ALL post-connect side
     # effects (State write, soc version bump, SocChangedPayload → FLUX-AWARE-MOCK
     # provisioning) complete before this returns. Connect failures remain
     # controller errors. The worst-case main-thread block is bounded by make_soc_proxy's

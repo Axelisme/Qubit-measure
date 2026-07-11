@@ -6,6 +6,16 @@ import time
 import pytest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.ports import OwnerScheduler
+
+
+def _assert_owner_scheduler_contract(scheduler: OwnerScheduler) -> None:
+    assert scheduler.is_owner_thread()
+
+
+def test_owner_scheduler_adapters_expose_owner_probe(qapp) -> None:  # noqa: ARG001
+    _assert_owner_scheduler_contract(ManualOwnerScheduler())
+    _assert_owner_scheduler_contract(QtOwnerScheduler())
 
 
 def test_manual_scheduler_posts_until_owner_pumps() -> None:

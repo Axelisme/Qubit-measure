@@ -37,7 +37,7 @@ from zcu_tools.gui.session.ports import BackgroundExecutor, ExclusionGate, Progr
 
 logger = logging.getLogger(__name__)
 
-# Sentinel re-exported so callers don't need to import from gui.background directly.
+# Sentinel re-exported so operation policies can import the lifecycle vocabulary here.
 __all__ = [
     "NO_RESULT",
     "BgResult",

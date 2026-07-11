@@ -173,7 +173,7 @@ def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:  # noq
         def on_client_open(self, link):  # noqa: ANN001
             pass
 
-        def on_client_close(self, link, *, on_main_thread):  # noqa: ANN001
+        def on_client_close(self, link, *, on_owner_thread):  # noqa: ANN001
             pass
 
         def route(self, link, request):  # noqa: ANN001
@@ -342,7 +342,7 @@ class _FakeRouter:
     def on_client_open(self, link):  # noqa: ANN001, ANN201
         pass
 
-    def on_client_close(self, link, *, on_main_thread):  # noqa: ANN001, ANN201
+    def on_client_close(self, link, *, on_owner_thread):  # noqa: ANN001, ANN201
         pass
 
     def route(self, link, request):  # noqa: ANN001, ANN201

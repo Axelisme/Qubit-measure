@@ -27,6 +27,9 @@ _T = TypeVar("_T")
 
 
 class _ImmediateOwnerScheduler:
+    def is_owner_thread(self) -> bool:
+        return True
+
     def post(self, callback: Callable[[], None]) -> None:
         callback()
 
@@ -71,9 +74,9 @@ def test_dispatch_scopes_handler_to_stable_per_connection_agent_origin(
             off_main_thread=off_main_thread,
         ),
     )
-    service._dispatch_on_main(first, "request-1", "test.origin", spec, {})
-    service._dispatch_on_main(first, "request-2", "test.origin", spec, {})
-    service._dispatch_on_main(second, "request-3", "test.origin", spec, {})
+    service._dispatch_on_owner(first, "request-1", "test.origin", spec, {})
+    service._dispatch_on_owner(first, "request-2", "test.origin", spec, {})
+    service._dispatch_on_owner(second, "request-3", "test.origin", spec, {})
 
     first_ctx = cast(SubscriptionCtx, first.app_ctx)
     second_ctx = cast(SubscriptionCtx, second.app_ctx)
@@ -111,7 +114,7 @@ def _spec(exc: BaseException, *, off_main_thread: bool = False) -> BoundMethod:
 
 def _dispatch(exc: BaseException, *, off_main_thread: bool = False) -> MagicMock:
     service = _service()
-    service._dispatch_on_main(
+    service._dispatch_on_owner(
         _link(),
         "request-1",
         "test.raise",

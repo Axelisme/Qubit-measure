@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-12 — Qt background adapter boundary
+**Last updated:** 2026-07-12 — owner-thread runtime adapters
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -157,7 +157,7 @@ Selector 每次開**全選重置**（不繼承 brush 選擇，否則移除的點
 ### Remote RPC + MCP（**read-only** observing view，共用 gui/remote transport）
 GUI 側：`RemoteControlAdapter` 是第二個 driving-shaped view，但只讀。它 **subclass 共用
 `RemoteControlServiceBase`**（`gui/remote/control_service`），後者擁有 router scaffolding
-（`route` 骨架 + events.* handlers + `_dispatch_on_main` bare marshal + EventBus
+（`route` 骨架 + events.* handlers + `_dispatch_on_owner` bare marshal + EventBus
 subscribe/serialize/broadcast，底層的 socket/framing/handshake 再委給
 `NdjsonRpcEndpoint`）。fluxdep 是 read-only → **零 policy 覆寫**（連 `_get_bus` 都用 base
 預設 `ctrl.bus`、event serializers 以 payload `type` 為 key），本檔 `service.py` 只剩

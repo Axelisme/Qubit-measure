@@ -195,13 +195,13 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         return False
 
     def _on_client_close_extra(
-        self, ctx: SubscriptionCtx, *, on_main_thread: bool
+        self, ctx: SubscriptionCtx, *, on_owner_thread: bool
     ) -> None:
         # Reclaim this connection's CfgEditor sessions. On a drop (IO thread) the
-        # LiveModel teardown must be marshalled onto the Qt main thread; during
+        # LiveModel teardown must be marshalled onto the State owner thread; during
         # stop() the endpoint already calls us there, so reclaim directly.
         assert isinstance(ctx, _ClientCtx)
-        self._reclaim_editors(ctx, marshal=not on_main_thread)
+        self._reclaim_editors(ctx, marshal=not on_owner_thread)
 
     # ------------------------------------------------------------------
     # editor.* state-owning handler

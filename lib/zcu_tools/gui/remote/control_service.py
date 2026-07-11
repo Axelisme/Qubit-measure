@@ -9,8 +9,8 @@ scaffolding* that all three apps share:
 
   - the :class:`EndpointRouter` seam: ``route`` (events.* state-owning handlers,
     then a ``_route_extra`` hook, then METHOD_REGISTRY lookup + ParamSpec
-    validation + main-thread dispatch), ``on_client_open`` / ``on_client_close``;
-  - ``_dispatch_on_main``: the marshal onto the State owner loop (via an injected
+    validation + owner-thread dispatch), ``on_client_open`` / ``on_client_close``;
+  - ``_dispatch_on_owner``: the marshal onto the State owner loop (via an injected
     ``OwnerScheduler``, timeout-bounded), composed with the
     ``off_main_thread`` blocking branch and two policy seams (``_guard`` before
     the handler, ``_after_success`` after) — both no-ops by default;
@@ -181,10 +181,10 @@ class RemoteControlServiceBase:
         del ctx, method, params, result
 
     def _on_client_close_extra(
-        self, ctx: SubscriptionCtx, *, on_main_thread: bool
+        self, ctx: SubscriptionCtx, *, on_owner_thread: bool
     ) -> None:
         """Reclaim extra per-connection resources on drop (e.g. editors). Default: none."""
-        del ctx, on_main_thread
+        del ctx, on_owner_thread
 
     def _on_client_count_changed(self) -> None:
         """Called on the State owner thread whenever a client changes.
@@ -225,7 +225,7 @@ class RemoteControlServiceBase:
         return port
 
     def stop(self) -> None:
-        """Unwire listeners, then stop the endpoint. Idempotent. Main thread."""
+        """Unwire listeners, then stop the endpoint. Idempotent. Owner thread."""
         self._unsubscribe_event_bus()
         self._extra_stop()
         if self._opts.app_slug:
@@ -266,10 +266,10 @@ class RemoteControlServiceBase:
         # Marshal a count-change notification onto the State owner thread.
         self._owner_scheduler.post(self._on_client_count_changed)
 
-    def on_client_close(self, link: ClientLink, *, on_main_thread: bool) -> None:
-        self._on_client_close_extra(_ctx(link), on_main_thread=on_main_thread)
-        # Notify the main thread on both IO-thread drops and main-thread stops.
-        if on_main_thread:
+    def on_client_close(self, link: ClientLink, *, on_owner_thread: bool) -> None:
+        self._on_client_close_extra(_ctx(link), on_owner_thread=on_owner_thread)
+        # Notify the owner on both IO-thread drops and owner-thread stops.
+        if on_owner_thread:
             self._on_client_count_changed()
         else:
             self._owner_scheduler.post(self._on_client_count_changed)
@@ -315,12 +315,12 @@ class RemoteControlServiceBase:
             return
         # Validate params against the method's ParamSpec contract on the IO
         # thread (pure, no Qt) so malformed requests fail fast without consuming
-        # a main-thread hop.
+        # an owner-thread hop.
         if spec.params:
             handler_params = validate_params(spec.params, req.params)
         else:
             handler_params = req.params
-        self._dispatch_on_main(link, req.id, req.method, spec, handler_params)
+        self._dispatch_on_owner(link, req.id, req.method, spec, handler_params)
 
     # ------------------------------------------------------------------
     # events.* state-owning handlers
@@ -375,14 +375,14 @@ class RemoteControlServiceBase:
     # Dispatch onto the State owner thread (marshal + off-main + policy seams)
     # ------------------------------------------------------------------
 
-    def _dispatch_on_main(self, link: ClientLink, rid, method, spec, params) -> None:
+    def _dispatch_on_owner(self, link: ClientLink, rid, method, spec, params) -> None:
         holder: dict[str, object] = {}
         bus = self._get_bus()
         request_origin = EventOrigin(kind="agent", client_id=_ctx(link).client_id)
 
         if spec.off_main_thread:
             # Blocking handler (e.g. operation.await): run on THIS IO worker
-            # thread, never the main thread — marshalling it onto the main thread
+            # thread, never the owner thread — marshalling it onto the owner thread
             # would deadlock (it would occupy the event loop that must dispatch
             # the worker signal it awaits). It must only do thread-safe waiting
             # and must not touch the guard / post-success seams, so neither runs.
@@ -451,11 +451,11 @@ class RemoteControlServiceBase:
         self._endpoint.reply_ok(link, rid=rid, result=result)
 
     # ------------------------------------------------------------------
-    # EventBus integration (subscribe on main thread; push via broadcast)
+    # EventBus integration (subscribe on owner thread; push via broadcast)
     # ------------------------------------------------------------------
 
     def _subscribe_event_bus(self) -> None:
-        """Subscribe one callback per serialised event key on the main thread."""
+        """Subscribe one callback per serialised event key on the owner thread."""
         bus = self._get_bus()
         self._bus = bus
         subscribed_keys: list[Any] = []

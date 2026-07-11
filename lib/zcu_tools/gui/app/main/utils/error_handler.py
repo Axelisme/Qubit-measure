@@ -16,11 +16,12 @@ ShowDialogFn = Callable[
 def install_global_exception_hook(
     show_dialog: ShowDialogFn,
 ) -> None:
-    """Installs global exception hooks for PyQt.
+    """Install process-level exception hooks with an injected presenter.
 
-    Catches both main thread sys.excepthook and threading.excepthook,
-    displaying a QMessageBox for unexpected errors to ensure Fast Fail
-    and minimal surprise.
+    Unexpected exceptions reaching ``sys.excepthook`` are presented and then
+    delegated to the prior hook. Worker-thread exceptions are logged and delegated;
+    they never call the presenter from a foreign thread. KeyboardInterrupt always
+    bypasses presentation and logging.
 
     ``show_dialog`` is the required presentation port; Qt composition injects its
     QMessageBox adapter while tests pass a recording fake.
@@ -47,10 +48,9 @@ def install_global_exception_hook(
             original_thread_excepthook(args)
             return
 
-        # Thread exceptions shouldn't directly show a Qt dialog unless using invokeMethod
-        # but for simplicity we log them and let PyQt's event loop catch them if they cross boundary.
-        # Alternatively, we could post an event to the main thread, but QThread already
-        # routes run_failed signals. Here we just ensure it's logged cleanly.
+        # A worker must not call an owner-thread presenter directly. Operation
+        # executors marshal their expected terminal failures through their own ports;
+        # this process-level fallback only records otherwise-unhandled failures.
         if args.exc_type and args.exc_value and args.exc_traceback:
             logger.error(
                 "Unhandled thread exception",

@@ -17,19 +17,19 @@ owns only how bytes enter and leave the socket, never what a request *means*:
 Everything past the handshake is the app's: the endpoint hands each parsed,
 authenticated :class:`Request` to the injected :class:`EndpointRouter` and stops
 there. The router decides which methods exist, how/where their handlers run
-(main-thread marshal, version guard, off-main blocking), and how events are
+(owner-thread marshal, version guard, off-owner blocking), and how events are
 serialized and pushed. The endpoint is zero-knowledge of all of it.
 
 Threading:
   - Server thread (daemon): selector loop — accept, recv, frame; built-in
     handshakes reply on this IO thread; everything else is handed to
-    ``router.route`` (still on the IO thread — the router owns any main-thread
+    ``router.route`` (still on the IO thread — the router owns any owner-thread
     marshal).
   - Per-client writer thread (daemon): the sole writer to its client socket;
     drains a ``queue.Queue`` of pre-encoded reply / push lines.
-  - Main thread (Qt): the router's handlers + the app's event-bus callbacks run
+  - State owner thread: the router's handlers + the app's event-bus callbacks run
     here; pushes originate here and call :meth:`broadcast`.
-  - Shutdown is initiated from the main thread: ``stop()`` calls the router's
+  - Shutdown is initiated from the owner thread: ``stop()`` calls the router's
     ``on_client_close`` per client, enqueues sentinels to every writer, joins
     writers, then wakes and joins the server thread via a ``socket.socketpair``.
 """
@@ -148,7 +148,7 @@ class EndpointRouter(Protocol):
 
         Called on the IO/server thread. ``request`` is a
         :class:`zcu_tools.gui.remote.wire.Request`. The app decides the method
-        set, validation, and how/where the handler runs (any main-thread
+        set, validation, and how/where the handler runs (any owner-thread
         marshal is the app's, via its injected owner scheduler). The app uses
         :meth:`NdjsonRpcEndpoint.reply_ok` / ``reply_error`` to respond.
         """
@@ -162,12 +162,12 @@ class EndpointRouter(Protocol):
         """
         ...
 
-    def on_client_close(self, link: ClientLink, *, on_main_thread: bool) -> None:
+    def on_client_close(self, link: ClientLink, *, on_owner_thread: bool) -> None:
         """A client is dropping — release any app-specific per-connection state.
 
-        Called on drop (IO/server thread, ``on_main_thread=False``) and during
-        ``stop()`` (Qt main thread, ``on_main_thread=True``). The flag lets a
-        router that must touch main-thread-owned state (e.g. reclaim editor
+        Called on drop (IO/server thread, ``on_owner_thread=False``) and during
+        ``stop()`` (State owner thread, ``on_owner_thread=True``). The flag lets a
+        router that must touch owner-thread state (e.g. reclaim editor
         sessions) choose between marshalling and a direct call — the endpoint
         owns the thread context and reports it; the router owns the cleanup.
         """
@@ -290,7 +290,7 @@ class NdjsonRpcEndpoint:
     def stop(self) -> None:
         """Wake the selector loop, close all sockets, join threads.
 
-        Idempotent. Must be called from the Qt main thread (it calls the
+        Idempotent. Must be called from the State owner thread (it calls the
         router's ``on_client_close`` synchronously, which may touch app state).
         """
         if self._stopping.is_set():
@@ -300,9 +300,9 @@ class NdjsonRpcEndpoint:
         with self._clients_lock:
             client_snapshot = list(self._clients.items())
         for _sock, link in client_snapshot:
-            # Release app state on the main thread (stop() runs here) before
+            # Release app state on the owner thread (stop() runs here) before
             # tearing the connection down.
-            self._router.on_client_close(link, on_main_thread=True)
+            self._router.on_client_close(link, on_owner_thread=True)
             link.closing = True
             try:
                 link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
@@ -359,7 +359,7 @@ class NdjsonRpcEndpoint:
         """Return True if at least one control client is currently connected.
 
         Thread-safe: reads _clients under the lock so it is safe to call from
-        any thread (the router calls this on the IO thread; the main-thread
+        any thread (the router calls this on the IO thread; the owner-thread
         refresh_feedback_widget reads it via the adapter façade).
         """
         with self._clients_lock:
@@ -414,8 +414,8 @@ class NdjsonRpcEndpoint:
         """Fan a pre-encoded push line out to every link passing ``predicate``.
 
         Pure mechanism: the endpoint does not know what the line is or why the
-        predicate selects who it does. Called on the Qt main thread (every push
-        originates from a main-thread event-bus callback / diagnostic fan-out).
+        predicate selects who it does. Called on the State owner thread (every push
+        originates from an owner-thread event-bus callback / diagnostic fan-out).
         Reads ``_clients`` under the lock; ``_enqueue`` is thread-safe.
         """
         self.broadcast_lazy(lambda: line, predicate)
@@ -637,9 +637,9 @@ class NdjsonRpcEndpoint:
         with self._clients_lock:
             self._clients.pop(sock, None)
         # Let the app release per-connection state (editor sessions etc.). On a
-        # drop this runs on the IO thread; the router marshals to the main
+        # drop this runs on the IO thread; the router marshals to the State owner
         # thread itself if its cleanup must.
-        self._router.on_client_close(link, on_main_thread=False)
+        self._router.on_client_close(link, on_owner_thread=False)
         logger.info("remote client disconnected: %s", link.peer)
 
     # ------------------------------------------------------------------
@@ -678,7 +678,7 @@ class NdjsonRpcEndpoint:
                 )
                 return
             # Past the handshake: everything else is the app's. The router owns
-            # the method set, validation, and dispatch (incl. any main-thread
+            # the method set, validation, and dispatch (incl. any owner-thread
             # marshal); the endpoint is zero-knowledge of method semantics.
             self._router.route(link, req)
         except RemoteError as exc:

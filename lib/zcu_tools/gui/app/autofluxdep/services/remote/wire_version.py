@@ -24,4 +24,4 @@ WIRE_VERSION = 6  # event envelopes carry seq/origin
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 9  # event attribution
+GUI_VERSION = 10  # owner-thread guards and runtime adapters

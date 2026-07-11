@@ -16,4 +16,4 @@ from __future__ import annotations
 
 WIRE_VERSION = 4  # v4: event envelopes carry seq/origin
 
-GUI_VERSION = 5
+GUI_VERSION = 6  # owner-thread guard and scheduler injection

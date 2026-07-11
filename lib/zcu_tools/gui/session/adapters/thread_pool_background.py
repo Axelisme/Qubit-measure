@@ -170,8 +170,7 @@ class ThreadPoolBackgroundExecutor:
         del self._jobs[future]
 
     def _is_owner_thread(self) -> bool:
-        probe = getattr(self._owner, "is_owner_thread", None)
-        return bool(callable(probe) and probe())
+        return self._owner.is_owner_thread()
 
 
 __all__ = ["ThreadPoolBackgroundExecutor"]

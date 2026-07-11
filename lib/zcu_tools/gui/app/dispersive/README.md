@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-12 — Qt background adapter boundary
+**Last updated:** 2026-07-12 — owner-thread runtime adapters
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -27,11 +27,11 @@ state/services/UI 與 GUI-process remote adapter。Import path 固定為
 - `zcu_tools.gui.remote.{errors,framing,param_spec,wire}`（傳遞依賴——經共用 transport 層帶入，dispersive 不直接 import）。**dispersive 的 worker 不畫圖（compute/record 模式），故不依賴 `zcu_tools.gui.plotting`（ADR-0017 R4 不適用）。**
 - `zcu_tools.gui.remote`：transport 機制三方共用。RPC 方法登錄 `MethodSpec/BoundMethod/build_method_registry`（`method_spec.py`）；GUI 側傳輸 `NdjsonRpcEndpoint`（`rpc_endpoint.py` —— socket 生命週期 + accept loop + NDJSON framing + per-client writer/outbound queue + 內建 `wire.version`/auth handshake + reply 編碼 + `broadcast` push fan-out + 主執行緒 marshal primitive + `ClientLink`）；MCP-server 側傳輸 `McpBridge`（住 `zcu_tools.mcp.core.bridge` —— socket 狀態為 instance attrs、send_rpc_raw/connect/disconnect/launch/stop/reader thread/RID routing + 注入 on_event hook）。
 - `zcu_tools.gui.event_bus`：`BaseEventBus`/`BasePayload` 三方共用機制。
-- wire 版本常數 `services/remote/wire_version.py` 留各 app（dispersive **WIRE=4/GUI=5**：EventBus push 含 seq/origin）。每 app 各自演化 wire 契約故不入共用 `remote.wire`。
+- wire 版本常數 `services/remote/wire_version.py` 留各 app（dispersive **WIRE=4/GUI=6**：EventBus push 含 seq/origin）。每 app 各自演化 wire 契約故不入共用 `remote.wire`。
 
 ### 領域各 app 自有（共用機制之上）
 - `event_bus.py`：dispersive 的 payload 型別 + `EventBus`（建在共用 `BaseEventBus` 上）。
-- `services/remote/service.py`（RemoteControlAdapter）：**subclass 共用 `RemoteControlServiceBase`**（`gui/remote/control_service`），router scaffolding（route / events.* / `_dispatch_on_main` bare marshal / EventBus subscribe/serialize/broadcast，底層委 `NdjsonRpcEndpoint`）全在 base。dispersive read-only → **零 policy 覆寫**（`_get_bus` 用 base 預設 `ctrl.bus`、serializers 以 payload `type` 為 key），本檔只剩 domain 注入（method registry / serializers / 版本 / `server_name="DispersiveRemoteServer"`）。
+- `services/remote/service.py`（RemoteControlAdapter）：**subclass 共用 `RemoteControlServiceBase`**（`gui/remote/control_service`），router scaffolding（route / events.* / `_dispatch_on_owner` bare marshal / EventBus subscribe/serialize/broadcast，底層委 `NdjsonRpcEndpoint`）全在 base。dispersive read-only → **零 policy 覆寫**（`_get_bus` 用 base 預設 `ctrl.bus`、serializers 以 payload `type` 為 key），本檔只剩 domain 注入（method registry / serializers / 版本 / `server_name="DispersiveRemoteServer"`）。
 - `ui/error_messages.py`：用共用 `gui/error_messages` framework（`normalize_raw`/`details_tail`/`friendly_from_rules`/`fit_io_redirect`），domain rule（`friendly_io_message` + `_FIT_RULES`）各 app。其餘領域自有。`ProjectDialog` 來自共用 `gui/widgets/project_dialog.py`（`db_label="One-tone dir"`），可用 project root 掃描到的 `result/**/params.json` result scope 選既有 chip/qubit；`ProjectInfo`/`default_*`/`nearest_existing` 在共用 `gui/project.py`（Qt-free）。本目錄不含 app-local project dialog。
 
 ## 計算全走 worker（避免 GUI 卡頓）
@@ -57,7 +57,7 @@ state/services/UI 與 GUI-process remote adapter。Import path 固定為
 **State / wire 全程 GHz**（g, bare_rf, bare_rf_seed, freqs）；slider UI 顯示 MHz（×1e3 進 / ×1e-3 出）。onetone load 經 `format_rawdata` Hz→GHz（**不走 experiment 層**：`FluxDepExp.load` 回 dataclass、MHz）。
 
 ## Remote / MCP（read-only，fluxdep 模式）
-agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / project.info / fit_inputs.info / preprocess.status / fit.result{has_result,g,bare_rf,res_dim} / resources.versions），**無 mutating RPC**。`mcp/dispersive/server.py` 是 **thin entrypoint**：填 config + instructions，body（`send_gui_rpc` / 3 lifecycle tools launch/connect/disconnect（**無 stop 曝露**）/ cleanup / `run_stdio_loop`）全交 `mcp/core/readonly_server.build_readonly_server`；read-only tools 從 METHOD_SPECS 自動生成。**event-push 丟棄**（read-only 無診斷流，bridge on_event 不接）。預設 control port **8767**（避開 fluxdep 8766）。當 script 跑：絕對 import（無 parent package）+ lib path inject。**WIRE=4/GUI=5**（EventBus push 含 seq/origin；fit.result 維持無 step）。`project.info` / `resources.versions` 直接註冊 `gui/remote/readonly_handlers.py` 的共用 `h_project_info` / `h_resources_versions`（與 fluxdep 共用，兩 app wire 形態永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project`）。
+agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / project.info / fit_inputs.info / preprocess.status / fit.result{has_result,g,bare_rf,res_dim} / resources.versions），**無 mutating RPC**。`mcp/dispersive/server.py` 是 **thin entrypoint**：填 config + instructions，body（`send_gui_rpc` / 3 lifecycle tools launch/connect/disconnect（**無 stop 曝露**）/ cleanup / `run_stdio_loop`）全交 `mcp/core/readonly_server.build_readonly_server`；read-only tools 從 METHOD_SPECS 自動生成。**event-push 丟棄**（read-only 無診斷流，bridge on_event 不接）。預設 control port **8767**（避開 fluxdep 8766）。當 script 跑：絕對 import（無 parent package）+ lib path inject。**WIRE=4/GUI=6**（EventBus push 含 seq/origin；fit.result 維持無 step）。`project.info` / `resources.versions` 直接註冊 `gui/remote/readonly_handlers.py` 的共用 `h_project_info` / `h_resources_versions`（與 fluxdep 共用，兩 app wire 形態永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project`）。
 
 ## 已知坑 / 設計決策
 - **preprocess edelay 用 numba kernel（GUI-local，非 utils）**：`services/_fast_edelay.py` 的 `@njit(parallel=True, fastmath=True, cache=True)` 把整個 (n_flux × 1000-grid) 雙層 loop 編成機器碼、per-flux 外層 `prange` 平行，內聯 **Kasa 代數圓擬合**（2×2 solve，取代 utils 的 `fit_circle_params` scipy.eig，圓心相同、半徑差 ~2e-3）。**~14x**（benchmark：scipy.eig+loky 1.49s → numba 8thr 0.103s；單核也 5x）。numba 放 GIL → 不 fork、不 pickle；kernel 是黑盒 ~0.1s → 進度條走 **busy/indeterminate**（無 per-flux tick）。**不動 utils 通用 `fit_edelay`/`fit_circle_params`**（這是 dispersive 專用快路徑）。數值對齊：transpose 正確的真實檔上 numba vs utils fit_edelay 差 = 0.000000。
