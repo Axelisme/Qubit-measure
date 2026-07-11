@@ -15,6 +15,15 @@ Phase 126 前，GUI 持久化散在 `StartupService`/`WorkspaceService`/兩個 `
 
 ## 決策
 
+GUI apps 共用 `gui.session.persistence.SingleFileCaretaker` 的 generic 單檔機制；每個 app
+各自擁有 typed codec、memento schema/version gate、filename、originator、restore report 與
+lifecycle trigger。shared caretaker 只擁有 cache fallback、whole-file JSON load/default
+degradation、same-directory temporary file、atomic replace 與 cleanup，不依賴 Pydantic、Qt、cfg
+或任何 app module。
+
+read/decode failure 以 fresh default restore 並回傳 typed `RestoreOutcome`；restore/apply exception
+原樣傳播；capture/encode/mkdir/write/replace failure 統一轉 shared `PersistenceError` 並保留 cause。
+
 **Memento + Caretaker**（業界對「持久化需橫跨多 aggregate 又要保封裝」的標準解，DDD State-Snapshot）：不讓持久化物件 reach into aggregate，而是**每個 owner 自吐一個可序列化 memento，一個 Caretaker 只管收集/落盤/讀回時機**。
 
 三層 capture/restore：

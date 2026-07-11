@@ -17,6 +17,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.gui.app.main.adapter import SavePaths
+from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.services.startup import (
     PersistedDeviceEntry as PersistedDeviceEntry,  # noqa: F401  (re-export)
 )
@@ -31,10 +32,6 @@ from zcu_tools.gui.session.state import (
 # former startup_v2 + tab_session_v1 files into one). Bump on any incompatible
 # shape change; a mismatch makes the Caretaker fall back to defaults.
 APP_STATE_VERSION = 1
-
-
-class PersistenceError(RuntimeError):
-    """Expected failure while reading or writing the GUI state file."""
 
 
 class PersistedTab(BaseModel):

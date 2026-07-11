@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — public scalar type vocabulary
+**Last updated:** 2026-07-11 — shared single-file persistence
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -8,6 +8,9 @@ app保留帶領域context的錯誤文字與unsupported-target轉譯。
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep 共用這層。
 
 ## 結構
+
+`persistence.py` 是 app-neutral、強型別的 single-file caretaker；app 注入 codec 並保留
+schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app module。
 
 ```
 session/

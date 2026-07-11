@@ -13,7 +13,9 @@ import time
 from pathlib import Path
 
 import pytest
-from zcu_tools.gui.app.main.services.caretaker import PersistenceCaretaker
+from zcu_tools.gui.app.main.services.caretaker import (
+    create_persistence_caretaker as PersistenceCaretaker,
+)
 from zcu_tools.gui.app.main.services.persistence_types import AppPersistedState
 from zcu_tools.gui.app.main.services.ports import RestoreReport
 from zcu_tools.gui.background import BackgroundRunner

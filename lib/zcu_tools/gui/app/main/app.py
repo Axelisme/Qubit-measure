@@ -102,11 +102,11 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
     def before_show(self, assembly: GuiAssembly) -> None:
-        from zcu_tools.gui.app.main.services import PersistenceCaretaker
+        from zcu_tools.gui.app.main.services import create_persistence_caretaker
 
         ctrl = assembly.controller
         assert _is_controller(ctrl)
-        caretaker = PersistenceCaretaker(ctrl)
+        caretaker = create_persistence_caretaker(ctrl)
         ctrl.attach_caretaker(caretaker)
         ctrl.restore_all(load=not self._clean)
 

@@ -688,11 +688,11 @@ def test_method_specs_import_does_not_pull_dispatch_or_service() -> None:
 def test_services_package_lazy_exports_preserve_explicit_imports() -> None:
     code = (
         "from zcu_tools.gui.app.main.services import (\n"
-        "    PersistenceCaretaker,\n"
+        "    create_persistence_caretaker,\n"
         "    StartupProjectRequest,\n"
         ")\n"
         "import zcu_tools.gui.app.main.services as services\n"
-        "assert services.PersistenceCaretaker is PersistenceCaretaker\n"
+        "assert services.create_persistence_caretaker is create_persistence_caretaker\n"
         "assert services.StartupProjectRequest is StartupProjectRequest\n"
     )
     subprocess.run(

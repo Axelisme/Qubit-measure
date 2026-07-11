@@ -30,9 +30,11 @@ from zcu_tools.gui.app.main.events.tab import (
 )
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services import (
-    PersistenceCaretaker,
     StartupConnectionRequest,
     StartupProjectRequest,
+)
+from zcu_tools.gui.app.main.services import (
+    create_persistence_caretaker as PersistenceCaretaker,
 )
 from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
 from zcu_tools.gui.app.main.state import DeviceStatus, State

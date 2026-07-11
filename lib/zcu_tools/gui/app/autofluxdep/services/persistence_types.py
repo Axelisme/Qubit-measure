@@ -7,13 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.services.startup import PersistedStartup
 
 APP_STATE_VERSION = 1
-
-
-class PersistenceError(RuntimeError):
-    """Expected failure while reading or writing autofluxdep GUI state."""
 
 
 class PersistedNode(BaseModel):

@@ -180,8 +180,8 @@ _Avoid_: 按話題聚合 service、entity 寫成哑 dataclass（貧血）、app 
 
 ### 持久化（Persistence，Memento + Caretaker，見 `docs/adr/0015`）
 
-**PersistenceCaretaker**（Memento 的 Caretaker，**Driven Adapter**）:
-GUI app state 的單檔存讀者。由 `MeasureGuiBehavior.before_show` 在 app 層建立、注入 Controller 持有（窄 port `PersistOriginatorPort`，單向 Command）。**與 RemoteControlAdapter 不同級不同向**——後者 driving（驅動操作進系統），它 driven（被 lifecycle 觸發做 I/O）。職責只有 disk I/O + 何時讀/寫:**不訂 event、不碰 UI、不碰 State、不懂 cfg**，只收 Controller 吐的 memento。`flush()` **觸發無關**:每次呼叫都重新 capture 現組 memento 落盤;目前唯一觸發是 lifecycle（close→`persist_all`、startup→`restore_all`），未來可加 timer/button/event/RPC 觸發而 Caretaker 不改。
+**SingleFileCaretaker**（Memento 的 Caretaker，**Driven Adapter**）:
+共用的單檔存讀機制，由 `MeasureGuiBehavior.before_show` 以 main-local codec 組合並注入 Controller。main 擁有 memento schema/version、filename、originator 與 lifecycle trigger；shared caretaker 只處理 JSON、cache path、default degradation 與 atomic replace，**不訂 event、不碰 UI、不碰 State、不懂 cfg**。`flush()` 每次重新 capture；main 只在 startup restore 與 close flush 觸發。
 _Avoid_: 讓 Caretaker 訂 event / 碰 State / 認識 cfg、把「只在關閉寫」當成 Caretaker 的不變式（是當前唯一觸發、非設計上限）
 
 **AppPersistedState memento**（`persistence_types.py`，pydantic v2 frozen）:

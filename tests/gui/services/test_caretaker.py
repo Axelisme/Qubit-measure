@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zcu_tools.gui.app.main.services.caretaker import PersistenceCaretaker
+from zcu_tools.gui.app.main.services.caretaker import (
+    create_persistence_caretaker as PersistenceCaretaker,
+)
 from zcu_tools.gui.app.main.services.persistence_types import (
     APP_STATE_VERSION,
     AppPersistedState,

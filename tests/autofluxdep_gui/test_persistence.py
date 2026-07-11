@@ -19,9 +19,11 @@ from zcu_tools.gui.app.autofluxdep.services import (
     PersistedStartup,
     PersistedUiPrefs,
     PersistedWorkflow,
-    PersistenceCaretaker,
     PersistenceError,
     RestoreReport,
+)
+from zcu_tools.gui.app.autofluxdep.services import (
+    create_persistence_caretaker as PersistenceCaretaker,
 )
 from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
@@ -345,6 +347,23 @@ def test_restore_without_predictor_defaults_none_and_default_dialog_state(
     assert ctrl.get_auto_follow_tabs() is False
 
 
+def test_wrong_version_restores_default_with_load_error(tmp_path: Path):
+    ctrl = build_core()
+    ctrl.add_node_by_type("qubit_freq")
+    caretaker = PersistenceCaretaker(ctrl, cache_dir=tmp_path)
+    caretaker.state_path.write_text(
+        json.dumps({"version": APP_STATE_VERSION + 1}), encoding="utf-8"
+    )
+    ctrl.attach_caretaker(caretaker)
+
+    outcome = ctrl.restore_all()
+
+    assert outcome is not None
+    assert isinstance(outcome.load_error, PersistenceError)
+    assert "Unsupported autofluxdep GUI state version" in str(outcome.load_error)
+    assert ctrl.state.node_names() == []
+
+
 def test_predictor_dialog_state_persistence_roundtrip(tmp_path: Path):
     dialog_state = PersistedPredictorDialogState(
         tracked_transitions=((2, 3), (3, 5)),
@@ -488,12 +507,12 @@ def test_caretaker_wraps_capture_failure(tmp_path: Path):
         def capture_persisted_state(self) -> AppPersistedState:
             raise RuntimeError("bad capture")
 
-        def restore_persisted_state(self, state: AppPersistedState) -> object:
-            return state
+        def restore_persisted_state(self, state: AppPersistedState) -> RestoreReport:
+            return RestoreReport(restored_nodes=len(state.workflow.nodes))
 
     caretaker = PersistenceCaretaker(BadOriginator(), cache_dir=tmp_path)
 
-    with pytest.raises(PersistenceError, match="Failed to save autofluxdep GUI state"):
+    with pytest.raises(PersistenceError, match="Failed to save GUI state"):
         caretaker.flush()
 
     assert not caretaker.state_path.exists()

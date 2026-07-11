@@ -77,7 +77,7 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
         self._project_root = project_root or _repo_root()
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
-        from zcu_tools.gui.app.autofluxdep.services import PersistenceCaretaker
+        from zcu_tools.gui.app.autofluxdep.services import create_persistence_caretaker
         from zcu_tools.gui.app.autofluxdep.services.remote.service import (
             RemoteControlAdapter,
         )
@@ -86,7 +86,7 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
         ctrl = build_core(self._project, project_root=self._project_root)
         window = MainWindow(ctrl)
 
-        caretaker = PersistenceCaretaker(ctrl)
+        caretaker = create_persistence_caretaker(ctrl)
         ctrl.attach_caretaker(caretaker)
         ctrl.restore_all()
         window.restore_workflow_view()

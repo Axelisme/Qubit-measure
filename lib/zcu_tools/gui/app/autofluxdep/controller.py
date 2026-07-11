@@ -133,13 +133,10 @@ from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH
 from zcu_tools.meta_tool import QubitParams, QubitParamsError
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.autofluxdep.services.caretaker import (
-        PersistenceCaretaker,
-        RestoreOutcome,
-    )
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.persistence import RestoreOutcome, SingleFileCaretaker
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
@@ -220,7 +217,9 @@ class Controller(SessionControllerMixin):
         self._last_run_info: InfoStore | None = None
         self._last_terminal_manifest_path: Path | None = None
         self._last_terminal_status: str | None = None
-        self._caretaker: PersistenceCaretaker | None = None
+        self._caretaker: (
+            SingleFileCaretaker[AppPersistedState, RestoreReport] | None
+        ) = None
         self._shutdown_driver: QtShutdownDriver | None = None
         self._persist_timer = QTimer()
         self._persist_timer.setSingleShot(True)
@@ -410,7 +409,9 @@ class Controller(SessionControllerMixin):
 
     # -- Memento Originator (workflow persistence) -----------------------------
 
-    def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
+    def attach_caretaker(
+        self, caretaker: SingleFileCaretaker[AppPersistedState, RestoreReport]
+    ) -> None:
         """Wire the app-level persistence caretaker built by the composition root."""
         self._caretaker = caretaker
 
@@ -543,7 +544,7 @@ class Controller(SessionControllerMixin):
         )
         return True
 
-    def restore_all(self, *, load: bool = True) -> RestoreOutcome | None:
+    def restore_all(self, *, load: bool = True) -> RestoreOutcome[RestoreReport] | None:
         if self._caretaker is None:
             return None
         outcome = self._caretaker.restore_all(load=load)

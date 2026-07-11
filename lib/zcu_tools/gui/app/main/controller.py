@@ -41,7 +41,6 @@ from .services import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
     LoadTabResultOutcome,
-    PersistenceCaretaker,
     PersistenceError,
     RestoreReport,
     SaveResultOutcome,
@@ -59,6 +58,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.persistence import SingleFileCaretaker
     from zcu_tools.gui.session.ports import ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
@@ -298,7 +298,9 @@ class Controller(SessionControllerMixin):
         # App-level PersistenceCaretaker, injected by runtime behavior via
         # attach_caretaker (None in bare-Controller tests that don't exercise
         # persistence).
-        self._caretaker: PersistenceCaretaker | None = None
+        self._caretaker: (
+            SingleFileCaretaker[AppPersistedState, RestoreReport] | None
+        ) = None
         # Lazily built on first begin_shutdown so the Controller stays importable
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
@@ -516,7 +518,9 @@ class Controller(SessionControllerMixin):
     def writeback_control(self) -> WritebackControlPort:
         return self._writeback_control
 
-    def attach_caretaker(self, caretaker: PersistenceCaretaker) -> None:
+    def attach_caretaker(
+        self, caretaker: SingleFileCaretaker[AppPersistedState, RestoreReport]
+    ) -> None:
         """Wire the app-level PersistenceCaretaker.
 
         The Controller is the Memento Originator; the Caretaker owns disk I/O.

@@ -1,8 +1,11 @@
-**Last updated:** 2026-07-11 — strict program shape consumers
+**Last updated:** 2026-07-11 — shared persistence mechanism
 
 # gui/app/autofluxdep/ — autofluxdep-gui app shell
 
 控制型 GUI：拿某 flux 的 base context 衍生、自動跑 flux × node-graph 掃描。**domain core**（Builder/Node/orchestrator/Result/Patch/Plotter 的設計語言）見 `CONTEXT.md` + ADR-0018；本 README 記 **app shell**（session 服務組合 + dialog + run path）。
+
+Autofluxdep 擁有 workflow snapshot codec/version、filename、partial-rejection report 與
+debounce/terminal/close triggers；disk mechanism 使用 shared `SingleFileCaretaker`。
 
 ## 結構
 

@@ -1,11 +1,14 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — canonical shape consumers
+**Last updated:** 2026-07-11 — shared persistence mechanism
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
 view 與 GUI-side remote handler。實驗領域知識住在 `experiment/v2_gui/` adapter；
 framework 只看 `ExpAdapterProtocol`。
+
+Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
+lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
 
 ## Package Boundaries
 

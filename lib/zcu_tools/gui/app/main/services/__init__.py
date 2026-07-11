@@ -27,7 +27,12 @@ if TYPE_CHECKING:
     from .analyze import AnalyzeService
     from .app_services import AppServices, build_app_services
     from .arb_waveform import ArbWaveformService
-    from .caretaker import PersistenceCaretaker, RestoreOutcome
+    from .caretaker import (
+        AppSnapshotCodec,
+        RestoreOutcome,
+        SingleFileCaretaker,
+        create_persistence_caretaker,
+    )
     from .guard import (
         AnalyzePermit,
         GuardError,
@@ -87,7 +92,9 @@ __all__ = [
     "RunService",
     "SaveResultOutcome",
     "SaveService",
-    "PersistenceCaretaker",
+    "AppSnapshotCodec",
+    "SingleFileCaretaker",
+    "create_persistence_caretaker",
     "RestoreOutcome",
     "AppPersistedState",
     "PersistedSession",
@@ -138,7 +145,9 @@ _EXPORT_MODULES: dict[str, str] = {
     "RunService": ".run",
     "SaveResultOutcome": ".save",
     "SaveService": ".save",
-    "PersistenceCaretaker": ".caretaker",
+    "AppSnapshotCodec": ".caretaker",
+    "SingleFileCaretaker": ".caretaker",
+    "create_persistence_caretaker": ".caretaker",
     "RestoreOutcome": ".caretaker",
     "AppPersistedState": ".persistence_types",
     "PersistedSession": ".persistence_types",

@@ -8,7 +8,12 @@ app-local.
 
 from __future__ import annotations
 
-from .caretaker import PersistenceCaretaker, RestoreOutcome
+from .caretaker import (
+    AppSnapshotCodec,
+    RestoreOutcome,
+    SingleFileCaretaker,
+    create_persistence_caretaker,
+)
 from .persistence_types import (
     APP_STATE_VERSION,
     AppPersistedState,
@@ -34,7 +39,9 @@ __all__ = [
     "PersistedStartup",
     "PersistedUiPrefs",
     "PersistedWorkflow",
-    "PersistenceCaretaker",
+    "AppSnapshotCodec",
+    "SingleFileCaretaker",
+    "create_persistence_caretaker",
     "PersistenceError",
     "RestoreIssue",
     "RestoreOutcome",
