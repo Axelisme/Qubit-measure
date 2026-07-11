@@ -208,14 +208,7 @@ def _h_context_md_del_attr(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     key = str(params["key"])
-    try:
-        adapter.context_control.del_md_attr(key)
-    except AttributeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.context_control.del_md_attr(key)
     return {}
 
 

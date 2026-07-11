@@ -63,15 +63,8 @@ def _h_dialog_screenshot(
     from ..dialogs import parse_dialog_name
 
     name_str = str(params["name"])
-    try:
-        dialog_name = parse_dialog_name(name_str)
-        png = render_view(adapter).take_dialog_screenshot(dialog_name)
-    except ValueError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    dialog_name = parse_dialog_name(name_str)
+    png = render_view(adapter).take_dialog_screenshot(dialog_name)
     if not isinstance(png, (bytes, bytearray)):
         raise RemoteError(
             ErrorCode.INTERNAL,

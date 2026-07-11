@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from zcu_tools.gui.expected_error import InvalidInputError
+
 
 class DialogName(str, Enum):
     """Wire-stable identifiers for remotely controllable dialogs."""
@@ -37,13 +39,15 @@ def parse_dialog_name(value: object) -> DialogName:
     """Coerce a wire string into a ``DialogName`` enum.
 
     Accepts the lowercase wire form (``"setup"``) and the upper-case enum
-    name (``"SETUP"``) for client ergonomics. Raises ``ValueError`` if the
-    name is unknown — callers translate that into ``invalid_params``.
+    name (``"SETUP"``) for client ergonomics. Raises ``InvalidInputError`` if
+    the name is unknown.
     """
     if isinstance(value, DialogName):
         return value
     if not isinstance(value, str):
-        raise ValueError(f"dialog name must be a string, got {type(value).__name__}")
+        raise InvalidInputError(
+            f"dialog name must be a string, got {type(value).__name__}"
+        )
     lowered = value.lower()
     for name in DialogName:
         if name.value == lowered:
@@ -52,7 +56,7 @@ def parse_dialog_name(value: object) -> DialogName:
     for name in DialogName:
         if name.name == upper:
             return name
-    raise ValueError(f"unknown dialog name: {value!r}")
+    raise InvalidInputError(f"unknown dialog name: {value!r}")
 
 
 __all__ = ["DialogName", "parse_dialog_name"]

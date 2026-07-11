@@ -17,6 +17,7 @@ from zcu_tools.gui.app.main.services.remote.handlers.connection_device import (
     _h_startup_apply,
 )
 from zcu_tools.gui.app.main.services.remote.handlers.context import (
+    _h_context_md_del_attr,
     _h_context_md_set_attr,
 )
 from zcu_tools.gui.app.main.services.remote.handlers.editor import _h_editor_new
@@ -25,6 +26,7 @@ from zcu_tools.gui.app.main.services.remote.handlers.run_save import (
     _h_tab_run_start,
 )
 from zcu_tools.gui.app.main.services.remote.handlers.view import (
+    _h_dialog_screenshot,
     _h_tab_get_current_figure,
 )
 from zcu_tools.gui.app.main.services.remote.handlers.writeback import (
@@ -137,6 +139,9 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
 
     context_control = MagicMock()
     context_control.set_md_attr.side_effect = FailedPreconditionError("No context")
+    context_control.del_md_attr.side_effect = FailedPreconditionError(
+        "MetaDict has no attribute missing"
+    )
     context_adapter = SimpleNamespace(context_control=context_control)
 
     device_control = MagicMock()
@@ -197,6 +202,17 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
             (ErrorCode.PRECONDITION_FAILED, "No context", "", None),
         ),
         (
+            lambda: _h_context_md_del_attr(
+                cast(Any, context_adapter), {"key": "missing"}
+            ),
+            (
+                ErrorCode.PRECONDITION_FAILED,
+                "MetaDict has no attribute missing",
+                "",
+                None,
+            ),
+        ),
+        (
             lambda: _h_device_connect(
                 cast(Any, device_adapter),
                 {"type_name": "fake", "name": "flux", "address": "mock"},
@@ -234,6 +250,28 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
 
     for call, expected in cases:
         assert _remote_error(call) == expected
+
+
+def test_dialog_screenshot_expected_errors_use_producer_taxonomy() -> None:
+    render_view = MagicMock()
+    adapter = SimpleNamespace(render_view=render_view)
+
+    assert _remote_error(
+        lambda: _h_dialog_screenshot(cast(Any, adapter), {"name": "unknown"})
+    ) == (ErrorCode.INVALID_PARAMS, "unknown dialog name: 'unknown'", "", None)
+    render_view.take_dialog_screenshot.assert_not_called()
+
+    render_view.take_dialog_screenshot.side_effect = FailedPreconditionError(
+        "dialog 'setup' is not open"
+    )
+    assert _remote_error(
+        lambda: _h_dialog_screenshot(cast(Any, adapter), {"name": "setup"})
+    ) == (
+        ErrorCode.PRECONDITION_FAILED,
+        "dialog 'setup' is not open",
+        "",
+        None,
+    )
 
 
 @pytest.mark.parametrize(

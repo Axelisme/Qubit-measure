@@ -256,6 +256,19 @@ def test_del_md_attr_emits_md_changed():
     assert SessionEvent.MD_CHANGED in event_calls
 
 
+def test_del_md_attr_missing_is_failed_precondition_without_mutation():
+    state, svc = _make_active_state()
+    before = state.version.get("context")
+
+    with pytest.raises(
+        FailedPreconditionError, match="MetaDict has no attribute missing"
+    ):
+        svc.del_md_attr("missing")
+
+    assert state.version.get("context") == before
+    svc._bus.emit.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # del_ml_module
 # ---------------------------------------------------------------------------

@@ -283,7 +283,10 @@ class ContextService:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
         md = self._state.exp_context.md
-        delattr(md, key)
+        try:
+            delattr(md, key)
+        except AttributeError as exc:
+            raise FailedPreconditionError(str(exc)) from exc
         self._state.version.bump("context")
         self._bus.emit(MdChangedPayload(md=md))
 
