@@ -41,6 +41,7 @@
       "base_branch": "main",
       "action": "preview",
       "status": "queued",
+      "blocked_kind": null,
       "requested_by": "<agent-or-thread>",
       "enqueued_at": "YYYY-MM-DDTHH:MM:SSZ",
       "started_at": null,
@@ -53,3 +54,21 @@
   ]
 }
 ```
+
+`merge_queue.json` 維持 version 1。`blocked_kind` 是向後相容的 optional / nullable failure
+provenance：`queued` / `merging` entry 只能缺省或為 `null`；`blocked` entry 可使用下列 closed
+values：
+
+- `manual`
+- `integration_refresh_failed`
+- `preview_abort_failed`
+- `merge_target_preflight_failed`
+- `preview_target_stale`
+- `preview_merge_failed`
+- `preview_postcondition_failed`
+- `final_fast_forward_failed`
+- `final_postcondition_failed`
+
+未知字串或非 blocked entry 的 non-null value 會 Fast Fail。舊版 blocked entry 缺少此欄位或值為
+`null` 時仍可由 `state validate` / `queue status` 讀取，但只代表 provenance unknown；
+`merge retry-refresh` 明確拒絕這類 entry，不從自由文字 `note` 推測或自動 migration。
