@@ -249,8 +249,10 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         ``VersionTable`` and does not care *why* those keys matter. A mismatch
         (someone, possibly a human, mutated a dependency since the caller read
         it; or the resource was dropped and now reads 0) raises
-        ``PRECONDITION_FAILED`` carrying the current versions of the offending
-        keys so the caller can resync and retry.
+        ``PRECONDITION_FAILED`` with ``data={"stale": [...]}``, containing only
+        the sorted identities of the resources that moved, never their current
+        versions. Client recovery follows the re-snapshot-then-retry contract in
+        the ``Resource-Version Guard`` section of this package's README.
 
         Absent/empty ``expected_versions`` means no check (same as a plain RPC).
 
