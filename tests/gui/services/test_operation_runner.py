@@ -17,7 +17,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
+from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin, OriginKind
 from zcu_tools.gui.session.operation_handles import (
     NO_RESULT,
     OperationHandles,
@@ -43,7 +43,9 @@ class _FakeGate:
     def __init__(self, *, conflict: bool = False) -> None:
         self._conflict = conflict
         self.ensure_calls: list[tuple[str, str | None]] = []
-        self.register_calls: list[tuple[int, str, str, str | None]] = []
+        self.register_calls: list[
+            tuple[int, str, str, OriginKind, str, str | None]
+        ] = []
         self.release_calls: list[int] = []
 
     def ensure_can_start(self, kind: str, *, resource_id: str | None = None) -> None:
@@ -52,9 +54,18 @@ class _FakeGate:
             raise OperationConflictError("conflict")
 
     def register(
-        self, token: int, kind: str, *, owner_id: str, resource_id: str | None = None
+        self,
+        token: int,
+        kind: str,
+        *,
+        owner_id: str,
+        origin_kind: OriginKind,
+        note: str,
+        resource_id: str | None = None,
     ) -> None:
-        self.register_calls.append((token, kind, owner_id, resource_id))
+        self.register_calls.append(
+            (token, kind, owner_id, origin_kind, note, resource_id)
+        )
 
     def release(self, token: int) -> None:
         self.release_calls.append(token)
@@ -199,7 +210,9 @@ def test_terminal_callback_restores_captured_operation_origin() -> None:
 
 def test_exclusion_present_calls_ensure_register_release():
     runner, gate, handles, progress, bg = _make_runner()
-    excl = ExclusionRequest(kind="run", owner_id="tab1", resource_id=None)
+    excl = ExclusionRequest(
+        kind="run", owner_id="tab1", note="test operation", resource_id=None
+    )
 
     collected_settle: list[SettleFn] = []
 
@@ -222,8 +235,31 @@ def test_exclusion_present_calls_ensure_register_release():
     assert len(gate.ensure_calls) == 1
     assert gate.ensure_calls[0] == ("run", None)
     assert len(gate.register_calls) == 1
-    assert gate.register_calls[0] == (token, "run", "tab1", None)
+    assert gate.register_calls[0] == (
+        token,
+        "run",
+        "tab1",
+        "user",
+        "test operation",
+        None,
+    )
     assert gate.release_calls == [token]
+
+
+def test_exclusion_register_uses_operation_captured_origin() -> None:
+    bus = BaseEventBus()
+    runner, gate, _handles, _progress, _bg = _make_runner(bus=bus)
+    exclusion = ExclusionRequest(kind="run", owner_id="tab1", note="run T1 (tab tab1)")
+
+    with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
+        runner.begin(_noop_spec(gate=gate, exclusion=exclusion))
+
+    assert gate.register_calls[0][3:5] == ("agent", "run T1 (tab tab1)")
+
+
+def test_exclusion_request_rejects_blank_note() -> None:
+    with pytest.raises(ValueError, match="note"):
+        ExclusionRequest(kind="run", owner_id="tab1", note=" ")
 
 
 def test_exclusion_absent_skips_ensure_register_release():
@@ -251,7 +287,12 @@ def test_exclusion_absent_skips_ensure_register_release():
 
 def test_exclusion_with_resource_id_passes_resource_id_to_gate():
     runner, gate, handles, progress, bg = _make_runner()
-    excl = ExclusionRequest(kind="device_setup", owner_id="dev1", resource_id="dev1")
+    excl = ExclusionRequest(
+        kind="device_setup",
+        owner_id="dev1",
+        note="test operation",
+        resource_id="dev1",
+    )
 
     def on_terminal(bgr: BgResult, settle: SettleFn) -> None:
         settle(OperationOutcome("finished"))
@@ -269,7 +310,14 @@ def test_exclusion_with_resource_id_passes_resource_id_to_gate():
     bg.deliver_result()
 
     assert gate.ensure_calls[0] == ("device_setup", "dev1")
-    assert gate.register_calls[0] == (token, "device_setup", "dev1", "dev1")
+    assert gate.register_calls[0] == (
+        token,
+        "device_setup",
+        "dev1",
+        "user",
+        "test operation",
+        "dev1",
+    )
     assert gate.release_calls == [token]
 
 
@@ -341,7 +389,7 @@ def test_wants_progress_false_skips_make_factory_and_discard():
 def test_submit_fail_calls_settle_failed_and_unwinds():
     bg = _FakeBg(fail_submit=True)
     runner, gate, handles, progress, _ = _make_runner(bg=bg)
-    excl = ExclusionRequest(kind="run", owner_id="tab1")
+    excl = ExclusionRequest(kind="run", owner_id="tab1", note="test operation")
 
     terminal_calls: list[BgResult] = []
 
@@ -435,7 +483,7 @@ def test_on_terminal_receives_error_result_on_error():
 
 def test_terminal_callback_exception_settles_failed_and_releases(caplog):
     runner, gate, handles, progress, bg = _make_runner()
-    excl = ExclusionRequest(kind="run", owner_id="tab1")
+    excl = ExclusionRequest(kind="run", owner_id="tab1", note="test operation")
 
     def on_terminal(_bgr: BgResult, _settle: SettleFn) -> None:
         raise RuntimeError("terminal boom")
@@ -466,7 +514,7 @@ def test_terminal_callback_exception_settles_failed_and_releases(caplog):
 def test_progress_discard_exception_still_settles_and_releases(caplog):
     progress = _FakeProgress(fail_discard=True)
     runner, gate, handles, _, bg = _make_runner(progress=progress)
-    excl = ExclusionRequest(kind="run", owner_id="tab1")
+    excl = ExclusionRequest(kind="run", owner_id="tab1", note="test operation")
 
     def on_terminal(_bgr: BgResult, settle: SettleFn) -> None:
         settle(OperationOutcome("finished"))
@@ -499,7 +547,7 @@ def test_progress_discard_exception_still_settles_and_releases(caplog):
 
 def test_settle_call_once_second_call_is_logged_noop(caplog):
     runner, gate, handles, progress, bg = _make_runner(gate=_FakeGate())
-    excl = ExclusionRequest(kind="run", owner_id="tab1")
+    excl = ExclusionRequest(kind="run", owner_id="tab1", note="test operation")
 
     settle_fn: list[SettleFn] = []
 
@@ -543,7 +591,7 @@ def test_settle_call_once_second_call_is_logged_noop(caplog):
 def test_ensure_raises_does_not_create_handle_or_call_settle():
     gate = _FakeGate(conflict=True)
     runner, _, handles, progress, bg = _make_runner(gate=gate)
-    excl = ExclusionRequest(kind="run", owner_id="tab1")
+    excl = ExclusionRequest(kind="run", owner_id="tab1", note="test operation")
 
     terminal_calls: list[BgResult] = []
 

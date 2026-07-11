@@ -245,7 +245,7 @@ class Controller(SessionControllerMixin):
             transport = progress_transport
         else:
             transport = QtProgressTransport()
-        self._operation_gate = OperationGate()
+        self._operation_gate = OperationGate(bus)
         self._operation_handles = OperationHandles()
         self._background_svc = BackgroundRunner()
         self._progress_svc = ProgressService(transport)
@@ -1160,6 +1160,7 @@ class Controller(SessionControllerMixin):
             exclusion=ExclusionRequest(
                 kind=OperationKind.RUN,
                 owner_id=RUN_PROGRESS_OWNER_ID,
+                note="autofluxdep run",
             ),
             owner_id=RUN_PROGRESS_OWNER_ID,
             wants_progress=True,

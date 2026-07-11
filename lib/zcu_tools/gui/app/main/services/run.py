@@ -186,6 +186,7 @@ class RunService(QObject):
             exclusion=ExclusionRequest(
                 kind=OperationKind.RUN,
                 owner_id=tab_id,
+                note=f"run {permit.adapter_name} (tab {tab_id})",
             ),
             owner_id=tab_id,
             wants_progress=True,

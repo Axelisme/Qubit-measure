@@ -45,6 +45,7 @@ class RunPermit:
     """
 
     tab_id: str
+    adapter_name: str
     request: RunRequest
     schema: CfgSchema
     adapter: ExpAdapterProtocol
@@ -155,7 +156,11 @@ class GuardService:
 
         logger.debug("acquire_run_permit: tab_id=%r", tab_id)
         return RunPermit(
-            tab_id=tab_id, request=req, schema=tab.cfg_schema, adapter=tab.adapter
+            tab_id=tab_id,
+            adapter_name=tab.adapter_name,
+            request=req,
+            schema=tab.cfg_schema,
+            adapter=tab.adapter,
         )
 
     def acquire_save_permit(self, tab_id: str) -> SavePermit:

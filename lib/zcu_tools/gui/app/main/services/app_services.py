@@ -120,7 +120,7 @@ def build_app_services(
     called during construction, so passing the still-initialising Controller is
     safe and keeps the bundle complete (no service built outside this function).
     """
-    operation_gate = OperationGate()
+    operation_gate = OperationGate(bus)
     handles = OperationHandles()
     background = BackgroundRunner()
     progress = ProgressService(progress_transport)

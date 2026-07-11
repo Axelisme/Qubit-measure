@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
+from zcu_tools.gui.event_bus import BaseEventBus, OriginKind
+from zcu_tools.gui.session.events import GateChangedPayload, GatePresence
 from zcu_tools.gui.session.ports import (
     ExclusionGate,
     OperationConflictError,
@@ -13,7 +17,7 @@ from zcu_tools.gui.session.ports import (
     OperationKind as SessionOpKind,
 )
 
-__all__ = ["RunBlocksHardwareGate"]
+__all__ = ["GatePresence", "RunBlocksHardwareGate"]
 
 
 _SOC_CONNECT = SessionOpKind.SOC_CONNECT.value
@@ -38,6 +42,9 @@ class _ActiveLease:
 
     kind: str
     owner_id: str
+    origin_kind: OriginKind
+    note: str
+    since: float
     resource_id: str | None = None
 
 
@@ -49,8 +56,16 @@ class RunBlocksHardwareGate(ExclusionGate):
     device mutations conflict only with mutations of the same device.
     """
 
-    def __init__(self, *, run_kind: str) -> None:
+    def __init__(
+        self,
+        *,
+        run_kind: str,
+        bus: BaseEventBus,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._run = _norm(run_kind)
+        self._bus = bus
+        self._clock = clock
         self._active: dict[int, _ActiveLease] = {}
 
     def ensure_can_start(self, kind: str, *, resource_id: str | None = None) -> None:
@@ -75,16 +90,46 @@ class RunBlocksHardwareGate(ExclusionGate):
         kind: str,
         *,
         owner_id: str,
+        origin_kind: OriginKind,
+        note: str,
         resource_id: str | None = None,
     ) -> None:
         if not owner_id:
             raise ValueError("owner_id must not be empty")
-        self._active[token] = _ActiveLease(_norm(kind), owner_id, resource_id)
+        if not note.strip():
+            raise ValueError("gate presence note must not be blank")
+        self._active[token] = _ActiveLease(
+            kind=_norm(kind),
+            owner_id=owner_id,
+            origin_kind=origin_kind,
+            note=note,
+            since=self._clock(),
+            resource_id=resource_id,
+        )
+        self._emit_changed()
 
     def release(self, token: int) -> None:
         if token not in self._active:
             raise RuntimeError(f"Operation lease {token} is not active")
         del self._active[token]
+        self._emit_changed()
+
+    def snapshot(self) -> tuple[GatePresence, ...]:
+        """Return a read-only presence projection without raw monotonic epochs."""
+
+        now = self._clock()
+        return tuple(
+            GatePresence(
+                kind=lease.kind,
+                origin_kind=lease.origin_kind,
+                note=lease.note,
+                active_for_seconds=max(0.0, now - lease.since),
+            )
+            for lease in self._active.values()
+        )
+
+    def _emit_changed(self) -> None:
+        self._bus.emit(GateChangedPayload(active=self.snapshot()))
 
     def has_active(self, kind: str) -> bool:
         return any(lease.kind == _norm(kind) for lease in self._active.values())

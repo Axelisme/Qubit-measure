@@ -12,6 +12,7 @@ from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
+from zcu_tools.gui.session.events import GatePresence
 from zcu_tools.gui.session.notify_handles import NotifyHandles, NotifyResult
 from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
@@ -478,6 +479,9 @@ class Controller(SessionControllerMixin):
 
     def get_bus(self) -> EventBus:
         return self._bus
+
+    def get_hardware_gate_presence(self) -> tuple[GatePresence, ...]:
+        return self._operation_gate.snapshot()
 
     @property
     def device_control(self) -> DeviceControlPort:

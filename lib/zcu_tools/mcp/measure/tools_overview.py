@@ -76,6 +76,7 @@ def _assemble_overview() -> dict[str, Any]:
         "project": project,
         "context": send_gui_rpc("context.active", {}).get("label"),
         "soc": soc,
+        "hardware_gate": send_gui_rpc("state.hardware_gate", {}),
         "tabs": tabs,
         "running_tab": send_gui_rpc("run.running_tab", {}).get("tab_id"),
         "active_tab": send_gui_rpc("view.snapshot", {}).get("active_tab_id"),
@@ -100,6 +101,8 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "has_active_context / has_soc), project ({chip_name, qub_name, "
             "res_name, result_dir, database_path} or null when none applied), "
             "context (active context label), soc ({connected, is_mock}), "
+            "hardware_gate ({active:[{kind, origin_kind, note, "
+            "active_for_seconds}]}), "
             "tabs ([{tab_id, adapter, is_running}]), running_tab, and active_tab. "
             "active_tab is where the USER is currently focused — a collaboration "
             "cue, NOT your operation target (you always act on an explicit tab_id). "

@@ -79,6 +79,7 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
     ctx = state.exp_context
     return RunPermit(
         tab_id=tab_id,
+        adapter_name=state.get_tab(tab_id).adapter_name,
         request=RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg),
         schema=state.get_tab(tab_id).cfg_schema,
         adapter=adapter,
@@ -168,7 +169,7 @@ def _make_run_service(
     bus = EventBus()
     if mock_emit:
         bus.emit = MagicMock()  # type: ignore[method-assign]
-    gate = OperationGate()
+    gate = OperationGate(bus)
     handles = OperationHandles()
     writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
@@ -264,7 +265,7 @@ def test_start_run_releases_lease_when_submit_raises():
 
     assert not gate.has_active(OperationKind.RUN)
     assert not state.is_tab_running(tab_id)
-    svc._bus.emit.assert_called_once_with(  # type: ignore[attr-defined]
+    svc._bus.emit.assert_called_with(  # type: ignore[attr-defined]
         TabInteractionChangedPayload(tab_id, TabInteractionFact.RUN_START_REJECTED)
     )
 

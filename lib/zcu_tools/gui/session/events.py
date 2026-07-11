@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar
 
-from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.event_bus import BasePayload, OriginKind
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
@@ -37,6 +37,7 @@ class SessionEvent(str, Enum):
     DEVICE_SETUP_FINISHED = (
         "device_setup_finished"  # payload: DeviceSetupFinishedPayload
     )
+    HARDWARE_GATE_CHANGED = "hardware_gate_changed"
 
 
 @dataclass(frozen=True)
@@ -115,3 +116,21 @@ class DeviceSetupFinishedPayload(SessionPayload):
     name: str
     outcome: str  # 'finished' | 'failed' | 'cancelled'
     error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class GatePresence:
+    """Read model for one active hardware exclusion lease."""
+
+    kind: str
+    origin_kind: OriginKind
+    note: str
+    active_for_seconds: float
+
+
+@dataclass(frozen=True)
+class GateChangedPayload(SessionPayload):
+    """In-process hint carrying the authoritative active-lease snapshot."""
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.HARDWARE_GATE_CHANGED
+    active: tuple[GatePresence, ...]

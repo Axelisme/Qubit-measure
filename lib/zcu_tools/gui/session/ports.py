@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
+from zcu_tools.gui.event_bus import OriginKind
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
@@ -80,9 +81,11 @@ class ExclusionGate(Protocol):
         kind: str,
         *,
         owner_id: str,
+        origin_kind: OriginKind,
+        note: str,
         resource_id: str | None = None,
     ) -> None:
-        """Add an active exclusion lease under ``token`` (after ensure_can_start)."""
+        """Add a lease with captured frontend origin and a nonblank human note."""
         ...
 
     def release(self, token: int) -> None:

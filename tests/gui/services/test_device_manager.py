@@ -82,7 +82,7 @@ def _drain_until(
 def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock]:
     device = driver or MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="none")
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
@@ -178,7 +178,7 @@ def test_device_service_emits_started_and_finished_events(qapp):
 
 def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]:
     fake_device = driver if driver is not None else FakeDevice()
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())

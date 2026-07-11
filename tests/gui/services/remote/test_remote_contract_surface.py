@@ -69,6 +69,7 @@ EXPECTED_WIRE_METHODS = {
     "state.has_context",
     "state.has_project",
     "state.has_soc",
+    "state.hardware_gate",
     "tab.analyze",
     "tab.close",
     "tab.get_analyze_params",
@@ -127,6 +128,7 @@ EXPECTED_INTERNAL_MCP_METHODS = {
     "state.has_context",
     "state.has_project",
     "state.has_soc",
+    "state.hardware_gate",
     "view.snapshot",
 }
 

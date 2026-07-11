@@ -402,6 +402,7 @@ class DeviceService(QObject):
             exclusion=ExclusionRequest(
                 kind=OperationKind.DEVICE_CONNECT,
                 owner_id=name,
+                note=f"connect device: {name}",
                 resource_id=name,
             ),
             owner_id=name,
@@ -493,6 +494,7 @@ class DeviceService(QObject):
             exclusion=ExclusionRequest(
                 kind=OperationKind.DEVICE_DISCONNECT,
                 owner_id=name,
+                note=f"disconnect device: {name}",
                 resource_id=name,
             ),
             owner_id=name,
@@ -594,6 +596,7 @@ class DeviceService(QObject):
             exclusion=ExclusionRequest(
                 kind=OperationKind.DEVICE_SETUP,
                 owner_id=name,
+                note=f"setup device: {name}",
                 resource_id=name,
             ),
             owner_id=name,

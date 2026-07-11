@@ -41,6 +41,23 @@ def _h_state_has_soc(
     return {"value": bool(adapter.ctrl.has_soc())}
 
 
+def _h_state_hardware_gate(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    return {
+        "active": [
+            {
+                "kind": presence.kind,
+                "origin_kind": presence.origin_kind,
+                "note": presence.note,
+                "active_for_seconds": presence.active_for_seconds,
+            }
+            for presence in adapter.ctrl.get_hardware_gate_presence()
+        ]
+    }
+
+
 def _h_soc_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:

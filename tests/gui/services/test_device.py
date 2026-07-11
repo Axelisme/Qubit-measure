@@ -94,7 +94,7 @@ def _make_svc(
     device = driver or MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
     bg = _bg()
-    resolved_gate = gate or OperationGate()
+    resolved_gate = gate or OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
@@ -203,10 +203,17 @@ def test_device_setup_started_and_finished_keep_operation_origin(qapp) -> None:
 
 
 def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp):
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, _device = _make_svc(gate=gate)
     _connect(svc, _req())
-    gate.register(1, OperationKind.DEVICE_SETUP, owner_id="held", resource_id="dev1")
+    gate.register(
+        1,
+        OperationKind.DEVICE_SETUP,
+        owner_id="held",
+        origin_kind="user",
+        note="held setup",
+        resource_id="dev1",
+    )
 
     with pytest.raises(OperationConflictError, match="Cannot start"):
         svc.start_setup_device(
@@ -287,7 +294,7 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
     bg_svc = _bg()
-    resolved_gate = OperationGate()
+    resolved_gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
@@ -473,7 +480,7 @@ def test_failing_device_changed_subscriber_does_not_abort_connect(qapp):
 
     bus = EventBus()
     bg_svc = _bg()
-    resolved_gate = OperationGate()
+    resolved_gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     runner = OperationRunner(resolved_gate, handles, progress, bg_svc, bus)
@@ -721,11 +728,18 @@ def test_poll_device_info_polls_setting_up_device(qapp):
 def test_poll_device_info_skips_non_setup_device_mutation(qapp, kind: OperationKind):
     """Connect/disconnect leases are not safe live-read windows, so poll skips
     them without submitting a worker."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, device = _make_svc(gate=gate)
     _connect(svc, _req())
     device.get_info.reset_mock()
-    gate.register(99, kind, owner_id="held", resource_id="dev1")
+    gate.register(
+        99,
+        kind,
+        owner_id="held",
+        origin_kind="user",
+        note="held mutation",
+        resource_id="dev1",
+    )
 
     try:
         svc.poll_device_info("dev1")  # skipped without raising
@@ -808,7 +822,7 @@ def _make_multi_svc(
         return device
 
     bg = _bg()
-    resolved_gate = gate or OperationGate()
+    resolved_gate = gate or OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
@@ -843,7 +857,7 @@ def _connect_named(svc: DeviceService, name: str) -> None:
 def test_gate_allows_concurrent_setup_of_different_devices(qapp):
     """Resource-aware gate: a setup of one device does NOT block a setup of a
     different device (the core of Phase C)."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, drivers = _make_multi_svc(gate=gate)
     _connect_named(svc, "devA")
     _connect_named(svc, "devB")
@@ -890,7 +904,7 @@ def test_same_device_setup_still_blocked_while_in_flight(qapp):
     is SETTING_UP, so _require_connected_device fast-fails first; the gate's
     same-resource conflict is the deeper guard (covered separately in
     test_device_mutation_is_globally_exclusive_and_blocks_same_device_read)."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, drivers = _make_multi_svc(gate=gate)
     _connect_named(svc, "devA")
 
@@ -917,7 +931,7 @@ def test_same_device_setup_still_blocked_while_in_flight(qapp):
 
 def test_concurrent_setups_cancel_independently(qapp):
     """Cancelling one in-flight setup must not affect the other device's setup."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, drivers = _make_multi_svc(gate=gate)
     _connect_named(svc, "devA")
     _connect_named(svc, "devB")
@@ -986,7 +1000,7 @@ def _make_svc_with_fake_registry(
     device = driver or MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=0.0)
     bg = _bg()
-    resolved_gate = gate or OperationGate()
+    resolved_gate = gate or OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
     bus = EventBus()
@@ -1089,7 +1103,7 @@ def test_registry_port_setup_reads_driver_from_fake(qapp):
 def test_concurrent_setup_failure_does_not_affect_other(qapp):
     """A failed setup of one device rolls back only that device; the other
     device's concurrent setup is unaffected."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, drivers = _make_multi_svc(gate=gate)
     _connect_named(svc, "devA")
     _connect_named(svc, "devB")

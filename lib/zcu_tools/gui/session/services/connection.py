@@ -181,8 +181,15 @@ class SoCConnectionService(QObject):
         # no cancellation point, so the token is a lease handle only (cancel_hook
         # None); it is settled + released in the finally regardless of outcome.
         self._gate.ensure_can_start(OperationKind.SOC_CONNECT, resource_id=None)
-        token = self._handles.create(cancel_hook=None, origin=self._bus.current_origin)
-        self._gate.register(token, OperationKind.SOC_CONNECT, owner_id="soc")
+        origin = self._bus.current_origin
+        token = self._handles.create(cancel_hook=None, origin=origin)
+        self._gate.register(
+            token,
+            OperationKind.SOC_CONNECT,
+            owner_id="soc",
+            origin_kind=origin.kind,
+            note=f"connect SoC ({'mock' if is_mock else 'remote'})",
+        )
         self._active_token = token
         self._pending_is_mock = is_mock
         with self._bus.origin(self._handles.event_origin(token)):
@@ -236,6 +243,7 @@ class SoCConnectionService(QObject):
             exclusion=ExclusionRequest(
                 kind=OperationKind.SOC_CONNECT,
                 owner_id="soc",
+                note=f"connect SoC ({'mock' if is_mock else 'remote'})",
             ),
             owner_id="soc",
             wants_progress=False,

@@ -544,7 +544,12 @@ def test_start_run_while_running_raises(cf):
 def test_start_run_while_device_setup_active_raises(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl._operation_gate.register(
-        1, OperationKind.DEVICE_SETUP, owner_id="flux", resource_id="flux"
+        1,
+        OperationKind.DEVICE_SETUP,
+        owner_id="flux",
+        origin_kind="user",
+        note="held setup",
+        resource_id="flux",
     )
 
     with pytest.raises(OperationConflictError, match="device_setup is active"):
@@ -615,7 +620,13 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
 
 def test_run_rejected_while_soc_connect_lease_active(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl._operation_gate.register(1, OperationKind.SOC_CONNECT, owner_id="soc")
+    cf.ctrl._operation_gate.register(
+        1,
+        OperationKind.SOC_CONNECT,
+        owner_id="soc",
+        origin_kind="user",
+        note="held connect",
+    )
 
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
         cf.ctrl.start_run(tab_id)

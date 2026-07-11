@@ -68,7 +68,7 @@ def _drain_until(
 
 def _make_svc(driver: object | None = None) -> DeviceService:
     fake = driver if driver is not None else FakeDevice()
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())

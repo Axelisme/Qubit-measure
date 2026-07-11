@@ -79,13 +79,16 @@ from __future__ import annotations
 #   without mutation and report the canonical replacement. Batch path diffs are
 #   final net before/after results rather than transient per-edit churn.
 # v50: EventBus push envelopes add process-wide seq and origin attribution.
-WIRE_VERSION = 50
+# v51: state.hardware_gate read RPC exposes active exclusion presence as
+# {active:[{kind, origin_kind, note, active_for_seconds}]}.
+WIRE_VERSION = 51
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
+# v69: hardware-gate presence and owner-loop gate attribution.
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 68  # event attribution
+GUI_VERSION = 69  # hardware-gate presence

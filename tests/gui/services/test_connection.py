@@ -103,7 +103,7 @@ def _make_svc(
     """Build SoCConnectionService with a synchronous fake bg executor."""
     state = _make_state()
     bus = EventBus()
-    real_gate = gate or OperationGate()
+    real_gate = gate or OperationGate(bus)
     handles = OperationHandles()
     fake_bg = bg or _FakeBg()
     progress = ProgressService(DirectProgressTransport())
@@ -124,7 +124,7 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
 
     state = _make_state()
     bus = EventBus()
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
@@ -148,7 +148,7 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
 
     state = _make_state()
     bus = EventBus()
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
@@ -177,7 +177,7 @@ def test_start_connect_mock_sim_params_override_is_honoured(qapp):
     custom = DEFAULT_SIMPARAM.model_copy(update={"snr": 9999.0})
     state = _make_state()
     bus = EventBus()
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
@@ -204,7 +204,7 @@ def test_connect_bumps_soc_not_context_version(qapp):
 
     state = _make_state()
     bus = EventBus()
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
@@ -234,7 +234,7 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     """connect_sync runs inline (no bg), sets the soc, and emits SocChangedPayload
     synchronously (the hook the MockFluxProvisioner rides). It returns the handles
     directly and releases the SOC_CONNECT lease."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, _bg, _handles = _make_svc(gate=gate)
     state = svc._state  # type: ignore[attr-defined]
     bus = svc._bus  # type: ignore[attr-defined]
@@ -260,16 +260,22 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
 def test_connect_sync_rejects_concurrent_calls(qapp):
     """connect_sync holds the same SOC_CONNECT lease as the async path, so a
     concurrent connect (or the GUI button) fast-fails."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, _bg, _handles = _make_svc(gate=gate)
-    gate.register(1, OperationKind.SOC_CONNECT, owner_id="existing")
+    gate.register(
+        1,
+        OperationKind.SOC_CONNECT,
+        owner_id="existing",
+        origin_kind="user",
+        note="existing connect",
+    )
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
         svc.connect_sync(ConnectMockRequest())
 
 
 def test_connect_sync_remote_failure_releases_lease_and_raises(qapp, monkeypatch):
     """A failed remote connect re-raises and still releases the lease (finally)."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, _bg, _handles = _make_svc(gate=gate)
 
     import zcu_tools.remote as remote
@@ -303,9 +309,15 @@ def test_connect_sync_rejects_unsupported_request(qapp):
 
 
 def test_start_connect_rejects_concurrent_calls(qapp):
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, _bg, _handles = _make_svc(gate=gate)
-    gate.register(1, OperationKind.SOC_CONNECT, owner_id="existing")
+    gate.register(
+        1,
+        OperationKind.SOC_CONNECT,
+        owner_id="existing",
+        origin_kind="user",
+        note="existing connect",
+    )
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
         svc.start_connect(ConnectMockRequest())
 
@@ -321,9 +333,15 @@ def test_start_connect_remote_unsupported_request_raises(qapp):
 
 
 def test_start_connect_rejected_while_run_active(qapp):
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, _bg, _handles = _make_svc(gate=gate)
-    gate.register(1, MeasureOpKind.RUN, owner_id="tab")
+    gate.register(
+        1,
+        MeasureOpKind.RUN,
+        owner_id="tab",
+        origin_kind="user",
+        note="existing run",
+    )
 
     with pytest.raises(OperationConflictError, match="run is active"):
         svc.start_connect(ConnectMockRequest())
@@ -340,7 +358,7 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
 
     state = _make_state()
     bus = EventBus()
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     real_bg = BackgroundRunner()
@@ -380,7 +398,7 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     via _FakeBg.deliver_result() so on_terminal executes synchronously, then
     asserts gate.has_active is False.
     """
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     state = _make_state()
     bus = EventBus()
     bus.subscribe(
@@ -414,7 +432,7 @@ def test_cancel_token_does_not_interrupt_connect(qapp):
     cancel_hook=None means the Stop event is queued but the work thunk is not
     interrupted (§B.3). After deliver_result the lease is released normally.
     """
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, fake_bg, handles = _make_svc(gate=gate)
 
     token = svc.start_connect(ConnectMockRequest())
@@ -433,7 +451,7 @@ def test_cancel_token_does_not_interrupt_connect(qapp):
 
 def test_cancel_all_does_not_interrupt_connect(qapp):
     """handles.cancel_all() on a connect-only handles is also a no-op (§B.3)."""
-    gate = OperationGate()
+    gate = OperationGate(EventBus())
     svc, fake_bg, handles = _make_svc(gate=gate)
 
     svc.start_connect(ConnectMockRequest())

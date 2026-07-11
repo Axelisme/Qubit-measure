@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.services.remote.handlers.state_project import (
+    _h_state_hardware_gate,
+)
+from zcu_tools.gui.session.events import GatePresence
 from zcu_tools.mcp.measure import server as mcp_server
 
 
@@ -221,6 +227,7 @@ def _overview_fake_send(*, has_soc: bool):
         "state.has_context": {"value": True},
         "state.has_active_context": {"value": False},
         "state.has_soc": {"value": has_soc},
+        "state.hardware_gate": {"active": []},
         "project.info": {
             "chip_name": "Q5_2D",
             "qub_name": "Q1",
@@ -284,12 +291,37 @@ def test_overview_assembles_from_read_rpcs_with_project(monkeypatch):
         },
         "context": "default",
         "soc": {"connected": True, "is_mock": True},
+        "hardware_gate": {"active": []},
         "tabs": [
             {"tab_id": "t1", "adapter": "Freq", "is_running": False},
             {"tab_id": "t2", "adapter": "Rabi", "is_running": True},
         ],
         "running_tab": "t2",
         "active_tab": "t1",
+    }
+
+
+def test_hardware_gate_rpc_projects_presence_without_monotonic_epoch() -> None:
+    ctrl = MagicMock()
+    ctrl.get_hardware_gate_presence.return_value = (
+        GatePresence(
+            kind="run",
+            origin_kind="agent",
+            note="run T1 (tab t1)",
+            active_for_seconds=1.25,
+        ),
+    )
+    adapter = cast(Any, SimpleNamespace(ctrl=ctrl))
+
+    assert _h_state_hardware_gate(adapter, {}) == {
+        "active": [
+            {
+                "kind": "run",
+                "origin_kind": "agent",
+                "note": "run T1 (tab t1)",
+                "active_for_seconds": 1.25,
+            }
+        ]
     }
 
 

@@ -60,7 +60,12 @@ class ExclusionRequest:
 
     kind: str
     owner_id: str
+    note: str
     resource_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.note.strip():
+            raise ValueError("exclusion note must not be blank")
 
 
 @dataclass(frozen=True)
@@ -156,15 +161,16 @@ class OperationRunner:
                 spec.exclusion.kind, resource_id=spec.exclusion.resource_id
             )
 
-        token = self._handles.create(
-            cancel_hook=spec.cancel_hook, origin=self._bus.current_origin
-        )
+        origin = self._bus.current_origin
+        token = self._handles.create(cancel_hook=spec.cancel_hook, origin=origin)
 
         if spec.exclusion is not None:
             self._gate.register(
                 token,
                 spec.exclusion.kind,
                 owner_id=spec.exclusion.owner_id,
+                origin_kind=origin.kind,
+                note=spec.exclusion.note,
                 resource_id=spec.exclusion.resource_id,
             )
 

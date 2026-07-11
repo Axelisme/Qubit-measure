@@ -109,7 +109,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
 # MeasureMcpSession owns measure-only MCP policy state.
-MCP_VERSION = 72
+MCP_VERSION = 73
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)

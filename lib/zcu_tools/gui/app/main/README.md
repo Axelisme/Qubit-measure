@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — analyze edit commit boundary
+**Last updated:** 2026-07-12 — hardware gate presence
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -122,7 +122,9 @@ Key ownership rules:
 - `GuardService` owns static preconditions and returns typed permits for
   run/save/analyze/writeback.
 - `OperationGate` is the app-local thin wrapper over the shared
-  `RunBlocksHardwareGate` hardware exclusion policy.
+  `RunBlocksHardwareGate` hardware exclusion policy。active lease另投影captured
+  origin、domain note與duration；`state.hardware_gate`是read-only internal RPC，
+  `gui_overview.hardware_gate.active`提供MCP orientation snapshot。
 - `OperationHandles` owns async handles, cancellation hooks, and feedback/stop
   channel state.
 - `OperationRunner` owns the generic operation lifecycle; each operation supplies

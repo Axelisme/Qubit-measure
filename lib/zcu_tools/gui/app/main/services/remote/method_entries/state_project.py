@@ -47,6 +47,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "state.hardware_gate",
+        "state_project:_h_state_hardware_gate",
+        MethodSpec(
+            5.0,
+            "Read active hardware exclusion leases with kind, origin, note, and age.",
+            mcp=McpMethodPolicy.internal("folded into gui_overview hardware_gate"),
+        ),
+    ),
+    method_entry(
         "soc.info",
         "state_project:_h_soc_info",
         MethodSpec(
