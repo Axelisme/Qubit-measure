@@ -12,8 +12,6 @@ KNOWN_QT_DEBT = frozenset(
     {
         # batch 3: migrate background execution behind a Qt adapter.
         Path("background.py"),
-        # batch 3: move socket wakeup integration behind a Qt adapter.
-        Path("remote/rpc_endpoint.py"),
         # batch 3: migrate connection notifications with the operation layer.
         Path("session/services/connection.py"),
         # batch 3: migrate device notifications with the operation layer.

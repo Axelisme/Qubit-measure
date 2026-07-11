@@ -89,7 +89,7 @@ class MethodSpec:
     derived ``<prefix>_<method>`` MCP tool name when non-empty.
 
     ``off_main_thread`` marks a blocking handler that must NOT be marshalled
-    onto the Qt main thread — it runs on the IO worker thread instead. Required
+    onto the State owner thread — it runs on the IO worker thread instead. Required
     for handlers that block waiting on a worker-thread completion (e.g.
     ``operation.await``): marshalling them onto the main thread would deadlock
     (the handler occupies the event loop that must dispatch the very signal it

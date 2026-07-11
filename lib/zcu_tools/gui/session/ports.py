@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ExpContext
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
+
+
+_T = TypeVar("_T")
 
 
 class OperationKind(str, Enum):
@@ -89,6 +92,24 @@ class ExclusionGate(Protocol):
     def is_device_mutating(self, name: str) -> bool:
         """True while a device-mutation lease (connect/disconnect/setup) for
         ``name`` is active — guards a snapshot read against a racing mutation."""
+        ...
+
+
+class OwnerScheduler(Protocol):
+    """Thread-safe marshal onto the single State-owner loop.
+
+    ``post`` is fire-and-forget. ``call`` blocks a foreign thread until the owner
+    executes the callback and returns its result; calling ``call`` from the owner
+    thread is a programming error because it would deadlock a queued adapter.
+    Implementations must preserve callback order for calls made by one producer.
+    """
+
+    def post(self, callback: Callable[[], None]) -> None:
+        """Enqueue ``callback`` for execution on the owner thread."""
+        ...
+
+    def call(self, callback: Callable[[], _T]) -> _T:
+        """Run ``callback`` on the owner thread and return its result."""
         ...
 
 

@@ -26,6 +26,7 @@ from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import remote_error_from_expected
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 
@@ -112,7 +113,10 @@ class Fixture:
         if opts is None:
             opts = ControlOptions(port=0)
         self.service = RemoteControlAdapter(
-            controller=self.ctrl, opts=opts, render_view=self.view
+            controller=self.ctrl,
+            opts=opts,
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=self.view,
         )
 
     def start(self) -> int:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from types import SimpleNamespace
-from typing import cast
+from typing import TypeVar, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,13 +20,19 @@ from zcu_tools.gui.remote.control_service import (
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, MethodSpec
-from zcu_tools.gui.remote.rpc_endpoint import ClientLink, MainThreadDispatcher
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.value_lookup import ProviderError
 
+_T = TypeVar("_T")
 
-class _ImmediateSignal:
-    def emit(self, callback: Callable[[], None]) -> None:
+
+class _ImmediateOwnerScheduler:
+    def post(self, callback: Callable[[], None]) -> None:
         callback()
+
+    def call(self, callback: Callable[[], _T]) -> _T:
+        del callback
+        raise AssertionError("call is not used by dispatch")
 
 
 class _InvalidCategoryExpectedError(ExpectedError):
@@ -37,9 +43,7 @@ class _InvalidCategoryExpectedError(ExpectedError):
 def _service() -> RemoteControlServiceBase:
     service = object.__new__(RemoteControlServiceBase)
     service.ctrl = SimpleNamespace(bus=BaseEventBus())
-    service._dispatcher = cast(
-        MainThreadDispatcher, SimpleNamespace(invoke=_ImmediateSignal())
-    )
+    service._owner_scheduler = _ImmediateOwnerScheduler()
     service._endpoint = MagicMock()
     return service
 

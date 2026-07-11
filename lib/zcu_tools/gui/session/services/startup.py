@@ -235,16 +235,18 @@ class StartupService:
         """Seed the remembered prefs from the memento + register remembered
         devices. Project is NOT auto-applied to the active context (the user
         applies it via the setup dialog) — the instrument never auto-connects."""
-        self._state.startup_prefs = StartupPrefs(
-            chip_name=data.chip_name,
-            qub_name=data.qub_name,
-            res_name=data.res_name,
-            scope_id=data.scope_id,
-            result_dir=data.result_dir,
-            database_path=data.database_path,
-            ip=data.ip,
-            port=data.port,
-            left_panel_width=data.left_panel_width,
+        self._state.set_startup_prefs(
+            StartupPrefs(
+                chip_name=data.chip_name,
+                qub_name=data.qub_name,
+                res_name=data.res_name,
+                scope_id=data.scope_id,
+                result_dir=data.result_dir,
+                database_path=data.database_path,
+                ip=data.ip,
+                port=data.port,
+                left_panel_width=data.left_panel_width,
+            )
         )
         self._devices.register_remembered_devices(
             [

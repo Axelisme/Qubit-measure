@@ -10,8 +10,8 @@ scaffolding* that all three apps share:
   - the :class:`EndpointRouter` seam: ``route`` (events.* state-owning handlers,
     then a ``_route_extra`` hook, then METHOD_REGISTRY lookup + ParamSpec
     validation + main-thread dispatch), ``on_client_open`` / ``on_client_close``;
-  - ``_dispatch_on_main``: the marshal onto the Qt main thread (via the shared
-    :class:`MainThreadDispatcher`, timeout-bounded), composed with the
+  - ``_dispatch_on_main``: the marshal onto the State owner loop (via an injected
+    ``OwnerScheduler``, timeout-bounded), composed with the
     ``off_main_thread`` blocking branch and two policy seams (``_guard`` before
     the handler, ``_after_success`` after) — both no-ops by default;
   - EventBus push: subscribe one callback per serialised event key and lazily
@@ -29,8 +29,7 @@ the key, it only passes it to ``bus.subscribe`` and the injected
 ``wire_event_name``; each app supplies ``wire_event_name=lambda p: p.EVENT.value``
 so the wire name comes from the payload's own domain enum.
 
-Qt-aware (it composes :class:`MainThreadDispatcher`) but app-free: it imports
-nothing from ``gui.app``.
+Qt-free and app-free: the composition root injects the concrete owner scheduler.
 """
 
 from __future__ import annotations
@@ -56,11 +55,11 @@ from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.remote.rpc_endpoint import (
     ClientLink,
     ControlOptions,
-    MainThreadDispatcher,
     NdjsonRpcEndpoint,
 )
 from zcu_tools.gui.remote.session_discovery import clear_session, write_session
 from zcu_tools.gui.remote.wire import Request
+from zcu_tools.gui.session.ports import OwnerScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +117,7 @@ class RemoteControlServiceBase:
         controller: Any,
         opts: ControlOptions,
         *,
+        owner_scheduler: OwnerScheduler,
         wire_version: int,
         gui_version: int,
         server_name: str,
@@ -131,7 +131,7 @@ class RemoteControlServiceBase:
         self._method_registry = method_registry
         self._event_serializers = event_serializers
         self._wire_event_name = wire_event_name
-        self._dispatcher = MainThreadDispatcher()
+        self._owner_scheduler = owner_scheduler
         self._endpoint = NdjsonRpcEndpoint(
             opts,
             wire_version=wire_version,
@@ -167,7 +167,7 @@ class RemoteControlServiceBase:
         return False
 
     def _guard(self, params: Mapping[str, object]) -> None:
-        """Pre-handler check on the Qt main thread (e.g. version guard). Default: none."""
+        """Pre-handler check on the State owner thread (e.g. version guard)."""
         del params
 
     def _after_success(
@@ -187,10 +187,10 @@ class RemoteControlServiceBase:
         del ctx, on_main_thread
 
     def _on_client_count_changed(self) -> None:
-        """Called on the Qt main thread whenever a client connects or disconnects.
+        """Called on the State owner thread whenever a client changes.
 
         Override to react to the live-client count changing (e.g. to refresh
-        a widget gate). Default: no-op. Always runs on the Qt main thread.
+        a widget gate). Default: no-op.
         """
 
     # ------------------------------------------------------------------
@@ -263,9 +263,8 @@ class RemoteControlServiceBase:
 
     def on_client_open(self, link: ClientLink) -> None:
         link.app_ctx = self._new_client_ctx()
-        # Marshal a count-change notification onto the Qt main thread so that
-        # show/hide logic that reads has_live_client() runs where Qt state lives.
-        self._dispatcher.invoke.emit(self._on_client_count_changed)
+        # Marshal a count-change notification onto the State owner thread.
+        self._owner_scheduler.post(self._on_client_count_changed)
 
     def on_client_close(self, link: ClientLink, *, on_main_thread: bool) -> None:
         self._on_client_close_extra(_ctx(link), on_main_thread=on_main_thread)
@@ -273,7 +272,7 @@ class RemoteControlServiceBase:
         if on_main_thread:
             self._on_client_count_changed()
         else:
-            self._dispatcher.invoke.emit(self._on_client_count_changed)
+            self._owner_scheduler.post(self._on_client_count_changed)
 
     def route(self, link: ClientLink, request: object) -> None:
         """Handle one parsed, authenticated request on the IO thread."""
@@ -373,7 +372,7 @@ class RemoteControlServiceBase:
         self._endpoint.reply_ok(link, rid=rid, result={"subscribed": subscribed})
 
     # ------------------------------------------------------------------
-    # Dispatch onto the Qt main thread (marshal + off-main + policy seams)
+    # Dispatch onto the State owner thread (marshal + off-main + policy seams)
     # ------------------------------------------------------------------
 
     def _dispatch_on_main(self, link: ClientLink, rid, method, spec, params) -> None:
@@ -401,7 +400,7 @@ class RemoteControlServiceBase:
             done = threading.Event()
 
             def _run() -> None:
-                # Runs on the Qt main thread (where State + VersionTable live), so
+                # Runs on the owner thread (where State + VersionTable live), so
                 # the guard's compare-and-act is atomic against any other GUI write.
                 with bus.origin(request_origin):
                     try:
@@ -417,7 +416,7 @@ class RemoteControlServiceBase:
                     finally:
                         done.set()
 
-            self._dispatcher.invoke.emit(_run)
+            self._owner_scheduler.post(_run)
             if not done.wait(timeout=spec.timeout_seconds):
                 self._endpoint.reply_error(
                     link,
@@ -486,7 +485,7 @@ class RemoteControlServiceBase:
         wire_name = self._wire_event_name(key)
 
         def _on_event(payload: Any, meta: EventMeta) -> None:
-            # Runs on the Qt main thread. The endpoint first selects recipients,
+            # Runs on the State owner thread. The endpoint first selects recipients,
             # then calls this factory on this same thread and revalidates before
             # enqueue. Resource versions still belong to mutation sites.
             def _make_line() -> bytes | None:

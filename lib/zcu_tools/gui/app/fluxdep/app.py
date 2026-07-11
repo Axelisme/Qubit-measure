@@ -47,6 +47,7 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         )
         from zcu_tools.gui.app.fluxdep.state import FluxDepState
         from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+        from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
         ctrl = Controller(
             FluxDepState(self._project),
@@ -54,7 +55,15 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
             project_root=self._project_root,
         )
         window = MainWindow(ctrl)
-        adapter = RemoteControlAdapter(ctrl, control) if control is not None else None
+        adapter = (
+            RemoteControlAdapter(
+                ctrl,
+                control,
+                owner_scheduler=QtOwnerScheduler(),
+            )
+            if control is not None
+            else None
+        )
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
 

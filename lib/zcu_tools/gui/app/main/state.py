@@ -146,6 +146,7 @@ class State(SessionState):
         tab_id: str,
         tab: Session[Any, Any, Any, Any],
     ) -> None:
+        self._assert_owner()
         if tab_id in self.tabs:
             raise ValueError(f"tab_id {tab_id!r} already exists")
         logger.debug(
@@ -157,6 +158,7 @@ class State(SessionState):
         self.version.bump(f"tab:{tab_id}")
 
     def remove_tab(self, tab_id: str) -> None:
+        self._assert_owner()
         logger.debug("remove_tab: tab_id=%r", tab_id)
         if self.is_tab_busy(tab_id):
             raise RuntimeError(f"Cannot close busy tab {tab_id!r}")
@@ -182,6 +184,7 @@ class State(SessionState):
 
     def reorder_tabs(self, tab_ids: Sequence[str]) -> None:
         """Replace the tab display order without replacing Session objects."""
+        self._assert_owner()
         new_order = list(tab_ids)
         if len(new_order) != len(set(new_order)):
             raise ValueError(f"duplicate tab_id in reorder: {new_order!r}")
@@ -194,6 +197,7 @@ class State(SessionState):
         self.tabs = {tab_id: self.tabs[tab_id] for tab_id in new_order}
 
     def set_active_tab(self, tab_id: str) -> None:
+        self._assert_owner()
         if tab_id not in self.tabs:
             raise KeyError(f"tab_id {tab_id!r} not found")
         logger.debug("set_active_tab: tab_id=%r", tab_id)
@@ -209,6 +213,7 @@ class State(SessionState):
         editor models must already be torn down by the caller (WritebackService),
         mirroring ``update_tab_result``.
         """
+        self._assert_owner()
         logger.debug("clear_tab_results: tab_id=%r", tab_id)
         tab = self.tabs[tab_id]
         tab.run_result = None
@@ -219,6 +224,7 @@ class State(SessionState):
         self.version.bump(f"tab:{tab_id}:post_analyze")
 
     def update_tab_result(self, tab_id: str, result: object) -> None:
+        self._assert_owner()
         logger.debug(
             "update_tab_result: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
@@ -232,6 +238,7 @@ class State(SessionState):
     def update_tab_loaded_result(
         self, tab_id: str, result: object, source_path: str
     ) -> None:
+        self._assert_owner()
         logger.debug(
             "update_tab_loaded_result: tab_id=%r source_path=%r result_type=%s",
             tab_id,
@@ -253,6 +260,7 @@ class State(SessionState):
         figure: Figure | None,
         writeback_items: list[WritebackItem] | None = None,
     ) -> None:
+        self._assert_owner()
         logger.debug(
             "update_tab_analyze: tab_id=%r figure=%s",
             tab_id,
@@ -301,6 +309,7 @@ class State(SessionState):
         """Record a freshly computed post-analysis result + figure (mirrors
         ``update_tab_analyze``). Fast-fails if the tab has no primary analyze
         result — post-analysis requires the primary fit it builds on."""
+        self._assert_owner()
         tab = self.tabs[tab_id]
         if not tab.has_analyze_result():
             raise RuntimeError(
@@ -319,6 +328,7 @@ class State(SessionState):
     def update_tab_post_analyze_param_instance(
         self, tab_id: str, instance: object
     ) -> None:
+        self._assert_owner()
         logger.debug(
             "update_tab_post_analyze_param_instance: tab_id=%r instance_type=%s",
             tab_id,
@@ -327,11 +337,13 @@ class State(SessionState):
         self.tabs[tab_id].post_analyze_param_instance = instance
 
     def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
+        self._assert_owner()
         logger.debug("update_tab_cfg_schema: tab_id=%r", tab_id)
         self.tabs[tab_id].cfg_schema = schema
         self.version.bump(f"tab:{tab_id}:cfg")
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
+        self._assert_owner()
         logger.debug(
             "update_tab_analyze_param_instance: tab_id=%r instance_type=%s",
             tab_id,
@@ -344,6 +356,7 @@ class State(SessionState):
         tab_id: str,
         paths: SavePaths | None,
     ) -> None:
+        self._assert_owner()
         logger.debug("update_tab_save_path_overrides: tab_id=%r", tab_id)
         self.tabs[tab_id].save_path_overrides = paths
         self.version.bump(f"tab:{tab_id}:save_path")
@@ -352,11 +365,13 @@ class State(SessionState):
         self,
         tab_id: str,
     ) -> None:
+        self._assert_owner()
         logger.debug("clear_tab_save_path_overrides: tab_id=%r", tab_id)
         self.tabs[tab_id].save_path_overrides = None
         self.version.bump(f"tab:{tab_id}:save_path")
 
     def set_tab_running(self, tab_id: str, running: bool) -> None:
+        self._assert_owner()
         logger.debug("set_tab_running: tab_id=%r running=%s", tab_id, running)
         _ = self.tabs[tab_id]
         if (
@@ -377,10 +392,12 @@ class State(SessionState):
         self.version.bump(f"tab:{tab_id}")
 
     def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None:
+        self._assert_owner()
         logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)
         self.tabs[tab_id].is_analyzing = analyzing
 
     def set_tab_saving_data(self, tab_id: str, saving_data: bool) -> None:
+        self._assert_owner()
         logger.debug(
             "set_tab_saving_data: tab_id=%r saving_data=%s", tab_id, saving_data
         )

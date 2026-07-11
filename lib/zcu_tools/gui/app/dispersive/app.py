@@ -59,8 +59,15 @@ class DispersiveGuiBehavior(GuiRuntimeBehavior):
             from zcu_tools.gui.app.dispersive.services.remote.service import (
                 RemoteControlAdapter,
             )
+            from zcu_tools.gui.session.adapters.qt_owner_scheduler import (
+                QtOwnerScheduler,
+            )
 
-            adapter = RemoteControlAdapter(ctrl, control)
+            adapter = RemoteControlAdapter(
+                ctrl,
+                control,
+                owner_scheduler=QtOwnerScheduler(),
+            )
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
 

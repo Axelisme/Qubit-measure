@@ -9,9 +9,10 @@ even though the transport mechanisms pull it in. Two tiers:
   ``errors`` (envelopes), ``wire`` (Request/Response + field coercion),
   ``param_spec`` (the ParamSpec schema engine), ``method_spec``
   (MethodSpec/BoundMethod + ``build_method_registry``).
-- **Transport mechanism**: ``rpc_endpoint`` — the ``NdjsonRpcEndpoint`` GUI-side
-  server (socket + framing + handshake + push fan-out + the
-  ``MainThreadDispatcher`` Qt marshal primitive; Qt-aware). The client-side
+- **Transport mechanism**: ``rpc_endpoint`` — the Qt-free
+  ``NdjsonRpcEndpoint`` GUI-side server (socket + framing + handshake + push
+  fan-out). ``RemoteControlServiceBase`` receives an injected ``OwnerScheduler``
+  for State-owner dispatch. The client-side
   ``McpBridge`` + ``run_stdio_loop`` the standalone MCP servers run on now lives in
   ``zcu_tools.mcp.core.bridge`` (a consumer of the wire primitives above).
 

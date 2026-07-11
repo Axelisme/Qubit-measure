@@ -1,10 +1,10 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — event attribution wire contract
+**Last updated:** 2026-07-12 — owner scheduler dispatch
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
-local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
-the Qt main thread, serializes selected events, and enforces measure-gui policy
+local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
+the injected owner scheduler, serializes selected events, and enforces measure-gui policy
 such as resource-version guards and editor lifecycle tracking.
 
 The agent-facing MCP bridge lives in `zcu_tools.mcp.measure`. This package does
@@ -31,7 +31,7 @@ not declare MCP tools and does not own stdio transport.
 - `wire_version.py`：measure-gui wire contract version and GUI code revision.
 
 Shared transport primitives live in `zcu_tools.gui.remote`: NDJSON framing,
-typed request/reply/error envelope, socket endpoint, main-thread dispatcher, and
+typed request/reply/error envelope, socket endpoint, owner-scheduler dispatch, and
 router scaffolding.
 
 ## Wire Contract
@@ -53,8 +53,9 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
 
 ## Dispatch And Threads
 
-Normal handlers run on the Qt main thread through `MainThreadDispatcher`. Handler
-exceptions become typed error envelopes.
+Normal handlers run on the State owner thread through the injected `OwnerScheduler`.
+The Qt composition root supplies `QtOwnerScheduler`; headless tests use
+`ManualOwnerScheduler`. Handler exceptions become typed error envelopes.
 
 Caller-correctable producer exceptions以remote-independent `ExpectedErrorCategory`分類。shared
 dispatch在main/off-main兩條路徑先讓direct `RemoteError`穿透，再以nominal `ExpectedError`作為

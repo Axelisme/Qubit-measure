@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     # Type-only: the string annotation keeps the import graph lean and lets
     # pyright check handler/ctrl method names without a runtime import.
     from zcu_tools.gui.app.autofluxdep.controller import Controller
+    from zcu_tools.gui.session.ports import OwnerScheduler
 
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
@@ -57,11 +58,13 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         controller: Controller,
         opts: ControlOptions,
         *,
+        owner_scheduler: OwnerScheduler,
         view: ScreenshotView | None = None,
     ) -> None:
         super().__init__(
             controller,
             opts,
+            owner_scheduler=owner_scheduler,
             wire_version=WIRE_VERSION,
             gui_version=GUI_VERSION,
             server_name="AutoFluxDepRemoteServer",

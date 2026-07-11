@@ -28,6 +28,7 @@ from zcu_tools.gui.app.main.services.remote.wire_version import (
 )
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 # ---------------------------------------------------------------------------
@@ -86,7 +87,10 @@ class _Fixture:
         # tab.list_all now reads active_tab_id off the render view (a view
         # projection), so the fixture must supply one — mirror _helpers.Fixture.
         self.service = RemoteControlAdapter(
-            controller=self.ctrl, opts=opts, render_view=self.view
+            controller=self.ctrl,
+            opts=opts,
+            owner_scheduler=QtOwnerScheduler(),
+            render_view=self.view,
         )
 
     def start(self) -> int:
@@ -159,6 +163,7 @@ def test_external_requires_token(qapp):  # noqa: ARG001
         RemoteControlAdapter(
             controller=MagicMock(),
             opts=ControlOptions(port=0, allow_external=True),
+            owner_scheduler=QtOwnerScheduler(),
         )
 
 

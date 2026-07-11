@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import SpectrumData
 
@@ -122,6 +123,7 @@ class DispersiveState:
     """Passive GUI state container for the dispersive analysis pipeline."""
 
     def __init__(self, project: ProjectInfo | None = None) -> None:
+        self._owner_guard = OwnerThreadGuard()
         self.project: ProjectInfo = project if project is not None else ProjectInfo()
         self.fit_inputs: FluxoniumInputs | None = None
         self.onetone: OnetoneEntry | None = None
@@ -134,6 +136,7 @@ class DispersiveState:
     # ------------------------------------------------------------------
 
     def set_project(self, project: ProjectInfo) -> None:
+        self._assert_owner()
         self.project = project
         self.version.bump(PROJECT_VERSION_KEY)
 
@@ -144,6 +147,7 @@ class DispersiveState:
         The bare_rf seed only fills the tuning state when it has no value yet (a
         prior session's bare_rf is not clobbered by a re-read of the inputs).
         """
+        self._assert_owner()
         self.fit_inputs = inputs
         if self.disp_fit.bare_rf is None:
             self.disp_fit = replace(self.disp_fit, bare_rf=inputs.bare_rf_seed)
@@ -157,6 +161,7 @@ class DispersiveState:
         from it), so those version keys are dropped and the cached results
         cleared — a downstream reader never sees results for the old spectrum.
         """
+        self._assert_owner()
         self.onetone = entry
         self.preprocess = None
         self.disp_fit = replace(self.disp_fit, g=None)
@@ -172,6 +177,7 @@ class DispersiveState:
         so a result whose ``signature`` differs from the new one invalidates the
         recorded fit.
         """
+        self._assert_owner()
         prior_sig = self.preprocess.signature if self.preprocess is not None else None
         self.preprocess = result
         if prior_sig is not None and prior_sig != result.signature:
@@ -181,6 +187,10 @@ class DispersiveState:
 
     def set_disp_result(self, g: float, bare_rf: float, *, res_dim: int) -> None:
         """Record the manually-tuned g / bare_rf result + its simulation resolution."""
+        self._assert_owner()
         self.disp_fit = replace(self.disp_fit, g=g, bare_rf=bare_rf, res_dim=res_dim)
         self.version.bump(FIT_VERSION_KEY)
         logger.debug("set_disp_result: g=%s bare_rf=%s", g, bare_rf)
+
+    def _assert_owner(self) -> None:
+        self._owner_guard.assert_owner()

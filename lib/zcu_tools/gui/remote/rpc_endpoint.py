@@ -13,8 +13,6 @@ owns only how bytes enter and leave the socket, never what a request *means*:
     understands — both need only injected constants + the configured token);
   - reply encoding (:meth:`reply_ok` / :meth:`reply_error`) and lock-safe eager
     / lazy push fan-out primitives (:meth:`broadcast` / :meth:`broadcast_lazy`);
-  - the :class:`MainThreadDispatcher` Qt-main-thread marshal primitive (a reusable
-    QObject each app composes into its own ``_dispatch_on_main``).
 
 Everything past the handshake is the app's: the endpoint hands each parsed,
 authenticated :class:`Request` to the injected :class:`EndpointRouter` and stops
@@ -47,8 +45,6 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
-
-from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.remote.errors import ErrorCode, ErrorEnvelope, RemoteError
 from zcu_tools.gui.remote.framing import (
@@ -104,26 +100,6 @@ class ControlOptions:
         return "0.0.0.0" if self.allow_external else "127.0.0.1"
 
 
-class MainThreadDispatcher(QObject):
-    """QObject living on the Qt main thread.
-
-    Server threads ``emit`` ``invoke`` to schedule a callable on the main thread
-    via Qt's queued connection — the supported way to marshal arbitrary work
-    onto the Qt event loop from a foreign thread. Apps compose this into their
-    own ``_dispatch_on_main`` (it is the byte-identical marshal primitive; the
-    dispatch *policy* — guard / lifecycle / off-main — stays per-app).
-    """
-
-    invoke = Signal(object)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.invoke.connect(self._run, type=Qt.ConnectionType.QueuedConnection)  # type: ignore[call-arg]
-
-    def _run(self, fn: Callable[[], None]) -> None:
-        fn()
-
-
 class ClientLink:
     """One accepted client's pure-transport state.
 
@@ -173,7 +149,7 @@ class EndpointRouter(Protocol):
         Called on the IO/server thread. ``request`` is a
         :class:`zcu_tools.gui.remote.wire.Request`. The app decides the method
         set, validation, and how/where the handler runs (any main-thread
-        marshal is the app's, via :class:`MainThreadDispatcher`). The app uses
+        marshal is the app's, via its injected owner scheduler). The app uses
         :meth:`NdjsonRpcEndpoint.reply_ok` / ``reply_error`` to respond.
         """
         ...
@@ -739,6 +715,5 @@ __all__ = [
     "ClientLink",
     "ControlOptions",
     "EndpointRouter",
-    "MainThreadDispatcher",
     "NdjsonRpcEndpoint",
 ]

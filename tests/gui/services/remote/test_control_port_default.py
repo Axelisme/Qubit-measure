@@ -214,6 +214,7 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     bus = BaseEventBus()
     ctrl_mock = MagicMock()
@@ -225,6 +226,7 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     adapter = RemoteControlAdapter(
         controller=ctrl_mock,
         opts=opts,
+        owner_scheduler=QtOwnerScheduler(),
         render_view=render_view_mock,
     )
 
@@ -256,6 +258,7 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus, EventMeta
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     class FailingEventBus(BaseEventBus):
         def __init__(self) -> None:
@@ -278,6 +281,7 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
     adapter = RemoteControlAdapter(
         controller=ctrl_mock,
         opts=ControlOptions(port=0),
+        owner_scheduler=QtOwnerScheduler(),
         render_view=MagicMock(),
     )
 
@@ -298,6 +302,7 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
+    from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
     bus = BaseEventBus()
     ctrl_mock = MagicMock()
@@ -305,6 +310,7 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     adapter = RemoteControlAdapter(
         controller=ctrl_mock,
         opts=ControlOptions(port=0, app_slug="measure"),
+        owner_scheduler=QtOwnerScheduler(),
         render_view=MagicMock(),
     )
     advertise_error = RuntimeError("discovery write failed")

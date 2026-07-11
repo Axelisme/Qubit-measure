@@ -21,17 +21,22 @@ import pytest
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.services.remote.service import _ClientCtx
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
 
 @pytest.fixture(autouse=True)
-def _qt(qapp):  # noqa: ARG001 — MainThreadDispatcher is a QObject; needs an app
+def _qt(qapp):  # noqa: ARG001 — QtOwnerScheduler is a QObject; needs an app
     yield
 
 
 def _service():
     ctrl = MagicMock()
     ctrl.get_bus.return_value = None  # disables event-bus subscription wiring
-    svc = RemoteControlAdapter(controller=ctrl, opts=ControlOptions(port=0))
+    svc = RemoteControlAdapter(
+        controller=ctrl,
+        opts=ControlOptions(port=0),
+        owner_scheduler=QtOwnerScheduler(),
+    )
     return svc, ctrl
 
 

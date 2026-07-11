@@ -20,6 +20,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
@@ -174,6 +175,7 @@ class FluxDepState:
     """Passive GUI state container for the fluxdep analysis pipeline."""
 
     def __init__(self, project: ProjectInfo | None = None) -> None:
+        self._owner_guard = OwnerThreadGuard()
         self.project: ProjectInfo = project if project is not None else ProjectInfo()
         self.spectrums: dict[str, SpectrumEntry] = {}
         self.active_spectrum: str | None = None
@@ -193,6 +195,7 @@ class FluxDepState:
         a concurrently-added spectrum; a re-load/replace of an existing name
         leaves the set cardinality unchanged).
         """
+        self._assert_owner()
         is_new = entry.name not in self.spectrums
         self.spectrums[entry.name] = entry
         self.version.bump(spectrum_version_key(entry.name))
@@ -202,6 +205,7 @@ class FluxDepState:
 
     def remove_spectrum(self, name: str) -> None:
         """Remove a spectrum entry and drop its version keys."""
+        self._assert_owner()
         del self.spectrums[name]
         self.version.drop_prefix(spectrum_version_key(name))
         self.version.bump(SPECTRUM_SET_VERSION_KEY)
@@ -210,6 +214,7 @@ class FluxDepState:
         logger.debug("remove_spectrum: name=%r", name)
 
     def set_active(self, name: str | None) -> None:
+        self._assert_owner()
         if name is not None and name not in self.spectrums:
             raise KeyError(f"no spectrum named {name!r}")
         self.active_spectrum = name
@@ -230,6 +235,7 @@ class FluxDepState:
         alignment scalars and the flux axis — happens at this single State
         boundary under one version bump.
         """
+        self._assert_owner()
         entry = self.spectrums[name]
         entry.raw["fluxs"] = np.asarray(new_fluxs, dtype=np.float64)
         self.spectrums[name] = replace(
@@ -251,6 +257,7 @@ class FluxDepState:
         to work with" and would crash on an empty cloud. Same ``freqs.size > 0``
         rule the load path uses (see ``LoadService``).
         """
+        self._assert_owner()
         self.spectrums[name] = replace(
             self.spectrums[name],
             points=points,
@@ -261,10 +268,12 @@ class FluxDepState:
     def set_selection(
         self, selected: NDArray[np.bool_], min_distance: float = 0.0
     ) -> None:
+        self._assert_owner()
         self.selection = SelectionState(selected=selected, min_distance=min_distance)
         self.version.bump(SELECTION_VERSION_KEY)
 
     def set_project(self, project: ProjectInfo) -> None:
+        self._assert_owner()
         self.project = project
         self.version.bump(PROJECT_VERSION_KEY)
 
@@ -284,6 +293,7 @@ class FluxDepState:
         parameters), so ``params`` resets to None — a downstream reader never
         sees a result that disagrees with the inputs it reads.
         """
+        self._assert_owner()
         self.fit = FitState(
             database_path=database_path,
             EJb=EJb,
@@ -297,5 +307,9 @@ class FluxDepState:
 
     def set_fit_result(self, params: tuple[float, float, float]) -> None:
         """Record a search result onto the current fit inputs."""
+        self._assert_owner()
         self.fit = replace(self.fit, params=params)
         self.version.bump(FIT_VERSION_KEY)
+
+    def _assert_owner(self) -> None:
+        self._owner_guard.assert_owner()

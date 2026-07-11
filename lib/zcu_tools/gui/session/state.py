@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.session.types import ExpContext
 from zcu_tools.gui.version_table import VersionTable
 
@@ -126,6 +127,7 @@ class SessionState:
     subclasses add their experiment-surface slice + version keys."""
 
     def __init__(self, ctx: ExpContext) -> None:
+        self._owner_guard = OwnerThreadGuard()
         self.exp_context: ExpContext = ctx
         # Remembered startup prefs (prefill values), distinct from exp_context.
         # StartupService writes at apply/connect; PersistenceCaretaker projects.
@@ -153,7 +155,13 @@ class SessionState:
         The full set of "writes md/ml → bump context" paths is enumerated at the
         canonical anchor on ``ContextService.set_md_attr``.
         """
+        self._assert_owner()
         self.exp_context = ctx
+
+    def set_startup_prefs(self, prefs: StartupPrefs) -> None:
+        """Replace remembered startup preferences on the owner thread."""
+        self._assert_owner()
+        self.startup_prefs = prefs
 
     # ------------------------------------------------------------------
     # Device state (DeviceService writes these on the Qt main thread).
@@ -163,6 +171,7 @@ class SessionState:
 
     def put_device(self, dev: DeviceState) -> None:
         """Insert or replace a device entry (create / status transition)."""
+        self._assert_owner()
         logger.debug("put_device: name=%r status=%s", dev.name, dev.status.value)
         is_new = dev.name not in self.devices
         self.devices[dev.name] = dev
@@ -180,17 +189,20 @@ class SessionState:
     def set_device_status(
         self, name: str, status: DeviceStatus, *, error: str | None = None
     ) -> None:
+        self._assert_owner()
         logger.debug("set_device_status: name=%r status=%s", name, status.value)
         self.devices[name] = replace(self.devices[name], status=status, error=error)
         self.version.bump(f"device:{name}")
 
     def set_device_info(self, name: str, info: BaseDeviceInfo | None) -> None:
         """Semantic info update (after set-value / setup); bumps version."""
+        self._assert_owner()
         logger.debug("set_device_info: name=%r info=%s", name, info is not None)
         self.devices[name] = replace(self.devices[name], info=info)
         self.version.bump(f"device:{name}")
 
     def set_device_remember(self, name: str, remember: bool) -> None:
+        self._assert_owner()
         logger.debug("set_device_remember: name=%r remember=%s", name, remember)
         self.devices[name] = replace(self.devices[name], remember=remember)
         self.version.bump(f"device:{name}")
@@ -209,6 +221,7 @@ class SessionState:
           ``device:<name>`` and return True so the caller can emit DEVICE_CHANGED.
           Compared by full ``BaseDeviceInfo`` value equality (pydantic ``==``).
         """
+        self._assert_owner()
         current = self.devices[name]
         changed = current.info != info
         self.devices[name] = replace(current, info=info, error=None)
@@ -217,6 +230,7 @@ class SessionState:
         return changed
 
     def remove_device(self, name: str) -> None:
+        self._assert_owner()
         logger.debug("remove_device: name=%r", name)
         del self.devices[name]
         # A stale dependency on a removed device now reads as version 0 (gone).
@@ -233,3 +247,6 @@ class SessionState:
 
     def list_devices(self) -> tuple[DeviceState, ...]:
         return tuple(self.devices[name] for name in sorted(self.devices))
+
+    def _assert_owner(self) -> None:
+        self._owner_guard.assert_owner()

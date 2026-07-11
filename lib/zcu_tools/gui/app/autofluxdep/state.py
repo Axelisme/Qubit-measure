@@ -21,6 +21,7 @@ from zcu_tools.gui.session.types import ExpContext
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.tools import Predictor
+    from zcu_tools.gui.cfg import CfgSectionValue
 
 # VersionTable resource keys (optimistic concurrency, shared mechanism). The
 # table itself is inherited from SessionState (one shared table, decision 6);
@@ -98,3 +99,76 @@ class AutoFluxDepState(SessionState):
 
     def node_names(self) -> list[str]:
         return [n.name for n in self.nodes]
+
+    def replace_nodes(self, nodes: list[PlacedNode]) -> None:
+        self._assert_owner()
+        self.nodes = list(nodes)
+
+    def append_node(self, node: PlacedNode) -> None:
+        self._assert_owner()
+        self.nodes.append(node)
+
+    def rename_node(self, index: int, name: str) -> None:
+        self._assert_owner()
+        self.nodes[index].name = name
+
+    def remove_node_named(self, name: str) -> bool:
+        self._assert_owner()
+        retained = [node for node in self.nodes if node.name != name]
+        if len(retained) == len(self.nodes):
+            return False
+        self.nodes = retained
+        return True
+
+    def swap_nodes(self, left: int, right: int) -> None:
+        self._assert_owner()
+        self.nodes[left], self.nodes[right] = self.nodes[right], self.nodes[left]
+
+    def set_node_enabled(self, index: int, enabled: bool) -> None:
+        self._assert_owner()
+        self.nodes[index].enabled = enabled
+
+    def replace_node_cfg(self, index: int, value: CfgSectionValue) -> None:
+        self._assert_owner()
+        self.nodes[index].schema.replace_value_tree(value)
+
+    def set_flux_values(self, values: list[float]) -> None:
+        self._assert_owner()
+        self.flux_values = list(values)
+
+    def set_flux_expressions(
+        self, start_expr: str, stop_expr: str, npts_expr: str
+    ) -> None:
+        self._assert_owner()
+        self.flux_start_expr = start_expr
+        self.flux_stop_expr = stop_expr
+        self.flux_npts_expr = npts_expr
+
+    def set_auto_follow_tabs(self, enabled: bool) -> None:
+        self._assert_owner()
+        self.auto_follow_tabs = enabled
+
+    def set_predictor_dialog_state(self, value: PersistedPredictorDialogState) -> None:
+        self._assert_owner()
+        self.predictor_dialog_state = value
+
+    def set_project(self, project: ProjectInfo) -> None:
+        self._assert_owner()
+        self.project = project
+
+    def clear_run_products(self) -> None:
+        self._assert_owner()
+        self.run_results = {}
+        self.run_predictor = None
+
+    def set_run_results(self, results: dict[str, Any]) -> None:
+        self._assert_owner()
+        self.run_results = results
+
+    def set_run_predictor(self, predictor: Predictor | None) -> None:
+        self._assert_owner()
+        self.run_predictor = predictor
+
+    def set_flux_device(self, name: str | None) -> None:
+        self._assert_owner()
+        self.flux_device_name = name

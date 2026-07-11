@@ -134,11 +134,11 @@ def create_run_session(
     run_ml = ctx.ml.clone()
     enabled_names = {node.name for node in enabled_nodes}
     if not state.run_results or not set(state.run_results).issubset(enabled_names):
-        state.run_results = allocate_run_results(state, enabled_nodes, flux_values)
+        state.set_run_results(allocate_run_results(state, enabled_nodes, flux_values))
     results = state.run_results
     providers = build_run_providers(enabled_nodes)
     tools = build_run_tools(state, providers)
-    state.run_predictor = tools.predictor
+    state.set_run_predictor(tools.predictor)
     flux_device = state.flux_device_name
     cfg_snapshots = build_run_cfg_snapshots(state, enabled_nodes, ml=run_ml)
     store = RunStore.create(

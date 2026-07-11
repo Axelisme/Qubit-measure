@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +27,11 @@ def _service(versions=None):
     ctrl = MagicMock()
     ctrl.get_bus.return_value = None
     ctrl.resources_versions.return_value = dict(versions or {})
-    return RemoteControlAdapter(controller=ctrl, opts=ControlOptions(port=0))
+    return RemoteControlAdapter(
+        controller=ctrl,
+        opts=ControlOptions(port=0),
+        owner_scheduler=QtOwnerScheduler(),
+    )
 
 
 # ---------------------------------------------------------------------------

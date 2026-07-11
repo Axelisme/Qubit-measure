@@ -483,7 +483,7 @@ class Controller(SessionControllerMixin):
         predictor_issue: RestoreIssue | None = None
         restored_predictor = False
         self._startup_svc.restore_startup(state.startup)
-        self._state.nodes = []
+        self._state.replace_nodes([])
 
         try:
             restored_predictor = self._restore_predictor_model(state.predictor)
@@ -513,14 +513,16 @@ class Controller(SessionControllerMixin):
             ) as exc:
                 rejected.append(RestoreIssue(subject=subject, message=str(exc)))
                 continue
-            self._state.nodes.append(node)
+            self._state.append_node(node)
 
-        self._state.flux_start_expr = state.flux.start_expr
-        self._state.flux_stop_expr = state.flux.stop_expr
-        self._state.flux_npts_expr = state.flux.npts_expr
-        self._state.flux_values = [float(v) for v in state.flux.values]
-        self._state.auto_follow_tabs = state.ui.auto_follow_tabs
-        self._state.predictor_dialog_state = state.ui.predictor_dialog
+        self._state.set_flux_expressions(
+            state.flux.start_expr,
+            state.flux.stop_expr,
+            state.flux.npts_expr,
+        )
+        self._state.set_flux_values([float(v) for v in state.flux.values])
+        self._state.set_auto_follow_tabs(state.ui.auto_follow_tabs)
+        self._state.set_predictor_dialog_state(state.ui.predictor_dialog)
         self._commit_workflow_edit(changed_name=None)
         self._state.version.bump(FLUX_VERSION_KEY)
         self._bus.emit(FluxChangedPayload(count=len(self._state.flux_values)))
@@ -584,8 +586,7 @@ class Controller(SessionControllerMixin):
         self._persist_timer.start(_PERSIST_DEBOUNCE_MS)
 
     def _clear_run_products(self) -> None:
-        self._state.run_results = {}
-        self._state.run_predictor = None
+        self._state.clear_run_products()
 
     def _clear_terminal_sample_artifact(self) -> None:
         self._last_terminal_manifest_path = None
@@ -638,12 +639,14 @@ class Controller(SessionControllerMixin):
         return True
 
     def _on_startup_project_applied(self, project: ResolvedStartupProject) -> None:
-        self._state.project = ProjectInfo(
-            chip_name=project.chip_name,
-            qub_name=project.qub_name,
-            result_dir=project.result_dir,
-            database_path=project.database_path,
-            params_path=project.params_path,
+        self._state.set_project(
+            ProjectInfo(
+                chip_name=project.chip_name,
+                qub_name=project.qub_name,
+                result_dir=project.result_dir,
+                database_path=project.database_path,
+                params_path=project.params_path,
+            )
         )
         self._try_auto_load_predictor_from_params(project)
 
@@ -717,7 +720,7 @@ class Controller(SessionControllerMixin):
             overrides=params,
             default_context=self._state.exp_context,
         )
-        self._state.nodes.append(node)
+        self._state.append_node(node)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
         self._commit_workflow_edit(changed_name=node.name)
         return node
@@ -731,7 +734,7 @@ class Controller(SessionControllerMixin):
         self._require_workflow_editable()
         node = create_placement(type_name, ctx=self._state.exp_context)
         node.name = self._unique_name(node.name)
-        self._state.nodes.append(node)
+        self._state.append_node(node)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
         self._commit_workflow_edit(changed_name=node.name)
         return node
@@ -753,18 +756,18 @@ class Controller(SessionControllerMixin):
             )
             return node.name  # blank → no-op, keep current name
         old = node.name
-        node.name = self._unique_name(cleaned, exclude=node)
-        if node.name == old:
-            return node.name
-        logger.debug("rename_node[%d]: %r -> %r", index, old, node.name)
-        self._commit_workflow_edit(changed_name=node.name)
-        return node.name
+        actual = self._unique_name(cleaned, exclude=node)
+        if actual == old:
+            return actual
+        self._state.rename_node(index, actual)
+        logger.debug("rename_node[%d]: %r -> %r", index, old, actual)
+        self._commit_workflow_edit(changed_name=actual)
+        return actual
 
     def remove_node(self, name: str) -> None:
         self._require_workflow_editable()
         before = len(self._state.nodes)
-        self._state.nodes = [n for n in self._state.nodes if n.name != name]
-        if len(self._state.nodes) == before:
+        if not self._state.remove_node_named(name):
             return
         logger.debug("remove_node: %r (%d -> %d)", name, before, len(self._state.nodes))
         self._commit_workflow_edit(changed_name=name)
@@ -776,7 +779,7 @@ class Controller(SessionControllerMixin):
         new_index = index + delta
         if not (0 <= index < len(nodes) and 0 <= new_index < len(nodes)):
             return index  # out of range → no-op
-        nodes[index], nodes[new_index] = nodes[new_index], nodes[index]
+        self._state.swap_nodes(index, new_index)
         logger.debug("reorder: %d <-> %d", index, new_index)
         self._commit_workflow_edit(changed_name=None)
         return new_index
@@ -788,7 +791,7 @@ class Controller(SessionControllerMixin):
         enabled = bool(enabled)
         if node.enabled == enabled:
             return
-        node.enabled = enabled
+        self._state.set_node_enabled(index, enabled)
         logger.debug("set_node_enabled[%d] (%r): %s", index, node.name, enabled)
         self._commit_workflow_edit(changed_name=node.name)
 
@@ -796,13 +799,13 @@ class Controller(SessionControllerMixin):
         """Replace one Node's complete cfg value tree from the typed form draft."""
         self._require_workflow_editable()
         node = self._state.nodes[index]
-        node.schema.replace_value_tree(value)
+        self._state.replace_node_cfg(index, value)
         logger.debug("set_node_cfg_value[%d] (%r)", index, node.name)
         self._commit_workflow_edit(changed_name=node.name)
 
     def set_flux_values(self, values: list[float]) -> None:
         self._require_workflow_editable()
-        self._state.flux_values = list(values)
+        self._state.set_flux_values(values)
         self._clear_run_products()
         self._state.version.bump(FLUX_VERSION_KEY)
         if values:
@@ -821,9 +824,7 @@ class Controller(SessionControllerMixin):
     ) -> None:
         """Remember the user's editable flux sweep expressions."""
         self._require_workflow_editable()
-        self._state.flux_start_expr = start_expr
-        self._state.flux_stop_expr = stop_expr
-        self._state.flux_npts_expr = npts_expr
+        self._state.set_flux_expressions(start_expr, stop_expr, npts_expr)
         self._commit_flux_edit()
 
     def get_flux_sweep_expressions(self) -> tuple[str, str, str]:
@@ -847,10 +848,8 @@ class Controller(SessionControllerMixin):
             raise RuntimeError("Flux sweep points must be at least 1")
 
         values = np.linspace(float(start), float(stop), npts).tolist()
-        self._state.flux_start_expr = start_expr
-        self._state.flux_stop_expr = stop_expr
-        self._state.flux_npts_expr = npts_expr
-        self._state.flux_values = values
+        self._state.set_flux_expressions(start_expr, stop_expr, npts_expr)
+        self._state.set_flux_values(values)
         logger.debug(
             "commit_flux_sweep: n=%d range=[%g, %g]",
             len(values),
@@ -865,7 +864,7 @@ class Controller(SessionControllerMixin):
         enabled = bool(enabled)
         if self._state.auto_follow_tabs == enabled:
             return
-        self._state.auto_follow_tabs = enabled
+        self._state.set_auto_follow_tabs(enabled)
         self._schedule_persist_all()
 
     def get_auto_follow_tabs(self) -> bool:
@@ -877,7 +876,7 @@ class Controller(SessionControllerMixin):
     def set_predictor_dialog_state(self, state: PersistedPredictorDialogState) -> None:
         if self._state.predictor_dialog_state == state:
             return
-        self._state.predictor_dialog_state = state
+        self._state.set_predictor_dialog_state(state)
         self._schedule_persist_all()
 
     def set_flux_device(self, name: str | None) -> None:
@@ -888,7 +887,7 @@ class Controller(SessionControllerMixin):
         selection — the flux values are then bare numbers.
         """
         self._require_workflow_editable()
-        self._state.flux_device_name = name or None
+        self._state.set_flux_device(name or None)
         logger.debug("set_flux_device: %r", self._state.flux_device_name)
 
     def get_flux_device(self) -> str | None:
@@ -1405,7 +1404,7 @@ class Controller(SessionControllerMixin):
         same Result objects the worker fills. Returns the name→Result map.
         """
         flux = np.asarray(self._current_flux_values_for_run(), dtype=np.float64)
-        self._state.run_results = self._allocate_results(flux)
+        self._state.set_run_results(self._allocate_results(flux))
         return self._state.run_results
 
     # --- dry run (headless: real orchestrator, no Results / notify) ---

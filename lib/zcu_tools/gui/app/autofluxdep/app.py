@@ -82,6 +82,7 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
             RemoteControlAdapter,
         )
         from zcu_tools.gui.app.autofluxdep.ui.main_window import MainWindow
+        from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 
         ctrl = build_core(self._project, project_root=self._project_root)
         window = MainWindow(ctrl)
@@ -92,7 +93,12 @@ class AutoFluxDepGuiBehavior(GuiRuntimeBehavior):
         window.restore_workflow_view()
 
         adapter = (
-            RemoteControlAdapter(ctrl, control, view=window)
+            RemoteControlAdapter(
+                ctrl,
+                control,
+                owner_scheduler=QtOwnerScheduler(),
+                view=window,
+            )
             if control is not None
             else None
         )

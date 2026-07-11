@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.ports import OwnerScheduler
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
 
 from .dispatch import METHOD_REGISTRY
@@ -125,11 +126,13 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self,
         controller: Controller,
         opts: ControlOptions,
+        owner_scheduler: OwnerScheduler,
         render_view: RenderView | None = None,
     ) -> None:
         super().__init__(
             controller,
             opts,
+            owner_scheduler=owner_scheduler,
             wire_version=WIRE_VERSION,
             gui_version=GUI_VERSION,
             server_name="RemoteControlServer",
@@ -348,7 +351,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
                 logger.exception("failed to reclaim editor sessions %r", ids)
 
         if marshal:
-            self._dispatcher.invoke.emit(_run)
+            self._owner_scheduler.post(_run)
         else:
             _run()
 

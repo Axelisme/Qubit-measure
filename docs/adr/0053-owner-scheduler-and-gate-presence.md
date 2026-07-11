@@ -40,8 +40,9 @@ class OwnerScheduler(Protocol):
 - 真正消費者是 `remote/control_service.py`；它注入scheduler並保留
   `post + Event.wait(spec.timeout_seconds)` 的bounded RPC timeout。`call()`是adapter contract，不取代RPC
   timeout。`MainThreadDispatcher`隨之消失，`rpc_endpoint.py`清償Qt debt。
-- **owner-loop 不變式改為機制守護**:Qt-free guard完整套用shared session與measure/autofluxdep/
-  fluxdep/dispersive四個app State aggregates；autoflux direct semantic writes收進State mutators。
+- **owner-loop 不變式改為機制守護**:Qt-free guard以明確`RuntimeError` Fast Fail（不使用可被
+  `python -O`移除的assert），完整套用shared session與measure/autofluxdep/fluxdep/dispersive四個app
+  State aggregates；autoflux direct semantic writes收進State mutators。
 
 ### BackgroundExecutor 第二實作與 background.py 重分類
 
