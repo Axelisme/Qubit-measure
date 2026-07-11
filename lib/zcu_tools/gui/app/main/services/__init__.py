@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from .ports import RestoreIssue, RestoreReport
     from .post_analyze import PostAnalyzeService
     from .run import RunService
-    from .save import SaveResultOutcome, SaveService
+    from .save import SaveService
     from .tab import TabService, TabSnapshot
     from .workspace import WorkspaceService
     from .writeback import WritebackService
@@ -90,7 +90,6 @@ __all__ = [
     "LoadService",
     "LoadTabResultOutcome",
     "RunService",
-    "SaveResultOutcome",
     "SaveService",
     "AppSnapshotCodec",
     "SingleFileCaretaker",
@@ -143,7 +142,6 @@ _EXPORT_MODULES: dict[str, str] = {
     "LoadService": ".load",
     "LoadTabResultOutcome": ".load",
     "RunService": ".run",
-    "SaveResultOutcome": ".save",
     "SaveService": ".save",
     "AppSnapshotCodec": ".caretaker",
     "SingleFileCaretaker": ".caretaker",

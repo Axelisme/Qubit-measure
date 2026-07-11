@@ -49,6 +49,11 @@ from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.services.io_manager import IOManager
 
+from tests.gui.services._completion_helpers import (
+    on_device_connected,
+    on_device_operation_failed,
+)
+
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
@@ -104,7 +109,7 @@ class ControllerFixture:
 
         self.bus = BaseEventBus()
         if mock_emit:
-            self.bus.emit = MagicMock()
+            self.bus.emit = MagicMock(wraps=self.bus.emit)
         self.ctrl = Controller(
             state=self.state,
             registry=self.registry,
@@ -643,8 +648,10 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
     cf.ctrl._startup_svc = MagicMock()
     connected: list[object] = []
     errors: list[str] = []
-    cf.ctrl._dev_svc.device_connected.connect(connected.append)
-    cf.ctrl._dev_svc.operation_failed.connect(lambda _name, error: errors.append(error))
+    on_device_connected(cf.ctrl._dev_svc, connected.append)
+    on_device_operation_failed(
+        cf.ctrl._dev_svc, lambda _name, error: errors.append(error)
+    )
 
     cf.ctrl.device_control.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="flux", address="addr")

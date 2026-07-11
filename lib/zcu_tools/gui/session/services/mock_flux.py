@@ -30,7 +30,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.session.events import SocChangedPayload
+from zcu_tools.gui.session.events import (
+    DeviceOperationFinishedPayload,
+    SocChangedPayload,
+)
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     SetupDeviceRequest,
@@ -59,7 +62,7 @@ class MockFluxProvisioner:
 
     Constructed by ``build_session_services`` with the session bus + DeviceService;
     it self-subscribes to ``SocChangedPayload`` and chains the one-shot
-    initial-value ramp off ``DeviceService.device_connected``. The app controllers
+    initial-value ramp off ``DeviceOperationFinishedPayload``. The app controllers
     need no flux-provisioning code of their own.
     """
 
@@ -90,7 +93,9 @@ class MockFluxProvisioner:
         # The initial-value ramp is chained off connect-success (connect carries
         # no initial-value channel; a setup cannot overlap the connect because
         # DeviceService serialises mutations through the OperationGate).
-        device.device_connected.connect(self._on_device_connected)
+        bus.subscribe(
+            DeviceOperationFinishedPayload, self._on_device_operation_finished
+        )
 
     def _on_soc_changed(self, payload: SocChangedPayload) -> None:
         """On a successful mock connect, bind a FakeDevice as the SimEngine's flux
@@ -211,7 +216,9 @@ class MockFluxProvisioner:
             sim_params.EL,
         )
 
-    def _on_device_connected(self, req: ConnectDeviceRequest) -> None:
+    def _on_device_operation_finished(
+        self, payload: DeviceOperationFinishedPayload
+    ) -> None:
         """Ramp the just-connected fake_flux to the default operating point.
 
         FLUX-AWARE-MOCK: a freshly connected FakeDevice sits at value 0.0 (reduced
@@ -221,7 +228,12 @@ class MockFluxProvisioner:
         provisioning, so a user reconnecting their own FakeDevice is never silently
         re-ramped.
         """
-        if req.name == FAKE_FLUX_DEVICE_NAME and self._fake_flux_pending_setup:
+        if (
+            payload.success
+            and payload.action == "connect"
+            and payload.name == FAKE_FLUX_DEVICE_NAME
+            and self._fake_flux_pending_setup
+        ):
             self._fake_flux_pending_setup = False
             self._setup_fake_flux_initial_value()
 

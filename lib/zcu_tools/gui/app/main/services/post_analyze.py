@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
-
 from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest
 from zcu_tools.gui.app.main.events.tab import TabInteractionFact
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -34,17 +32,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
     SUCCEEDED_FACT = TabInteractionFact.POST_ANALYZE_SUCCEEDED
     FAILED_FACT = TabInteractionFact.POST_ANALYZE_FAILED
     START_REJECTED_FACT = TabInteractionFact.POST_ANALYZE_START_REJECTED
-
-    post_analyze_finished: Signal = Signal(str, object)
-    post_analyze_failed: Signal = Signal(str, object)
-
-    @property
-    def _finished_signal(self) -> Any:
-        return self.post_analyze_finished
-
-    @property
-    def _failed_signal(self) -> Any:
-        return self.post_analyze_failed
+    FAILURE_STAGE = "post"
 
     def start_post_analyze(
         self,

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from zcu_tools.gui.event_bus import BasePayload, OriginKind
 
@@ -38,6 +38,8 @@ class SessionEvent(str, Enum):
         "device_setup_finished"  # payload: DeviceSetupFinishedPayload
     )
     HARDWARE_GATE_CHANGED = "hardware_gate_changed"
+    CONNECTION_FINISHED = "connection_finished"
+    DEVICE_OPERATION_FINISHED = "device_operation_finished"
 
 
 @dataclass(frozen=True)
@@ -134,3 +136,24 @@ class GateChangedPayload(SessionPayload):
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.HARDWARE_GATE_CHANGED
     active: tuple[GatePresence, ...]
+
+
+@dataclass(frozen=True)
+class ConnectionFinishedPayload(SessionPayload):
+    """In-process terminal outcome for an asynchronous SoC connection."""
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.CONNECTION_FINISHED
+    success: bool
+    is_mock: bool
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class DeviceOperationFinishedPayload(SessionPayload):
+    """In-process terminal outcome for device connect/disconnect."""
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.DEVICE_OPERATION_FINISHED
+    name: str
+    action: Literal["connect", "disconnect"]
+    success: bool
+    error_message: str | None = None

@@ -51,6 +51,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.gui.event_bus import BaseEventBus, EventSubscriptions
+from zcu_tools.gui.session.events import ConnectionFinishedPayload
+
 if TYPE_CHECKING:
     from zcu_tools.gui.result_scope import ProjectPaths, ResultScope
     from zcu_tools.gui.session.services.connection import (
@@ -87,6 +90,10 @@ class SessionControllerMixin:
     _ctx_svc: ContextService
     _dev_svc: DeviceService
     _startup_svc: StartupService
+
+    def get_bus(self) -> BaseEventBus:
+        """Return the concrete app bus; every app controller overrides this."""
+        raise NotImplementedError
 
     # --- setup dialog: startup -------------------------------------------
     def get_persisted_startup(self) -> PersistedStartup:
@@ -150,20 +157,20 @@ class SessionControllerMixin:
         on_finished: Callable[[], None],
         on_failed: Callable[[str], None],
     ) -> None:
-        """Bind the single connection observer (the open SetupDialog) without
-        exposing the service. Drops all prior slots first so a re-created dialog
-        does not leak the previous observer (a no-arg ``disconnect()`` clears every
-        connection), guaranteeing exactly the latest observer."""
-        for signal in (
-            self._soc_svc.connection_finished,
-            self._soc_svc.connection_failed,
-        ):
-            try:
-                signal.disconnect()
-            except (TypeError, RuntimeError):
-                pass  # no existing connections
-        self._soc_svc.connection_finished.connect(on_finished)
-        self._soc_svc.connection_failed.connect(on_failed)
+        """Replace the single SetupDialog connection-outcome observer."""
+        subscriptions = getattr(self, "_connection_outcome_subscriptions", None)
+        if subscriptions is not None:
+            subscriptions.unsubscribe_all()
+        subscriptions = EventSubscriptions()
+        self._connection_outcome_subscriptions = subscriptions
+
+        def dispatch(payload: ConnectionFinishedPayload) -> None:
+            if payload.success:
+                on_finished()
+            else:
+                on_failed(payload.error_message or "SoC connection failed")
+
+        subscriptions.subscribe(self.get_bus(), ConnectionFinishedPayload, dispatch)
 
     def get_soccfg(self) -> SocCfgHandle | None:
         return self._soc_svc.get_soccfg()

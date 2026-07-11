@@ -255,22 +255,27 @@ def test_setup_control_project_applied_hook_receives_resolved_project() -> None:
     assert seen[0].params_path == "/tmp/result/chip/qub/params.json"
 
 
-def test_setup_control_rebinds_connection_outcome_signals() -> None:
-    facet, log, _bus, connection = _facet()
+def test_setup_control_rebinds_connection_outcome_subscription() -> None:
+    from zcu_tools.gui.session.events import ConnectionFinishedPayload
 
-    def on_finished() -> None:
-        raise AssertionError("not called")
+    facet, _log, bus, _connection = _facet()
+    first: list[str] = []
+    second: list[str] = []
 
-    def on_failed(_message: str) -> None:
-        raise AssertionError("not called")
+    facet.bind_connection_outcome(
+        lambda: first.append("done"), lambda message: first.append(message)
+    )
+    bus.emit(ConnectionFinishedPayload(success=True, is_mock=True))
+    bus.emit(
+        ConnectionFinishedPayload(
+            success=False, is_mock=True, error_message="first failed"
+        )
+    )
 
-    facet.bind_connection_outcome(on_finished, on_failed)
+    facet.bind_connection_outcome(
+        lambda: second.append("done"), lambda message: second.append(message)
+    )
+    bus.emit(ConnectionFinishedPayload(success=True, is_mock=False))
 
-    assert log.calls == [
-        call("connection_finished", "disconnect"),
-        call("connection_failed", "disconnect"),
-        call("connection_finished", "connect", on_finished),
-        call("connection_failed", "connect", on_failed),
-    ]
-    assert connection.connection_finished.handlers == [on_finished]
-    assert connection.connection_failed.handlers == [on_failed]
+    assert first == ["done", "first failed"]
+    assert second == ["done"]

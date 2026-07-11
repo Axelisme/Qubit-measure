@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
-
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
+from zcu_tools.gui.app.main.events.completion import SaveFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -26,28 +24,13 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 
-@dataclass(frozen=True)
-class SaveResultOutcome:
-    """Combined result envelope for a save_result (data + image) operation."""
-
-    data_path: str
-    image_path: str
-    data_error: str | None = None
-    image_error: str | None = None
-
-
-class SaveService(QObject):
-    save_finished: Signal = Signal(str, str)
-    save_failed: Signal = Signal(str, str, object)
-    save_result_finished: Signal = Signal(str, object)
-
+class SaveService:
     def __init__(
         self,
         state: State,
         bg: BackgroundExecutor,
         bus: EventBus,
     ) -> None:
-        super().__init__()
         self._state = state
         self._bg = bg
         self._bus = bus
@@ -209,17 +192,22 @@ class SaveService(QObject):
                 tab_id,
                 image_error,
             )
-            self.save_result_finished.emit(
-                tab_id,
-                SaveResultOutcome(
+            self._bus.emit(
+                SaveFinishedPayload(
+                    tab_id=tab_id,
                     data_path=path,
                     image_path=image_path,
-                    data_error=None,
                     image_error=image_error,
-                ),
+                )
             )
         else:
-            self.save_finished.emit(tab_id, path)
+            self._bus.emit(
+                SaveFinishedPayload(
+                    tab_id=tab_id,
+                    data_path=path,
+                    image_path=None,
+                )
+            )
 
     def _on_save_failed(self, tab_id: str, error: Exception) -> None:
         path = self._active_paths.pop(tab_id, "")
@@ -235,14 +223,21 @@ class SaveService(QObject):
                 error,
                 image_error,
             )
-            self.save_result_finished.emit(
-                tab_id,
-                SaveResultOutcome(
+            self._bus.emit(
+                SaveFinishedPayload(
+                    tab_id=tab_id,
                     data_path=path,
                     image_path=image_path,
                     data_error=str(error),
                     image_error=image_error,
-                ),
+                )
             )
         else:
-            self.save_failed.emit(tab_id, path, error)
+            self._bus.emit(
+                SaveFinishedPayload(
+                    tab_id=tab_id,
+                    data_path=path,
+                    image_path=None,
+                    data_error=str(error),
+                )
+            )

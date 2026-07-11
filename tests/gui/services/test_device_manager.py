@@ -35,6 +35,14 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
+from tests.gui.services._completion_helpers import (
+    on_device_connected,
+    on_device_disconnected,
+    on_device_operation_failed,
+    on_setup_cancelled,
+    on_setup_failed,
+    on_setup_finished,
+)
 from tests.gui.services._device_fakes import FakeDeviceRegistry
 
 # See tests/gui/services/test_device.py for why test-created BackgroundRunners must
@@ -104,8 +112,8 @@ def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock
 def _connect(svc: DeviceService) -> None:
     connected: list[object] = []
     errors: list[str] = []
-    svc.device_connected.connect(connected.append)
-    svc.operation_failed.connect(lambda _name, error: errors.append(error))
+    on_device_connected(svc, connected.append)
+    on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name="test_dev", address="none")
     )
@@ -120,7 +128,7 @@ def test_device_setup_failure_emits_setup_failed(qapp):
     device.setup.side_effect = RuntimeError("setup failed")
     loop = QEventLoop()
     errors: list[str] = []
-    svc.setup_failed.connect(lambda _name, error: errors.append(error) or loop.quit())
+    on_setup_failed(svc, lambda _name, error: errors.append(error) or loop.quit())
 
     svc.start_setup_device(
         SetupDeviceRequest(name="test_dev", info=FakeDeviceInfo(address="none"))
@@ -140,7 +148,7 @@ def test_device_setup_cancel_emits_setup_cancelled(qapp):
     device.setup.side_effect = lambda _info, stop_event: stop_event.wait(1.0)
     loop = QEventLoop()
     cancelled: list[str] = []
-    svc.setup_cancelled.connect(lambda name: cancelled.append(name) or loop.quit())
+    on_setup_cancelled(svc, lambda name: cancelled.append(name) or loop.quit())
 
     svc.start_setup_device(
         SetupDeviceRequest(name="test_dev", info=FakeDeviceInfo(address="none"))
@@ -159,7 +167,7 @@ def test_device_service_emits_started_and_finished_events(qapp):
     svc._bus.subscribe(DeviceSetupStartedPayload, started.append)
     svc._bus.subscribe(DeviceSetupFinishedPayload, finished.append)
     loop = QEventLoop()
-    svc.setup_finished.connect(lambda _name: loop.quit())
+    on_setup_finished(svc, lambda _name: loop.quit())
 
     svc.start_setup_device(
         SetupDeviceRequest(name="test_dev", info=FakeDeviceInfo(address="none"))
@@ -198,7 +206,7 @@ def _make_real_svc(driver: object | None = None) -> tuple[DeviceService, object]
 
 def _register(svc: DeviceService, name: str = "flux") -> None:
     loop = QEventLoop()
-    svc.device_connected.connect(lambda _request: loop.quit())
+    on_device_connected(svc, lambda _request: loop.quit())
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name=name, address="")
     )
@@ -207,7 +215,7 @@ def _register(svc: DeviceService, name: str = "flux") -> None:
 
 def _disconnect(svc: DeviceService, name: str = "flux") -> None:
     loop = QEventLoop()
-    svc.device_disconnected.connect(lambda _request: loop.quit())
+    on_device_disconnected(svc, lambda _request: loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name=name))
     loop.exec()
 
@@ -220,8 +228,8 @@ def _set_value(svc: DeviceService, name: str, value: float) -> None:
     info = svc.get_device_info(name)
     assert info is not None
     loop = QEventLoop()
-    svc.setup_finished.connect(lambda _name: loop.quit())
-    svc.setup_failed.connect(lambda _name, _err: loop.quit())
+    on_setup_finished(svc, lambda _name: loop.quit())
+    on_setup_failed(svc, lambda _name, _err: loop.quit())
     svc.start_setup_device(
         SetupDeviceRequest(name=name, info=info.with_updates(value=value))
     )

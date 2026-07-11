@@ -12,7 +12,11 @@ from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
-from zcu_tools.gui.session.events import GatePresence
+from zcu_tools.gui.session.events import (
+    DeviceOperationFinishedPayload,
+    DeviceSetupFinishedPayload,
+    GatePresence,
+)
 from zcu_tools.gui.session.notify_handles import NotifyHandles, NotifyResult
 from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
@@ -30,6 +34,8 @@ from .adapter import (
     InteractiveSession,
     WritebackItem,
 )
+from .events.completion import AnalyzeFailedPayload, SaveFinishedPayload
+from .events.run import RunFinishedPayload
 from .events.tab import (
     TabContentChangedPayload,
     TabContentFact,
@@ -45,7 +51,6 @@ from .services import (
     LoadTabResultOutcome,
     PersistenceError,
     RestoreReport,
-    SaveResultOutcome,
     StartupProjectRequest,
     TabSnapshot,
     build_app_services,
@@ -312,23 +317,14 @@ class Controller(SessionControllerMixin):
         # None means no control socket is running → treat as no client connected.
         self._agent_connected_query: Callable[[], bool] | None = None
 
-        self._run_svc.run_finished.connect(self._on_run_finished)
-        self._run_svc.run_failed.connect(self._on_run_failed)
-        self._analyze_svc.analyze_finished.connect(self._on_analyze_finished)
-        self._analyze_svc.analyze_failed.connect(self._on_analyze_failed)
-        self._post_analyze_svc.post_analyze_finished.connect(
-            self._on_post_analyze_finished
+        bus.subscribe(RunFinishedPayload, self._on_run_finished)
+        bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
+        bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
+        bus.subscribe(SaveFinishedPayload, self._on_save_finished)
+        bus.subscribe(DeviceSetupFinishedPayload, self._on_device_setup_finished)
+        bus.subscribe(
+            DeviceOperationFinishedPayload, self._on_device_operation_finished
         )
-        self._post_analyze_svc.post_analyze_failed.connect(self._on_post_analyze_failed)
-        self._save_svc.save_finished.connect(self._on_save_finished)
-        self._save_svc.save_failed.connect(self._on_save_failed)
-        self._save_svc.save_result_finished.connect(self._on_save_result_finished)
-        self._dev_svc.setup_finished.connect(self._on_device_setup_finished)
-        self._dev_svc.setup_failed.connect(self._on_device_setup_failed)
-        self._dev_svc.setup_cancelled.connect(self._on_device_setup_cancelled)
-        self._dev_svc.device_connected.connect(self._on_device_connected)
-        self._dev_svc.device_disconnected.connect(self._on_device_disconnected)
-        self._dev_svc.operation_failed.connect(self._on_device_operation_failed)
         # FLUX-AWARE-MOCK: the mock flux source provisioning (SOC_CHANGED hook +
         # fake_flux register/reconnect/ramp) is owned by the shared session-layer
         # MockFluxProvisioner (built in build_session_services), so this controller
@@ -366,7 +362,16 @@ class Controller(SessionControllerMixin):
     def _report_persistence_error(self, title: str, error: Exception) -> None:
         self._notify("error", title, str(error))
 
-    def _on_run_finished(self, tab_id: str, _result: object) -> None:
+    def _on_run_finished(self, payload: RunFinishedPayload) -> None:
+        if payload.outcome == "failed":
+            self._notify("error", "Run failed", payload.error_message or "Run failed")
+            return
+        tab_id = payload.tab_id
+        if (
+            payload.outcome == "cancelled"
+            and self._state.get_tab(tab_id).run_result is None
+        ):
+            return
         # State is already updated in RunService. Only adapters that do
         # analysis (mode != NONE) are routed into analyze-params init; the NONE
         # 2D sweeps (flux_dep / power_dep) have no analyze step, and their base
@@ -383,10 +388,7 @@ class Controller(SessionControllerMixin):
             )
         )
 
-    def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
-        self._notify("error", "Run failed", str(error))
-
-    def _on_analyze_finished(self, tab_id: str, _result: object) -> None:
+    def _on_analyze_finished(self, tab_id: str) -> None:
         # A fresh primary analyze result seeds the post-analysis params (mirrors
         # how a finished run seeds the analyze params). Only adapters declaring
         # post_analysis are routed there; the base get_post_analyze_params is a
@@ -400,10 +402,7 @@ class Controller(SessionControllerMixin):
             )
         )
 
-    def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
-        self._notify("error", "Analyze failed", str(error))
-
-    def _on_post_analyze_finished(self, tab_id: str, _result: object) -> None:
+    def _on_post_analyze_finished(self, tab_id: str) -> None:
         # The post result + figure are already in State (PostAnalyzeService);
         # emit the content event so the View refreshes the Post sub-tab.
         self._bus.emit(
@@ -413,19 +412,27 @@ class Controller(SessionControllerMixin):
             )
         )
 
-    def _on_post_analyze_failed(self, _tab_id: str, error: Exception) -> None:
-        self._notify("error", "Post-analysis failed", str(error))
+    def _on_tab_interaction_changed(
+        self, payload: TabInteractionChangedPayload
+    ) -> None:
+        if payload.fact is TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED:
+            self._on_analyze_finished(payload.tab_id)
+        elif payload.fact is TabInteractionFact.POST_ANALYZE_SUCCEEDED:
+            self._on_post_analyze_finished(payload.tab_id)
 
-    def _on_save_finished(self, tab_id: str, data_path: str) -> None:
-        del tab_id
-        self._info(f"Data saved to {data_path}")
+    def _on_analyze_failed(self, payload: AnalyzeFailedPayload) -> None:
+        title = (
+            "Analyze failed" if payload.stage == "primary" else "Post-analysis failed"
+        )
+        self._notify("error", title, payload.error_message)
 
-    def _on_save_failed(self, tab_id: str, data_path: str, error: Exception) -> None:
-        del tab_id, data_path
-        self._notify("error", "Save data failed", str(error))
-
-    def _on_save_result_finished(self, tab_id: str, outcome: SaveResultOutcome) -> None:
-        del tab_id
+    def _on_save_finished(self, outcome: SaveFinishedPayload) -> None:
+        if outcome.image_path is None:
+            if outcome.data_error is None:
+                self._info(f"Data saved to {outcome.data_path}")
+            else:
+                self._notify("error", "Save data failed", outcome.data_error)
+            return
         if outcome.data_error is None and outcome.image_error is None:
             self._info(
                 f"Data saved to {outcome.data_path}; "
@@ -449,32 +456,28 @@ class Controller(SessionControllerMixin):
             f"Data failed: {outcome.data_error}\nImage failed: {outcome.image_error}",
         )
 
-    def _on_device_setup_finished(self, name: str) -> None:
-        self._info(f"Device setup completed: {name}")
+    def _on_device_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
+        if payload.outcome == "finished":
+            self._info(f"Device setup completed: {payload.name}")
+        elif payload.outcome == "cancelled":
+            self._info(f"Device setup cancelled: {payload.name}")
+        else:
+            self._notify(
+                "error",
+                f"Device setup failed: {payload.name}",
+                payload.error_message or "Device setup failed",
+            )
 
-    def _on_device_setup_failed(self, name: str, error: str) -> None:
+    def _on_device_operation_finished(
+        self, payload: DeviceOperationFinishedPayload
+    ) -> None:
+        if payload.success:
+            self._info(f"Device {payload.action}ed: {payload.name}")
+            return
         self._notify(
             "error",
-            f"Device setup failed: {name}",
-            error,
-        )
-
-    def _on_device_setup_cancelled(self, name: str) -> None:
-        self._info(f"Device setup cancelled: {name}")
-
-    def _on_device_connected(self, req: ConnectDeviceRequest) -> None:
-        # Persistence is a projection of device State, driven by StartupService's
-        # DEVICE_CHANGED subscription — this handler only presents UI feedback.
-        self._info(f"Device connected: {req.name}")
-
-    def _on_device_disconnected(self, req: DisconnectDeviceRequest) -> None:
-        self._info(f"Device disconnected: {req.name}")
-
-    def _on_device_operation_failed(self, name: str, error: str) -> None:
-        self._notify(
-            "error",
-            f"Device operation failed: {name}",
-            error,
+            f"Device operation failed: {payload.name}",
+            payload.error_message or "Device operation failed",
         )
 
     def get_bus(self) -> EventBus:
@@ -1214,7 +1217,7 @@ class Controller(SessionControllerMixin):
         """Connect the SoC synchronously (blocks until connected + side effects
         applied). The wire ``soc.connect`` path uses this so the handler can return
         the SoC summary directly; the GUI's connect button keeps using the async
-        start_connect + signals. Both share SoCConnectionService._apply_connection,
+        start_connect + completion facts. Both share SoCConnectionService._apply_connection,
         so the post-connect side effects (State write, soc version bump,
         SocChangedPayload → FLUX-AWARE-MOCK provisioning) are identical."""
         self._soc_svc.connect_sync(req)

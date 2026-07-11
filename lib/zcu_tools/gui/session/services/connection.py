@@ -7,9 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
-from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
-
-from zcu_tools.gui.session.events import SocChangedPayload
+from zcu_tools.gui.session.events import ConnectionFinishedPayload, SocChangedPayload
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
@@ -71,17 +69,12 @@ class SoCConnectionError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-class SoCConnectionService(QObject):
+class SoCConnectionService:
     """Owns SoC connect lifecycle, delegating async work to OperationRunner.
 
-    Connect work is always reported via Qt signals (connection_finished /
-    connection_failed) so the View has a single non-blocking contract. Both mock
-    and remote connects run via bg.submit, so signals arrive on the next
-    event-loop tick after the bg work finishes — preserving the async contract.
+    Async terminal outcomes are published as typed EventBus facts on the owner
+    thread. Both mock and remote connects run via the injected executor.
     """
-
-    connection_finished: Signal = Signal()
-    connection_failed: Signal = Signal(str)
 
     def __init__(
         self,
@@ -90,9 +83,7 @@ class SoCConnectionService(QObject):
         gate: ExclusionGate,
         handles: OperationHandles,
         runner: OperationRunner,
-        parent: QObject | None = None,
     ) -> None:
-        super().__init__(parent)
         self._state = state
         self._bus = bus
         # Connect composes both leaves (ADR-0019): an Exclusion lease
@@ -208,7 +199,7 @@ class SoCConnectionService(QObject):
                 self._gate.release(token)
 
     def start_connect(self, req: ConnectRequest) -> int:
-        """Start a SoC connect; outcome always arrives via signals.
+        """Start a SoC connect; outcome arrives as ``ConnectionFinishedPayload``.
 
         Delegates to OperationRunner with cancel_hook=None (connect has no
         cancellation point — §B.3 equivalence with old _ConnectWorker). Returns
@@ -221,7 +212,7 @@ class SoCConnectionService(QObject):
 
         def work(factory: Any) -> tuple[SocHandle, SocCfgHandle]:
             # factory is None (wants_progress=False). Both branches run off-main via
-            # bg.submit, preserving the async signal contract for mock and remote.
+            # the executor and publish one typed completion fact on the owner thread.
             return self._run_connect_work(req)
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
@@ -232,12 +223,18 @@ class SoCConnectionService(QObject):
                 soc, soccfg = bg.result
                 self._apply_connection(soc, soccfg, is_mock)
                 settle(OperationOutcome("finished"))
-                self.connection_finished.emit()
+                self._bus.emit(ConnectionFinishedPayload(success=True, is_mock=is_mock))
             else:
                 assert bg.error is not None
                 msg = _format_error(bg.error)
                 settle(OperationOutcome("failed", msg))
-                self.connection_failed.emit(msg)
+                self._bus.emit(
+                    ConnectionFinishedPayload(
+                        success=False,
+                        is_mock=is_mock,
+                        error_message=msg,
+                    )
+                )
 
         spec = OperationSpec(
             exclusion=ExclusionRequest(

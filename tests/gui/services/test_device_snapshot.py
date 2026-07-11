@@ -22,6 +22,10 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 
+from tests.gui.services._completion_helpers import (
+    on_device_connected,
+    on_device_operation_failed,
+)
 from tests.gui.services._device_fakes import FakeDeviceRegistry
 
 # See tests/gui/services/test_device.py for why test-created BackgroundRunners must
@@ -91,8 +95,8 @@ def _connect(
 ) -> None:
     connected: list[object] = []
     errors: list[str] = []
-    svc.device_connected.connect(connected.append)
-    svc.operation_failed.connect(lambda _name, error: errors.append(error))
+    on_device_connected(svc, connected.append)
+    on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     svc.start_connect_device(
         ConnectDeviceRequest(type_name=type_name, name=name, address="")
     )

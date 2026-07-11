@@ -4,13 +4,14 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.events.completion import SaveFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
 from zcu_tools.gui.app.main.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.app.main.services.guard import SavePermit
-from zcu_tools.gui.app.main.services.save import SaveResultOutcome, SaveService
+from zcu_tools.gui.app.main.services.save import SaveService
 from zcu_tools.gui.app.main.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
@@ -55,6 +56,12 @@ def _record_facts(svc: SaveService) -> list[TabInteractionFact]:
         lambda payload: facts.append(payload.fact),
     )
     return facts
+
+
+def _record_outcomes(svc: SaveService) -> list[SaveFinishedPayload]:
+    outcomes: list[SaveFinishedPayload] = []
+    svc._bus.subscribe(SaveFinishedPayload, outcomes.append)  # type: ignore[attr-defined]
+    return outcomes
 
 
 def test_start_save_data_creates_parent_at_command_boundary(
@@ -191,15 +198,14 @@ def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
     facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
 
-    finished: list = []
-    svc.save_finished.connect(lambda tid, path: finished.append((tid, path)))
+    finished = _record_outcomes(svc)
 
     # Stage the active path as start_save_data would
     svc.start_save_data(permit, "/tmp/data")
     svc._on_save_finished("tab")
 
     assert len(finished) == 1
-    assert finished[0][0] == "tab"
+    assert finished[0].tab_id == "tab"
     assert facts == [
         TabInteractionFact.SAVE_STARTED,
         TabInteractionFact.SAVE_SUCCEEDED,
@@ -221,8 +227,7 @@ def test_on_save_finished_with_pending_image_emits_save_result_finished(
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
-    outcomes: list[SaveResultOutcome] = []
-    svc.save_result_finished.connect(lambda tid, o: outcomes.append(o))
+    outcomes = _record_outcomes(svc)
 
     svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
     svc._on_save_finished("tab")
@@ -243,8 +248,7 @@ def test_on_save_finished_with_pending_image_error_propagates(
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
-    outcomes: list[SaveResultOutcome] = []
-    svc.save_result_finished.connect(lambda tid, o: outcomes.append(o))
+    outcomes = _record_outcomes(svc)
 
     svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
     svc._on_save_finished("tab")
@@ -264,16 +268,15 @@ def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
     facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
 
-    failed: list = []
-    svc.save_failed.connect(lambda tid, path, err: failed.append((tid, err)))
+    failed = _record_outcomes(svc)
 
     svc.start_save_data(permit, "/tmp/data")
     error = OSError("write error")
     svc._on_save_failed("tab", error)
 
     assert len(failed) == 1
-    assert failed[0][0] == "tab"
-    assert failed[0][1] is error
+    assert failed[0].tab_id == "tab"
+    assert failed[0].data_error == str(error)
     assert facts == [
         TabInteractionFact.SAVE_STARTED,
         TabInteractionFact.SAVE_FAILED,
@@ -290,8 +293,7 @@ def test_on_save_failed_with_pending_image_emits_save_result_finished(
     data_path = tmp_path / "data" / "meas"
     image_path = tmp_path / "img" / "plot.png"
 
-    outcomes: list[SaveResultOutcome] = []
-    svc.save_result_finished.connect(lambda tid, o: outcomes.append(o))
+    outcomes = _record_outcomes(svc)
 
     svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
     error = OSError("data write failed")

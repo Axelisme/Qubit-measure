@@ -12,12 +12,11 @@ from typing import (
     runtime_checkable,
 )
 
-from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
-
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
+    DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
 )
@@ -277,15 +276,8 @@ def _default_driver_factory(type_name: str, address: str) -> DeviceProtocol:
     return cast(DeviceProtocol, cls())
 
 
-class DeviceService(QObject):
+class DeviceService:
     """Own device mutation workers and cached render snapshots."""
-
-    device_connected: Signal = Signal(object)
-    device_disconnected: Signal = Signal(object)
-    operation_failed: Signal = Signal(str, str)
-    setup_finished: Signal = Signal(str)
-    setup_failed: Signal = Signal(str, str)
-    setup_cancelled: Signal = Signal(str)
 
     def __init__(
         self,
@@ -298,9 +290,7 @@ class DeviceService(QObject):
         *,
         driver_factory: DriverFactoryPort | None = None,
         device_registry: DeviceRegistryPort | None = None,
-        parent: QObject | None = None,
     ) -> None:
-        super().__init__(parent)
         self._bus = bus
         self._state = state
         # Device composes both leaves (ADR-0019): Exclusion (device mutation vs
@@ -379,7 +369,13 @@ class DeviceService(QObject):
             # State is observable before settle (invariant 1).
             settle(OperationOutcome("finished"))
             self._emit_device_changed(name)
-            self.device_connected.emit(req)
+            self._bus.emit(
+                DeviceOperationFinishedPayload(
+                    name=name,
+                    action="connect",
+                    success=True,
+                )
+            )
 
         def _on_operation_failed(message: str, settle: SettleFn) -> None:
             logger.warning("device operation failed: name=%r error=%s", name, message)
@@ -396,7 +392,14 @@ class DeviceService(QObject):
             # State is observable before settle.
             settle(OperationOutcome("failed", message))
             self._emit_device_changed(name)
-            self.operation_failed.emit(name, message)
+            self._bus.emit(
+                DeviceOperationFinishedPayload(
+                    name=name,
+                    action="connect",
+                    success=False,
+                    error_message=message,
+                )
+            )
 
         spec = OperationSpec(
             exclusion=ExclusionRequest(
@@ -479,7 +482,13 @@ class DeviceService(QObject):
             # State is observable before settle.
             settle(OperationOutcome("finished"))
             self._emit_device_changed(name)
-            self.device_disconnected.emit(req)
+            self._bus.emit(
+                DeviceOperationFinishedPayload(
+                    name=name,
+                    action="disconnect",
+                    success=True,
+                )
+            )
 
         def _on_operation_failed(message: str, settle: SettleFn) -> None:
             logger.warning("device operation failed: name=%r error=%s", name, message)
@@ -488,7 +497,14 @@ class DeviceService(QObject):
             # State is observable before settle.
             settle(OperationOutcome("failed", message))
             self._emit_device_changed(name)
-            self.operation_failed.emit(name, message)
+            self._bus.emit(
+                DeviceOperationFinishedPayload(
+                    name=name,
+                    action="disconnect",
+                    success=False,
+                    error_message=message,
+                )
+            )
 
         spec = OperationSpec(
             exclusion=ExclusionRequest(
@@ -565,7 +581,6 @@ class DeviceService(QObject):
             settle(OperationOutcome("finished"))
             self._emit_device_changed(name)
             self._bus.emit(DeviceSetupFinishedPayload(name=name, outcome="finished"))
-            self.setup_finished.emit(name)
 
         def _on_setup_failed(error: str, settle: SettleFn) -> None:
             logger.warning("device setup failed: name=%r error=%s", name, error)
@@ -579,7 +594,6 @@ class DeviceService(QObject):
                     name=name, outcome="failed", error_message=error
                 )
             )
-            self.setup_failed.emit(name, error)
 
         def _on_setup_cancelled(settle: SettleFn) -> None:
             self._inflight.pop(name, None)
@@ -590,7 +604,6 @@ class DeviceService(QObject):
             )
             self._emit_device_changed(name)
             self._bus.emit(DeviceSetupFinishedPayload(name=name, outcome="cancelled"))
-            self.setup_cancelled.emit(name)
 
         spec = OperationSpec(
             exclusion=ExclusionRequest(

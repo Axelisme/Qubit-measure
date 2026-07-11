@@ -33,6 +33,12 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
+from tests.gui.services._completion_helpers import (
+    on_analyze_failed,
+    on_post_analyze_failed,
+    on_post_analyze_finished,
+)
+
 from ._progress_fakes import DirectProgressTransport
 
 
@@ -201,7 +207,7 @@ def test_on_post_analyze_finished_updates_state(qapp):  # noqa: ARG001
     post_result.figure = Figure()
 
     finished: list = []
-    svc.post_analyze_finished.connect(lambda tid, r: finished.append((tid, r)))
+    on_post_analyze_finished(svc, lambda tid, r: finished.append((tid, r)))
 
     assert bg.last_on_done is not None
     bg.last_on_done(post_result)
@@ -229,7 +235,7 @@ def test_on_post_analyze_failed_resets_state(qapp):  # noqa: ARG001
     token = svc.start_post_analyze("tab1", post_analyze_params_instance=object())
 
     failed: list = []
-    svc.post_analyze_failed.connect(lambda tid, err: failed.append((tid, err)))
+    on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     error = RuntimeError("post analysis failed")
     assert bg.last_on_error is not None
@@ -308,7 +314,7 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(
     monkeypatch.setattr(state, "update_tab_post_analyze", MagicMock(side_effect=boom))
 
     failed: list = []
-    svc.post_analyze_failed.connect(lambda tid, err: failed.append((tid, err)))
+    on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     post_result = MagicMock()
     post_result.figure = Figure()
@@ -321,5 +327,5 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(
     assert outcome is not None
     assert outcome.status == "failed"
     assert outcome.error == str(boom)
-    assert failed == [("tab1", boom)]
+    assert failed == [("tab1", str(boom))]
     assert handles.live_count() == 0

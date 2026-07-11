@@ -37,6 +37,14 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
+from tests.gui.services._completion_helpers import (
+    on_device_connected,
+    on_device_disconnected,
+    on_device_operation_failed,
+    on_setup_cancelled,
+    on_setup_failed,
+    on_setup_finished,
+)
 from tests.gui.services._device_fakes import FakeDeviceRegistry
 
 # Every BackgroundRunner created in a test is registered here so the autouse
@@ -121,8 +129,8 @@ def _req(name: str = "dev1") -> ConnectDeviceRequest:
 def _connect(svc: DeviceService, req: ConnectDeviceRequest) -> None:
     connected: list[object] = []
     errors: list[str] = []
-    svc.device_connected.connect(connected.append)
-    svc.operation_failed.connect(lambda _name, error: errors.append(error))
+    on_device_connected(svc, connected.append)
+    on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     svc.start_connect_device(req)
     _drain_until(lambda: bool(connected or errors), label=f"connect {req.name}")
     assert not errors
@@ -132,8 +140,8 @@ def test_device_connect_returns_operation_handle(qapp):
     svc, _device = _make_svc()
     connected: list[object] = []
     errors: list[str] = []
-    svc.device_connected.connect(connected.append)
-    svc.operation_failed.connect(lambda _name, error: errors.append(error))
+    on_device_connected(svc, connected.append)
+    on_device_operation_failed(svc, lambda _name, error: errors.append(error))
     token = svc.start_connect_device(_req())
     _drain_until(lambda: bool(connected or errors), label="device connect")
     assert not errors
@@ -151,7 +159,7 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     # separate set_value: the post-setup get_info reflects the new value.
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=1.0)
     setup_loop = QEventLoop()
-    svc.setup_finished.connect(lambda _name: setup_loop.quit())
+    on_setup_finished(svc, lambda _name: setup_loop.quit())
     svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=1.0))
     )
@@ -160,7 +168,7 @@ def test_device_setup_updates_value_and_disconnect_updates_snapshot(qapp):
     assert svc.get_device_snapshot("dev1").info.value == 1.0  # type: ignore[union-attr]
 
     drop_loop = QEventLoop()
-    svc.device_disconnected.connect(lambda _request: drop_loop.quit())
+    on_device_disconnected(svc, lambda _request: drop_loop.quit())
     disc_token = svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     assert isinstance(disc_token, int)  # disconnect also returns a handle
     drop_loop.exec()
@@ -182,7 +190,7 @@ def test_device_setup_started_and_finished_keep_operation_origin(qapp) -> None:
         lambda payload, meta: observed.append((payload, meta)),
     )
     loop = QEventLoop()
-    svc.setup_finished.connect(lambda _name: loop.quit())
+    on_setup_finished(svc, lambda _name: loop.quit())
 
     with svc._bus.origin(EventOrigin(kind="agent", client_id="client-a")):
         token = svc.start_setup_device(
@@ -241,8 +249,8 @@ def test_device_connect_failure_is_reported_without_live_registration(qapp):
     device.get_info.side_effect = RuntimeError("cannot query")
     errors: list[str] = []
     loop = QEventLoop()
-    svc.operation_failed.connect(
-        lambda _name, error: errors.append(error) or loop.quit()
+    on_device_operation_failed(
+        svc, lambda _name, error: errors.append(error) or loop.quit()
     )
 
     svc.start_connect_device(_req())
@@ -260,7 +268,7 @@ def test_setup_uses_gate_and_returns_to_connected_snapshot(qapp):
     _connect(svc, _req())
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=2.0)
     loop = QEventLoop()
-    svc.setup_finished.connect(lambda _name: loop.quit())
+    on_setup_finished(svc, lambda _name: loop.quit())
 
     svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=2.0))
@@ -313,7 +321,7 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
 
     for name in ("alpha", "beta"):
         loop = QEventLoop()
-        svc.device_connected.connect(lambda _r: loop.quit())
+        on_device_connected(svc, lambda _r: loop.quit())
         svc.start_connect_device(_req(name))
         loop.exec()
         drivers[name] = cast(MagicMock, registry.get_device(name))
@@ -352,8 +360,8 @@ def test_active_device_setups_enumerates_concurrent_setups(qapp):
     # Let both setups finish so the autouse teardown can quiesce cleanly.
     finished: set[str] = set()
     done = QEventLoop()
-    svc.setup_finished.connect(
-        lambda name: (finished.add(name), len(finished) == 2 and done.quit())
+    on_setup_finished(
+        svc, lambda name: (finished.add(name), len(finished) == 2 and done.quit())
     )
     release.set()
     spin_deadline = time.monotonic() + 3.0
@@ -457,8 +465,8 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
     device.close.side_effect = OSError("close failed")
     loop = QEventLoop()
     errors: list[str] = []
-    svc.operation_failed.connect(
-        lambda _name, error: errors.append(error) or loop.quit()
+    on_device_operation_failed(
+        svc, lambda _name, error: errors.append(error) or loop.quit()
     )
 
     svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
@@ -469,7 +477,7 @@ def test_disconnect_close_failure_retains_connected_device_and_releases_gate(qap
     assert svc.get_device_snapshot("dev1").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
     device.close.side_effect = None
     retry_loop = QEventLoop()
-    svc.device_disconnected.connect(lambda _request: retry_loop.quit())
+    on_device_disconnected(svc, lambda _request: retry_loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     retry_loop.exec()
 
@@ -659,7 +667,7 @@ def test_poll_device_info_skips_memory_only_device(qapp):
     _connect(svc, _req())
     # Disconnect (remember=True) → MEMORY_ONLY.
     drop_loop = QEventLoop()
-    svc.device_disconnected.connect(lambda _r: drop_loop.quit())
+    on_device_disconnected(svc, lambda _r: drop_loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     drop_loop.exec()
     device.get_info.reset_mock()
@@ -844,8 +852,8 @@ def _make_multi_svc(
 def _connect_named(svc: DeviceService, name: str) -> None:
     connected: list[object] = []
     errors: list[str] = []
-    svc.device_connected.connect(connected.append)
-    svc.operation_failed.connect(lambda _n, error: errors.append(error))
+    on_device_connected(svc, connected.append)
+    on_device_operation_failed(svc, lambda _n, error: errors.append(error))
     # address == name so _make_multi_svc keys the driver by name.
     svc.start_connect_device(
         ConnectDeviceRequest(type_name="FakeDevice", name=name, address=name)
@@ -873,7 +881,7 @@ def test_gate_allows_concurrent_setup_of_different_devices(qapp):
     )
     # devB setup must start concurrently (no OperationConflictError).
     finished_b = QEventLoop()
-    svc.setup_finished.connect(lambda n: finished_b.quit() if n == "devB" else None)
+    on_setup_finished(svc, lambda n: finished_b.quit() if n == "devB" else None)
     token_b = svc.start_setup_device(
         SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
     )
@@ -892,7 +900,7 @@ def test_gate_allows_concurrent_setup_of_different_devices(qapp):
 
     # Let devA finish too.
     finished_a = QEventLoop()
-    svc.setup_finished.connect(lambda n: finished_a.quit() if n == "devA" else None)
+    on_setup_finished(svc, lambda n: finished_a.quit() if n == "devA" else None)
     release_a.set()
     finished_a.exec()
     assert svc.get_device_snapshot("devA").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]
@@ -925,7 +933,7 @@ def test_same_device_setup_still_blocked_while_in_flight(qapp):
     finally:
         release.set()
         loop = QEventLoop()
-        svc.setup_finished.connect(lambda n: loop.quit() if n == "devA" else None)
+        on_setup_finished(svc, lambda n: loop.quit() if n == "devA" else None)
         loop.exec()
 
 
@@ -950,9 +958,9 @@ def test_concurrent_setups_cancel_independently(qapp):
     )
 
     cancelled: list[str] = []
-    svc.setup_cancelled.connect(lambda n: cancelled.append(n))
+    on_setup_cancelled(svc, lambda n: cancelled.append(n))
     finished: list[str] = []
-    svc.setup_finished.connect(lambda n: finished.append(n))
+    on_setup_finished(svc, lambda n: finished.append(n))
 
     svc.start_setup_device(
         SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
@@ -965,7 +973,7 @@ def test_concurrent_setups_cancel_independently(qapp):
 
     # Cancel only devA.
     cancel_loop = QEventLoop()
-    svc.setup_cancelled.connect(lambda n: cancel_loop.quit() if n == "devA" else None)
+    on_setup_cancelled(svc, lambda n: cancel_loop.quit() if n == "devA" else None)
     svc.cancel_device_operation("devA")
     cancel_loop.exec()
 
@@ -976,7 +984,7 @@ def test_concurrent_setups_cancel_independently(qapp):
     assert "devB" not in cancelled
 
     finish_loop = QEventLoop()
-    svc.setup_finished.connect(lambda n: finish_loop.quit() if n == "devB" else None)
+    on_setup_finished(svc, lambda n: finish_loop.quit() if n == "devB" else None)
     release_b.set()
     finish_loop.exec()
     assert "devB" in finished
@@ -1038,7 +1046,7 @@ def test_registry_port_disconnect_drops_from_fake(qapp):
     assert "dev1" in registry.get_all_devices()
 
     drop_loop = QEventLoop()
-    svc.device_disconnected.connect(lambda _r: drop_loop.quit())
+    on_device_disconnected(svc, lambda _r: drop_loop.quit())
     svc.start_disconnect_device(DisconnectDeviceRequest(name="dev1"))
     drop_loop.exec()
 
@@ -1066,8 +1074,8 @@ def test_registry_port_connect_failure_rollback_still_correct(qapp):
     device.get_info.side_effect = RuntimeError("boom")
     errors: list[str] = []
     loop = QEventLoop()
-    svc.operation_failed.connect(
-        lambda _name, error: errors.append(error) or loop.quit()
+    on_device_operation_failed(
+        svc, lambda _name, error: errors.append(error) or loop.quit()
     )
 
     svc.start_connect_device(_req())
@@ -1088,7 +1096,7 @@ def test_registry_port_setup_reads_driver_from_fake(qapp):
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=5.0)
 
     setup_loop = QEventLoop()
-    svc.setup_finished.connect(lambda _name: setup_loop.quit())
+    on_setup_finished(svc, lambda _name: setup_loop.quit())
     svc.start_setup_device(
         SetupDeviceRequest(name="dev1", info=FakeDeviceInfo(address="addr", value=5.0))
     )
@@ -1117,13 +1125,13 @@ def test_concurrent_setup_failure_does_not_affect_other(qapp):
     )
 
     failed: list[tuple[str, str]] = []
-    svc.setup_failed.connect(lambda n, e: failed.append((n, e)))
+    on_setup_failed(svc, lambda n, e: failed.append((n, e)))
 
     svc.start_setup_device(
         SetupDeviceRequest(name="devB", info=FakeDeviceInfo(address="devB", value=2.0))
     )
     fail_loop = QEventLoop()
-    svc.setup_failed.connect(lambda n, _e: fail_loop.quit() if n == "devA" else None)
+    on_setup_failed(svc, lambda n, _e: fail_loop.quit() if n == "devA" else None)
     svc.start_setup_device(
         SetupDeviceRequest(name="devA", info=FakeDeviceInfo(address="devA", value=1.0))
     )
@@ -1138,7 +1146,7 @@ def test_concurrent_setup_failure_does_not_affect_other(qapp):
     assert gate.is_device_mutating("devB")
 
     finish_loop = QEventLoop()
-    svc.setup_finished.connect(lambda n: finish_loop.quit() if n == "devB" else None)
+    on_setup_finished(svc, lambda n: finish_loop.quit() if n == "devB" else None)
     release_b.set()
     finish_loop.exec()
     assert svc.get_device_snapshot("devB").status is DeviceStatus.CONNECTED  # type: ignore[union-attr]

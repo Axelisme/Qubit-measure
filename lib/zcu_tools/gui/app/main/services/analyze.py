@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from qtpy.QtCore import Signal  # type: ignore[attr-defined]
-
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+from zcu_tools.gui.app.main.events.completion import AnalyzeFailedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -29,13 +28,11 @@ if TYPE_CHECKING:
 
 
 class AnalyzeService(_StagedAnalyzeService):
+    FAILURE_STAGE = "primary"
     STARTED_FACT = TabInteractionFact.PRIMARY_ANALYZE_STARTED
     SUCCEEDED_FACT = TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED
     FAILED_FACT = TabInteractionFact.PRIMARY_ANALYZE_FAILED
     START_REJECTED_FACT = TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED
-
-    analyze_finished: Signal = Signal(str, object)
-    analyze_failed: Signal = Signal(str, object)
 
     def __init__(
         self,
@@ -59,14 +56,6 @@ class AnalyzeService(_StagedAnalyzeService):
         # analyze (which would settle the handle while the worker callback is still
         # in flight). Entries are removed by every interactive terminal path.
         self._interactive_tabs: set[str] = set()
-
-    @property
-    def _finished_signal(self) -> Any:
-        return self.analyze_finished
-
-    @property
-    def _failed_signal(self) -> Any:
-        return self.analyze_failed
 
     def start_analyze(
         self,
@@ -186,7 +175,7 @@ class AnalyzeService(_StagedAnalyzeService):
 
         Mirrors the ``_fail`` terminal (set_tab_analyzing(False) + _release +
         interaction event) but with a ``cancelled`` outcome and WITHOUT emitting
-        ``analyze_failed`` — a user/agent cancel is not an error, so it must not
+        ``AnalyzeFailedPayload`` — a user/agent cancel is not an error, so it must not
         pop the "Analyze failed" diagnostic. Returns False (no-op) when the tab has
         no in-flight interactive picker, so the caller can report a graceful
         message instead of raising.
@@ -233,7 +222,13 @@ class AnalyzeService(_StagedAnalyzeService):
                     fact=TabInteractionFact.PRIMARY_ANALYZE_FAILED,
                 )
             )
-            self._failed_signal.emit(tab_id, exc)
+            self._bus.emit(
+                AnalyzeFailedPayload(
+                    tab_id=tab_id,
+                    stage="primary",
+                    error_message=str(exc),
+                )
+            )
             return
         self._state.set_tab_analyzing(tab_id, False)
         self._release(tab_id, OperationOutcome("finished"))
@@ -243,7 +238,6 @@ class AnalyzeService(_StagedAnalyzeService):
                 fact=TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED,
             )
         )
-        self._finished_signal.emit(tab_id, analyze_result)
 
     def _record(self, tab_id: str, analyze_result: Any) -> None:
         # Tear down the previous analyze's writeback editor models before the new

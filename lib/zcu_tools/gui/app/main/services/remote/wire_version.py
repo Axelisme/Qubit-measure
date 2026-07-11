@@ -86,9 +86,10 @@ WIRE_VERSION = 51
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
 # v69: hardware-gate presence and owner-loop gate attribution.
+# v70: service completion delivery uses Qt-free typed EventBus facts.
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 69  # hardware-gate presence
+GUI_VERSION = 70  # Qt-free service completion facts

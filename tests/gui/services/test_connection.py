@@ -34,6 +34,7 @@ from zcu_tools.gui.session.services.connection import (
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
+from ._completion_helpers import on_connection_failed, on_connection_finished
 from ._progress_fakes import DirectProgressTransport
 
 # ---------------------------------------------------------------------------
@@ -132,8 +133,8 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     loop = QEventLoop()
-    svc.connection_finished.connect(loop.quit)
-    svc.connection_failed.connect(lambda msg: loop.quit())
+    on_connection_finished(svc, loop.quit)
+    on_connection_failed(svc, lambda msg: loop.quit())
 
     svc.start_connect(ConnectMockRequest())
     loop.exec()
@@ -156,8 +157,8 @@ def test_start_connect_mock_soc_carries_default_simparam(qapp):
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     loop = QEventLoop()
-    svc.connection_finished.connect(loop.quit)
-    svc.connection_failed.connect(lambda msg: loop.quit())
+    on_connection_finished(svc, loop.quit)
+    on_connection_failed(svc, lambda msg: loop.quit())
 
     svc.start_connect(ConnectMockRequest())
     loop.exec()
@@ -185,8 +186,8 @@ def test_start_connect_mock_sim_params_override_is_honoured(qapp):
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
     loop = QEventLoop()
-    svc.connection_finished.connect(loop.quit)
-    svc.connection_failed.connect(lambda msg: loop.quit())
+    on_connection_finished(svc, loop.quit)
+    on_connection_failed(svc, lambda msg: loop.quit())
 
     svc.start_connect(ConnectMockRequest(sim_params=custom))
     loop.exec()
@@ -215,8 +216,8 @@ def test_connect_bumps_soc_not_context_version(qapp):
     soc_before = state.version.get("soc")
 
     loop = QEventLoop()
-    svc.connection_finished.connect(loop.quit)
-    svc.connection_failed.connect(lambda msg: loop.quit())
+    on_connection_finished(svc, loop.quit)
+    on_connection_failed(svc, lambda msg: loop.quit())
 
     svc.start_connect(ConnectMockRequest())
     loop.exec()
@@ -374,8 +375,8 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
 
     loop = QEventLoop()
     errors: list[str] = []
-    svc.connection_failed.connect(lambda msg: errors.append(msg) or loop.quit())
-    svc.connection_finished.connect(loop.quit)
+    on_connection_failed(svc, lambda msg: errors.append(msg) or loop.quit())
+    on_connection_finished(svc, loop.quit)
 
     svc.start_connect(ConnectRemoteRequest(ip="127.0.0.1", port=7000))
     loop.exec()

@@ -34,6 +34,11 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
+from tests.gui.services._completion_helpers import (
+    on_analyze_failed,
+    on_analyze_finished,
+)
+
 from ._progress_fakes import DirectProgressTransport
 
 
@@ -210,7 +215,7 @@ def test_on_analyze_finished_updates_state(qapp):  # noqa: ARG001
     fake_result.figure = MagicMock()
 
     finished_signals: list = []
-    svc.analyze_finished.connect(lambda tid, res: finished_signals.append((tid, res)))
+    on_analyze_finished(svc, lambda tid, res: finished_signals.append((tid, res)))
 
     # Trigger the on_done path (runner calls on_terminal with ok=True)
     assert bg.last_on_done is not None
@@ -284,7 +289,7 @@ def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
     session.finish.return_value = fake_result
 
     finished: list = []
-    svc.analyze_finished.connect(lambda tid, res: finished.append((tid, res)))
+    on_analyze_finished(svc, lambda tid, res: finished.append((tid, res)))
 
     svc.finish_interactive("tab1", session)
 
@@ -344,7 +349,7 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):  # noq
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     # A cancel is not a failure: analyze_failed must NOT fire (no error dialog).
     failed: list = []
-    svc.analyze_failed.connect(lambda tid, err: failed.append((tid, err)))
+    on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     cancelled = svc.cancel_interactive("tab1")
 
@@ -436,7 +441,7 @@ def test_background_analyze_failure_resets_state(qapp):  # noqa: ARG001
     assert state.get_tab("tab1").is_analyzing is True
 
     failed_signals: list = []
-    svc.analyze_failed.connect(lambda tid, err: failed_signals.append((tid, err)))
+    on_analyze_failed(svc, lambda tid, err: failed_signals.append((tid, err)))
 
     error = RuntimeError("analysis failed")
     assert bg.last_on_error is not None
@@ -538,7 +543,7 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa
     writeback.compute_items_for_tab.side_effect = boom
 
     failed: list = []
-    svc.analyze_failed.connect(lambda tid, err: failed.append((tid, err)))
+    on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))
 
     result = MagicMock()
     result.figure = None
@@ -553,5 +558,5 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa
     assert outcome is not None
     assert outcome.status == "failed"
     assert outcome.error == str(boom)
-    assert failed == [("tab1", boom)]
+    assert failed == [("tab1", str(boom))]
     assert handles.live_count() == 0

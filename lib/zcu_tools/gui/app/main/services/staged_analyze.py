@@ -5,8 +5,8 @@ layer) run the identical operation lifecycle: a per-tab async handle (no exclusi
 ADR-0019), ``set_tab_analyzing`` for the duration, a single failure terminal path,
 and a finished path that records into State before settling the handle. Only three
 things differ between them — the gate + request assembly that starts the work, what
-``record`` does with the worker's result, and which Qt signals fire on
-finish/fail. This base owns the lifecycle skeleton; each subclass fills the three
+``record`` does with the worker's result, and which completion stage identifies a
+failure. This base owns the lifecycle skeleton; each subclass fills the three
 seams.
 
 Stage 2c: FIT/post analyze changed from inline bg.submit to OperationRunner
@@ -23,10 +23,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from qtpy.QtCore import QObject  # type: ignore[attr-defined]
-
+from zcu_tools.gui.app.main.events.completion import AnalyzeFailedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -51,13 +50,12 @@ if TYPE_CHECKING:
     from .ports import AnalyzeStatePort
 
 
-class _StagedAnalyzeService(QObject):
+class _StagedAnalyzeService:
     """Lifecycle skeleton shared by the primary- and post-analyze services.
 
-    Subclasses declare their own ``finished``/``failed`` Qt signals (a signal must
-    be bound on the concrete class) and expose them through ``_finished_signal`` /
-    ``_failed_signal`` so the base can emit the right one. The per-tab token map,
-    the failure terminal path, and the start/finish templates are owned here.
+    Subclasses declare their completion stage while the shared EventBus facts carry
+    success and failure. The per-tab token map, failure terminal path, and
+    start/finish templates are owned here.
 
     FIT/post analyze delegate bg submission to OperationRunner (_submit_with_runner).
     Interactive analyze still uses _open_token + _release directly (no runner).
@@ -67,6 +65,7 @@ class _StagedAnalyzeService(QObject):
     SUCCEEDED_FACT: ClassVar[TabInteractionFact]
     FAILED_FACT: ClassVar[TabInteractionFact]
     START_REJECTED_FACT: ClassVar[TabInteractionFact]
+    FAILURE_STAGE: ClassVar[Literal["primary", "post"]]
 
     def __init__(
         self,
@@ -75,7 +74,6 @@ class _StagedAnalyzeService(QObject):
         bus: EventBus,
         handles: OperationHandles,
     ) -> None:
-        super().__init__()
         self._state = state
         self._runner = runner
         self._bus = bus
@@ -85,20 +83,6 @@ class _StagedAnalyzeService(QObject):
         # start clobber the first, leaking the first's handle. Keyed by tab_id,
         # every terminal path settles exactly the token its own start created.
         self._active_tokens: dict[str, int] = {}
-
-    # -- subclass seam: which concrete Qt signal to emit on finish / fail --
-    #
-    # Typed Any: at runtime each accessor returns a *bound* signal (it has .emit),
-    # but a class-level ``Signal`` annotation is the unbound descriptor type, which
-    # the type checker would (wrongly) reject ``.emit`` on.
-
-    @property
-    def _finished_signal(self) -> Any:
-        raise NotImplementedError
-
-    @property
-    def _failed_signal(self) -> Any:
-        raise NotImplementedError
 
     # -- shared handle bookkeeping -----------------------------------------
 
@@ -173,7 +157,7 @@ class _StagedAnalyzeService(QObject):
             ``record`` performs the subclass-specific State write. On a recording
             failure route through _fail so the handle never stays live. On success:
             clear analyzing, settle (State already observable — invariant 1),
-            then emit signals/events.
+            then emit completion facts.
             """
             try:
                 record(tab_id, result)
@@ -183,24 +167,29 @@ class _StagedAnalyzeService(QObject):
                 return
             self._active_tokens.pop(tab_id, None)
             self._state.set_tab_analyzing(tab_id, False)
-            # settle before signals — State visible to awaiter on wake.
+            # settle before facts — State visible to awaiter on wake.
             settle(OperationOutcome("finished"))
             self._bus.emit(
                 TabInteractionChangedPayload(tab_id=tab_id, fact=self.SUCCEEDED_FACT)
             )
-            self._finished_signal.emit(tab_id, result)
 
         def _fail(error: Exception, settle: SettleFn) -> None:
             """The single failure terminal path: clear analyzing, settle failed, emit."""
             logger.warning("staged-analyze failed: tab_id=%r error=%r", tab_id, error)
             self._active_tokens.pop(tab_id, None)
             self._state.set_tab_analyzing(tab_id, False)
-            # settle before signals — State visible to awaiter on wake.
+            # settle before facts — State visible to awaiter on wake.
             settle(OperationOutcome("failed", str(error)))
             self._bus.emit(
                 TabInteractionChangedPayload(tab_id=tab_id, fact=self.FAILED_FACT)
             )
-            self._failed_signal.emit(tab_id, error)
+            self._bus.emit(
+                AnalyzeFailedPayload(
+                    tab_id=tab_id,
+                    stage=self.FAILURE_STAGE,
+                    error_message=str(error),
+                )
+            )
 
         spec = OperationSpec(
             exclusion=None,  # analyze has no exclusion facet (ADR-0019)

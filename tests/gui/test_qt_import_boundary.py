@@ -10,24 +10,10 @@ QT_PACKAGES = frozenset({"qtpy", "PyQt6", "PySide6"})
 
 KNOWN_QT_DEBT = frozenset(
     {
-        # batch 3: migrate connection notifications with the operation layer.
-        Path("session/services/connection.py"),
-        # batch 3: migrate device notifications with the operation layer.
-        Path("session/services/device.py"),
         # batch 3: isolate application bootstrap Qt ownership.
         Path("app/main/app.py"),
         # batch 3: move cfg binding widget access into the UI layer.
         Path("app/main/cfg_binding.py"),
-        # batch 3: migrate analysis execution with the operation layer.
-        Path("app/main/services/analyze.py"),
-        # batch 3: migrate post-analysis execution with the operation layer.
-        Path("app/main/services/post_analyze.py"),
-        # batch 3: migrate run execution with the operation layer.
-        Path("app/main/services/run.py"),
-        # batch 3: migrate save execution with the operation layer.
-        Path("app/main/services/save.py"),
-        # batch 3: migrate staged analysis with the operation layer.
-        Path("app/main/services/staged_analyze.py"),
         # batch 3: replace utility-level Qt error presentation with a UI port.
         Path("app/main/utils/error_handler.py"),
         # batch 3: isolate autofluxdep controller Qt ownership.

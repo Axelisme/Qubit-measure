@@ -505,17 +505,21 @@ def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
     # Confirm at least one subscription is installed.
     subs = f.bus._meta_subs  # type: ignore[attr-defined]
     assert subs.get(RunFinishedPayload), "service should have subscribed"
-    assert not f.bus._subs.get(RunFinishedPayload)  # type: ignore[attr-defined]
+    controller_subs = tuple(  # type: ignore[attr-defined]
+        f.bus._subs.get(RunFinishedPayload, [])
+    )
+    assert controller_subs, "Controller consumes the run completion fact"
     assert len(f.service._bus_subs) == len(EVENT_SERIALIZERS)
     f.stop()
     subs_after = f.bus._meta_subs  # type: ignore[attr-defined]
     # The RemoteEventService's subscriptions are gone after stop. RUN_FINISHED
-    # is remote-event-specific, so it must be empty. (MD_CHANGED is *also* held
+    # has a permanent Controller subscriber, but the remote meta subscriber must
+    # be empty. (MD_CHANGED is *also* held
     # permanently by CfgEditorService for owned-model refresh — ADR-0008 — so it
     # is not a clean proxy for the remote view's teardown.)
     assert len(f.service._bus_subs) == 0
     assert not subs_after.get(RunFinishedPayload)
-    assert not f.bus._subs.get(RunFinishedPayload)  # type: ignore[attr-defined]
+    assert tuple(f.bus._subs.get(RunFinishedPayload, [])) == controller_subs  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

@@ -4,8 +4,6 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
-
 from zcu_tools.device import device_setup_cancel_scope
 from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
@@ -38,16 +36,13 @@ if TYPE_CHECKING:
     from .ports import RunStatePort, WritebackLifecyclePort
 
 
-class RunService(QObject):
+class RunService:
     """Encapsulates execution of an experiment adapter via BackgroundRunner
     (OffMain-thread strategy with figure/progress/cancel scopes — ADR-0019).
 
     Uses OperationRunner (ADR-0026 §1) for the lifecycle mechanism; domain
-    policy (cancel-partial interpretation, State writes, signals) is inline here.
+    policy (cancel-partial interpretation, State writes, facts) is inline here.
     """
-
-    run_finished: Signal = Signal(str, object)
-    run_failed: Signal = Signal(str, object)
 
     def __init__(
         self,
@@ -57,7 +52,6 @@ class RunService(QObject):
         handles: OperationHandles,
         writeback: WritebackLifecyclePort,
     ) -> None:
-        super().__init__()
         self._state = state
         self._runner = runner
         self._bus = bus
@@ -149,7 +143,6 @@ class RunService(QObject):
             # STATE is observable before settle (ADR-0017 / stage2c invariant 1).
             settle(OperationOutcome("finished"))
             self._bus.emit(RunFinishedPayload(tab_id=tab_id, outcome="finished"))
-            self.run_finished.emit(tab_id, result)
 
         def _on_run_cancelled(result: Any, settle: SettleFn) -> None:
             logger.info("_on_run_cancelled: tab_id=%r", tab_id)
@@ -163,9 +156,6 @@ class RunService(QObject):
             # STATE is observable before settle.
             settle(OperationOutcome("cancelled"))
             self._bus.emit(RunFinishedPayload(tab_id=tab_id, outcome="cancelled"))
-            # A cancelled run emits run_finished only if it produced a usable result.
-            if result is not NO_RESULT:
-                self.run_finished.emit(tab_id, result)
 
         def _on_run_failed(error: Exception, settle: SettleFn) -> None:
             logger.warning("_on_run_failed: tab_id=%r error=%r", tab_id, error)
@@ -180,7 +170,6 @@ class RunService(QObject):
                     error_message=str(error),
                 )
             )
-            self.run_failed.emit(tab_id, error)
 
         spec = OperationSpec(
             exclusion=ExclusionRequest(

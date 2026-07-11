@@ -130,11 +130,10 @@ def build_session_services(
         device=device_control,
         on_project_applied=on_project_applied,
     )
-    # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED + chains the one-shot ramp
-    # off device.device_connected — both apps get mock flux provisioning for free.
-    # Not exposed on the returned bundle: nothing reads it. Its lifetime is anchored
-    # by the strong reference the EventBus holds to its bound subscriber (and the
-    # device_connected signal connection), both of which outlive the bundle, so the
+    # FLUX-AWARE-MOCK: self-subscribes to SOC_CHANGED and the typed
+    # DeviceOperationFinishedPayload to chain the one-shot ramp. Both apps get mock
+    # flux provisioning for free. Not exposed on the returned bundle: nothing reads
+    # it. EventBus holds strong references to both bound subscribers, so the
     # provisioner survives despite not being a field here.
     MockFluxProvisioner(bus, device, predictor)
     return SessionServices(

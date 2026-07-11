@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
+from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.session.events import ConnectionFinishedPayload
+
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.result_scope import ResultScope
@@ -76,6 +79,7 @@ class SetupControlFacet:
         self._connection = connection
         self._device = device
         self._on_project_applied = on_project_applied
+        self._connection_outcome_subscriptions = EventSubscriptions()
 
     def get_bus(self) -> BaseEventBus:
         return self._bus
@@ -116,16 +120,18 @@ class SetupControlFacet:
         on_finished: Callable[[], None],
         on_failed: Callable[[str], None],
     ) -> None:
-        for signal in (
-            self._connection.connection_finished,
-            self._connection.connection_failed,
-        ):
-            try:
-                signal.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-        self._connection.connection_finished.connect(on_finished)
-        self._connection.connection_failed.connect(on_failed)
+        self._connection_outcome_subscriptions.unsubscribe_all()
+        self._connection_outcome_subscriptions = EventSubscriptions()
+
+        def dispatch(payload: ConnectionFinishedPayload) -> None:
+            if payload.success:
+                on_finished()
+            else:
+                on_failed(payload.error_message or "SoC connection failed")
+
+        self._connection_outcome_subscriptions.subscribe(
+            self._bus, ConnectionFinishedPayload, dispatch
+        )
 
     def remember_startup_connection(self, req: StartupConnectionRequest) -> None:
         self._startup.remember_connection(req)
