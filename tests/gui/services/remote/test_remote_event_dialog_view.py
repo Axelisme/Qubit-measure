@@ -19,6 +19,7 @@ import pytest
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
+    TabClosedPayload,
     TabContentChangedPayload,
     TabContentFact,
     TabInteractionChangedPayload,
@@ -33,7 +34,12 @@ from zcu_tools.gui.app.main.services.remote.events import (
     _ser_tab_interaction_changed,
 )
 from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
+    DeviceChangedPayload,
+    DeviceSetupFinishedPayload,
+    DeviceSetupStartedPayload,
     MdChangedPayload,
+    MlChangedPayload,
     PredictorChangedPayload,
     SocChangedPayload,
 )
@@ -103,6 +109,64 @@ def test_event_serializers_wire_names_locked():
     )
 
 
+def test_all_event_serializer_payload_shapes_are_locked() -> None:
+    from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
+
+    opaque = MagicMock()
+    cases = [
+        (
+            TabAddedPayload(tab_id="tab-x", adapter_name="fake"),
+            {"tab_id": "tab-x", "adapter_name": "fake"},
+        ),
+        (TabClosedPayload(tab_id="tab-x"), {"tab_id": "tab-x"}),
+        (
+            TabContentChangedPayload(
+                tab_id="tab-x", fact=TabContentFact.RUN_RESULT_COMMITTED
+            ),
+            {"tab_id": "tab-x", "requery": ["tab.snapshot"]},
+        ),
+        (
+            TabInteractionChangedPayload(
+                tab_id="tab-x", fact=TabInteractionFact.SAVE_SUCCEEDED
+            ),
+            {"tab_id": "tab-x", "requery": ["tab.snapshot"]},
+        ),
+        (RunStartedPayload(tab_id="tab-x"), {"tab_id": "tab-x"}),
+        (
+            RunFinishedPayload(tab_id="tab-x", outcome="failed", error_message="boom"),
+            {
+                "tab_id": "tab-x",
+                "outcome": "failed",
+                "error_message": "boom",
+                "requery": ["tab.snapshot"],
+            },
+        ),
+        (PredictorChangedPayload(), {}),
+        (
+            DeviceChangedPayload(name="flux"),
+            {"name": "flux", "requery": ["device.list"]},
+        ),
+        (DeviceSetupStartedPayload(name="flux"), {"name": "flux"}),
+        (
+            DeviceSetupFinishedPayload(
+                name="flux", outcome="failed", error_message="boom"
+            ),
+            {"name": "flux", "outcome": "failed", "error_message": "boom"},
+        ),
+        (
+            ContextSwitchedPayload(md=opaque, ml=opaque),
+            {"requery": ["context.active"]},
+        ),
+        (MdChangedPayload(md=opaque), {"requery": ["context.md_get_attr"]}),
+        (MlChangedPayload(ml=opaque), {"requery": ["context.ml_get"]}),
+        (SocChangedPayload(soc=None, soccfg=None), {"connected": False}),
+    ]
+
+    assert len(cases) == len(EVENT_SERIALIZERS) == 14
+    for payload, expected in cases:
+        assert EVENT_SERIALIZERS[type(payload)](payload) == expected
+
+
 @pytest.mark.parametrize("fact", list(TabInteractionFact))
 def test_interaction_fact_does_not_change_wire_payload(
     fact: TabInteractionFact,
@@ -166,6 +230,145 @@ def test_subscribe_then_run_started_arrives(fx):
         sock.close()
 
 
+def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch):  # noqa: ARG001
+    from zcu_tools.gui.remote import control_service as service_module
+
+    f = Fixture()
+    serializer = MagicMock(return_value={"tab_id": "tab-x"})
+    f.service._event_serializers = {
+        **f.service._event_serializers,
+        RunStartedPayload: serializer,
+    }
+    encode = MagicMock(wraps=service_module.encode_line)
+    monkeypatch.setattr(service_module, "encode_line", encode)
+    f.start()
+    sock = open_client(f.service.port)
+    try:
+        call(sock, "events.list")
+        encode.reset_mock()  # ignore the events.list reply (endpoint-owned encode)
+
+        f.bus.emit(RunStartedPayload(tab_id="tab-x"))
+
+        serializer.assert_not_called()
+        encode.assert_not_called()
+    finally:
+        sock.close()
+        f.stop()
+
+
+def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):  # noqa: ARG001
+    from zcu_tools.gui.remote import control_service as service_module
+
+    f = Fixture()
+    serializer = MagicMock(return_value={"tab_id": "tab-x"})
+    f.service._event_serializers = {
+        **f.service._event_serializers,
+        RunStartedPayload: serializer,
+    }
+    encode = MagicMock(wraps=service_module.encode_line)
+    monkeypatch.setattr(service_module, "encode_line", encode)
+    f.start()
+    sockets = [open_client(f.service.port), open_client(f.service.port)]
+    try:
+        for index, sock in enumerate(sockets):
+            call(
+                sock,
+                "events.subscribe",
+                {"events": ["run_started"]},
+                rid=f"sub-{index}",
+            )
+        encode.reset_mock()
+
+        f.bus.emit(RunStartedPayload(tab_id="tab-x"))
+
+        serializer.assert_called_once_with(RunStartedPayload(tab_id="tab-x"))
+        encode.assert_called_once()
+        assert [recv_push(sock, "run_started")["payload"] for sock in sockets] == [
+            {"tab_id": "tab-x"},
+            {"tab_id": "tab-x"},
+        ]
+    finally:
+        for sock in sockets:
+            sock.close()
+        f.stop()
+
+
+def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):  # noqa: ARG001
+    f = Fixture()
+    serializer = MagicMock(side_effect=RuntimeError("broken serializer"))
+    f.service._event_serializers = {
+        **f.service._event_serializers,
+        RunStartedPayload: serializer,
+    }
+    later_subscriber = MagicMock()
+    f.bus.subscribe(RunStartedPayload, later_subscriber)
+    f.start()
+    sock = open_client(f.service.port)
+    try:
+        call(sock, "events.subscribe", {"events": ["run_started"]})
+
+        with caplog.at_level("ERROR"):
+            f.bus.emit(RunStartedPayload(tab_id="tab-x"))
+
+        serializer.assert_called_once()
+        later_subscriber.assert_called_once()
+        assert "Event serializer for run_started raised" in caplog.text
+        assert call(sock, "events.list", rid="probe")["ok"] is True
+    finally:
+        sock.close()
+        f.stop()
+
+
+def test_serializer_returning_none_only_runs_for_subscriber(qapp):  # noqa: ARG001
+    f = Fixture()
+    serializer = MagicMock(return_value=None)
+    f.service._event_serializers = {
+        **f.service._event_serializers,
+        RunStartedPayload: serializer,
+    }
+    f.start()
+    sock = open_client(f.service.port)
+    try:
+        call(sock, "events.list")
+        f.bus.emit(RunStartedPayload(tab_id="no-sub"))
+        serializer.assert_not_called()
+
+        call(sock, "events.subscribe", {"events": ["run_started"]}, rid="sub")
+        f.bus.emit(RunStartedPayload(tab_id="sub"))
+        serializer.assert_called_once()
+        assert call(sock, "events.list", rid="probe")["ok"] is True
+    finally:
+        sock.close()
+        f.stop()
+
+
+def test_push_encode_failure_is_logged_and_contained(qapp, monkeypatch, caplog):  # noqa: ARG001
+    from zcu_tools.gui.remote import control_service as service_module
+
+    f = Fixture()
+    original_encode = service_module.encode_line
+
+    def fail_push_only(payload):
+        if "event" in payload:
+            raise TypeError("not encodable")
+        return original_encode(payload)
+
+    monkeypatch.setattr(service_module, "encode_line", fail_push_only)
+    f.start()
+    sock = open_client(f.service.port)
+    try:
+        call(sock, "events.subscribe", {"events": ["run_started"]})
+
+        with caplog.at_level("ERROR"):
+            f.bus.emit(RunStartedPayload(tab_id="tab-x"))
+
+        assert "Failed to encode push line for run_started" in caplog.text
+        assert call(sock, "events.list", rid="probe")["ok"] is True
+    finally:
+        sock.close()
+        f.stop()
+
+
 def test_diagnostic_pushed_without_subscription(fx):
     """The adapter is a diagnostic sink (ADR-0013): a Controller diagnostic
     reaches the client out-of-band of EventBus, with no subscription needed."""
@@ -211,6 +414,39 @@ def test_unsubscribe_stops_push(fx):
         # RPC and verifying its reply comes back without a push in between.
         resp = call(sock, "state.has_context", rid="probe")
         assert resp["ok"] is True
+    finally:
+        sock.close()
+
+
+def test_editor_subscription_lazily_builds_then_unsubscribe_stops_it(fx):
+    sock = open_client(fx.service.port)
+    try:
+        subscribed = call(
+            sock,
+            "editor.subscribe",
+            {"editor_id": "editor-race"},
+        )
+        assert subscribed["result"]["subscribed_editors"] == ["editor-race"]
+        payload_factory = MagicMock(return_value={"paths": []})
+
+        fx.service._on_editor_event("editor-race", "editor_changed", payload_factory)
+
+        assert recv_push(sock, "editor_changed")["payload"] == {
+            "editor_id": "editor-race",
+            "paths": [],
+        }
+        payload_factory.assert_called_once_with()
+
+        unsubscribed = call(
+            sock,
+            "editor.unsubscribe",
+            {"editor_id": "editor-race"},
+            rid="unsub-editor",
+        )
+        assert unsubscribed["result"]["subscribed_editors"] == []
+        payload_factory.reset_mock()
+        fx.service._on_editor_event("editor-race", "editor_changed", payload_factory)
+        payload_factory.assert_not_called()
     finally:
         sock.close()
 

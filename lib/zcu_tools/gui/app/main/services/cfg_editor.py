@@ -43,7 +43,7 @@ from __future__ import annotations
 import itertools
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -81,10 +81,12 @@ logger = logging.getLogger(__name__)
 
 _ITEM_KINDS = ("module", "waveform")
 
-# Listener for per-session push notifications: (editor_id, event_name, payload).
-# event_name ∈ {"editor_changed", "editor_closed"}. Injected by the remote
-# layer; the service stays ignorant of transport.
-ChangeListener = Callable[[str, str, dict], None]
+# Listener for per-session push notifications: (editor_id, event_name,
+# payload_factory).  The remote layer decides whether a matching subscriber
+# exists before materializing the payload; this service stays ignorant of
+# transport and subscription state.
+ChangePayloadFactory = Callable[[], Mapping[str, object]]
+ChangeListener = Callable[[str, str, ChangePayloadFactory], None]
 
 # Max concurrent *headless* sessions before the oldest is evicted (orphan
 # protection for agents that open without commit/discard while connected).
@@ -258,8 +260,10 @@ class CfgEditorService:
     def set_change_listener(self, listener: ChangeListener | None) -> None:
         """Inject the per-session push listener (remote layer wires this).
 
-        The listener receives ``(editor_id, event_name, payload)`` on the Qt
-        main thread (where ``on_change`` fires); it must not block.
+        The listener receives ``(editor_id, event_name, payload_factory)`` on
+        the Qt main thread (where ``on_change`` fires); it must not block.  The
+        factory also runs on that thread, but only when transport has a matching
+        live subscriber.
         """
         self._listener = listener
 
@@ -438,7 +442,7 @@ class CfgEditorService:
     def _attach_change_stream(self, session: CfgEditorSession) -> None:
         """Bind a root ``on_change`` callback that pushes ``editor_changed``.
 
-        Fires on any descendant edit (root on_change bubbles). The payload
+        Fires on any descendant edit (root on_change bubbles). The lazy payload
         carries the full current path list (root on_change does not say which
         path changed); subtree-only optimisation can come later.
 
@@ -455,17 +459,22 @@ class CfgEditorService:
             self._emit(
                 editor_id,
                 "editor_changed",
-                {"paths": session.current_paths()},
+                lambda: {"paths": session.current_paths()},
             )
 
         session.change_cb = _on_change
         session.draft.on_change.connect(_on_change)
 
-    def _emit(self, editor_id: str, event_name: str, payload: dict) -> None:
+    def _emit(
+        self,
+        editor_id: str,
+        event_name: str,
+        payload_factory: ChangePayloadFactory,
+    ) -> None:
         if self._listener is None:
             return
         try:
-            self._listener(editor_id, event_name, payload)
+            self._listener(editor_id, event_name, payload_factory)
         except Exception:  # pragma: no cover — listener must not break the edit
             logger.exception("cfg-editor change listener raised for %s", editor_id)
 
@@ -484,7 +493,7 @@ class CfgEditorService:
         # version. Done whether or not we tear the root down — the session is gone.
         self._version_drop(editor_id)
         # Notify subscribers the session is gone (after state is consistent).
-        self._emit(editor_id, "editor_closed", {"reason": reason})
+        self._emit(editor_id, "editor_closed", lambda: {"reason": reason})
 
     def _evict_excess_gc(self) -> None:
         gc_sessions = [(eid, s) for eid, s in self._editors.items() if s.gc]

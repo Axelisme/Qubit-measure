@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — event fact/reaction lifecycle coverage
+**Last updated:** 2026-07-11 — subscriber-aware lazy push coverage
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -261,6 +261,12 @@ twotone `ro_optimize` adapter tests 覆蓋 pulse-readout-only spec、GUI analyze
 schema fields：no-snapshot md-only、current result 與 MetaDict 合併、缺值 skip。
 
 ### GUI remote/control tests
+
+`tests/gui/remote/test_lazy_broadcast.py`以barrier鎖定two-phase recipient
+selection：零matching recipient不build、多client只build一次、unsubscribe/disconnect送前重驗、
+late subscribe不補收舊event，以及slow-client drop budget不阻塞healthy client或改變per-client order。
+remote EventBus與cfg-editor focused tests另鎖serializer/current-path/encode lazy cost、failure logging、
+`editor_closed` delivery cleanup；diagnostic測試確認fault channel仍不受subscription gate影響。
 
 `tests/gui/app/main/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
 完整call sequence、zero-reaction local edits與lazy單次snapshot；service與真實UI測試覆蓋

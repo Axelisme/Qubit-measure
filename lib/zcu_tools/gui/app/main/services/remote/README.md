@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — internal event facts, stable wire envelope
+**Last updated:** 2026-07-11 — subscriber-aware lazy push
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -80,9 +80,20 @@ Qt widgets.
 Event push is still available on the wire for GUI/internal consumers. Event
 payloads use requery hints for complex objects; live Python objects never cross
 the wire.
+Event serializers and NDJSON encoding run only when the endpoint finds a matching
+live subscriber. Recipient selection is two-phase: payload construction stays on
+the Qt main thread and outside the endpoint registry lock, then subscribe state
+and link liveness are revalidated immediately before enqueue. One event is built
+once for any number of matching clients; unsubscribe/disconnect completed first
+cannot receive a late push.
 Internal tab interaction/content payloads include closed domain facts used by the
 Qt reaction matrix. Their serializers deliberately omit those facts and preserve
 the existing event names and `{tab_id, requery}` shape.
+
+Cfg-editor change producers pass a payload factory rather than transport state.
+Editor versions still bump on every edit; `current_paths()` is materialized once
+only when an `editor_id` subscriber exists. `editor_closed` removes a client's
+subscription only after its close push is accepted by that client's queue.
 
 Diagnostics are separate from EventBus. The controller pushes diagnostics to the
 remote adapter sink, which broadcasts diagnostic payloads to clients regardless
@@ -101,7 +112,7 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 48` and `GUI_VERSION = 62`.
+Current measure-gui values are `WIRE_VERSION = 48` and `GUI_VERSION = 63`.
 `MCP_VERSION` is defined in `zcu_tools.mcp.measure.server`.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a

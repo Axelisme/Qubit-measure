@@ -11,8 +11,8 @@ owns only how bytes enter and leave the socket, never what a request *means*:
   - request parsing (``decode_line`` + ``parse_request``) and the built-in
     ``wire.version`` / ``auth`` handshakes (the only two methods the endpoint
     understands — both need only injected constants + the configured token);
-  - reply encoding (:meth:`reply_ok` / :meth:`reply_error`) and the lock-safe
-    push fan-out primitive (:meth:`broadcast`);
+  - reply encoding (:meth:`reply_ok` / :meth:`reply_error`) and lock-safe eager
+    / lazy push fan-out primitives (:meth:`broadcast` / :meth:`broadcast_lazy`);
   - the :class:`MainThreadDispatcher` Qt-main-thread marshal primitive (a reusable
     QObject each app composes into its own ``_dispatch_on_main``).
 
@@ -46,7 +46,7 @@ import socket
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from qtpy.QtCore import QObject, Qt, Signal  # type: ignore[attr-defined]
 
@@ -70,6 +70,8 @@ _OUTBOUND_QUEUE_MAX = 256
 _QUEUE_DROP_BUDGET = 8
 
 _SHUTDOWN_SENTINEL: bytes = b""
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -387,6 +389,19 @@ class NdjsonRpcEndpoint:
         with self._clients_lock:
             return bool(self._clients)
 
+    def client_state_transaction(
+        self, link: ClientLink, operation: Callable[[], _T]
+    ) -> _T:
+        """Run one app-owned per-client state operation under the registry lock.
+
+        The endpoint does not inspect ``link.app_ctx``.  Routers use this narrow
+        transaction to linearize subscription mutation/listing with lazy push
+        recipient selection.  ``operation`` must be non-blocking and must not
+        call back into the endpoint.
+        """
+        with self._clients_lock:
+            return operation()
+
     # ------------------------------------------------------------------
     # Outbound: reply (to one link) + broadcast (push fan-out)
     # ------------------------------------------------------------------
@@ -427,18 +442,63 @@ class NdjsonRpcEndpoint:
         originates from a main-thread event-bus callback / diagnostic fan-out).
         Reads ``_clients`` under the lock; ``_enqueue`` is thread-safe.
         """
-        with self._clients_lock:
-            links = list(self._clients.values())
-        for link in links:
-            if predicate(link):
-                self._enqueue(link, line, is_push=True)
+        self.broadcast_lazy(lambda: line, predicate)
 
-    def _enqueue(self, link: ClientLink, line: bytes, *, is_push: bool) -> None:
-        if link.closing:
+    def broadcast_lazy(
+        self,
+        line_factory: Callable[[], bytes | None],
+        predicate: Callable[[ClientLink], bool],
+        *,
+        on_delivered: Callable[[ClientLink], None] | None = None,
+    ) -> None:
+        """Build one push line only when at least one live recipient needs it.
+
+        Recipient selection is a two-phase transaction.  The first phase takes
+        a registry-order snapshot of matching, non-closing links.  The caller's
+        factory then runs outside ``_clients_lock`` (and therefore stays on the
+        caller's thread).  The final phase revalidates the original recipients
+        and enqueues under the same lock used by subscription mutation.  A
+        subscribe after the first phase does not receive the old event; an
+        unsubscribe or disconnect completed before final delivery receives no
+        late push.
+
+        ``predicate`` and ``on_delivered`` are app-owned O(1) state operations.
+        They must not block or call back into the endpoint.  ``on_delivered`` is
+        called only after the line was actually accepted by that link's queue.
+        """
+        with self._clients_lock:
+            candidates = [
+                (sock, link)
+                for sock, link in self._clients.items()
+                if not link.closing and predicate(link)
+            ]
+        if not candidates:
             return
+
+        line = line_factory()
+        if line is None:
+            return
+
+        with self._clients_lock:
+            for sock, link in candidates:
+                if (
+                    self._clients.get(sock) is not link
+                    or link.closing
+                    or not predicate(link)
+                ):
+                    continue
+                if not self._enqueue(link, line, is_push=True):
+                    continue
+                if on_delivered is not None:
+                    on_delivered(link)
+
+    def _enqueue(self, link: ClientLink, line: bytes, *, is_push: bool) -> bool:
+        if link.closing:
+            return False
         try:
             link.outbound.put_nowait(line)
             link.consecutive_drops = 0
+            return True
         except queue.Full:
             link.consecutive_drops += 1
             logger.warning(
@@ -460,6 +520,7 @@ class NdjsonRpcEndpoint:
                     link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
                 except queue.Full:
                     pass
+            return False
 
     # ------------------------------------------------------------------
     # Server loop

@@ -16,4 +16,4 @@ from __future__ import annotations
 
 WIRE_VERSION = 3  # v3: fit.result dropped `step` (prediction always covers full axis)
 
-GUI_VERSION = 3
+GUI_VERSION = 4

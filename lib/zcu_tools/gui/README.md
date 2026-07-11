@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-11（shared expected-error projection）
+**Last updated:** 2026-07-11（subscriber-aware lazy remote push）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -179,6 +179,11 @@ subscriber raising is logged without aborting later subscribers.
 Remote bridges subscribe their EventBus push callbacks before opening the socket;
 startup subscription failure is fatal and rolls back partial subscriptions, while
 runtime subscriber exceptions remain isolated by the EventBus.
+Remote payload materialization and encoding are lazy: the shared endpoint first
+selects matching live subscribers, calls the main-thread factory once outside its
+registry lock, then revalidates before using the existing per-client queues. Zero
+matches perform no serializer/encode work; multiple matches share one encoded
+line while preserving independent ordering, backpressure, and drop isolation.
 
 ## Logging (`logging_setup.py`)
 

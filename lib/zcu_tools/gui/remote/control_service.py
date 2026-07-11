@@ -14,8 +14,8 @@ scaffolding* that all three apps share:
     :class:`MainThreadDispatcher`, timeout-bounded), composed with the
     ``off_main_thread`` blocking branch and two policy seams (``_guard`` before
     the handler, ``_after_success`` after) — both no-ops by default;
-  - EventBus push: subscribe one callback per serialised event key, serialize,
-    and broadcast to subscribed clients.
+  - EventBus push: subscribe one callback per serialised event key and lazily
+    serialize/encode once only when at least one matching subscriber is live.
 
 Each app supplies its domain via ``__init__`` (the method registry, the event
 serializers + their wire-name accessor, the wire/gui versions, the server name)
@@ -286,6 +286,9 @@ class RemoteControlServiceBase:
             self._handle_unsubscribe(link, req.id, req.params)
             return
         if req.method == "events.list":
+            subscribed = self._endpoint.client_state_transaction(
+                link, lambda: sorted(_ctx(link).subscribed)
+            )
             self._endpoint.reply_ok(
                 link,
                 rid=req.id,
@@ -293,7 +296,7 @@ class RemoteControlServiceBase:
                     "events": sorted(
                         self._wire_event_name(k) for k in self._event_serializers
                     ),
-                    "subscribed": sorted(_ctx(link).subscribed),
+                    "subscribed": subscribed,
                 },
             )
             return
@@ -339,13 +342,16 @@ class RemoteControlServiceBase:
                 raise RemoteError(
                     ErrorCode.INVALID_PARAMS, f"unknown event name: {ev!r}"
                 )
-        ctx = _ctx(link)
-        for ev in events:
-            assert isinstance(ev, str)
-            ctx.subscribed.add(ev)
-        self._endpoint.reply_ok(
-            link, rid=rid, result={"subscribed": sorted(ctx.subscribed)}
-        )
+
+        def _subscribe() -> list[str]:
+            ctx = _ctx(link)
+            for ev in events:
+                assert isinstance(ev, str)
+                ctx.subscribed.add(ev)
+            return sorted(ctx.subscribed)
+
+        subscribed = self._endpoint.client_state_transaction(link, _subscribe)
+        self._endpoint.reply_ok(link, rid=rid, result={"subscribed": subscribed})
 
     def _handle_unsubscribe(self, link: ClientLink, rid: str, params) -> None:
         events = params.get("events")
@@ -353,13 +359,16 @@ class RemoteControlServiceBase:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, "'events' must be a list of event names"
             )
-        ctx = _ctx(link)
-        for ev in events:
-            if isinstance(ev, str):
-                ctx.subscribed.discard(ev)
-        self._endpoint.reply_ok(
-            link, rid=rid, result={"subscribed": sorted(ctx.subscribed)}
-        )
+
+        def _unsubscribe() -> list[str]:
+            ctx = _ctx(link)
+            for ev in events:
+                if isinstance(ev, str):
+                    ctx.subscribed.discard(ev)
+            return sorted(ctx.subscribed)
+
+        subscribed = self._endpoint.client_state_transaction(link, _unsubscribe)
+        self._endpoint.reply_ok(link, rid=rid, result={"subscribed": subscribed})
 
     # ------------------------------------------------------------------
     # Dispatch onto the Qt main thread (marshal + off-main + policy seams)
@@ -471,23 +480,26 @@ class RemoteControlServiceBase:
         wire_name = self._wire_event_name(key)
 
         def _on_event(payload: Any) -> None:
-            # Runs on the Qt main thread. Serialize and push to subscribers; this
-            # is the agent's notification face ("what changed"). Resource version
-            # bookkeeping happens at the mutation site, not here.
-            try:
-                wire_payload = serializer(payload)
-            except Exception:  # pragma: no cover — serializer must not raise
-                logger.exception("Event serializer for %s raised", wire_name)
-                return
-            if wire_payload is None:
-                return
-            try:
-                line = encode_line({"event": wire_name, "payload": wire_payload})
-            except Exception:
-                logger.exception("Failed to encode push line for %s", wire_name)
-                return
-            self._endpoint.broadcast(
-                line, predicate=lambda link: wire_name in _ctx(link).subscribed
+            # Runs on the Qt main thread. The endpoint first selects recipients,
+            # then calls this factory on this same thread and revalidates before
+            # enqueue. Resource versions still belong to mutation sites.
+            def _make_line() -> bytes | None:
+                try:
+                    wire_payload = serializer(payload)
+                except Exception:  # pragma: no cover — serializer must not raise
+                    logger.exception("Event serializer for %s raised", wire_name)
+                    return None
+                if wire_payload is None:
+                    return None
+                try:
+                    return encode_line({"event": wire_name, "payload": wire_payload})
+                except Exception:
+                    logger.exception("Failed to encode push line for %s", wire_name)
+                    return None
+
+            self._endpoint.broadcast_lazy(
+                _make_line,
+                predicate=lambda link: wire_name in _ctx(link).subscribed,
             )
 
         return _on_event

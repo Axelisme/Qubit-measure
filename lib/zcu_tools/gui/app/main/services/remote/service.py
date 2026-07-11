@@ -33,7 +33,7 @@ predictor commands through ``adapter.predictor_control``, and View-side surfaces
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.remote.control_service import (
@@ -211,18 +211,23 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, "'editor_id' must be a non-empty string"
             )
+
         # No existence check: subscription is a pure per-connection filter. A
         # client may subscribe before/around open; pushes only flow for live
         # sessions, and editor_closed cleans the set.
-        ctx = _ctx(link)
-        if subscribe:
-            ctx.subscribed_editors.add(editor_id)
-        else:
-            ctx.subscribed_editors.discard(editor_id)
+        def _update() -> list[str]:
+            ctx = _ctx(link)
+            if subscribe:
+                ctx.subscribed_editors.add(editor_id)
+            else:
+                ctx.subscribed_editors.discard(editor_id)
+            return sorted(ctx.subscribed_editors)
+
+        subscribed_editors = self._endpoint.client_state_transaction(link, _update)
         self._endpoint.reply_ok(
             link,
             rid=rid,
-            result={"subscribed_editors": sorted(ctx.subscribed_editors)},
+            result={"subscribed_editors": subscribed_editors},
         )
 
     # ------------------------------------------------------------------
@@ -382,7 +387,12 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     def _unwire_editor_change_listener(self) -> None:
         self.ctrl.set_cfg_editor_change_listener(None)
 
-    def _on_editor_event(self, editor_id: str, event_name: str, payload: dict) -> None:
+    def _on_editor_event(
+        self,
+        editor_id: str,
+        event_name: str,
+        payload_factory: Callable[[], Mapping[str, object]],
+    ) -> None:
         """Push a per-editor notification. Runs on the Qt main thread.
 
         ``event_name`` ∈ {editor_changed, editor_closed}. Only clients that
@@ -390,27 +400,31 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         id from every client's subscription set. (The editor's resource version
         is bumped at the edit site, not here.)
         """
-        body = dict(payload)
-        body["editor_id"] = editor_id
-        try:
-            line = encode_line({"event": event_name, "payload": body})
-        except Exception:
-            logger.exception(
-                "failed to encode editor push %s/%s", editor_id, event_name
-            )
-            return
         closing = event_name == "editor_closed"
 
         def _predicate(link: ClientLink) -> bool:
-            ctx = _ctx(link)
-            if editor_id not in ctx.subscribed_editors:
-                return False
-            # On editor_closed, drop the id from this client's set as we push.
-            if closing:
-                ctx.subscribed_editors.discard(editor_id)
-            return True
+            return editor_id in _ctx(link).subscribed_editors
 
-        self._endpoint.broadcast(line, predicate=_predicate)
+        def _make_line() -> bytes | None:
+            try:
+                body = dict(payload_factory())
+                body["editor_id"] = editor_id
+                return encode_line({"event": event_name, "payload": body})
+            except Exception:
+                logger.exception(
+                    "failed to build editor push %s/%s", editor_id, event_name
+                )
+                return None
+
+        def _on_delivered(link: ClientLink) -> None:
+            if closing:
+                _ctx(link).subscribed_editors.discard(editor_id)
+
+        self._endpoint.broadcast_lazy(
+            _make_line,
+            predicate=_predicate,
+            on_delivered=_on_delivered,
+        )
 
 
 __all__ = ["ControlOptions", "RemoteControlAdapter"]

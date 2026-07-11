@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.meta_tool import ArbWaveformData, ArbWaveformInfo
 
+    from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
@@ -1093,7 +1094,7 @@ class Controller(SessionControllerMixin):
     def editor_id_for_owner(self, owner_key: str) -> str | None:
         return self._cfg_editor_svc.editor_id_for_owner(owner_key)
 
-    def set_cfg_editor_change_listener(self, listener: Any) -> None:
+    def set_cfg_editor_change_listener(self, listener: ChangeListener | None) -> None:
         """Wire the per-session push listener (remote layer injects this)."""
         self._cfg_editor_svc.set_change_listener(listener)
 

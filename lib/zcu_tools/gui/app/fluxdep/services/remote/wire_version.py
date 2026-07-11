@@ -24,4 +24,4 @@ WIRE_VERSION = 1
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 1
+GUI_VERSION = 2

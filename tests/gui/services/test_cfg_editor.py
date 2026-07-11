@@ -419,7 +419,7 @@ def test_lru_does_not_count_gc_false_sessions(service):
 def test_change_stream_emits_editor_changed(service):
     events = []
     service.set_change_listener(
-        lambda eid, ev, payload: events.append((eid, ev, payload))
+        lambda eid, ev, payload_factory: events.append((eid, ev, payload_factory()))
     )
 
     editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
@@ -434,7 +434,7 @@ def test_change_stream_emits_editor_changed(service):
 def test_change_stream_emits_editor_closed_with_reason(service):
     events = []
     service.set_change_listener(
-        lambda eid, ev, payload: events.append((eid, ev, payload))
+        lambda eid, ev, payload_factory: events.append((eid, ev, payload_factory()))
     )
 
     # seeded (UI-owned) teardown → tab_closed (default reason)
@@ -466,7 +466,7 @@ def test_closed_draft_rejects_residual_field_edits(service):
     """After teardown, cached fields fail fast and cannot re-emit."""
     events = []
     service.set_change_listener(
-        lambda eid, ev, payload: events.append((eid, ev, payload))
+        lambda eid, ev, payload_factory: events.append((eid, ev, payload_factory()))
     )
     editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     draft = service.get_draft(editor_id)
@@ -476,6 +476,27 @@ def test_closed_draft_rejects_residual_field_edits(service):
     with pytest.raises(RuntimeError, match="closed"):
         field.set_value(99.0)
     assert events == []
+
+
+def test_change_stream_defers_current_paths_but_always_bumps_version(service, ctrl):
+    factories = []
+    service.set_change_listener(
+        lambda _eid, _ev, payload_factory: factories.append(payload_factory)
+    )
+    editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
+    session = service._require(editor_id)
+    current_paths = MagicMock(wraps=session.current_paths)
+    session.current_paths = current_paths
+    ctrl.bump_editor_version.reset_mock()
+
+    service.set_field(editor_id, "freq", 5000.0)
+
+    ctrl.bump_editor_version.assert_called_once_with(editor_id)
+    current_paths.assert_not_called()
+    assert len(factories) == 1
+    payload = factories[0]()
+    assert "freq" in {entry["path"] for entry in payload["paths"]}
+    current_paths.assert_called_once_with()
 
 
 def _hook_count(draft):
