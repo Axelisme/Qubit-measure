@@ -16,6 +16,7 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleWriteback,
     WaveformWriteback,
 )
+from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
 from zcu_tools.gui.app.main.services.guard import WritebackPermit
 from zcu_tools.gui.app.main.services.writeback import WritebackService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
@@ -88,7 +89,7 @@ def _svc(
     that reproduces ContextService's observable effects."""
     bus = bus or EventBus()
     return WritebackService(
-        state, bus, cfg_editor or MagicMock(), _make_write_port(state, bus)
+        state, cfg_editor or MagicMock(), _make_write_port(state, bus)
     )
 
 
@@ -278,7 +279,9 @@ def test_apply_module_writeback_registers_and_emits():
     state = _make_state_with_tab()
     bus = EventBus()
     received: list = []
+    tab_content: list[TabContentChangedPayload] = []
     bus.subscribe(MlChangedPayload, lambda p: received.append(p))
+    bus.subscribe(TabContentChangedPayload, tab_content.append)
     svc = _svc(state, bus)
     before = state.version.get("context")
 
@@ -292,6 +295,7 @@ def test_apply_module_writeback_registers_and_emits():
     assert applied["written"]["ml_modules"] == ["qub"]
     assert state.version.get("context") == before + 1
     assert len(received) == 1
+    assert tab_content == []
 
 
 def test_apply_waveform_writeback_registers():
@@ -395,7 +399,7 @@ def test_set_item_field_unknown_id_raises():
 def test_teardown_tab_items_tears_down_editor_models():
     state = _make_state_with_tab()
     cfg_editor = MagicMock()
-    svc = WritebackService(state, EventBus(), cfg_editor, MagicMock())
+    svc = WritebackService(state, cfg_editor, MagicMock())
 
     item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
     item.session_id = "ml-1"

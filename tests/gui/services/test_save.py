@@ -4,6 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.figure_export import SAVE_DPI, SAVE_FIGSIZE
 from zcu_tools.gui.app.main.services.guard import SavePermit
 from zcu_tools.gui.app.main.services.save import SaveResultOutcome, SaveService
@@ -43,17 +47,28 @@ def _make_service() -> tuple[SaveService, State, MagicMock]:
     return svc, state, bg
 
 
+def _record_facts(svc: SaveService) -> list[TabInteractionFact]:
+    facts: list[TabInteractionFact] = []
+    svc._bus.subscribe(  # type: ignore[attr-defined]
+        TabInteractionChangedPayload,
+        lambda payload: facts.append(payload.fact),
+    )
+    return facts
+
+
 def test_start_save_data_creates_parent_at_command_boundary(
     qapp,
     tmp_path: Path,  # noqa: ARG001
 ) -> None:
     svc, _, bg = _make_service()
+    facts = _record_facts(svc)
     data_path = tmp_path / "data" / "measurement"
 
     svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
 
     assert data_path.parent.is_dir()
     bg.submit.assert_called_once()
+    assert facts == [TabInteractionFact.SAVE_STARTED]
 
 
 def test_start_save_data_resolves_path_to_actual_hdf5(
@@ -145,6 +160,7 @@ def test_start_save_result_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
 
 def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
     svc, _, _ = _make_service()
+    facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
 
     finished: list = []
@@ -156,6 +172,10 @@ def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
 
     assert len(finished) == 1
     assert finished[0][0] == "tab"
+    assert facts == [
+        TabInteractionFact.SAVE_STARTED,
+        TabInteractionFact.SAVE_SUCCEEDED,
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +233,7 @@ def test_on_save_finished_with_pending_image_error_propagates(
 
 def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
     svc, _, _ = _make_service()
+    facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
 
     failed: list = []
@@ -225,6 +246,10 @@ def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
     assert len(failed) == 1
     assert failed[0][0] == "tab"
     assert failed[0][1] is error
+    assert facts == [
+        TabInteractionFact.SAVE_STARTED,
+        TabInteractionFact.SAVE_FAILED,
+    ]
 
 
 def test_on_save_failed_with_pending_image_emits_save_result_finished(

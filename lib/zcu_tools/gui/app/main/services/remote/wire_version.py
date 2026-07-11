@@ -82,4 +82,4 @@ WIRE_VERSION = 48
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 61  # result-scope discovery setup flow and path-based migration
+GUI_VERSION = 62  # domain event facts and scoped main-window reactions

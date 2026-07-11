@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
@@ -103,4 +106,9 @@ class TabControlFacet:
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
         self._tab.update_tab_save_path_overrides(tab_id, data_path, image_path)
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            )
+        )

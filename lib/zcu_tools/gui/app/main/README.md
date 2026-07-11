@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — shared expected-error projection
+**Last updated:** 2026-07-11 — domain event facts and scoped View reactions
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -84,6 +84,12 @@ while `MainWindowEventCoordinator` owns EventBus subscription and payload routin
 The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
 which refresh sequence a payload requires, but the window keeps widget ownership
 and concrete rendering methods.
+Tab interaction/content payloads carry mandatory closed domain facts. Producers
+describe lifecycle outcomes or committed resources; the coordinator owns the
+ordered reaction matrix and fetches one snapshot only when a reaction needs it.
+Local analyze/post/save-path edits keep synchronous State commit timing but have
+no Qt reaction. Failed/cancelled/start-rejected analysis restores retained
+primary then post figures; successful terminals wait for the content-commit fact.
 `MainWindowToolbar` owns the top toolbar widgets and slash-grouped new-tab menu;
 it reports selected actions back through a narrow `MainWindowToolbarHost` surface
 instead of reaching into `Controller` directly.
@@ -271,10 +277,11 @@ Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib
 figures attach to the active `FigureContainer` through routing context; refresh,
 activate, and close resolve through the figure registry. Figure export uses fixed
 logical sizes so saved images and agent screenshots do not depend on window size.
-Analyze interaction refresh keeps writeback controls and the current
-analyze/post-analyze figure in sync once the corresponding result exists; start
-events still leave plot teardown to the render host so stale figures do not
-reappear while a new analysis is running.
+Analysis start leaves plot teardown to the render host. Terminal domain facts
+restore retained figures only after failure, cancellation, or start rejection;
+successful content commits attach new figures once. Run failure keeps the
+placeholder because run start invalidates prior results, while loaded-result
+commit explicitly clears canvases when the new State has no figure.
 
 ## Remote / MCP Boundary
 

@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.gui.app.main.adapter import NoAnalyzeParams
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.services.guard import LoadPermit
 from zcu_tools.gui.app.main.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
@@ -41,7 +40,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
     emit = MagicMock()
     bus.emit = emit  # type: ignore[method-assign]
     writeback = MagicMock()
-    return LoadService(state, bus, writeback), emit, writeback
+    return LoadService(state, writeback), emit, writeback
 
 
 def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
@@ -78,7 +77,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
     assert tab.writeback_items == []
     assert tab.applied_session_ids == set()
     writeback.teardown_tab_items.assert_called_once_with(tab_id)
-    emit.assert_called_once_with(TabInteractionChangedPayload(tab_id=tab_id))
+    emit.assert_not_called()
     assert outcome.result_type == type(loaded).__name__
     assert outcome.has_cfg_snapshot is True
     assert outcome.has_analyze_params is False

@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, AnalyzeRequest
-from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
+from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import InteractiveHost, InteractiveSession
@@ -109,7 +109,12 @@ class RunAnalyzeControlFacet:
         if tab.adapter.capabilities.analysis is not AnalysisMode.NONE:
             self._tab.initialize_tab_analyze_params(tab_id)
             has_analyze_params = True
-        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabContentChangedPayload(
+                tab_id=tab_id,
+                fact=TabContentFact.LOADED_RESULT_COMMITTED,
+            )
+        )
         return replace(outcome, has_analyze_params=has_analyze_params)
 
     def cancel_run(self) -> bool:

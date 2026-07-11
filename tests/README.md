@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — shared expected-error dispatch coverage
+**Last updated:** 2026-07-11 — event fact/reaction lifecycle coverage
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -261,6 +261,11 @@ twotone `ro_optimize` adapter tests 覆蓋 pulse-readout-only spec、GUI analyze
 schema fields：no-snapshot md-only、current result 與 MetaDict 合併、缺值 skip。
 
 ### GUI remote/control tests
+
+`tests/gui/app/main/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
+完整call sequence、zero-reaction local edits與lazy單次snapshot；service與真實UI測試覆蓋
+run去重、analysis start-rejected/failure/cancel retained-figure restore、load stale-canvas clear、
+same-class form hydrate/cache，以及ModuleLibrary變更透過attached cfg draft更新run gate。
 
 `tests/gui/test_expected_error.py`鎖定closed category、legacy RuntimeError/ValueError ancestry與
 explicit concrete opt-in/exclusion；`tests/gui/services/remote/test_expected_error_wire_compat.py`

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
-from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
+from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
 from zcu_tools.gui.app.main.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.main.services.run_analyze_control import RunAnalyzeControlFacet
 
@@ -242,6 +242,7 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
         call("bus", "emit", "TabContentChangedPayload"),
     ]
     assert isinstance(bus.payloads[0], TabContentChangedPayload)
+    assert bus.payloads[0].fact is TabContentFact.LOADED_RESULT_COMMITTED
 
 
 def test_fit_analyze_uses_worker_service_and_live_container() -> None:

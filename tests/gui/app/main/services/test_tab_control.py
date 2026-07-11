@@ -6,7 +6,10 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.services.tab_control import TabControlFacet
 
 from tests.gui._control_fakes import CallLog, call
@@ -211,3 +214,4 @@ def test_tab_control_update_save_paths_emits_interaction_changed() -> None:
     payload = bus.payloads[0]
     assert isinstance(payload, TabInteractionChangedPayload)
     assert payload.tab_id == "tab-1"
+    assert payload.fact is TabInteractionFact.SAVE_PATHS_CHANGED

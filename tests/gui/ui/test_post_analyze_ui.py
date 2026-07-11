@@ -166,7 +166,10 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
     post figure into the *shared* right-pane container (the post figure draws into
     the same ``_figure_container`` run/analyze use)."""
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
+    from zcu_tools.gui.app.main.events.tab import (
+        TabContentChangedPayload,
+        TabContentFact,
+    )
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _mock_ctrl()
@@ -194,7 +197,7 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
         ),
     )
 
-    bus.emit(TabContentChangedPayload(tab_id="tab-1"))
+    bus.emit(TabContentChangedPayload("tab-1", TabContentFact.POST_ANALYSIS_COMMITTED))
 
     assert tab_w.has_post_analyze_params() is True
     # The post figure was attached to the shared primary container, not a private

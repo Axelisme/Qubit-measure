@@ -23,11 +23,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from qtpy.QtCore import QObject  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.session.operation_handles import (
     CancelHook,
     OperationHandles,
@@ -59,6 +62,11 @@ class _StagedAnalyzeService(QObject):
     FIT/post analyze delegate bg submission to OperationRunner (_submit_with_runner).
     Interactive analyze still uses _open_token + _release directly (no runner).
     """
+
+    STARTED_FACT: ClassVar[TabInteractionFact]
+    SUCCEEDED_FACT: ClassVar[TabInteractionFact]
+    FAILED_FACT: ClassVar[TabInteractionFact]
+    START_REJECTED_FACT: ClassVar[TabInteractionFact]
 
     def __init__(
         self,
@@ -123,7 +131,9 @@ class _StagedAnalyzeService(QObject):
         the tab is busy for the duration so concurrent run/analyze is gated out.
         """
         self._state.set_tab_analyzing(tab_id, True)
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabInteractionChangedPayload(tab_id=tab_id, fact=self.STARTED_FACT)
+        )
 
     def _submit_with_runner(
         self,
@@ -171,7 +181,9 @@ class _StagedAnalyzeService(QObject):
             self._state.set_tab_analyzing(tab_id, False)
             # settle before signals — State visible to awaiter on wake.
             settle(OperationOutcome("finished"))
-            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+            self._bus.emit(
+                TabInteractionChangedPayload(tab_id=tab_id, fact=self.SUCCEEDED_FACT)
+            )
             self._finished_signal.emit(tab_id, result)
 
         def _fail(error: Exception, settle: SettleFn) -> None:
@@ -181,7 +193,9 @@ class _StagedAnalyzeService(QObject):
             self._state.set_tab_analyzing(tab_id, False)
             # settle before signals — State visible to awaiter on wake.
             settle(OperationOutcome("failed", str(error)))
-            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+            self._bus.emit(
+                TabInteractionChangedPayload(tab_id=tab_id, fact=self.FAILED_FACT)
+            )
             self._failed_signal.emit(tab_id, error)
 
         spec = OperationSpec(
@@ -194,7 +208,16 @@ class _StagedAnalyzeService(QObject):
             on_terminal=on_terminal,
         )
 
-        token = self._runner.begin(spec)
+        try:
+            token = self._runner.begin(spec)
+        except Exception:
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id=tab_id,
+                    fact=self.START_REJECTED_FACT,
+                )
+            )
+            raise
         # runner.begin mints and registers the token internally; we record it in
         # _active_tokens so the interactive accessors cannot see it (they check
         # _interactive_tabs, not _active_tokens, but _release uses _active_tokens).

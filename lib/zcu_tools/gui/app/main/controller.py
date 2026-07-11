@@ -30,7 +30,12 @@ from .adapter import (
     InteractiveSession,
     WritebackItem,
 )
-from .events.tab import TabContentChangedPayload, TabInteractionChangedPayload
+from .events.tab import (
+    TabContentChangedPayload,
+    TabContentFact,
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from .registry import Registry
 from .role_catalog import RoleCatalog
 from .services import (
@@ -352,7 +357,12 @@ class Controller(SessionControllerMixin):
             is not AnalysisMode.NONE
         ):
             self._tab_svc.initialize_tab_analyze_params(tab_id)
-        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabContentChangedPayload(
+                tab_id=tab_id,
+                fact=TabContentFact.RUN_RESULT_COMMITTED,
+            )
+        )
 
     def _on_run_failed(self, _tab_id: str, error: Exception) -> None:
         self._notify("error", "Run failed", str(error))
@@ -364,7 +374,12 @@ class Controller(SessionControllerMixin):
         # Fast-Fail guard. The primary result is already in State (AnalyzeService).
         if self._state.get_tab(tab_id).adapter.capabilities.post_analysis:
             self._tab_svc.initialize_tab_post_analyze_params(tab_id)
-        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabContentChangedPayload(
+                tab_id=tab_id,
+                fact=TabContentFact.PRIMARY_ANALYSIS_COMMITTED,
+            )
+        )
 
     def _on_analyze_failed(self, _tab_id: str, error: Exception) -> None:
         self._notify("error", "Analyze failed", str(error))
@@ -372,7 +387,12 @@ class Controller(SessionControllerMixin):
     def _on_post_analyze_finished(self, tab_id: str, _result: object) -> None:
         # The post result + figure are already in State (PostAnalyzeService);
         # emit the content event so the View refreshes the Post sub-tab.
-        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabContentChangedPayload(
+                tab_id=tab_id,
+                fact=TabContentFact.POST_ANALYSIS_COMMITTED,
+            )
+        )
 
     def _on_post_analyze_failed(self, _tab_id: str, error: Exception) -> None:
         self._notify("error", "Post-analysis failed", str(error))
@@ -795,6 +815,12 @@ class Controller(SessionControllerMixin):
         self, tab_id: str, instance: object
     ) -> None:
         self._tab_svc.update_tab_post_analyze_param_instance(tab_id, instance)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED,
+            )
+        )
 
     def run_background(
         self, compute: Callable[[], object], on_done: Callable[[object], None]
@@ -1238,7 +1264,10 @@ class Controller(SessionControllerMixin):
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
         self._bus.emit(
-            TabInteractionChangedPayload(tab_id=tab_id),
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.ANALYZE_PARAMS_CHANGED,
+            ),
         )
 
     def update_tab_save_paths(

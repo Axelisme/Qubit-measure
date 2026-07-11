@@ -70,7 +70,6 @@ def test_writeback_service_satisfies_writeback_lifecycle_port():
 
     svc = WritebackService(
         state=_make_state(),
-        bus=EventBus(),
         cfg_editor=MagicMock(),
         write_port=MagicMock(),
     )

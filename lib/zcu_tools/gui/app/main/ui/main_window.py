@@ -244,13 +244,14 @@ class MainWindow(QMainWindow):
         # so skip before the Fast-Fail below (which guards the *analysis* adapter
         # contract: a run result must carry initialized params).
         if current.capabilities.analysis is AnalysisMode.NONE:
+            tab_w.analyze_form.sync(None)
             return
         if not current.interaction.has_run_result:
+            tab_w.analyze_form.sync(None)
             return
         if current.analyze_params is None:
             raise RuntimeError("Run result has no initialized analyze parameters")
-        tab_w.populate_analyze_params(current.analyze_params)
-        tab_w.analyze_form.populate_values(current.analyze_params)
+        tab_w.analyze_form.sync(current.analyze_params)
 
     def refresh_tab_post_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -265,11 +266,12 @@ class MainWindow(QMainWindow):
         # params are cleared (State), so there is no instance to populate — the
         # gate (update_interaction_state) disables the empty form.
         if not current.capabilities.post_analysis:
+            tab_w.post_analyze_form.sync(None)
             return
         if current.post_analyze_params is None:
+            tab_w.post_analyze_form.sync(None)
             return
-        tab_w.populate_post_analyze_params(current.post_analyze_params)
-        tab_w.post_analyze_form.populate_values(current.post_analyze_params)
+        tab_w.post_analyze_form.sync(current.post_analyze_params)
 
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -317,6 +319,12 @@ class MainWindow(QMainWindow):
             # (post) figure. On invalidation (post_figure is None) there is nothing
             # to do: the shared container already shows the primary figure.
             self.show_post_analysis_image(tab_id, post_figure)
+
+    def clear_tab_plot(self, tab_id: str) -> None:
+        """Clear stale canvases after loading content with no analysis figure."""
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is not None:
+            tab_w.reset_plot()
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)

@@ -17,12 +17,20 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
-from zcu_tools.gui.app.main.events.tab import TabAddedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabAddedPayload,
+    TabContentChangedPayload,
+    TabContentFact,
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.services.remote.events import (
     _ser_predictor_changed,
     _ser_run_finished,
     _ser_run_started,
     _ser_soc_changed,
+    _ser_tab_content_changed,
+    _ser_tab_interaction_changed,
 )
 from zcu_tools.gui.session.events import (
     MdChangedPayload,
@@ -93,6 +101,23 @@ def test_event_serializers_wire_names_locked():
         f"  Added:   {sorted(actual - _EXPECTED_WIRE_NAMES)}\n"
         f"  Removed: {sorted(_EXPECTED_WIRE_NAMES - actual)}"
     )
+
+
+@pytest.mark.parametrize("fact", list(TabInteractionFact))
+def test_interaction_fact_does_not_change_wire_payload(
+    fact: TabInteractionFact,
+) -> None:
+    assert _ser_tab_interaction_changed(
+        TabInteractionChangedPayload("tab-x", fact)
+    ) == {"tab_id": "tab-x", "requery": ["tab.snapshot"]}
+
+
+@pytest.mark.parametrize("fact", list(TabContentFact))
+def test_content_fact_does_not_change_wire_payload(fact: TabContentFact) -> None:
+    assert _ser_tab_content_changed(TabContentChangedPayload("tab-x", fact)) == {
+        "tab_id": "tab-x",
+        "requery": ["tab.snapshot"],
+    }
 
 
 # ---------------------------------------------------------------------------

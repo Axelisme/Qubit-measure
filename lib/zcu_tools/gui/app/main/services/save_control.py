@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
@@ -117,4 +120,9 @@ class SaveControlFacet:
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
         self._tab.update_tab_save_path_overrides(tab_id, data_path, image_path)
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            )
+        )

@@ -23,6 +23,36 @@ class TabEvent(str, Enum):
     TAB_INTERACTION_CHANGED = "tab_interaction_changed"
 
 
+class TabInteractionFact(str, Enum):
+    """Closed domain facts carried by the interaction event envelope."""
+
+    RUN_START_REJECTED = "run_start_rejected"
+    PRIMARY_ANALYZE_STARTED = "primary_analyze_started"
+    PRIMARY_ANALYZE_SUCCEEDED = "primary_analyze_succeeded"
+    PRIMARY_ANALYZE_FAILED = "primary_analyze_failed"
+    PRIMARY_ANALYZE_CANCELLED = "primary_analyze_cancelled"
+    PRIMARY_ANALYZE_START_REJECTED = "primary_analyze_start_rejected"
+    POST_ANALYZE_STARTED = "post_analyze_started"
+    POST_ANALYZE_SUCCEEDED = "post_analyze_succeeded"
+    POST_ANALYZE_FAILED = "post_analyze_failed"
+    POST_ANALYZE_START_REJECTED = "post_analyze_start_rejected"
+    SAVE_STARTED = "save_started"
+    SAVE_SUCCEEDED = "save_succeeded"
+    SAVE_FAILED = "save_failed"
+    ANALYZE_PARAMS_CHANGED = "analyze_params_changed"
+    POST_ANALYZE_PARAMS_CHANGED = "post_analyze_params_changed"
+    SAVE_PATHS_CHANGED = "save_paths_changed"
+
+
+class TabContentFact(str, Enum):
+    """Closed facts for committed tab-owned result content."""
+
+    RUN_RESULT_COMMITTED = "run_result_committed"
+    LOADED_RESULT_COMMITTED = "loaded_result_committed"
+    PRIMARY_ANALYSIS_COMMITTED = "primary_analysis_committed"
+    POST_ANALYSIS_COMMITTED = "post_analysis_committed"
+
+
 @dataclass(frozen=True)
 class _TabPayload(BasePayload):
     """Base for all tab-domain EventBus payloads. Subclasses set ``EVENT``."""
@@ -53,6 +83,7 @@ class TabContentChangedPayload(_TabPayload):
 
     EVENT: ClassVar[TabEvent] = TabEvent.TAB_CONTENT_CHANGED
     tab_id: str
+    fact: TabContentFact
 
 
 @dataclass(frozen=True)
@@ -61,3 +92,4 @@ class TabInteractionChangedPayload(_TabPayload):
 
     EVENT: ClassVar[TabEvent] = TabEvent.TAB_INTERACTION_CHANGED
     tab_id: str
+    fact: TabInteractionFact

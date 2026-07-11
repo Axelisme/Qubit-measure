@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from dataclasses import dataclass
 from typing import Any, get_type_hints
 
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
@@ -20,12 +21,23 @@ from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from ..adapter.analyze_params import _resolve_field_info, reconstruct_params
 
 
+@dataclass(frozen=True)
+class _FieldBinding:
+    name: str
+    bare_type: type
+    choices: list[Any] | None
+    label: str
+    decimals: int | None
+    optional: bool
+
+
 class AnalyzeFormWidget(QWidget):
     params_changed: Signal = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._params_cls: type[Any] | None = None
+        self._bindings: tuple[_FieldBinding, ...] = ()
         self._widgets: dict[str, QWidget] = {}
         self._hydrating = False
 
@@ -41,46 +53,77 @@ class AnalyzeFormWidget(QWidget):
 
     def populate(self, params_instance: object) -> None:
         """Build form from a dataclass instance."""
+        self.sync(params_instance)
+
+    def sync(self, params_instance: object | None) -> None:
+        """Clear, rebuild, or hydrate the form to match ``params_instance``."""
+        if params_instance is None:
+            self.clear()
+            return
         if not dataclasses.is_dataclass(params_instance) or isinstance(
             params_instance, type
         ):
-            raise TypeError("AnalyzeFormWidget.populate expects a dataclass instance")
+            raise TypeError("AnalyzeFormWidget.sync expects a dataclass instance")
 
-        while self._form.rowCount():
-            self._form.removeRow(0)
-        self._widgets.clear()
+        if type(params_instance) is self._params_cls:
+            self.populate_values(params_instance)
+            return
+
+        self.clear()
         self._params_cls = type(params_instance)
-
         hints = get_type_hints(self._params_cls, include_extras=True)
+        bindings: list[_FieldBinding] = []
         for field in dataclasses.fields(params_instance):
             bare_type, choices, label, decimals, optional = _resolve_field_info(
                 field, hints
             )
-            initial = getattr(params_instance, field.name)
-            widget = make_value_widget(
-                bare_type,
-                initial,
-                choices,
-                editable=True,
-                decimals=decimals,
-                optional=optional,
+            bindings.append(
+                _FieldBinding(
+                    name=field.name,
+                    bare_type=bare_type,
+                    choices=choices,
+                    label=label,
+                    decimals=decimals,
+                    optional=optional,
+                )
             )
-            self._form.addRow(label + ":", widget)
-            self._widgets[field.name] = widget
+        self._bindings = tuple(bindings)
+
+        for binding in self._bindings:
+            initial = getattr(params_instance, binding.name)
+            widget = make_value_widget(
+                binding.bare_type,
+                initial,
+                binding.choices,
+                editable=True,
+                decimals=binding.decimals,
+                optional=binding.optional,
+            )
+            self._form.addRow(binding.label + ":", widget)
+            self._widgets[binding.name] = widget
             self._connect_widget(widget)
+
+    def clear(self) -> None:
+        """Remove every field and reset the form's dataclass contract."""
+        while self._form.rowCount():
+            self._form.removeRow(0)
+        self._widgets.clear()
+        self._bindings = ()
+        self._params_cls = None
 
     def read_params(self) -> object:
         """Read widgets and return a typed dataclass instance."""
         if self._params_cls is None:
             raise RuntimeError("Analyze form has not been populated")
 
-        hints = get_type_hints(self._params_cls, include_extras=True)
         raw: dict[str, Any] = {}
-        for field in dataclasses.fields(self._params_cls):
-            bare_type, choices, _, _, optional = _resolve_field_info(field, hints)
-            widget = self._widgets[field.name]
-            raw[field.name] = self._read_widget_value(
-                widget, bare_type, choices, optional
+        for binding in self._bindings:
+            widget = self._widgets[binding.name]
+            raw[binding.name] = self._read_widget_value(
+                widget,
+                binding.bare_type,
+                binding.choices,
+                binding.optional,
             )
         return reconstruct_params(self._params_cls, raw)
 
@@ -93,11 +136,11 @@ class AnalyzeFormWidget(QWidget):
 
         self._hydrating = True
         try:
-            for field in dataclasses.fields(self._params_cls):
-                widget = self._widgets.get(field.name)
+            for binding in self._bindings:
+                widget = self._widgets.get(binding.name)
                 if widget is None:
                     continue
-                value = getattr(instance, field.name)
+                value = getattr(instance, binding.name)
                 if isinstance(widget, QComboBox):
                     idx = widget.findText(str(value))
                     if idx >= 0:

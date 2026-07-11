@@ -727,7 +727,10 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
 
 
 def test_main_window_content_event_queries_single_tab_snapshot(qapp):
-    from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
+    from zcu_tools.gui.app.main.events.tab import (
+        TabContentChangedPayload,
+        TabContentFact,
+    )
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -737,7 +740,7 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     window = MainWindow(ctrl)
     window._tab_widgets["tab-1"] = MagicMock()
 
-    bus.emit(TabContentChangedPayload(tab_id="tab-1"))
+    bus.emit(TabContentChangedPayload("tab-1", TabContentFact.RUN_RESULT_COMMITTED))
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
@@ -746,7 +749,10 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
     from dataclasses import replace
 
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.events.tab import (
+        TabInteractionChangedPayload,
+        TabInteractionFact,
+    )
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -769,10 +775,12 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+    bus.emit(
+        TabInteractionChangedPayload("tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED)
+    )
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
-    tab.update_writeback_items.assert_called_once_with([writeback_item])
+    tab.update_writeback_items.assert_not_called()
     tab.show_analysis_figure.assert_called_once_with(figure)
 
 
@@ -782,7 +790,10 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
     from dataclasses import replace
 
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.events.tab import (
+        TabInteractionChangedPayload,
+        TabInteractionFact,
+    )
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -803,7 +814,11 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+    bus.emit(
+        TabInteractionChangedPayload(
+            "tab-1", TabInteractionFact.PRIMARY_ANALYZE_STARTED
+        )
+    )
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
     tab.show_analysis_figure.assert_not_called()
@@ -815,7 +830,10 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     from dataclasses import replace
 
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.events.tab import (
+        TabInteractionChangedPayload,
+        TabInteractionFact,
+    )
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -837,7 +855,9 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+    bus.emit(
+        TabInteractionChangedPayload("tab-1", TabInteractionFact.RUN_START_REJECTED)
+    )
 
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
     tab.show_analysis_figure.assert_not_called()
@@ -847,7 +867,10 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
     from dataclasses import replace
 
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+    from zcu_tools.gui.app.main.events.tab import (
+        TabInteractionChangedPayload,
+        TabInteractionFact,
+    )
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -871,12 +894,110 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
     tab = MagicMock()
     window._tab_widgets["tab-1"] = tab
 
-    bus.emit(TabInteractionChangedPayload(tab_id="tab-1"))
+    bus.emit(
+        TabInteractionChangedPayload("tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED)
+    )
 
     assert tab.show_analysis_figure.call_args_list == [
         ((primary,),),
         ((post,),),
     ]
+
+
+@pytest.mark.parametrize(
+    "fact",
+    [
+        "primary_analyze_failed",
+        "primary_analyze_cancelled",
+        "primary_analyze_start_rejected",
+        "post_analyze_failed",
+        "post_analyze_start_rejected",
+    ],
+)
+def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, fact):
+    from dataclasses import replace
+
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.events.tab import (
+        TabInteractionChangedPayload,
+        TabInteractionFact,
+    )
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.has_tab.return_value = True
+    primary = Figure()
+    post = Figure()
+    snapshot = replace(
+        _snapshot(
+            "tab-1",
+            has_analyze_result=True,
+            has_post_analyze_result=True,
+            has_figure=True,
+        ),
+        figure=primary,
+        post_figure=post,
+    )
+    ctrl.get_tab_snapshot.return_value = snapshot
+    window = MainWindow(ctrl)
+    tab = ExpTabWidget("tab-1", ctrl)
+    window._tab_widgets["tab-1"] = tab
+    tab.show_analysis_figure(primary)
+    tab.show_analysis_figure(post)
+
+    window.make_live_container("tab-1")
+    assert tab._plot_stack.count() == 1
+    assert tab._plot_stack.currentWidget() is tab._plot_placeholder
+
+    bus.emit(TabInteractionChangedPayload("tab-1", TabInteractionFact(fact)))
+
+    assert tab._plot_stack.count() == 3
+    current = tab._plot_stack.currentWidget()
+    assert current is not None and getattr(current, "figure", None) is post
+
+
+def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(qapp):
+    from dataclasses import dataclass, replace
+
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.events.tab import (
+        TabContentChangedPayload,
+        TabContentFact,
+    )
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
+
+    @dataclass
+    class _Params:
+        threshold: float = 0.5
+
+    ctrl = _apply_window_defaults(MagicMock())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.has_tab.return_value = True
+    snapshot = replace(
+        _snapshot(
+            "tab-1",
+            has_run_result=True,
+            has_analyze_result=False,
+            has_figure=False,
+            analyze_params=_Params(),
+        ),
+        figure=None,
+        post_figure=None,
+    )
+    ctrl.get_tab_snapshot.return_value = snapshot
+    window = MainWindow(ctrl)
+    tab = ExpTabWidget("tab-1", ctrl)
+    window._tab_widgets["tab-1"] = tab
+    tab.show_analysis_figure(Figure())
+    assert tab._plot_stack.count() == 2
+
+    bus.emit(TabContentChangedPayload("tab-1", TabContentFact.LOADED_RESULT_COMMITTED))
+
+    assert tab._plot_stack.count() == 1
+    assert tab._plot_stack.currentWidget() is tab._plot_placeholder
 
 
 def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
@@ -1047,6 +1168,99 @@ def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
 
     ctrl.teardown_cfg_editor.assert_called_once_with("editor-tab1")
     assert tab._cfg_editor_id is None
+
+
+def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp):
+    import dataclasses
+    from typing import Any, cast
+
+    from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorService
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        CfgSectionSpec,
+        CfgSectionValue,
+        ReferenceSpec,
+        ReferenceValue,
+    )
+    from zcu_tools.gui.session.events import MlChangedPayload
+    from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
+    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+    ctrl = _editor_wiring_ctrl()
+    bus = EventBus()
+    ml = ModuleLibrary()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_current_md.return_value = MetaDict()
+    ctrl.get_current_ml.return_value = ml
+    service = CfgEditorService(
+        ctrl,
+        read_port=ctrl,
+        write_port=ctrl,
+        version_bump=ctrl.bump_editor_version,
+        version_drop=ctrl.drop_editor_version,
+        bus=bus,
+    )
+    ctrl.open_seeded_cfg_editor.side_effect = service.open_seeded
+    ctrl.get_cfg_editor_draft.side_effect = service.get_draft
+    ctrl.teardown_cfg_editor.side_effect = service.teardown
+
+    raw_pulse = {
+        "type": "pulse",
+        "waveform": {"style": "const", "length": 1.0},
+        "ch": 0,
+        "nqz": 1,
+        "freq": 5000.0,
+        "gain": 0.2,
+        "phase": 0.0,
+        "pre_delay": 0.0,
+        "post_delay": 0.0,
+        "mixer_freq": None,
+    }
+    pulse_spec = make_pulse_spec()
+    _, pulse_value = module_cfg_to_value(raw_pulse)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "drive": ReferenceSpec(
+                    kind="module", allowed=[pulse_spec], label="Drive"
+                )
+            }
+        ),
+        value=CfgSectionValue(
+            fields={
+                "drive": ReferenceValue(
+                    chosen_key="drive-pulse",
+                    value=pulse_value,
+                )
+            }
+        ),
+    )
+    snapshot = dataclasses.replace(
+        _snapshot("tab-1", has_run_result=False),
+        cfg_schema=schema,
+    )
+    tab = ExpTabWidget("tab-1", ctrl)
+
+    class _GateRefreshingActions(_RecordingTabActions):
+        def refresh_interaction(self, tab_id: str) -> None:
+            super().refresh_interaction(tab_id)
+            tab.update_interaction_state(snapshot)
+
+    tab.attach(snapshot, _GateRefreshingActions())
+    assert tab.cfg_form.is_valid() is False
+    assert tab.run_btn.isEnabled() is False
+
+    ml.modules["drive-pulse"] = cast(Any, raw_pulse)
+    bus.emit(MlChangedPayload(ml))
+
+    ref_widget = tab.cfg_form.findChild(ReferenceWidget)
+    assert ref_widget is not None
+    assert ref_widget._combo.currentText() == "Lib: drive-pulse"
+    assert tab.cfg_form.is_valid() is True
+    assert tab.run_btn.isEnabled() is True
 
 
 def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
@@ -1323,7 +1537,6 @@ def test_main_window_close_removes_event_bus_subscriptions(qapp):
         DeviceChangedPayload,
         DeviceSetupFinishedPayload,
         DeviceSetupStartedPayload,
-        MlChangedPayload,
         PredictorChangedPayload,
         SocChangedPayload,
     )
@@ -1340,7 +1553,6 @@ def test_main_window_close_removes_event_bus_subscriptions(qapp):
         RunStartedPayload,
         RunFinishedPayload,
         ContextSwitchedPayload,
-        MlChangedPayload,
         TabAddedPayload,
         TabClosedPayload,
         TabContentChangedPayload,

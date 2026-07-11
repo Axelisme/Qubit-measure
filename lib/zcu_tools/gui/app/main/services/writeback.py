@@ -10,7 +10,6 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
@@ -21,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
-    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .ports import ContextWritePort
 
@@ -52,12 +50,10 @@ class WritebackService:
     def __init__(
         self,
         state: State,
-        bus: EventBus,
         cfg_editor: CfgEditorPort,
         write_port: ContextWritePort,
     ) -> None:
         self._state = state
-        self._bus = bus
         self._cfg_editor = cfg_editor
         self._write = write_port
 
@@ -212,7 +208,8 @@ class WritebackService:
         # it collects the selected items into a ContextWrites batch and hands them
         # to the single write authority (ContextService), which lowers + registers
         # + bumps "context" once + emits at most one MD/ML_CHANGED. Writeback only
-        # owns the per-tab bookkeeping (applied ids + TAB_CONTENT_CHANGED).
+        # owns the per-tab bookkeeping (applied ids). ContextService emits the
+        # resource facts for the actual MetaDict/ModuleLibrary mutations.
         tab_id = permit.tab_id
         logger.info("writeback apply: tab_id=%r", tab_id)
         tab = self._state.get_tab(tab_id)
@@ -246,7 +243,6 @@ class WritebackService:
             ContextWrites(md=md, ml_modules=ml_modules, ml_waveforms=ml_waveforms)
         )
         tab.applied_session_ids.update(applied_ids)
-        self._bus.emit(TabContentChangedPayload(tab_id=tab_id))
         logger.info(
             "writeback applied: tab_id=%r md=%d ml_modules=%d ml_waveforms=%d",
             tab_id,

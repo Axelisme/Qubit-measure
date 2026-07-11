@@ -6,7 +6,10 @@ from typing import Any, cast
 
 import pytest
 from zcu_tools.gui.app.main.adapter import SavePaths
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.services.save_control import SaveControlFacet
 
 from tests.gui._control_fakes import CallLog, call
@@ -239,3 +242,4 @@ def test_update_tab_save_paths_updates_override_and_emits_interaction_changed() 
     payload = bus.payloads[0]
     assert isinstance(payload, TabInteractionChangedPayload)
     assert payload.tab_id == "tab-1"
+    assert payload.fact is TabInteractionFact.SAVE_PATHS_CHANGED

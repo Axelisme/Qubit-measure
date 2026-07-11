@@ -17,7 +17,10 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -79,8 +82,10 @@ class _FakeBg:
         self.last_on_error = on_error
 
 
-def _make_service(state: State, bus: EventBus) -> tuple[PostAnalyzeService, _FakeBg]:
-    bg = _FakeBg()
+def _make_service(
+    state: State, bus: EventBus, *, fail_submit: bool = False
+) -> tuple[PostAnalyzeService, _FakeBg]:
+    bg = _FakeBg(fail_submit=fail_submit)
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(MagicMock(), handles, progress, bg)  # type: ignore[arg-type]
@@ -114,13 +119,34 @@ def test_start_post_analyze_submits_to_bg(qapp):  # noqa: ARG001
 def test_start_post_analyze_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
-    received: list[str] = []
-    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
 
     svc, _ = _make_service(state, bus)
     svc.start_post_analyze("tab1", post_analyze_params_instance=object())
 
-    assert "tab1" in received
+    assert received == [TabInteractionFact.POST_ANALYZE_STARTED]
+
+
+def test_start_post_analyze_submit_rejection_preserves_figures(qapp):  # noqa: ARG001
+    state = _make_state()
+    old_primary = Figure()
+    old_post = Figure()
+    tab = state.get_tab("tab1")
+    tab.figure = old_primary
+    tab.post_figure = old_post
+    bus = EventBus()
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
+    svc, _ = _make_service(state, bus, fail_submit=True)
+
+    with pytest.raises(RuntimeError, match="submit boom"):
+        svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+
+    assert received == [TabInteractionFact.POST_ANALYZE_START_REJECTED]
+    assert tab.figure is old_primary
+    assert tab.post_figure is old_post
+    assert tab.is_analyzing is False
 
 
 def test_start_post_analyze_gates_on_missing_primary_result(qapp):  # noqa: ARG001
@@ -164,7 +190,10 @@ def test_start_post_analyze_work_thunk_captures_figure_container(qapp):  # noqa:
 
 def test_on_post_analyze_finished_updates_state(qapp):  # noqa: ARG001
     state = _make_state()
-    svc, bg = _make_service(state, EventBus())
+    bus = EventBus()
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
+    svc, bg = _make_service(state, bus)
 
     token = svc.start_post_analyze("tab1", post_analyze_params_instance=object())
 
@@ -184,11 +213,17 @@ def test_on_post_analyze_finished_updates_state(qapp):  # noqa: ARG001
     assert finished == [("tab1", post_result)]
     outcome = svc._handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
+    assert received == [
+        TabInteractionFact.POST_ANALYZE_STARTED,
+        TabInteractionFact.POST_ANALYZE_SUCCEEDED,
+    ]
 
 
 def test_on_post_analyze_failed_resets_state(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, bg = _make_service(state, bus)
 
     token = svc.start_post_analyze("tab1", post_analyze_params_instance=object())
@@ -204,6 +239,10 @@ def test_on_post_analyze_failed_resets_state(qapp):  # noqa: ARG001
     assert len(failed) == 1
     outcome = svc._handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
+    assert received == [
+        TabInteractionFact.POST_ANALYZE_STARTED,
+        TabInteractionFact.POST_ANALYZE_FAILED,
+    ]
 
 
 # ---------------------------------------------------------------------------

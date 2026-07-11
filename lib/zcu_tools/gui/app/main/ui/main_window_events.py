@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from collections.abc import Iterable, Mapping
+from enum import Enum, auto
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
     TabClosedPayload,
     TabContentChangedPayload,
+    TabContentFact,
     TabInteractionChangedPayload,
+    TabInteractionFact,
 )
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
@@ -17,7 +21,6 @@ from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
-    MlChangedPayload,
     PredictorChangedPayload,
     SocChangedPayload,
 )
@@ -55,6 +58,7 @@ class MainWindowEventHost(Protocol):
     def refresh_tab_post_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
+    def clear_tab_plot(self, tab_id: str) -> None: ...
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
@@ -62,6 +66,156 @@ class MainWindowEventHost(Protocol):
     def refresh_context_panel(self) -> None: ...
     def refresh_predictor_panel(self) -> None: ...
     def refresh_feedback_widget(self) -> None: ...
+
+
+class _TabReaction(Enum):
+    ANALYZE_FORM = auto()
+    POST_ANALYZE_FORM = auto()
+    WRITEBACK = auto()
+    FIGURE = auto()
+    POST_FIGURE = auto()
+    INTERACTION = auto()
+    FEEDBACK = auto()
+    CLEAR_PLOT = auto()
+
+
+_INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
+    TabInteractionFact.RUN_START_REJECTED: (
+        _TabReaction.ANALYZE_FORM,
+        _TabReaction.POST_ANALYZE_FORM,
+        _TabReaction.WRITEBACK,
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.PRIMARY_ANALYZE_STARTED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.PRIMARY_ANALYZE_FAILED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.PRIMARY_ANALYZE_CANCELLED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.POST_ANALYZE_STARTED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.POST_ANALYZE_SUCCEEDED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.POST_ANALYZE_FAILED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.POST_ANALYZE_START_REJECTED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.SAVE_STARTED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.SAVE_SUCCEEDED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.SAVE_FAILED: (
+        _TabReaction.INTERACTION,
+        _TabReaction.FEEDBACK,
+    ),
+    TabInteractionFact.ANALYZE_PARAMS_CHANGED: (),
+    TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED: (),
+    TabInteractionFact.SAVE_PATHS_CHANGED: (),
+}
+
+_CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {
+    TabContentFact.RUN_RESULT_COMMITTED: (
+        _TabReaction.ANALYZE_FORM,
+        _TabReaction.POST_ANALYZE_FORM,
+        _TabReaction.WRITEBACK,
+        _TabReaction.INTERACTION,
+    ),
+    TabContentFact.LOADED_RESULT_COMMITTED: (
+        _TabReaction.CLEAR_PLOT,
+        _TabReaction.ANALYZE_FORM,
+        _TabReaction.POST_ANALYZE_FORM,
+        _TabReaction.WRITEBACK,
+        _TabReaction.INTERACTION,
+    ),
+    TabContentFact.PRIMARY_ANALYSIS_COMMITTED: (
+        _TabReaction.POST_ANALYZE_FORM,
+        _TabReaction.WRITEBACK,
+        _TabReaction.FIGURE,
+        _TabReaction.INTERACTION,
+    ),
+    TabContentFact.POST_ANALYSIS_COMMITTED: (
+        _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
+        _TabReaction.INTERACTION,
+    ),
+}
+
+
+_FactT = TypeVar("_FactT", bound=Enum)
+
+
+def _validate_reaction_matrix(
+    name: str,
+    fact_type: type[_FactT],
+    matrix: Mapping[_FactT, object],
+) -> None:
+    """Fast-fail when a closed fact enum and its reaction matrix drift."""
+    expected = set(fact_type)
+    actual = set(matrix)
+    missing = expected - actual
+    extra = actual - expected
+    if not missing and not extra:
+        return
+
+    def labels(values: Iterable[object]) -> list[str]:
+        return sorted(
+            str(value.value) if isinstance(value, Enum) else repr(value)
+            for value in values
+        )
+
+    raise RuntimeError(
+        f"{name} reaction matrix key mismatch: "
+        f"missing={labels(missing)}, extra={labels(extra)}"
+    )
+
+
+_validate_reaction_matrix(
+    "interaction",
+    TabInteractionFact,
+    _INTERACTION_REACTIONS,
+)
+_validate_reaction_matrix(
+    "content",
+    TabContentFact,
+    _CONTENT_REACTIONS,
+)
 
 
 class MainWindowEventCoordinator:
@@ -80,7 +234,6 @@ class MainWindowEventCoordinator:
         self._subs.subscribe(bus, RunStartedPayload, self._on_run_started)
         self._subs.subscribe(bus, RunFinishedPayload, self._on_run_finished)
         self._subs.subscribe(bus, ContextSwitchedPayload, self._on_context_switched)
-        self._subs.subscribe(bus, MlChangedPayload, self._on_ml_changed)
         self._subs.subscribe(bus, TabAddedPayload, self._on_tab_added)
         self._subs.subscribe(bus, TabClosedPayload, self._on_tab_closed)
         self._subs.subscribe(
@@ -103,30 +256,26 @@ class MainWindowEventCoordinator:
     def _on_tab_interaction_changed(
         self, payload: TabInteractionChangedPayload
     ) -> None:
-        tab_id = payload.tab_id
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        self._host.refresh_tab_writeback(tab_id, snapshot)
-        self._host.refresh_tab_interaction(tab_id, snapshot)
-        interaction = snapshot.interaction
-        if interaction is not None and not (
-            interaction.is_running
-            or interaction.is_analyzing
-            or interaction.is_saving_data
-        ):
-            if interaction.has_analyze_result:
-                self._host.refresh_tab_figure(tab_id, snapshot)
-            if interaction.has_post_analyze_result:
-                self._host.refresh_tab_post_figure(tab_id, snapshot)
-        self._host.refresh_feedback_widget()
+        self._react_to_tab(payload.tab_id, _INTERACTION_REACTIONS[payload.fact])
 
     def _on_run_started(self, payload: RunStartedPayload) -> None:
+        self._react_to_tab(
+            payload.tab_id,
+            (
+                _TabReaction.ANALYZE_FORM,
+                _TabReaction.POST_ANALYZE_FORM,
+                _TabReaction.WRITEBACK,
+                _TabReaction.INTERACTION,
+            ),
+        )
         self._host.refresh_run_lock(payload.tab_id)
         self._host.refresh_feedback_widget()
 
     def _on_run_finished(self, payload: RunFinishedPayload) -> None:
+        self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
         self._host.refresh_run_lock(None)
         self._host.refresh_feedback_widget()
-        if payload.outcome == "finished":
+        if payload.outcome == "finished" and self._host.has_tab_widget(payload.tab_id):
             self._host.focus_run_result_panel(payload.tab_id)
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
@@ -134,15 +283,7 @@ class MainWindowEventCoordinator:
         self._host.refresh_context_panel()
         for tab_id in self._host.view_tab_ids():
             snapshot = self._ctrl.get_tab_snapshot(tab_id)
-            self._host.refresh_tab_writeback(tab_id, snapshot)
             self._host.refresh_tab_save_paths(tab_id, snapshot)
-            self._host.refresh_tab_interaction(tab_id, snapshot)
-
-    def _on_ml_changed(self, payload: MlChangedPayload) -> None:
-        del payload
-        for tab_id in self._host.view_tab_ids():
-            snapshot = self._ctrl.get_tab_snapshot(tab_id)
-            self._host.refresh_tab_writeback(tab_id, snapshot)
             self._host.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_tab_added(self, payload: TabAddedPayload) -> None:
@@ -153,18 +294,30 @@ class MainWindowEventCoordinator:
         self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
 
     def _on_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
-        tab_id = payload.tab_id
-        if not self._host.has_tab_widget(tab_id):
+        self._react_to_tab(payload.tab_id, _CONTENT_REACTIONS[payload.fact])
+
+    def _react_to_tab(self, tab_id: str, reactions: tuple[_TabReaction, ...]) -> None:
+        """Apply a fact's ordered View reactions with at most one snapshot read."""
+        if not reactions or not self._host.has_tab_widget(tab_id):
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        self._host.refresh_tab_analyze_form(tab_id, snapshot)
-        self._host.refresh_tab_post_analyze_form(tab_id, snapshot)
-        self._host.refresh_tab_writeback(tab_id, snapshot)
-        self._host.refresh_tab_save_paths(tab_id, snapshot)
-        self._host.refresh_tab_figure(tab_id, snapshot)
-        self._host.refresh_tab_post_figure(tab_id, snapshot)
-        self._host.refresh_tab_interaction(tab_id, snapshot)
-        self._host.refresh_feedback_widget()
+        for reaction in reactions:
+            if reaction is _TabReaction.ANALYZE_FORM:
+                self._host.refresh_tab_analyze_form(tab_id, snapshot)
+            elif reaction is _TabReaction.POST_ANALYZE_FORM:
+                self._host.refresh_tab_post_analyze_form(tab_id, snapshot)
+            elif reaction is _TabReaction.WRITEBACK:
+                self._host.refresh_tab_writeback(tab_id, snapshot)
+            elif reaction is _TabReaction.FIGURE:
+                self._host.refresh_tab_figure(tab_id, snapshot)
+            elif reaction is _TabReaction.POST_FIGURE:
+                self._host.refresh_tab_post_figure(tab_id, snapshot)
+            elif reaction is _TabReaction.INTERACTION:
+                self._host.refresh_tab_interaction(tab_id, snapshot)
+            elif reaction is _TabReaction.FEEDBACK:
+                self._host.refresh_feedback_widget()
+            elif reaction is _TabReaction.CLEAR_PLOT:
+                self._host.clear_tab_plot(tab_id)
 
     def _on_predictor_changed(self, payload: PredictorChangedPayload) -> None:
         del payload

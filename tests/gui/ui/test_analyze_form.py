@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
+import pytest
 from zcu_tools.gui.app.main.adapter import ParamMeta
 from zcu_tools.gui.app.main.ui.analyze_form import AnalyzeFormWidget
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
@@ -54,6 +55,71 @@ def test_analyze_form_hydration_does_not_emit_params_changed(qapp):  # noqa: ARG
     form.populate_values(_TestParams(threshold=0.9, model="b"))
 
     assert emitted == []
+
+
+def test_sync_same_class_preserves_widgets_and_only_hydrates(qapp):  # noqa: ARG001
+    form = AnalyzeFormWidget()
+    emitted: list[object] = []
+    form.params_changed.connect(emitted.append)
+    form.sync(_TestParams(threshold=0.5, model="a"))
+    widgets = dict(form._widgets)
+    row_count = form._form.rowCount()
+
+    form.sync(_TestParams(threshold=0.9, model="b"))
+
+    assert form._widgets == widgets
+    assert all(form._widgets[name] is widget for name, widget in widgets.items())
+    assert form._form.rowCount() == row_count
+    assert form.read_params() == _TestParams(threshold=0.9, model="b")
+    assert emitted == []
+
+
+def test_sync_class_change_rebuilds_and_clear_fast_fails(qapp):  # noqa: ARG001
+    form = AnalyzeFormWidget()
+    form.sync(_TestParams(threshold=0.5, model="a"))
+    old_widgets = tuple(form._widgets.values())
+
+    form.sync(_OptionalParams(t0=1.0))
+
+    assert all(widget not in form._widgets.values() for widget in old_widgets)
+    assert form.read_params() == _OptionalParams(t0=1.0)
+
+    form.clear()
+    assert form.has_params() is False
+    assert form._form.rowCount() == 0
+    with pytest.raises(RuntimeError, match="not been populated"):
+        form.read_params()
+
+
+def test_field_metadata_is_resolved_once_per_class_build(qapp, monkeypatch):  # noqa: ARG001
+    from zcu_tools.gui.app.main.ui import analyze_form as module
+
+    real_hints = module.get_type_hints
+    real_resolve = module._resolve_field_info
+    hint_calls = 0
+    resolve_calls = 0
+
+    def counted_hints(*args, **kwargs):
+        nonlocal hint_calls
+        hint_calls += 1
+        return real_hints(*args, **kwargs)
+
+    def counted_resolve(*args, **kwargs):
+        nonlocal resolve_calls
+        resolve_calls += 1
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(module, "get_type_hints", counted_hints)
+    monkeypatch.setattr(module, "_resolve_field_info", counted_resolve)
+    form = AnalyzeFormWidget()
+
+    form.sync(_TestParams(threshold=0.5, model="a"))
+    form.read_params()
+    form.sync(_TestParams(threshold=0.9, model="b"))
+    form.read_params()
+
+    assert hint_calls == 1
+    assert resolve_calls == 2
 
 
 def test_analyze_form_user_edit_emits_params_changed(qapp):  # noqa: ARG001

@@ -6,7 +6,10 @@ from typing import TYPE_CHECKING, Any
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
@@ -26,6 +29,11 @@ if TYPE_CHECKING:
 
 
 class AnalyzeService(_StagedAnalyzeService):
+    STARTED_FACT = TabInteractionFact.PRIMARY_ANALYZE_STARTED
+    SUCCEEDED_FACT = TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED
+    FAILED_FACT = TabInteractionFact.PRIMARY_ANALYZE_FAILED
+    START_REJECTED_FACT = TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED
+
     analyze_finished: Signal = Signal(str, object)
     analyze_failed: Signal = Signal(str, object)
 
@@ -127,7 +135,16 @@ class AnalyzeService(_StagedAnalyzeService):
         def _hook() -> None:
             self.cancel_interactive(tab_id)
 
-        token = self._open_token(tab_id, cancel_hook=_hook)
+        try:
+            token = self._open_token(tab_id, cancel_hook=_hook)
+        except Exception:
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id=tab_id,
+                    fact=TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED,
+                )
+            )
+            raise
         self._interactive_tabs.add(tab_id)
         self._begin(tab_id)
         return token
@@ -174,7 +191,12 @@ class AnalyzeService(_StagedAnalyzeService):
         logger.info("cancel_interactive: tab_id=%r", tab_id)
         self._state.set_tab_analyzing(tab_id, False)
         self._release(tab_id, OperationOutcome("cancelled"))
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.PRIMARY_ANALYZE_CANCELLED,
+            )
+        )
         return True
 
     def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
@@ -197,12 +219,22 @@ class AnalyzeService(_StagedAnalyzeService):
             logger.exception("%s finished post-processing failed: %r", tab_id, exc)
             self._state.set_tab_analyzing(tab_id, False)
             self._release(tab_id, OperationOutcome("failed", str(exc)))
-            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id=tab_id,
+                    fact=TabInteractionFact.PRIMARY_ANALYZE_FAILED,
+                )
+            )
             self._failed_signal.emit(tab_id, exc)
             return
         self._state.set_tab_analyzing(tab_id, False)
         self._release(tab_id, OperationOutcome("finished"))
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED,
+            )
+        )
         self._finished_signal.emit(tab_id, analyze_result)
 
     def _record(self, tab_id: str, analyze_result: Any) -> None:

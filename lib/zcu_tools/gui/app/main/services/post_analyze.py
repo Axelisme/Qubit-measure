@@ -6,6 +6,7 @@ from typing import Any
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest
+from zcu_tools.gui.app.main.events.tab import TabInteractionFact
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 
@@ -28,6 +29,11 @@ class PostAnalyzeService(_StagedAnalyzeService):
     Gate: the primary analyze result must exist; ``start_post_analyze`` fast-fails
     otherwise (the post-analysis builds on the primary fit it carries).
     """
+
+    STARTED_FACT = TabInteractionFact.POST_ANALYZE_STARTED
+    SUCCEEDED_FACT = TabInteractionFact.POST_ANALYZE_SUCCEEDED
+    FAILED_FACT = TabInteractionFact.POST_ANALYZE_FAILED
+    START_REJECTED_FACT = TabInteractionFact.POST_ANALYZE_START_REJECTED
 
     post_analyze_finished: Signal = Signal(str, object)
     post_analyze_failed: Signal = Signal(str, object)

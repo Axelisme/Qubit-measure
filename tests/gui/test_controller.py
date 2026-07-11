@@ -24,7 +24,9 @@ from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabContentChangedPayload,
+    TabContentFact,
     TabInteractionChangedPayload,
+    TabInteractionFact,
 )
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services import (
@@ -444,7 +446,9 @@ def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    cf.bus.emit.assert_any_call(TabContentChangedPayload(tab_id=tab_id))
+    cf.bus.emit.assert_any_call(
+        TabContentChangedPayload(tab_id, TabContentFact.RUN_RESULT_COMMITTED)
+    )
 
 
 def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
@@ -471,7 +475,9 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     # run completes without surfacing an error dialog.
     no_analysis.get_analyze_params.assert_not_called()
     assert not cf.view.show_error_dialog.called
-    cf.bus.emit.assert_any_call(TabContentChangedPayload(tab_id=tab_id))
+    cf.bus.emit.assert_any_call(
+        TabContentChangedPayload(tab_id, TabContentFact.RUN_RESULT_COMMITTED)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +600,9 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     assert request.data_path == "/tmp/loaded.hdf5"
     assert not hasattr(request, "soc")
     assert outcome.has_analyze_params is True
-    cf.bus.emit.assert_any_call(TabContentChangedPayload(tab_id=tab_id))
+    cf.bus.emit.assert_any_call(
+        TabContentChangedPayload(tab_id, TabContentFact.LOADED_RESULT_COMMITTED)
+    )
 
 
 def test_run_rejected_while_soc_connect_lease_active(cf):
@@ -672,6 +680,24 @@ def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
         assert not isinstance(payload, TabInteractionChangedPayload), (
             f"update_tab_cfg emitted TAB_INTERACTION_CHANGED unexpectedly: {call}"
         )
+
+
+def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
+    tab_id = cf.ctrl.new_tab("fake")
+    cf.bus.emit.reset_mock()
+
+    cf.ctrl.update_tab_analyze_param_instance(tab_id, object())
+    cf.ctrl.update_tab_post_analyze_param_instance(tab_id, object())
+
+    facts = [
+        call.args[0].fact
+        for call in cf.bus.emit.call_args_list
+        if isinstance(call.args[0], TabInteractionChangedPayload)
+    ]
+    assert facts == [
+        TabInteractionFact.ANALYZE_PARAMS_CHANGED,
+        TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED,
+    ]
 
 
 def test_reset_tab_cfg_restores_adapter_default(cf):

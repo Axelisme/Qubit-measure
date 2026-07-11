@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.figure_export import save_figure_to_path
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.ports import BackgroundExecutor
@@ -77,7 +80,7 @@ class SaveService(QObject):
         self._ensure_parent_directory(data_path)
         self._start_save(tab_id, req)
         self._active_paths[tab_id] = data_path
-        self._mark_saving(tab_id, True)
+        self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
         return data_path
 
     def start_save_result(
@@ -119,7 +122,7 @@ class SaveService(QObject):
         self._start_save(tab_id, req)
         self._active_paths[tab_id] = data_path
         self._pending_image[tab_id] = (image_path, image_error)
-        self._mark_saving(tab_id, True)
+        self._mark_saving(tab_id, True, TabInteractionFact.SAVE_STARTED)
         return data_path
 
     def save_image_sync(self, permit: SavePermit, image_path: str) -> None:
@@ -171,10 +174,15 @@ class SaveService(QObject):
         )
         return req
 
-    def _mark_saving(self, tab_id: str, saving_data: bool) -> None:
+    def _mark_saving(
+        self,
+        tab_id: str,
+        saving_data: bool,
+        fact: TabInteractionFact,
+    ) -> None:
         self._state.set_tab_saving_data(tab_id, saving_data)
         self._bus.emit(
-            TabInteractionChangedPayload(tab_id=tab_id),
+            TabInteractionChangedPayload(tab_id=tab_id, fact=fact),
         )
 
     def _on_save_finished(self, tab_id: str) -> None:
@@ -183,7 +191,7 @@ class SaveService(QObject):
         # entry must degrade to "" rather than raise inside a terminal slot.
         path = self._active_paths.pop(tab_id, "")
         logger.info("_on_save_finished: tab_id=%r path=%r", tab_id, path)
-        self._mark_saving(tab_id, False)
+        self._mark_saving(tab_id, False, TabInteractionFact.SAVE_SUCCEEDED)
         if tab_id in self._pending_image:
             image_path, image_error = self._pending_image.pop(tab_id)
             logger.info(
@@ -208,7 +216,7 @@ class SaveService(QObject):
         logger.warning(
             "_on_save_failed: tab_id=%r path=%r error=%r", tab_id, path, error
         )
-        self._mark_saving(tab_id, False)
+        self._mark_saving(tab_id, False, TabInteractionFact.SAVE_FAILED)
         if tab_id in self._pending_image:
             image_path, image_error = self._pending_image.pop(tab_id)
             logger.warning(

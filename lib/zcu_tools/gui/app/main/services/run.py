@@ -9,7 +9,10 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 from zcu_tools.device import device_setup_cancel_scope
 from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
@@ -145,7 +148,6 @@ class RunService(QObject):
             self._active_token = None
             # STATE is observable before settle (ADR-0017 / stage2c invariant 1).
             settle(OperationOutcome("finished"))
-            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
             self._bus.emit(RunFinishedPayload(tab_id=tab_id, outcome="finished"))
             self.run_finished.emit(tab_id, result)
 
@@ -160,7 +162,6 @@ class RunService(QObject):
             self._active_token = None
             # STATE is observable before settle.
             settle(OperationOutcome("cancelled"))
-            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
             self._bus.emit(RunFinishedPayload(tab_id=tab_id, outcome="cancelled"))
             # A cancelled run emits run_finished only if it produced a usable result.
             if result is not NO_RESULT:
@@ -172,7 +173,6 @@ class RunService(QObject):
             self._active_token = None
             # STATE is observable before settle.
             settle(OperationOutcome("failed", str(error)))
-            self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
             self._bus.emit(
                 RunFinishedPayload(
                     tab_id=tab_id,
@@ -197,13 +197,21 @@ class RunService(QObject):
 
         # begin() is atomic: ensure_can_start → create → register → factory → submit.
         # Raises on conflict or submit-fail (settle unwinds resources inside runner).
-        token = self._runner.begin(spec)
+        try:
+            token = self._runner.begin(spec)
+        except Exception:
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id=tab_id,
+                    fact=TabInteractionFact.RUN_START_REJECTED,
+                )
+            )
+            raise
 
         # POST-BEGIN: tab is marked running and started events are emitted only
         # after begin() succeeds (a begin-raise means no worker started — ADR-0026).
         self._active_token = token
         self._state.set_tab_running(tab_id, True)
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
         self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
 

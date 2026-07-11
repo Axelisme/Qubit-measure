@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — shared expected-error projection
+**Last updated:** 2026-07-11 — internal event facts, stable wire envelope
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -80,6 +80,9 @@ Qt widgets.
 Event push is still available on the wire for GUI/internal consumers. Event
 payloads use requery hints for complex objects; live Python objects never cross
 the wire.
+Internal tab interaction/content payloads include closed domain facts used by the
+Qt reaction matrix. Their serializers deliberately omit those facts and preserve
+the existing event names and `{tab_id, requery}` shape.
 
 Diagnostics are separate from EventBus. The controller pushes diagnostics to the
 remote adapter sink, which broadcasts diagnostic payloads to clients regardless
@@ -98,7 +101,7 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 48` and `GUI_VERSION = 61`.
+Current measure-gui values are `WIRE_VERSION = 48` and `GUI_VERSION = 62`.
 `MCP_VERSION` is defined in `zcu_tools.mcp.measure.server`.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a

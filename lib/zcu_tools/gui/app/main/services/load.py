@@ -5,14 +5,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import LoadDataRequest
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .guard import LoadPermit
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
-    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .ports import WritebackLifecyclePort
 
@@ -56,11 +54,9 @@ class LoadService:
     def __init__(
         self,
         state: State,
-        bus: EventBus,
         writeback: WritebackLifecyclePort,
     ) -> None:
         self._state = state
-        self._bus = bus
         self._writeback = writeback
 
     def load_result(self, permit: LoadPermit, data_path: str) -> LoadTabResultOutcome:
@@ -92,7 +88,6 @@ class LoadService:
 
         self._writeback.teardown_tab_items(tab_id)
         self._state.update_tab_loaded_result(tab_id, result, data_path)
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,

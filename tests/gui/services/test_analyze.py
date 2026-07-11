@@ -16,7 +16,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.services.analyze import AnalyzeService
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
@@ -121,13 +124,35 @@ def test_start_analyze_submits_to_bg(qapp):  # noqa: ARG001
 def test_start_analyze_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
-    received: list[str] = []
-    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
 
     svc, _ = _make_service(state, bus)
     svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
 
-    assert "tab1" in received
+    assert received == [TabInteractionFact.PRIMARY_ANALYZE_STARTED]
+
+
+def test_start_analyze_submit_rejection_emits_restore_fact(qapp):  # noqa: ARG001
+    state = _make_state()
+    old_figure = MagicMock()
+    old_post_figure = MagicMock()
+    state.get_tab("tab1").figure = old_figure
+    state.get_tab("tab1").post_figure = old_post_figure
+    bus = EventBus()
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
+    svc, _ = _make_service(state, bus, fail_submit=True)
+
+    with pytest.raises(RuntimeError, match="submit boom"):
+        svc.start_analyze(
+            AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
+        )
+
+    assert received == [TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED]
+    assert state.get_tab("tab1").figure is old_figure
+    assert state.get_tab("tab1").post_figure is old_post_figure
+    assert state.get_tab("tab1").is_analyzing is False
 
 
 def test_start_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG001
@@ -202,8 +227,8 @@ def test_on_analyze_finished_updates_state(qapp):  # noqa: ARG001
 def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
-    received: list[str] = []
-    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, bg = _make_service(state, bus)
 
     svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
@@ -213,7 +238,10 @@ def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
     assert bg.last_on_done is not None
     bg.last_on_done(fake_result)
 
-    assert "tab1" in received
+    assert received == [
+        TabInteractionFact.PRIMARY_ANALYZE_STARTED,
+        TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED,
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -281,8 +309,8 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):  # noq
     token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
     assert state.get_tab("tab1").is_analyzing is True
 
-    received: list[str] = []
-    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     # A cancel is not a failure: analyze_failed must NOT fire (no error dialog).
     failed: list = []
     svc.analyze_failed.connect(lambda tid, err: failed.append((tid, err)))
@@ -299,7 +327,7 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):  # noq
     assert handles.live_count() == 0
     assert "tab1" not in svc._active_tokens
     # Interaction event fired; no failure signal.
-    assert "tab1" in received
+    assert received == [TabInteractionFact.PRIMARY_ANALYZE_CANCELLED]
     assert failed == []
 
 
@@ -392,15 +420,18 @@ def test_background_analyze_failure_resets_state(qapp):  # noqa: ARG001
 def test_background_analyze_failure_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
-    received: list[str] = []
-    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.tab_id))
+    received: list[TabInteractionFact] = []
+    bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
     svc, bg = _make_service(state, bus)
 
     svc.start_analyze(AnalyzePermit(tab_id="tab1"), analyze_params_instance=object())
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("oops"))
 
-    assert "tab1" in received
+    assert received == [
+        TabInteractionFact.PRIMARY_ANALYZE_STARTED,
+        TabInteractionFact.PRIMARY_ANALYZE_FAILED,
+    ]
 
 
 # ---------------------------------------------------------------------------
