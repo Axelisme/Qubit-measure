@@ -118,7 +118,7 @@ def test_codec_missing_optional_key_falls_back_to_none() -> None:
 
 
 def test_make_pulse_spec_mixer_freq_is_optional_advanced() -> None:
-    from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
 
     mf = make_pulse_spec().fields["mixer_freq"]
     assert isinstance(mf, ScalarSpec)
@@ -127,7 +127,7 @@ def test_make_pulse_spec_mixer_freq_is_optional_advanced() -> None:
 
 
 def test_pulse_default_has_unset_mixer_freq_and_lowers_omitted() -> None:
-    from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
 
     spec = make_pulse_spec()
     val = make_default_value(spec)
@@ -138,7 +138,7 @@ def test_pulse_default_has_unset_mixer_freq_and_lowers_omitted() -> None:
 
 
 def test_pulse_with_mixer_freq_lowers_value() -> None:
-    from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
 
     spec = make_pulse_spec()
     val = make_default_value(spec).with_field("mixer_freq", 500.0)
@@ -150,7 +150,7 @@ def test_pulse_with_mixer_freq_lowers_value() -> None:
 
 
 def test_make_direct_readout_spec_gen_ch_is_optional_advanced() -> None:
-    from zcu_tools.gui.app.main.specs.readout import make_direct_readout_spec
+    from zcu_tools.gui.app.main.specs import make_direct_readout_spec
 
     gen_ch = make_direct_readout_spec().fields["gen_ch"]
     assert isinstance(gen_ch, ScalarSpec)
@@ -160,7 +160,7 @@ def test_make_direct_readout_spec_gen_ch_is_optional_advanced() -> None:
 
 
 def test_direct_readout_default_has_unset_gen_ch_and_lowers_omitted() -> None:
-    from zcu_tools.gui.app.main.specs.readout import make_direct_readout_spec
+    from zcu_tools.gui.app.main.specs import make_direct_readout_spec
 
     spec = make_direct_readout_spec()
     val = make_default_value(spec)
@@ -171,7 +171,7 @@ def test_direct_readout_default_has_unset_gen_ch_and_lowers_omitted() -> None:
 
 
 def test_direct_readout_with_gen_ch_lowers_value() -> None:
-    from zcu_tools.gui.app.main.specs.readout import make_direct_readout_spec
+    from zcu_tools.gui.app.main.specs import make_direct_readout_spec
 
     spec = make_direct_readout_spec()
     val = make_default_value(spec).with_field("gen_ch", 9)

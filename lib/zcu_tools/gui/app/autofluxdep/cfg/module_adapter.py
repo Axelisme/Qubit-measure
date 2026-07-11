@@ -1,4 +1,4 @@
-"""Autoflux-local pulse/readout specs and ModuleLibrary value conversion."""
+"""Autoflux policy adapter and ModuleLibrary value conversion."""
 
 from __future__ import annotations
 
@@ -8,35 +8,21 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    LiteralSpec,
     ReferenceSpec,
     ReferenceValue,
-    ScalarSpec,
     ScalarValue,
     make_custom_reference_key,
     make_default_value,
 )
+from zcu_tools.gui.measure_cfg import (
+    PROGRAM_SHAPES,
+    ProgramSpecPolicy,
+    UnknownProgramShapeError,
+)
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
 
-_MODULE_LABELS: dict[str, str] = {
-    "pulse": "Pulse",
-    "readout/direct": "Direct Readout",
-    "readout/pulse": "Pulse Readout",
-    "reset/none": "None Reset",
-    "reset/pulse": "Pulse Reset",
-    "reset/two_pulse": "Two-Pulse Reset",
-    "reset/bath": "Bath Reset",
-}
-
-_WAVEFORM_LABELS: dict[str, str] = {
-    "const": "Const",
-    "cosine": "Cosine",
-    "gauss": "Gauss",
-    "drag": "DRAG",
-    "arb": "Arb",
-    "flat_top": "FlatTop",
-}
+AUTOFLUX_PROGRAM_SPEC_POLICY = ProgramSpecPolicy()
 
 
 def _value(cfg: dict[str, Any], key: str) -> ScalarValue:
@@ -61,166 +47,37 @@ def _normalize_module_cfg(cfg_input: object) -> dict[str, Any]:
     raise TypeError(f"Expected dict or ModuleCfg, got {type(cfg_input)}")
 
 
+def _make_waveform_spec(style: str) -> CfgSectionSpec:
+    try:
+        shape = PROGRAM_SHAPES.waveform(style)
+    except UnknownProgramShapeError as exc:
+        raise RuntimeError(f"Unsupported waveform style {style!r}") from exc
+    return shape.make_spec(AUTOFLUX_PROGRAM_SPEC_POLICY)
+
+
 def _make_const_waveform_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="Const",
-        fields={
-            "style": LiteralSpec("const"),
-            "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-        },
-    )
+    return _make_waveform_spec("const")
 
 
 def _make_cosine_waveform_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="Cosine",
-        fields={
-            "style": LiteralSpec("cosine"),
-            "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-        },
-    )
-
-
-def _make_gauss_waveform_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="Gauss",
-        fields={
-            "style": LiteralSpec("gauss"),
-            "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-            "sigma": ScalarSpec(label="Sigma (us)", type=float, decimals=3),
-        },
-    )
-
-
-def _make_drag_waveform_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="DRAG",
-        fields={
-            "style": LiteralSpec("drag"),
-            "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-            "sigma": ScalarSpec(label="Sigma (us)", type=float, decimals=3),
-            "delta": ScalarSpec(label="Delta (MHz)", type=float, decimals=2),
-            "alpha": ScalarSpec(label="Alpha", type=float, decimals=4),
-        },
-    )
-
-
-def _make_arb_waveform_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="Arb",
-        fields={
-            "style": LiteralSpec("arb"),
-            "data": ScalarSpec(
-                label="Data key",
-                type=str,
-            ),
-        },
-    )
-
-
-def _make_flat_top_waveform_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="FlatTop",
-        fields={
-            "style": LiteralSpec("flat_top"),
-            "length": ScalarSpec(label="Length (us)", type=float, decimals=3),
-            "raise_waveform": ReferenceSpec(
-                kind="waveform",
-                allowed=[
-                    _make_cosine_waveform_spec(),
-                    _make_gauss_waveform_spec(),
-                    _make_drag_waveform_spec(),
-                    _make_arb_waveform_spec(),
-                ],
-                label="Raise Waveform",
-            ),
-        },
-    )
-
-
-def _make_waveform_spec(style: str) -> CfgSectionSpec:
-    factories = {
-        "const": _make_const_waveform_spec,
-        "cosine": _make_cosine_waveform_spec,
-        "gauss": _make_gauss_waveform_spec,
-        "drag": _make_drag_waveform_spec,
-        "arb": _make_arb_waveform_spec,
-        "flat_top": _make_flat_top_waveform_spec,
-    }
-    factory = factories.get(style)
-    if factory is None:
-        raise RuntimeError(f"Unsupported waveform style {style!r}")
-    return factory()
+    return _make_waveform_spec("cosine")
 
 
 def _make_pulse_spec(label: str = "Pulse") -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label=label,
-        fields={
-            "type": LiteralSpec("pulse"),
-            "waveform": ReferenceSpec(
-                kind="waveform",
-                allowed=[
-                    _make_const_waveform_spec(),
-                    _make_cosine_waveform_spec(),
-                    _make_gauss_waveform_spec(),
-                    _make_drag_waveform_spec(),
-                    _make_arb_waveform_spec(),
-                    _make_flat_top_waveform_spec(),
-                ],
-                label="Waveform",
-            ),
-            "ch": ScalarSpec(label="Gen ch", type=int),
-            "nqz": ScalarSpec(label="NQZ", type=int, choices=[1, 2], group="Advanced"),
-            "freq": ScalarSpec(label="Freq (MHz)", type=float, decimals=2),
-            "gain": ScalarSpec(label="Gain", type=float, decimals=4),
-            "phase": ScalarSpec(
-                label="Phase (deg)", type=float, decimals=2, group="Advanced"
-            ),
-            "pre_delay": ScalarSpec(
-                label="Pre-delay (us)", type=float, decimals=3, group="Advanced"
-            ),
-            "post_delay": ScalarSpec(
-                label="Post-delay (us)", type=float, decimals=3, group="Advanced"
-            ),
-            "mixer_freq": ScalarSpec(
-                label="Mixer freq (MHz)",
-                type=float,
-                decimals=2,
-                optional=True,
-                group="Advanced",
-            ),
-        },
+    return PROGRAM_SHAPES.module("pulse").make_spec(
+        AUTOFLUX_PROGRAM_SPEC_POLICY, label=label
     )
 
 
 def _make_direct_readout_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="Direct Readout",
-        fields={
-            "type": LiteralSpec("readout/direct"),
-            "ro_ch": ScalarSpec(label="RO ch", type=int),
-            "ro_freq": ScalarSpec(label="RO Freq (MHz)", type=float, decimals=2),
-            "ro_length": ScalarSpec(label="RO length (us)", type=float, decimals=3),
-            "trig_offset": ScalarSpec(label="Trig offset (us)", type=float, decimals=3),
-            "gen_ch": ScalarSpec(
-                label="Gen ch",
-                type=int,
-                optional=True,
-                group="Advanced",
-            ),
-        },
+    return PROGRAM_SHAPES.module("readout/direct").make_spec(
+        AUTOFLUX_PROGRAM_SPEC_POLICY
     )
 
 
 def _make_pulse_readout_spec() -> CfgSectionSpec:
-    return CfgSectionSpec(
-        label="Pulse Readout",
-        fields={
-            "type": LiteralSpec("readout/pulse"),
-            "pulse_cfg": _make_pulse_spec(),
-            "ro_cfg": _make_direct_readout_spec(),
-        },
+    return PROGRAM_SHAPES.module("readout/pulse").make_spec(
+        AUTOFLUX_PROGRAM_SPEC_POLICY
     )
 
 
@@ -388,16 +245,16 @@ def module_cfg_shape_label(cfg_input: object) -> str:
     if "style" in cfg:
         return waveform_cfg_shape_label(cfg)
     type_value = str(cfg.get("type", ""))
-    label = _MODULE_LABELS.get(type_value)
-    if label is None:
-        raise RuntimeError(f"Unsupported module type {type_value!r}")
-    return label
+    try:
+        return PROGRAM_SHAPES.module(type_value).label
+    except UnknownProgramShapeError as exc:
+        raise RuntimeError(f"Unsupported module type {type_value!r}") from exc
 
 
 def waveform_cfg_shape_label(cfg_input: object) -> str:
     cfg = _normalize_waveform_cfg(cfg_input)
     style = str(cfg.get("style", "const"))
-    label = _WAVEFORM_LABELS.get(style)
-    if label is None:
-        raise RuntimeError(f"Unsupported waveform style {style!r}")
-    return label
+    try:
+        return PROGRAM_SHAPES.waveform(style).label
+    except UnknownProgramShapeError as exc:
+        raise RuntimeError(f"Unsupported waveform style {style!r}") from exc

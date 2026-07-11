@@ -25,31 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec as make_pulse_spec_
-from zcu_tools.gui.app.main.specs.readout import (
-    make_direct_readout_spec as make_direct_readout_spec_,
-)
-from zcu_tools.gui.app.main.specs.readout import (
-    make_pulse_readout_spec as make_pulse_readout_spec_,
-)
-from zcu_tools.gui.app.main.specs.reset import (
-    make_bath_reset_spec as make_bath_reset_spec_,
-)
-from zcu_tools.gui.app.main.specs.reset import (
-    make_none_reset_spec as make_none_reset_spec_,
-)
-from zcu_tools.gui.app.main.specs.reset import (
-    make_pulse_reset_spec as make_pulse_reset_spec_,
-)
-from zcu_tools.gui.app.main.specs.reset import (
-    make_two_pulse_reset_spec as make_two_pulse_reset_spec_,
-)
-from zcu_tools.gui.app.main.specs.waveform import (
-    make_const_waveform_spec as make_const_waveform_spec_,
-)
-from zcu_tools.gui.app.main.specs.waveform import (
-    make_cosine_waveform_spec as make_cosine_waveform_spec_,
-)
+from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
@@ -59,6 +35,7 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
     make_default_value,
 )
+from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 from zcu_tools.gui.session.value_lookup import ValueRef, resolve_value_ref
 from zcu_tools.program.v2.modules import AbsResetCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -77,6 +54,43 @@ if TYPE_CHECKING:
     from zcu_tools.gui.cfg import CfgSectionSpec
 
 _RefNode = ReferenceValue
+
+
+def make_pulse_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module("pulse").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_direct_readout_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module("readout/direct").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_pulse_readout_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module("readout/pulse").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_none_reset_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module("reset/none").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_pulse_reset_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module("reset/pulse").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_two_pulse_reset_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module("reset/two_pulse").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_bath_reset_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module("reset/bath").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_const_waveform_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.waveform("const").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+
+def make_cosine_waveform_spec_() -> CfgSectionSpec:
+    return PROGRAM_SHAPES.waveform("cosine").make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
 
 # ---------------------------------------------------------------------------
 # Seed value carriers — the md-mechanism today, a ValueSource seam tomorrow.

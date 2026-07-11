@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
+from zcu_tools.gui.app.main.specs import make_pulse_spec
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,

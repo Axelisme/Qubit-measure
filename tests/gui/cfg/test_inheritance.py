@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.specs.readout import (
+from zcu_tools.gui.app.main.specs import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
 )

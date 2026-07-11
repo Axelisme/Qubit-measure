@@ -5,7 +5,7 @@ status: accepted
 # 0046 — Shared cfg lowering ports
 
 **狀態：** accepted（2026-07-10）。
-**關聯：** [[0011]]、[[0043]]、[[0045]]。
+**關聯：** [[0011]]、[[0043]]、[[0045]]、[[0051]]。
 
 ## 背景
 
@@ -54,8 +54,9 @@ measure adapter保留 `validate_schema(schema, ml)` 與
 `schema_to_raw_dict(schema, md, ml)` caller interface，並在呼叫內組 expression/reference/range
 ports；measure與autofluxdep adapter在validation/lowering前各自套用app-owned合法kind集合。
 autofluxdep使用獨立 local lowering adapter與 local pulse/readout/waveform conversion；
-defaults conversion只接受 `pulse`與`readout/pulse`，reference shape resolver仍辨識所有合法
-measure module discriminator，使合法但不允許的 shape由 shared core回報 unsupported spec。
+defaults conversion只接受 `pulse`與`readout/pulse`，reference shape resolver透過 [[0051]] 的
+closed catalog辨識所有合法 measure module discriminator，使合法但不允許的 shape由 shared core
+回報 unsupported spec。
 兩個app的pulse/waveform factory都顯式建立`ReferenceSpec(kind="module")`或
 `ReferenceSpec(kind="waveform")`，resolver/converter依`spec.kind`分派；shared core不import
 這些app policy。既有persisted `module_ref`/`waveform_ref` discriminator、payload shape與

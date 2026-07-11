@@ -52,11 +52,10 @@ from zcu_tools.gui.app.main.cfg_binding import (
     MeasureCfgBindings,
 )
 from zcu_tools.gui.app.main.cfg_schemas import (
-    _MODULE_SPEC_FACTORIES,
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
-from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
@@ -70,6 +69,7 @@ from zcu_tools.gui.cfg.binding import (
     SettableTargetKind,
 )
 from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, UnknownProgramShapeError
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
@@ -571,21 +571,11 @@ class CfgEditorService:
 
         if discriminator is None:
             raise CfgEditorError("either 'discriminator' or 'from_name' is required")
-        if item_kind == "module":
-            factory = _MODULE_SPEC_FACTORIES.get(discriminator)
-            if factory is None:
-                raise CfgEditorError(
-                    f"unknown module type {discriminator!r}; "
-                    f"allowed: {sorted(_MODULE_SPEC_FACTORIES)}"
-                )
-            spec = factory()
-        else:
-            try:
-                spec = make_waveform_spec_by_style(discriminator)
-            except (KeyError, RuntimeError) as exc:
-                raise CfgEditorError(
-                    f"unknown waveform style {discriminator!r}: {exc}"
-                ) from exc
+        try:
+            shape = PROGRAM_SHAPES.get(item_kind, discriminator)  # type: ignore[arg-type]
+        except (KeyError, UnknownProgramShapeError) as exc:
+            raise CfgEditorError(str(exc)) from exc
+        spec = shape.make_spec(MAIN_PROGRAM_SPEC_POLICY)
         return spec, make_default_value(spec)
 
 

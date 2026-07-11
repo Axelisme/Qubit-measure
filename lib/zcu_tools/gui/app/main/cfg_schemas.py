@@ -12,6 +12,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from zcu_tools.gui.app.main.specs import (
+    MAIN_PROGRAM_SPEC_POLICY,
     make_bath_reset_spec,
     make_const_waveform_spec,
     make_direct_readout_spec,
@@ -30,6 +31,10 @@ from zcu_tools.gui.cfg import (
     ScalarValue,
     make_custom_reference_key,
     make_default_value,
+)
+from zcu_tools.gui.measure_cfg import (
+    PROGRAM_SHAPES,
+    UnknownProgramShapeError,
 )
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.waveform import AbsWaveformCfg
@@ -64,7 +69,10 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
         raise TypeError(f"Expected dict or AbsWaveformCfg, got {type(cfg_input)}")
     style = cfg.get("style", "const")
     logger.debug("waveform_cfg_to_value: style=%r keys=%r", style, list(cfg.keys()))
-    spec = make_waveform_spec_by_style(style)
+    try:
+        spec = make_waveform_spec_by_style(style)
+    except UnknownProgramShapeError as exc:
+        raise RuntimeError(f"Unsupported waveform style {style!r}") from exc
 
     if style == "const":
         val = CfgSectionValue(
@@ -105,7 +113,7 @@ def waveform_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionVal
             raise_style = raise_wav.get("style", "cosine")
             raise_spec = make_waveform_spec_by_style(raise_style)
         else:
-            from zcu_tools.gui.app.main.specs.waveform import make_cosine_waveform_spec
+            from zcu_tools.gui.app.main.specs import make_cosine_waveform_spec
 
             raise_spec = make_cosine_waveform_spec()
             raise_val = make_default_value(raise_spec)
@@ -271,13 +279,8 @@ _MODULE_VALUE_BUILDERS = {
 }
 
 _MODULE_SPEC_FACTORIES = {
-    "pulse": make_pulse_spec,
-    "readout/direct": make_direct_readout_spec,
-    "readout/pulse": make_pulse_readout_spec,
-    "reset/none": make_none_reset_spec,
-    "reset/pulse": make_pulse_reset_spec,
-    "reset/two_pulse": make_two_pulse_reset_spec,
-    "reset/bath": make_bath_reset_spec,
+    shape.discriminator: (lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY))
+    for shape in PROGRAM_SHAPES.modules()
 }
 
 
@@ -303,10 +306,11 @@ def module_cfg_to_value(cfg_input: Any) -> tuple[CfgSectionSpec, CfgSectionValue
 
     # 3. Check for module types
     type_val = str(cfg.get("type", ""))
-    spec_factory = _MODULE_SPEC_FACTORIES.get(type_val)
     builder = _MODULE_VALUE_BUILDERS.get(type_val)
-    if spec_factory is not None and builder is not None:
-        return spec_factory(), builder(cfg)
+    if builder is not None:
+        return PROGRAM_SHAPES.module(type_val).make_spec(
+            MAIN_PROGRAM_SPEC_POLICY
+        ), builder(cfg)
 
     # 4. Unknown module type — fast fail
     raise RuntimeError(f"Unsupported module type {type_val!r}")

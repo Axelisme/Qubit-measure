@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — canonical cfg edit batches
+**Last updated:** 2026-07-11 — canonical program cfg catalog
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -11,7 +11,8 @@ framework 只看 `ExpAdapterProtocol`。
 
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
   adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
-- `specs/`：program module cfg 的 GUI spec factory。
+- `specs/`：`gui.measure_cfg`的main policy adapter；只綁定Arb asset choices與readout
+  cross-shape inheritance，不擁有program field/label清單。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
@@ -29,6 +30,8 @@ Shared layers:
 
 - `zcu_tools.gui.cfg`：Qt-free Spec/Value model、`CfgSchema` data carrier、inheritance、
   persistence codec與generic finished-cfg validation/lowering ports。
+- `zcu_tools.gui.measure_cfg`：Qt-free closed program module/waveform shape catalog與fresh Spec
+  factories；main以app-local policy啟用Arb choices與readout inheritance。
 - `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
   instance-owned frozen exact renderer registry。
 - `zcu_tools.gui.session`：context、SoC、device、startup、predictor、operation

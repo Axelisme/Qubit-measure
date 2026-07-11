@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-11（canonical cfg binding paths）
+**Last updated:** 2026-07-11（canonical program cfg shape catalog）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -40,15 +40,20 @@ generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adap
 framework contract、request/result/writeback/analyze params與protocol signature需要的session
 vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
 `NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
-conversion/spec functions仍由`cfg.module_adapter`擁有。
+conversion留在`cfg.module_adapter`，program shape/spec由`gui.measure_cfg`擁有（ADR-0051）。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
 allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與
 reference value且要求leaf已存在。這層不create、不wrap、不處理lock或domain policy；
 `CfgSectionValue.with_field`只保留scalar wrapping後委派replace。
 
+`zcu_tools.gui.measure_cfg`是Qt-free measure-domain層：closed catalog擁有七種module與六種
+waveform的discriminator、label與fresh Spec factory；app只綁定Arb choices與readout inheritance
+兩個policy。它不importprogram runtime/app/session/experiment，`gui.cfg`也不反向import它。
+
 Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`是shared core只
-轉送的app-local opaque id。module/waveform factory、resolver與converter policy留在各app，
+轉送的app-local opaque id。module/waveform shape factory由`gui.measure_cfg`擁有，resolver與
+converter policy留在各app，
 既有`module_ref`/`waveform_ref` persistence wire shape不變。
 
 `zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。

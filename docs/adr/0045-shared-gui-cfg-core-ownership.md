@@ -5,7 +5,7 @@ status: accepted
 # 0045 — Shared GUI cfg core ownership
 
 **狀態：** accepted（2026-07-11）。
-**關聯：** [[0009]]、[[0010]]、[[0011]]、[[0012]]、[[0043]]、[[0046]]。
+**關聯：** [[0009]]、[[0010]]、[[0011]]、[[0012]]、[[0043]]、[[0046]]、[[0051]]。
 
 ## 背景
 
@@ -70,10 +70,15 @@ caller-facing `validate_schema`與`schema_to_raw_dict`，在adapter內組app-own
 measure domain另外擁有context-free `MeasureCfgBuilder` / `MeasureCfgDefinition`與deferred typed
 Seed recipes；definition materialization才把resolved defaults交給shared assembler（[[0012]]）。
 
+program/v2 module/waveform 的closed GUI shape vocabulary由 [[0051]] 的
+`zcu_tools.gui.measure_cfg`擁有；它位於generic cfg core之上、app policy之下，不讓
+`gui.cfg`理解program discriminator。
+
 autofluxdep caller直接從shared owner匯入generic model、inheritance、codec names與Qt form。
 `zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露`NodeCfgSchema`、OverridePlan/policy、
 module reference spec helpers與其它app-owned API，不forward `zcu_tools.gui.cfg` public names。
-`cfg.module_adapter`擁有pulse/readout/waveform conversion與spec functions；
+`cfg.module_adapter`擁有pulse/readout/waveform conversion與autoflux policy adapter；canonical
+spec functions由`gui.measure_cfg`擁有；
 `NodeCfgSchema.logical_paths`、generation persistence reshape、`OverridePlan`、node builder與
 pulse/readout spec factory由app/domain layer擁有。autofluxdep local lowering與module
 conversion遵循 [[0046]]，production不import measure app。`NodeSchemaBuilder`使用shared

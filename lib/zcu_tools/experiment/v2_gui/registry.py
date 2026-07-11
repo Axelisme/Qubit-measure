@@ -23,15 +23,15 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
-from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
+from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,
     make_default_value,
 )
+from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 
 from .adapters._support import ROLE_FACTORIES
 from .adapters.fake.freq import FakeFreqAdapter
@@ -136,14 +136,11 @@ def register_all(registry: Registry) -> None:
 
 # Blank shapes that have no md-aware role of their own. Module discriminators are
 # the create-able ml module types; waveform discriminators are the styles.
-_BLANK_MODULE_DISCRIMINATORS = list(_MODULE_SPEC_FACTORIES.keys())
+_BLANK_MODULE_DISCRIMINATORS = [
+    shape.discriminator for shape in PROGRAM_SHAPES.modules()
+]
 _BLANK_WAVEFORM_DISCRIMINATORS = [
-    "const",
-    "cosine",
-    "gauss",
-    "drag",
-    "flat_top",
-    "arb",
+    shape.discriminator for shape in PROGRAM_SHAPES.waveforms()
 ]
 
 
@@ -151,7 +148,9 @@ def _blank_module_factory(
     disc: str,
 ) -> Callable[[ExpContext], ReferenceValue]:
     def _make(_ctx: ExpContext) -> ReferenceValue:
-        value = make_default_value(_MODULE_SPEC_FACTORIES[disc]())
+        value = make_default_value(
+            PROGRAM_SHAPES.module(disc).make_spec(MAIN_PROGRAM_SPEC_POLICY)
+        )
         return ReferenceValue(make_custom_reference_key(disc), value)
 
     return _make
@@ -161,7 +160,9 @@ def _blank_waveform_factory(
     disc: str,
 ) -> Callable[[ExpContext], ReferenceValue]:
     def _make(_ctx: ExpContext) -> ReferenceValue:
-        value = make_default_value(make_waveform_spec_by_style(disc))
+        value = make_default_value(
+            PROGRAM_SHAPES.waveform(disc).make_spec(MAIN_PROGRAM_SPEC_POLICY)
+        )
         return ReferenceValue(make_custom_reference_key(disc), value)
 
     return _make

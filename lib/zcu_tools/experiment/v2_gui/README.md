@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-11 — mandatory adapter run preflight contract
+**Last updated:** 2026-07-11 — canonical program cfg shapes
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -43,7 +43,9 @@ generic model/default/inheritance與validation/lowering直接從`zcu_tools.gui.c
 entry point只組current md expression、measure module shape與`SweepCfg` ports。measure adapter
 facade只提供framework contract、request/result/writeback/analyze params與session signature
 vocabulary，不forward shared generic names。role/module conversion policy仍在experiment/measure
-domain，不下沉到shared core（ADR-0045、ADR-0046）。
+domain，不下沉到shared core。role shape factory從`gui.measure_cfg` closed catalog取得
+main-policy-bound fresh Spec，role seed與library adopt policy仍由experiment層擁有
+（ADR-0045、ADR-0046、ADR-0051）。
 
 Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
 `ReferenceSpec(kind="module" | "waveform")`與`ReferenceValue`。kind由domain factory顯式

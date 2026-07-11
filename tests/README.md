@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — canonical cfg binding paths
+**Last updated:** 2026-07-11 — canonical program cfg catalog
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -230,6 +230,11 @@ optimization contract。Segment propagator LRU、單次 signal-grid prefix seque
 與 numba routing threshold 這類 private optimization contract 也放在同一檔。
 
 ### Shared GUI cfg import ownership tests
+
+`tests/gui/measure_cfg/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
+runtime parity、nested allowed sets、deep-fresh mutable containers、main/autoflux僅兩個policy差異、
+strict unknown lookup與fresh-process import purity。raw materializer的missing/default與autoflux allowed
+subset golden仍留在各app既有cfg tests，避免catalog test誤擁有app policy。
 
 `tests/gui/cfg/binding/test_targets.py`鎖定list/resolve acceptance equality、canonical grammar、
 legacy zero-mutation replacement、schema collision與production registry coverage。remote cfg tests

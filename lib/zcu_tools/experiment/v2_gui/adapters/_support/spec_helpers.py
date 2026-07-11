@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.main.specs.pulse import make_pulse_spec
-from zcu_tools.gui.app.main.specs.readout import (
-    make_direct_readout_spec,
-    make_pulse_readout_spec,
-)
-from zcu_tools.gui.app.main.specs.reset import (
-    make_bath_reset_spec,
-    make_none_reset_spec,
-    make_pulse_reset_spec,
-    make_two_pulse_reset_spec,
-)
+from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     CfgSchema,
+    CfgSectionSpec,
     ReferenceSpec,
 )
+from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
+
+
+def _module_shape(discriminator: str) -> CfgSectionSpec:
+    return PROGRAM_SHAPES.module(discriminator).make_spec(MAIN_PROGRAM_SPEC_POLICY)
 
 
 def make_readout_module_spec(
@@ -25,7 +21,10 @@ def make_readout_module_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
-        allowed=[make_direct_readout_spec(), make_pulse_readout_spec()],
+        allowed=[
+            _module_shape("readout/direct"),
+            _module_shape("readout/pulse"),
+        ],
         label=label,
         optional=optional,
     )
@@ -36,7 +35,7 @@ def make_pulse_readout_module_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
-        allowed=[make_pulse_readout_spec()],
+        allowed=[_module_shape("readout/pulse")],
         label=label,
         optional=optional,
     )
@@ -47,7 +46,7 @@ def make_pulse_module_spec(
 ) -> ReferenceSpec:
     return ReferenceSpec(
         kind="module",
-        allowed=[make_pulse_spec()],
+        allowed=[_module_shape("pulse")],
         label=label,
         optional=optional,
     )
@@ -59,10 +58,10 @@ def make_reset_module_spec(
     return ReferenceSpec(
         kind="module",
         allowed=[
-            make_none_reset_spec(),
-            make_pulse_reset_spec(),
-            make_two_pulse_reset_spec(),
-            make_bath_reset_spec(),
+            _module_shape("reset/none"),
+            _module_shape("reset/pulse"),
+            _module_shape("reset/two_pulse"),
+            _module_shape("reset/bath"),
         ],
         label=label,
         optional=optional,
@@ -86,7 +85,7 @@ def make_pulse_reset_module_spec(
     """Single-shape ``reset/pulse`` ref (the tested reset of a one-pulse sweep)."""
     return ReferenceSpec(
         kind="module",
-        allowed=[make_pulse_reset_spec()],
+        allowed=[_module_shape("reset/pulse")],
         label=label,
         optional=optional,
     )
@@ -98,7 +97,7 @@ def make_two_pulse_reset_module_spec(
     """Single-shape ``reset/two_pulse`` ref (the tested reset of a two-pulse sweep)."""
     return ReferenceSpec(
         kind="module",
-        allowed=[make_two_pulse_reset_spec()],
+        allowed=[_module_shape("reset/two_pulse")],
         label=label,
         optional=optional,
     )
@@ -110,7 +109,7 @@ def make_bath_reset_module_spec(
     """Single-shape ``reset/bath`` ref (the tested reset of a bath-reset sweep)."""
     return ReferenceSpec(
         kind="module",
-        allowed=[make_bath_reset_spec()],
+        allowed=[_module_shape("reset/bath")],
         label=label,
         optional=optional,
     )
