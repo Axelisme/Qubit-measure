@@ -24,6 +24,7 @@
 - [0048 — Domain event facts and View reactions](0048-domain-event-facts-and-view-reactions.md)：producer 發布 closed domain fact；coordinator 擁有 lazy-snapshot reaction matrix與figure restore政策。
 - [0037 — Value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session value source 提供少量 default / md-write escape hatch；`ValueRef` 立即 materialize。
 - [0044 — GUI process runtime](0044-gui-process-runtime.md)：GUI app 用 static runtime spec + behavior ABC 宣告 process startup contract。
+- [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：core 以 `OwnerScheduler` port 取代 Qt main-thread 隱含假設，service completion 全走 EventBus；hardware gate lease 附 origin_kind/note/since 供多前端 presence。
 
 ## Cfg / Value Model
 
