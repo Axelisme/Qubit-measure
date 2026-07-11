@@ -10,22 +10,73 @@ import pytest
 from qtpy.QtWidgets import QDialog, QWidget
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.main.ui.main_dialog_registry import MainDialogRegistry
+from zcu_tools.gui.widgets import DialogRefStore
 
 
 class _FactoryRegistry(MainDialogRegistry):
     def __init__(
         self, parent: QWidget, factory: Callable[[DialogName], QDialog]
     ) -> None:
-        super().__init__(MagicMock(), parent=parent)
+        super().__init__(MagicMock(), parent=parent, dialog_refs=DialogRefStore())
         self._factory = factory
 
     def _build_dialog(self, name: DialogName) -> QDialog:
         return self._factory(name)
 
 
+class _Signal:
+    def __init__(self) -> None:
+        self.callbacks: list[Callable[..., None]] = []
+
+    def connect(self, callback: Callable[..., None]) -> None:
+        self.callbacks.append(callback)
+
+    def emit(self, *args: object) -> None:
+        for callback in list(self.callbacks):
+            callback(*args)
+
+
 class _DestroyedDialog:
+    def __init__(self) -> None:
+        self.finished = _Signal()
+        self.destroyed = _Signal()
+
     def raise_(self) -> None:
         raise RuntimeError("wrapped C/C++ object has been deleted")
+
+
+class _PersistentDialog:
+    def __init__(self) -> None:
+        self.finished = _Signal()
+        self.destroyed = _Signal()
+        self.visible = False
+
+    def open(self) -> None:
+        self.visible = True
+
+    def reject(self) -> None:
+        self.visible = False
+
+    def raise_(self) -> None:
+        pass
+
+    def activateWindow(self) -> None:
+        pass
+
+    def isVisible(self) -> bool:
+        return self.visible
+
+    def show(self) -> None:
+        self.visible = True
+
+
+class _TransientDialog(_PersistentDialog):
+    def setAttribute(self, _attribute: object) -> None:
+        pass
+
+    def reject(self) -> None:
+        self.visible = False
+        self.finished.emit(0)
 
 
 def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
@@ -34,7 +85,7 @@ def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
 
     def build_dialog(name: DialogName) -> QDialog:
         assert name is DialogName.PREDICTOR
-        dialog = QDialog(parent)
+        dialog = cast(QDialog, _PersistentDialog())
         created.append(dialog)
         return dialog
 
@@ -57,11 +108,12 @@ def test_persistent_predictor_dialog_is_reused_when_hidden(qapp) -> None:
     assert created == [first]
     assert first.isVisible() is True
     assert registry.visible_names() == [DialogName.PREDICTOR]
+    cast(_PersistentDialog, first).destroyed.emit()
 
 
 def test_nonpersistent_dialog_close_clears_registry(qapp) -> None:
     parent = QWidget()
-    registry = _FactoryRegistry(parent, lambda _name: QDialog(parent))
+    registry = _FactoryRegistry(parent, lambda _name: cast(QDialog, _TransientDialog()))
 
     registry.open(DialogName.SETUP)
     qapp.processEvents()
@@ -76,9 +128,11 @@ def test_nonpersistent_dialog_close_clears_registry(qapp) -> None:
 
 def test_register_dialog_tracks_visible_only_and_cleans_on_finish(qapp) -> None:
     parent = QWidget()
-    registry = MainDialogRegistry(MagicMock(), parent=parent)
-    visible = QDialog(parent)
-    hidden = QDialog(parent)
+    registry = MainDialogRegistry(
+        MagicMock(), parent=parent, dialog_refs=DialogRefStore()
+    )
+    visible = cast(QDialog, _TransientDialog())
+    hidden = cast(QDialog, _TransientDialog())
 
     registry.register(DialogName.STARTUP, visible)
     registry.register(DialogName.SETUP, hidden)
@@ -93,6 +147,8 @@ def test_register_dialog_tracks_visible_only_and_cleans_on_finish(qapp) -> None:
     assert registry.dialog(DialogName.STARTUP) is None
     assert registry.dialog(DialogName.SETUP) is hidden
     assert registry.visible_names() == []
+    hidden.reject()
+    qapp.processEvents()
 
 
 def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
@@ -100,24 +156,45 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
     created: list[QDialog] = []
 
     def build_dialog(_name: DialogName) -> QDialog:
-        dialog = QDialog(parent)
+        dialog = cast(QDialog, _TransientDialog())
         created.append(dialog)
         return dialog
 
     registry = _FactoryRegistry(parent, build_dialog)
-    registry._dialogs[DialogName.SETUP] = cast(QDialog, _DestroyedDialog())
+    stale = cast(QDialog, _DestroyedDialog())
+    registry.register(DialogName.SETUP, stale)
 
     registry.open(DialogName.SETUP)
     qapp.processEvents()
 
     assert registry.dialog(DialogName.SETUP) is created[0]
     assert created[0].isVisible() is True
+    registry.close(DialogName.SETUP)
+    qapp.processEvents()
+
+
+def test_register_replaces_existing_dialog_without_old_cleanup_removing_new(
+    qapp,
+) -> None:
+    parent = QWidget()
+    registry = MainDialogRegistry(
+        MagicMock(), parent=parent, dialog_refs=DialogRefStore()
+    )
+    old = cast(QDialog, _PersistentDialog())
+    new = cast(QDialog, _PersistentDialog())
+
+    registry.register(DialogName.SETUP, old)
+    registry.register(DialogName.SETUP, new)
+    cast(_PersistentDialog, old).finished.emit(0)
+
+    assert registry.dialog(DialogName.SETUP) is new
+    cast(_PersistentDialog, new).finished.emit(0)
 
 
 def test_predictor_dialog_factory_injects_predictor_and_device_facets(qapp) -> None:
     parent = QWidget()
     ctrl = MagicMock()
-    registry = MainDialogRegistry(ctrl, parent=parent)
+    registry = MainDialogRegistry(ctrl, parent=parent, dialog_refs=DialogRefStore())
     dialog = QDialog(parent)
 
     with patch(
@@ -148,3 +225,5 @@ def test_take_screenshot_requires_visible_dialog(qapp) -> None:
 
     png = registry.take_screenshot(DialogName.SETUP)
     assert png.startswith(b"\x89PNG")
+    registry.close(DialogName.SETUP)
+    qapp.processEvents()

@@ -333,11 +333,11 @@ direct user actions that do not wait on worker completion.
 
 `MainWindow.open_dialog` / `close_dialog` is the public registry façade shared by
 toolbar actions and remote screenshots. The named-dialog registry helper owns
-lazy dialog construction, visible-name listing, persistent predictor caching, and
-per-dialog screenshots; `MainWindow` remains the `RenderView` façade. Transient
-non-modal dialogs that are not part of the remote named-dialog surface use the
-shared dialog lifecycle helper for reference retention and `finished` /
-`destroyed` cleanup.
+lazy dialog construction, stable visible-name ordering, persistent predictor
+caching, raise/show policy, and per-dialog screenshots; `MainWindow` remains the
+`RenderView` façade. General named dialogs and transient dialogs outside the
+remote named-dialog surface delegate reference retention and `finished` /
+`destroyed` cleanup to the shared dialog lifecycle helper.
 
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete

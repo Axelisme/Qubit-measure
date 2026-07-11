@@ -60,3 +60,20 @@ def test_dialog_ref_store_duplicate_key_fast_fails() -> None:
         store.open_named("setup", cast(QDialog, second))
 
     assert second.open_count == 0
+
+
+def test_dialog_ref_store_retains_without_opening_and_reports_release() -> None:
+    store = DialogRefStore()
+    dialog = _Dialog()
+    releases = 0
+
+    def on_released() -> None:
+        nonlocal releases
+        releases += 1
+
+    store.retain_named("startup", cast(QDialog, dialog), on_released=on_released)
+    dialog.destroyed.emit(object())
+
+    assert dialog.open_count == 0
+    assert store.get("startup") is None
+    assert releases == 1

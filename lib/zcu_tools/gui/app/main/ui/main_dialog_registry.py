@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.widgets import widget_to_png_bytes
+from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
@@ -18,9 +18,14 @@ if TYPE_CHECKING:
 _PERSISTENT_DIALOGS: frozenset[DialogName] = frozenset({DialogName.PREDICTOR})
 
 
-def _visible_dialog_names(dialogs: dict[DialogName, QDialog]) -> list[DialogName]:
+def _visible_dialog_names(
+    names: dict[DialogName, None], dialog_for: Callable[[DialogName], QDialog | None]
+) -> list[DialogName]:
     visible: list[DialogName] = []
-    for name, dialog in dialogs.items():
+    for name in names:
+        dialog = dialog_for(name)
+        if dialog is None:
+            continue
         try:
             if dialog.isVisible():
                 visible.append(name)
@@ -32,10 +37,20 @@ def _visible_dialog_names(dialogs: dict[DialogName, QDialog]) -> list[DialogName
 class MainDialogRegistry:
     """Owns the named non-modal dialogs exposed through ``MainWindow``."""
 
-    def __init__(self, ctrl: Controller, parent: QWidget) -> None:
+    def __init__(
+        self, ctrl: Controller, parent: QWidget, *, dialog_refs: DialogRefStore
+    ) -> None:
         self._ctrl = ctrl
         self._parent = parent
-        self._dialogs: dict[DialogName, QDialog] = {}
+        self._dialog_refs = dialog_refs
+        self._dialog_names: dict[DialogName, None] = {}
+
+    def _dialog(self, name: DialogName) -> QDialog | None:
+        return self._dialog_refs.get(name)
+
+    def _forget(self, name: DialogName) -> None:
+        self._dialog_refs.discard(name)
+        self._dialog_names.pop(name, None)
 
     def _build_dialog(self, name: DialogName) -> QDialog:
         """Construct a fresh QDialog for ``name``.
@@ -88,7 +103,7 @@ class MainDialogRegistry:
 
     def open(self, name: DialogName) -> None:
         """Open a named dialog non-modally, or raise an existing instance."""
-        existing = self._dialogs.get(name)
+        existing = self._dialog(name)
         if existing is not None:
             try:
                 existing.raise_()
@@ -97,42 +112,55 @@ class MainDialogRegistry:
                     existing.show()
                 return
             except RuntimeError:
-                self._dialogs.pop(name, None)
+                self._forget(name)
 
         dialog = self._build_dialog(name)
-        if name not in _PERSISTENT_DIALOGS:
-            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self._dialogs[name] = dialog
-        if name not in _PERSISTENT_DIALOGS:
-            dialog.finished.connect(lambda _status, n=name: self._dialogs.pop(n, None))
-        dialog.open()
+        self._dialog_names[name] = None
+        if name in _PERSISTENT_DIALOGS:
+            self._dialog_refs.retain_named(
+                name,
+                dialog,
+                on_released=lambda n=name: self._dialog_names.pop(n, None),
+            )
+            dialog.open()
+        else:
+            self._dialog_refs.open_named(
+                name,
+                dialog,
+                on_released=lambda n=name: self._dialog_names.pop(n, None),
+            )
 
     def close(self, name: DialogName) -> None:
         """Close or hide a named dialog if the registry currently owns it."""
-        existing = self._dialogs.get(name)
+        existing = self._dialog(name)
         if existing is None:
             return
         try:
             existing.reject()
         except RuntimeError:
-            self._dialogs.pop(name, None)
+            self._forget(name)
 
     def visible_names(self) -> list[DialogName]:
         """Return named dialogs that are currently visible on screen."""
-        return _visible_dialog_names(self._dialogs)
+        return _visible_dialog_names(self._dialog_names, self._dialog)
 
     def dialog(self, name: DialogName) -> QDialog | None:
         """Return the registered dialog object, visible or hidden."""
-        return self._dialogs.get(name)
+        return self._dialog(name)
 
     def register(self, name: DialogName, dialog: QDialog) -> None:
         """Register a dialog constructed outside the registry factory."""
-        self._dialogs[name] = dialog
-        dialog.finished.connect(lambda _status, n=name: self._dialogs.pop(n, None))
+        self._dialog_refs.discard(name)
+        self._dialog_names.setdefault(name, None)
+        self._dialog_refs.retain_named(
+            name,
+            dialog,
+            on_released=lambda n=name: self._dialog_names.pop(n, None),
+        )
 
     def take_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""
-        dialog = self._dialogs.get(dialog_name)
+        dialog = self._dialog(dialog_name)
         if dialog is None or not dialog.isVisible():
             raise FailedPreconditionError(
                 f"dialog {dialog_name.value!r} is not currently open"

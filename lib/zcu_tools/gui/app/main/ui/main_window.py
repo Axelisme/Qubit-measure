@@ -104,7 +104,9 @@ class MainWindow(QMainWindow):
         self._dialog_presenter = dialog_presenter or QtDialogPresenter(
             self._dialog_refs
         )
-        self._dialog_registry = MainDialogRegistry(self._ctrl, parent=self)
+        self._dialog_registry = MainDialogRegistry(
+            self._ctrl, parent=self, dialog_refs=self._dialog_refs
+        )
         self._events = MainWindowEventCoordinator(self._ctrl, host=self)
         # True once _perform_close has begun the actual teardown, so the second
         # closeEvent (triggered by _perform_close's self.close()) passes straight

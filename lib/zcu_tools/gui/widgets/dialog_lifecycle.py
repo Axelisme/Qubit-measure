@@ -39,20 +39,44 @@ class DialogRefStore:
         *,
         delete_on_close: bool = True,
         on_finished: Callable[[int], None] | None = None,
+        on_released: Callable[[], None] | None = None,
     ) -> QDialog:
         """Retain and open a dialog under a caller-owned key.
 
         Existing-key policy stays with the caller: a duplicate key is a bug, not
         an implicit raise/show decision.
         """
-        if key in self._refs:
-            raise RuntimeError(f"dialog key is already retained: {key!r}")
-        self._refs[key] = dialog
         if delete_on_close:
             dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
+        self.retain_named(
+            key,
+            dialog,
+            on_finished=on_finished,
+            on_released=on_released,
+        )
+        dialog.open()
+        return dialog
+
+    def retain_named(
+        self,
+        key: Hashable,
+        dialog: QDialog,
+        *,
+        on_finished: Callable[[int], None] | None = None,
+        on_released: Callable[[], None] | None = None,
+    ) -> QDialog:
+        """Retain an already-managed dialog without changing or opening it."""
+        if key in self._refs:
+            raise RuntimeError(f"dialog key is already retained: {key!r}")
+        self._refs[key] = dialog
+
         def _cleanup() -> None:
+            if self._refs.get(key) is not dialog:
+                return
             self._refs.pop(key, None)
+            if on_released is not None:
+                on_released()
 
         def _on_finished(status: int) -> None:
             _cleanup()
@@ -61,8 +85,11 @@ class DialogRefStore:
 
         dialog.finished.connect(_on_finished)
         dialog.destroyed.connect(lambda *_args: _cleanup())
-        dialog.open()
         return dialog
+
+    def discard(self, key: Hashable) -> QDialog | None:
+        """Stop retaining ``key`` without changing the dialog lifetime."""
+        return self._refs.pop(key, None)
 
     def get(self, key: Hashable) -> QDialog | None:
         return self._refs.get(key)
