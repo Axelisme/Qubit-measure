@@ -4,9 +4,11 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+import zcu_tools.gui.app.autofluxdep.cfg.binding as binding_module
 from zcu_tools.gui.app.autofluxdep.cfg.binding import AutofluxCfgBindings
 from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import waveform_cfg_to_value
 from zcu_tools.gui.cfg import ScalarSpec
+from zcu_tools.gui.measure_cfg import ProgramShape, UnknownProgramShapeError
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -79,5 +81,57 @@ def test_autoflux_catalog_corrupt_entry_fast_fails_during_enumeration() -> None:
     ml.modules["corrupt"] = cast(Any, {"type": "not-a-module"})
     bindings, _ = _bindings(ml)
 
-    with pytest.raises(RuntimeError, match="Unsupported module type"):
+    with pytest.raises(UnknownProgramShapeError, match="Unknown module program shape"):
         bindings.keys("module", frozenset({"Pulse"}))
+
+
+def test_autoflux_keys_never_materializes_supported_or_legal_unsupported_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ml = ModuleLibrary()
+    ml.modules["drive"] = cast(Any, _pulse())
+    ml.modules["direct"] = cast(Any, {"type": "readout/direct"})
+    bindings, _ = _bindings(ml)
+    shape_lookup = MagicMock(side_effect=binding_module.program_shape_for_input)
+    converter = MagicMock(side_effect=binding_module.module_cfg_to_value)
+    monkeypatch.setattr(binding_module, "program_shape_for_input", shape_lookup)
+    monkeypatch.setattr(binding_module, "module_cfg_to_value", converter)
+    monkeypatch.setattr(
+        ProgramShape,
+        "make_spec",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("keys must not construct specs")
+        ),
+    )
+
+    assert bindings.keys("module", frozenset({"Pulse", "Direct Readout"})) == ("drive",)
+    assert shape_lookup.call_count == 2
+    converter.assert_not_called()
+
+
+def test_autoflux_resolve_uses_discriminator_capability_and_converter_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ml = ModuleLibrary()
+    ml.modules["drive"] = cast(Any, _pulse())
+    ml.modules["direct"] = cast(Any, {"type": "readout/direct"})
+    bindings, _ = _bindings(ml)
+    shape_lookup = MagicMock(side_effect=binding_module.program_shape_for_input)
+    converter = MagicMock(side_effect=binding_module.module_cfg_to_value)
+    monkeypatch.setattr(binding_module, "program_shape_for_input", shape_lookup)
+    monkeypatch.setattr(binding_module, "module_cfg_to_value", converter)
+
+    assert bindings.resolve("module", "missing") is None
+    shape_lookup.assert_not_called()
+    converter.assert_not_called()
+
+    unsupported = bindings.resolve("module", "direct")
+    assert unsupported is not None
+    assert unsupported.label == "Direct Readout"
+    assert unsupported.value is None
+    assert shape_lookup.call_count == 1
+    converter.assert_not_called()
+
+    assert bindings.resolve("module", "drive") is not None
+    assert shape_lookup.call_count == 2
+    assert converter.call_count == 1

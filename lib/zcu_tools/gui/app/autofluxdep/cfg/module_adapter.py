@@ -9,7 +9,6 @@ from zcu_tools.gui.measure_cfg import (
     PROGRAM_SHAPES,
     ProgramMaterializationPolicy,
     ProgramSpecPolicy,
-    UnknownProgramShapeError,
     materialize_program_module,
     materialize_program_waveform,
 )
@@ -97,41 +96,3 @@ def module_cfg_to_value(
         _normalize_module_cfg(cfg_input),
         AUTOFLUX_PROGRAM_MATERIALIZATION_POLICY,
     )
-
-
-def module_cfg_shape_label(cfg_input: object) -> str:
-    """Resolve every legal module discriminator without materializing it."""
-
-    cfg = _normalize_module_cfg(cfg_input)
-    if "style" in cfg:
-        return waveform_cfg_shape_label(cfg)
-    type_value = _read_discriminator(cfg, "type", missing="")
-    try:
-        return PROGRAM_SHAPES.module(type_value).label
-    except UnknownProgramShapeError as exc:
-        raise RuntimeError(f"Unsupported module type {type_value!r}") from exc
-
-
-def waveform_cfg_shape_label(cfg_input: object) -> str:
-    cfg = _normalize_waveform_cfg(cfg_input)
-    style = _read_discriminator(cfg, "style", missing="const")
-    try:
-        return PROGRAM_SHAPES.waveform(style).label
-    except UnknownProgramShapeError as exc:
-        raise RuntimeError(f"Unsupported waveform style {style!r}") from exc
-
-
-def _read_discriminator(
-    raw: dict[str, Any],
-    key: str,
-    *,
-    missing: str,
-) -> str:
-    if key not in raw:
-        return missing
-    value = raw[key]
-    if not isinstance(value, str):
-        raise TypeError(
-            f"Program discriminator {key!r} must be str, got {type(value).__name__}"
-        )
-    return value

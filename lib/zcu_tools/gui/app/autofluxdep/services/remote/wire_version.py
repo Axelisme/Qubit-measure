@@ -24,4 +24,4 @@ WIRE_VERSION = 5
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 7  # spec-driven program cfg materialization
+GUI_VERSION = 8  # canonical shape consumers

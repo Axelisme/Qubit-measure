@@ -7,6 +7,7 @@ from .catalog import (
     ProgramShapeCatalog,
     ProgramSpecPolicy,
     UnknownProgramShapeError,
+    program_shape_for_input,
 )
 from .materializer import (
     ProgramMaterializationPolicy,
@@ -24,4 +25,5 @@ __all__ = [
     "UnknownProgramShapeError",
     "materialize_program_module",
     "materialize_program_waveform",
+    "program_shape_for_input",
 ]

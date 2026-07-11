@@ -44,9 +44,15 @@ materialize Pulse / Pulse Readout module，但shape-label lookup仍辨識完整l
 
 main `cfg_schemas`與autoflux `module_adapter`只正規化runtime object並綁定各自policy。Bath Reset
 module-local `relax_delay`不是runtime/Spec欄位，materializer明確拒絕；program root
-`relax_delay`不受影響。experiment role seed與預設值仍由experiment layer擁有，只從canonical
-catalog取得shape。RoleEntry/Controller consumer收斂另行處理，不讓generic cfg core理解program
-discriminator。
+`relax_delay`不受影響。strict `program_shape_for_input`只檢查root discriminator，不normalize或
+materialize typed cfg；waveform materialization可把missing style視為Const，inspection則把missing、
+non-string與unknown視為corrupt並Fast Fail。
+
+main與autoflux reference `keys()`只走strict inspection，`resolve()`才各自呼app materializer façade；
+autoflux以policy discriminator set判斷capability，不以presentation label代替。experiment composition
+把context-free shape factory與value factory一起放入`RoleEntry`；registration只驗shape/catalog kind，
+Controller create依序建立role value與fresh shape再直接組`CfgSchema`，不從value反查discriminator或
+private factory map。generic cfg core仍不理解program discriminator，wire metadata不增加shape欄位。
 
 ## 後果
 
@@ -56,6 +62,8 @@ discriminator。
 - unknown explicit style不再在 main blank seam silent fallback成 Const；wire contract不變，GUI code
   revision增加。
 - shape catalog完整性不擴張 autoflux可 materialize 或 node reference允許的 module subset。
+- library catalog enumeration不建立完整Spec/Value tree；blank role順序、metadata與value contract保持
+  既有26-entry golden。
 - main/autoflux raw converter共用同一generic traversal與program policy，missing/default、nested
   reference與subset contract由cross-app golden鎖定。
 - Bath Reset spec/value欄位完全一致，module-local幽靈`relax_delay`在GUI邊界Fast Fail。

@@ -31,7 +31,7 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
     make_default_value,
 )
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
+from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, ProgramShape
 
 from .adapters._support import ROLE_FACTORIES
 from .adapters.fake.freq import FakeFreqAdapter
@@ -134,36 +134,13 @@ def register_all(registry: Registry) -> None:
 
 # --- role catalog --------------------------------------------------------
 
-# Blank shapes that have no md-aware role of their own. Module discriminators are
-# the create-able ml module types; waveform discriminators are the styles.
-_BLANK_MODULE_DISCRIMINATORS = [
-    shape.discriminator for shape in PROGRAM_SHAPES.modules()
-]
-_BLANK_WAVEFORM_DISCRIMINATORS = [
-    shape.discriminator for shape in PROGRAM_SHAPES.waveforms()
-]
 
-
-def _blank_module_factory(
-    disc: str,
+def _blank_value_factory(
+    shape: ProgramShape,
 ) -> Callable[[ExpContext], ReferenceValue]:
     def _make(_ctx: ExpContext) -> ReferenceValue:
-        value = make_default_value(
-            PROGRAM_SHAPES.module(disc).make_spec(MAIN_PROGRAM_SPEC_POLICY)
-        )
-        return ReferenceValue(make_custom_reference_key(disc), value)
-
-    return _make
-
-
-def _blank_waveform_factory(
-    disc: str,
-) -> Callable[[ExpContext], ReferenceValue]:
-    def _make(_ctx: ExpContext) -> ReferenceValue:
-        value = make_default_value(
-            PROGRAM_SHAPES.waveform(disc).make_spec(MAIN_PROGRAM_SPEC_POLICY)
-        )
-        return ReferenceValue(make_custom_reference_key(disc), value)
+        value = make_default_value(shape.make_spec(MAIN_PROGRAM_SPEC_POLICY))
+        return ReferenceValue(make_custom_reference_key(shape.discriminator), value)
 
     return _make
 
@@ -171,13 +148,27 @@ def _blank_waveform_factory(
 def _blank_entries() -> list[RoleEntry]:
     entries: list[RoleEntry] = []
     factory: Callable[[ExpContext], ReferenceValue]
-    for disc in _BLANK_MODULE_DISCRIMINATORS:
-        factory = _blank_module_factory(disc)
-        entries.append(RoleEntry(f"{disc}:blank", f"Blank: {disc}", "module", factory))
-    for disc in _BLANK_WAVEFORM_DISCRIMINATORS:
-        factory = _blank_waveform_factory(disc)
+    for shape in PROGRAM_SHAPES.modules():
+        factory = _blank_value_factory(shape)
         entries.append(
-            RoleEntry(f"{disc}:blank", f"Blank: {disc}", "waveform", factory)
+            RoleEntry(
+                f"{shape.discriminator}:blank",
+                f"Blank: {shape.discriminator}",
+                "module",
+                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
+                factory,
+            )
+        )
+    for shape in PROGRAM_SHAPES.waveforms():
+        factory = _blank_value_factory(shape)
+        entries.append(
+            RoleEntry(
+                f"{shape.discriminator}:blank",
+                f"Blank: {shape.discriminator}",
+                "waveform",
+                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
+                factory,
+            )
         )
     return entries
 
@@ -208,7 +199,14 @@ _CATALOG_ROLES: list[tuple[str, str, RoleItemKind, str]] = [
 ]
 
 ROLE_ENTRIES: list[RoleEntry] = [
-    RoleEntry(role_id, label, kind, ROLE_FACTORIES[role_id].blank, default_name)
+    RoleEntry(
+        role_id,
+        label,
+        kind,
+        ROLE_FACTORIES[role_id].shape,
+        ROLE_FACTORIES[role_id].blank,
+        default_name,
+    )
     for role_id, label, kind, default_name in _CATALOG_ROLES
 ]
 

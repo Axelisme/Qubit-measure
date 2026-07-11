@@ -136,13 +136,13 @@ def test_seeded_session_rejects_commit_on_the_aggregate(service):
     """commit-guard (item_kind is None) is enforced on the aggregate, not just
     the service facade. A seeded session (tab cfg / writeback draft) is
     teardown-only."""
-    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
         CfgSchema,
         make_default_value,
     )
 
-    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    spec = make_pulse_spec()
     seed = CfgSchema(spec=spec, value=make_default_value(spec))
     editor_id, _ = service.open_seeded(seed, gc=False, owner_key="owner-x")
     session = service._require(editor_id)
@@ -460,13 +460,13 @@ def test_commit_failure_keeps_session(service, ctrl):
 
 def _make_tab_seed():
     """Build a CfgSchema seed as a tab cfg / writeback draft would carry."""
-    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
         CfgSchema,
         make_default_value,
     )
 
-    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    spec = make_pulse_spec()
     return CfgSchema(spec=spec, value=make_default_value(spec))
 
 

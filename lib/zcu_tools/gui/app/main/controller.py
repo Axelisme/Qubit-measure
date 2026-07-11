@@ -990,10 +990,6 @@ class Controller(SessionControllerMixin):
         against the live md turns those into the md's current concrete values
         (ModuleLibrary stores concrete numbers, never md references).
         """
-        from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
-        from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
-        from zcu_tools.gui.cfg import CfgSchema
-
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
         entry = self.get_role_catalog().get(role_id)
@@ -1008,31 +1004,14 @@ class Controller(SessionControllerMixin):
 
         ctx = self.get_exp_context()
         ref = entry.make_value(ctx)
-        value = ref.value
-        discriminator = self._discriminator_of(value, item_kind)
-        if item_kind == "module":
-            spec = _MODULE_SPEC_FACTORIES[discriminator]()
-        else:
-            spec = make_waveform_spec_by_style(discriminator)
+        spec = entry.shape()
         # ADR-0006: hand the un-lowered CfgSchema to the single write authority;
         # ContextService lowers (against live md) + registers. No UI-side lowering.
-        schema = CfgSchema(spec=spec, value=value)
+        schema = CfgSchema(spec=spec, value=ref.value)
         if item_kind == "module":
             self.set_ml_module_from_schema(name, schema)
         else:
             self.set_ml_waveform_from_schema(name, schema)
-
-    @staticmethod
-    def _discriminator_of(value: Any, item_kind: str) -> str:
-        """Read the type/style discriminator off a role factory's value."""
-        key = "type" if item_kind == "module" else "style"
-        field = value.fields.get(key)
-        disc = getattr(field, "value", None)
-        if not isinstance(disc, str):
-            raise RuntimeError(
-                f"Role value has no usable {key!r} discriminator (got {disc!r})."
-            )
-        return disc
 
     def has_ml_entry(self, item_kind: str, name: str) -> bool:
         """Whether an ml module/waveform of this name already exists."""

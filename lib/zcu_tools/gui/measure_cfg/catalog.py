@@ -135,3 +135,33 @@ PROGRAM_SHAPES = ProgramShapeCatalog(
         ProgramShape("waveform", "arb", "Arb", _make_arb_waveform_spec),
     )
 )
+
+
+_MISSING_DISCRIMINATOR = object()
+
+
+def program_shape_for_input(
+    kind: ProgramCfgKind,
+    cfg_input: object,
+) -> ProgramShape:
+    """Inspect one root discriminator without normalizing or materializing cfg."""
+
+    if kind == "module":
+        key = "type"
+    elif kind == "waveform":
+        key = "style"
+    else:
+        raise RuntimeError(f"Unsupported program reference kind {kind!r}")
+
+    if isinstance(cfg_input, Mapping):
+        discriminator = cfg_input.get(key, _MISSING_DISCRIMINATOR)
+    else:
+        discriminator = getattr(cfg_input, key, _MISSING_DISCRIMINATOR)
+    if discriminator is _MISSING_DISCRIMINATOR:
+        raise ValueError(f"Program {kind} input is missing discriminator {key!r}")
+    if not isinstance(discriminator, str):
+        raise TypeError(
+            f"Program discriminator {key!r} must be str, "
+            f"got {type(discriminator).__name__}"
+        )
+    return PROGRAM_SHAPES.get(kind, discriminator)

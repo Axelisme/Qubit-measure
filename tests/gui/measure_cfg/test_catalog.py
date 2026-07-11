@@ -18,6 +18,7 @@ from zcu_tools.gui.measure_cfg import (
     ProgramCfgKind,
     ProgramSpecPolicy,
     UnknownProgramShapeError,
+    program_shape_for_input,
 )
 from zcu_tools.program.v2.modules import (
     ArbWaveformCfg,
@@ -99,6 +100,88 @@ def test_catalog_unknown_discriminator_fast_fails(
     assert str(exc_info.value) == (
         f"Unknown {kind} program shape {discriminator!r}; allowed: {allowed}"
     )
+
+
+class _TypedProgramCfg:
+    def __init__(self, **attributes: object) -> None:
+        self.__dict__.update(attributes)
+
+    def to_dict(self) -> dict[str, object]:
+        raise AssertionError("strict shape inspection must not normalize the cfg")
+
+
+@pytest.mark.parametrize(
+    ("kind", "cfg_input", "discriminator"),
+    [
+        ("module", {"type": "pulse", "nested": {"type": "reset/none"}}, "pulse"),
+        ("waveform", {"style": "gauss", "nested": {"style": "const"}}, "gauss"),
+        ("module", _TypedProgramCfg(type="readout/direct"), "readout/direct"),
+        ("waveform", _TypedProgramCfg(style="drag"), "drag"),
+    ],
+)
+def test_program_shape_inspection_reads_only_root_mapping_or_typed_attribute(
+    kind: ProgramCfgKind,
+    cfg_input: object,
+    discriminator: str,
+) -> None:
+    assert program_shape_for_input(kind, cfg_input).discriminator == discriminator
+
+
+@pytest.mark.parametrize(
+    ("kind", "cfg_input", "key"),
+    [
+        ("module", {}, "type"),
+        ("waveform", {}, "style"),
+        ("module", _TypedProgramCfg(style="const"), "type"),
+        ("waveform", _TypedProgramCfg(type="pulse"), "style"),
+    ],
+)
+def test_program_shape_inspection_rejects_missing_discriminator(
+    kind: ProgramCfgKind,
+    cfg_input: object,
+    key: str,
+) -> None:
+    with pytest.raises(ValueError, match=rf"missing discriminator '{key}'"):
+        program_shape_for_input(kind, cfg_input)
+
+
+@pytest.mark.parametrize(
+    ("kind", "key"),
+    [("module", "type"), ("waveform", "style")],
+)
+def test_program_shape_inspection_rejects_non_string_discriminator(
+    kind: ProgramCfgKind,
+    key: str,
+) -> None:
+    with pytest.raises(TypeError, match=rf"'{key}' must be str"):
+        program_shape_for_input(kind, {key: 7})
+
+
+def test_program_shape_inspection_preserves_catalog_unknown_error() -> None:
+    with pytest.raises(UnknownProgramShapeError, match="Unknown module program shape"):
+        program_shape_for_input("module", {"type": "not-a-module"})
+
+
+def test_waveform_inspection_and_materialization_intentionally_differ_on_missing_style() -> (
+    None
+):
+    from zcu_tools.gui.measure_cfg import (
+        ProgramMaterializationPolicy,
+        materialize_program_waveform,
+    )
+
+    with pytest.raises(ValueError, match="missing discriminator 'style'"):
+        program_shape_for_input("waveform", {})
+
+    spec, _ = materialize_program_waveform(
+        {},
+        ProgramMaterializationPolicy(
+            spec_policy=_AUTOFLUX_POLICY,
+            allowed_module_discriminators=frozenset(),
+            allowed_waveform_styles=frozenset({"const"}),
+        ),
+    )
+    assert spec.label == "Const"
 
 
 def test_catalog_matches_explicit_program_v2_runtime_discriminators() -> None:

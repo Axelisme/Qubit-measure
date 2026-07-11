@@ -4,7 +4,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+import zcu_tools.gui.app.main.cfg_binding as binding_module
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.measure_cfg import ProgramShape, UnknownProgramShapeError
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -67,5 +69,78 @@ def test_measure_catalog_corrupt_entry_fast_fails_during_enumeration() -> None:
     ml.modules["corrupt"] = cast(Any, {"type": "not-a-module"})
     bindings, _ = _bindings(ml)
 
-    with pytest.raises(RuntimeError, match="Unsupported module type"):
+    with pytest.raises(UnknownProgramShapeError, match="Unknown module program shape"):
         bindings.keys("module", frozenset({"Pulse"}))
+
+
+def test_measure_keys_inspects_shapes_without_converter_or_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TypedModule:
+        def __init__(self, discriminator: str) -> None:
+            self.type = discriminator
+
+        def to_dict(self):
+            raise AssertionError("keys must not normalize typed cfg")
+
+    ml = ModuleLibrary()
+    ml.modules["drive"] = cast(Any, TypedModule("pulse"))
+    ml.modules["readout"] = cast(Any, TypedModule("readout/direct"))
+    bindings, _ = _bindings(ml)
+    shape_lookup = MagicMock(side_effect=binding_module.program_shape_for_input)
+    converter = MagicMock(side_effect=binding_module.module_cfg_to_value)
+    monkeypatch.setattr(binding_module, "program_shape_for_input", shape_lookup)
+    monkeypatch.setattr(binding_module, "module_cfg_to_value", converter)
+    monkeypatch.setattr(
+        ProgramShape,
+        "make_spec",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("keys must not construct specs")
+        ),
+    )
+
+    assert bindings.keys("module", frozenset({"Pulse", "Direct Readout"})) == (
+        "drive",
+        "readout",
+    )
+    assert shape_lookup.call_count == 2
+    converter.assert_not_called()
+
+
+def test_measure_resolve_calls_app_converter_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ml = ModuleLibrary()
+    ml.modules["drive"] = cast(Any, _pulse())
+    bindings, _ = _bindings(ml)
+    shape_lookup = MagicMock(side_effect=binding_module.program_shape_for_input)
+    converter = MagicMock(side_effect=binding_module.module_cfg_to_value)
+    monkeypatch.setattr(binding_module, "program_shape_for_input", shape_lookup)
+    monkeypatch.setattr(binding_module, "module_cfg_to_value", converter)
+
+    assert bindings.resolve("module", "missing") is None
+    shape_lookup.assert_not_called()
+    converter.assert_not_called()
+    assert bindings.resolve("module", "drive") is not None
+    shape_lookup.assert_not_called()
+    assert converter.call_count == 1
+
+
+def test_measure_resolve_materializes_missing_waveform_style_as_const(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ml = ModuleLibrary()
+    ml.waveforms["legacy"] = cast(Any, {})
+    bindings, _ = _bindings(ml)
+    shape_lookup = MagicMock(side_effect=binding_module.program_shape_for_input)
+    converter = MagicMock(side_effect=binding_module.waveform_cfg_to_value)
+    monkeypatch.setattr(binding_module, "program_shape_for_input", shape_lookup)
+    monkeypatch.setattr(binding_module, "waveform_cfg_to_value", converter)
+
+    resolved = bindings.resolve("waveform", "legacy")
+
+    assert resolved is not None
+    assert resolved.label == "Const"
+    assert resolved.value is not None
+    shape_lookup.assert_not_called()
+    assert converter.call_count == 1

@@ -11,9 +11,8 @@ from zcu_tools.gui.cfg import (
     lower_finished_cfg,
     validate_reference_kinds,
 )
+from zcu_tools.gui.measure_cfg import program_shape_for_input
 from zcu_tools.program.v2 import SweepCfg
-
-from .module_adapter import module_cfg_shape_label, waveform_cfg_shape_label
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -31,16 +30,26 @@ def _make_expression_resolver(md: MetaDict) -> ExpressionResolver:
 
 
 def _make_reference_resolver(ml: ModuleLibrary) -> ReferenceResolver:
+    resolved: dict[tuple[str, str], str | None] = {}
+
     def resolve_reference(kind: str, key: str, /) -> str | None:
+        cache_key = (kind, key)
+        if cache_key in resolved:
+            return resolved[cache_key]
         if kind == "module":
             if key not in ml.modules:
-                return None
-            return module_cfg_shape_label(ml.modules[key])
-        if kind == "waveform":
+                label = None
+            else:
+                label = program_shape_for_input("module", ml.modules[key]).label
+        elif kind == "waveform":
             if key not in ml.waveforms:
-                return None
-            return waveform_cfg_shape_label(ml.waveforms[key])
-        raise RuntimeError(f"Unsupported reference kind {kind!r}")
+                label = None
+            else:
+                label = program_shape_for_input("waveform", ml.waveforms[key]).label
+        else:
+            raise RuntimeError(f"Unsupported reference kind {kind!r}")
+        resolved[cache_key] = label
+        return label
 
     return resolve_reference
 

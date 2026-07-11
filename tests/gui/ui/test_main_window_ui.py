@@ -1109,13 +1109,13 @@ def _editor_wiring_ctrl() -> MagicMock:
     # attaches the widget to the service-owned model (ADR-0008). Build a real
     # CfgDraft for get_cfg_editor_draft so attach() works.
     from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
         CfgSchema,
         make_default_value,
     )
 
-    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    spec = make_pulse_spec()
     draft = MeasureCfgBindings(ctrl).new_draft(
         CfgSchema(spec, make_default_value(spec))
     )
@@ -1125,13 +1125,13 @@ def _editor_wiring_ctrl() -> MagicMock:
 
 
 def _pulse_schema():
-    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
         CfgSchema,
         make_default_value,
     )
 
-    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    spec = make_pulse_spec()
     return CfgSchema(spec=spec, value=make_default_value(spec))
 
 
@@ -1319,13 +1319,13 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
 
 def _make_pulse_model(ctrl):
     from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.main.cfg_schemas import _MODULE_SPEC_FACTORIES
+    from zcu_tools.gui.app.main.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
         CfgSchema,
         make_default_value,
     )
 
-    spec = _MODULE_SPEC_FACTORIES["pulse"]()
+    spec = make_pulse_spec()
     return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, make_default_value(spec)))
 
 

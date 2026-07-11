@@ -25,14 +25,6 @@ MAIN_PROGRAM_MATERIALIZATION_POLICY = ProgramMaterializationPolicy(
     ),
 )
 
-# The current Controller consumer still reads this private factory table. Phase 7c
-# moves that consumer to a directly carried canonical shape; 7b does not mix in
-# the RoleEntry/Controller migration.
-_MODULE_SPEC_FACTORIES = {
-    shape.discriminator: (lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY))
-    for shape in PROGRAM_SHAPES.modules()
-}
-
 
 def waveform_cfg_to_value(
     cfg_input: Any,

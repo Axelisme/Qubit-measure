@@ -5,19 +5,21 @@ from typing import Protocol, cast
 
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
+from zcu_tools.gui.measure_cfg import (
+    ProgramCfgKind,
+    ProgramShape,
+    program_shape_for_input,
+)
 from zcu_tools.gui.session.expression import evaluate_numeric_expr
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 from .module_adapter import (
-    module_cfg_shape_label,
+    AUTOFLUX_PROGRAM_MATERIALIZATION_POLICY,
     module_cfg_to_value,
-    waveform_cfg_shape_label,
     waveform_cfg_to_value,
 )
 
 _DEVICES_SOURCE = "devices"
-_MATERIALIZABLE_MODULE_LABELS = frozenset({"Pulse", "Pulse Readout"})
-
 _ReferenceConverter = Callable[[object], tuple[CfgSectionSpec, CfgSectionValue]]
 
 
@@ -52,53 +54,50 @@ class AutofluxCfgBindings:
         raise RuntimeError(f"Unsupported autoflux cfg option source {source_id!r}")
 
     def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
-        store, _ = self._store_and_converter(kind)
-        shape_label = self._shape_label_resolver(kind)
+        store, catalog_kind = self._store(kind)
         compatible: list[str] = []
         for key, value in store.items():
-            label = shape_label(value)
-            if label in allowed_labels and self._can_materialize(kind, label):
+            shape = program_shape_for_input(catalog_kind, value)
+            if shape.label in allowed_labels and self._can_materialize(shape):
                 compatible.append(key)
         return tuple(sorted(compatible))
 
     def resolve(self, kind: str, key: str) -> ResolvedReference | None:
-        store, converter = self._store_and_converter(kind)
+        store, catalog_kind = self._store(kind)
         if key not in store:
             return None
         value = store[key]
-        label = self._shape_label_resolver(kind)(value)
-        if not self._can_materialize(kind, label):
-            return ResolvedReference(label=label, value=None)
+        shape = program_shape_for_input(catalog_kind, value)
+        if not self._can_materialize(shape):
+            return ResolvedReference(label=shape.label, value=None)
+        converter = self._converter(kind)
         spec, section_value = converter(value)
-        if spec.label != label:
+        if spec.label != shape.label:
             raise RuntimeError(
                 f"Autoflux {kind} converter returned shape {spec.label!r}; "
-                f"expected {label!r}"
+                f"expected {shape.label!r}"
             )
-        return ResolvedReference(label=label, value=section_value)
+        return ResolvedReference(label=shape.label, value=section_value)
 
     @staticmethod
-    def _shape_label_resolver(kind: str) -> Callable[[object], str]:
-        if kind == "module":
-            return module_cfg_shape_label
-        if kind == "waveform":
-            return waveform_cfg_shape_label
-        raise RuntimeError(f"Unsupported autoflux cfg reference kind {kind!r}")
+    def _can_materialize(shape: ProgramShape) -> bool:
+        policy = AUTOFLUX_PROGRAM_MATERIALIZATION_POLICY
+        if shape.kind == "module":
+            return shape.discriminator in policy.allowed_module_discriminators
+        return shape.discriminator in policy.allowed_waveform_styles
 
-    @staticmethod
-    def _can_materialize(kind: str, label: str) -> bool:
-        if kind == "module":
-            return label in _MATERIALIZABLE_MODULE_LABELS
-        if kind == "waveform":
-            return True
-        raise RuntimeError(f"Unsupported autoflux cfg reference kind {kind!r}")
-
-    def _store_and_converter(
-        self, kind: str
-    ) -> tuple[Mapping[str, object], _ReferenceConverter]:
+    def _store(self, kind: str) -> tuple[Mapping[str, object], ProgramCfgKind]:
         ml = self._host.get_current_ml()
         if kind == "module":
-            return ml.modules, cast(_ReferenceConverter, module_cfg_to_value)
+            return ml.modules, "module"
         if kind == "waveform":
-            return ml.waveforms, cast(_ReferenceConverter, waveform_cfg_to_value)
+            return ml.waveforms, "waveform"
+        raise RuntimeError(f"Unsupported autoflux cfg reference kind {kind!r}")
+
+    @staticmethod
+    def _converter(kind: str) -> _ReferenceConverter:
+        if kind == "module":
+            return cast(_ReferenceConverter, module_cfg_to_value)
+        if kind == "waveform":
+            return cast(_ReferenceConverter, waveform_cfg_to_value)
         raise RuntimeError(f"Unsupported autoflux cfg reference kind {kind!r}")

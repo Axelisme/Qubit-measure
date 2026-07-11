@@ -12,6 +12,7 @@ from zcu_tools.gui.cfg import (
     DirectValue,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
+from zcu_tools.gui.measure_cfg import ProgramCfgKind, program_shape_for_input
 from zcu_tools.gui.session.expression import evaluate_numeric_expr
 from zcu_tools.gui.session.ui.value_source_input import (
     SessionValueSourceInputHost,
@@ -72,19 +73,20 @@ class MeasureCfgBindings:
         raise RuntimeError(f"Unsupported measure cfg option source {source_id!r}")
 
     def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
-        store, converter = self._store_and_converter(kind)
+        store, catalog_kind = self._store(kind)
         compatible: list[str] = []
         for key, value in store.items():
-            spec, _ = converter(value)
-            if spec.label in allowed_labels:
+            shape = program_shape_for_input(catalog_kind, value)
+            if shape.label in allowed_labels:
                 compatible.append(key)
         return tuple(sorted(compatible))
 
     def resolve(self, kind: str, key: str) -> ResolvedReference | None:
-        store, converter = self._store_and_converter(kind)
+        store, _ = self._store(kind)
         if key not in store:
             return None
         value = store[key]
+        converter = self._converter(kind)
         spec, section_value = converter(value)
         return ResolvedReference(label=spec.label, value=section_value)
 
@@ -99,14 +101,20 @@ class MeasureCfgBindings:
         _, value = self._host.read_value_source(ref.key, target_type_name)
         return DirectValue(value)
 
-    def _store_and_converter(
-        self, kind: str
-    ) -> tuple[Mapping[str, object], _ReferenceConverter]:
+    def _store(self, kind: str) -> tuple[Mapping[str, object], ProgramCfgKind]:
         ml = self._host.get_current_ml()
         if kind == "module":
-            return ml.modules, cast(_ReferenceConverter, module_cfg_to_value)
+            return ml.modules, "module"
         if kind == "waveform":
-            return ml.waveforms, cast(_ReferenceConverter, waveform_cfg_to_value)
+            return ml.waveforms, "waveform"
+        raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
+
+    @staticmethod
+    def _converter(kind: str) -> _ReferenceConverter:
+        if kind == "module":
+            return cast(_ReferenceConverter, module_cfg_to_value)
+        if kind == "waveform":
+            return cast(_ReferenceConverter, waveform_cfg_to_value)
         raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
 
 

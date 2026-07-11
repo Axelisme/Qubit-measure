@@ -112,7 +112,7 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 49`, `GUI_VERSION = 66`, and
+Current measure-gui values are `WIRE_VERSION = 49`, `GUI_VERSION = 67`, and
 `MCP_VERSION = 71`（defined in `zcu_tools.mcp.measure.server`）。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a

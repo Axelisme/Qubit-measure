@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — orchestrate contracts and spec-driven cfg materialization
+**Last updated:** 2026-07-11 — orchestrate contracts and canonical cfg consumers
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -233,10 +233,12 @@ optimization contract。Segment propagator LRU、單次 signal-grid prefix seque
 
 `tests/gui/measure_cfg/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
 runtime parity、nested allowed sets、deep-fresh mutable containers、main/autoflux僅兩個policy差異、
-strict unknown lookup與fresh-process import purity；materializer tests另鎖spec/value完整對齊、scalar
+strict root-only Mapping/typed inspection、missing/non-string/unknown與fresh-process import purity；materializer tests另鎖spec/value完整對齊、scalar
 missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與
 Bath ghost rejection。`tests/gui/cfg/test_materialization.py`只測domain-free Spec walk與policy ports；main
-全7+6及autoflux legal-but-unmaterializable subset由各app cfg tests鎖定。
+全7+6及autoflux legal-but-unmaterializable subset由各app cfg tests鎖定。app binding/lowering tests鎖
+shape lookup、converter與`to_dict()`精確call count；role tests鎖registration shape/value count、Controller
+value→shape順序，以及既有26-entry metadata/value golden。
 
 `tests/gui/cfg/binding/test_targets.py`鎖定list/resolve acceptance equality、canonical grammar、
 legacy zero-mutation replacement、schema collision與production registry coverage。remote cfg tests

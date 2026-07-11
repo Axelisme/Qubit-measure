@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+import zcu_tools.gui.app.autofluxdep.cfg.lowering as lowering_module
 from zcu_tools.gui.app.autofluxdep.cfg.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import (
-    module_cfg_shape_label,
     module_cfg_to_value,
     pulse_module_ref_spec,
     pulse_readout_module_ref_spec,
-    waveform_cfg_shape_label,
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.cfg import (
@@ -23,6 +24,7 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.gui.measure_cfg import program_shape_for_input
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import SweepCfg
 
@@ -174,7 +176,7 @@ def test_autoflux_recognizes_but_does_not_materialize_other_legal_modules(
 ) -> None:
     raw = {"type": discriminator}
 
-    assert module_cfg_shape_label(raw) == label
+    assert program_shape_for_input("module", raw).label == label
     with pytest.raises(RuntimeError) as exc_info:
         module_cfg_to_value(raw)
     assert str(exc_info.value) == f"Unsupported module type {discriminator!r}"
@@ -185,7 +187,7 @@ def test_autoflux_module_shape_label_requires_string_discriminator(
     value: object,
 ) -> None:
     with pytest.raises(TypeError, match=r"'type' must be str"):
-        module_cfg_shape_label({"type": value})
+        program_shape_for_input("module", {"type": value})
 
 
 @pytest.mark.parametrize("value", [_StringImpostor("const"), None, 7])
@@ -193,7 +195,7 @@ def test_autoflux_waveform_shape_label_requires_string_discriminator(
     value: object,
 ) -> None:
     with pytest.raises(TypeError, match=r"'style' must be str"):
-        waveform_cfg_shape_label({"style": value})
+        program_shape_for_input("waveform", {"style": value})
 
 
 def test_autoflux_ports_integrate_expression_and_sweepcfg() -> None:
@@ -245,6 +247,29 @@ def test_autoflux_reference_missing_then_relinks_with_embedded_snapshot() -> Non
     ml.register_module(drive={**_PULSE, "gain": 0.9})
     raw = schema_to_raw_dict(schema, None, ml)
     assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
+
+
+def test_autoflux_lowering_inspects_each_resolved_reference_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_spec, snapshot = module_cfg_to_value(_PULSE)
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "drive": ReferenceSpec(
+                    kind="module", allowed=[snapshot_spec], label="Drive"
+                )
+            }
+        ),
+        value=CfgSectionValue(fields={"drive": ReferenceValue("drive", snapshot)}),
+    )
+    ml = ModuleLibrary()
+    ml.register_module(drive=_PULSE)
+    shape_lookup = MagicMock(side_effect=lowering_module.program_shape_for_input)
+    monkeypatch.setattr(lowering_module, "program_shape_for_input", shape_lookup)
+
+    assert schema_to_raw_dict(schema, None, ml) == {"drive": _PULSE}
+    assert shape_lookup.call_count == 1
 
 
 def _unknown_reference_schema(*, disabled: bool) -> CfgSchema:
