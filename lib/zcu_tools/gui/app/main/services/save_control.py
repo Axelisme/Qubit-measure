@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import SavePaths
@@ -69,7 +70,7 @@ class SaveControlFacet:
     def _resolve_save_paths(self, tab_id: str) -> SavePaths:
         paths = self._tab.get_tab_save_paths(tab_id)
         if paths is None:
-            raise RuntimeError(
+            raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no save paths configured — "
                 "set paths via the Save panel or update_tab_save_paths()."
             )

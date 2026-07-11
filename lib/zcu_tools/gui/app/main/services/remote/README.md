@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-07 - centered sweep cfg paths
+**Last updated:** 2026-07-11 — typed expected-error projection
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -55,6 +55,12 @@ Push     <- {"event": "...", "payload": {...}}
 
 Normal handlers run on the Qt main thread through `MainThreadDispatcher`. Handler
 exceptions become typed error envelopes.
+
+Caller-correctable producer exceptions以remote-independent `ExpectedErrorCategory`
+分類；本層handlers目前在各自domain boundary投影成既有`INVALID_PARAMS`或
+`PRECONDITION_FAILED` wire code，並原樣保留message/reason/data。ordinary exception不屬
+expected taxonomy；handler-local structured policies（例如arb waveform data）仍由原handler
+擁有（ADR-0047）。
 
 Only bounded wait handlers run off-main:
 

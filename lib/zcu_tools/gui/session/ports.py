@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from zcu_tools.gui.expected_error import FailedPreconditionError
+
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceProtocol
     from zcu_tools.gui.session.types import ExpContext
@@ -46,7 +48,7 @@ class OperationKind(str, Enum):
     DEVICE_SETUP = "device_setup"
 
 
-class OperationConflictError(RuntimeError):
+class OperationConflictError(FailedPreconditionError):
     """Raised when a hardware operation conflicts with an active operation."""
 
 

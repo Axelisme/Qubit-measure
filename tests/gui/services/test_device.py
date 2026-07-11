@@ -16,6 +16,10 @@ from zcu_tools.gui.app.main.services.operation_gate import OperationGate
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.background import BackgroundRunner
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
@@ -173,6 +177,16 @@ def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp)
     with pytest.raises(OperationConflictError, match="Cannot read"):
         svc.get_device_info("dev1")
     gate.release(1)
+
+
+def test_cancel_missing_device_operation_is_failed_precondition(qapp):  # noqa: ARG001
+    svc, _device = _make_svc()
+
+    with pytest.raises(FailedPreconditionError, match="No operation") as exc_info:
+        svc.cancel_device_operation("dev1")
+
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 def test_device_connect_failure_is_reported_without_live_registration(qapp):

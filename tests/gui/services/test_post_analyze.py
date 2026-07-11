@@ -21,6 +21,10 @@ from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -123,8 +127,12 @@ def test_start_post_analyze_gates_on_missing_primary_result(qapp):  # noqa: ARG0
     state = _make_state(with_analyze=False)
     svc, bg = _make_service(state, EventBus())
 
-    with pytest.raises(RuntimeError, match="no primary analyze result"):
+    with pytest.raises(
+        FailedPreconditionError, match="no primary analyze result"
+    ) as exc_info:
         svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
     assert bg.submit_count == 0
 
 
@@ -133,8 +141,11 @@ def test_start_post_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
     state.set_tab_running("tab1", True)
     svc, _ = _make_service(state, EventBus())
 
-    with pytest.raises(RuntimeError, match="busy"):
+    with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
         svc.start_post_analyze("tab1", post_analyze_params_instance=object())
+
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 def test_start_post_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG001

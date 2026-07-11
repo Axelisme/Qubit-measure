@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — orchestrate workflow refresh recovery coverage
+**Last updated:** 2026-07-11 — typed expected-error compatibility coverage
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -261,6 +261,11 @@ twotone `ro_optimize` adapter tests 覆蓋 pulse-readout-only spec、GUI analyze
 schema fields：no-snapshot md-only、current result 與 MetaDict 合併、缺值 skip。
 
 ### GUI remote/control tests
+
+`tests/gui/test_expected_error.py`鎖定closed category、legacy RuntimeError/ValueError ancestry與
+explicit concrete opt-in/exclusion；`tests/gui/services/remote/test_expected_error_wire_compat.py`
+以exact `(code, message, reason, data)` tuple鎖定既有handler projection，並證
+`ResultScopeError`分類不依賴reason prefix。
 
 `tests/gui/services/remote/test_remote_mcp_toolchain.py` 保留 remote MCP startup/device/schema/wrapper 與 base async contract；bundle/stage tools 放在 `test_bundle_tools.py`，screenshot/debug/overview 放在 `test_screenshot_overview_tools.py`。新增 remote MCP 測試時優先放到對應 focused file；只有真正跨 toolchain 的行為才放回 `test_remote_mcp_toolchain.py`。
 

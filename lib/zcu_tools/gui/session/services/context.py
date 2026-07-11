@@ -5,6 +5,12 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+    InvalidInputError,
+)
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     MdChangedPayload,
@@ -30,12 +36,14 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ExpContext
 
 
-class MlEntryValidationError(RuntimeError):
+class MlEntryValidationError(InvalidInputError):
     """Expected failure when raw ML entry cannot be deserialised."""
 
 
-class MdValueError(ValueError):
+class MdValueError(ValueError, ExpectedError):
     """Expected failure when the MetaDict value text cannot be coerced safely."""
+
+    category = ExpectedErrorCategory.INVALID_INPUT
 
 
 def _coerce_scalar(text: str, current: Any) -> Any:
@@ -254,7 +262,7 @@ class ContextService:
 
     def set_md_attr(self, key: str, value: Any) -> None:
         if not self.has_context():
-            raise RuntimeError("No experiment context.")
+            raise FailedPreconditionError("No experiment context.")
         md = self._state.exp_context.md
         setattr(md, key, value)
         # Semantic context content change: bump so concurrency guards on
@@ -273,7 +281,7 @@ class ContextService:
 
     def del_md_attr(self, key: str) -> None:
         if not self.has_context():
-            raise RuntimeError("No experiment context.")
+            raise FailedPreconditionError("No experiment context.")
         md = self._state.exp_context.md
         delattr(md, key)
         self._state.version.bump("context")
@@ -313,7 +321,7 @@ class ContextService:
         a single editor commit does not). Raises MlEntryValidationError (from the
         lowering callback) on a bad entry."""
         if not self.has_context():
-            raise RuntimeError("No experiment context.")
+            raise FailedPreconditionError("No experiment context.")
         ctx = self._state.exp_context
         for key, value in md.items():
             setattr(ctx.md, key, value)
@@ -333,7 +341,7 @@ class ContextService:
 
     def del_ml_module(self, name: str) -> None:
         if not self.has_context():
-            raise RuntimeError("No experiment context.")
+            raise FailedPreconditionError("No experiment context.")
         ml = self._state.exp_context.ml
         ml.delete_module(name)
         self._state.version.bump("context")
@@ -359,7 +367,7 @@ class ContextService:
 
     def del_ml_waveform(self, name: str) -> None:
         if not self.has_context():
-            raise RuntimeError("No experiment context.")
+            raise FailedPreconditionError("No experiment context.")
         ml = self._state.exp_context.ml
         ml.delete_waveform(name)
         self._state.version.bump("context")
@@ -373,14 +381,14 @@ class ContextService:
         ML_CHANGED below (the value is preserved). New-name clash fails fast.
         """
         if not self.has_context():
-            raise RuntimeError("No experiment context.")
+            raise FailedPreconditionError("No experiment context.")
         if not new:
-            raise RuntimeError("New name must not be empty.")
+            raise FailedPreconditionError("New name must not be empty.")
         ml = self._state.exp_context.ml
         if old not in ml.modules:
-            raise RuntimeError(f"No module named {old!r}.")
+            raise FailedPreconditionError(f"No module named {old!r}.")
         if new in ml.modules:
-            raise RuntimeError(f"A module named {new!r} already exists.")
+            raise FailedPreconditionError(f"A module named {new!r} already exists.")
         ml.register_module(**{new: ml.modules[old]})
         ml.delete_module(old)
         self._state.version.bump("context")
@@ -389,14 +397,14 @@ class ContextService:
     def rename_ml_waveform(self, old: str, new: str) -> None:
         """Rename an ml waveform (see :meth:`rename_ml_module`)."""
         if not self.has_context():
-            raise RuntimeError("No experiment context.")
+            raise FailedPreconditionError("No experiment context.")
         if not new:
-            raise RuntimeError("New name must not be empty.")
+            raise FailedPreconditionError("New name must not be empty.")
         ml = self._state.exp_context.ml
         if old not in ml.waveforms:
-            raise RuntimeError(f"No waveform named {old!r}.")
+            raise FailedPreconditionError(f"No waveform named {old!r}.")
         if new in ml.waveforms:
-            raise RuntimeError(f"A waveform named {new!r} already exists.")
+            raise FailedPreconditionError(f"A waveform named {new!r} already exists.")
         ml.register_waveform(**{new: ml.waveforms[old]})
         ml.delete_waveform(old)
         self._state.version.bump("context")

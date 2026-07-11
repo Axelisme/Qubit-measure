@@ -15,6 +15,10 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
 
 
 def _empty_schema() -> CfgSchema:
@@ -90,9 +94,11 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     state.set_tab_analyzing(tab_id, True)
     svc, _emit, writeback = _service(state)
 
-    with pytest.raises(RuntimeError, match="busy"):
+    with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
         svc.load_result(LoadPermit(tab_id), "/tmp/new.hdf5")
 
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
     adapter.load.assert_not_called()
     writeback.teardown_tab_items.assert_not_called()
     assert state.get_tab(tab_id).run_result is None
@@ -109,6 +115,7 @@ def test_load_result_error_leaves_state_unchanged() -> None:
         svc.load_result(LoadPermit(tab_id), "/tmp/bad.hdf5")
 
     assert exc_info.value.reason_code == "invalid_data_file"
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert "Details: bad file" in str(exc_info.value)
     writeback.teardown_tab_items.assert_not_called()
     assert state.get_tab(tab_id).run_result is old
@@ -124,4 +131,5 @@ def test_load_result_wraps_unsupported_adapter() -> None:
         svc.load_result(LoadPermit(tab_id), "/tmp/file.hdf5")
 
     assert exc_info.value.reason_code == "unsupported_load"
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     writeback.teardown_tab_items.assert_not_called()

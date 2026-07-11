@@ -21,6 +21,10 @@ from zcu_tools.gui.app.main.services.analyze import AnalyzeService
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -153,10 +157,13 @@ def test_start_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
     state.set_tab_running("tab1", True)
     svc, _ = _make_service(state, EventBus())
 
-    with pytest.raises(RuntimeError, match="busy"):
+    with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
         svc.start_analyze(
             AnalyzePermit(tab_id="tab1"), analyze_params_instance=object()
         )
+
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +237,11 @@ def test_start_interactive_rejects_busy_tab(qapp):  # noqa: ARG001
     state.set_tab_running("tab1", True)
     svc, _ = _make_service(state, EventBus())
 
-    with pytest.raises(RuntimeError, match="busy"):
+    with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
         svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001

@@ -20,6 +20,11 @@ from zcu_tools.gui.app.main.services.guard import WritebackPermit
 from zcu_tools.gui.app.main.services.writeback import WritebackService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+    InvalidInputError,
+)
 from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
@@ -206,8 +211,13 @@ def test_set_item_field_edits_on_metadict_item_raises():
     item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
     item.session_id = "md-1"
     _put_items(state, item)
-    with pytest.raises(RuntimeError, match="not a module/waveform item"):
+    with pytest.raises(
+        InvalidInputError, match="not a module/waveform item"
+    ) as exc_info:
         svc.set_item_field("t1", "md-1", edits=[{"path": "p", "value": 1}])
+
+    assert exc_info.value.category is ExpectedErrorCategory.INVALID_INPUT
+    assert exc_info.value.reason_code == ""
 
 
 def test_set_item_field_metadict_value_returns_empty_aggregate():
@@ -324,8 +334,11 @@ def test_apply_module_no_editable_schema_raises():
     item.session_id = "ml-1"
     _put_items(state, item)
 
-    with pytest.raises(RuntimeError, match="no editable schema"):
+    with pytest.raises(FailedPreconditionError, match="no editable schema") as exc_info:
         svc.apply_tab_writeback(WritebackPermit(tab_id="t1"))
+
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 # ---------------------------------------------------------------------------
@@ -355,15 +368,23 @@ def test_set_item_field_proposed_value_on_module_rejected():
     item.session_id = "ml-1"
     _put_items(state, item)
 
-    with pytest.raises(RuntimeError, match="not a metadict"):
+    with pytest.raises(InvalidInputError, match="not a metadict") as exc_info:
         svc.set_item_field("t1", "ml-1", proposed_value=1.0)
+
+    assert exc_info.value.category is ExpectedErrorCategory.INVALID_INPUT
+    assert exc_info.value.reason_code == ""
 
 
 def test_set_item_field_unknown_id_raises():
     state = _make_state_with_tab()
     svc = _svc(state)
-    with pytest.raises(RuntimeError, match="unknown writeback session_id"):
+    with pytest.raises(
+        InvalidInputError, match="unknown writeback session_id"
+    ) as exc_info:
         svc.set_item_field("t1", "md-99", selected=True)
+
+    assert exc_info.value.category is ExpectedErrorCategory.INVALID_INPUT
+    assert exc_info.value.reason_code == ""
 
 
 # ---------------------------------------------------------------------------

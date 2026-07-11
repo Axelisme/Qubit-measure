@@ -6,6 +6,7 @@ from typing import Any
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 
 from .scopes import figure_ambient
@@ -52,12 +53,12 @@ class PostAnalyzeService(_StagedAnalyzeService):
         params off the tab and calls ``adapter.post_analyze``.
         """
         if self._state.is_tab_busy(tab_id):
-            raise RuntimeError(f"Tab {tab_id!r} is busy")
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
         analyze_result = tab.analyze_result
         if analyze_result is None:
-            raise RuntimeError(
+            raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no primary analyze result to post-analyze"
             )
 

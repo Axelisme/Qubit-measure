@@ -10,6 +10,7 @@ from zcu_tools.device import device_setup_cancel_scope
 from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
@@ -76,7 +77,7 @@ class RunService(QObject):
         # (tab busy, hardware exclusion) is checked here at the operation boundary.
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
-            raise RuntimeError(f"Tab {tab_id!r} is busy")
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         logger.info("start_run: tab_id=%r", tab_id)
 

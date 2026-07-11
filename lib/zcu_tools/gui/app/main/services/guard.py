@@ -11,6 +11,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
 
 
-class GuardError(RuntimeError):
+class GuardError(FailedPreconditionError):
     """Raised when a protected operation's static precondition is not met.
 
     This is the single failure mode both clients (View and remote) see when a
@@ -30,10 +31,6 @@ class GuardError(RuntimeError):
     so a remote client can decide the next action without parsing the human
     ``message``. Empty when unset.
     """
-
-    def __init__(self, message: str, *, reason_code: str = "") -> None:
-        super().__init__(message)
-        self.reason_code = reason_code
 
 
 @dataclass(frozen=True)

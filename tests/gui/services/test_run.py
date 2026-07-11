@@ -37,6 +37,10 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
@@ -187,9 +191,11 @@ def test_start_run_rejects_when_tab_busy():
     state.set_tab_analyzing(tab_id, True)
     svc, gate, bg, _ = _make_run_service(state)
 
-    with pytest.raises(RuntimeError, match="busy"):
+    with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
         svc.start_run(_make_permit(state, tab_id, adapter))
 
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
     assert not gate.has_active(OperationKind.RUN)
     assert bg.last_work is None
 

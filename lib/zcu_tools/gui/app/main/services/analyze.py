@@ -7,6 +7,7 @@ from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -70,7 +71,7 @@ class AnalyzeService(_StagedAnalyzeService):
         # Returns the operation token (handle) so the caller can await it.
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
-            raise RuntimeError(f"Tab {tab_id!r} is busy")
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
@@ -115,7 +116,7 @@ class AnalyzeService(_StagedAnalyzeService):
         """
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
-            raise RuntimeError(f"Tab {tab_id!r} is busy")
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         # Open the token with a cancel_hook that executes the interactive teardown.
         # The hook runs *after* Stop is enqueued, so Settled(cancelled) from the

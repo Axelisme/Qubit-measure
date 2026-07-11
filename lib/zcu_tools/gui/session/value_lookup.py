@@ -12,6 +12,8 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeAlias, TypeVar, cast
 
+from zcu_tools.gui.expected_error import ExpectedError, ExpectedErrorCategory
+
 ScalarValue: TypeAlias = int | float | str | bool
 ScalarType: TypeAlias = type[int] | type[float] | type[str] | type[bool]
 
@@ -26,23 +28,32 @@ MISSING = _Missing()
 
 
 class ValueLookupError(RuntimeError):
-    """Base class for expected value lookup failures."""
+    """Base class for value lookup failures.
+
+    Only selected concrete leaves opt in to the expected-error taxonomy.
+    """
 
     def __init__(self, key: str, message: str) -> None:
         self.key = key
         super().__init__(message)
 
 
-class MissingValue(ValueLookupError):
+class MissingValue(ValueLookupError, ExpectedError):
     """The requested key is not registered."""
 
+    category = ExpectedErrorCategory.INVALID_INPUT
 
-class UnavailableValue(ValueLookupError):
+
+class UnavailableValue(ValueLookupError, ExpectedError):
     """The key is known but cannot be read in the current session state."""
 
+    category = ExpectedErrorCategory.FAILED_PRECONDITION
 
-class ValueTypeError(ValueLookupError, TypeError):
+
+class ValueTypeError(ValueLookupError, TypeError, ExpectedError):
     """The registered or returned value does not match the requested type."""
+
+    category = ExpectedErrorCategory.INVALID_INPUT
 
 
 class ProviderError(ValueLookupError):

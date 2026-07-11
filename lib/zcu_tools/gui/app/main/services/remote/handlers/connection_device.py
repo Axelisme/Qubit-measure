@@ -6,6 +6,7 @@ import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
 from zcu_tools.gui.session.services.connection import (
@@ -105,11 +106,12 @@ def _h_startup_apply(
     try:
         return adapter.ctrl.apply_startup_project(req)
     except ResultScopeError as exc:
-        code = (
-            ErrorCode.INVALID_PARAMS
-            if exc.reason_code.startswith("scope_")
-            else ErrorCode.PRECONDITION_FAILED
-        )
+        if exc.category is ExpectedErrorCategory.INVALID_INPUT:
+            code = ErrorCode.INVALID_PARAMS
+        elif exc.category is ExpectedErrorCategory.FAILED_PRECONDITION:
+            code = ErrorCode.PRECONDITION_FAILED
+        else:
+            raise AssertionError(f"unsupported expected-error category: {exc.category}")
         raise RemoteError(code, str(exc), reason=exc.reason_code) from exc
 
 

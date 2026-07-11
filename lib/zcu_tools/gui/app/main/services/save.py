@@ -10,6 +10,7 @@ from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.main.figure_export import save_figure_to_path
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.ports import BackgroundExecutor
 from zcu_tools.utils.datasaver import reserve_labber_filepath
 
@@ -89,7 +90,7 @@ class SaveService(QObject):
         tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
-            raise RuntimeError("No figure available to save")
+            raise FailedPreconditionError("No figure available to save")
 
         # Reserve the final data path up front. Low-level persistence now writes
         # the exact path it receives, so the GUI must own uniqueness policy before
@@ -125,7 +126,7 @@ class SaveService(QObject):
         tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
-            raise RuntimeError("No figure available to save")
+            raise FailedPreconditionError("No figure available to save")
         logger.info("save_image_sync: tab_id=%r path=%r", tab_id, image_path)
         self._ensure_parent_directory(image_path)
         save_figure_to_path(tab.figure, image_path)
@@ -138,7 +139,7 @@ class SaveService(QObject):
         tab_id = permit.tab_id
         tab = self._state.get_tab(tab_id)
         if tab.post_figure is None:
-            raise RuntimeError("No post-analysis figure available to save")
+            raise FailedPreconditionError("No post-analysis figure available to save")
         logger.info("save_post_image_sync: tab_id=%r path=%r", tab_id, image_path)
         self._ensure_parent_directory(image_path)
         save_figure_to_path(tab.post_figure, image_path)
@@ -153,7 +154,7 @@ class SaveService(QObject):
         # Run-result presence is proven by the SavePermit; tab-busy is the
         # dynamic check that stays at the operation boundary.
         if self._state.is_tab_busy(tab_id):
-            raise RuntimeError(f"Tab {tab_id!r} is busy")
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context

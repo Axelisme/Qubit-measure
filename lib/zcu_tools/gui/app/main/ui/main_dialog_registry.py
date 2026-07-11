@@ -8,6 +8,7 @@ from qtpy.QtCore import QBuffer, QIODevice, Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
+from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
@@ -132,7 +133,9 @@ class MainDialogRegistry:
         """Grab a currently-open dialog and return raw PNG bytes."""
         dialog = self._dialogs.get(dialog_name)
         if dialog is None or not dialog.isVisible():
-            raise RuntimeError(f"dialog {dialog_name.value!r} is not currently open")
+            raise FailedPreconditionError(
+                f"dialog {dialog_name.value!r} is not currently open"
+            )
         pixmap = dialog.grab()
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)

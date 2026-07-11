@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import set_shutting_down
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
@@ -723,10 +724,10 @@ class MainWindow(QMainWindow):
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
-            raise RuntimeError(f"unknown tab_id: {tab_id!r}")
+            raise FailedPreconditionError(f"unknown tab_id: {tab_id!r}")
         canvas = tab_w._plot_stack.currentWidget()
         if canvas is None or canvas is tab_w._plot_placeholder:
-            raise RuntimeError(f"tab {tab_id!r} has no figure yet")
+            raise FailedPreconditionError(f"tab {tab_id!r} has no figure yet")
         figure = getattr(canvas, "figure", None)
         if not isinstance(figure, Figure):
             raise RuntimeError(f"tab {tab_id!r} canvas has no matplotlib figure")

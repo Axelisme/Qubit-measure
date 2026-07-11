@@ -1,10 +1,18 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-11（domain-free paired schema assembler）
+**Last updated:** 2026-07-11（typed expected-error taxonomy）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 `plotting`, `remote`, `session`, `widgets`) are shared by every app.
+
+## Expected Errors (`expected_error.py`)
+
+Caller-correctable failure使用Qt-free、remote-independent的nominal `ExpectedError`
+seam。closed category只有`INVALID_INPUT`與`FAILED_PRECONDITION`；producer以concrete
+exception或raise site明列分類，optional `reason_code`提供stable machine tag。普通
+`RuntimeError`、provider/persistence/async terminal與invariant failures不自動opt in。
+RuntimeError-compatible fixed leaves讓既有view/handler catches維持相容（ADR-0047）。
 
 ## Shared Config Core (`cfg/`)
 

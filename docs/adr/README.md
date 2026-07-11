@@ -40,6 +40,7 @@
 
 - [0013 — RemoteControlAdapter as second view](0013-remote-adapter-as-second-view.md)：remote socket 是 MainWindow 平級 driving adapter。
 - [0014 — Shared GUI transport layer](0014-gui-shared-transport-layer.md)：三個 GUI app 共用 NDJSON RPC endpoint 與 MCP bridge primitive。
+- [0047 — Typed expected-error taxonomy](0047-typed-expected-error-taxonomy.md)：caller-correctable failure 由 producer 以 closed category 顯式 opt in，transport 只投影。
 
 ## Persistence
 

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.notify_handles import NotifyHandles, NotifyResult
@@ -597,7 +598,7 @@ class Controller(SessionControllerMixin):
 
         soccfg = self._soc_svc.get_soccfg()
         if soccfg is None:
-            raise RuntimeError("No SoC connected")
+            raise FailedPreconditionError("No SoC connected")
         info: dict[str, object] = {
             "description": describe_soc(soccfg),
             "is_mock": self._soc_svc.is_mock_soc(),
@@ -948,7 +949,7 @@ class Controller(SessionControllerMixin):
 
     def get_role_catalog(self) -> RoleCatalog:
         if self._role_catalog is None:
-            raise RuntimeError("No role catalog is wired up.")
+            raise FailedPreconditionError("No role catalog is wired up.")
         return self._role_catalog
 
     def get_exp_context(self) -> ExpContext:
@@ -966,10 +967,10 @@ class Controller(SessionControllerMixin):
         from zcu_tools.gui.cfg import CfgSchema
 
         if not name:
-            raise RuntimeError("Entry name must not be empty.")
+            raise FailedPreconditionError("Entry name must not be empty.")
         entry = self.get_role_catalog().get(role_id)
         if entry.item_kind != item_kind:
-            raise RuntimeError(
+            raise FailedPreconditionError(
                 f"Role {role_id!r} is a {entry.item_kind}, not a {item_kind}."
             )
         # create = new entry; a name clash is an error (the user/agent meant to
@@ -1014,7 +1015,7 @@ class Controller(SessionControllerMixin):
     def _require_new_ml_name(self, item_kind: str, name: str) -> None:
         """Fail fast if a create would overwrite an existing ml entry."""
         if self.has_ml_entry(item_kind, name):
-            raise RuntimeError(
+            raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists; "
                 "use Modify to change it, or pick a different name."
             )

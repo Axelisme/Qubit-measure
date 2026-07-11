@@ -12,6 +12,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 from .guard import WritebackPermit
 from .ports import CfgEditorPort, ContextWrites
@@ -154,7 +155,7 @@ class WritebackService:
             item.target_name = target_name
         if proposed_value is not _UNSET:
             if not isinstance(item, MetaDictWriteback):
-                raise RuntimeError(
+                raise InvalidInputError(
                     f"{session_id!r} is not a metadict item; proposed_value invalid"
                 )
             item.proposed_value = proposed_value
@@ -164,16 +165,16 @@ class WritebackService:
         added: list[str] = []
         if edits is not None:
             if not isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                raise RuntimeError(
+                raise InvalidInputError(
                     f"{session_id!r} is not a module/waveform item; edits invalid"
                 )
             if item.editor_id is None:
-                raise RuntimeError(
+                raise FailedPreconditionError(
                     f"{session_id!r} has no editable cfg model to apply edits to"
                 )
             for i, edit in enumerate(edits):
                 if "path" not in edit or "value" not in edit:
-                    raise RuntimeError(
+                    raise InvalidInputError(
                         f"edits[{i}] must be an object with 'path' and 'value'"
                     )
                 result = self._cfg_editor.set_field(
@@ -192,7 +193,7 @@ class WritebackService:
         for item in self._state.get_tab(tab_id).writeback_items:
             if item.session_id == session_id:
                 return item
-        raise RuntimeError(f"unknown writeback session_id: {session_id!r}")
+        raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
 
     # ------------------------------------------------------------------
     # Apply (execute the persistent draft)
@@ -266,5 +267,7 @@ class WritebackService:
             return self._cfg_editor.get_draft(item.editor_id).snapshot()
         schema = item.edit_schema
         if schema is None:
-            raise RuntimeError(f"writeback '{item.session_id}' has no editable schema")
+            raise FailedPreconditionError(
+                f"writeback '{item.session_id}' has no editable schema"
+            )
         return schema

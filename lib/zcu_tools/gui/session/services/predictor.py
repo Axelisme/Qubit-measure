@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.events import PredictorChangedPayload
 from zcu_tools.meta_tool import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -127,11 +128,11 @@ class PredictMatrixCurveResult:
 # ---------------------------------------------------------------------------
 
 
-class PredictorLoadError(RuntimeError):
+class PredictorLoadError(FailedPreconditionError):
     """Expected failure: predictor file could not be loaded / parsed."""
 
 
-class PredictorNotLoaded(RuntimeError):
+class PredictorNotLoaded(FailedPreconditionError):
     """Expected failure: predict_freq called before any predictor was loaded."""
 
 

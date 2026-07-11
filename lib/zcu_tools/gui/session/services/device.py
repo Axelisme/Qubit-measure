@@ -15,6 +15,7 @@ from typing import (
 from qtpy.QtCore import QObject, Signal  # type: ignore[attr-defined]
 
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
@@ -337,7 +338,9 @@ class DeviceService(QObject):
     def start_connect_device(self, req: ConnectDeviceRequest) -> int:
         current = self._state.get_device(req.name)
         if current is not None and current.is_live():
-            raise RuntimeError(f"Device {req.name!r} is already connected or busy")
+            raise FailedPreconditionError(
+                f"Device {req.name!r} is already connected or busy"
+            )
         initial = current or DeviceState(
             name=req.name,
             type_name=req.type_name,
@@ -429,7 +432,9 @@ class DeviceService(QObject):
         # device starts, otherwise gui_op_wait cannot track a name-only reconnect).
         dev = self._require_device(name)
         if not dev.is_memory_only():
-            raise RuntimeError(f"Device {name!r} is not a memory-only device")
+            raise FailedPreconditionError(
+                f"Device {name!r} is not a memory-only device"
+            )
         return self.start_connect_device(
             ConnectDeviceRequest(
                 type_name=dev.type_name,
@@ -614,11 +619,13 @@ class DeviceService(QObject):
         op = self._inflight.get(name)
         if op is None:
             # No operation at all for this device — not busy.
-            raise RuntimeError(f"No operation in flight for device {name!r}.")
+            raise FailedPreconditionError(
+                f"No operation in flight for device {name!r}."
+            )
         if op.kind is not OperationKind.DEVICE_SETUP:
             # An op is in flight, but connect/disconnect have no cancellation point
             # (they run to natural completion; only apply/setup polls stop_event).
-            raise RuntimeError(
+            raise FailedPreconditionError(
                 f"Device {name!r} has a {op.kind.value} operation in flight, "
                 f"which has no cancellation point (only apply/setup is cancellable)."
             )
@@ -646,7 +653,9 @@ class DeviceService(QObject):
     def forget_device(self, name: str) -> None:
         dev = self._require_device(name)
         if not dev.is_memory_only():
-            raise RuntimeError(f"Device {name!r} is not a memory-only device")
+            raise FailedPreconditionError(
+                f"Device {name!r} is not a memory-only device"
+            )
         self._state.remove_device(name)
         self._emit_device_changed(name)
 
@@ -947,11 +956,11 @@ class DeviceService(QObject):
     def _require_device(self, name: str) -> DeviceState:
         dev = self._state.get_device(name)
         if dev is None:
-            raise RuntimeError(f"Device {name!r} is not known")
+            raise FailedPreconditionError(f"Device {name!r} is not known")
         return dev
 
     def _require_connected_device(self, name: str) -> DeviceState:
         dev = self._require_device(name)
         if not dev.is_connected():
-            raise RuntimeError(f"Device {name!r} is not connected")
+            raise FailedPreconditionError(f"Device {name!r} is not connected")
         return dev

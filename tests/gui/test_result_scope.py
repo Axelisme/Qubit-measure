@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import zcu_tools.gui.result_scope as result_scope_mod
+from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.result_scope import (
     ResultScopeError,
     ResultScopeManager,
@@ -121,6 +122,14 @@ def test_result_scope_reads_legacy_name_in_one_place(tmp_path) -> None:
     assert read_params_identity(params_path) == ("LegacyChip", "Q2")
 
 
+def test_result_scope_params_read_failure_is_failed_precondition(tmp_path) -> None:
+    with pytest.raises(ResultScopeError) as exc_info:
+        read_params_identity(tmp_path / "missing" / "params.json")
+
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == "params_read_failed"
+
+
 def test_list_scopes_migrates_two_level_params_from_path(tmp_path) -> None:
     params_path = tmp_path / "result" / "Q3_2D" / "Q1" / "params.json"
     params_path.parent.mkdir(parents=True)
@@ -210,5 +219,8 @@ def test_ensure_scope_rejects_identity_mismatch(tmp_path) -> None:
         encoding="utf8",
     )
 
-    with pytest.raises(ResultScopeError, match="Other/Q1"):
+    with pytest.raises(ResultScopeError, match="Other/Q1") as exc_info:
         ResultScopeManager(tmp_path).ensure_scope(chip_name="ChipA", qub_name="Q1")
+
+    assert exc_info.value.category is ExpectedErrorCategory.INVALID_INPUT
+    assert exc_info.value.reason_code == "scope_identity_mismatch"

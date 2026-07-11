@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from zcu_tools.gui.expected_error import ExpectedError, ExpectedErrorCategory
 from zcu_tools.meta_tool import (
     UNKNOWN_RESONATOR_NAME,
     ParamsProject,
@@ -40,11 +41,18 @@ class ProjectPaths:
     params_path: str
 
 
-class ResultScopeError(RuntimeError):
+class ResultScopeError(RuntimeError, ExpectedError):
     """Expected result-scope failure with a stable reason code."""
 
-    def __init__(self, message: str, *, reason_code: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: ExpectedErrorCategory,
+        reason_code: str,
+    ) -> None:
         super().__init__(message)
+        self.category = category
         self.reason_code = reason_code
 
 
@@ -56,6 +64,7 @@ def _params_error(
     )
     return ResultScopeError(
         f"Failed to {action} params identity at {path}: {exc}",
+        category=ExpectedErrorCategory.FAILED_PRECONDITION,
         reason_code=reason_code,
     )
 
@@ -214,6 +223,7 @@ class ResultScopeManager:
                 raise ResultScopeError(
                     f"Result scope {scope_id!r} belongs to "
                     f"{scope.chip_name}/{scope.qub_name}, not {chip_name}/{qub_name}",
+                    category=ExpectedErrorCategory.INVALID_INPUT,
                     reason_code="scope_identity_mismatch",
                 )
             write_params_identity(
@@ -231,6 +241,7 @@ class ResultScopeManager:
                 raise ResultScopeError(
                     f"Generated params path {params_path} belongs to "
                     f"{actual_chip}/{actual_qub}, not {chip_name}/{qub_name}",
+                    category=ExpectedErrorCategory.INVALID_INPUT,
                     reason_code="scope_identity_mismatch",
                 )
         write_params_identity(params_path, chip_name=chip_name, qub_name=qub_name)
@@ -257,5 +268,6 @@ class ResultScopeManager:
                     return scope
         raise ResultScopeError(
             f"Unknown result scope id: {scope_id!r}",
+            category=ExpectedErrorCategory.INVALID_INPUT,
             reason_code="scope_not_found",
         )

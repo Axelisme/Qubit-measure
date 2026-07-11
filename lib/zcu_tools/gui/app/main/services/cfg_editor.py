@@ -63,6 +63,7 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueLookupError, decode_value_ref
 
@@ -106,7 +107,7 @@ class CfgEditorHost(MeasureCfgBindingHost, ContextReadPort, ContextWritePort, Pr
     def drop_editor_version(self, editor_id: str) -> None: ...
 
 
-class CfgEditorError(RuntimeError):
+class CfgEditorError(InvalidInputError):
     """A CfgEditor session operation failed (unknown id, bad kind, …)."""
 
 

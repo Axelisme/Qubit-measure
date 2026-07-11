@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import LoadDataRequest
 from zcu_tools.gui.app.main.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .guard import LoadPermit
 
@@ -28,12 +29,11 @@ class LoadTabResultOutcome:
     source_kind: str = "loaded"
 
 
-class LoadDataError(RuntimeError):
+class LoadDataError(FailedPreconditionError):
     """User-facing load failure with a stable reason code."""
 
     def __init__(self, message: str, *, reason_code: str) -> None:
-        super().__init__(message)
-        self.reason_code = reason_code
+        super().__init__(message, reason_code=reason_code)
 
 
 def _format_invalid_data_message(data_path: str, detail: str) -> str:
@@ -66,7 +66,7 @@ class LoadService:
     def load_result(self, permit: LoadPermit, data_path: str) -> LoadTabResultOutcome:
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
-            raise RuntimeError(f"Tab {tab_id!r} is busy")
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context

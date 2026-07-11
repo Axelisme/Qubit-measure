@@ -9,6 +9,10 @@ from zcu_tools.gui.app.main.services.guard import SavePermit
 from zcu_tools.gui.app.main.services.save import SaveResultOutcome, SaveService
 from zcu_tools.gui.app.main.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
 
 
 def _make_figure() -> MagicMock:
@@ -127,8 +131,11 @@ def test_start_save_result_captures_image_error_and_continues_data(
 
 def test_start_save_result_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
     svc, _, _ = _make_service()
-    with pytest.raises(RuntimeError, match="No figure"):
+    with pytest.raises(FailedPreconditionError, match="No figure") as exc_info:
         svc.start_save_result(SavePermit(tab_id="tab"), "/data", "/img")
+
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 # ---------------------------------------------------------------------------

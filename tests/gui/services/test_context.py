@@ -8,6 +8,10 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.main.adapter import ContextReadiness
 from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
 from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -311,22 +315,28 @@ def test_rename_ml_module_clash_fails():
     state, svc = _make_active_state()
     ml = state.exp_context.ml
     ml.register_module(a=MagicMock(), b=MagicMock())
-    with pytest.raises(RuntimeError, match="already exists"):
+    with pytest.raises(FailedPreconditionError, match="already exists") as exc_info:
         svc.rename_ml_module("a", "b")
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
     assert "a" in ml.modules  # untouched
 
 
 def test_rename_ml_module_missing_fails():
     state, svc = _make_active_state()
-    with pytest.raises(RuntimeError, match="No module named"):
+    with pytest.raises(FailedPreconditionError, match="No module named") as exc_info:
         svc.rename_ml_module("nope", "x")
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 def test_rename_ml_module_empty_name_fails():
     state, svc = _make_active_state()
     state.exp_context.ml.register_module(qub=MagicMock())
-    with pytest.raises(RuntimeError, match="must not be empty"):
+    with pytest.raises(FailedPreconditionError, match="must not be empty") as exc_info:
         svc.rename_ml_module("qub", "")
+    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert exc_info.value.reason_code == ""
 
 
 def test_rename_ml_waveform_moves_key():

@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-08 — predictor view toolbar
+**Last updated:** 2026-07-11 — typed expected-error taxonomy
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -55,6 +55,11 @@ session/
 
 ## 關鍵設計
 
+- **expected failure逐一opt in**：session service只讓caller可修正的concrete exceptions加入
+  `ExpectedError` taxonomy；`OperationConflictError`、context validation、predictor readiness與
+  value-lookup expected leaves攜帶typed category。`ValueLookupError` parent、`ProviderError`、
+  SoC/device async terminal與registration failures保持unexpected，不因共同ancestry被降級
+  （ADR-0047）。
 - **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ 共用 `BackgroundRunner`（`gui/background.py`，純 off-main 執行器，三 app 共用同一 class——owner 直接持具體 runner 才能呼 anti-segfault 的 `quiesce()`）各自建；`ProgressService`/`IOManager`/`QtProgressTransport`/`QtShutdownDriver` 是共用 session service/adapter。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub`/`ProjectIOPort` port。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure/autofluxdep 各自 `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
 - **app 繼承/實作**：measure `State(SessionState)`、autofluxdep `AutoFluxDepState(SessionState)`；兩 Controller 暴露 `setup_control: SetupControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。

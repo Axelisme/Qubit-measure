@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.meta_tool import (
     ArbWaveformData,
     ArbWaveformDatabase,
@@ -100,7 +101,9 @@ def resolve_arb_waveform_root(ctx: ExpContext) -> Path:
 
     root = try_resolve_arb_waveform_root(ctx)
     if root is None:
-        raise RuntimeError("No project database_path is configured.")
+        raise FailedPreconditionError(
+            "No project database_path is configured.", reason_code="no_project"
+        )
     return root
 
 
