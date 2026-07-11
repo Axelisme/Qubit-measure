@@ -47,6 +47,8 @@ from .registry import (
 )
 
 if TYPE_CHECKING:
+    from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+
     from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,11 @@ class CfgFormWidget(QWidget):
         self._renderers = default_cfg_renderers() if renderers is None else renderers
         self._field_decorations: dict[str, FieldDecoration] = {}
         self._choice_state: tuple[tuple[str, str], ...] = ()
+        self._schema_snapshot_pending = False
+        self._schema_snapshot_timer = QTimer(self)
+        self._schema_snapshot_timer.setSingleShot(True)
+        self._schema_snapshot_timer.setInterval(0)
+        self._schema_snapshot_timer.timeout.connect(self._flush_pending_schema_snapshot)
         self._pending_section_refresh_paths: set[str] = set()
         self._section_refresh_scheduled = False
         self._editing_enabled = True
@@ -153,6 +160,7 @@ class CfgFormWidget(QWidget):
 
     def detach(self) -> None:
         """Unsubscribe and drop the Qt tree without closing the draft."""
+        self._drop_pending_schema_snapshot()
         draft = self._draft
         self._draft = None
         if draft is not None:
@@ -219,16 +227,38 @@ class CfgFormWidget(QWidget):
     def _on_draft_changed(self, *_: object) -> None:
         if self._draft is None:
             return
-        self.schema_changed.emit(self._draft.snapshot())
         state = _choice_state_for_model(self._draft.root)
-        if state == self._choice_state:
-            return
-        changed_selectors = _changed_choice_selector_paths(self._choice_state, state)
-        self._choice_state = state
-        self._queue_section_refresh(_parent_section_paths(changed_selectors))
+        if state != self._choice_state:
+            changed_selectors = _changed_choice_selector_paths(
+                self._choice_state, state
+            )
+            self._choice_state = state
+            self._queue_section_refresh(_parent_section_paths(changed_selectors))
+        self._queue_schema_snapshot()
 
     def _on_draft_validity_changed(self, valid: bool) -> None:
         self.validity_changed.emit(valid)
+
+    def _queue_schema_snapshot(self) -> None:
+        self._schema_snapshot_pending = True
+        if not self._schema_snapshot_timer.isActive():
+            self._schema_snapshot_timer.start()
+
+    def _flush_pending_schema_snapshot(self) -> None:
+        if not self._schema_snapshot_pending:
+            return
+        self._schema_snapshot_pending = False
+        draft = self._draft
+        if draft is not None:
+            self.schema_changed.emit(draft.snapshot())
+
+    def _drop_pending_schema_snapshot(self) -> None:
+        self._schema_snapshot_timer.stop()
+        self._schema_snapshot_pending = False
+
+    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
+        self.detach()
+        super().closeEvent(a0)
 
     def _resolve_decoration(self, path: str, field: CfgField) -> FieldDecoration:
         decoration = self._decoration_for_field(path, field)

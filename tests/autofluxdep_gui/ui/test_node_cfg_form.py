@@ -471,6 +471,7 @@ def test_node_cfg_form_renders_override_plan_badges_and_refreshes(ctrl_node, qap
         assert readout_trigger.badge == ""
 
         _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
+        qapp.processEvents()
 
         refreshed = form._default_form.decoration_for_path("modules.qub_pulse.gain")
         assert refreshed.enabled is True
@@ -523,11 +524,13 @@ def test_ro_optimize_previous_best_ranges_are_editable_initial_fields(qapp):
         _generation_group(form, "freq_search").fields["freq_range_mode"].set_value(
             DirectValue(value="fixed")
         )
+        qapp.processEvents()
         assert form._default_form.decoration_for_path("sweep.freq").badge == ""
 
         _generation_group(form, "gain_search").fields["gain_range_mode"].set_value(
             DirectValue(value="fixed")
         )
+        qapp.processEvents()
         assert form._default_form.decoration_for_path("sweep.gain").badge == ""
     finally:
         form.teardown()
@@ -571,6 +574,7 @@ def test_lenrabi_auto_sweep_marks_only_stop_generated(qapp):
         _generation_group(form, "sweep").fields["sweep_range_mode"].set_value(
             DirectValue(value="fixed")
         )
+        qapp.processEvents()
 
         refreshed = form._default_form.decoration_for_path("sweep.length.stop")
         assert refreshed.enabled is True
@@ -682,6 +686,7 @@ def test_edit_scalar_writes_back_to_schema(ctrl_node, qapp):
         qub_pulse = _ref_subsection(_section(form, "modules"), "qub_pulse")
         qub_pulse.fields["gain"].set_value(DirectValue(value=0.42))
         _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
+        qapp.processEvents()
         knobs = node.schema.lower(None)
         assert knobs["reps"] == 321 and isinstance(knobs["reps"], int)
         assert knobs["qub_gain"] == 0.42
@@ -715,11 +720,13 @@ def test_node_cfg_form_snapshots_only_the_unchanged_side(
     monkeypatch.setattr(generation_draft, "snapshot", count_generation_snapshot)
     try:
         form._default_draft.root.fields["reps"].set_value(DirectValue(321))
+        qapp.processEvents()
 
         assert snapshot_counts == {"default": 1, "generation": 1}
 
         snapshot_counts = {"default": 0, "generation": 0}
         _generation_leaf(form, "drive_gain_mode").set_value(DirectValue(value="fixed"))
+        qapp.processEvents()
 
         assert snapshot_counts == {"default": 1, "generation": 1}
     finally:
@@ -733,6 +740,7 @@ def test_edit_sweep_writes_back_to_schema(ctrl_node, qapp):
         _section(form, "sweep").fields["freq"].set_value(
             CenteredSweepValue(center=0.0, span=40.0, expts=41)
         )
+        qapp.processEvents()
         detune = node.schema.lower(None)["detune_sweep"]
         assert (float(detune.start), float(detune.stop), int(detune.expts)) == (
             -20.0,
@@ -756,6 +764,7 @@ def test_sectioned_form_commit_projects_to_logical_keys(qapp):
 
         _section(form, "acquire").fields["reps"].set_value(DirectValue(value=432))
         _section(form, "drive").fields["gain"].set_value(DirectValue(value=0.25))
+        qapp.processEvents()
 
         knobs = node.schema.lower(None)
         assert knobs["reps"] == 432
@@ -773,8 +782,10 @@ def test_optional_scalar_blank_lowers_to_none(ctrl_node, qapp):
         # optional scalar lowers to an omitted key (None — no early-stop)
         earlystop_snr = _generation_leaf(form, "earlystop_snr")
         earlystop_snr.set_value(DirectValue(value=50.0))
+        qapp.processEvents()
         assert node.schema.lower(None)["earlystop_snr"] == 50.0
         earlystop_snr.set_value(DirectValue(value=None))
+        qapp.processEvents()
         assert "earlystop_snr" not in node.schema.lower(None)
     finally:
         form.teardown()
@@ -792,6 +803,7 @@ def test_invalid_required_scalar_is_rejected(ctrl_node, qapp):
         nqz.set_value(DirectValue(value=None))
         assert not nqz.is_valid()
         assert not form._default_form.is_valid()  # the whole default block is invalid
+        qapp.processEvents()
         with pytest.raises(RuntimeError, match="modules\\.qub_pulse\\.nqz"):
             node.schema.lower(None)
     finally:

@@ -864,6 +864,7 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
 
     md.r_f = 6100.0
     model.refresh_expressions()
+    qapp.processEvents()
 
     val = w.read_values().fields["freq"]
     assert isinstance(val, EvalValue)
@@ -871,7 +872,7 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     assert emitted
 
 
-def test_nested_edit_materializes_schema_once_at_form_boundary(
+def test_same_tick_edits_materialize_schema_once_at_form_boundary(
     qapp, ctrl, monkeypatch: pytest.MonkeyPatch
 ):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
@@ -883,6 +884,8 @@ def test_nested_edit_materializes_schema_once_at_form_boundary(
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     form = CfgFormWidget()
     form.attach(draft)
+    emitted: list[CfgSchema] = []
+    form.schema_changed.connect(emitted.append)
     snapshot_count = 0
     original_snapshot = draft.snapshot
 
@@ -897,8 +900,121 @@ def test_nested_edit_materializes_schema_once_at_form_boundary(
         reps = cast(ScalarField, nested.fields["reps"])
 
         reps.set_value(11)
+        reps.set_value(12)
+        reps.set_value(13)
+
+        assert snapshot_count == 0
+        assert emitted == []
+
+        qapp.processEvents()
 
         assert snapshot_count == 1
+        assert len(emitted) == 1
+        nested_value = emitted[0].value.fields["nested"]
+        assert isinstance(nested_value, CfgSectionValue)
+        assert nested_value.fields["reps"] == DirectValue(13)
+    finally:
+        form.detach()
+        draft.close()
+
+
+def test_validity_feedback_stays_synchronous_while_schema_is_coalesced(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    schema = _schema(
+        {"value": ScalarSpec(label="Value", type=int, required=True)},
+        {"value": DirectValue(1)},
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    validity: list[bool] = []
+    schemas: list[CfgSchema] = []
+    form.validity_changed.connect(validity.append)
+    form.schema_changed.connect(schemas.append)
+    form.attach(draft)
+
+    try:
+        value = cast(ScalarField, draft.root.fields["value"])
+        value.set_value(None)
+        value.set_value(2)
+        value.set_value(None)
+
+        assert validity == [True, False, True, False]
+        assert schemas == []
+        assert form._schema_snapshot_timer.isActive()
+
+        qapp.processEvents()
+
+        assert len(schemas) == 1
+        assert not form._schema_snapshot_timer.isActive()
+    finally:
+        form.detach()
+        draft.close()
+
+
+def test_detach_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    schema = _schema(
+        {"value": ScalarSpec(label="Value", type=int)},
+        {"value": DirectValue(1)},
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    schemas: list[CfgSchema] = []
+    form.schema_changed.connect(schemas.append)
+    form.attach(draft)
+    value = cast(ScalarField, draft.root.fields["value"])
+
+    try:
+        value.set_value(2)
+        form.detach()
+        qapp.processEvents()
+
+        assert schemas == []
+        assert not form._schema_snapshot_timer.isActive()
+
+        form.attach(draft)
+        value.set_value(3)
+        qapp.processEvents()
+
+        assert len(schemas) == 1
+        assert schemas[0].value.fields["value"] == DirectValue(3)
+    finally:
+        form.detach()
+        draft.close()
+
+
+def test_close_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    schema = _schema(
+        {"value": ScalarSpec(label="Value", type=int)},
+        {"value": DirectValue(1)},
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    form = CfgFormWidget()
+    schemas: list[CfgSchema] = []
+    form.schema_changed.connect(schemas.append)
+    form.attach(draft)
+    form.show()
+    value = cast(ScalarField, draft.root.fields["value"])
+
+    try:
+        value.set_value(2)
+        form.close()
+        qapp.processEvents()
+
+        assert schemas == []
+        assert form._draft is None
+        assert not form._schema_snapshot_timer.isActive()
+
+        form.attach(draft)
+        value.set_value(3)
+        qapp.processEvents()
+
+        assert len(schemas) == 1
+        assert schemas[0].value.fields["value"] == DirectValue(3)
     finally:
         form.detach()
         draft.close()

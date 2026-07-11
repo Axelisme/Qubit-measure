@@ -1440,6 +1440,7 @@ def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
     assert draft is not None
     scalar = draft.root.fields["gain"]
     scalar.set_value(0.42)
+    qapp.processEvents()
 
     assert ctrl.update_tab_cfg.call_count == 1
     committed = ctrl.update_tab_cfg.call_args.args[1]
