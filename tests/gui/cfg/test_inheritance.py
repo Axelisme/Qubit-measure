@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from zcu_tools.gui.app.main.specs import (
     make_direct_readout_spec,
     make_pulse_readout_spec,
@@ -38,6 +39,18 @@ def _section(fields: dict) -> CfgSectionSpec:
 
 def _val(fields: dict) -> CfgSectionValue:
     return CfgSectionValue(fields=fields)
+
+
+def test_make_default_value_rejects_unknown_spec_type() -> None:
+    class _UnknownSpec:
+        pass
+
+    spec = CfgSectionSpec(
+        fields={"unknown": _UnknownSpec()}  # type: ignore[dict-item]
+    )
+
+    with pytest.raises(TypeError, match="Unsupported cfg spec node"):
+        make_default_value(spec)
 
 
 # ---------------------------------------------------------------------------

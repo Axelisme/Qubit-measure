@@ -15,6 +15,13 @@ from .lowering import (
     validate_finished_cfg,
     validate_reference_kinds,
 )
+from .materialization import (
+    RAW_MISSING,
+    RawMissing,
+    ReferenceMaterialization,
+    SpecMaterializationPolicy,
+    materialize_spec_value,
+)
 from .model import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -71,6 +78,9 @@ __all__ = [
     "ReferenceSpec",
     "ReferenceValue",
     "RangeFactory",
+    "RAW_MISSING",
+    "RawMissing",
+    "ReferenceMaterialization",
     "ReferenceResolver",
     "ScalarLeafInput",
     "ScalarSpec",
@@ -78,6 +88,7 @@ __all__ = [
     "SessionCodecError",
     "SweepSpec",
     "SweepValue",
+    "SpecMaterializationPolicy",
     "USE_SPEC_DEFAULT",
     "align_locked_literals",
     "default_value_for_type",
@@ -86,6 +97,7 @@ __all__ = [
     "is_custom_reference_key",
     "lower_finished_cfg",
     "make_default_value",
+    "materialize_spec_value",
     "make_custom_reference_key",
     "parse_custom_reference_key",
     "raw_to_schema",

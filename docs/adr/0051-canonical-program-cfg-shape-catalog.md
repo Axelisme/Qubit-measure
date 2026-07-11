@@ -30,14 +30,23 @@ shape 漂移。
   屬 materialization policy，不等同 unknown explicit style；
 - pulse root label 可由 caller factory override，`Pulse 1` / `Pulse 2` 不形成額外 catalog entry。
 
-`gui.cfg` 繼續只擁有 generic Spec/Value、inheritance、binding 與 lowering mechanics，不 import
-measure-domain vocabulary。main `specs` 與 autoflux `module_adapter` 只做窄 policy binding；autoflux
-node reference allowed subset仍精確限制為 Pulse / Pulse Readout。experiment role seed與預設值仍由
-experiment layer擁有，只從 canonical catalog取得 shape。
+`gui.cfg` 繼續只擁有 generic Spec/Value、inheritance、binding、lowering與raw spec-walk mechanics，
+不 import measure-domain vocabulary。generic materializer只依 supplied Spec遞迴建立完整Value，並把
+scalar missing、missing/non-mapping section、reference selection與Sweep carrier交給窄policy port；
+Literal永遠採Spec lock，extra raw key可代表domain object未公開於GUI的intentional subset，不做
+blanket rejection。
 
-raw materialization與 RoleEntry/Controller create flow不屬於本階段：materializer收斂時仍須顯式
-保存 missing scalar/nested default與 app allowed subset；consumer收斂時直接攜帶 catalog shape，
-不得讓 generic cfg core理解 program discriminator。
+`gui.measure_cfg.ProgramMaterializationPolicy`擁有program raw semantics：root `type/style`選shape、
+missing `ch/ro_ch`為0而其它scalar為None、missing/non-mapping nested section建立完整Spec default、
+required reference missing選`allowed[0]`，以及app可materialize subset。missing waveform style是Const；
+explicit unknown style/type Fast Fail。main policy支援完整七種module與六種waveform；autoflux只
+materialize Pulse / Pulse Readout module，但shape-label lookup仍辨識完整legal catalog。
+
+main `cfg_schemas`與autoflux `module_adapter`只正規化runtime object並綁定各自policy。Bath Reset
+module-local `relax_delay`不是runtime/Spec欄位，materializer明確拒絕；program root
+`relax_delay`不受影響。experiment role seed與預設值仍由experiment layer擁有，只從canonical
+catalog取得shape。RoleEntry/Controller consumer收斂另行處理，不讓generic cfg core理解program
+discriminator。
 
 ## 後果
 
@@ -47,6 +56,9 @@ raw materialization與 RoleEntry/Controller create flow不屬於本階段：mate
 - unknown explicit style不再在 main blank seam silent fallback成 Const；wire contract不變，GUI code
   revision增加。
 - shape catalog完整性不擴張 autoflux可 materialize 或 node reference允許的 module subset。
+- main/autoflux raw converter共用同一generic traversal與program policy，missing/default、nested
+  reference與subset contract由cross-app golden鎖定。
+- Bath Reset spec/value欄位完全一致，module-local幽靈`relax_delay`在GUI邊界Fast Fail。
 
 ## 拒絕的替代方案
 

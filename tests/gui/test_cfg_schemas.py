@@ -17,6 +17,7 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ReferenceValue,
 )
+from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 
 
 def test_waveform_cfg_to_value():
@@ -130,19 +131,47 @@ def test_waveform_cfg_to_value_invalid_type():
         waveform_cfg_to_value("not_a_dict")
 
 
-# ---------------------------------------------------------------------------
-# "pulse" module spec registration
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("raw", "expected_label"),
+    [
+        *[
+            ({"type": shape.discriminator}, shape.label)
+            for shape in PROGRAM_SHAPES.modules()
+        ],
+        *[
+            ({"style": shape.discriminator}, shape.label)
+            for shape in PROGRAM_SHAPES.waveforms()
+        ],
+    ],
+)
+def test_main_cfg_schemas_materializes_entire_catalog(
+    raw: dict[str, object],
+    expected_label: str,
+) -> None:
+    spec, value = module_cfg_to_value(raw)
+
+    assert spec.label == expected_label
+    assert tuple(value.fields) == tuple(spec.fields)
 
 
-def test_pulse_spec_registered():
-    from zcu_tools.gui.app.main.cfg_schemas import (
-        _MODULE_SPEC_FACTORIES,
-        _MODULE_VALUE_BUILDERS,
+def test_main_bath_reset_has_no_module_local_relax_delay() -> None:
+    spec, value = module_cfg_to_value({"type": "reset/bath"})
+
+    assert tuple(spec.fields) == (
+        "type",
+        "cavity_tone_cfg",
+        "qubit_tone_cfg",
+        "pi2_cfg",
     )
+    assert tuple(value.fields) == tuple(spec.fields)
 
-    assert "pulse" in _MODULE_SPEC_FACTORIES
-    assert "pulse" in _MODULE_VALUE_BUILDERS
+
+def test_main_bath_reset_rejects_module_local_relax_delay() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="reset/bath.*does not accept.*relax_delay.*program root",
+    ):
+        module_cfg_to_value({"type": "reset/bath", "relax_delay": 10.0})
 
 
 def test_module_cfg_to_value_pulse_basic():

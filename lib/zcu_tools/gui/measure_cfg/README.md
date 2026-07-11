@@ -1,6 +1,6 @@
 # `zcu_tools.gui.measure_cfg` — program cfg GUI vocabulary
 
-**Last updated:** 2026-07-11 — canonical shape catalog
+**Last updated:** 2026-07-11 — spec-driven raw materializer
 
 此 Qt-free package 是 program/v2 module/waveform GUI shape 的唯一 owner。`PROGRAM_SHAPES`
 固定列出七種 module 與六種 waveform discriminator、label與fresh Spec factory；它不做runtime
@@ -8,9 +8,14 @@ registration，也不import program runtime、app、session、experiment、Qt或
 
 每次`ProgramShape.make_spec(policy)`都建立deep-fresh tree。`ProgramSpecPolicy`只容許兩個跨app
 差異：Arb data的choices source，以及Direct/Pulse Readout間的inheritance hook。main與autoflux
-各自在app edge綁定policy；app-specific raw materialization、reference allowed subset與role seed不屬於
-catalog。
+各自在app edge綁定policy；runtime object normalization與role seed仍不屬於本package。
+
+`ProgramMaterializationPolicy`把generic `gui.cfg` spec walk綁成program raw contract：missing
+`ch`/`ro_ch`為0、其它scalar為unset；missing或non-mapping nested section建立完整Spec default；required
+reference missing選`allowed[0]`。main可materialize完整7+6 shapes；autoflux module subset只含Pulse與
+Pulse Readout，但label lookup仍辨識完整legal catalog。Bath module-local `relax_delay`明確拒絕，
+program root同名欄位不在此materializer scope。
 
 Catalog lookup對explicit unknown discriminator Fast Fail。raw輸入缺少waveform style時是否採Const
-是materializer policy，不是catalog fallback。generic `zcu_tools.gui.cfg`不得反向import本package；
+由materializer policy固定為Const，不是catalog fallback。generic `zcu_tools.gui.cfg`不得反向import本package；
 runtime closed set parity由tests顯式比較program cfg classes。

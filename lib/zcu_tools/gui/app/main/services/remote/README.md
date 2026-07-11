@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — canonical program cfg catalog version
+**Last updated:** 2026-07-11 — spec-driven program cfg materializer version
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -112,7 +112,7 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 49`, `GUI_VERSION = 65`, and
+Current measure-gui values are `WIRE_VERSION = 49`, `GUI_VERSION = 66`, and
 `MCP_VERSION = 71`（defined in `zcu_tools.mcp.measure.server`）。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a

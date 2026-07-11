@@ -5,9 +5,11 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.autofluxdep.cfg.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import (
+    module_cfg_shape_label,
     module_cfg_to_value,
     pulse_module_ref_spec,
     pulse_readout_module_ref_spec,
+    waveform_cfg_shape_label,
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.cfg import (
@@ -79,6 +81,14 @@ _LOWERED_READOUT = {
 }
 
 
+class _StringImpostor:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def __str__(self) -> str:
+        return self._text
+
+
 def _lower_converted(spec: CfgSectionSpec, value: CfgSectionValue) -> dict[str, object]:
     return schema_to_raw_dict(CfgSchema(spec=spec, value=value), None, None)
 
@@ -146,6 +156,44 @@ def test_autoflux_default_conversion_rejects_direct_readout() -> None:
             }
         )
     assert str(exc_info.value) == "Unsupported module type 'readout/direct'"
+
+
+@pytest.mark.parametrize(
+    ("discriminator", "label"),
+    [
+        ("readout/direct", "Direct Readout"),
+        ("reset/none", "None Reset"),
+        ("reset/pulse", "Pulse Reset"),
+        ("reset/two_pulse", "Two-Pulse Reset"),
+        ("reset/bath", "Bath Reset"),
+    ],
+)
+def test_autoflux_recognizes_but_does_not_materialize_other_legal_modules(
+    discriminator: str,
+    label: str,
+) -> None:
+    raw = {"type": discriminator}
+
+    assert module_cfg_shape_label(raw) == label
+    with pytest.raises(RuntimeError) as exc_info:
+        module_cfg_to_value(raw)
+    assert str(exc_info.value) == f"Unsupported module type {discriminator!r}"
+
+
+@pytest.mark.parametrize("value", [_StringImpostor("pulse"), None, 7])
+def test_autoflux_module_shape_label_requires_string_discriminator(
+    value: object,
+) -> None:
+    with pytest.raises(TypeError, match=r"'type' must be str"):
+        module_cfg_shape_label({"type": value})
+
+
+@pytest.mark.parametrize("value", [_StringImpostor("const"), None, 7])
+def test_autoflux_waveform_shape_label_requires_string_discriminator(
+    value: object,
+) -> None:
+    with pytest.raises(TypeError, match=r"'style' must be str"):
+        waveform_cfg_shape_label({"style": value})
 
 
 def test_autoflux_ports_integrate_expression_and_sweepcfg() -> None:

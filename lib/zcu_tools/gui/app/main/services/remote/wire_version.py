@@ -87,4 +87,4 @@ WIRE_VERSION = 49
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 65  # canonical program module/waveform cfg catalog
+GUI_VERSION = 66  # spec-driven program cfg materialization

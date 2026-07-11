@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — canonical program cfg catalog
+**Last updated:** 2026-07-11 — spec-driven program cfg materialization
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -13,6 +13,8 @@ framework 只看 `ExpAdapterProtocol`。
   adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
 - `specs/`：`gui.measure_cfg`的main policy adapter；只綁定Arb asset choices與readout
   cross-shape inheritance，不擁有program field/label清單。
+- `cfg_schemas.py`：main raw/typed cfg normalization與policy facade；全七種module/六種waveform的
+  spec walk、missing/nested/reference規則由`gui.measure_cfg`materializer擁有。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
@@ -29,9 +31,10 @@ framework 只看 `ExpAdapterProtocol`。
 Shared layers:
 
 - `zcu_tools.gui.cfg`：Qt-free Spec/Value model、`CfgSchema` data carrier、inheritance、
-  persistence codec與generic finished-cfg validation/lowering ports。
+  persistence codec、domain-free raw spec walk與generic finished-cfg validation/lowering ports。
 - `zcu_tools.gui.measure_cfg`：Qt-free closed program module/waveform shape catalog與fresh Spec
-  factories；main以app-local policy啟用Arb choices與readout inheritance。
+  factories，以及program missing/nested/reference/subset materialization policy；main以app-local policy
+  啟用Arb choices、readout inheritance與完整7+6 materializable catalog。
 - `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
   instance-owned frozen exact renderer registry。
 - `zcu_tools.gui.session`：context、SoC、device、startup、predictor、operation
@@ -165,15 +168,15 @@ against current `MetaDict` when a field is set or lowered. `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
 
-generic model、inheritance、codec、static/dynamic validation與lowering由
+generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter只把current
-`MetaDict` expression evaluator、measure-owned module/waveform shape conversion與`SweepCfg`
+`MetaDict` expression evaluator、measure-owned module/waveform resolver與`SweepCfg`
 factory組成三個窄ports；adapter package不import或forward shared cfg public names，也不保留
 第二份algorithm或model/inheritance/codec implementation（ADR-0045、ADR-0046）。
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
-`MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/converter，並提供expression、
+`MeasureCfgBindings`依`spec.kind`選擇精確的ModuleLibrary store/materializer facade，並提供expression、
 dynamic scalar options與ValueRef resolution policy；widget只讀field API，shared cfg不認識這些
 app-local policy。device selector是required string `ScalarSpec`，wire value維持`DirectValue(str)`。
 measure composition另以generic `QLineEdit -> keepalive object` enhancer seam安裝

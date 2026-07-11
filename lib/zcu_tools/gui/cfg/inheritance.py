@@ -61,6 +61,10 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 )
         elif isinstance(node_spec, CfgSectionSpec):
             fields[key] = make_default_value(node_spec)
+        else:
+            raise TypeError(
+                f"Unsupported cfg spec node {type(node_spec).__name__} at {key!r}"
+            )
     return CfgSectionValue(fields=fields)
 
 

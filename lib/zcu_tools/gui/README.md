@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-11（canonical program cfg shape catalog）
+**Last updated:** 2026-07-11（spec-driven program cfg materialization）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -26,8 +26,9 @@ leaf、sweep直接edge、reference `.ref`與直接child；legacy `.sweep`/`.valu
 `gui.cfg`的custom-reference-key helpers是tag representation唯一constructor/parser。
 
 `zcu_tools.gui.cfg` 擁有 Qt-free 的 Spec/Value tree、`CfgSchema` data carrier、
-default/inheritance helpers、raw persistence codec，以及generic finished-cfg
-validation/lowering。lowering只依賴expression/reference/range三個callable ports，維持
+default/inheritance helpers、raw persistence codec、domain-free raw spec walk，以及generic finished-cfg
+validation/lowering。materialization walker把missing scalar/section、reference shape與Sweep carrier交給
+窄policy，不理解program vocabulary；lowering只依賴expression/reference/range三個callable ports，維持
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
@@ -40,7 +41,8 @@ generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adap
 framework contract、request/result/writeback/analyze params與protocol signature需要的session
 vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
 `NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
-conversion留在`cfg.module_adapter`，program shape/spec由`gui.measure_cfg`擁有（ADR-0051）。
+normalization與policy binding留在`cfg.module_adapter`，program shape/spec與raw missing/subset policy由
+`gui.measure_cfg`擁有（ADR-0051）。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
 allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與
@@ -49,11 +51,14 @@ reference value且要求leaf已存在。這層不create、不wrap、不處理loc
 
 `zcu_tools.gui.measure_cfg`是Qt-free measure-domain層：closed catalog擁有七種module與六種
 waveform的discriminator、label與fresh Spec factory；app只綁定Arb choices與readout inheritance
-兩個policy。它不importprogram runtime/app/session/experiment，`gui.cfg`也不反向import它。
+兩個spec policy，以及可materialize module/waveform subset。program materializer固定missing
+`ch/ro_ch=0`、其它scalar為unset、nested section完整default、required ref採`allowed[0]`；missing style
+是Const，explicit unknown Fast Fail。它不importprogram runtime/app/session/experiment，`gui.cfg`也不
+反向import它。
 
 Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`是shared core只
-轉送的app-local opaque id。module/waveform shape factory由`gui.measure_cfg`擁有，resolver與
-converter policy留在各app，
+轉送的app-local opaque id。module/waveform shape factory與raw materialization policy由
+`gui.measure_cfg`擁有，resolver與runtime object normalization留在各app，
 既有`module_ref`/`waveform_ref` persistence wire shape不變。
 
 `zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。
