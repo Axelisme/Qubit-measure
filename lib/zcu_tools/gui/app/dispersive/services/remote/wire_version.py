@@ -14,6 +14,6 @@ independently, so the constants live beside the app's own RemoteControlAdapter.
 
 from __future__ import annotations
 
-WIRE_VERSION = 3  # v3: fit.result dropped `step` (prediction always covers full axis)
+WIRE_VERSION = 4  # v4: event envelopes carry seq/origin
 
-GUI_VERSION = 4
+GUI_VERSION = 5

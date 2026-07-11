@@ -241,6 +241,7 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
 
     endpoint_stop.assert_not_called()
     assert len(adapter._bus_subs) == 0
+    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
     assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
     assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
@@ -253,7 +254,7 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
 ) -> None:
     from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
     from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
-    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.event_bus import BaseEventBus, EventMeta
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 
     class FailingEventBus(BaseEventBus):
@@ -261,11 +262,15 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
             super().__init__()
             self.subscribe_count = 0
 
-        def subscribe(self, payload_type: type[Any], cb: Callable[[Any], None]) -> Any:
+        def subscribe_with_meta(
+            self,
+            payload_type: type[Any],
+            cb: Callable[[Any, EventMeta], None],
+        ) -> Any:
             self.subscribe_count += 1
             if self.subscribe_count == 2:
                 raise RuntimeError("subscribe failed")
-            return super().subscribe(payload_type, cb)
+            return super().subscribe_with_meta(payload_type, cb)
 
     bus = FailingEventBus()
     ctrl_mock = MagicMock()
@@ -282,6 +287,7 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
 
     endpoint_start.assert_not_called()
     assert len(adapter._bus_subs) == 0
+    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
     assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
 
 
@@ -313,6 +319,7 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
 
     endpoint_stop.assert_called_once_with()
     assert len(adapter._bus_subs) == 0
+    assert all(not bus._meta_subs.get(event_key) for event_key in EVENT_SERIALIZERS)
     assert all(not bus._subs.get(event_key) for event_key in EVENT_SERIALIZERS)
     assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)

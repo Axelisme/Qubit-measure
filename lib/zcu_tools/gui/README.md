@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-11（shared cfg/Qt mechanics）
+**Last updated:** 2026-07-11（event attribution）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -195,6 +195,13 @@ idempotent cleanup handle, and long-lived windows / bridges group those handles
 so close/stop tears down callbacks explicitly. Event delivery rules are
 unchanged: callbacks for the concrete payload type run in order, and one
 subscriber raising is logged without aborting later subscribers.
+Every emit also receives a process-wide monotonic `EventMeta(seq, origin)` stamp.
+Legacy `subscribe()` callbacks still receive only the payload; attribution-aware
+boundaries use `subscribe_with_meta()`. The per-bus origin is a nested
+`ContextVar` defaulting to `user`, but it does not cross worker threads:
+`OperationHandles` captures the origin at creation and `OperationRunner` restores
+it with the string operation id around terminal delivery. Remote dispatch declares
+an opaque per-connection `agent` origin; persistence restore declares `system`.
 Remote bridges subscribe their EventBus push callbacks before opening the socket;
 startup subscription failure is fatal and rolls back partial subscriptions, while
 runtime subscriber exceptions remain isolated by the EventBus.
@@ -203,6 +210,14 @@ selects matching live subscribers, calls the main-thread factory once outside it
 registry lock, then revalidates before using the existing per-client queues. Zero
 matches perform no serializer/encode work; multiple matches share one encoded
 line while preserving independent ordering, backpressure, and drop isolation.
+EventBus wire pushes carry the unchanged `event` / `payload` plus `seq` and
+`origin={kind, operation_id}`; RPC-only `client_id` never crosses the wire.
+Diagnostics and editor pushes are separate channels and retain their existing
+two-field envelope.
+
+Views hold render caches only and never apply optimistic domain updates. Pending
+state is broadcast by core so every attached view renders the same authoritative
+state.
 
 ## Logging (`logging_setup.py`)
 

@@ -5,8 +5,8 @@ Communicates with an MCP host (Gemini / Claude / VS Code) via stdio JSON-RPC
 2.0, and forwards calls to the live GUI's ``RemoteControlAdapter`` over a
 single persistent TCP socket. Event push from the GUI is received by a
 dedicated reader thread, parked in an internal queue and exposed to the LLM
-piggybacked on tool replies (diagnostics) — the agent is not exposed to
-resource-change events; it waits/polls operation handles instead.
+piggybacked on successful tool replies. Low-frequency resource events are
+best-effort context; the agent still waits/polls operation handles for completion.
 
 Threading:
   - Main (stdio) thread: reads MCP request lines, dispatches into tool
@@ -109,7 +109,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
 # MeasureMcpSession owns measure-only MCP policy state.
-MCP_VERSION = 71
+MCP_VERSION = 72
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -187,7 +187,7 @@ until the SoC is connected and returns {status:'finished', soc:{...}} in one cal
 
 The async ops (run / analyze / post_analyze / device) share ONE contract — the
 per-tool descriptions only name what each waits on; the mechanics live here.
-Completion is detected by wait/poll on a handle, NOT events (nothing is pushed):
+Completion is detected by wait/poll on a handle, not by best-effort events:
   - A short-wait START (gui_tab_run_start, gui_tab_analyze_start,
     gui_tab_post_analyze_start, gui_device_*) waits up to wait_seconds (default
     1.0): settles in time -> {status:'finished', handle, <product>}
@@ -224,10 +224,11 @@ Completion is detected by wait/poll on a handle, NOT events (nothing is pushed):
     clicks Done, so it never settles in the short wait — a 'pending' is EXPECTED;
     prompt the user, then gui_op_poll (do not block on gui_op_wait).
 
-Diagnostic push: every tool reply piggybacks any {severity:'error'|'info', title,
-message} the GUI surfaced since your last call, under "notifications since last
-call" — UNSOLICITED, including failures not tied to the call you just made.
-Resource-change events are NOT exposed.
+Push context: every successful tool reply piggybacks diagnostics and subscribed
+low-frequency GUI events accumulated since the prior successful reply. Event
+envelopes retain payload, process sequence, and origin attribution. This stream is
+bounded and best-effort across disconnects; operation wait/poll and fresh snapshots
+remain the completion/state authorities.
 
 Stale model (optimistic concurrency): a guarded op (run / save / editor_save) rejects
 with precondition_failed when a dependency a GUI user changed under you moved
@@ -595,21 +596,31 @@ def _format_diagnostic(msg: dict[str, Any]) -> str:
 
 
 def _piggyback_blocks() -> list[dict[str, Any]]:
-    """Diagnostics buffered since the last tool call, as extra content blocks.
+    """Buffered diagnostics and events as compact extra content blocks.
 
     Piggyback (ADR-0013): drain GUI diagnostics onto every successful tool reply
-    so the agent gets the GUI's error/info feedback ("Data saved to …", a
-    run-failure reason) without a dedicated poll. Only diagnostics ride here —
-    resource-change events are not exposed to the agent. Rendered as a compact
-    one-line-per-diagnostic list (no indented JSON) to keep the piggyback
-    token-light.
+    so the agent gets GUI feedback without a dedicated poll. Diagnostics render
+    one per line; event envelopes stay intact in compact JSON so seq/origin are
+    machine-visible.
     """
     pending = _drain_pending()
     diagnostics = pending["diagnostics"]
-    if not diagnostics:
-        return []
-    lines = "\n".join(_format_diagnostic(m) for m in diagnostics)
-    return [{"type": "text", "text": "notifications since last call:\n" + lines}]
+    events = pending["events"]
+    blocks: list[dict[str, Any]] = []
+    if diagnostics:
+        lines = "\n".join(_format_diagnostic(m) for m in diagnostics)
+        blocks.append(
+            {"type": "text", "text": "notifications since last call:\n" + lines}
+        )
+    if events:
+        blocks.append(
+            {
+                "type": "text",
+                "text": "events since last call:\n"
+                + json.dumps(events, separators=(",", ":")),
+            }
+        )
+    return blocks
 
 
 def main() -> None:

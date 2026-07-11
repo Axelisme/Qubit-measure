@@ -21,8 +21,8 @@ from zcu_tools.gui.remote.wire import (
 
 
 def test_versions_start_at_one():
-    assert WIRE_VERSION == 1
-    assert GUI_VERSION == 2
+    assert WIRE_VERSION == 2
+    assert GUI_VERSION == 3
 
 
 def test_parse_request_ok():

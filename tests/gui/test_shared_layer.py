@@ -122,8 +122,8 @@ def test_apps_keep_their_own_wire_versions() -> None:
 
     # Distinct contracts: measure-gui has evolved its wire; fluxdep starts at 1.
     assert main_wv.WIRE_VERSION >= 1
-    assert flux_wv.WIRE_VERSION == 1
-    assert flux_wv.GUI_VERSION == 2
+    assert flux_wv.WIRE_VERSION == 2
+    assert flux_wv.GUI_VERSION == 3
 
 
 # Each mcp server is launched as a SCRIPT (``uv run .../mcp/<app>/server.py`` per

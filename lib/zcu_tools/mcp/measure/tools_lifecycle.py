@@ -26,6 +26,7 @@ def tool_gui_connect(arguments: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Invalid 'port' argument (must be integer)")
     port = resolve_connect_port(_CONFIG, requested)
     note = _BRIDGE.connect(port, arguments.get("token"))
+    _SESSION.initialize_event_stream()
     # Fold the situational overview into the connect reply so attaching alone
     # gives the agent the current picture (the same data gui_overview returns),
     # saving a follow-up probe. The socket is live by here, so the fan-out reads
@@ -38,7 +39,7 @@ def tool_gui_disconnect(arguments: dict[str, Any]) -> dict[str, Any]:
     note = _BRIDGE.disconnect()
     # App-specific housekeeping: drop any buffered diagnostics — they belong to
     # the connection that just closed.
-    _SESSION.clear_diagnostics()
+    _SESSION.clear_pending()
     return {"note": note}
 
 
@@ -56,6 +57,7 @@ def tool_gui_launch(arguments: dict[str, Any]) -> dict[str, Any]:
     # bridge — the fan-out reads need a live socket. With auto_connect=false the
     # GUI is up but not yet attached, so there is no live state to read.
     if _BRIDGE.is_connected:
+        _SESSION.initialize_event_stream()
         return {"note": note, "overview": _assemble_overview()}
     return {"note": note}
 
@@ -72,7 +74,7 @@ def tool_gui_stop(arguments: dict[str, Any]) -> dict[str, Any]:
     )
     # The bridge's disconnect does not clear measure-gui's diagnostic queue; do it
     # here so a later session does not see the previous one's buffered messages.
-    _SESSION.clear_diagnostics()
+    _SESSION.clear_pending()
     # Branch on the bridge's machine-readable outcome (no prose string-matching).
     return {"stopped": result["exited"], "note": result["note"]}
 

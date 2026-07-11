@@ -34,12 +34,24 @@ def _versions_reply(table: dict[str, int]) -> dict[str, Any]:
     return {"ok": True, "result": {"versions": table}}
 
 
+def _event_replies(fake: FakeTransport) -> None:
+    fake.replies["events.list"] = {
+        "ok": True,
+        "result": {"events": ["tab_added", "run_finished"]},
+    }
+    fake.replies["events.subscribe"] = {
+        "ok": True,
+        "result": {"subscribed": ["run_finished", "tab_added"]},
+    }
+
+
 def test_auto_connects_then_forwards_when_gui_discoverable(disconnected, monkeypatch):
     # Session discovery resolves a port; connect() attaches a FakeTransport so the
     # subsequent send_rpc_raw round-trip completes synchronously.
     fake = FakeTransport()
     fake.replies["state.has_soc"] = {"ok": True, "result": {"value": True}}
     fake.replies["resources.versions"] = _versions_reply({})
+    _event_replies(fake)
 
     monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda _cfg, _req: 9911)
     # The pre-connect listener probe (cold-start fast-fail) must see the
@@ -62,6 +74,13 @@ def test_auto_connects_then_forwards_when_gui_discoverable(disconnected, monkeyp
     assert connected == {"port": 9911, "token": None}
     # And the RPC actually went out over the freshly-attached transport.
     assert ("state.has_soc", {}) in fake.sent
+    assert fake.sent[:2] == [
+        ("events.list", {}),
+        (
+            "events.subscribe",
+            {"events": ["tab_added", "run_finished"]},
+        ),
+    ]
     assert result == {"value": True}
 
 
@@ -70,6 +89,7 @@ def test_does_not_auto_start_soc(disconnected, monkeypatch):
     # soc.connect (SoC choice is the user's, not an attach side effect).
     fake = FakeTransport()
     fake.replies["resources.versions"] = _versions_reply({})
+    _event_replies(fake)
     monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda _cfg, _req: 9911)
     monkeypatch.setattr(mcp_server, "_port_is_open", lambda _port: True)
     monkeypatch.setattr(
@@ -82,6 +102,26 @@ def test_does_not_auto_start_soc(disconnected, monkeypatch):
 
     sent_methods = [m for (m, _p) in fake.sent]
     assert "soc.connect" not in sent_methods
+
+
+def test_event_subscription_failure_disconnects_new_transport(
+    disconnected, monkeypatch
+) -> None:
+    fake = FakeTransport()
+    fake.replies["events.list"] = {"ok": True, "result": {"events": "invalid"}}
+    monkeypatch.setattr(mcp_server, "resolve_connect_port", lambda _cfg, _req: 9911)
+    monkeypatch.setattr(mcp_server, "_port_is_open", lambda _port: True)
+    monkeypatch.setattr(
+        mcp_server._BRIDGE,
+        "connect",
+        lambda _port, _token=None: mcp_server._BRIDGE.set_transport(fake),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid catalog"):
+        mcp_server.send_gui_rpc("state.has_soc", {})
+
+    assert mcp_server._BRIDGE.is_connected is False
+    assert mcp_server._drain_pending() == {"diagnostics": [], "events": []}
 
 
 def test_raises_clear_error_when_no_gui(disconnected, monkeypatch):

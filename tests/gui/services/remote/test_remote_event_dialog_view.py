@@ -13,6 +13,11 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
 
 from __future__ import annotations
 
+import json
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -44,6 +49,9 @@ from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
+from zcu_tools.mcp.core.bridge import McpBridge
+from zcu_tools.mcp.measure import server as mcp_server
+from zcu_tools.mcp.measure.session import MeasureMcpSession
 
 from ._helpers import (
     Fixture,
@@ -381,6 +389,7 @@ def test_diagnostic_pushed_without_subscription(fx):
         # Drive a Controller diagnostic on the main thread (fan-out is sync).
         fx.ctrl._notify("error", "Run failed", "boom")
         msg = recv_push(sock, "diagnostic")
+        assert set(msg) == {"event", "payload"}
         assert msg["payload"]["severity"] == "error"
         assert msg["payload"]["title"] == "Run failed"
         assert msg["payload"]["message"] == "boom"
@@ -432,7 +441,9 @@ def test_editor_subscription_lazily_builds_then_unsubscribe_stops_it(fx):
 
         fx.service._on_editor_event("editor-race", "editor_changed", payload_factory)
 
-        assert recv_push(sock, "editor_changed")["payload"] == {
+        editor_changed = recv_push(sock, "editor_changed")
+        assert set(editor_changed) == {"event", "payload"}
+        assert editor_changed["payload"] == {
             "editor_id": "editor-race",
             "paths": [],
         }
@@ -492,17 +503,19 @@ def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
     f = Fixture()
     f.start()
     # Confirm at least one subscription is installed.
-    subs = f.bus._subs  # type: ignore[attr-defined]
+    subs = f.bus._meta_subs  # type: ignore[attr-defined]
     assert subs.get(RunFinishedPayload), "service should have subscribed"
+    assert not f.bus._subs.get(RunFinishedPayload)  # type: ignore[attr-defined]
     assert len(f.service._bus_subs) == len(EVENT_SERIALIZERS)
     f.stop()
-    subs_after = f.bus._subs  # type: ignore[attr-defined]
+    subs_after = f.bus._meta_subs  # type: ignore[attr-defined]
     # The RemoteEventService's subscriptions are gone after stop. RUN_FINISHED
     # is remote-event-specific, so it must be empty. (MD_CHANGED is *also* held
     # permanently by CfgEditorService for owned-model refresh — ADR-0008 — so it
     # is not a clean proxy for the remote view's teardown.)
     assert len(f.service._bus_subs) == 0
     assert not subs_after.get(RunFinishedPayload)
+    assert not f.bus._subs.get(RunFinishedPayload)  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -578,10 +591,19 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
         result = call(sock, "tab.run_start", {"tab_id": tab_id})["result"]
         # One run_started, then one run_finished with outcome='finished'.
         started = recv_push(sock, "run_started")
+        assert set(started) == {"event", "payload", "seq", "origin"}
         assert started["payload"]["tab_id"] == tab_id
+        assert started["origin"] == {
+            "kind": "agent",
+            "operation_id": str(result["operation_id"]),
+        }
+        assert "client_id" not in started["origin"]
         finished = recv_push(sock, "run_finished", timeout_s=5.0)
+        assert set(finished) == {"event", "payload", "seq", "origin"}
         assert finished["payload"]["tab_id"] == tab_id
         assert finished["payload"]["outcome"] == "finished"
+        assert finished["seq"] > started["seq"]
+        assert finished["origin"] == started["origin"]
         assert [type(payload) for payload, _meta in observed] == [
             RunStartedPayload,
             RunFinishedPayload,
@@ -597,6 +619,81 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
         assert all(meta.origin.client_id for _payload, meta in observed)
     finally:
         sock.close()
+
+
+def _run_mcp_call(qapp: object, fn: Callable[[], Any]) -> Any:
+    result: list[Any] = []
+    errors: list[BaseException] = []
+
+    def work() -> None:
+        try:
+            result.append(fn())
+        except BaseException as exc:  # noqa: BLE001 - re-raised on test thread
+            errors.append(exc)
+
+    thread = threading.Thread(target=work)
+    thread.start()
+    deadline = time.monotonic() + 10.0
+    while thread.is_alive() and time.monotonic() < deadline:
+        qapp.processEvents()  # type: ignore[attr-defined]
+        time.sleep(0.005)
+    thread.join(timeout=0.1)
+    assert not thread.is_alive(), "MCP call did not complete"
+    if errors:
+        raise errors[0]
+    assert len(result) == 1
+    return result[0]
+
+
+def test_real_mcp_bridge_piggybacks_agent_run_origin(fx, qapp, monkeypatch) -> None:
+    session = MeasureMcpSession(
+        mcp_server._CONFIG,
+        resolve_connect_port=lambda _config, _requested: fx.service.port,
+        port_is_open=lambda _port: True,
+    )
+    bridge = McpBridge(mcp_server._CONFIG, on_event=session.deliver_event)
+    session.attach_bridge(bridge)
+    try:
+        _run_mcp_call(qapp, session.ensure_connected)
+        created = _run_mcp_call(
+            qapp,
+            lambda: session.send_gui_rpc("tab.new", {"adapter_name": "fake"}),
+        )
+        tab_id = created["tab_id"]
+        session.clear_pending()
+
+        started = _run_mcp_call(
+            qapp,
+            lambda: session.send_gui_rpc("tab.run_start", {"tab_id": tab_id}),
+        )
+        handle = started["handle"]
+        deadline = time.monotonic() + 5.0
+        while (
+            fx.state.get_tab(tab_id).run_result is None and time.monotonic() < deadline
+        ):
+            qapp.processEvents()
+            time.sleep(0.005)
+        assert fx.state.get_tab(tab_id).run_result is not None
+
+        # Model the next successful MCP tool reply: the stdio loop invokes this
+        # hook only after a handler succeeds.
+        _run_mcp_call(qapp, lambda: session.send_gui_rpc("state.has_soc", {}))
+        monkeypatch.setattr(mcp_server, "_drain_pending", session.drain_pending)
+        blocks = mcp_server._piggyback_blocks()
+
+        event_block = next(
+            block for block in blocks if block["text"].startswith("events since")
+        )
+        events = json.loads(event_block["text"].split("\n", 1)[1])
+        finished = next(event for event in events if event["event"] == "run_finished")
+        assert finished["origin"] == {
+            "kind": "agent",
+            "operation_id": str(handle),
+        }
+        assert isinstance(finished["seq"], int)
+    finally:
+        bridge.disconnect()
+        session.clear_pending()
 
 
 def test_unauthenticated_subscribe_rejected(qapp):  # noqa: ARG001

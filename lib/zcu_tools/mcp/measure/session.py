@@ -53,6 +53,7 @@ class MeasureMcpSession:
         resolve_connect_port: ResolveConnectPortFn,
         port_is_open: PortIsOpenFn,
         diagnostic_queue_max: int = 1024,
+        event_queue_max: int = 1024,
     ) -> None:
         self._config = config
         self._policy = policy
@@ -62,7 +63,8 @@ class MeasureMcpSession:
         self._diagnostic_queue: deque[dict[str, Any]] = deque(
             maxlen=diagnostic_queue_max
         )
-        self._diagnostic_cond = threading.Condition()
+        self._event_queue: deque[dict[str, Any]] = deque(maxlen=event_queue_max)
+        self._pending_cond = threading.Condition()
         self._last_seen: dict[str, int] = {}
         self._operation_handles: dict[str, int] = {}
 
@@ -90,32 +92,67 @@ class MeasureMcpSession:
         self._bridge = bridge
 
     def clear_diagnostics(self) -> None:
-        with self._diagnostic_cond:
+        with self._pending_cond:
             self._diagnostic_queue.clear()
+
+    def clear_pending(self) -> None:
+        """Drop diagnostics and events owned by the current connection."""
+
+        with self._pending_cond:
+            self._diagnostic_queue.clear()
+            self._event_queue.clear()
 
     def clear_policy_state(self) -> None:
         """Reset mutable policy state for tests and fresh sessions."""
 
-        self.clear_diagnostics()
+        self.clear_pending()
         self._last_seen.clear()
         self._operation_handles.clear()
 
     def deliver_event(self, msg: dict[str, Any]) -> None:
-        """Queue only diagnostics; drop resource-change events."""
+        """Queue diagnostics and subscribed low-frequency event envelopes."""
 
-        if msg.get("event") != "diagnostic":
-            return
-        with self._diagnostic_cond:
-            self._diagnostic_queue.append(msg)
-            self._diagnostic_cond.notify_all()
+        with self._pending_cond:
+            if msg.get("event") == "diagnostic":
+                self._diagnostic_queue.append(msg)
+            else:
+                self._event_queue.append(msg)
+            self._pending_cond.notify_all()
 
     def drain_pending(self) -> dict[str, list[dict[str, Any]]]:
-        """Drain diagnostics buffered for piggybacking on the next tool reply."""
+        """Drain diagnostics and events for the next successful tool reply."""
 
-        with self._diagnostic_cond:
+        with self._pending_cond:
             diagnostics = list(self._diagnostic_queue)
+            events = list(self._event_queue)
             self._diagnostic_queue.clear()
-        return {"diagnostics": diagnostics}
+            self._event_queue.clear()
+        return {"diagnostics": diagnostics, "events": events}
+
+    def initialize_event_stream(self) -> None:
+        """Clear stale queues and subscribe to the GUI's low-frequency catalog."""
+
+        self.clear_pending()
+        try:
+            listed = self.bridge.send_rpc_raw("events.list", {}, 5.0)
+            if not listed.get("ok", False):
+                raise RuntimeError("GUI events.list failed during MCP bridge connect")
+            events = listed.get("result", {}).get("events")
+            if not isinstance(events, list) or not all(
+                isinstance(event, str) for event in events
+            ):
+                raise RuntimeError("GUI events.list returned an invalid catalog")
+            subscribed = self.bridge.send_rpc_raw(
+                "events.subscribe", {"events": events}, 5.0
+            )
+            if not subscribed.get("ok", False):
+                raise RuntimeError(
+                    "GUI events.subscribe failed during MCP bridge connect"
+                )
+        except Exception:
+            self.bridge.disconnect()
+            self.clear_pending()
+            raise
 
     def read_version_table(self) -> dict[str, int] | None:
         """Read the full resource version table without applying guard policy."""
@@ -168,6 +205,7 @@ class MeasureMcpSession:
                 "no running measure-gui found to attach to "
                 f"(tried 127.0.0.1:{port}); start one with gui_launch."
             ) from exc
+        self.initialize_event_stream()
 
     def send_gui_rpc(
         self,

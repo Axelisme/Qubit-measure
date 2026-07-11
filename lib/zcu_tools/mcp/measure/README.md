@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 (canonical cfg paths)
+**Last updated:** 2026-07-11 (event attribution pass-through)
 
 # `zcu_tools/mcp/measure/`
 
@@ -27,7 +27,8 @@ Cfg agent直接複製`gui_tab_get_cfg`/`gui_editor_get_cfg`列出的canonical le
   internal / override exposure plan，並在 assembly 時 fail-fast 檢查 generated
   tool collision、manual/generated collision、override tool 缺漏，以及
   internal/override method 誤用 `MethodSpec.tool_name`。
-- `session.py` 擁有 measure-only policy state：diagnostics piggyback queue、
+- `session.py` 擁有 measure-only policy state：diagnostics與low-frequency event兩個
+  bounded piggyback queues、
   optimistic-concurrency baseline、guarded send flow、operation handle capture，以及
   `gui_debug_operations` 使用的 latest-handle projection。
 - `session_policy.py` 放不可變 policy table 與純 helper：version guard deps、
@@ -58,6 +59,11 @@ Cfg agent直接複製`gui_tab_get_cfg`/`gui_editor_get_cfg`列出的canonical le
   重新連線。
 - `McpBridge` 只屬於 `zcu_tools.mcp.core` 的 transport adapter；measure-gui policy
   不下放到 bridge。
+- 每次 explicit connect、launch auto-connect或lazy auto-connect後，session先呼叫
+  `events.list`再訂閱回傳的既有low-frequency catalog，不維護第二份event清單。
+  完整wire envelope（`event`、`payload`、`seq`、`origin`）在下一個successful
+  MCP tool reply以compact JSON block穿透；queue bounded、disconnect清空且不提供
+  replay，因此operation wait/poll與fresh snapshot仍是authority。
 - Wire method MCP exposure policy 由
   `zcu_tools.gui.app.main.services.remote.method_entries` 的 method entry 宣告：
   default `generated` 產生 1:1 RPC tool；`internal` 保留 wire method 供 bundle /

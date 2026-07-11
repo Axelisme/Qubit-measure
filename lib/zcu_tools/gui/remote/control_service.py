@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from zcu_tools.gui.event_bus import EventOrigin, EventSubscriptions
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin, EventSubscriptions
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -463,7 +463,7 @@ class RemoteControlServiceBase:
         for key in self._event_serializers:
             cb = self._make_bus_callback(key)
             try:
-                self._bus_subs.subscribe(bus, key, cb)
+                self._bus_subs.subscribe_with_meta(bus, key, cb)
             except Exception:  # pragma: no cover — bus.subscribe is straightforward
                 logger.exception("Failed to subscribe %s on EventBus", key)
                 self._bus_subs.unsubscribe_all()
@@ -481,11 +481,11 @@ class RemoteControlServiceBase:
         self._bus_subs.unsubscribe_all()
         self._bus = None
 
-    def _make_bus_callback(self, key: Any) -> Callable[[Any], None]:
+    def _make_bus_callback(self, key: Any) -> Callable[[Any, EventMeta], None]:
         serializer = self._event_serializers[key]
         wire_name = self._wire_event_name(key)
 
-        def _on_event(payload: Any) -> None:
+        def _on_event(payload: Any, meta: EventMeta) -> None:
             # Runs on the Qt main thread. The endpoint first selects recipients,
             # then calls this factory on this same thread and revalidates before
             # enqueue. Resource versions still belong to mutation sites.
@@ -498,7 +498,17 @@ class RemoteControlServiceBase:
                 if wire_payload is None:
                     return None
                 try:
-                    return encode_line({"event": wire_name, "payload": wire_payload})
+                    return encode_line(
+                        {
+                            "event": wire_name,
+                            "payload": wire_payload,
+                            "seq": meta.seq,
+                            "origin": {
+                                "kind": meta.origin.kind,
+                                "operation_id": meta.origin.operation_id,
+                            },
+                        }
+                    )
                 except Exception:
                     logger.exception("Failed to encode push line for %s", wire_name)
                     return None

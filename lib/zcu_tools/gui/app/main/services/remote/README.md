@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — stale-version recovery contract
+**Last updated:** 2026-07-11 — event attribution wire contract
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -40,7 +40,7 @@ router scaffolding.
 Request  -> {"id": "...", "method": "tab.run_start", "params": {...}}
 Reply    <- {"id": "...", "ok": true, "result": {...}}
 Reply    <- {"id": "...", "ok": false, "error": {"code": "...", "message": "...", "reason": "..."}}
-Push     <- {"event": "...", "payload": {...}}
+Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "agent", "operation_id": "7"}}
 ```
 
 - One connection has at most one in-flight RPC.
@@ -80,6 +80,10 @@ Qt widgets.
 Event push is still available on the wire for GUI/internal consumers. Event
 payloads use requery hints for complex objects; live Python objects never cross
 the wire.
+EventBus pushes add process-wide `seq` and `origin={kind, operation_id}` without
+changing the event name or payload shape. The per-connection `client_id` is
+RPC-side bookkeeping and is deliberately omitted. Diagnostic and cfg-editor
+pushes are not EventBus broadcasts and retain `{event, payload}`.
 Event serializers and NDJSON encoding run only when the endpoint finds a matching
 live subscriber. Recipient selection is two-phase: payload construction stays on
 the Qt main thread and outside the endpoint registry lock, then subscribe state
@@ -97,8 +101,9 @@ subscription only after its close push is accepted by that client's queue.
 
 Diagnostics are separate from EventBus. The controller pushes diagnostics to the
 remote adapter sink, which broadcasts diagnostic payloads to clients regardless
-of subscription. MCP keeps only diagnostics from the push stream and piggybacks
-them on later tool replies.
+of subscription. MCP keeps diagnostics in a dedicated queue and automatically
+subscribes to the existing low-frequency event catalog; both queues piggyback on
+the next successful tool reply.
 
 Agent-visible async completion comes from `gui_op_poll` / `gui_op_wait`, not
 from resource-change events.
@@ -112,8 +117,8 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 49`, `GUI_VERSION = 67`, and
-`MCP_VERSION = 71`（defined in `zcu_tools.mcp.measure.server`）。
+Current measure-gui values are `WIRE_VERSION = 50`, `GUI_VERSION = 68`, and
+`MCP_VERSION = 72`（defined in `zcu_tools.mcp.measure.server`）。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump

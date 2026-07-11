@@ -78,7 +78,8 @@ from __future__ import annotations
 #   children descend directly. Removed .sweep.* / .value.* aliases are rejected
 #   without mutation and report the canonical replacement. Batch path diffs are
 #   final net before/after results rather than transient per-edit churn.
-WIRE_VERSION = 49
+# v50: EventBus push envelopes add process-wide seq and origin attribution.
+WIRE_VERSION = 50
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -87,4 +88,4 @@ WIRE_VERSION = 49
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 67  # canonical shape consumers
+GUI_VERSION = 68  # event attribution

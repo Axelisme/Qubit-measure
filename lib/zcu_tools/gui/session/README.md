@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — shared single-file persistence
+**Last updated:** 2026-07-11 — operation event attribution
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -19,7 +19,7 @@ session/
 ├── state.py            — SessionState（exp_context+devices/DeviceState+startup_prefs/StartupPrefs+shared VersionTable+device mutators）；DeviceStatus
 ├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（GlobalDeviceManager classmethod 面的 instance 化，DeviceService 依契約存取、測試注 in-memory fake，ADR-0026 §6）、ProjectIOPort、ContextReadPort、StartupContextPort
 ├── hardware_gate.py    — RunBlocksHardwareGate：measure/autofluxdep 共用硬體互斥矩陣（RUN 擋 RUN/SoC/device mutation；device mutation 依 resource id 互斥；SoC connect 擋 RUN/SoC），app 只注入自己的 RUN kind wrapper
-├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）+ OperationOutcome/OperationStatus/AwaitResult/CancelHook；`create(cancel_hook=)`、`has_cancel_hook`/channel.`can_cancel`（gate 'Send & Stop' 鈕，無 op-kind 知識）；cancel hook 例外只 log，Stop 事件仍入列且 cancel_all 繼續處理其它 operation
+├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）+ captured EventOrigin operation record；`create(cancel_hook=, origin=)`要求caller顯式capture，`event_origin(token)`在live/retained-done record上投影string operation id；`has_cancel_hook`/channel.`can_cancel` gate 'Send & Stop'鈕；cancel hook例外只log，Stop事件仍入列且cancel_all繼續處理其它operation
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0026 §1：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
 ├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
 ├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）

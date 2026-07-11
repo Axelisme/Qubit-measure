@@ -1,10 +1,4 @@
-"""mcp-side diagnostic-only piggyback (Phase 120c-2).
-
-The GUI still emits its full EventBus stream on the wire, but the bridge exposes
-ONLY diagnostics to the agent: resource-change events are dropped in
-_deliver_event, and _drain_pending returns diagnostics that piggyback any tool
-reply. These exercise that pure queue logic without a live socket.
-"""
+"""MCP-side diagnostic and low-frequency event piggyback queues."""
 
 from __future__ import annotations
 
@@ -14,13 +8,18 @@ from zcu_tools.mcp.measure import server as mcp_server
 
 
 def _clear() -> None:
-    mcp_server._SESSION.clear_diagnostics()
+    mcp_server._SESSION.clear_pending()
 
 
-def test_deliver_drops_events_keeps_diagnostics():
+def test_deliver_keeps_full_events_separate_from_diagnostics():
     _clear()
-    # A resource-change event is dropped (agent not exposed to it).
-    mcp_server._deliver_event({"event": "run_finished", "payload": {}})
+    event = {
+        "event": "run_finished",
+        "payload": {"tab_id": "t1", "outcome": "finished"},
+        "seq": 7,
+        "origin": {"kind": "agent", "operation_id": "3"},
+    }
+    mcp_server._deliver_event(event)
     # A diagnostic is queued for piggyback.
     mcp_server._deliver_event(
         {"event": "diagnostic", "payload": {"severity": "error", "title": "x"}}
@@ -28,6 +27,7 @@ def test_deliver_drops_events_keeps_diagnostics():
     drained = mcp_server._drain_pending()
     assert len(drained["diagnostics"]) == 1
     assert drained["diagnostics"][0]["event"] == "diagnostic"
+    assert drained["events"] == [event]
     _clear()
 
 
@@ -38,13 +38,60 @@ def test_drain_pending_takes_diagnostics_and_empties():
         {"event": "diagnostic", "payload": {"severity": "info", "message": "saved"}}
     )
     drained = mcp_server._drain_pending()
-    # Only diagnostics surface; the event was dropped on delivery.
-    assert "events" not in drained
     assert [d["payload"]["severity"] for d in drained["diagnostics"]] == ["info"]
+    assert drained["events"] == [{"event": "tab_added", "payload": {"tab_id": "a"}}]
     # Second drain is empty (one buffer, drained once).
     again = mcp_server._drain_pending()
-    assert again == {"diagnostics": []}
+    assert again == {"diagnostics": [], "events": []}
     _clear()
+
+
+def test_piggyback_blocks_preserve_event_envelope_as_compact_json() -> None:
+    _clear()
+    event = {
+        "event": "run_finished",
+        "payload": {"tab_id": "t1"},
+        "seq": 11,
+        "origin": {"kind": "agent", "operation_id": "4"},
+    }
+    mcp_server._deliver_event(event)
+
+    blocks = mcp_server._piggyback_blocks()
+
+    assert blocks == [
+        {
+            "type": "text",
+            "text": (
+                'events since last call:\n[{"event":"run_finished",'
+                '"payload":{"tab_id":"t1"},"seq":11,"origin":'
+                '{"kind":"agent","operation_id":"4"}}]'
+            ),
+        }
+    ]
+
+
+def test_event_fifo_is_bounded_and_keeps_newest_entries() -> None:
+    _clear()
+    for seq in range(1025):
+        mcp_server._deliver_event({"event": "tab_added", "seq": seq})
+
+    events = mcp_server._drain_pending()["events"]
+
+    assert len(events) == 1024
+    assert events[0]["seq"] == 1
+    assert events[-1]["seq"] == 1024
+
+
+def test_disconnect_clears_diagnostic_and_event_queues() -> None:
+    _clear()
+    mcp_server._deliver_event({"event": "tab_added", "seq": 1})
+    mcp_server._deliver_event({"event": "diagnostic", "payload": {}})
+
+    with patch.object(mcp_server._BRIDGE, "disconnect", return_value="detached"):
+        result = mcp_server.tool_gui_disconnect({})
+
+    assert result == {"note": "detached"}
+    assert mcp_server._drain_pending() == {"diagnostics": [], "events": []}
 
 
 # ---------------------------------------------------------------------------

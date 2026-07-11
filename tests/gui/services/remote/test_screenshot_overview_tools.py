@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.mcp.measure import server as mcp_server
@@ -346,7 +347,12 @@ def test_connect_folds_overview_into_reply(monkeypatch):
         lambda port, token=None: ports.append(port) or "ok",
     )
     monkeypatch.setattr(mcp_server, "_assemble_overview", lambda: {"sentinel": True})
+    initialize_events = MagicMock()
+    monkeypatch.setattr(
+        mcp_server._SESSION, "initialize_event_stream", initialize_events
+    )
 
     out = mcp_server.TOOLS["gui_bridge_connect"]["handler"]({})
     assert out == {"note": "ok", "overview": {"sentinel": True}}
     assert ports == [9911]
+    initialize_events.assert_called_once_with()
