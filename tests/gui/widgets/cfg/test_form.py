@@ -1409,6 +1409,70 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
     assert "manual_value" in search_widget._child_widgets
 
 
+def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
+    qapp, ctrl, monkeypatch: pytest.MonkeyPatch
+):
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    from zcu_tools.gui.widgets.cfg.fields import SectionWidget
+
+    fields: dict[str, CfgNodeSpec] = {
+        "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
+        "half_width": ScalarSpec(label="Half width", type=float),
+        "manual_value": ScalarSpec(label="Manual", type=float),
+    }
+    schema = _schema(
+        {
+            "search": ChoiceSectionSpec(
+                fields=fields,
+                bindings=(
+                    ChoiceBinding(
+                        "mode",
+                        {
+                            "auto": CfgSectionSpec(
+                                fields={"half_width": fields["half_width"]}
+                            ),
+                            "fixed": CfgSectionSpec(
+                                fields={"manual_value": fields["manual_value"]}
+                            ),
+                        },
+                    ),
+                ),
+            )
+        },
+        {
+            "search": CfgSectionValue(
+                fields={
+                    "mode": DirectValue("auto"),
+                    "half_width": DirectValue(1.0),
+                    "manual_value": DirectValue(2.0),
+                }
+            )
+        },
+    )
+    form = CfgFormWidget()
+    model = _attach(form, schema, ctrl)
+    original_root = form._root_widget
+    assert isinstance(original_root, SectionWidget)
+    monkeypatch.setattr(original_root, "refresh_section", lambda _path: False)
+    emitted: list[CfgSchema] = []
+    form.schema_changed.connect(emitted.append)
+
+    search = cast(SectionField, model.fields["search"])
+    search.fields["mode"].set_value(DirectValue("fixed"))
+    form._flush_pending_section_refresh()
+
+    assert form._root_widget is not original_root
+    assert emitted == []
+    assert form._schema_snapshot_pending is True
+
+    qapp.processEvents()
+
+    assert len(emitted) == 1
+    emitted_search = emitted[0].value.fields["search"]
+    assert isinstance(emitted_search, CfgSectionValue)
+    assert emitted_search.fields["mode"] == DirectValue("fixed")
+
+
 def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import (
         CfgFormWidget,

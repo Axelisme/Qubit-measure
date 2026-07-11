@@ -329,9 +329,17 @@ class CfgFormWidget(QWidget):
             self._drop_decorations_under(path)
             if not root_field_widget.refresh_section(path):
                 # A stale or unsupported path should not leave the form half-updated.
-                if self._draft is not None:
-                    self.attach(self._draft)
+                self._reattach_after_section_refresh_failure()
                 return
+
+    def _reattach_after_section_refresh_failure(self) -> None:
+        draft = self._draft
+        if draft is None:
+            return
+        schema_snapshot_pending = self._schema_snapshot_pending
+        self.attach(draft)
+        if schema_snapshot_pending:
+            self._queue_schema_snapshot()
 
     def _drop_decorations_under(self, section_path: str) -> None:
         if not section_path:
