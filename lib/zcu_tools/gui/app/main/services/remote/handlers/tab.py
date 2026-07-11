@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.main.services.ports import CfgEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -166,27 +167,14 @@ def _h_tab_set_cfg(
     raw_edits = params.get("edits")
     if not isinstance(raw_edits, list):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'edits' must be a list")
-    # Apply edits sequentially (fail-fast, non-atomic); caller orders ref-switch
-    # edits before dependent inner-path edits. Delegate to cfg_editor_set_field
-    # — the same path the editor.set_field handler uses — to avoid duplicating
-    # path resolution and validation logic.
-    all_removed: list[str] = []
-    all_added: list[str] = []
-    valid = True
+    # Decode only the wire envelope here. The editor aggregate owns ordered,
+    # fail-fast, non-atomic execution and the final net path-set diff.
+    edits: list[CfgEdit] = []
     for i, edit in enumerate(raw_edits):
         if not isinstance(edit, dict) or "path" not in edit or "value" not in edit:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
                 f"edits[{i}] must be an object with 'path' and 'value'",
             )
-        path = str(edit["path"])
-        value = edit["value"]
-        result = adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
-        valid = bool(result.get("valid", True))
-        removed = result.get("removed", [])
-        added = result.get("added", [])
-        if isinstance(removed, list):
-            all_removed.extend(str(p) for p in removed)
-        if isinstance(added, list):
-            all_added.extend(str(p) for p in added)
-    return {"valid": valid, "removed": all_removed, "added": all_added}
+        edits.append(CfgEdit(str(edit["path"]), edit["value"]))
+    return adapter.ctrl.cfg_editor_set_fields(editor_id, edits).to_wire()

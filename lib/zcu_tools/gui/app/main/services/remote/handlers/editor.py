@@ -25,7 +25,7 @@ def _h_editor_new(
     )
     # The agent reads every cfg view as a nested tree (same shape as
     # tab.get_cfg / editor.get), so the open reply carries the freshly-opened
-    # draft as {tree} rather than the flat current_paths the session also tracks
+    # draft as {tree} rather than the nominal current_targets snapshot
     # internally for change-push / set_field diffing.
     draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
     return {"editor_id": editor_id, "tree": build_settable_tree(draft)}
@@ -46,7 +46,7 @@ def _h_editor_set_field(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {owner!r} is currently running; cancel the run before editing cfg",
         )
-    return adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
+    return adapter.ctrl.cfg_editor_set_field(editor_id, path, value).to_wire()
 
 
 def _h_editor_get(

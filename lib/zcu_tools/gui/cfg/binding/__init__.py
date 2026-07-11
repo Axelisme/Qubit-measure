@@ -17,6 +17,13 @@ from .ports import (
 )
 from .range import CenteredSweepEditor, SweepEditor
 from .reference import LibraryBindingState, ReferenceField
+from .targets import (
+    LegacySettablePathError,
+    SettablePathError,
+    SettableTarget,
+    SettableTargetKind,
+    SettableTargetUnavailable,
+)
 
 __all__ = [
     "CenteredSweepEditor",
@@ -25,6 +32,7 @@ __all__ = [
     "CfgField",
     "ExpressionEvaluator",
     "LibraryBindingState",
+    "LegacySettablePathError",
     "LiteralField",
     "OptionProvider",
     "ReferenceCatalog",
@@ -32,6 +40,10 @@ __all__ = [
     "ResolvedReference",
     "ScalarField",
     "SectionField",
+    "SettablePathError",
+    "SettableTarget",
+    "SettableTargetKind",
+    "SettableTargetUnavailable",
     "SweepEditor",
     "SweepField",
 ]

@@ -22,6 +22,7 @@ from .model import (
     SweepSpec,
     SweepValue,
 )
+from .reference_key import parse_custom_reference_key
 
 logger = logging.getLogger(__name__)
 
@@ -256,10 +257,11 @@ def _select_reference_spec(
     resolve_reference: ReferenceResolver | None,
 ) -> CfgSectionSpec:
     chosen = ref_value.chosen_key
-    if chosen.startswith("<Custom:"):
-        if not chosen.endswith(">"):
-            raise RuntimeError(f"Invalid custom reference key: {chosen!r}")
-        label = chosen[len("<Custom:") : -1]
+    try:
+        label = parse_custom_reference_key(chosen)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if label is not None:
         for spec in ref_spec.allowed:
             if spec.label == label:
                 return spec

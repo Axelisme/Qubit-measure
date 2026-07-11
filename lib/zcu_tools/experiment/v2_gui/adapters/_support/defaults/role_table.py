@@ -56,6 +56,7 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ReferenceValue,
     ScalarValue,
+    make_custom_reference_key,
     make_default_value,
 )
 from zcu_tools.gui.session.value_lookup import ValueRef, resolve_value_ref
@@ -309,31 +310,31 @@ ROLE_TABLE: dict[str, RoleDef] = {
     # qubit / resonator probe pulses
     "qub_probe": RoleDef(
         make_pulse_spec_,
-        "<Custom:Pulse>",
+        make_custom_reference_key("Pulse"),
         _QUB_PULSE,
         lib=Lib(PulseCfg, ("qub_probe",)),
     ),
     "res_probe": RoleDef(
         make_pulse_spec_,
-        "<Custom:Pulse>",
+        make_custom_reference_key("Pulse"),
         (Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.05, 1.0),),
         lib=Lib(PulseCfg, ("res_probe",)),
     ),
     "pi_pulse": RoleDef(
         make_pulse_spec_,
-        "<Custom:Pulse>",
+        make_custom_reference_key("Pulse"),
         _QUB_PULSE,
         lib=Lib(PulseCfg, ("pi_amp", "pi_len")),
     ),
     "rabi_pulse": RoleDef(
         make_pulse_spec_,
-        "<Custom:Pulse>",
+        make_custom_reference_key("Pulse"),
         _QUB_PULSE,
         lib=Lib(PulseCfg, ("pi_len", "pi_amp")),
     ),
     "pi2_pulse": RoleDef(
         make_pulse_spec_,
-        "<Custom:Pulse>",
+        make_custom_reference_key("Pulse"),
         _QUB_PULSE,
         lib=Lib(PulseCfg, ("pi2_amp", "pi2_len")),
     ),
@@ -343,7 +344,7 @@ ROLE_TABLE: dict[str, RoleDef] = {
     # are the other inline-only shapes.
     "readout": RoleDef(
         make_pulse_readout_spec_,
-        "<Custom:Pulse Readout>",
+        make_custom_reference_key("Pulse Readout"),
         (Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.1, 1.0, at="pulse_cfg"),),
         ro=Ro(Md("r_f", 6000.0), Md("ro_ch", 0)),
         adopt_waveform="ro_waveform",
@@ -353,7 +354,7 @@ ROLE_TABLE: dict[str, RoleDef] = {
     ),
     "direct_readout": RoleDef(
         make_direct_readout_spec_,
-        "<Custom:Direct Readout>",
+        make_custom_reference_key("Direct Readout"),
         ro=Ro(Md("r_f", 6000.0), Md("ro_ch", 0), at=""),
     ),
     # readout_dpm: the optimized pulse readout, seeded all-live from the
@@ -361,7 +362,7 @@ ROLE_TABLE: dict[str, RoleDef] = {
     # the acquisition window is best_ro_length; freq falls back to r_f then 6000.
     "readout_dpm": RoleDef(
         make_pulse_readout_spec_,
-        "<Custom:Pulse Readout>",
+        make_custom_reference_key("Pulse Readout"),
         (
             Pulse(
                 Md("best_ro_freq", Md("r_f", 6000.0)),
@@ -384,14 +385,16 @@ ROLE_TABLE: dict[str, RoleDef] = {
     # other inline-only shapes.
     "reset": RoleDef(
         make_pulse_reset_spec_,
-        "<Custom:Pulse Reset>",
+        make_custom_reference_key("Pulse Reset"),
         (Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse_cfg"),),
         lib=Lib(AbsResetCfg, ("reset_bath", "reset_10", "reset_120")),
     ),
-    "none_reset": RoleDef(make_none_reset_spec_, "<Custom:None Reset>"),
+    "none_reset": RoleDef(
+        make_none_reset_spec_, make_custom_reference_key("None Reset")
+    ),
     "two_pulse_reset": RoleDef(
         make_two_pulse_reset_spec_,
-        "<Custom:Two-Pulse Reset>",
+        make_custom_reference_key("Two-Pulse Reset"),
         (
             Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse1_cfg"),
             Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse2_cfg"),
@@ -399,7 +402,7 @@ ROLE_TABLE: dict[str, RoleDef] = {
     ),
     "bath_reset": RoleDef(
         make_bath_reset_spec_,
-        "<Custom:Bath Reset>",
+        make_custom_reference_key("Bath Reset"),
         (
             Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.1, 1.0, at="cavity_tone_cfg"),
             Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="qubit_tone_cfg"),
@@ -409,14 +412,14 @@ ROLE_TABLE: dict[str, RoleDef] = {
     # waveforms
     "qub_waveform": RoleDef(
         make_cosine_waveform_spec_,
-        "<Custom:Cosine>",
+        make_custom_reference_key("Cosine"),
         wf_length=0.1,
         is_waveform=True,
         lib=Lib(None, ("qub_flat", "qub_cos")),
     ),
     "res_waveform": RoleDef(
         make_const_waveform_spec_,
-        "<Custom:Const>",
+        make_custom_reference_key("Const"),
         wf_length=1.0,
         is_waveform=True,
         lib=Lib(None, ("res_flat", "res_const")),

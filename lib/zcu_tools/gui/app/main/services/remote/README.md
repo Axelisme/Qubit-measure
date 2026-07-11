@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — subscriber-aware lazy push
+**Last updated:** 2026-07-11 — canonical cfg target projection
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -91,7 +91,7 @@ Qt reaction matrix. Their serializers deliberately omit those facts and preserve
 the existing event names and `{tab_id, requery}` shape.
 
 Cfg-editor change producers pass a payload factory rather than transport state.
-Editor versions still bump on every edit; `current_paths()` is materialized once
+Editor versions still bump on every edit; `current_targets()` is materialized and projected once
 only when an `editor_id` subscriber exists. `editor_closed` removes a client's
 subscription only after its close push is accepted by that client's queue.
 
@@ -112,8 +112,8 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 48` and `GUI_VERSION = 63`.
-`MCP_VERSION` is defined in `zcu_tools.mcp.measure.server`.
+Current measure-gui values are `WIRE_VERSION = 49`, `GUI_VERSION = 64`, and
+`MCP_VERSION = 71`（defined in `zcu_tools.mcp.measure.server`）。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -161,6 +161,10 @@ mapping or override, and tests for generation / guard policy. `method_specs.py`
 remains the Qt-free public projection used by MCP generation.
 
 ## Cfg Editing
+
+`path_resolver.py`只把binding `SettableTarget`投影成flat/tree wire view與prefix query，禁止
+field/editor subtype grammar。Setter只接受listing canonical leaf；legacy `.sweep.*`/`.value.*`
+zero-mutation拒絕並給replacement。Tab/writeback成功batch回final net path diff。
 
 `tab.get_cfg` returns the nested settable value tree for discovery. Mutations use
 dotted paths through `tab.set_cfg` or `editor.set_field`.

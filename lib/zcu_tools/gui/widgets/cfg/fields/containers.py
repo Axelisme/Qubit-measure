@@ -19,7 +19,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.cfg import ChoiceSectionSpec, DirectValue, LiteralSpec
+from zcu_tools.gui.cfg import (
+    ChoiceSectionSpec,
+    DirectValue,
+    LiteralSpec,
+    is_custom_reference_key,
+    make_custom_reference_key,
+)
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
     ReferenceField,
@@ -386,7 +392,7 @@ class ReferenceWidget(BaseLiveWidget):
         # 1. Custom specs from 'allowed'
         for spec in field.spec.allowed:
             label = spec.label or "Custom"
-            key = f"<Custom:{label}>"
+            key = make_custom_reference_key(label)
             self._combo.addItem(label, key)
 
         # 2. App-local catalog keys, already filtered to compatible labels.
@@ -421,12 +427,12 @@ class ReferenceWidget(BaseLiveWidget):
             if field.spec.optional and not field.is_enabled:
                 field.set_enabled(True)
             field.set_chosen_key(key)
-            self._expand_btn.setChecked(str(key).startswith("<Custom:"))
+            self._expand_btn.setChecked(is_custom_reference_key(str(key)))
             self._on_toggle_subsection(self._expand_btn.isChecked())
 
     def _should_expand_by_default(self) -> bool:
         field = cast(ReferenceField, self._field)
-        return field.get_chosen_key().startswith("<Custom:")
+        return is_custom_reference_key(field.get_chosen_key())
 
     def _on_model_enabled_changed(self, enabled: bool) -> None:
         self._combo.blockSignals(True)

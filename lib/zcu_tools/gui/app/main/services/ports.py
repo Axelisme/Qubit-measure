@@ -16,6 +16,7 @@ infrastructure capability it has no business using.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -23,6 +24,27 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class CfgEdit:
+    path: str
+    value: object
+
+
+@dataclass(frozen=True, slots=True)
+class CfgEditResult:
+    valid: bool
+    removed: tuple[str, ...] = ()
+    added: tuple[str, ...] = ()
+
+    def to_wire(self) -> dict[str, object]:
+        return {
+            "valid": self.valid,
+            "removed": list(self.removed),
+            "added": list(self.added),
+        }
+
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -34,7 +56,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.app.main.state import Session, TabInteractionState
     from zcu_tools.gui.cfg import CfgSchema
-    from zcu_tools.gui.cfg.binding import CfgDraft
+    from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
     from zcu_tools.gui.session.types import ExpContext
 
     from .persistence_types import AppPersistedState
@@ -214,7 +236,7 @@ class CfgEditorPort(Protocol):
         *,
         gc: bool = False,
         owner_key: str | None = None,
-    ) -> tuple[str, list[dict[str, object]]]: ...
+    ) -> tuple[str, tuple[SettableTarget, ...]]: ...
 
     def teardown(self, editor_id: str, *, reason: str = ...) -> None: ...
 
@@ -224,9 +246,9 @@ class CfgEditorPort(Protocol):
     # edit through the item's editor session (ADR-0008): the writeback editing
     # surface internalizes editor_id, so the service writes via the port rather
     # than re-exposing the handle. Signature mirrors CfgEditorService.set_field.
-    def set_field(
-        self, editor_id: str, path: str, value: object
-    ) -> dict[str, object]: ...
+    def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult: ...
+
+    def set_fields(self, editor_id: str, edits: Sequence[CfgEdit]) -> CfgEditResult: ...
 
 
 @runtime_checkable

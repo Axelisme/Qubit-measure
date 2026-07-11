@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
+from zcu_tools.gui.app.main.services.ports import CfgEditResult
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 
@@ -48,7 +49,7 @@ def test_open_translates_cfg_editor_error():
 
 def test_set_field_passes_through_result():
     ctrl = MagicMock()
-    ctrl.cfg_editor_set_field.return_value = {"paths": [], "valid": True}
+    ctrl.cfg_editor_set_field.return_value = CfgEditResult(valid=True)
     res = _dispatch(
         ctrl,
         "editor.set_field",
@@ -60,7 +61,7 @@ def test_set_field_passes_through_result():
 
 def test_set_field_eval_value_passed_through():
     ctrl = MagicMock()
-    ctrl.cfg_editor_set_field.return_value = {"paths": [], "valid": True}
+    ctrl.cfg_editor_set_field.return_value = CfgEditResult(valid=True)
     ev = {"__kind": "eval", "expr": "r_f"}
     _dispatch(
         ctrl,

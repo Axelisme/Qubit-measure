@@ -21,6 +21,10 @@ app-owned library shape policy。[[0046]]以窄resolver port提供此能力，sh
 
 `zcu_tools.gui.cfg` 擁有以下 app-independent Qt-free core：
 
+`gui.cfg.binding`以 [[0050]] 的nominal `SettableTarget`擁有live draft唯一canonical
+path grammar；custom reference key helper屬shared cfg public contract。remote只投影target，
+不依賴field subtype。
+
 - `model.py`：Spec/Value 型別、`CfgSchema` 的 `spec`/`value` data carrier；
 - `inheritance.py`：default value、locked literal alignment、inheritance；
 - `tree.py`：section/reference-aware Spec resolve與existing-leaf Value read/replace；

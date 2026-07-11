@@ -3,6 +3,7 @@ from __future__ import annotations
 from ..model import CfgSchema
 from .fields import CallbackList, SectionField
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
+from .targets import SettableTarget, iter_settable_targets, resolve_settable_target
 
 
 class CfgDraft:
@@ -41,6 +42,19 @@ class CfgDraft:
     def is_valid(self) -> bool:
         self._require_open()
         return self._root.is_valid()
+
+    def resolve_target(self, path: str) -> SettableTarget:
+        self._require_open()
+        return resolve_settable_target(self._root, path)
+
+    def iter_settable_targets(self):
+        self._require_open()
+        yield from iter_settable_targets(self._root)
+
+    def set_target(self, path: str, value: object) -> SettableTarget:
+        target = self.resolve_target(path)
+        target.set_value(value)
+        return target
 
     def refresh_expressions(self) -> None:
         self._require_open()

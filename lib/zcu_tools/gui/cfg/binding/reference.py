@@ -13,6 +13,11 @@ from ..model import (
     ReferenceSpec,
     ReferenceValue,
 )
+from ..reference_key import (
+    is_custom_reference_key,
+    make_custom_reference_key,
+    parse_custom_reference_key,
+)
 from .fields import CallbackList, CfgField, SectionField, _validate_section_keys
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 
@@ -38,8 +43,11 @@ class _PreparedRebuild:
 
 
 def _binding_state_for_key(chosen_key: str) -> LibraryBindingState:
-    if chosen_key.startswith("<Custom:"):
-        return LibraryBindingState.CUSTOM
+    try:
+        if is_custom_reference_key(chosen_key):
+            return LibraryBindingState.CUSTOM
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
     return LibraryBindingState.LINKED
 
 
@@ -77,7 +85,7 @@ class ReferenceField(CfgField):
             init_overridden = initial_val.is_overridden
         else:
             first_label = spec.allowed[0].label
-            self._chosen_key = f"<Custom:{first_label}>"
+            self._chosen_key = make_custom_reference_key(first_label)
             initial_section = None
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
@@ -257,7 +265,7 @@ class ReferenceField(CfgField):
                     kept_value,
                     chosen_key=chosen_key,
                 )
-                final_key = f"<Custom:{label}>"
+                final_key = make_custom_reference_key(label)
                 final_binding_state = LibraryBindingState.CUSTOM
                 resolved = self._resolve_key(final_key)
                 if resolved is None:
@@ -345,10 +353,11 @@ class ReferenceField(CfgField):
         return self._resolve_key(self._chosen_key)
 
     def _resolve_key(self, chosen_key: str) -> _ResolvedChoice | None:
-        if chosen_key.startswith("<Custom:"):
-            if not chosen_key.endswith(">"):
-                raise RuntimeError(f"Invalid custom reference key: {chosen_key!r}")
-            label = chosen_key[len("<Custom:") : -1]
+        try:
+            label = parse_custom_reference_key(chosen_key)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if label is not None:
             for spec in self.spec.allowed:
                 if spec.label == label:
                     return spec, None

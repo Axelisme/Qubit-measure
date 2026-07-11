@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — subscriber-aware lazy push coverage
+**Last updated:** 2026-07-11 — canonical cfg binding paths
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -230,6 +230,10 @@ optimization contract。Segment propagator LRU、單次 signal-grid prefix seque
 與 numba routing threshold 這類 private optimization contract 也放在同一檔。
 
 ### Shared GUI cfg import ownership tests
+
+`tests/gui/cfg/binding/test_targets.py`鎖定list/resolve acceptance equality、canonical grammar、
+legacy zero-mutation replacement、schema collision與production registry coverage。remote cfg tests
+鎖定target wire parity與AST import purity；service/writeback tests鎖定shape-only listing與batch net diff。
 
 `tests/gui/cfg/test_measure_import_contract.py` 鎖定measure adapter facade不forward
 `zcu_tools.gui.cfg.__all__` names，並以AST掃描`lib/`、`tests/`與`adapter.*` local submodules，

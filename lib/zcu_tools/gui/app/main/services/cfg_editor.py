@@ -43,7 +43,7 @@ from __future__ import annotations
 import itertools
 import logging
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -59,20 +59,21 @@ from zcu_tools.gui.app.main.cfg_schemas import (
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
 from zcu_tools.gui.cfg import (
     CfgSchema,
+    DirectValue,
     EvalValue,
     make_default_value,
 )
-from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.cfg.binding import (
+    CfgDraft,
+    SettablePathError,
+    SettableTarget,
+    SettableTargetKind,
+)
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.ports import ContextReadPort
-from zcu_tools.gui.session.value_lookup import ValueLookupError, decode_value_ref
+from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
-from .ports import ContextWritePort
-from .remote.path_resolver import (
-    ValueRefResolver,
-    list_settable_paths_full,
-    resolve_and_set,
-)
+from .ports import CfgEdit, CfgEditResult, ContextWritePort
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -85,7 +86,7 @@ _ITEM_KINDS = ("module", "waveform")
 # payload_factory).  The remote layer decides whether a matching subscriber
 # exists before materializing the payload; this service stays ignorant of
 # transport and subscription state.
-ChangePayloadFactory = Callable[[], Mapping[str, object]]
+ChangePayloadFactory = Callable[[], object]
 ChangeListener = Callable[[str, str, ChangePayloadFactory], None]
 
 # Max concurrent *headless* sessions before the oldest is evicted (orphan
@@ -111,6 +112,9 @@ class CfgEditorHost(MeasureCfgBindingHost, ContextReadPort, ContextWritePort, Pr
 
 class CfgEditorError(InvalidInputError):
     """A CfgEditor session operation failed (unknown id, bad kind, …)."""
+
+
+ValueRefResolver = Callable[[ValueRef, type], DirectValue]
 
 
 @dataclass
@@ -150,19 +154,21 @@ class CfgEditorSession:
 
     # -- behaviour (the aggregate operates its own draft) ------------------
 
-    def current_paths(self) -> list[dict[str, object]]:
-        """Full flat settable-path list of the draft.
+    def current_targets(self) -> tuple[SettableTarget, ...]:
+        """Full canonical target snapshot of the draft.
 
         Internal use only: the change-push payload (``_attach_change_stream``)
         and ``editor.new``'s session-create return. Agent-facing reads of the
         draft go through the nested tree (``editor.get`` / ``tab.get_cfg``),
         not this flat list.
         """
-        return list_settable_paths_full(self.draft)
+        return tuple(self.draft.iter_settable_targets())
 
-    def set_field(self, path: str, value: object) -> dict[str, object]:
-        """Mutate one field; return draft validity + which paths a ref switch
-        added/removed.
+    def set_field(self, path: str, value: object) -> CfgEditResult:
+        return self.set_fields((CfgEdit(path, value),))
+
+    def set_fields(self, edits: Sequence[CfgEdit]) -> CfgEditResult:
+        """Apply an ordered, fail-fast, non-atomic edit batch.
 
         Does NOT echo cfg content back — reading it would force a lowering pass
         that eagerly evaluates EvalValue (e.g. ``r_f - 0.1`` → a concrete
@@ -172,22 +178,34 @@ class CfgEditorSession:
         whole draft) tell the agent exactly which paths disappeared / appeared,
         so it need not re-list the whole tab after a variant switch.
         """
-        before = {str(e["path"]) for e in list_settable_paths_full(self.draft)}
-        try:
-            resolve_and_set(
-                self.draft,
-                path,
-                _decode_value(value),
-                resolve_value_ref=self.resolve_value_ref,
-            )
-        except ValueLookupError as exc:
-            raise CfgEditorError(str(exc)) from exc
-        after = {str(e["path"]) for e in list_settable_paths_full(self.draft)}
-        return {
-            "valid": bool(self.draft.is_valid()),
-            "removed": sorted(before - after),
-            "added": sorted(after - before),
-        }
+        before: set[str] | None = None
+        for edit in edits:
+            target = self.draft.resolve_target(edit.path)
+            if target.affects_path_shape and before is None:
+                before = {item.path for item in self.draft.iter_settable_targets()}
+            value = _decode_value(edit.value)
+            if (
+                isinstance(value, EvalValue)
+                and target.kind is not SettableTargetKind.SCALAR
+            ):
+                raise SettablePathError(
+                    f"eval value is only valid for scalar target {edit.path!r}"
+                )
+            if isinstance(value, ValueRef):
+                if target.kind is not SettableTargetKind.SCALAR:
+                    raise SettablePathError(
+                        f"value_ref is only valid for scalar target {edit.path!r}"
+                    )
+                value = self.resolve_value_ref(value, target.value_type)
+            target.set_value(value)
+        if before is None:
+            return CfgEditResult(valid=bool(self.draft.is_valid()))
+        after = {item.path for item in self.draft.iter_settable_targets()}
+        return CfgEditResult(
+            valid=bool(self.draft.is_valid()),
+            removed=tuple(sorted(before - after)),
+            added=tuple(sorted(after - before)),
+        )
 
     def commit_schema(self) -> CfgSchema:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
@@ -279,7 +297,7 @@ class CfgEditorService:
         from_name: str | None = None,
         gc: bool = True,
         owner_key: str | None = None,
-    ) -> tuple[str, list[dict[str, object]]]:
+    ) -> tuple[str, tuple[SettableTarget, ...]]:
         """Open an ml-entry editing session (module / waveform).
 
         ``gc=True`` (the agent default) makes the session reclaimable by LRU and
@@ -304,7 +322,7 @@ class CfgEditorService:
         *,
         gc: bool = False,
         owner_key: str | None = None,
-    ) -> tuple[str, list[dict[str, object]]]:
+    ) -> tuple[str, tuple[SettableTarget, ...]]:
         """Open a session seeded from an existing ``CfgSchema`` (no item_kind).
 
         Used by UI surfaces that own a cfg draft which is *not* an ml entry — a
@@ -327,7 +345,7 @@ class CfgEditorService:
         item_kind: str | None,
         gc: bool,
         owner_key: str | None,
-    ) -> tuple[str, list[dict[str, object]]]:
+    ) -> tuple[str, tuple[SettableTarget, ...]]:
         draft = self._bindings.new_draft(CfgSchema(spec=spec, value=value))
         editor_id = self._new_id(owner_key)
         session = CfgEditorSession(
@@ -343,7 +361,7 @@ class CfgEditorService:
         self._attach_change_stream(session)
         if gc:
             self._evict_excess_gc()
-        return editor_id, session.current_paths()
+        return editor_id, session.current_targets()
 
     def editor_id_for_owner(self, owner_key: str) -> str | None:
         for editor_id, session in self._editors.items():
@@ -370,8 +388,11 @@ class CfgEditorService:
         """
         return self._require(editor_id).draft
 
-    def set_field(self, editor_id: str, path: str, value: object) -> dict[str, object]:
+    def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult:
         return self._require(editor_id).set_field(path, value)
+
+    def set_fields(self, editor_id: str, edits: Sequence[CfgEdit]) -> CfgEditResult:
+        return self._require(editor_id).set_fields(edits)
 
     def commit(self, editor_id: str, name: str) -> None:
         # ADR-0006: the aggregate yields its un-lowered CfgSchema; ContextService
@@ -459,7 +480,7 @@ class CfgEditorService:
             self._emit(
                 editor_id,
                 "editor_changed",
-                lambda: {"paths": session.current_paths()},
+                session.current_targets,
             )
 
         session.change_cb = _on_change
@@ -574,8 +595,8 @@ def _decode_value(value: object) -> object:
     The agent sends ``{"__kind": "eval", "expr": "..."}`` for an md-reference
     expression (the same tag used by the cfg-form codec), or
     ``{"__kind": "value_ref", "key": "...", "type": "float"}`` for a registered
-    value source. Everything else is a plain JSON scalar that ``resolve_and_set``
-    handles directly.
+    value source. Everything else is a plain JSON scalar passed to the resolved
+    binding target.
     """
     if isinstance(value, dict) and value.get("__kind") == "eval":
         expr = value.get("expr")
@@ -584,7 +605,7 @@ def _decode_value(value: object) -> object:
         return EvalValue(expr=expr)
     try:
         ref = decode_value_ref(value)
-    except (ValueError, ValueLookupError) as exc:
+    except ValueError as exc:
         raise CfgEditorError(str(exc)) from exc
     if ref is not None:
         return ref

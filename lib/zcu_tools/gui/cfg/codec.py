@@ -29,6 +29,7 @@ from .model import (
     SweepValue,
     _reference_discriminator_key,
 )
+from .reference_key import parse_custom_reference_key
 
 
 class SessionCodecError(RuntimeError):
@@ -329,8 +330,11 @@ def _select_allowed_spec(
     that default mis-shaped a multi-shape ref (e.g. a readout LINKED to a library
     pulse-readout but serialised against the first allowed direct-readout shape,
     which then crashes on the missing ``ro_ch`` field)."""
-    if chosen_key.startswith("<Custom:") and chosen_key.endswith(">"):
-        label = chosen_key[len("<Custom:") : -1]
+    try:
+        label = parse_custom_reference_key(chosen_key)
+    except ValueError as exc:
+        raise SessionCodecError(str(exc)) from exc
+    if label is not None:
         for allowed_spec in spec.allowed:
             if allowed_spec.label == label:
                 return allowed_spec

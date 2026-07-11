@@ -52,11 +52,12 @@ from .services import (
     build_app_services,
 )
 from .services.cfg_lowering import lower_module, lower_waveform
-from .services.ports import ContextWrites
+from .services.ports import CfgEdit, CfgEditResult, ContextWrites
 from .services.remote.dialogs import DialogName
 from .state import State
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -1059,7 +1060,7 @@ class Controller(SessionControllerMixin):
         from_name: str | None = None,
         gc: bool = True,
         owner_key: str | None = None,
-    ) -> tuple[str, list[dict[str, object]]]:
+    ) -> tuple[str, tuple[SettableTarget, ...]]:
         """Open a CfgEditor session. The ``editor.new`` RPC only uses
         ``from_name`` (edit an existing entry); ``discriminator`` (blank seed)
         remains an internal seam — creating a blank goes through
@@ -1075,7 +1076,7 @@ class Controller(SessionControllerMixin):
 
     def open_seeded_cfg_editor(
         self, seed: CfgSchema, *, gc: bool = False, owner_key: str | None = None
-    ) -> tuple[str, list[dict[str, object]]]:
+    ) -> tuple[str, tuple[SettableTarget, ...]]:
         """Open a service-owned cfg model seeded from an existing CfgSchema.
 
         Used by UI surfaces (tab cfg / writeback item) that own a non-ml-entry
@@ -1115,8 +1116,13 @@ class Controller(SessionControllerMixin):
 
     def cfg_editor_set_field(
         self, editor_id: str, path: str, value: object
-    ) -> dict[str, object]:
+    ) -> CfgEditResult:
         return self._cfg_editor_svc.set_field(editor_id, path, value)
+
+    def cfg_editor_set_fields(
+        self, editor_id: str, edits: list[CfgEdit]
+    ) -> CfgEditResult:
+        return self._cfg_editor_svc.set_fields(editor_id, edits)
 
     def owner_of_editor(self, editor_id: str) -> str | None:
         """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""

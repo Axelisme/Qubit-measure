@@ -427,7 +427,7 @@ def test_editor_subscription_lazily_builds_then_unsubscribe_stops_it(fx):
             {"editor_id": "editor-race"},
         )
         assert subscribed["result"]["subscribed_editors"] == ["editor-race"]
-        payload_factory = MagicMock(return_value={"paths": []})
+        payload_factory = MagicMock(return_value=())
 
         fx.service._on_editor_event("editor-race", "editor_changed", payload_factory)
 

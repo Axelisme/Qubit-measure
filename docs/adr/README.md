@@ -36,6 +36,7 @@
 - [0043 — Autofluxdep runtime cfg override plan](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、runtime patch enforcement、remote/artifact exposure 與 cfg form decoration。
 - [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有Qt-free core，`gui.widgets.cfg`擁有instance-registry Qt renderer，measure adapter與autoflux cfg barrel只暴露app-owned API；lowering ports見 [[0046]]。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：finished-cfg algorithm由shared core擁有，app以expression/reference/range三個窄port提供runtime policy。
+- [0050 — Canonical cfg binding paths](0050-canonical-cfg-binding-paths.md)：binding擁有唯一typed path grammar與batch net diff；remote只投影target。
 
 ## Remote / Transport
 

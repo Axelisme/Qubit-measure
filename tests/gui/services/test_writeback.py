@@ -18,6 +18,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload
 from zcu_tools.gui.app.main.services.guard import WritebackPermit
+from zcu_tools.gui.app.main.services.ports import CfgEdit, CfgEditResult
 from zcu_tools.gui.app.main.services.writeback import WritebackService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -186,11 +187,9 @@ def test_set_item_field_edits_route_through_item_editor():
     each edit via CfgEditorPort.set_field, returning the aggregated result."""
     state = _make_state_with_tab()
     cfg_editor = MagicMock()
-    cfg_editor.set_field.return_value = {
-        "valid": True,
-        "removed": ["qub.old"],
-        "added": ["qub.new"],
-    }
+    cfg_editor.set_fields.return_value = CfgEditResult(
+        valid=True, removed=("qub.old",), added=("qub.new",)
+    )
     svc = _svc(state, cfg_editor=cfg_editor)
 
     item = ModuleWriteback(target_name="qub", description="d", edit_schema=MagicMock())
@@ -202,7 +201,9 @@ def test_set_item_field_edits_route_through_item_editor():
         "t1", "ml-1", edits=[{"path": "qub.freq", "value": 5000.0}]
     )
 
-    cfg_editor.set_field.assert_called_once_with("editor-7", "qub.freq", 5000.0)
+    cfg_editor.set_fields.assert_called_once_with(
+        "editor-7", [CfgEdit("qub.freq", 5000.0)]
+    )
     assert agg == {"valid": True, "removed": ["qub.old"], "added": ["qub.new"]}
 
 

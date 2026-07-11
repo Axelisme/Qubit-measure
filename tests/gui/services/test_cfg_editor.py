@@ -7,13 +7,28 @@ commit path including eval-on-commit and ModuleRef sub-tree re-binding.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError, CfgEditorService
+from zcu_tools.gui.app.main.services.ports import CfgEdit
+from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CfgSchema,
+    CfgSectionSpec,
+    SweepSpec,
+    make_default_value,
+)
+from zcu_tools.gui.cfg.binding import SettablePathError
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.session.value_lookup import ValueInfo
+from zcu_tools.gui.session.value_lookup import (
+    MissingValue,
+    ProviderError,
+    UnavailableValue,
+    ValueInfo,
+    ValueTypeError,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 
@@ -75,7 +90,9 @@ def service(ctrl):
 
 
 def _paths(entries):
-    return {e["path"]: e for e in entries}
+    from zcu_tools.gui.app.main.services.remote.path_resolver import project_targets
+
+    return {e["path"]: e for e in project_targets(entries)}
 
 
 # ---------------------------------------------------------------------------
@@ -97,11 +114,11 @@ def test_session_is_the_aggregate_with_behaviour(service, ml):
 
     # set_field is the aggregate's own behaviour: returns validity + ref-switch
     # diff, NOT cfg content (no lowering/eval side effect). The new value is read
-    # back via current_paths.
+    # back via current_targets.
     out = session.set_field("freq", 5000.0)
-    assert "valid" in out and "removed" in out and "added" in out
-    assert "paths" not in out
-    assert _paths(session.current_paths())["freq"]["value"] == 5000.0
+    assert out.valid is True
+    assert out.removed == () and out.added == ()
+    assert _paths(session.current_targets())["freq"]["value"] == 5000.0
 
     # commit_schema is the aggregate's own behaviour: it yields the un-lowered
     # CfgSchema (ADR-0006 — lowering + register belong to the write authority).
@@ -183,7 +200,7 @@ def test_open_from_existing_entry_returns_concrete_values(service, ml):
 def test_set_scalar_then_commit_lands_concrete(service, ctrl, ml):
     editor_id, _ = service.open("module", discriminator="pulse")
     res = service.set_field(editor_id, "freq", 5000.0)
-    assert res["valid"] is True
+    assert res.valid is True
     service.commit(editor_id, "agent_pulse")
 
     ctrl.set_ml_module_from_schema.assert_called_once()
@@ -238,6 +255,53 @@ def test_value_ref_requires_string_key(service):
         )
 
 
+@pytest.mark.parametrize(
+    "error",
+    (
+        MissingValue("device.flux.value", "missing"),
+        UnavailableValue("device.flux.value", "unavailable"),
+        ProviderError("device.flux.value", "device:flux", RuntimeError("boom")),
+    ),
+)
+def test_value_ref_lookup_error_identity_and_category_are_preserved(
+    service, ctrl, error
+):
+    ctrl.read_value_source.side_effect = error
+    editor_id, _ = service.open("module", discriminator="pulse")
+
+    with pytest.raises(type(error)) as exc:
+        service.set_field(
+            editor_id,
+            "freq",
+            {"__kind": "value_ref", "key": "device.flux.value", "type": "float"},
+        )
+
+    assert exc.value is error
+
+
+def test_value_ref_type_error_keeps_nominal_invalid_input(service):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    with pytest.raises(ValueTypeError):
+        service.set_field(
+            editor_id,
+            "freq",
+            {"__kind": "value_ref", "key": "device.flux.value", "type": "str"},
+        )
+
+
+@pytest.mark.parametrize("path", ("sweep.start", "sweep.stop", "centered.center"))
+def test_wire_eval_value_is_rejected_for_sweep_edges(service, path: str):
+    spec = CfgSectionSpec(
+        fields={"sweep": SweepSpec(), "centered": CenteredSweepSpec()}
+    )
+    editor_id, _ = service.open_seeded(
+        CfgSchema(spec, make_default_value(spec)), gc=False
+    )
+
+    with pytest.raises(SettablePathError, match="only valid for scalar"):
+        service.set_field(editor_id, path, {"__kind": "eval", "expr": "r_f"})
+
+
 # ---------------------------------------------------------------------------
 # ModuleRef key switch rebinds the sub-tree
 # ---------------------------------------------------------------------------
@@ -255,19 +319,98 @@ def test_ref_switch_returns_new_subtree_and_diff(service):
     # Switch the waveform ref key; set_field returns only a removed/added diff of
     # settable paths (no cfg content — no lowering/eval side effect).
     res = service.set_field(editor_id, "waveform.ref", "<Custom:Gauss>")
-    assert "paths" not in res
+    assert isinstance(res.valid, bool)
     # The diff names the appeared path explicitly so the agent need not re-list.
-    assert "waveform.sigma" in res["added"]
-    assert "waveform.sigma" not in res["removed"]
-    # And the rebuilt structure is observable on the live root via the flat
-    # settable-path lister (the diff-only/internal API editor.set_field uses).
-    from zcu_tools.gui.app.main.services.remote.path_resolver import (
-        list_settable_paths_full,
+    assert "waveform.sigma" in res.added
+    assert "waveform.sigma" not in res.removed
+    assert "waveform.sigma" in _paths(service._require(editor_id).current_targets())
+
+
+def test_non_shape_batch_does_not_materialize_path_sets(service):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    session = service._require(editor_id)
+    iter_targets = MagicMock(wraps=session.draft.iter_settable_targets)
+    session.draft.iter_settable_targets = iter_targets
+
+    result = session.set_fields((CfgEdit("freq", 5000.0), CfgEdit("gain", 0.4)))
+
+    assert result.removed == () and result.added == ()
+    iter_targets.assert_not_called()
+
+
+def test_shape_batch_lists_once_before_and_after_and_returns_net_diff(service):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    session = service._require(editor_id)
+    iter_targets = MagicMock(wraps=session.draft.iter_settable_targets)
+    session.draft.iter_settable_targets = iter_targets
+
+    result = session.set_fields(
+        (
+            CfgEdit("waveform.ref", "Gauss"),
+            CfgEdit("waveform.ref", "Const"),
+        )
     )
 
-    assert "waveform.sigma" in _paths(
-        list_settable_paths_full(service.get_draft(editor_id))
-    )
+    assert result.removed == () and result.added == ()
+    assert iter_targets.call_count == 2
+
+
+def test_shape_batch_failure_does_not_materialize_after_path_set(service):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    session = service._require(editor_id)
+    iter_targets = MagicMock(wraps=session.draft.iter_settable_targets)
+    session.draft.iter_settable_targets = iter_targets
+
+    with pytest.raises(SettablePathError, match="unknown settable path"):
+        session.set_fields(
+            (
+                CfgEdit("waveform.ref", "Gauss"),
+                CfgEdit("waveform.does_not_exist", 1),
+            )
+        )
+
+    assert iter_targets.call_count == 1
+    assert session.draft.resolve_target("waveform.ref").get_value() == "<Custom:Gauss>"
+
+
+def test_batch_bumps_editor_version_once_per_successful_edit(service, ctrl):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    ctrl.bump_editor_version.reset_mock()
+
+    service.set_fields(editor_id, (CfgEdit("freq", 5000.0), CfgEdit("gain", 0.25)))
+
+    assert ctrl.bump_editor_version.call_args_list == [call(editor_id), call(editor_id)]
+
+
+def test_batch_is_ordered_fail_fast_non_atomic(service):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    session = service._require(editor_id)
+
+    with pytest.raises(SettablePathError, match="unknown settable path"):
+        session.set_fields(
+            (
+                CfgEdit("freq", 4321.0),
+                CfgEdit("does.not.exist", 1),
+                CfgEdit("gain", 0.9),
+            )
+        )
+
+    paths = _paths(session.current_targets())
+    assert paths["freq"]["value"] == 4321.0
+    assert paths["gain"]["value"] != 0.9
+
+
+def test_empty_batch_returns_live_validity_without_path_listing(service):
+    editor_id, _ = service.open("module", discriminator="pulse")
+    session = service._require(editor_id)
+    iter_targets = MagicMock(wraps=session.draft.iter_settable_targets)
+    session.draft.iter_settable_targets = iter_targets
+
+    result = session.set_fields(())
+
+    assert result.valid is session.draft.is_valid()
+    assert result.removed == () and result.added == ()
+    iter_targets.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +571,7 @@ def test_change_stream_emits_editor_changed(service):
     changed = [e for e in events if e[1] == "editor_changed" and e[0] == editor_id]
     assert changed
     # payload carries the full current path list.
-    assert any("freq" in {p["path"] for p in e[2]["paths"]} for e in changed)
+    assert any("freq" in {target.path for target in e[2]} for e in changed)
 
 
 def test_change_stream_emits_editor_closed_with_reason(service):
@@ -478,25 +621,25 @@ def test_closed_draft_rejects_residual_field_edits(service):
     assert events == []
 
 
-def test_change_stream_defers_current_paths_but_always_bumps_version(service, ctrl):
+def test_change_stream_defers_current_targets_but_always_bumps_version(service, ctrl):
     factories = []
     service.set_change_listener(
         lambda _eid, _ev, payload_factory: factories.append(payload_factory)
     )
     editor_id, _ = service.open_seeded(_make_tab_seed(), gc=False, owner_key="tab-1")
     session = service._require(editor_id)
-    current_paths = MagicMock(wraps=session.current_paths)
-    session.current_paths = current_paths
+    current_targets = MagicMock(wraps=session.current_targets)
+    session.current_targets = current_targets
     ctrl.bump_editor_version.reset_mock()
 
     service.set_field(editor_id, "freq", 5000.0)
 
     ctrl.bump_editor_version.assert_called_once_with(editor_id)
-    current_paths.assert_not_called()
+    current_targets.assert_not_called()
     assert len(factories) == 1
     payload = factories[0]()
-    assert "freq" in {entry["path"] for entry in payload["paths"]}
-    current_paths.assert_called_once_with()
+    assert "freq" in {target.path for target in payload}
+    current_targets.assert_called_once_with()
 
 
 def _hook_count(draft):

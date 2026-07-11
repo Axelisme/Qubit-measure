@@ -73,7 +73,12 @@ from __future__ import annotations
 # v48: result-scope discovery and startup path override removal:
 #   result_scope.list added; startup.apply replaces result_dir/database_path
 #   optional params with scope_id and echoes params_path/scope_id.
-WIRE_VERSION = 48
+# v49: cfg setters accept only the canonical paths emitted by get/listing:
+#   sweep edges are <path>.<edge>, reference keys are <path>.ref, and reference
+#   children descend directly. Removed .sweep.* / .value.* aliases are rejected
+#   without mutation and report the canonical replacement. Batch path diffs are
+#   final net before/after results rather than transient per-edit churn.
+WIRE_VERSION = 49
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -82,4 +87,4 @@ WIRE_VERSION = 48
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 63  # subscriber-aware lazy event/editor push
+GUI_VERSION = 64  # canonical cfg binding targets and batch net diff

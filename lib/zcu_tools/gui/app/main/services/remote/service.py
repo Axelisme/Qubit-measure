@@ -33,8 +33,8 @@ predictor commands through ``adapter.predictor_control``, and View-side surfaces
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterable, Mapping
+from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.services.save_control import SaveControlPort
     from zcu_tools.gui.app.main.services.tab_control import TabControlPort
     from zcu_tools.gui.app.main.services.writeback_control import WritebackControlPort
+    from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
@@ -391,7 +392,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self,
         editor_id: str,
         event_name: str,
-        payload_factory: Callable[[], Mapping[str, object]],
+        payload_factory: Callable[[], object],
     ) -> None:
         """Push a per-editor notification. Runs on the Qt main thread.
 
@@ -407,7 +408,17 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
         def _make_line() -> bytes | None:
             try:
-                body = dict(payload_factory())
+                payload = payload_factory()
+                if event_name == "editor_changed":
+                    from .path_resolver import project_targets
+
+                    body: dict[str, object] = {
+                        "paths": project_targets(
+                            cast("Iterable[SettableTarget]", payload)
+                        )
+                    }
+                else:
+                    body = dict(cast("Mapping[str, object]", payload))
                 body["editor_id"] = editor_id
                 return encode_line({"event": event_name, "payload": body})
             except Exception:

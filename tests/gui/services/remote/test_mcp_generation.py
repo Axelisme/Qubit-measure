@@ -20,6 +20,17 @@ from zcu_tools.mcp.measure import server as m
 from zcu_tools.mcp.measure.exposure import build_mcp_exposure_plan
 
 
+def test_canonical_cfg_contract_revisions_are_exact() -> None:
+    from zcu_tools.gui.app.main.services.remote.wire_version import (
+        GUI_VERSION,
+        WIRE_VERSION,
+    )
+
+    assert WIRE_VERSION == 49
+    assert GUI_VERSION == 64
+    assert m.MCP_VERSION == 71
+
+
 def _tool_name_for(method: str, spec) -> str:
     # The shared generate_tools derives a tool name as spec.tool_name or the
     # app's tool_prefix + method-with-dots-as-underscores. Mirror that here so

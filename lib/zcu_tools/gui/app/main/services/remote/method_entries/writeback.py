@@ -43,13 +43,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the METADICT-only facet (a complex value is passed as "
             '{"__complex__": [re, im]}, the same shape the list emits; it applies as '
             "a Python complex). edits? is the MODULE/WAVEFORM-only facet: an ORDERED "
-            "list of {path, value} cfg edits applied to the item's draft (no editor_id "
+            "list of {path, value} canonical cfg edits copied from the listing and "
+            "applied to the item's draft (no editor_id "
             "needed — the surface resolves it internally). Apply ref-switch edits "
             "before dependent inner-path edits (a ref switch removes child paths); "
             "fail-fast and non-atomic. proposed_value and edits are mutually exclusive "
             "(different item kinds). Echoes the edited {item}; an edits batch also "
-            "returns {valid, removed, added} aggregated across the batch (same shape "
-            "as tab.set_cfg). Read the item's current paths via tab.writeback_preview.",
+            "returns {valid, removed, added} as the final net before/after path-set "
+            "difference (same shape as tab.set_cfg; A→B→A is empty). Removed "
+            "'.sweep.*' / '.value.*' aliases are rejected with a canonical "
+            "replacement. Read the item's current paths via tab.writeback_preview.",
             (
                 _str("tab_id"),
                 _str("id", "writeback item session id (<kind>-<n>)"),

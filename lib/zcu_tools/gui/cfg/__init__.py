@@ -39,6 +39,11 @@ from .model import (
     SweepValue,
     default_value_for_type,
 )
+from .reference_key import (
+    is_custom_reference_key,
+    make_custom_reference_key,
+    parse_custom_reference_key,
+)
 from .schema_assembler import (
     USE_SPEC_DEFAULT,
     CfgSchemaAssembler,
@@ -78,8 +83,11 @@ __all__ = [
     "default_value_for_type",
     "default_value_for_spec",
     "inherit_from",
+    "is_custom_reference_key",
     "lower_finished_cfg",
     "make_default_value",
+    "make_custom_reference_key",
+    "parse_custom_reference_key",
     "raw_to_schema",
     "read_value_path",
     "replace_value_path",

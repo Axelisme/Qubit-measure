@@ -95,16 +95,21 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:_h_tab_set_cfg",
         MethodSpec(
             5.0,
-            "Batch-set cfg fields on a tab in order (fail-fast, non-atomic). 'edits' "
-            "is an ORDERED list of {path, value} objects. Apply ref-switch edits "
+            "Batch-set canonical cfg paths on a tab in order (fail-fast, non-atomic). "
+            "Copy paths from tab.get_cfg: sweep edges are '<path>.<edge>', reference "
+            "keys are '<path>.ref', and reference children descend directly. Removed "
+            "'.sweep.*' / '.value.*' aliases are rejected without mutation and name "
+            "their replacement. 'edits' is an ORDERED list of {path, value} objects. "
+            "Apply ref-switch edits "
             "before dependent inner-path edits (a ref switch removes child paths). "
             "'value' is a JSON scalar, an md-reference eval tag "
             '{"__kind":"eval","expr":"r_f"}, or a registered value-source tag '
             '{"__kind":"value_ref","key":"device.flux.value","type":"float"}; '
             "value_ref is resolved immediately at set time and stored as a direct "
             "scalar. Discover keys with value.list / value.read. "
-            "Returns {valid, removed, added} aggregated across the batch — the same "
-            "shape as editor.set_field. A tab that is currently running is rejected "
+            "Returns {valid, removed, added}; removed/added are the final net path-set "
+            "difference before versus after the successful whole batch (A→B→A is "
+            "empty), not transient churn. A tab that is currently running is rejected "
             "(cancel the run first). Use tab.get_cfg to read the current tree.",
             (
                 _str("tab_id"),

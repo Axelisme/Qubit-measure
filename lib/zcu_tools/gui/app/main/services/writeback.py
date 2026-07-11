@@ -14,7 +14,7 @@ from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 from .guard import WritebackPermit
-from .ports import CfgEditorPort, ContextWrites
+from .ports import CfgEdit, CfgEditorPort, ContextWrites
 
 logger = logging.getLogger(__name__)
 
@@ -156,9 +156,7 @@ class WritebackService:
                 )
             item.proposed_value = proposed_value
 
-        valid = True
-        removed: list[str] = []
-        added: list[str] = []
+        result = None
         if edits is not None:
             if not isinstance(item, (ModuleWriteback, WaveformWriteback)):
                 raise InvalidInputError(
@@ -168,22 +166,17 @@ class WritebackService:
                 raise FailedPreconditionError(
                     f"{session_id!r} has no editable cfg model to apply edits to"
                 )
+            typed_edits: list[CfgEdit] = []
             for i, edit in enumerate(edits):
                 if "path" not in edit or "value" not in edit:
                     raise InvalidInputError(
                         f"edits[{i}] must be an object with 'path' and 'value'"
                     )
-                result = self._cfg_editor.set_field(
-                    item.editor_id, str(edit["path"]), edit["value"]
-                )
-                valid = bool(result.get("valid", True))
-                r = result.get("removed", [])
-                a = result.get("added", [])
-                if isinstance(r, list):
-                    removed.extend(str(p) for p in r)
-                if isinstance(a, list):
-                    added.extend(str(p) for p in a)
-        return {"valid": valid, "removed": removed, "added": added}
+                typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
+            result = self._cfg_editor.set_fields(item.editor_id, typed_edits)
+        if result is None:
+            return {"valid": True, "removed": [], "added": []}
+        return result.to_wire()
 
     def _find_item(self, tab_id: str, session_id: str) -> WritebackItem:
         for item in self._state.get_tab(tab_id).writeback_items:

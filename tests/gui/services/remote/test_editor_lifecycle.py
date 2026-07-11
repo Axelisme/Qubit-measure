@@ -126,7 +126,7 @@ def test_editor_event_only_to_subscribers():
     _register(svc, sub)
     _register(svc, other)
 
-    svc._on_editor_event("editor-1", "editor_changed", lambda: {"paths": []})
+    svc._on_editor_event("editor-1", "editor_changed", lambda: ())
 
     sub_events = _enqueued_events(sub)
     assert len(sub_events) == 1
@@ -188,7 +188,7 @@ def test_editor_event_builds_and_encodes_once_for_multiple_subscribers(monkeypat
     for link in links:
         link.app_ctx.subscribed_editors.add("editor-1")  # type: ignore[attr-defined]
         _register(svc, link)
-    payload_factory = MagicMock(return_value={"paths": [{"path": "freq"}]})
+    payload_factory = MagicMock(return_value=())
     encode = MagicMock(wraps=service_module.encode_line)
     monkeypatch.setattr(service_module, "encode_line", encode)
 

@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-11（subscriber-aware lazy remote push）
+**Last updated:** 2026-07-11（canonical cfg binding paths）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -19,6 +19,11 @@ RuntimeError-compatible fixed leaves讓既有view/handler catches維持相容（
 controller error與traceback。
 
 ## Shared Config Core (`cfg/`)
+
+`cfg.binding.CfgDraft`以nominal `SettableTarget`提供同源的
+`iter_settable_targets()` / `resolve_target()` / `set_target()`。唯一grammar是scalar dotted
+leaf、sweep直接edge、reference `.ref`與直接child；legacy `.sweep`/`.value`只回遷移提示。
+`gui.cfg`的custom-reference-key helpers是tag representation唯一constructor/parser。
 
 `zcu_tools.gui.cfg` 擁有 Qt-free 的 Spec/Value tree、`CfgSchema` data carrier、
 default/inheritance helpers、raw persistence codec，以及generic finished-cfg

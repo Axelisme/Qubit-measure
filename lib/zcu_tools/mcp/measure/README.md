@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-03 (shared standalone bootstrap)
+**Last updated:** 2026-07-11 (canonical cfg paths)
 
 # `zcu_tools/mcp/measure/`
 
@@ -6,6 +6,9 @@ measure-gui 的 MCP entry，負責把 MCP tool call 轉接到 live measure-gui
 RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 transport。
 
 ## 邊界
+
+Cfg agent直接複製`gui_tab_get_cfg`/`gui_editor_get_cfg`列出的canonical leaf path；不加入
+`.sweep`或`.value` wrapper。Batch path diff是成功後final net結果，失敗後重新讀cfg reconcile。
 
 - `server.py` 是 MCP bootstrap / aggregation facade：保留 standalone preflight、
   server instructions/config、session/bridge setup、guarded `send_gui_rpc`、

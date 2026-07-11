@@ -29,6 +29,7 @@ from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry, RoleItem
 from zcu_tools.gui.app.main.specs import make_waveform_spec_by_style
 from zcu_tools.gui.cfg import (
     ReferenceValue,
+    make_custom_reference_key,
     make_default_value,
 )
 
@@ -151,7 +152,7 @@ def _blank_module_factory(
 ) -> Callable[[ExpContext], ReferenceValue]:
     def _make(_ctx: ExpContext) -> ReferenceValue:
         value = make_default_value(_MODULE_SPEC_FACTORIES[disc]())
-        return ReferenceValue(f"<Custom:{disc}>", value)
+        return ReferenceValue(make_custom_reference_key(disc), value)
 
     return _make
 
@@ -161,7 +162,7 @@ def _blank_waveform_factory(
 ) -> Callable[[ExpContext], ReferenceValue]:
     def _make(_ctx: ExpContext) -> ReferenceValue:
         value = make_default_value(make_waveform_spec_by_style(disc))
-        return ReferenceValue(f"<Custom:{disc}>", value)
+        return ReferenceValue(make_custom_reference_key(disc), value)
 
     return _make
 

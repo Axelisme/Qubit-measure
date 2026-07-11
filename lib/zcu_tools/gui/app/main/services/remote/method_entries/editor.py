@@ -39,9 +39,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "editor:_h_editor_set_field",
         MethodSpec(
             5.0,
-            "Set one field in an editing session. 'path' is a dotted path from "
-            "editor.new/get (ModuleRef sub-fields descend directly, no 'value' "
-            "segment); 'value' is a JSON scalar, or an md-reference expression as "
+            "Set one field in an editing session. 'path' must be a canonical dotted "
+            "leaf copied from editor.new/get: scalar '<path>', sweep edge "
+            "'<path>.start|stop|expts|step' (or centered center/span/expts/step), "
+            "reference key '<path>.ref', and reference children directly below the "
+            "reference. Removed '.sweep.<edge>' / '.value.<child>' aliases are "
+            "rejected without mutation and the error gives the replacement. "
+            "'value' is a JSON scalar, or an md-reference expression as "
             '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
             "commit), or a registered value source as "
             '{"__kind":"value_ref","key":"device.flux.value","type":"float"} '
@@ -54,7 +58,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Returns {valid, removed, added} — does NOT echo cfg content "
             "(that would force a lowering pass that eagerly evaluates EvalValue). "
             "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
-            "list settable paths a ModuleRef key switch ('<path>.ref') dropped/"
+            "list net settable paths a reference key switch ('<path>.ref') dropped/"
             "created so you need not re-list after a variant switch. To read cfg use "
             "tab.get_cfg / editor.get (the nested current-value tree).",
             (

@@ -24,6 +24,7 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    is_custom_reference_key,
     read_value_path,
     resolve_spec_path,
 )
@@ -536,7 +537,7 @@ def _materialize_module(
         )
 
     applicable = list(overrides)
-    if node.chosen_key.startswith("<Custom:"):
+    if is_custom_reference_key(node.chosen_key):
         applicable = [*blank_overrides, *applicable]
     resolved: list[tuple[str, ScalarLeafInput]] = []
     for relative_path, seed in applicable:

@@ -19,6 +19,7 @@ from .model import (
     _reference_discriminator_key,
     default_value_for_type,
 )
+from .reference_key import make_custom_reference_key, parse_custom_reference_key
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def make_default_value(spec: CfgSectionSpec) -> CfgSectionValue:
                 first = node_spec.allowed[0]
                 label = first.label or "Custom"
                 fields[key] = ReferenceValue(
-                    f"<Custom:{label}>", make_default_value(first)
+                    make_custom_reference_key(label), make_default_value(first)
                 )
         elif isinstance(node_spec, CfgSectionSpec):
             fields[key] = make_default_value(node_spec)
@@ -75,10 +76,11 @@ def select_ref_value_spec(
     spec that carries extra ``LiteralSpec`` locks.
     """
     chosen = ref_val.chosen_key
-    if chosen.startswith("<Custom:"):
-        if not chosen.endswith(">"):
-            raise RuntimeError(f"Invalid custom reference key: {chosen!r}")
-        label = chosen[len("<Custom:") : -1]
+    try:
+        label = parse_custom_reference_key(chosen)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if label is not None:
         for spec in ref_spec.allowed:
             if spec.label == label:
                 return spec
@@ -239,7 +241,7 @@ def inherit_from(
                 first = new_node_spec.allowed[0]
                 label = first.label or "Custom"
                 new_fields[key] = ReferenceValue(
-                    f"<Custom:{label}>", make_default_value(first)
+                    make_custom_reference_key(label), make_default_value(first)
                 )
             continue
 

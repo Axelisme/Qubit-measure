@@ -13,6 +13,7 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
     ScalarValue,
+    make_custom_reference_key,
     make_default_value,
 )
 from zcu_tools.program.v2.modules.base import AbsModuleCfg
@@ -296,7 +297,7 @@ def waveform_cfg_to_value(
                 "style": DirectValue("flat_top"),
                 "length": _value(cfg, "length"),
                 "raise_waveform": ReferenceValue(
-                    chosen_key=f"<Custom:{raise_spec.label}>",
+                    chosen_key=make_custom_reference_key(raise_spec.label),
                     value=raise_value,
                 ),
             }
@@ -318,7 +319,7 @@ def _pulse_to_value(cfg: dict[str, Any]) -> CfgSectionValue:
         fields={
             "type": DirectValue("pulse"),
             "waveform": ReferenceValue(
-                chosen_key=f"<Custom:{waveform_spec.label}>",
+                chosen_key=make_custom_reference_key(waveform_spec.label),
                 value=waveform_value,
             ),
             "ch": DirectValue(cfg.get("ch", 0)),

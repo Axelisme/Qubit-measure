@@ -14,19 +14,45 @@ cases (sweep edges, literal rejection, unknown paths) each get a focused case.
 
 from __future__ import annotations
 
-from typing import Any, NoReturn
+import ast
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.app.main.services.remote.path_resolver import (
-    resolve_and_set as _resolve_and_set,
-)
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue, DirectValue
 from zcu_tools.gui.cfg.binding import CfgDraft
-from zcu_tools.gui.session.value_lookup import ValueRef
 
 from ._helpers import Fixture, call, open_client
+
+
+def test_remote_path_projection_has_no_field_or_editor_subtype_grammar() -> None:
+    source_path = (
+        Path(__file__).parents[4]
+        / "lib/zcu_tools/gui/app/main/services/remote/path_resolver.py"
+    )
+    source = source_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    forbidden = {
+        "CfgField",
+        "SectionField",
+        "ScalarField",
+        "LiteralField",
+        "SweepField",
+        "CenteredSweepField",
+        "ReferenceField",
+        "SweepEditor",
+        "CenteredSweepEditor",
+    }
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+    assert imported.isdisjoint(forbidden)
+    assert "<Custom:" not in source
 
 
 def _make_draft(
@@ -35,18 +61,8 @@ def _make_draft(
     return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value))
 
 
-def _reject_value_ref(ref: ValueRef, target_type: type) -> NoReturn:
-    del ref, target_type
-    raise AssertionError("direct path-resolver tests do not accept ValueRef")
-
-
 def _set(draft: CfgDraft, path: str, value: object) -> None:
-    _resolve_and_set(
-        draft,
-        path,
-        value,
-        resolve_value_ref=_reject_value_ref,
-    )
+    draft.set_target(path, value)
 
 
 # ---------------------------------------------------------------------------
@@ -83,11 +99,11 @@ class _LiveFixture(Fixture):
     def get_value(self, path: str):
         """Read the current value of a path off the live session draft."""
         from zcu_tools.gui.app.main.services.remote.path_resolver import (
-            list_settable_paths_full,
+            project_target_entries,
         )
 
         draft = self.ctrl.get_cfg_editor_draft(self.editor_id)
-        for entry in list_settable_paths_full(draft):
+        for entry in project_target_entries(draft):
             if entry["path"] == path:
                 return entry["value"]
         raise KeyError(path)
@@ -131,6 +147,57 @@ def test_set_field_scalar_float(lf):
         resp = _set_field(sock, lf, "gain", 0.25)
         assert resp["ok"] is True
         assert lf.get_value("gain") == 0.25
+    finally:
+        sock.close()
+
+
+def test_value_ref_provider_failure_maps_to_controller_error(lf, monkeypatch):
+    from zcu_tools.gui.session.value_lookup import ProviderError
+
+    error = ProviderError("device.flux.value", "device:flux", RuntimeError("boom"))
+
+    def fail_read(*_args):
+        raise error
+
+    monkeypatch.setattr(lf.ctrl, "read_value_source", fail_read)
+    sock = open_client(lf.service.port)
+    try:
+        resp = _set_field(
+            sock,
+            lf,
+            "gain",
+            {"__kind": "value_ref", "key": "device.flux.value", "type": "float"},
+        )
+        assert resp["ok"] is False
+        assert resp["error"] == {
+            "code": "controller_error",
+            "message": str(error),
+        }
+    finally:
+        sock.close()
+
+
+def test_value_ref_unavailable_maps_to_precondition_failed(lf, monkeypatch):
+    from zcu_tools.gui.session.value_lookup import UnavailableValue
+
+    error = UnavailableValue("device.flux.value", "flux device is unavailable")
+
+    def fail_read(*_args):
+        raise error
+
+    monkeypatch.setattr(lf.ctrl, "read_value_source", fail_read)
+    sock = open_client(lf.service.port)
+    try:
+        resp = _set_field(
+            sock,
+            lf,
+            "gain",
+            {"__kind": "value_ref", "key": "device.flux.value", "type": "float"},
+        )
+        assert resp["ok"] is False
+        assert resp["error"]["code"] == "precondition_failed"
+        assert resp["error"]["message"] == str(error)
+        assert resp["error"].get("reason", "") == ""
     finally:
         sock.close()
 
@@ -237,19 +304,16 @@ def _single_point_centered_sweep_root():
 def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
         build_settable_tree,
-        list_settable_paths_full,
-        resolve_and_set,
+        project_target_entries,
     )
 
     root = _centered_sweep_root()
 
     _set(root, "sweep.center", 5.0)
     _set(root, "sweep.span", 20.0)
-    _set(root, "sweep.sweep.expts", 5)
+    _set(root, "sweep.expts", 5)
 
-    entries = {
-        entry["path"]: entry["value"] for entry in list_settable_paths_full(root)
-    }
+    entries = {entry["path"]: entry["value"] for entry in project_target_entries(root)}
     assert entries["sweep.center"] == 5.0
     assert entries["sweep.span"] == 20.0
     assert entries["sweep.expts"] == 5
@@ -263,32 +327,28 @@ def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
 
 
 def test_resolver_centered_sweep_rejects_start_stop_edges(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
-    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.cfg.binding import SettablePathError
 
     root = _centered_sweep_root()
 
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(SettablePathError) as exc:
         _set(root, "sweep.start", 1.0)
 
-    assert exc.value.code == ErrorCode.INVALID_PARAMS
-    assert "centered sweep edge" in exc.value.message
+    assert "unknown settable path" in str(exc.value)
 
 
 def test_resolver_centered_sweep_rejects_locked_center_mismatch(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
         build_settable_tree,
-        resolve_and_set,
     )
-    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.cfg.binding import SettablePathError
 
     root = _locked_centered_sweep_root()
 
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(SettablePathError) as exc:
         _set(root, "sweep.center", 5.0)
 
-    assert exc.value.code == ErrorCode.INVALID_PARAMS
-    assert "locked to 0.0" in exc.value.message
+    assert "locked to 0.0" in str(exc.value)
     sweep = build_settable_tree(root)["sweep"]
     assert isinstance(sweep, dict)
     assert sweep["center"] == 0.0
@@ -299,7 +359,7 @@ def test_resolver_centered_sweep_rejects_locked_center_mismatch(qapp):  # noqa: 
     (
         ("sweep.span", -1.0, "span"),
         ("sweep.span", 0.0, "span"),
-        ("sweep.sweep.expts", 0, "expts"),
+        ("sweep.expts", 0, "expts"),
         ("sweep.step", -0.5, "step"),
     ),
 )
@@ -309,16 +369,14 @@ def test_resolver_centered_sweep_value_errors_are_remote_errors(
     value: object,
     match: str,  # noqa: ARG001
 ):
-    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
-    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.cfg.binding import SettablePathError
 
     root = _centered_sweep_root()
 
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(SettablePathError) as exc:
         _set(root, path, value)
 
-    assert exc.value.code == ErrorCode.INVALID_PARAMS
-    assert match in exc.value.message
+    assert match in str(exc.value)
 
 
 def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
@@ -326,17 +384,15 @@ def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
 ):
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
         build_settable_tree,
-        resolve_and_set,
     )
-    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.cfg.binding import SettablePathError
 
     root = _single_point_centered_sweep_root()
 
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(SettablePathError) as exc:
         _set(root, "sweep.expts", 2)
 
-    assert exc.value.code == ErrorCode.INVALID_PARAMS
-    assert "span" in exc.value.message
+    assert "span" in str(exc.value)
     assert build_settable_tree(root)["sweep"] == {
         "center": 0.0,
         "span": 0.0,
@@ -706,7 +762,6 @@ def test_tree_moduleref_node_current_options_and_variant_subtree(qapp):  # noqa:
 def test_tree_moduleref_only_chosen_variant_expanded(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
         build_settable_tree,
-        resolve_and_set,
     )
 
     root = _fakefreq_root()
@@ -746,7 +801,7 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):  # noqa: ARG001
 # in 'choices') is accepted and stored as the tagged <Custom:label> chosen_key,
 # not mistaken for a (non-existent) library entry name. Regression: a bare label
 # used to be stored verbatim → empty sub-field → lowering "Unknown module
-# reference". Pure resolve_and_set unit (no socket): fake/freq has a readout
+# reference". Pure binding-target unit (no socket): fake/freq has a readout
 # ModuleRef with variant labels "Direct Readout" / "Pulse Readout".
 # ---------------------------------------------------------------------------
 
@@ -765,21 +820,18 @@ def _fakefreq_root():
 
 
 def test_unknown_field_suggests_matching_descendant_path(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.main.services.remote.path_resolver import resolve_and_set
-    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.cfg.binding import SettablePathError
 
     root = _fakefreq_root()
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(SettablePathError) as exc:
         _set(root, "modules.readout.gain", 0.25)
 
-    assert exc.value.code == ErrorCode.INVALID_PARAMS
-    assert "modules.readout.pulse_cfg.gain" in exc.value.message
+    assert "modules.readout.pulse_cfg.gain" in str(exc.value)
 
 
 def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
-        list_settable_paths_full,
-        resolve_and_set,
+        project_target_entries,
     )
 
     root = _fakefreq_root()
@@ -787,7 +839,7 @@ def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
     _set(root, "modules.readout.ref", "Direct Readout")
 
     entry = next(
-        e for e in list_settable_paths_full(root) if e["path"] == "modules.readout.ref"
+        e for e in project_target_entries(root) if e["path"] == "modules.readout.ref"
     )
     # Stored as the tagged key, not the bare label.
     assert entry["value"] == "<Custom:Direct Readout>"
@@ -795,8 +847,7 @@ def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
 
 def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
-        list_settable_paths_full,
-        resolve_and_set,
+        project_target_entries,
     )
 
     root = _fakefreq_root()
@@ -804,7 +855,7 @@ def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
     _set(root, "modules.readout.ref", "<Custom:Direct Readout>")
 
     entry = next(
-        e for e in list_settable_paths_full(root) if e["path"] == "modules.readout.ref"
+        e for e in project_target_entries(root) if e["path"] == "modules.readout.ref"
     )
     assert entry["value"] == "<Custom:Direct Readout>"
 
@@ -833,21 +884,19 @@ def _fluxdep_root(device_names: list[str]):
 
 def _device_value(root, path: str = "dev.flux_dev"):
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
-        list_settable_paths_full,
+        project_target_entries,
     )
 
-    return next(e for e in list_settable_paths_full(root) if e["path"] == path)["value"]
+    return next(e for e in project_target_entries(root) if e["path"] == path)["value"]
 
 
 def test_device_selector_advertises_scalar_leaf_path(qapp):  # noqa: ARG001
     from zcu_tools.gui.app.main.services.remote.path_resolver import (
-        list_settable_paths_full,
+        project_target_entries,
     )
 
     root = _fluxdep_root(["flux_yoko"])
-    entry = next(
-        e for e in list_settable_paths_full(root) if e["path"] == "dev.flux_dev"
-    )
+    entry = next(e for e in project_target_entries(root) if e["path"] == "dev.flux_dev")
     assert entry["kind"] == "scalar"
     assert entry["choices"] == ["flux_yoko"]
 
@@ -859,18 +908,16 @@ def test_device_selector_scalar_path_resolves(qapp):  # noqa: ARG001
 
 
 def test_device_selector_non_string_value_rejected(qapp):  # noqa: ARG001
-    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.cfg.binding import SettablePathError
 
     root = _fluxdep_root(["flux_yoko"])
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(SettablePathError):
         _set(root, "dev.flux_dev", 42)
-    assert exc.value.code == ErrorCode.INVALID_PARAMS
 
 
 def test_device_selector_has_no_legacy_alias_segment(qapp):  # noqa: ARG001
-    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+    from zcu_tools.gui.cfg.binding import SettablePathError
 
     root = _fluxdep_root(["flux_yoko"])
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(SettablePathError):
         _set(root, "dev.flux_dev.device", "flux_yoko")
-    assert exc.value.code == ErrorCode.INVALID_PARAMS

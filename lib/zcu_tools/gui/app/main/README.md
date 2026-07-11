@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — domain event facts and scoped View reactions
+**Last updated:** 2026-07-11 — canonical cfg edit batches
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -146,6 +146,10 @@ remote tab views, and captured sessions all use the same tab order as the Qt tab
 bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
+
+CfgEditor在app seam解碼`ValueRef`，並以typed `CfgEdit` batch依序操作binding target。
+Batch維持fail-fast/non-atomic；只有reference shape edit列出前後path set，成功回final net diff，
+每筆成功edit仍各自bump version與觸發subscriber-aware lazy push。
 
 The GUI uses a two-tree model:
 
