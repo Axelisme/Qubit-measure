@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -12,8 +11,6 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 from ._common import render_view
-
-logger = logging.getLogger(__name__)
 
 
 def _h_tab_new(
@@ -150,8 +147,6 @@ def _h_tab_get_cfg(
 def _h_tab_set_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
-
     tab_id = str(params["tab_id"])
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -186,18 +181,7 @@ def _h_tab_set_cfg(
             )
         path = str(edit["path"])
         value = edit["value"]
-        try:
-            result = adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
-        except CfgEditorError as exc:
-            raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-        except RemoteError:
-            raise
-        except (KeyError, RuntimeError) as exc:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                str(exc),
-                reason=getattr(exc, "reason_code", ""),
-            ) from exc
+        result = adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
         valid = bool(result.get("valid", True))
         removed = result.get("removed", [])
         added = result.get("added", [])

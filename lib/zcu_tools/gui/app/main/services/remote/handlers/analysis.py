@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
@@ -10,9 +9,6 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
-
-
-logger = logging.getLogger(__name__)
 
 
 def _h_analyze_cancel(
@@ -99,14 +95,7 @@ def _h_tab_analyze(
         updated = dataclasses.replace(ap, **raw_updates)
     except (TypeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    try:
-        operation_id = control.analyze(tab_id, updated)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    operation_id = control.analyze(tab_id, updated)
     return {"operation_id": operation_id}
 
 
@@ -182,12 +171,5 @@ def _h_tab_post_analyze(
         updated = dataclasses.replace(pp, **raw_updates)
     except (TypeError, ValueError) as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    try:
-        operation_id = control.start_post_analyze(tab_id, updated)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    operation_id = control.start_post_analyze(tab_id, updated)
     return {"operation_id": operation_id}

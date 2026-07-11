@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import MetaDictWriteback, ModuleWriteback
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 
@@ -291,7 +292,9 @@ def test_set_empty_target_name_rejected():
 
 def test_set_unknown_id_rejected():
     ctrl = _ctrl()
-    ctrl.set_writeback_item.side_effect = RuntimeError("unknown writeback session_id")
+    ctrl.set_writeback_item.side_effect = InvalidInputError(
+        "unknown writeback session_id"
+    )
     with pytest.raises(RemoteError) as exc:
         _dispatch(
             ctrl, "tab.writeback_set", {"tab_id": "t", "id": "md-99", "selected": True}

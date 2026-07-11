@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
-from ...load import LoadDataError
-
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
-
-
-logger = logging.getLogger(__name__)
 
 
 def _h_tab_run_start(
@@ -24,14 +18,7 @@ def _h_tab_run_start(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    try:
-        operation_id = control.start_run(tab_id)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    operation_id = control.start_run(tab_id)
     return {"operation_id": operation_id}
 
 
@@ -44,23 +31,7 @@ def _h_tab_load_data(
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    try:
-        outcome = control.load_tab_result(tab_id, str(params["data_path"]))
-    except LoadDataError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=exc.reason_code,
-        ) from exc
-    except (RuntimeError, OSError, ValueError) as exc:
-        reason = getattr(exc, "reason_code", "")
-        if isinstance(exc, NotImplementedError):
-            reason = "unsupported_load"
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=reason,
-        ) from exc
+    outcome = control.load_tab_result(tab_id, str(params["data_path"]))
 
     snap = control.get_tab_snapshot(tab_id)
     interaction = snap.interaction
@@ -101,16 +72,9 @@ def _h_tab_save_data(
     tab_id = str(params["tab_id"])
     data_path = params["data_path"]
     comment = str(params["comment"])
-    try:
-        written = adapter.save_control.save_data(
-            tab_id, str(data_path) if data_path is not None else None, comment=comment
-        )
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    written = adapter.save_control.save_data(
+        tab_id, str(data_path) if data_path is not None else None, comment=comment
+    )
     # The save runs async, but the resolved path (.hdf5 + uniqueness suffix) is
     # known synchronously — return it so the caller need not recover it from a
     # later diagnostic / snapshot.
@@ -122,16 +86,9 @@ def _h_tab_save_image(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     image_path = params["image_path"]
-    try:
-        written = adapter.save_control.save_image(
-            tab_id, str(image_path) if image_path is not None else None
-        )
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    written = adapter.save_control.save_image(
+        tab_id, str(image_path) if image_path is not None else None
+    )
     return {"image_path": written}
 
 
@@ -140,16 +97,9 @@ def _h_tab_save_post_image(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     image_path = params["image_path"]
-    try:
-        written = adapter.save_control.save_post_image(
-            tab_id, str(image_path) if image_path is not None else None
-        )
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    written = adapter.save_control.save_post_image(
+        tab_id, str(image_path) if image_path is not None else None
+    )
     return {"image_path": written}
 
 
@@ -160,19 +110,12 @@ def _h_tab_save_result(
     data_path = params["data_path"]
     image_path = params["image_path"]
     comment = str(params["comment"])
-    try:
-        written_data, written_image = adapter.save_control.save_result(
-            tab_id,
-            str(data_path) if data_path is not None else None,
-            str(image_path) if image_path is not None else None,
-            comment=comment,
-        )
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    written_data, written_image = adapter.save_control.save_result(
+        tab_id,
+        str(data_path) if data_path is not None else None,
+        str(image_path) if image_path is not None else None,
+        comment=comment,
+    )
     # The data save runs async, but both resolved paths (the data path's .hdf5 +
     # uniqueness suffix included) are known synchronously — return them so the
     # caller need not recover them from a later diagnostic.

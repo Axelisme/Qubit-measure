@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -12,29 +11,16 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-logger = logging.getLogger(__name__)
-
-
 def _h_predictor_load(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.predictor import (
-        LoadPredictorRequest,
-        PredictorLoadError,
-    )
+    from zcu_tools.gui.session.services.predictor import LoadPredictorRequest
 
     path = str(params["path"])
     flux_bias = float(params["flux_bias"])  # type: ignore[arg-type]
-    try:
-        adapter.predictor_control.load_predictor(
-            LoadPredictorRequest(path=path, flux_bias=flux_bias)
-        )
-    except PredictorLoadError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.predictor_control.load_predictor(
+        LoadPredictorRequest(path=path, flux_bias=flux_bias)
+    )
     # Echo the installed model so the agent verifies the load without a follow-up
     # read; get_predictor_info() is non-None right after a successful install (a
     # None here is a broken invariant, so raise rather than echo a half-shape).
@@ -47,10 +33,7 @@ def _h_predictor_load(
 def _h_predictor_set_model_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.predictor import (
-        PredictorLoadError,
-        SetModelParamsRequest,
-    )
+    from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
 
     req = SetModelParamsRequest(
         EJ=float(params["EJ"]),  # type: ignore[arg-type]
@@ -60,14 +43,7 @@ def _h_predictor_set_model_params(
         flux_period=float(params["flux_period"]),  # type: ignore[arg-type]
         flux_bias=float(params["flux_bias"]),  # type: ignore[arg-type]
     )
-    try:
-        adapter.predictor_control.set_predictor_model_params(req)
-    except PredictorLoadError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.predictor_control.set_predictor_model_params(req)
     # Echo the installed model (path is null — in-memory install has no file); a
     # None right after a successful install is a broken invariant, so raise.
     info = adapter.predictor_control.get_predictor_info()
@@ -87,24 +63,14 @@ def _h_predictor_clear(
 def _h_predictor_predict(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.predictor import (
-        PredictFreqRequest,
-        PredictorNotLoaded,
-    )
+    from zcu_tools.gui.session.services.predictor import PredictFreqRequest
 
     device_value = float(params["device_value"])  # type: ignore[arg-type]
     from_level = int(params["from_level"])  # type: ignore[arg-type]
     to_level = int(params["to_level"])  # type: ignore[arg-type]
-    try:
-        freq = adapter.predictor_control.predict_freq(
-            PredictFreqRequest(value=device_value, transition=(from_level, to_level))
-        )
-    except PredictorNotLoaded as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    freq = adapter.predictor_control.predict_freq(
+        PredictFreqRequest(value=device_value, transition=(from_level, to_level))
+    )
     return {"freq_mhz": freq}
 
 

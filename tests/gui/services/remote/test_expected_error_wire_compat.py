@@ -31,21 +31,89 @@ from zcu_tools.gui.app.main.services.remote.handlers.writeback import (
     _h_tab_writeback_set,
 )
 from zcu_tools.gui.expected_error import (
+    ExpectedError,
     ExpectedErrorCategory,
     FailedPreconditionError,
     InvalidInputError,
 )
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.errors import (
+    ErrorCode,
+    RemoteError,
+    remote_error_from_expected,
+)
 from zcu_tools.gui.result_scope import ResultScopeError
 
 WireTuple = tuple[ErrorCode, str, str, dict | None]
 
 
+class _ExpectedWithIncidentalData(InvalidInputError):
+    def __init__(self) -> None:
+        super().__init__("bad input", reason_code="bad_field")
+        self.data = {"must_not": "cross the generic boundary"}
+
+
+class _StructuralExpectedDuck(Exception):
+    category = ExpectedErrorCategory.INVALID_INPUT
+    reason_code = "duck_reason"
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (
+            InvalidInputError("bad input", reason_code="bad_field"),
+            (ErrorCode.INVALID_PARAMS, "bad input", "bad_field", None),
+        ),
+        (
+            FailedPreconditionError("not ready", reason_code="no_context"),
+            (
+                ErrorCode.PRECONDITION_FAILED,
+                "not ready",
+                "no_context",
+                None,
+            ),
+        ),
+        (
+            _ExpectedWithIncidentalData(),
+            (ErrorCode.INVALID_PARAMS, "bad input", "bad_field", None),
+        ),
+    ],
+)
+def test_generic_expected_error_translation_has_exact_wire_contract(
+    exc: ExpectedError,
+    expected: WireTuple,
+) -> None:
+    translated = remote_error_from_expected(exc)
+
+    assert (
+        translated.code,
+        translated.message,
+        translated.reason,
+        translated.data,
+    ) == expected
+
+
+def test_generic_translation_rejects_structural_expected_error_duck() -> None:
+    duck = cast(ExpectedError, _StructuralExpectedDuck("structural"))
+
+    with pytest.raises(TypeError, match="nominal ExpectedError"):
+        remote_error_from_expected(duck)
+
+
 def _remote_error(call: Callable[[], object]) -> WireTuple:
-    with pytest.raises(RemoteError) as exc_info:
+    try:
         call()
-    exc = exc_info.value
-    return exc.code, exc.message, exc.reason, exc.data
+    except RemoteError as exc:
+        return exc.code, exc.message, exc.reason, exc.data
+    except ExpectedError as expected:
+        translated = remote_error_from_expected(expected)
+        return (
+            translated.code,
+            translated.message,
+            translated.reason,
+            translated.data,
+        )
+    raise AssertionError("call did not raise a remote or expected error")
 
 
 def test_existing_handler_error_projection_is_wire_equivalent() -> None:

@@ -24,6 +24,8 @@ from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControl
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.remote.errors import remote_error_from_expected
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 
@@ -157,12 +159,14 @@ class FakeTransport:
 
 
 def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, object]:
-    """Invoke a dispatch handler directly with a ctrl mock/real Controller.
+    """Invoke a handler plus the shared expected-error projection boundary.
 
     Handlers now receive the ``RemoteControlAdapter`` (not the bare ctrl) and
     reach the façade via ``adapter.ctrl`` (ADR-0013). This wraps ``ctrl`` in a
     minimal adapter stub so unit tests can drive a single handler without a live
-    socket. Cast keeps the typed ``Handler`` signature satisfied.
+    socket. The lightweight adapter delegates nominal ``ExpectedError`` mapping
+    to the production translator; unexpected exceptions escape unchanged.
+    Cast keeps the typed ``Handler`` signature satisfied.
     """
     from types import SimpleNamespace
     from typing import cast
@@ -187,7 +191,10 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
             predictor_control=_facet_or_self("predictor_control"),
         ),
     )
-    return METHOD_REGISTRY[method].handler(adapter, params)
+    try:
+        return METHOD_REGISTRY[method].handler(adapter, params)
+    except ExpectedError as exc:
+        raise remote_error_from_expected(exc) from exc
 
 
 def send(sock: socket.socket, obj: dict) -> None:

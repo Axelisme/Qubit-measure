@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — typed expected-error taxonomy
+**Last updated:** 2026-07-11 — shared expected-error projection
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -91,8 +91,10 @@ instead of reaching into `Controller` directly.
 Key ownership rules:
 
 - Caller-correctable app/service failures由producer透過`ExpectedError`明列invalid-input或
-  failed-precondition category；ordinary/provider/persistence/invariant failures保持unexpected。
-  Remote handler只投影既有wire semantics，不擁有分類registry（ADR-0047）。
+  failed-precondition category；shared remote dispatch統一投影generic category。handler只保留
+  request coercion與structured/domain-special wire policy，不擁有分類registry。
+  ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
+  （ADR-0047）。
 - `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
   contents.
 - `State` owns tab/device/result/save-path resource state and resource versions.

@@ -2,26 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.services.context import MlEntryValidationError
-from zcu_tools.gui.session.value_lookup import (
-    MissingValue,
-    ProviderError,
-    UnavailableValue,
-    ValueInfo,
-    ValueTypeError,
-)
+from zcu_tools.gui.session.value_lookup import ValueInfo
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 from ._wire_values import _json_safe
-
-logger = logging.getLogger(__name__)
 
 
 def _h_context_use(
@@ -145,12 +135,8 @@ def _h_value_read(
     type_name = cast(str | None, raw_type)
     try:
         info, value = adapter.context_control.read_value_source(key, type_name)
-    except (MissingValue, ValueTypeError, ValueError) as exc:
+    except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except UnavailableValue as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
-    except ProviderError as exc:
-        raise RemoteError(ErrorCode.CONTROLLER_ERROR, str(exc)) from exc
     return {**_value_info_to_wire(info), "value": value}
 
 
@@ -180,10 +166,7 @@ def _h_context_ml_list_roles(
 ) -> Mapping[str, object]:
     """List the experiment-role templates available for create_from_role."""
     del params
-    try:
-        catalog = adapter.ctrl.get_role_catalog()
-    except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    catalog = adapter.ctrl.get_role_catalog()
     return {"roles": list(catalog.list_meta())}
 
 
@@ -205,20 +188,10 @@ def _h_context_ml_create_from_role(
         item_kind = adapter.ctrl.get_role_catalog().get(role_id).item_kind
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
     try:
         adapter.ctrl.create_from_role(item_kind, role_id, name)
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except MlEntryValidationError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
     return {"created": name}
 
 
@@ -227,14 +200,7 @@ def _h_context_md_set_attr(
 ) -> Mapping[str, object]:
     key = str(params["key"])
     value = params["value"]
-    try:
-        adapter.context_control.set_md_attr(key, value)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.context_control.set_md_attr(key, value)
     return {}
 
 
@@ -244,7 +210,7 @@ def _h_context_md_del_attr(
     key = str(params["key"])
     try:
         adapter.context_control.del_md_attr(key)
-    except (AttributeError, RuntimeError) as exc:
+    except AttributeError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
@@ -257,14 +223,7 @@ def _h_context_ml_del_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
-    try:
-        adapter.context_control.del_ml_module(name)
-    except (KeyError, RuntimeError) as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.context_control.del_ml_module(name)
     return {"deleted": name}
 
 
@@ -273,14 +232,7 @@ def _h_context_ml_rename_module(
 ) -> Mapping[str, object]:
     old = str(params["old"])
     new = str(params["new"])
-    try:
-        adapter.context_control.rename_ml_module(old, new)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.context_control.rename_ml_module(old, new)
     return {"renamed": new}
 
 
@@ -289,14 +241,7 @@ def _h_context_ml_rename_waveform(
 ) -> Mapping[str, object]:
     old = str(params["old"])
     new = str(params["new"])
-    try:
-        adapter.context_control.rename_ml_waveform(old, new)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.context_control.rename_ml_waveform(old, new)
     return {"renamed": new}
 
 
@@ -304,12 +249,5 @@ def _h_context_ml_del_waveform(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
-    try:
-        adapter.context_control.del_ml_waveform(name)
-    except (KeyError, RuntimeError) as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.context_control.del_ml_waveform(name)
     return {"deleted": name}

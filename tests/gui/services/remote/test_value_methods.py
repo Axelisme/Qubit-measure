@@ -89,11 +89,10 @@ def test_value_read_unavailable_source_is_precondition_failed() -> None:
 
 def test_value_read_provider_failure_is_controller_error() -> None:
     ctrl = MagicMock()
-    ctrl.read_value_source.side_effect = ProviderError(
-        "x", "owner", RuntimeError("bad")
-    )
+    error = ProviderError("x", "owner", RuntimeError("bad"))
+    ctrl.read_value_source.side_effect = error
 
-    with pytest.raises(RemoteError) as exc:
+    with pytest.raises(ProviderError) as exc:
         _dispatch(ctrl, "value.read", {"key": "x"})
 
-    assert exc.value.code is ErrorCode.CONTROLLER_ERROR
+    assert exc.value is error

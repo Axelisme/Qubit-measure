@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -12,9 +11,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.result_scope import ResultScope
 
     from ..service import RemoteControlAdapter
-
-
-logger = logging.getLogger(__name__)
 
 
 def _h_state_has_project(
@@ -49,10 +45,7 @@ def _h_soc_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     include_cfg = bool(params["include_cfg"])  # ParamSpec(_bool_default)-validated
-    try:
-        return adapter.ctrl.get_soc_info(include_cfg=include_cfg)
-    except RuntimeError as exc:
-        raise RemoteError(ErrorCode.PRECONDITION_FAILED, str(exc)) from exc
+    return adapter.ctrl.get_soc_info(include_cfg=include_cfg)
 
 
 def _h_project_info(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -12,8 +11,6 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 from ._common import render_view
-
-logger = logging.getLogger(__name__)
 
 
 def _h_adapter_list(
@@ -69,7 +66,7 @@ def _h_dialog_screenshot(
     try:
         dialog_name = parse_dialog_name(name_str)
         png = render_view(adapter).take_dialog_screenshot(dialog_name)
-    except (ValueError, RuntimeError) as exc:
+    except ValueError as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             str(exc),
@@ -113,14 +110,7 @@ def _h_tab_get_current_figure(
     tab_id = str(params["tab_id"])
     out_path_raw = params.get("out_path")
     out_path: str | None = str(out_path_raw) if out_path_raw is not None else None
-    try:
-        png = render_view(adapter).take_figure_screenshot(tab_id)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    png = render_view(adapter).take_figure_screenshot(tab_id)
     if not isinstance(png, (bytes, bytearray)):
         raise RemoteError(
             ErrorCode.INTERNAL,

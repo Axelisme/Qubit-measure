@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from zcu_tools.gui.expected_error import ExpectedError, ExpectedErrorCategory
+
 
 class ErrorCode(str, Enum):
     UNKNOWN_METHOD = "unknown_method"
@@ -53,6 +55,19 @@ class RemoteError(Exception):
         self.message = message
         self.reason = reason
         self.data = data
+
+
+def remote_error_from_expected(exc: ExpectedError) -> RemoteError:
+    """Project one nominal caller-correctable failure onto the wire policy."""
+    if not isinstance(exc, ExpectedError):
+        raise TypeError(
+            f"expected a nominal ExpectedError instance, got {type(exc).__name__}"
+        )
+    code = {
+        ExpectedErrorCategory.INVALID_INPUT: ErrorCode.INVALID_PARAMS,
+        ExpectedErrorCategory.FAILED_PRECONDITION: ErrorCode.PRECONDITION_FAILED,
+    }[exc.category]
+    return RemoteError(code, str(exc), reason=exc.reason_code)
 
 
 @dataclass(frozen=True)

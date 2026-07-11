@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
-from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
 from zcu_tools.gui.session.services.connection import (
@@ -22,9 +20,6 @@ from zcu_tools.gui.session.services.device import (
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
-
-
-logger = logging.getLogger(__name__)
 
 
 def coerce_connect_request(params: Mapping[str, object]) -> ConnectRequest:
@@ -66,18 +61,12 @@ def _h_soc_connect(
     # Synchronous connect: runs on the Qt main thread (the IO worker blocks on the
     # _dispatch_on_main marshal), so the connect work + ALL post-connect side
     # effects (State write, soc version bump, SocChangedPayload → FLUX-AWARE-MOCK
-    # provisioning) complete before this returns. A connect failure raises a typed
-    # RemoteError. The worst-case main-thread block is bounded by make_soc_proxy's
+    # provisioning) complete before this returns. Connect failures remain
+    # controller errors. The worst-case main-thread block is bounded by make_soc_proxy's
     # 1s COMMTIMEOUT for a remote board (mock is instant). Connect is no longer an
     # async operation handle — run / analyze / device keep theirs.
     req = coerce_connect_request(params)
-    try:
-        adapter.ctrl.connect_sync(req)
-    except Exception as exc:
-        raise RemoteError(
-            ErrorCode.CONTROLLER_ERROR,
-            f"SoC connect failed: {exc}",
-        ) from exc
+    adapter.ctrl.connect_sync(req)
     # Return the SoC summary directly — the same {description, is_mock} the old
     # finished short-wait reply folded in. The structured cfg is fetched on demand
     # via soc.info (it is ~2 KB and rarely needed at connect time).
@@ -88,7 +77,6 @@ def _h_soc_connect(
 def _h_startup_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.result_scope import ResultScopeError
     from zcu_tools.gui.session.services.startup import StartupProjectRequest
 
     chip = str(params["chip_name"])
@@ -103,16 +91,7 @@ def _h_startup_apply(
     )
     # Echo the resolved project (apply always mutates and either succeeds or
     # raises — there is no no-op outcome, so no {applied:false} branch).
-    try:
-        return adapter.ctrl.apply_startup_project(req)
-    except ResultScopeError as exc:
-        if exc.category is ExpectedErrorCategory.INVALID_INPUT:
-            code = ErrorCode.INVALID_PARAMS
-        elif exc.category is ExpectedErrorCategory.FAILED_PRECONDITION:
-            code = ErrorCode.PRECONDITION_FAILED
-        else:
-            raise AssertionError(f"unsupported expected-error category: {exc.category}")
-        raise RemoteError(code, str(exc), reason=exc.reason_code) from exc
+    return adapter.ctrl.apply_startup_project(req)
 
 
 def _h_device_connect(
@@ -120,14 +99,7 @@ def _h_device_connect(
 ) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
     dev = adapter.device_control
-    try:
-        operation_id = dev.start_connect_device(req)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    operation_id = dev.start_connect_device(req)
     return {"operation_id": operation_id}
 
 
@@ -136,14 +108,7 @@ def _h_device_disconnect(
 ) -> Mapping[str, object]:
     req = coerce_disconnect_device_request(params)
     dev = adapter.device_control
-    try:
-        operation_id = dev.start_disconnect_device(req)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    operation_id = dev.start_disconnect_device(req)
     return {"operation_id": operation_id}
 
 
@@ -152,14 +117,7 @@ def _h_device_reconnect(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     dev = adapter.device_control
-    try:
-        operation_id = dev.start_reconnect_device(name)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    operation_id = dev.start_reconnect_device(name)
     # Reconnect runs asynchronously like connect/disconnect/setup; expose the
     # operation_id so the MCP short-wait/handle path can track it (FC1).
     return {"operation_id": operation_id}
@@ -170,14 +128,7 @@ def _h_device_forget(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     dev = adapter.device_control
-    try:
-        dev.forget_device(name)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    dev.forget_device(name)
     # Synchronous sync mutation: echo the forgotten name so the reply is
     # self-verifying (no follow-up read needed to confirm what was dropped).
     return {"forgotten": name}
@@ -189,14 +140,7 @@ def _h_device_setup(
     name = str(params["name"])
     updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
     dev = adapter.device_control
-    try:
-        info = dev.get_device_info(name)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    info = dev.get_device_info(name)
     if info is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -206,16 +150,7 @@ def _h_device_setup(
         updated = info.with_updates(**dict(updates))
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    try:
-        operation_id = dev.start_setup_device(
-            SetupDeviceRequest(name=name, info=updated)
-        )
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    operation_id = dev.start_setup_device(SetupDeviceRequest(name=name, info=updated))
     return {"operation_id": operation_id}
 
 
@@ -256,14 +191,7 @@ def _h_device_setup_spec(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     dev = adapter.device_control
-    try:
-        info = dev.get_device_info(name)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    info = dev.get_device_info(name)
     if info is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
@@ -289,14 +217,7 @@ def _h_device_cancel_operation(
 ) -> Mapping[str, object]:
     name = str(params["name"])
     dev = adapter.device_control
-    try:
-        dev.cancel_device_operation(name)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    dev.cancel_device_operation(name)
     # Self-verifying echo: cancel succeeded (a non-cancellable / absent op raised
     # above). The terminal outcome is observed via the operation handle.
     return {"ok": True, "cancelled": True}

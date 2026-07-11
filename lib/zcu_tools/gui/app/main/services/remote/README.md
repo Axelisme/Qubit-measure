@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-11 — typed expected-error projection
+**Last updated:** 2026-07-11 — shared expected-error projection
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals GUI-owned work onto
@@ -56,11 +56,15 @@ Push     <- {"event": "...", "payload": {...}}
 Normal handlers run on the Qt main thread through `MainThreadDispatcher`. Handler
 exceptions become typed error envelopes.
 
-Caller-correctable producer exceptions以remote-independent `ExpectedErrorCategory`
-分類；本層handlers目前在各自domain boundary投影成既有`INVALID_PARAMS`或
-`PRECONDITION_FAILED` wire code，並原樣保留message/reason/data。ordinary exception不屬
-expected taxonomy；handler-local structured policies（例如arb waveform data）仍由原handler
-擁有（ADR-0047）。
+Caller-correctable producer exceptions以remote-independent `ExpectedErrorCategory`分類。shared
+dispatch在main/off-main兩條路徑先讓direct `RemoteError`穿透，再以nominal `ExpectedError`作為
+唯一generic gate：`INVALID_INPUT`映射`INVALID_PARAMS`，`FAILED_PRECONDITION`映射
+`PRECONDITION_FAILED`，message/reason原樣保留且generic data固定為`None`。handler-local
+request coercion與structured policies（例如arb waveform data）仍由原handler擁有。
+
+ordinary `RuntimeError`、ProviderError、I/O/persistence與invariant failure進controller-error
+branch並記錄traceback。translator projection failure也由同一controller branch收斂，不會留下
+empty reply holder（ADR-0047）。
 
 Only bounded wait handlers run off-main:
 

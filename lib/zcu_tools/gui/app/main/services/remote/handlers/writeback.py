@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -17,8 +16,6 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 from ._wire_values import _coerce_wire_value, _json_safe
-
-logger = logging.getLogger(__name__)
 
 
 def _writeback_item_wire(item) -> dict[str, object]:
@@ -114,12 +111,7 @@ def _h_tab_writeback_set(
                 )
             edits.append({"path": str(edit["path"]), "value": edit["value"]})
         changes["edits"] = edits
-    try:
-        agg = adapter.writeback_control.set_writeback_item(
-            tab_id, session_id, **changes
-        )
-    except RuntimeError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    agg = adapter.writeback_control.set_writeback_item(tab_id, session_id, **changes)
     # Echo the edited item so the agent sees the post-edit state in one round-trip.
     item = _find_writeback_item(adapter, tab_id, session_id)
     reply: dict[str, object] = {"item": _writeback_item_wire(item)}
@@ -147,14 +139,7 @@ def _h_tab_writeback_apply(
     tab_id = str(params["tab_id"])
     if not adapter.writeback_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    try:
-        result = adapter.writeback_control.apply_writeback(tab_id)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    result = adapter.writeback_control.apply_writeback(tab_id)
     # Read the context version AFTER apply so the agent sees the bumped value it
     # can pass back as an expected_versions guard on a follow-up write.
     context_version = adapter.writeback_control.get_context_version()

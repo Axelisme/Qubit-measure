@@ -43,7 +43,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from zcu_tools.gui.event_bus import EventSubscriptions
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.remote.errors import (
+    ErrorCode,
+    RemoteError,
+    remote_error_from_expected,
+)
 from zcu_tools.gui.remote.framing import encode_line
 from zcu_tools.gui.remote.method_spec import BoundMethod
 from zcu_tools.gui.remote.param_spec import validate_params
@@ -60,6 +65,19 @@ logger = logging.getLogger(__name__)
 
 # An event serializer maps a domain payload to a wire payload (or None to drop).
 Serializer = Callable[[Any], Mapping[str, object] | None]
+
+
+def _store_expected_error(
+    holder: dict[str, object], exc: ExpectedError, *, origin: str
+) -> None:
+    """Store generic expected projection, containing projection bugs as controller errors."""
+    try:
+        holder["remote_error"] = remote_error_from_expected(exc)
+    except Exception as projection_exc:  # noqa: BLE001 — projection safety boundary
+        logger.exception(
+            "%s expected-error projection raised: %s", origin, projection_exc
+        )
+        holder["controller_error"] = projection_exc
 
 
 class SubscriptionCtx:
@@ -360,6 +378,8 @@ class RemoteControlServiceBase:
                 holder["result"] = spec.handler(self, params)
             except RemoteError as exc:
                 holder["remote_error"] = exc
+            except ExpectedError as exc:
+                _store_expected_error(holder, exc, origin="off-main handler")
             except Exception as exc:  # noqa: BLE001 — Controller error envelope
                 logger.exception("off-main handler raised: %s", exc)
                 holder["controller_error"] = exc
@@ -374,6 +394,8 @@ class RemoteControlServiceBase:
                     holder["result"] = spec.handler(self, params)
                 except RemoteError as exc:
                     holder["remote_error"] = exc
+                except ExpectedError as exc:
+                    _store_expected_error(holder, exc, origin="handler")
                 except Exception as exc:  # noqa: BLE001 — Controller error envelope
                     logger.exception("handler raised: %s", exc)
                     holder["controller_error"] = exc

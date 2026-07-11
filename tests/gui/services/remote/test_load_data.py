@@ -10,6 +10,8 @@ from zcu_tools.gui.app.main.services.load import LoadDataError, LoadTabResultOut
 from zcu_tools.gui.app.main.services.remote.handlers.run_save import _h_tab_load_data
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ._helpers import dispatch_handler
+
 
 @dataclass
 class _AnalyzeParams:
@@ -56,11 +58,11 @@ def test_tab_load_data_dispatch_maps_load_data_error() -> None:
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",
         reason_code="invalid_data_file",
     )
-    adapter = SimpleNamespace(run_analyze_control=ctrl)
-
     with pytest.raises(RemoteError) as exc_info:
-        _h_tab_load_data(
-            cast(Any, adapter), {"tab_id": "tab-1", "data_path": "/tmp/bad.hdf5"}
+        dispatch_handler(
+            ctrl,
+            "tab.load_data",
+            {"tab_id": "tab-1", "data_path": "/tmp/bad.hdf5"},
         )
 
     assert exc_info.value.code is ErrorCode.PRECONDITION_FAILED

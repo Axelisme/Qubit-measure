@@ -21,7 +21,12 @@ from zcu_tools.gui.app.main.services.guard import GuardError
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.remote.errors import (
+    ErrorCode,
+    RemoteError,
+    remote_error_from_expected,
+)
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.session.services.io_manager import IOManager
 
@@ -76,7 +81,10 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
             save_control=ctrl,
         ),
     )
-    return spec.handler(adapter, handler_params)
+    try:
+        return spec.handler(adapter, handler_params)
+    except ExpectedError as exc:
+        raise remote_error_from_expected(exc) from exc
 
 
 def test_run_start_draft_context_symmetry(qapp):  # noqa: ARG001

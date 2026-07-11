@@ -2,37 +2,27 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.services.context import MlEntryValidationError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-logger = logging.getLogger(__name__)
-
-
 def _h_editor_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
-
     from ..path_resolver import build_settable_tree
 
     item_kind = str(params["item_kind"])
     from_name = str(params["from_name"])
     # editor.new is modify-only: it edits an existing ml entry. Creating a blank
     # entry goes through context.ml_create_from_role (role_id='<disc>:blank').
-    try:
-        editor_id, _ = adapter.ctrl.open_cfg_editor(
-            item_kind, discriminator=None, from_name=from_name
-        )
-    except CfgEditorError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    editor_id, _ = adapter.ctrl.open_cfg_editor(
+        item_kind, discriminator=None, from_name=from_name
+    )
     # The agent reads every cfg view as a nested tree (same shape as
     # tab.get_cfg / editor.get), so the open reply carries the freshly-opened
     # draft as {tree} rather than the flat current_paths the session also tracks
@@ -44,8 +34,6 @@ def _h_editor_new(
 def _h_editor_set_field(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
-
     editor_id = str(params["editor_id"])
     path = str(params["path"])
     value = params["value"]
@@ -58,25 +46,12 @@ def _h_editor_set_field(
             ErrorCode.PRECONDITION_FAILED,
             f"tab {owner!r} is currently running; cancel the run before editing cfg",
         )
-    try:
-        return adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
-    except CfgEditorError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except RemoteError:
-        raise
-    except (KeyError, RuntimeError) as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    return adapter.ctrl.cfg_editor_set_field(editor_id, path, value)
 
 
 def _h_editor_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
-
     from ..path_resolver import build_settable_tree
 
     editor_id = str(params["editor_id"])
@@ -86,43 +61,22 @@ def _h_editor_get(
     # tree shape tab.get_cfg returns, so the agent reads every cfg view as a tree
     # and edits leaves via editor.set_field (dotted paths). An unknown
     # editor_id raises CfgEditorError from get_cfg_editor_draft → INVALID_PARAMS.
-    try:
-        draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
-    except CfgEditorError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
     return {"tree": build_settable_tree(draft, prefix=prefix)}
 
 
 def _h_editor_commit(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
-
     editor_id = str(params["editor_id"])
     name = str(params["name"])
-    try:
-        adapter.ctrl.commit_cfg_editor(editor_id, name)
-    except CfgEditorError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except MlEntryValidationError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", ""),
-        ) from exc
+    adapter.ctrl.commit_cfg_editor(editor_id, name)
     return {}
 
 
 def _h_editor_discard(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
-
     editor_id = str(params["editor_id"])
-    try:
-        adapter.ctrl.discard_cfg_editor(editor_id)
-    except CfgEditorError as exc:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    adapter.ctrl.discard_cfg_editor(editor_id)
     return {}

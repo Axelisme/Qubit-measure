@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NoReturn
 
@@ -13,8 +12,6 @@ from zcu_tools.meta_tool import ArbWaveformError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-
-logger = logging.getLogger(__name__)
 
 _ARB_INVALID_PARAM_REASONS = frozenset(
     {
@@ -50,14 +47,7 @@ def _h_arb_waveform_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    try:
-        return {"waveforms": adapter.ctrl.list_arb_waveforms()}
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", "no_project"),
-        ) from exc
+    return {"waveforms": adapter.ctrl.list_arb_waveforms()}
 
 
 def _h_arb_waveform_preview(
@@ -68,12 +58,6 @@ def _h_arb_waveform_preview(
         return adapter.ctrl.get_arb_waveform_preview(name)
     except ArbWaveformError as exc:
         _raise_arb_waveform_error(exc)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", "no_project"),
-        ) from exc
 
 
 def _h_arb_waveform_set(
@@ -86,11 +70,5 @@ def _h_arb_waveform_set(
         result = dict(adapter.ctrl.set_arb_waveform(name, recipe, overwrite=overwrite))
     except ArbWaveformError as exc:
         _raise_arb_waveform_error(exc)
-    except RuntimeError as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            str(exc),
-            reason=getattr(exc, "reason_code", "no_project"),
-        ) from exc
     result["success"] = True
     return result

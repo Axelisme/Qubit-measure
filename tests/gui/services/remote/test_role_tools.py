@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ._helpers import dispatch_handler as _dispatch  # noqa: E402
@@ -23,7 +24,9 @@ def test_list_roles_returns_catalog_meta():
 
 def test_list_roles_no_catalog_precondition():
     ctrl = MagicMock()
-    ctrl.get_role_catalog.side_effect = RuntimeError("No role catalog is wired up.")
+    ctrl.get_role_catalog.side_effect = FailedPreconditionError(
+        "No role catalog is wired up."
+    )
     with pytest.raises(RemoteError) as exc:
         _dispatch(ctrl, "context.ml_list_roles", {})
     assert exc.value.code is ErrorCode.PRECONDITION_FAILED
@@ -57,7 +60,9 @@ def test_create_from_role_unknown_role_invalid_params():
 
 def test_create_from_role_no_context_precondition():
     ctrl = MagicMock()
-    ctrl.create_from_role.side_effect = RuntimeError("No experiment context.")
+    ctrl.create_from_role.side_effect = FailedPreconditionError(
+        "No experiment context."
+    )
     with pytest.raises(RemoteError) as exc:
         _dispatch(
             ctrl,
