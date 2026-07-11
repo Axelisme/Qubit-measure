@@ -58,7 +58,6 @@ def _make_ctrl() -> MagicMock:
     ctrl.progress_bars.return_value = ()
     ctrl.list_devices.return_value = []
     ctrl.is_memory_device.return_value = False
-    ctrl.get_memory_device_address.return_value = None
     ctrl.get_device_snapshot.return_value = None
     ctrl.try_poll_device_info.return_value = True
     return ctrl

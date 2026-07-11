@@ -19,15 +19,8 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
 )
-from zcu_tools.gui.session.services.device import (
-    ActiveDeviceOperation,
-    DeviceSetupSnapshot,
-)
+from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.gui.session.services.mock_flux import (
-    FAKE_FLUX_DEVICE_NAME,
-    FAKE_FLUX_INITIAL_VALUE,
-)
 
 from .adapter import (
     AnalysisMode,
@@ -83,12 +76,6 @@ if TYPE_CHECKING:
 # through its own ``render_view`` (see RenderView), not by the Controller.
 
 Severity = Literal["error", "info"]
-
-# FLUX-AWARE-MOCK: the provisioning now lives in the shared session layer
-# (gui/session/services/mock_flux) so both measure and autofluxdep reuse one
-# implementation. Re-exported here for the existing tests that import the names.
-_FAKE_FLUX_DEVICE_NAME = FAKE_FLUX_DEVICE_NAME
-_FAKE_FLUX_INITIAL_VALUE = FAKE_FLUX_INITIAL_VALUE
 
 
 class DiagnosticSink(Protocol):
@@ -754,7 +741,7 @@ class Controller(SessionControllerMixin):
     def has_agent_connected(self) -> bool:
         """Return True if at least one MCP control client is connected.
 
-        The View calls this inside _refresh_feedback_widget() to gate display
+        The View calls this inside refresh_feedback_widget() to gate display
         (ADR-0025 C3: show only when op live AND agent connected). Always
         returns False when no RemoteControlAdapter has been started.
         """
@@ -892,9 +879,6 @@ class Controller(SessionControllerMixin):
         # arbitrary result/database paths.
         return self._startup_svc.apply_project(req).as_wire_dict()
 
-    def get_flux_dir(self) -> str | None:
-        return self._ctx_svc.get_flux_dir()
-
     def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None:
         self._ctx_svc.apply_ml_writes(
             {},
@@ -934,14 +918,6 @@ class Controller(SessionControllerMixin):
 
     def list_arb_waveform_infos(self) -> list[ArbWaveformInfo]:
         return self._arb_waveform_svc.list_infos()
-
-    def inspect_arb_waveform(self, data_key: str) -> dict[str, object]:
-        info = self._arb_waveform_svc.inspect(data_key)
-        return {
-            "data_key": info.data_key,
-            "duration": info.duration,
-            "mtime": info.mtime,
-        }
 
     def load_arb_waveform_data(self, data_key: str) -> ArbWaveformData:
         return self._arb_waveform_svc.load_data(data_key)
@@ -1137,13 +1113,6 @@ class Controller(SessionControllerMixin):
     def get_device_value_for_new_context(self, name: str) -> float | None:
         return self._dev_svc.get_device_value_for_new_context(name)
 
-    def get_active_device_setups(self) -> tuple[DeviceSetupSnapshot, ...]:
-        return self._dev_svc.get_active_device_setups()
-
-    def get_memory_device_address(self, name: str) -> str | None:
-        """Return the persisted address for a memory-only device, or None."""
-        return self._dev_svc.get_memory_device_address(name)
-
     def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
         return self._dev_svc.get_active_device_operations()
 
@@ -1233,12 +1202,6 @@ class Controller(SessionControllerMixin):
     def get_tab_adapter_name(self, tab_id: str) -> str:
         return self._tab_control.get_tab_adapter_name(tab_id)
 
-    def get_tab_cfg_schema(self, tab_id: str) -> CfgSchema:
-        return self._tab_control.get_tab_cfg_schema(tab_id)
-
-    def get_tab_result(self, tab_id: str) -> object | None:
-        return self._tab_svc.get_tab_result(tab_id)
-
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab_control.get_tab_snapshot(tab_id)
 
@@ -1284,10 +1247,6 @@ class Controller(SessionControllerMixin):
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
-
-    def get_adapter_analyze_params(self, adapter_name: str) -> list[dict]:
-        """Static analyze-params field spec of an adapter ([] if unsupported)."""
-        return self._tab_svc.adapter_analyze_params(adapter_name)
 
     def get_adapter_guide(self, adapter_name: str) -> dict:
         """Static human-facing orientation guide of an adapter (no tab needed)."""

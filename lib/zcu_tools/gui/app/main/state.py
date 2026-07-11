@@ -374,9 +374,6 @@ class State(SessionState):
         self.tabs[tab_id].save_path_overrides = None
         self.version.bump(f"tab:{tab_id}:save_path")
 
-    def get_effective_save_paths(self, tab_id: str) -> SavePaths | None:
-        return self.tabs[tab_id].save_path_overrides
-
     def set_tab_running(self, tab_id: str, running: bool) -> None:
         logger.debug("set_tab_running: tab_id=%r running=%s", tab_id, running)
         tab = self.tabs[tab_id]

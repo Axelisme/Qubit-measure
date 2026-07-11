@@ -242,7 +242,7 @@ def test_update_tab_save_path_overrides_sets_both_paths():
     state.update_tab_save_path_overrides(
         "t1", SavePaths("/tmp/custom-data", "/tmp/custom-image")
     )
-    assert state.get_effective_save_paths("t1") == SavePaths(
+    assert state.get_tab("t1").save_path_overrides == SavePaths(
         "/tmp/custom-data", "/tmp/custom-image"
     )
 

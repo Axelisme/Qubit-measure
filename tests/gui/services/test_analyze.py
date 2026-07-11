@@ -352,11 +352,11 @@ def test_finish_after_cancel_interactive_is_inert(qapp):  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# _on_analyze_failed
+# Background analyze failure
 # ---------------------------------------------------------------------------
 
 
-def test_on_analyze_failed_resets_state(qapp):  # noqa: ARG001
+def test_background_analyze_failure_resets_state(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
     svc, bg = _make_service(state, bus)
@@ -379,7 +379,7 @@ def test_on_analyze_failed_resets_state(qapp):  # noqa: ARG001
     assert outcome is not None and outcome.status == "failed"
 
 
-def test_on_analyze_failed_emits_interaction_event(qapp):  # noqa: ARG001
+def test_background_analyze_failure_emits_interaction_event(qapp):  # noqa: ARG001
     state = _make_state()
     bus = EventBus()
     received: list[str] = []

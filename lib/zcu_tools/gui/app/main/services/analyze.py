@@ -204,15 +204,6 @@ class AnalyzeService(_StagedAnalyzeService):
         self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
         self._finished_signal.emit(tab_id, analyze_result)
 
-    def _on_analyze_failed(self, tab_id: str, error: Exception) -> None:
-        # Named worker-failure slot kept as the public entry point for interactive;
-        # delegates to the single failure terminal path via _release.
-        logger.warning("analyze failed: tab_id=%r error=%r", tab_id, error)
-        self._state.set_tab_analyzing(tab_id, False)
-        self._release(tab_id, OperationOutcome("failed", str(error)))
-        self._bus.emit(TabInteractionChangedPayload(tab_id=tab_id))
-        self._failed_signal.emit(tab_id, error)
-
     def _record(self, tab_id: str, analyze_result: Any) -> None:
         # Tear down the previous analyze's writeback editor models before the new
         # draft replaces them (ADR-0008: per-item gc=False models are tied to a

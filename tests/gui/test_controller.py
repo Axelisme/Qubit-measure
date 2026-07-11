@@ -644,21 +644,6 @@ def test_run_clears_active_figure_container_after_finish(cf):
     assert has_current_container() is False
 
 
-# ---------------------------------------------------------------------------
-# View getter methods
-# ---------------------------------------------------------------------------
-
-
-def test_get_tab_result_returns_last_result(cf):
-    import numpy as np
-
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(tab_id)
-    _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    result = cf.ctrl.get_tab_result(tab_id)
-    assert isinstance(result.data, np.ndarray)
-
-
 def test_run_completion_prepares_pure_tab_snapshot(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id)
@@ -706,7 +691,7 @@ def test_reset_tab_cfg_restores_adapter_default(cf):
     default = _default_fake_schema(cf.state.exp_context)
     assert returned.value.fields["reps"] == default.value.fields["reps"]
     # State now holds the returned default, not the mutated draft.
-    committed = cf.ctrl.get_tab_cfg_schema(tab_id)
+    committed = cf.state.get_tab(tab_id).cfg_schema
     assert committed is returned
     assert committed.value.fields["reps"] == default.value.fields["reps"]
 
@@ -801,9 +786,7 @@ def test_persist_then_restore_app_state(tmp_path):
     assert len(cf_restored.state.tabs) == 1
     restored_tab = next(iter(cf_restored.state.tabs.values()))
     assert restored_tab.adapter_name == "fake"
-    save_paths = cf_restored.state.get_effective_save_paths(
-        next(iter(cf_restored.state.tabs.keys()))
-    )
+    save_paths = restored_tab.save_path_overrides
     assert save_paths is not None
     assert save_paths.data_path == "/tmp/a.h5"
     assert save_paths.image_path == "/tmp/b.png"

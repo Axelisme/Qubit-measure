@@ -148,7 +148,6 @@ class ExpTabWidget(QWidget):
         self._ctrl = ctrl
         self._dialog_presenter = dialog_presenter or QtDialogPresenter()
         self._progress_control = ctrl.progress_control
-        self._writeback_count: int = 0
         # editor_id of this tab's shared cfg-editor session (set on bind, when
         # the cfg_form's live model exists). Exposed to agents via tab.snapshot.
         self._cfg_editor_id: str | None = None
@@ -218,7 +217,6 @@ class ExpTabWidget(QWidget):
         self.cfg_form = CfgFormWidget(
             text_input_enhancer=make_value_source_input_enhancer(ctrl)
         )
-        self.cfg_form.validity_changed.connect(self._on_cfg_validity_changed)
         config_layout.addWidget(self.cfg_form, stretch=1)
 
         self.run_btn = QPushButton("Run")
@@ -549,9 +547,6 @@ class ExpTabWidget(QWidget):
         self._cfg_editor_id = editor_id
         self.cfg_form.attach(ctrl.get_cfg_editor_draft(editor_id))
 
-    def read_schema(self) -> CfgSchema:
-        return self.cfg_form.read_schema()
-
     # ── populate / refresh helpers ────────────────────────────────────────
 
     def populate_analyze_params(self, instance: object) -> None:
@@ -573,7 +568,6 @@ class ExpTabWidget(QWidget):
         return self.post_analyze_form.has_params()
 
     def update_writeback_items(self, items: list[WritebackItem]) -> None:
-        self._writeback_count = sum(1 for item in items if item.selected)
         self.writeback_widget.populate(items)
         self.writeback_section.setVisible(len(items) > 0)
 
@@ -657,9 +651,6 @@ class ExpTabWidget(QWidget):
             raise RuntimeError("Attached analysis canvas does not support draw()")
         draw()
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
-
-    def _on_cfg_validity_changed(self, valid: bool) -> None:
-        del valid
 
     def _on_reset_cfg_clicked(self) -> None:
         # Guard: ask before discarding — Reset is destructive (drops entire cfg).

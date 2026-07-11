@@ -132,13 +132,3 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
 
     with pytest.raises(RuntimeError, match="primary analyze result"):
         service.initialize_tab_post_analyze_params("tab")
-
-
-def test_adapter_post_analyze_params_empty_when_not_supported() -> None:
-    registry = MagicMock()
-    adapter = MagicMock()
-    adapter.capabilities.post_analysis = False
-    registry.create.return_value = adapter
-    service = TabService(_active_state(), registry, MagicMock())
-
-    assert service.adapter_post_analyze_params("ge") == []

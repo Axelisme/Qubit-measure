@@ -20,11 +20,7 @@ from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.controller import (
-    _FAKE_FLUX_DEVICE_NAME,
-    _FAKE_FLUX_INITIAL_VALUE,
-    Controller,
-)
+from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.state import DeviceStatus, State
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -34,6 +30,10 @@ from zcu_tools.gui.session.services.connection import (
 )
 from zcu_tools.gui.session.services.device import DisconnectDeviceRequest
 from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.gui.session.services.mock_flux import (
+    FAKE_FLUX_DEVICE_NAME,
+    FAKE_FLUX_INITIAL_VALUE,
+)
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ def fx(qapp) -> Iterator[_Fixture]:  # noqa: ARG001
     # fake_flux is registered in the process-global GlobalDeviceManager; drop it so
     # tests stay independent (a second connect would otherwise see it "already
     # registered" at the driver layer).
-    GlobalDeviceManager.drop_device(_FAKE_FLUX_DEVICE_NAME, ignore_error=True)
+    GlobalDeviceManager.drop_device(FAKE_FLUX_DEVICE_NAME, ignore_error=True)
 
 
 def _process_events() -> None:
@@ -113,10 +113,10 @@ def _connect_mock(fx: _Fixture) -> None:
     # default operating value applied.
     assert _pump_until(
         lambda: (
-            (dev := fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)) is not None
+            (dev := fx.state.get_device(FAKE_FLUX_DEVICE_NAME)) is not None
             and dev.status is DeviceStatus.CONNECTED
             and dev.info is not None
-            and getattr(dev.info, "value", None) == _FAKE_FLUX_INITIAL_VALUE
+            and getattr(dev.info, "value", None) == FAKE_FLUX_INITIAL_VALUE
         )
     ), "fake_flux was not provisioned to the default operating value"
 
@@ -132,10 +132,10 @@ def _connect_mock_sync(fx: _Fixture) -> None:
     fx.ctrl.connect_sync(ConnectMockRequest())
     assert _pump_until(
         lambda: (
-            (dev := fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)) is not None
+            (dev := fx.state.get_device(FAKE_FLUX_DEVICE_NAME)) is not None
             and dev.status is DeviceStatus.CONNECTED
             and dev.info is not None
-            and getattr(dev.info, "value", None) == _FAKE_FLUX_INITIAL_VALUE
+            and getattr(dev.info, "value", None) == FAKE_FLUX_INITIAL_VALUE
         )
     ), "sync connect did not provision fake_flux to the default operating value"
 
@@ -148,12 +148,12 @@ def _connect_mock_sync(fx: _Fixture) -> None:
 def test_mock_connect_registers_fake_flux_device(fx):
     _connect_mock(fx)
 
-    dev = fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)
+    dev = fx.state.get_device(FAKE_FLUX_DEVICE_NAME)
     assert dev is not None
     assert dev.type_name == "FakeDevice"
     assert dev.status is DeviceStatus.CONNECTED
     # FakeDevice -> unit "none".
-    assert fx.ctrl.get_device_unit(_FAKE_FLUX_DEVICE_NAME) == "none"
+    assert fx.ctrl.get_device_unit(FAKE_FLUX_DEVICE_NAME) == "none"
 
 
 def test_mock_connect_sets_soc_flux_device(fx):
@@ -162,7 +162,7 @@ def test_mock_connect_sets_soc_flux_device(fx):
     soc = fx.state.exp_context.soc
     assert soc is not None
     # set_flux_device records the name on the soc's internal SimParams copy.
-    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+    assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
 def test_mock_connect_initial_value_is_reduced_flux_one(fx):
@@ -170,10 +170,10 @@ def test_mock_connect_initial_value_is_reduced_flux_one(fx):
     documented default operating point (reduced flux = 1.0, f01 ~5423 MHz)."""
     _connect_mock(fx)
 
-    dev = fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)
+    dev = fx.state.get_device(FAKE_FLUX_DEVICE_NAME)
     assert dev is not None and dev.info is not None
-    assert getattr(dev.info, "value") == _FAKE_FLUX_INITIAL_VALUE
-    assert _FAKE_FLUX_INITIAL_VALUE == 0.5
+    assert getattr(dev.info, "value") == FAKE_FLUX_INITIAL_VALUE
+    assert FAKE_FLUX_INITIAL_VALUE == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -189,16 +189,16 @@ def test_sync_connect_provisions_fake_flux_and_binds_soc(fx):
     SocChangedPayload -> MockFluxProvisioner)."""
     _connect_mock_sync(fx)
 
-    dev = fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)
+    dev = fx.state.get_device(FAKE_FLUX_DEVICE_NAME)
     assert dev is not None
     assert dev.type_name == "FakeDevice"
     assert dev.status is DeviceStatus.CONNECTED
     assert dev.info is not None
-    assert getattr(dev.info, "value") == _FAKE_FLUX_INITIAL_VALUE
+    assert getattr(dev.info, "value") == FAKE_FLUX_INITIAL_VALUE
 
     soc = fx.state.exp_context.soc
     assert soc is not None
-    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+    assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
 def test_sync_connect_bumps_soc_version(fx):
@@ -217,7 +217,7 @@ def test_sync_connect_bumps_soc_version(fx):
 def test_reconnect_does_not_double_register_fake_flux(fx):
     _connect_mock(fx)
     # Hand-edit the device value to detect any re-provisioning stomp.
-    _fake_device(_FAKE_FLUX_DEVICE_NAME).set_value(0.123)
+    _fake_device(FAKE_FLUX_DEVICE_NAME).set_value(0.123)
 
     # Connect again (e.g. the user presses "Use MockSoc" a second time). The mock
     # soc allows re-connect; the SocChangedPayload fires again.
@@ -228,10 +228,10 @@ def test_reconnect_does_not_double_register_fake_flux(fx):
     _process_events()
 
     # Exactly one fake_flux entry, value untouched (no re-ramp), binding intact.
-    assert fx.state.get_device(_FAKE_FLUX_DEVICE_NAME) is not None
-    assert _fake_device(_FAKE_FLUX_DEVICE_NAME).get_value() == 0.123
+    assert fx.state.get_device(FAKE_FLUX_DEVICE_NAME) is not None
+    assert _fake_device(FAKE_FLUX_DEVICE_NAME).get_value() == 0.123
     soc = fx.state.exp_context.soc
-    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+    assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -243,11 +243,11 @@ def test_reconnect_does_not_double_register_fake_flux(fx):
 def _disconnect_fake_flux(fx: _Fixture) -> None:
     """Disconnect fake_flux so it lands in MEMORY_ONLY state, then quiesce."""
     fx.ctrl._dev_svc.start_disconnect_device(
-        DisconnectDeviceRequest(name=_FAKE_FLUX_DEVICE_NAME, remember=True)
+        DisconnectDeviceRequest(name=FAKE_FLUX_DEVICE_NAME, remember=True)
     )
     assert _pump_until(
         lambda: (
-            (dev := fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)) is not None
+            (dev := fx.state.get_device(FAKE_FLUX_DEVICE_NAME)) is not None
             and dev.status is DeviceStatus.MEMORY_ONLY
         )
     ), "fake_flux did not reach MEMORY_ONLY after disconnect"
@@ -262,24 +262,22 @@ def test_mock_connect_reconnects_disconnected_fake_flux(fx):
 
     # Simulate the 'disconnected at startup' scenario: disconnect the device.
     _disconnect_fake_flux(fx)
-    assert fx.state.get_device(_FAKE_FLUX_DEVICE_NAME) is not None
-    assert (
-        fx.state.get_device(_FAKE_FLUX_DEVICE_NAME).status is DeviceStatus.MEMORY_ONLY
-    )  # type: ignore[union-attr]
+    assert fx.state.get_device(FAKE_FLUX_DEVICE_NAME) is not None
+    assert fx.state.get_device(FAKE_FLUX_DEVICE_NAME).status is DeviceStatus.MEMORY_ONLY  # type: ignore[union-attr]
 
     # Use MockSoc again — the controller must fire the reconnect path.
     fx.ctrl.start_connect(ConnectMockRequest())
     # Wait for fake_flux to come back CONNECTED (reconnect is async).
     assert _pump_until(
         lambda: (
-            (dev := fx.state.get_device(_FAKE_FLUX_DEVICE_NAME)) is not None
+            (dev := fx.state.get_device(FAKE_FLUX_DEVICE_NAME)) is not None
             and dev.status is DeviceStatus.CONNECTED
         )
     ), "fake_flux was not reconnected after Use MockSoc with MEMORY_ONLY device"
 
     # Binding must still be in place on the new soc.
     soc = fx.state.exp_context.soc
-    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+    assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
 def test_mock_connect_skips_reconnect_when_already_connected(fx):
@@ -287,7 +285,7 @@ def test_mock_connect_skips_reconnect_when_already_connected(fx):
     trigger a redundant reconnect — only the set_flux_device binding is repeated."""
     _connect_mock(fx)
     # Record a sentinel value; a spurious reconnect would reset it to 0.0.
-    _fake_device(_FAKE_FLUX_DEVICE_NAME).set_value(0.777)
+    _fake_device(FAKE_FLUX_DEVICE_NAME).set_value(0.777)
 
     # Use MockSoc a second time while fake_flux is still CONNECTED.
     fx.ctrl.start_connect(ConnectMockRequest())
@@ -296,9 +294,9 @@ def test_mock_connect_skips_reconnect_when_already_connected(fx):
     _process_events()
 
     # Value must be untouched — no reconnect / re-setup fired.
-    assert _fake_device(_FAKE_FLUX_DEVICE_NAME).get_value() == 0.777
+    assert _fake_device(FAKE_FLUX_DEVICE_NAME).get_value() == 0.777
     soc = fx.state.exp_context.soc
-    assert getattr(soc, "_sim_params").flux_device == _FAKE_FLUX_DEVICE_NAME
+    assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +323,7 @@ def test_mock_connect_installs_sim_predictor(fx):
     assert sim_params is not None
     reference = build_predictor_from_simparams(sim_params)
     # Compare at the provisioned operating value (reduced flux = 1.0).
-    value = _FAKE_FLUX_INITIAL_VALUE
+    value = FAKE_FLUX_INITIAL_VALUE
     assert abs(predictor.predict_freq(value) - reference.predict_freq(value)) < 1e-6
 
 
@@ -370,5 +368,5 @@ def test_remote_connect_does_not_provision_fake_flux(fx, monkeypatch):
     fx.quiesce()
     _process_events()
 
-    assert fx.state.get_device(_FAKE_FLUX_DEVICE_NAME) is None
+    assert fx.state.get_device(FAKE_FLUX_DEVICE_NAME) is None
     fake_soc.set_flux_device.assert_not_called()

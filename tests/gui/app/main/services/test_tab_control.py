@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -18,8 +17,6 @@ class RecordingState:
         self._log = log
         self.active_tab_id: str | None = "tab-1"
         self.running_tab_id: str | None = None
-        self.cfg_schema = object()
-        self._tab = SimpleNamespace(cfg_schema=self.cfg_schema)
 
     def has_tab(self, tab_id: str) -> bool:
         self._log.add("state", "has_tab", tab_id)
@@ -28,10 +25,6 @@ class RecordingState:
     def list_tab_ids(self) -> list[str]:
         self._log.add("state", "list_tab_ids")
         return ["tab-1", "tab-2"]
-
-    def get_tab(self, tab_id: str) -> object:
-        self._log.add("state", "get_tab", tab_id)
-        return self._tab
 
 
 class RecordingTab:
@@ -166,15 +159,13 @@ def test_tab_control_routes_tab_read_model_to_tab_service() -> None:
     ]
 
 
-def test_tab_control_reads_cfg_schema_from_state_and_updates_via_tab_service() -> None:
-    facet, log, state, _tab, _workspace, _bus = _facet()
+def test_tab_control_updates_cfg_via_tab_service() -> None:
+    facet, log, _state, _tab, _workspace, _bus = _facet()
     schema = cast(Any, object())
 
-    assert facet.get_tab_cfg_schema("tab-1") is state.cfg_schema
     facet.update_tab_cfg("tab-1", schema)
 
     assert log.calls == [
-        call("state", "get_tab", "tab-1"),
         call("tab", "update_tab_cfg", "tab-1", schema),
     ]
 

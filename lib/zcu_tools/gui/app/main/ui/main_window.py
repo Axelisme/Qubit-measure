@@ -216,14 +216,6 @@ class MainWindow(QMainWindow):
     # Docked feedback panel (ADR-0025 C3)
     # ------------------------------------------------------------------
 
-    def _refresh_feedback_widget(self) -> None:
-        """Mount/unmount the feedback panel (internal bus-handler trampoline).
-
-        Idempotent: all bus handlers that may change op-count or agent-presence
-        call this; the decision is centralized in refresh_feedback_widget().
-        """
-        self.refresh_feedback_widget()
-
     def refresh_feedback_widget(self) -> None:
         """Mount/unmount the docked feedback panel on op count + agent presence.
 
@@ -236,13 +228,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # ViewProtocol implementation
     # ------------------------------------------------------------------
-
-    def _set_tab_running(
-        self,
-        tab_w: ExpTabWidget,
-        snapshot: TabSnapshot,
-    ) -> None:
-        tab_w.update_interaction_state(snapshot)
 
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -337,7 +322,7 @@ class MainWindow(QMainWindow):
         self._toolbar.set_new_tab_enabled(True)
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
-                self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
+                tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
         # Progress no longer cleared here — ProgressService.discard_operation on
         # the run's terminal path drops the container and notifies the tab's
         # listener, which re-renders to empty.
@@ -348,7 +333,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None or not self._ctrl.has_tab(tab_id):
             return
-        self._set_tab_running(tab_w, snapshot or self._ctrl.get_tab_snapshot(tab_id))
+        tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
         label = self._ctrl.get_active_context_label()
@@ -372,7 +357,7 @@ class MainWindow(QMainWindow):
             self._ctx_label.setStyleSheet("color: gray;")
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
-                self._set_tab_running(tab_w, self._ctrl.get_tab_snapshot(tab_id))
+                tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_inspect_panel(self) -> None:
         inspect = self._dialog_registry.dialog(DialogName.INSPECT)
@@ -476,9 +461,6 @@ class MainWindow(QMainWindow):
     def show_error_dialog(self, title: str, message: str) -> None:
         self._dialog_presenter.critical(self, title, message)
 
-    def show_plot(self, tab_id: str, fig: Any) -> None:  # Phase 11
-        logger.debug("show_plot: tab_id=%r fig=%s", tab_id, type(fig).__name__)
-
     def show_analysis_image(self, tab_id: str, fig: Any) -> None:
         logger.debug("show_analysis_image: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.get(tab_id)
@@ -532,7 +514,7 @@ class MainWindow(QMainWindow):
         self._ctrl.set_active_tab(widget.tab_id)
         # The active tab is the feedback panel's target when nothing is running;
         # re-evaluate so a visible panel follows the user to the new tab.
-        self._refresh_feedback_widget()
+        self.refresh_feedback_widget()
 
     def _resolve_tab_widget(self, tab_id: str, action: str) -> ExpTabWidget | None:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-11 — context-free adapter cfg definitions
+**Last updated:** 2026-07-11 — dead surface pruning
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt

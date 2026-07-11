@@ -4,10 +4,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.adapter import (
-    AnalysisMode,
-    SavePaths,
-)
+from zcu_tools.gui.app.main.adapter import SavePaths
 from zcu_tools.gui.app.main.state import Session, TabInteractionState
 from zcu_tools.gui.cfg import CfgSchema
 
@@ -135,25 +132,6 @@ class TabService:
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()
 
-    def adapter_analyze_params(self, adapter_name: str) -> list[dict]:
-        """Static analyze-params field spec, or [] when analysis unsupported."""
-        from zcu_tools.gui.app.main.adapter import describe_analyze_params
-
-        adapter = self._registry.create(adapter_name)
-        if adapter.capabilities.analysis is AnalysisMode.NONE:
-            return []
-        return describe_analyze_params(adapter.analyze_params_cls())
-
-    def adapter_post_analyze_params(self, adapter_name: str) -> list[dict]:
-        """Static post-analysis param field spec, or [] when post-analysis is not
-        supported. Mirrors ``adapter_analyze_params`` for the second layer."""
-        from zcu_tools.gui.app.main.adapter import describe_analyze_params
-
-        adapter = self._registry.create(adapter_name)
-        if not adapter.capabilities.post_analysis:
-            return []
-        return describe_analyze_params(adapter.post_analyze_params_cls())
-
     def adapter_guide(self, adapter_name: str) -> dict:
         """Static human-facing orientation guide of an adapter (five fields)."""
         import dataclasses
@@ -171,9 +149,6 @@ class TabService:
         tab's CfgFormWidget reports a change.
         """
         self._state.update_tab_cfg_schema(tab_id, schema)
-
-    def get_tab_result(self, tab_id: str) -> object | None:
-        return self._state.get_tab(tab_id).run_result
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).analyze_result

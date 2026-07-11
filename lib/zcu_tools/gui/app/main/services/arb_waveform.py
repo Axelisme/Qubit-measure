@@ -44,10 +44,6 @@ class ArbWaveformService:
             for data_key in ArbWaveformDatabase.list()
         ]
 
-    def inspect(self, data_key: str) -> ArbWaveformInfo:
-        self._init_database()
-        return ArbWaveformDatabase.inspect(data_key)
-
     def load_data(self, data_key: str) -> ArbWaveformData:
         self._init_database()
         return ArbWaveformDatabase.load(data_key)

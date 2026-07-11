@@ -35,7 +35,7 @@ def test_tab_save_path_query_is_pure_and_does_not_create_directories(
     paths = svc.get_tab_save_paths(tab_id)
 
     assert paths is not None
-    assert state.get_effective_save_paths(tab_id) is None
+    assert state.get_tab(tab_id).save_path_overrides is None
     assert not (tmp_path / "database").exists()
     assert not (tmp_path / "result").exists()
 
