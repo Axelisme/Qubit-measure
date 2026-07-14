@@ -100,7 +100,11 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.program.v2.utils import is_qick_param
+from zcu_tools.program.v2.utils import (
+    is_qick_param,
+    readout_freq_from_word,
+    readout_freq_from_words,
+)
 
 from .bloch import Segment
 from .params import SimParams
@@ -725,13 +729,24 @@ def _readout_plan(
                 f"PulseReadout {module.name!r} uses gain_val={module.gain_val!r}; "
                 "SimEngine cannot decode raw gain LoadWord values"
             )
-        if module.freq_val is not None:
+        if module.freq_val is not None and module.ro_freq_val is not None:
+            f_ro_mhz = _load_word_pair_freq_mhz(
+                module.freq_val,
+                module.ro_freq_val,
+                dmem_tables,
+                point,
+                soccfg,
+                pulse_cfg=module.cfg.pulse_cfg,
+                ro_ch=module.cfg.ro_cfg.ro_ch,
+            )
+        elif module.freq_val is not None:
             f_ro_mhz = _load_word_gen_freq_mhz(
                 module.freq_val,
                 dmem_tables,
                 point,
                 soccfg,
-                gen_ch=module.cfg.pulse_cfg.ch,
+                pulse_cfg=module.cfg.pulse_cfg,
+                ro_ch=module.cfg.ro_cfg.ro_ch,
             )
         elif module.ro_freq_val is not None:
             f_ro_mhz = _load_word_ro_freq_mhz(
@@ -739,7 +754,9 @@ def _readout_plan(
                 dmem_tables,
                 point,
                 soccfg,
+                pulse_cfg=module.cfg.pulse_cfg,
                 ro_ch=module.cfg.ro_cfg.ro_ch,
+                reference_freq_mhz=f_ro_mhz,
             )
         ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
         trig_offset_us = _resolve_scalar(trig_offset, loop_counts, point)
@@ -764,7 +781,8 @@ def _load_word_gen_freq_mhz(
     point: dict[str, int],
     soccfg: object | None,
     *,
-    gen_ch: int,
+    pulse_cfg: PulseCfg,
+    ro_ch: int,
 ) -> float:
     raw = _load_word_value(
         val_reg, dmem_tables, point, consumer="PulseReadout.freq_val"
@@ -774,7 +792,15 @@ def _load_word_gen_freq_mhz(
             "PulseReadout.freq_val requires soccfg.reg2freq to decode LoadWord "
             "frequency words"
         )
-    return float(soccfg.reg2freq(raw, gen_ch=gen_ch))  # type: ignore[attr-defined]
+    return readout_freq_from_word(  # type: ignore[arg-type]
+        soccfg,
+        raw,
+        kind="gen",
+        gen_ch=pulse_cfg.ch,
+        ro_ch=ro_ch,
+        mixer_freq=pulse_cfg.mixer_freq,
+        nqz=pulse_cfg.nqz,
+    )
 
 
 def _load_word_ro_freq_mhz(
@@ -783,7 +809,9 @@ def _load_word_ro_freq_mhz(
     point: dict[str, int],
     soccfg: object | None,
     *,
+    pulse_cfg: PulseCfg,
     ro_ch: int,
+    reference_freq_mhz: float,
 ) -> float:
     raw = _load_word_value(
         val_reg, dmem_tables, point, consumer="PulseReadout.ro_freq_val"
@@ -793,7 +821,52 @@ def _load_word_ro_freq_mhz(
             "PulseReadout.ro_freq_val requires soccfg.reg2freq_adc to decode "
             "LoadWord readout frequency words"
         )
-    return float(soccfg.reg2freq_adc(raw, ro_ch=ro_ch))  # type: ignore[attr-defined]
+    return readout_freq_from_word(  # type: ignore[arg-type]
+        soccfg,
+        raw,
+        kind="ro",
+        gen_ch=pulse_cfg.ch,
+        ro_ch=ro_ch,
+        mixer_freq=pulse_cfg.mixer_freq,
+        nqz=pulse_cfg.nqz,
+        reference_freq_mhz=reference_freq_mhz,
+    )
+
+
+def _load_word_pair_freq_mhz(
+    gen_val_reg: str,
+    ro_val_reg: str,
+    dmem_tables: dict[str, _DmemTable],
+    point: dict[str, int],
+    soccfg: object | None,
+    *,
+    pulse_cfg: PulseCfg,
+    ro_ch: int,
+) -> float:
+    gen_word = _load_word_value(
+        gen_val_reg, dmem_tables, point, consumer="PulseReadout.freq_val"
+    )
+    ro_word = _load_word_value(
+        ro_val_reg, dmem_tables, point, consumer="PulseReadout.ro_freq_val"
+    )
+    if soccfg is None or not all(
+        hasattr(soccfg, name) for name in ("reg2freq", "freq2reg", "freq2reg_adc")
+    ):
+        raise UnsupportedModuleError(
+            "paired PulseReadout frequency words require soccfg frequency converters"
+        )
+    try:
+        return readout_freq_from_words(  # type: ignore[arg-type]
+            soccfg,
+            gen_word,
+            ro_word,
+            gen_ch=pulse_cfg.ch,
+            ro_ch=ro_ch,
+            mixer_freq=pulse_cfg.mixer_freq,
+            nqz=pulse_cfg.nqz,
+        )
+    except ValueError as exc:
+        raise UnsupportedModuleError(str(exc)) from exc
 
 
 def _load_word_value(

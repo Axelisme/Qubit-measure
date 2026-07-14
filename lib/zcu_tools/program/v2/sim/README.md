@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-07 — stop flag acquire contract
+**Last updated:** 2026-07-14 — runtime frequency-word decoding
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -159,7 +159,10 @@ every coupling point.
   `detune_offset` frame shift), shaped-pulse discretisation, deterministic Branch
   selection, scalar `LoadValue` dmem indirection used by non-uniform T1, and
   `LoadWord` readout frequency decoding when consumed by `PulseReadout.freq_val`
-  or `PulseReadout.ro_freq_val`. Arbitrary raw hardware words still fast-fail
+  or `PulseReadout.ro_freq_val`. Paired generator/readout words resolve the
+  semantic probe frequency from the generator and validate the ADC word
+  bit-exactly. A readout-only word is an ADC-DDS alias, so lowering unwraps the
+  alias nearest the semantic `ro_freq` template. Arbitrary raw hardware words still fast-fail
   without an explicit consuming module contract. Does NOT compute f_qubit, acc_buf,
   noise, S21, or the detune ensemble (the engine owns that).
 - `waveforms.py` — shared peak-normalized envelope sampling for both lowering and

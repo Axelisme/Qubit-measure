@@ -33,6 +33,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
+from zcu_tools.program.v2.utils import readout_freq_words
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
 SamplingMode = Literal["linear", "homophasal"]
@@ -137,24 +138,6 @@ def homophasal_sweep2array(
     return rounded
 
 
-def readout_freq_words_from_freqs(
-    freqs: NDArray[np.float64],
-    cfg: FreqCfg,
-    soccfg,
-) -> tuple[list[int], list[int]]:
-    readout = cfg.modules.readout
-    gen_ch = readout.pulse_cfg.ch
-    ro_ch = readout.ro_cfg.ro_ch
-    gen_words = [
-        int(soccfg.freq2reg(float(freq), gen_ch=gen_ch, ro_ch=ro_ch)) for freq in freqs
-    ]
-    ro_words = [
-        int(soccfg.freq2reg_adc(float(freq), ro_ch=ro_ch, gen_ch=gen_ch))
-        for freq in freqs
-    ]
-    return gen_words, ro_words
-
-
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     # freq stores Hz on disk -> scale=MHZ_TO_HZ (disk = memory * 1e6)
     AXES_SPEC = AxesSpec(
@@ -243,8 +226,15 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                 cfg = sched.cfg
                 modules = cfg.modules
                 modules.readout.set_param("freq", float(freqs[0]))
-                freq_words, ro_freq_words = readout_freq_words_from_freqs(
-                    freqs, cfg, soccfg
+                pulse_cfg = modules.readout.pulse_cfg
+                ro_cfg = modules.readout.ro_cfg
+                freq_words, ro_freq_words = readout_freq_words(
+                    soccfg,
+                    freqs,
+                    gen_ch=pulse_cfg.ch,
+                    ro_ch=ro_cfg.ro_ch,
+                    mixer_freq=pulse_cfg.mixer_freq,
+                    nqz=pulse_cfg.nqz,
                 )
 
                 _ = (

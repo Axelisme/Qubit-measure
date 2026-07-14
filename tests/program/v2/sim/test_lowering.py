@@ -62,7 +62,7 @@ from zcu_tools.program.v2.sim.lowering import (
     lower_point,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.program.v2.utils import sweep2param
+from zcu_tools.program.v2.utils import readout_freq_words, sweep2param
 
 # Long T1/T2 so the unit pulse tests see (essentially) unitary rotations; the
 # end-to-end pi tests rely on this to compare against the ideal angle.
@@ -584,16 +584,18 @@ class TestReadoutPlan:
             soccfg.reg2freq(freq_words[2], gen_ch=0) / 1e3
         )
 
-    def test_pulse_readout_prefers_freq_val_over_ro_freq_val_for_probe_freq(
+    def test_pulse_readout_validates_paired_frequency_words(
         self,
     ) -> None:
         soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
-        freq_words = [
-            int(soccfg.freq2reg(freq, gen_ch=0, ro_ch=0)) for freq in (5990.0, 6000.0)
-        ]
-        ro_freq_words = [
-            int(soccfg.freq2reg_adc(freq, ro_ch=0, gen_ch=0)) for freq in (100.0, 200.0)
-        ]
+        freq_words, ro_freq_words = readout_freq_words(
+            soccfg,
+            (5990.0, 6000.0),
+            gen_ch=0,
+            ro_ch=0,
+            mixer_freq=None,
+            nqz=1,
+        )
         pulse_cfg = PulseCfg(
             waveform=ConstWaveformCfg(length=1.0),
             ch=0,
@@ -632,6 +634,54 @@ class TestReadoutPlan:
         assert lp.readout.f_ro_ghz == pytest.approx(
             soccfg.reg2freq(freq_words[1], gen_ch=0) / 1e3
         )
+
+    def test_pulse_readout_ro_only_word_unwraps_nearest_cfg_frequency(
+        self,
+    ) -> None:
+        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        _gen_words, ro_freq_words = readout_freq_words(
+            soccfg,
+            [6000.0],
+            gen_ch=0,
+            ro_ch=0,
+            mixer_freq=None,
+            nqz=1,
+        )
+        pulse_cfg = PulseCfg(
+            waveform=ConstWaveformCfg(length=1.0),
+            ch=0,
+            nqz=1,
+            freq=6000.0,
+            gain=0.25,
+        )
+        ro = PulseReadout(
+            "ro",
+            PulseReadoutCfg(
+                pulse_cfg=pulse_cfg,
+                ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=6000.0),
+            ),
+            ro_freq_val="ro_freq_word",
+        )
+
+        lp = lower_point(
+            [
+                LoadWord(
+                    "load_ro_freq",
+                    ro_freq_words,
+                    idx_reg="freq",
+                    val_reg="ro_freq_word",
+                ),
+                ro,
+            ],
+            [("freq", 1)],
+            _SIM,
+            _F_QUBIT_GHZ,
+            {"freq": 0},
+            _identity_cycles2us,
+            soccfg=soccfg,
+        )
+
+        assert lp.readout.f_ro_ghz == pytest.approx(6.0)
 
     def test_pulse_readout_gain_val_load_word_fast_fails(self) -> None:
         pulse_cfg = PulseCfg(
