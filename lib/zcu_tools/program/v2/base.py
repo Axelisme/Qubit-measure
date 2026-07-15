@@ -50,6 +50,21 @@ class MyProgramV2(  # type: ignore[reportIncompatibleMethodOverride]
 
     def _body(self, cfg: ProgramV2Cfg) -> None: ...
 
+    def _make_binprog(self) -> None:
+        """Build QICK binaries with a NumPy-version-independent dmem payload."""
+        super()._make_binprog()
+
+        dmem = self.binprog["dmem"]
+        if dmem is None:
+            return
+
+        words = np.asarray(dmem, dtype=np.int32)
+        if words.ndim != 1:
+            raise ValueError(
+                f"compiled dmem must be one-dimensional, got shape {words.shape}"
+            )
+        self.binprog["dmem"] = [int(word) for word in words]
+
     def compile(self) -> None:
         super().compile()
 

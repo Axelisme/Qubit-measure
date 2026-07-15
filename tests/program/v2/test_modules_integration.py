@@ -442,6 +442,28 @@ class TestDmemIntegration:
         assert dmem.dtype == np.int32
         assert dmem.tolist() == [0, -(2**31), -1]
 
+    def test_load_word_binprog_uses_builtin_ints_for_transport(self):
+        vals = [0, 2**31, 2**32 - 1]
+        lw = LoadWord("lw", vals, idx_reg="myloop", val_reg="myword")
+        r = Repeat("myloop", len(vals))
+        r.add_content(lw)
+
+        prog = _make_prog(modules=[r])
+
+        dmem = prog.binprog["dmem"]
+        assert dmem == [0, -(2**31), -1]
+        assert all(type(word) is int for word in dmem)
+
+    def test_binprog_rejects_non_vector_dmem(self):
+        class TwoDimensionalDmemProgram(ModularProgramV2):
+            def compile_datamem(self):
+                return np.asarray([[1, 2]], dtype=np.int32)
+
+        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+
+        with pytest.raises(ValueError, match="dmem must be one-dimensional"):
+            TwoDimensionalDmemProgram(soccfg, ProgramV2Cfg(), modules=[])
+
     def test_scan_with_compiles(self):
         vals = list(range(10))
         s = ScanWith("s", vals, "myval")

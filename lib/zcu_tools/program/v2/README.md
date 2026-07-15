@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-07-11 — tone-specific cfg ownership
+**Last updated:** 2026-07-15 — portable dmem transport
 
 ## Testing & Type Checking Conventions
 
@@ -81,6 +81,8 @@ pulse_by_reg(ch, wmem_reg, ...)
 **flat_top**：table 中存的是每個 flat_top 候選的**第一個** wmem entry（ramp_up），`pulse_by_reg(flat_top_pulse=True)` 從此 index 自動連讀 3 個 entry（ramp_up / flat / ramp_down）。
 
 **dmem 共用**：`ModularProgramV2._dmem_buffer` 是全程式共享的順序 buffer，`add_dmem()` 回傳的 `offset` 是 slice 起點，`compile_datamem()` 最後轉為 `np.int32` 陣列。
+
+**dmem 傳輸邊界**：`compile_datamem()` 維持 QICK 規定的 `np.int32` array contract；`MyProgramV2` 在完整 binary program 建立後，將送往 remote SoC 的 dmem 正規化為一維 built-in `list[int]`。這讓 Python 3 client 與舊版 NumPy 的 ZCU server 不需共享 NumPy pickle 私有 module 路徑，同時保留 signed int32 與 two's-complement bit pattern。
 
 ## Big-Jump Threshold
 
