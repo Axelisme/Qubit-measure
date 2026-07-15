@@ -53,12 +53,14 @@ class Pulse(Module):
         tag: str | None = None,
         block_mode: bool = True,
         pulse_id: str | None = None,
+        phase_reset: bool = False,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
         self.tag = tag
         self.block_mode = block_mode
         self.pulse_id = pulse_id
+        self.phase_reset = phase_reset
 
     def init(self, prog: ModularProgramV2) -> None:
         if self.cfg is None:
@@ -91,6 +93,8 @@ class Pulse(Module):
 
         self.waveform.create(prog, cfg.ch)
         pulse_kwargs = dict[str, Any](freq=cfg.freq, phase=cfg.phase, gain=cfg.gain)
+        if self.phase_reset:
+            pulse_kwargs["phrst"] = 1
         if cfg.mask is not None:
             pulse_kwargs["mask"] = cfg.mask
         if cfg.outsel is not None:

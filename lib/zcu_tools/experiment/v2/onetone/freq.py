@@ -258,6 +258,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                             modules.readout,
                             freq_val="readout_freq_word",
                             ro_freq_val="readout_ro_freq_word",
+                            phase_reset=True,
                         ),
                     )
                     .declare_sweep("freq", len(freqs))

@@ -142,12 +142,14 @@ class PulseReadout(AbsReadout):
         gain_val: str | None = None,
         freq_val: str | None = None,
         ro_freq_val: str | None = None,
+        phase_reset: bool = False,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
+        self.phase_reset = phase_reset
         ro_ch = self.cfg.pulse_cfg.ro_ch
         if ro_ch is None:
             ro_ch = self.cfg.ro_cfg.ro_ch
@@ -169,6 +171,7 @@ class PulseReadout(AbsReadout):
                 name=f"{self.name}_runtime_pulse",
                 cfg=self.cfg.pulse_cfg,
                 pulse_id=f"{self.name}_runtime_pulse",
+                phase_reset=self.phase_reset,
             )
             self._runtime_pulse.init(prog)
         if self.ro_freq_val is not None:
@@ -176,6 +179,8 @@ class PulseReadout(AbsReadout):
             readout_kwargs: dict[str, int] = {}
             if self.cfg.ro_cfg.gen_ch is not None:
                 readout_kwargs["gen_ch"] = self.cfg.ro_cfg.gen_ch
+            if self.phase_reset:
+                readout_kwargs["phrst"] = 1
             prog.add_readoutconfig(
                 ch=self.cfg.ro_cfg.ro_ch,
                 name=self._runtime_ro_name,

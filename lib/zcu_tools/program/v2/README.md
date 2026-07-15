@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-07-15 — runtime wave-register playback
+**Last updated:** 2026-07-15 — runtime DDS phase reset
 
 ## Testing & Type Checking Conventions
 
@@ -56,6 +56,8 @@ Runtime pulse/readout words use dedicated macros that load a single-wave wmem
 template into `r_wave`, patch selected fields, and send `r_wave` directly to the
 target port. They do not persist the patched bundle to wmem. This keeps runtime
 updates atomic at playback and leaves the fixed template stable across points.
+Runtime templates may request QICK's DDS phase-reset flag when arbitrary
+point-to-point frequency changes must not inherit accumulator history.
 
 ### `MetaMacro.regs` — Register Name Resolution
 

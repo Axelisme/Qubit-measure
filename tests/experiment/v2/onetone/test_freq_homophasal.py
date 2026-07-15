@@ -5,6 +5,7 @@ import pickle
 
 import numpy as np
 import pytest
+import zcu_tools.experiment.v2.runner.schedule as schedule_module
 from zcu_tools.experiment.v2.onetone.freq import (
     FreqCfg,
     FreqExp,
@@ -15,6 +16,7 @@ from zcu_tools.experiment.v2.onetone.freq import (
 )
 from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, PulseReadoutCfg, SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc, make_mock_soccfg
+from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
@@ -149,6 +151,32 @@ def test_homophasal_run_executes_nine_point_mock_soc_path() -> None:
     assert result.signals.shape == (9,)
     assert np.all(np.diff(result.freqs) > 0.0)
     assert not np.allclose(np.diff(result.freqs), np.diff(result.freqs)[0])
+
+
+def test_homophasal_runtime_templates_reset_dds_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_programs: list[ModularProgramV2] = []
+
+    class CapturingProgram(ModularProgramV2):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            captured_programs.append(self)
+
+    monkeypatch.setattr(schedule_module, "ModularProgramV2", CapturingProgram)
+    soc, soccfg = make_mock_soc(n_gens=1, n_readouts=1, sim=None)
+
+    FreqExp().run(soc, soccfg, _homophasal_cfg())
+
+    assert len(captured_programs) == 1
+    runtime_waves = {
+        wave.name: wave for wave in captured_programs[0].waves if "runtime" in wave.name
+    }
+    assert set(runtime_waves) == {
+        "readout_runtime_pulse_w0",
+        "readout_adc_runtime_w0",
+    }
+    assert all(wave.conf & 0b010000 for wave in runtime_waves.values())
 
 
 def test_homophasal_run_sends_numpy_version_independent_binprog(

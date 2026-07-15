@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-07-15 — coherent runtime wave-register playback
+**Last updated:** 2026-07-15 — runtime DDS phase reset
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -43,6 +43,9 @@ without leaking hardware register choreography into experiment classes.
   selected fields in `r_wave`, and sends that register bundle directly to the
   hardware port. The runtime path does not write and immediately re-read wmem;
   the template remains unchanged for the next sweep point.
+- Runtime pulse/readout templates can opt into QICK's DDS phase reset. This is a
+  playback property of the scratch templates, so ordinary static templates retain
+  their existing continuous-phase behavior.
 
 ## Design Boundaries
 

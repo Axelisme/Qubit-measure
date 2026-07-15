@@ -326,6 +326,31 @@ class TestPulseReadoutRuntime:
             "ro_adc_runtime",
         ]
 
+    def test_runtime_phase_reset_only_marks_runtime_entries(self, mock_prog):
+        ro = PulseReadout(
+            "ro",
+            _make_pulse_ro_cfg(ch=3),
+            freq_val="freq_word",
+            ro_freq_val="ro_freq_word",
+            phase_reset=True,
+        )
+
+        ro.init(mock_prog)
+
+        add_pulses = {
+            event.kwargs["name"]: event.kwargs
+            for event in mock_prog.events_of("add_pulse")
+        }
+        assert "phrst" not in add_pulses["pulse_0"]
+        assert add_pulses["ro_runtime_pulse"]["phrst"] == 1
+
+        add_readouts = {
+            event.kwargs["name"]: event.kwargs
+            for event in mock_prog.events_of("add_readout_config")
+        }
+        assert "phrst" not in add_readouts["ro_adc"]
+        assert add_readouts["ro_adc_runtime"]["phrst"] == 1
+
     def test_runtime_regs_play_scratch_entries_from_wave_registers(self, mock_prog):
         ro = PulseReadout(
             "ro",
