@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 from qick.asm_v2 import AsmInst, WriteReg
 from qick.tprocv2_assembler import Assembler
-from zcu_tools.program.v2.macro.wmem import ConfigReadoutFromRegs, PulseFromRegs
+from zcu_tools.program.v2.macro.wmem import (
+    ConfigReadoutFromRegs,
+    PatchWmemFromDmem,
+    PatchWmemFromRegs,
+    PulseFromRegs,
+)
 
 
 class _Pulse:
@@ -26,7 +31,12 @@ class _Prog:
         }
 
     def _get_reg(self, name: str) -> str:
-        return {"freq_word": "s1", "gain_word": "s2"}.get(name, name)
+        return {
+            "freq_word": "s1",
+            "gain_word": "s2",
+            "idx": "r1",
+            "addr": "r2",
+        }.get(name, name)
 
 
 def _compile_instruction(inst: AsmInst) -> list[int]:
@@ -103,6 +113,38 @@ def test_pulse_from_regs_compiles_like_qick_wave_register_write() -> None:
     oracle = WriteReg(dst="w0", src="freq_word").expand(prog)[0]
 
     assert _compile_instruction(actual) == _compile_instruction(oracle)
+
+
+def test_patch_wmem_from_regs_persists_without_port_write() -> None:
+    insts = PatchWmemFromRegs(name="readout", freq_reg="freq_word").expand(
+        _Prog(["readout_wave"])
+    )
+
+    assert [inst.inst["CMD"] for inst in insts] == ["REG_WR", "REG_WR", "WMEM_WR"]
+    assert insts[-1].inst == {"CMD": "WMEM_WR", "DST": "&4"}
+
+
+def test_patch_wmem_from_dmem_keeps_address_and_value_registers_separate() -> None:
+    insts = PatchWmemFromDmem(
+        name="readout",
+        idx_reg="idx",
+        addr_reg="addr",
+        val_reg="freq_word",
+        dmem_offset=7,
+    ).expand(_Prog(["readout_wave"]))
+
+    assert insts[0].inst == {
+        "CMD": "REG_WR",
+        "DST": "r2",
+        "SRC": "op",
+        "OP": "r1 + #7",
+    }
+    assert insts[1].inst == {
+        "CMD": "REG_WR",
+        "DST": "s1",
+        "SRC": "dmem",
+        "ADDR": "&r2",
+    }
 
 
 @pytest.mark.parametrize("macro_factory", [_pulse_macro, _readout_macro])

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
+from qick.asm_v2 import AsmV2, Macro
 
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
@@ -64,6 +65,19 @@ class ModularProgramV2(MyProgramV2):
                 self.debug_macro(f"{type(module).__name__}({module.name})", t)
             t = module.run(self, t)
         self.delay(t=t)
+
+    def append_loop_after(self, name: str, *macros: Macro) -> None:
+        """Append macros to QICK's exec-after hook for one declared sweep loop."""
+        for idx, (loop_name, count, before, after) in enumerate(self.loops):
+            if loop_name != name:
+                continue
+            if after is None:
+                after = AsmV2()
+                self.loops[idx] = (loop_name, count, before, after)
+            for macro in macros:
+                after.append_macro(macro)
+            return
+        raise ValueError(f"sweep loop {name!r} is not declared")
 
     def add_dmem(self, values: Sequence[int]) -> int:
         offset = len(self._dmem_buffer)

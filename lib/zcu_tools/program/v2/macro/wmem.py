@@ -1,11 +1,75 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from numbers import Integral
 
-from qick.asm_v2 import AsmInst, ConfigReadout, Pulse, QickParam
+from qick.asm_v2 import AsmInst, ConfigReadout, Macro, Pulse, QickParam
 
 _W_FREQ = "w0"
 _W_GAIN = "w3"
+
+
+@dataclass
+class PatchWmemFromRegs(Macro):
+    """Persist selected runtime fields into one single-wave wmem entry."""
+
+    name: str
+    freq_reg: str | None = None
+    gain_reg: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.freq_reg is None and self.gain_reg is None:
+            raise ValueError("PatchWmemFromRegs requires at least one runtime register")
+
+    def expand(self, prog) -> list[AsmInst]:  # type: ignore[no-untyped-def]
+        addr = _single_wave_addr(prog, self.name)
+        insts = [_read_wmem(addr)]
+        if self.freq_reg is not None:
+            insts.append(_copy_reg_to_wave_field(prog, self.freq_reg, _W_FREQ))
+        if self.gain_reg is not None:
+            insts.append(_copy_reg_to_wave_field(prog, self.gain_reg, _W_GAIN))
+        insts.append(AsmInst(inst={"CMD": "WMEM_WR", "DST": f"&{addr}"}, addr_inc=1))
+        return insts
+
+
+@dataclass
+class PatchWmemFromDmem(Macro):
+    """Load one table word and persist it into a single-wave wmem entry."""
+
+    name: str
+    idx_reg: str
+    addr_reg: str
+    val_reg: str
+    dmem_offset: int
+
+    def expand(self, prog) -> list[AsmInst]:  # type: ignore[no-untyped-def]
+        idx_reg = prog._get_reg(self.idx_reg)
+        addr_reg = prog._get_reg(self.addr_reg)
+        val_reg = prog._get_reg(self.val_reg)
+        insts = [
+            AsmInst(
+                inst={
+                    "CMD": "REG_WR",
+                    "DST": addr_reg,
+                    "SRC": "op",
+                    "OP": f"{idx_reg} + #{self.dmem_offset}",
+                },
+                addr_inc=1,
+            ),
+            AsmInst(
+                inst={
+                    "CMD": "REG_WR",
+                    "DST": val_reg,
+                    "SRC": "dmem",
+                    "ADDR": f"&{addr_reg}",
+                },
+                addr_inc=1,
+            ),
+        ]
+        insts.extend(
+            PatchWmemFromRegs(name=self.name, freq_reg=self.val_reg).expand(prog)
+        )
+        return insts
 
 
 class _WaveFromRegs:
@@ -16,32 +80,12 @@ class _WaveFromRegs:
     def _expand_wave_from_regs(self, prog, port: int) -> list[AsmInst]:  # type: ignore[no-untyped-def]
         if self.freq_reg is None and self.gain_reg is None:
             raise ValueError("runtime wave playback requires at least one register")
-        if self.name not in prog.pulses:
-            raise RuntimeError(f"pulse/readout config {self.name!r} is not registered")
-
-        wave_names = prog.pulses[self.name].get_wavenames(exclude_special=True)
-        if len(wave_names) != 1:
-            raise NotImplementedError(
-                f"runtime wmem patch for {self.name!r} requires exactly one "
-                f"non-special waveform, got {len(wave_names)}"
-            )
-
-        addr = prog.wave2idx[wave_names[0]]
+        addr = _single_wave_addr(prog, self.name)
         time_reg = self.t_regs["t"]  # type: ignore[attr-defined]
         insts: list[AsmInst] = []
         if not isinstance(time_reg, Integral):
             insts.append(self.set_timereg(prog, "t"))  # type: ignore[attr-defined]
-        insts.append(
-            AsmInst(
-                inst={
-                    "CMD": "REG_WR",
-                    "DST": "r_wave",
-                    "SRC": "wmem",
-                    "ADDR": f"&{addr}",
-                },
-                addr_inc=1,
-            )
-        )
+        insts.append(_read_wmem(addr))
 
         if self.freq_reg is not None:
             insts.append(_copy_reg_to_wave_field(prog, self.freq_reg, _W_FREQ))
@@ -104,6 +148,30 @@ class ConfigReadoutFromRegs(_WaveFromRegs, ConfigReadout):
     def expand(self, prog) -> list[AsmInst]:  # type: ignore[no-untyped-def]
         port = int(prog.soccfg["readouts"][self.ch]["tproc_ctrl"])
         return self._expand_wave_from_regs(prog, port)
+
+
+def _single_wave_addr(prog, name: str) -> int:  # type: ignore[no-untyped-def]
+    if name not in prog.pulses:
+        raise RuntimeError(f"pulse/readout config {name!r} is not registered")
+    wave_names = prog.pulses[name].get_wavenames(exclude_special=True)
+    if len(wave_names) != 1:
+        raise NotImplementedError(
+            f"runtime wmem patch for {name!r} requires exactly one "
+            f"non-special waveform, got {len(wave_names)}"
+        )
+    return int(prog.wave2idx[wave_names[0]])
+
+
+def _read_wmem(addr: int) -> AsmInst:
+    return AsmInst(
+        inst={
+            "CMD": "REG_WR",
+            "DST": "r_wave",
+            "SRC": "wmem",
+            "ADDR": f"&{addr}",
+        },
+        addr_inc=1,
+    )
 
 
 def _copy_reg_to_wave_field(prog, reg: str, wave_reg: str) -> AsmInst:  # type: ignore[no-untyped-def]

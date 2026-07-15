@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-07-15 — runtime DDS phase reset
+**Last updated:** 2026-07-15 — table-backed readout frequency sweep
 
 ## Testing & Type Checking Conventions
 
@@ -50,14 +50,18 @@ The IR is divided into three layers to decouple high-level program structure fro
 
 ## Macro Layer
 
-### Runtime wave-register playback
+### Runtime and table-backed waveform updates
 
 Runtime pulse/readout words use dedicated macros that load a single-wave wmem
 template into `r_wave`, patch selected fields, and send `r_wave` directly to the
 target port. They do not persist the patched bundle to wmem. This keeps runtime
 updates atomic at playback and leaves the fixed template stable across points.
-Runtime templates may request QICK's DDS phase-reset flag when arbitrary
-point-to-point frequency changes must not inherit accumulator history.
+
+`TablePulseReadout` uses a different contract for arbitrary frequency sweeps: the
+body plays ordinary wmem-backed templates, while `ModularProgramV2` attaches dmem
+lookup + wmem patch macros to QICK's loop exec-after hook. The update therefore
+lands after the shot timing and before the loop test/jump, matching native
+`QickParam` sweep placement without enabling DDS phase reset.
 
 ### `MetaMacro.regs` — Register Name Resolution
 

@@ -153,7 +153,7 @@ def test_homophasal_run_executes_nine_point_mock_soc_path() -> None:
     assert not np.allclose(np.diff(result.freqs), np.diff(result.freqs)[0])
 
 
-def test_homophasal_runtime_templates_reset_dds_phase(
+def test_homophasal_uses_native_wmem_playback_without_phase_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_programs: list[ModularProgramV2] = []
@@ -169,14 +169,20 @@ def test_homophasal_runtime_templates_reset_dds_phase(
     FreqExp().run(soc, soccfg, _homophasal_cfg())
 
     assert len(captured_programs) == 1
-    runtime_waves = {
-        wave.name: wave for wave in captured_programs[0].waves if "runtime" in wave.name
-    }
-    assert set(runtime_waves) == {
-        "readout_runtime_pulse_w0",
-        "readout_adc_runtime_w0",
-    }
-    assert all(wave.conf & 0b010000 for wave in runtime_waves.values())
+    prog = captured_programs[0]
+    assert not any("runtime" in wave.name for wave in prog.waves)
+    assert not any(wave.conf & 0b010000 for wave in prog.waves)
+
+    port_indices = [
+        idx for idx, inst in enumerate(prog.prog_list) if inst.get("CMD") == "WPORT_WR"
+    ]
+    update_indices = [
+        idx for idx, inst in enumerate(prog.prog_list) if inst.get("CMD") == "WMEM_WR"
+    ]
+    assert len(port_indices) == 2
+    assert all(prog.prog_list[idx].get("SRC") == "wmem" for idx in port_indices)
+    assert len(update_indices) == 2
+    assert min(update_indices) > max(port_indices)
 
 
 def test_homophasal_run_sends_numpy_version_independent_binprog(

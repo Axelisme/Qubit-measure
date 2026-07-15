@@ -26,6 +26,7 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
     Readout,
+    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
@@ -35,6 +36,7 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.utils import readout_freq_words
 
 # ---------------------------------------------------------------------------
 # Constants — valid for the mock soccfg
@@ -277,6 +279,110 @@ class TestReadoutIntegration:
         ]
         assert len(runtime_ports) == 2
         assert not any(inst.get("CMD") == "WMEM_WR" for inst in prog.prog_list)
+
+    def test_table_pulse_readout_prepares_next_wmem_after_standard_playback(self):
+        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        freqs = [1000.0, 1010.0, 1020.0]
+        freq_words, ro_freq_words = readout_freq_words(
+            soccfg,
+            freqs,
+            gen_ch=GEN_CH,
+            ro_ch=RO_CH,
+            mixer_freq=None,
+            nqz=GEN_NQZ,
+        )
+        cfg = PulseReadoutCfg(
+            pulse_cfg=_pulse_cfg(ch=GEN_CH, freq=freqs[0]),
+            ro_cfg=DirectReadoutCfg(
+                ro_ch=RO_CH,
+                ro_length=RO_LENGTH,
+                ro_freq=freqs[0],
+                gen_ch=GEN_CH,
+            ),
+        )
+        prog = ModularProgramV2(
+            soccfg,
+            ProgramV2Cfg(),
+            modules=[
+                TablePulseReadout(
+                    "ro",
+                    cfg,
+                    idx_reg="freq",
+                    freq_words=freq_words,
+                    ro_freq_words=ro_freq_words,
+                )
+            ],
+            sweep=[("freq", len(freqs))],
+        )
+
+        ports = [
+            (idx, inst)
+            for idx, inst in enumerate(prog.prog_list)
+            if inst.get("CMD") == "WPORT_WR"
+        ]
+        updates = [
+            (idx, inst)
+            for idx, inst in enumerate(prog.prog_list)
+            if inst.get("CMD") == "WMEM_WR"
+        ]
+        assert len(ports) == 2
+        assert all(inst.get("SRC") == "wmem" for _, inst in ports)
+        assert len(updates) == 2
+        assert min(idx for idx, _ in updates) > max(idx for idx, _ in ports)
+        time_indices = [
+            idx for idx, inst in enumerate(prog.prog_list) if inst.get("CMD") == "TIME"
+        ]
+        test_indices = [
+            idx for idx, inst in enumerate(prog.prog_list) if inst.get("CMD") == "TEST"
+        ]
+        assert any(
+            max(idx for idx, _ in ports) < idx < min(idx for idx, _ in updates)
+            for idx in time_indices
+        )
+        assert max(idx for idx, _ in updates) < min(test_indices)
+        assert not any("runtime" in wave.name for wave in prog.waves)
+        assert not any(wave.conf & 0b010000 for wave in prog.waves)
+
+        for pulse_name, expected_word in (
+            ("ro_table_pulse", freq_words[0]),
+            ("ro_adc", ro_freq_words[0]),
+        ):
+            wave_names = prog.pulses[pulse_name].get_wavenames(exclude_special=True)
+            assert len(wave_names) == 1
+            wave = prog.waves[prog.wave2idx[wave_names[0]]]
+            raw_freq = wave.freq.start if hasattr(wave.freq, "start") else wave.freq
+            assert int(raw_freq) % 2**32 == expected_word
+
+        dmem = prog.binprog["dmem"]
+        assert dmem is not None
+        assert [int(word) % 2**32 for word in dmem] == (
+            freq_words[1:] + freq_words[:1] + ro_freq_words[1:] + ro_freq_words[:1]
+        )
+
+    def test_table_pulse_readout_rejects_loop_count_mismatch(self):
+        cfg = PulseReadoutCfg(
+            pulse_cfg=_pulse_cfg(ch=GEN_CH),
+            ro_cfg=DirectReadoutCfg(
+                ro_ch=RO_CH,
+                ro_length=RO_LENGTH,
+                ro_freq=GEN_FREQ,
+                gen_ch=GEN_CH,
+            ),
+        )
+        with pytest.raises(ValueError, match="does not match loop"):
+            _make_prog(
+                modules=[
+                    TablePulseReadout(
+                        "ro",
+                        cfg,
+                        idx_reg="freq",
+                        freq_words=[1, 2],
+                        ro_freq_words=[3, 4],
+                    )
+                ],
+                sweep=[("freq", 3)],
+                n_gens=1,
+            )
 
     def test_readout_factory_direct_compiles(self):
         prog = _make_prog(modules=[Readout("ro", _direct_ro_cfg())])

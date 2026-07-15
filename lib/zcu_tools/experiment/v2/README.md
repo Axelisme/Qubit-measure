@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-07-15 — homophasal runtime phase reset
+**Last updated:** 2026-07-15 — homophasal native-style table sweep
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -135,11 +135,11 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
 `SweepCfg` sweep；`homophasal` 保留同一個 `sweep.freq` 使用者介面，但由已擬合的 resonator
 circle 參數產生非等距 frequency array，再把 gen/readout raw frequency words 放進
-`LoadWord` tables，由單一 program-side sweep 透過 `PulseReadout.freq_val` /
-`ro_freq_val` 逐點更新 runtime wave registers。homophasal 的 generator 與 readout
-runtime templates 在每個點重置 DDS phase accumulator，避免非等距頻率順序成為額外相位；
-`linear` 保持一般連續相位行為。這類非等距模式仍先把點 round 到硬體格點，並在相鄰點
-collapse 時 fast-fail。
+`TablePulseReadout` 的 dmem tables。每點沿用一般 `PulseReadout` 的 wmem-backed WPORT，
+並在 sweep loop 的 exec-after hook 更新下一點 generator/readout frequency words；最後一點
+回繞第一點供下一個 outer repetition 使用。這條路徑不重置 DDS phase accumulator，更新
+位置與 QICK native `QickParam` sweep 一致。非等距模式仍先把點 round 到硬體格點，並在
+相鄰點 collapse 時 fast-fail。
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 

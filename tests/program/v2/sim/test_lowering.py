@@ -42,6 +42,7 @@ from zcu_tools.program.v2.modules.readout import (
     DirectReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
+    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
@@ -633,6 +634,53 @@ class TestReadoutPlan:
 
         assert lp.readout.f_ro_ghz == pytest.approx(
             soccfg.reg2freq(freq_words[1], gen_ch=0) / 1e3
+        )
+
+    def test_table_pulse_readout_resolves_current_point_words(self) -> None:
+        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        freqs_mhz = [5990.0, 6000.0, 6010.0]
+        freq_words, ro_freq_words = readout_freq_words(
+            soccfg,
+            freqs_mhz,
+            gen_ch=0,
+            ro_ch=0,
+            mixer_freq=None,
+            nqz=1,
+        )
+        ro = TablePulseReadout(
+            "ro",
+            PulseReadoutCfg(
+                pulse_cfg=PulseCfg(
+                    waveform=ConstWaveformCfg(length=1.0),
+                    ch=0,
+                    nqz=1,
+                    freq=freqs_mhz[0],
+                    gain=0.25,
+                ),
+                ro_cfg=DirectReadoutCfg(
+                    ro_ch=0,
+                    ro_length=1.5,
+                    ro_freq=freqs_mhz[0],
+                    gen_ch=0,
+                ),
+            ),
+            idx_reg="freq",
+            freq_words=freq_words,
+            ro_freq_words=ro_freq_words,
+        )
+
+        lp = lower_point(
+            [ro],
+            [("freq", len(freq_words))],
+            _SIM,
+            _F_QUBIT_GHZ,
+            {"freq": 2},
+            _identity_cycles2us,
+            soccfg=soccfg,
+        )
+
+        assert lp.readout.f_ro_ghz == pytest.approx(
+            soccfg.reg2freq(freq_words[2], gen_ch=0) / 1e3
         )
 
     def test_pulse_readout_ro_only_word_unwraps_nearest_cfg_frequency(

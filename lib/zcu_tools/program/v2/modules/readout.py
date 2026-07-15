@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import warnings
 from abc import abstractmethod
+from collections.abc import Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias
 
 from pydantic import BeforeValidator, Field, model_validator
 from qick.asm_v2 import QickParam
 
+from ..macro.wmem import PatchWmemFromDmem
 from .base import AbsModuleCfg, Module, resolve_module_ref
+from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
 
@@ -142,14 +145,12 @@ class PulseReadout(AbsReadout):
         gain_val: str | None = None,
         freq_val: str | None = None,
         ro_freq_val: str | None = None,
-        phase_reset: bool = False,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
-        self.phase_reset = phase_reset
         ro_ch = self.cfg.pulse_cfg.ro_ch
         if ro_ch is None:
             ro_ch = self.cfg.ro_cfg.ro_ch
@@ -171,7 +172,6 @@ class PulseReadout(AbsReadout):
                 name=f"{self.name}_runtime_pulse",
                 cfg=self.cfg.pulse_cfg,
                 pulse_id=f"{self.name}_runtime_pulse",
-                phase_reset=self.phase_reset,
             )
             self._runtime_pulse.init(prog)
         if self.ro_freq_val is not None:
@@ -179,8 +179,6 @@ class PulseReadout(AbsReadout):
             readout_kwargs: dict[str, int] = {}
             if self.cfg.ro_cfg.gen_ch is not None:
                 readout_kwargs["gen_ch"] = self.cfg.ro_cfg.gen_ch
-            if self.phase_reset:
-                readout_kwargs["phrst"] = 1
             prog.add_readoutconfig(
                 ch=self.cfg.ro_cfg.ro_ch,
                 name=self._runtime_ro_name,
@@ -232,3 +230,112 @@ class PulseReadout(AbsReadout):
         ro_ch = self.cfg.ro_cfg.ro_ch
         prog.send_readoutconfig_from_regs(ro_ch, name, t=t, freq_reg=self.ro_freq_val)
         prog.trigger([ro_ch], t=t + self.cfg.ro_cfg.trig_offset)
+
+
+class TablePulseReadout(AbsReadout):
+    """Sweep a pulse readout through exact dmem frequency-word tables.
+
+    The current point is played through QICK's ordinary wmem-backed pulse and
+    readout-config path. At the sweep loop's exec-after hook, the next point is
+    loaded from rotated dmem tables and persisted into dedicated templates. The
+    final table entry wraps back to the first point for the next outer repetition.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        cfg: PulseReadoutCfg,
+        *,
+        idx_reg: str,
+        freq_words: Sequence[int],
+        ro_freq_words: Sequence[int],
+    ) -> None:
+        self.name = name
+        self.idx_reg = idx_reg
+        self.freq_words = [int(word) for word in freq_words]
+        self.ro_freq_words = [int(word) for word in ro_freq_words]
+        if len(self.freq_words) == 0:
+            raise ValueError("TablePulseReadout requires at least one frequency word")
+        if len(self.freq_words) != len(self.ro_freq_words):
+            raise ValueError(
+                "TablePulseReadout generator/readout tables must have equal length"
+            )
+
+        self._readout = PulseReadout(name, cfg)
+        self.cfg = self._readout.cfg
+        self._readout.pulse = Pulse(
+            name=f"{name}_pulse",
+            cfg=self.cfg.pulse_cfg,
+            pulse_id=f"{name}_table_pulse",
+        )
+        self._addr_reg = f"{name}_table_addr"
+
+        self._freq_loader = LoadWord(
+            name=f"{name}_next_freq",
+            values=self.freq_words[1:] + self.freq_words[:1],
+            idx_reg=idx_reg,
+            val_reg=f"{name}_next_freq_word",
+        )
+        self._ro_freq_loader = LoadWord(
+            name=f"{name}_next_ro_freq",
+            values=self.ro_freq_words[1:] + self.ro_freq_words[:1],
+            idx_reg=idx_reg,
+            val_reg=f"{name}_next_ro_freq_word",
+        )
+
+    def init(self, prog: ModularProgramV2) -> None:
+        self._validate_loop_count(prog)
+        self._readout.init(prog)
+        self._freq_loader.init(prog)
+        self._ro_freq_loader.init(prog)
+        prog.add_reg(self._addr_reg)
+        pulse_id = self._readout.pulse.pulse_id
+        assert pulse_id is not None
+        prog.append_loop_after(
+            self.idx_reg,
+            PatchWmemFromDmem(
+                name=pulse_id,
+                idx_reg=self.idx_reg,
+                addr_reg=self._addr_reg,
+                val_reg=self._freq_loader.val_reg,
+                dmem_offset=self._freq_loader.offset,
+            ),
+            PatchWmemFromDmem(
+                name=self._readout.ro_window.name,
+                idx_reg=self.idx_reg,
+                addr_reg=self._addr_reg,
+                val_reg=self._ro_freq_loader.val_reg,
+                dmem_offset=self._ro_freq_loader.offset,
+            ),
+        )
+
+    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+        return self._readout.total_length(prog)
+
+    def run(
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
+        return self._readout.run(prog, t)
+
+    def allow_rerun(self) -> bool:
+        return True
+
+    def _validate_loop_count(self, prog: ModularProgramV2) -> None:
+        sweep_dict = prog.sweep_dict
+        if sweep_dict is None:
+            raise ValueError(
+                f"TablePulseReadout idx_reg={self.idx_reg!r} requires a sweep loop"
+            )
+        matches = [spec for name, spec in sweep_dict if name == self.idx_reg]
+        if len(matches) != 1:
+            raise ValueError(
+                f"TablePulseReadout idx_reg={self.idx_reg!r} must match exactly "
+                "one sweep loop"
+            )
+        spec = matches[0]
+        count = spec if isinstance(spec, int) else spec.expts
+        if count != len(self.freq_words):
+            raise ValueError(
+                f"TablePulseReadout table length {len(self.freq_words)} does not "
+                f"match loop {self.idx_reg!r} count {count}"
+            )

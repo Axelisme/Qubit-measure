@@ -73,6 +73,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
+from qick import QickConfig
 from qick.asm_v2 import QickParam
 
 from zcu_tools.program.v2.modules.base import Module
@@ -84,6 +85,7 @@ from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
     DirectReadout,
     PulseReadout,
+    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import (
     BathReset,
@@ -696,7 +698,7 @@ def _readout_plan(
     loop_counts: dict[str, int],
     point: dict[str, int],
     dmem_tables: dict[str, _DmemTable],
-    soccfg: object | None,
+    soccfg: QickConfig | None,
 ) -> ReadoutPlan:
     """Build the ReadoutPlan from a readout module at one sweep point."""
 
@@ -712,7 +714,7 @@ def _readout_plan(
             ro_length_us=ro_length_us,
             trig_offset_us=trig_offset_us,
         )
-    elif isinstance(module, PulseReadout):
+    elif isinstance(module, (PulseReadout, TablePulseReadout)):
         ro_freq = module.cfg.ro_cfg.ro_freq
         ro_length = module.cfg.ro_cfg.ro_length
         trig_offset = module.cfg.ro_cfg.trig_offset
@@ -724,12 +726,40 @@ def _readout_plan(
             module.cfg.pulse_cfg.pre_delay, loop_counts, point
         )
         f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
-        if module.gain_val is not None:
+        if isinstance(module, TablePulseReadout):
+            if module.idx_reg not in point:
+                raise UnsupportedModuleError(
+                    f"cannot determine which sweep point indexes "
+                    f"TablePulseReadout {module.name!r}"
+                )
+            idx = point[module.idx_reg]
+            if not 0 <= idx < len(module.freq_words):
+                raise UnsupportedModuleError(
+                    f"TablePulseReadout {module.name!r} index {idx} out of range"
+                )
+            if soccfg is None:
+                raise UnsupportedModuleError(
+                    "TablePulseReadout requires soccfg to decode frequency words"
+                )
+            f_ro_mhz = readout_freq_from_words(
+                soccfg,
+                module.freq_words[idx],
+                module.ro_freq_words[idx],
+                gen_ch=module.cfg.pulse_cfg.ch,
+                ro_ch=module.cfg.ro_cfg.ro_ch,
+                mixer_freq=module.cfg.pulse_cfg.mixer_freq,
+                nqz=module.cfg.pulse_cfg.nqz,
+            )
+        elif module.gain_val is not None:
             raise UnsupportedModuleError(
                 f"PulseReadout {module.name!r} uses gain_val={module.gain_val!r}; "
                 "SimEngine cannot decode raw gain LoadWord values"
             )
-        if module.freq_val is not None and module.ro_freq_val is not None:
+        if (
+            isinstance(module, PulseReadout)
+            and module.freq_val is not None
+            and module.ro_freq_val is not None
+        ):
             f_ro_mhz = _load_word_pair_freq_mhz(
                 module.freq_val,
                 module.ro_freq_val,
@@ -739,7 +769,7 @@ def _readout_plan(
                 pulse_cfg=module.cfg.pulse_cfg,
                 ro_ch=module.cfg.ro_cfg.ro_ch,
             )
-        elif module.freq_val is not None:
+        elif isinstance(module, PulseReadout) and module.freq_val is not None:
             f_ro_mhz = _load_word_gen_freq_mhz(
                 module.freq_val,
                 dmem_tables,
@@ -748,7 +778,7 @@ def _readout_plan(
                 pulse_cfg=module.cfg.pulse_cfg,
                 ro_ch=module.cfg.ro_cfg.ro_ch,
             )
-        elif module.ro_freq_val is not None:
+        elif isinstance(module, PulseReadout) and module.ro_freq_val is not None:
             f_ro_mhz = _load_word_ro_freq_mhz(
                 module.ro_freq_val,
                 dmem_tables,
@@ -779,7 +809,7 @@ def _load_word_gen_freq_mhz(
     val_reg: str,
     dmem_tables: dict[str, _DmemTable],
     point: dict[str, int],
-    soccfg: object | None,
+    soccfg: QickConfig | None,
     *,
     pulse_cfg: PulseCfg,
     ro_ch: int,
@@ -792,7 +822,7 @@ def _load_word_gen_freq_mhz(
             "PulseReadout.freq_val requires soccfg.reg2freq to decode LoadWord "
             "frequency words"
         )
-    return readout_freq_from_word(  # type: ignore[arg-type]
+    return readout_freq_from_word(
         soccfg,
         raw,
         kind="gen",
@@ -807,7 +837,7 @@ def _load_word_ro_freq_mhz(
     val_reg: str,
     dmem_tables: dict[str, _DmemTable],
     point: dict[str, int],
-    soccfg: object | None,
+    soccfg: QickConfig | None,
     *,
     pulse_cfg: PulseCfg,
     ro_ch: int,
@@ -821,7 +851,7 @@ def _load_word_ro_freq_mhz(
             "PulseReadout.ro_freq_val requires soccfg.reg2freq_adc to decode "
             "LoadWord readout frequency words"
         )
-    return readout_freq_from_word(  # type: ignore[arg-type]
+    return readout_freq_from_word(
         soccfg,
         raw,
         kind="ro",
@@ -838,7 +868,7 @@ def _load_word_pair_freq_mhz(
     ro_val_reg: str,
     dmem_tables: dict[str, _DmemTable],
     point: dict[str, int],
-    soccfg: object | None,
+    soccfg: QickConfig | None,
     *,
     pulse_cfg: PulseCfg,
     ro_ch: int,
@@ -856,7 +886,7 @@ def _load_word_pair_freq_mhz(
             "paired PulseReadout frequency words require soccfg frequency converters"
         )
     try:
-        return readout_freq_from_words(  # type: ignore[arg-type]
+        return readout_freq_from_words(
             soccfg,
             gen_word,
             ro_word,
@@ -988,7 +1018,7 @@ def lower_point(
     f_qubit_ghz: float,
     point: dict[str, int],
     cycles2us: object,
-    soccfg: object | None = None,
+    soccfg: QickConfig | None = None,
     detune_offset: float = 0.0,
 ) -> LoweredPoint:
     """Lower the module tree to a Bloch timeline + readout plan at one sweep point.

@@ -25,12 +25,12 @@ from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
-    LoadWord,
     ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
     ResetCfg,
     SweepCfg,
+    TablePulseReadout,
     sweep2param,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
@@ -241,24 +241,12 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                     sched.prog_builder(soc, soccfg)
                     .add_reset("reset", modules.reset)
                     .add(
-                        LoadWord(
-                            "load_readout_freq",
-                            values=freq_words,
-                            idx_reg="freq",
-                            val_reg="readout_freq_word",
-                        ),
-                        LoadWord(
-                            "load_readout_ro_freq",
-                            values=ro_freq_words,
-                            idx_reg="freq",
-                            val_reg="readout_ro_freq_word",
-                        ),
-                        PulseReadout(
+                        TablePulseReadout(
                             "readout",
                             modules.readout,
-                            freq_val="readout_freq_word",
-                            ro_freq_val="readout_ro_freq_word",
-                            phase_reset=True,
+                            idx_reg="freq",
+                            freq_words=freq_words,
+                            ro_freq_words=ro_freq_words,
                         ),
                     )
                     .declare_sweep("freq", len(freqs))
