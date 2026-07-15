@@ -58,10 +58,9 @@ def _copy_reg_to_wave_field(prog, reg: str, wave_reg: str) -> AsmInst:  # type: 
     return AsmInst(
         inst={
             "CMD": "REG_WR",
-            "DST": resolved,
+            "DST": wave_reg,
             "SRC": "op",
             "OP": resolved,
-            "WR": f"{wave_reg} op",
         },
         addr_inc=1,
     )

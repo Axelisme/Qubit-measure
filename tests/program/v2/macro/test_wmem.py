@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from qick.asm_v2 import AsmInst, WriteReg
+from qick.tprocv2_assembler import Assembler
 from zcu_tools.program.v2.macro.wmem import PatchWmemFromRegs
 
 
@@ -21,6 +23,12 @@ class _Prog:
 
     def _get_reg(self, name: str) -> str:
         return {"freq_word": "s1", "gain_word": "s2"}.get(name, name)
+
+
+def _compile_instruction(inst: AsmInst) -> list[int]:
+    command = {**inst.inst, "LINE": 1, "P_ADDR": 1}
+    _binary_text, binary_words = Assembler.list2bin([command])
+    return binary_words[0]
 
 
 def test_patch_wmem_from_regs_emits_read_patch_write_sequence() -> None:
@@ -44,19 +52,25 @@ def test_patch_wmem_from_regs_emits_read_patch_write_sequence() -> None:
     }
     assert insts[1].inst == {
         "CMD": "REG_WR",
-        "DST": "s1",
+        "DST": "w0",
         "SRC": "op",
         "OP": "s1",
-        "WR": "w0 op",
     }
     assert insts[2].inst == {
         "CMD": "REG_WR",
-        "DST": "s2",
+        "DST": "w3",
         "SRC": "op",
         "OP": "s2",
-        "WR": "w3 op",
     }
     assert insts[3].inst == {"CMD": "WMEM_WR", "DST": "&4"}
+
+
+def test_patch_wmem_from_regs_compiles_like_qick_wave_register_write() -> None:
+    prog = _Prog(["readout_wave"])
+    actual = PatchWmemFromRegs(name="readout", freq_reg="freq_word").expand(prog)[1]
+    oracle = WriteReg(dst="w0", src="freq_word").expand(prog)[0]
+
+    assert _compile_instruction(actual) == _compile_instruction(oracle)
 
 
 def test_patch_wmem_from_regs_ignores_special_waves() -> None:
