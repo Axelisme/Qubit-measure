@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-07-15 — portable dmem transport
+**Last updated:** 2026-07-15 — runtime wave-register playback
 
 ## Testing & Type Checking Conventions
 
@@ -49,6 +49,13 @@ The IR is divided into three layers to decouple high-level program structure fro
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## Macro Layer
+
+### Runtime wave-register playback
+
+Runtime pulse/readout words use dedicated macros that load a single-wave wmem
+template into `r_wave`, patch selected fields, and send `r_wave` directly to the
+target port. They do not persist the patched bundle to wmem. This keeps runtime
+updates atomic at playback and leaves the fixed template stable across points.
 
 ### `MetaMacro.regs` — Register Name Resolution
 

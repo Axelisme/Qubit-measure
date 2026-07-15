@@ -10,9 +10,12 @@ from ..base import fit_func
 def get_rough_edelay(
     freqs: NDArray[np.float64], signals: NDArray[np.complex128]
 ) -> float:
+    freq_steps = np.diff(freqs)
+    if np.any(freq_steps == 0.0):
+        raise ValueError("frequency points must be distinct")
     signal_ratios = signals[1:] / (signals[:-1] + 1e-12)
-
-    slope = np.median(np.angle(signal_ratios)) / (freqs[1] - freqs[0])
+    local_slopes = np.angle(signal_ratios) / freq_steps
+    slope = np.median(local_slopes)
 
     return -slope / (2 * np.pi)
 
@@ -69,9 +72,10 @@ def fit_circle_params(
     eigvals, eigvecs = sp.linalg.eig(M, B)
     eigvals = eigvals.real
 
-    # find the smallest non-negative eigenvalue
-    min_eigval = np.min(eigvals[eigvals >= 0])
-    eigvec = eigvecs[:, eigvals == min_eigval][:, 0]
+    # The exact-circle solution is the eigenvalue nearest zero. Floating-point
+    # roundoff can place it just below zero, so filtering for non-negative values
+    # selects a different circle even for noiseless data.
+    eigvec = eigvecs[:, np.argmin(np.abs(eigvals))]
 
     A, B, C, D = eigvec
     center_x = mean_x - B / (2 * A)
@@ -130,11 +134,10 @@ def fit_resonant_params(
     """[resonant_freq, Ql, theta0, bg_slope]"""
     phases = calc_phase(signals, circle_params[0], circle_params[1])
 
-    magnitudes = np.abs(signals - 0.5 * (signals[0] + signals[-1]))
-    fwhm = np.ptp(freqs) * np.sum(magnitudes > 0.5 * np.max(magnitudes)) / len(freqs)
-
-    init_freq = freqs[np.argmax(np.abs(np.diff(signals)))]
-    init_Ql = 2 * init_freq / fwhm
+    phase_slopes = np.gradient(phases, freqs)
+    resonance_index = int(np.argmax(np.abs(phase_slopes)))
+    init_freq = freqs[resonance_index]
+    init_Ql = abs(0.25 * init_freq * phase_slopes[resonance_index])
     init_theta0 = 0.5 * float(np.max(phases) + np.min(phases))
 
     bg_slope_est = abs((phases[-1] - phases[0]) / (freqs[-1] - freqs[0]))

@@ -200,8 +200,7 @@ class PulseReadout(AbsReadout):
         else:
             runtime_ro_name = self._runtime_ro_name
             assert runtime_ro_name is not None
-            prog.patch_wmem_from_regs(runtime_ro_name, freq_reg=self.ro_freq_val)
-            self._run_readout_config(prog, runtime_ro_name, t)
+            self._run_readout_config_from_regs(prog, runtime_ro_name, t)
 
         if not self._uses_runtime_pulse:
             self.pulse.run(prog, t)
@@ -210,15 +209,21 @@ class PulseReadout(AbsReadout):
             assert runtime_pulse is not None
             pulse_id = runtime_pulse.pulse_id
             assert pulse_id is not None
-            prog.patch_wmem_from_regs(
-                pulse_id, freq_reg=self.freq_val, gain_reg=self.gain_val
+            pulse_cfg = runtime_pulse.cfg
+            assert pulse_cfg is not None
+            prog.pulse_from_regs(
+                pulse_cfg.ch,
+                pulse_id,
+                t=t + pulse_cfg.pre_delay,
+                tag=runtime_pulse.tag,
+                freq_reg=self.freq_val,
+                gain_reg=self.gain_val,
             )
-            runtime_pulse.run(prog, t)
         return t + self.total_length(prog)
 
-    def _run_readout_config(
+    def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam
     ) -> None:
         ro_ch = self.cfg.ro_cfg.ro_ch
-        prog.send_readoutconfig(ro_ch, name, t=t)  # type: ignore
+        prog.send_readoutconfig_from_regs(ro_ch, name, t=t, freq_reg=self.ro_freq_val)
         prog.trigger([ro_ch], t=t + self.cfg.ro_cfg.trig_offset)

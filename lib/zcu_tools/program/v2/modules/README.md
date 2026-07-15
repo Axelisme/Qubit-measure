@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-07-14 — final readout frequency words
+**Last updated:** 2026-07-15 — coherent runtime wave-register playback
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -36,9 +36,13 @@ without leaking hardware register choreography into experiment classes.
   templates; raw word ownership remains with the `LoadWord` modules that populate
   the named registers.
 - Frequency words supplied to `freq_val` and `ro_freq_val` are the final uint32
-  hardware patterns written into wmem. They already include generator mixer
-  lowering and the readout downconversion sign; bare `freq2reg` outputs are not
-  valid substitutes for this contract.
+  hardware patterns applied to the wave frequency field. They already include
+  generator mixer lowering and the readout downconversion sign; bare `freq2reg`
+  outputs are not valid substitutes for this contract.
+- Runtime pulse/readout playback reads its fixed template from wmem, applies the
+  selected fields in `r_wave`, and sends that register bundle directly to the
+  hardware port. The runtime path does not write and immediately re-read wmem;
+  the template remains unchanged for the next sweep point.
 
 ## Design Boundaries
 

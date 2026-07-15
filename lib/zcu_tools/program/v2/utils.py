@@ -78,8 +78,8 @@ def readout_freq_words(
 ) -> tuple[list[int], list[int]]:
     """Encode absolute readout frequencies as final generator/readout words.
 
-    The returned unsigned 32-bit patterns are ready for ``LoadWord`` and
-    ``patch_wmem_from_regs``. They include QICK's absolute-frequency mixer
+    The returned unsigned 32-bit patterns are ready for ``LoadWord`` and runtime
+    wave-register playback. They include QICK's absolute-frequency mixer
     correction and readout downconversion sign, rather than the bare output of
     ``freq2reg`` or ``freq2reg_adc``.
     """

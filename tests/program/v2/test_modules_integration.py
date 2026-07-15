@@ -270,7 +270,13 @@ class TestReadoutIntegration:
         prog = _make_prog(modules=modules, sweep=[("freq", 2)])
 
         assert prog.binprog is not None
-        assert any(inst.get("CMD") == "WMEM_WR" for inst in prog.prog_list)
+        runtime_ports = [
+            inst
+            for inst in prog.prog_list
+            if inst.get("CMD") == "WPORT_WR" and inst.get("SRC") == "r_wave"
+        ]
+        assert len(runtime_ports) == 2
+        assert not any(inst.get("CMD") == "WMEM_WR" for inst in prog.prog_list)
 
     def test_readout_factory_direct_compiles(self):
         prog = _make_prog(modules=[Readout("ro", _direct_ro_cfg())])
