@@ -1,10 +1,57 @@
 from __future__ import annotations
 
+import warnings
+from collections.abc import Callable, Sequence
+
 import numpy as np
 import scipy as sp
 from numpy.typing import NDArray
 
 from ..base import fit_func
+
+
+def run_complex_refinement(
+    residual: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    initial: Sequence[float],
+    bounds: tuple[Sequence[float], Sequence[float]],
+    *,
+    model_name: str,
+) -> NDArray[np.float64] | None:
+    """Run the shared bounded complex-fit optimizer with explicit fallback."""
+    try:
+        result = sp.optimize.least_squares(
+            residual,
+            np.asarray(initial, dtype=np.float64),
+            bounds=bounds,
+            x_scale=np.ones(len(initial), dtype=np.float64),
+            ftol=1e-12,
+            xtol=1e-12,
+            gtol=1e-12,
+            max_nfev=10_000,
+        )
+    except (RuntimeError, ValueError, FloatingPointError) as exc:
+        warnings.warn(
+            f"{model_name} complex refinement failed; using sequential "
+            f"initializer ({exc})",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
+
+    if (
+        not result.success
+        or not np.all(np.isfinite(result.x))
+        or not np.all(np.isfinite(result.fun))
+        or np.any(result.active_mask != 0)
+    ):
+        warnings.warn(
+            f"{model_name} complex refinement was non-finite, unsuccessful, or "
+            "reached a parameter bound; using sequential initializer",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
+    return np.asarray(result.x, dtype=np.float64)
 
 
 def get_rough_edelay(
@@ -115,13 +162,8 @@ def phase_func(
     resonant_f: float,
     Ql: float,
     theta0: float,
-    bg_slope: float = 0.0,
 ) -> NDArray[np.float64]:
-    return (
-        theta0
-        + 2 * np.arctan(2 * Ql * (1 - freqs / resonant_f))
-        + bg_slope * (freqs - resonant_f)
-    )
+    return theta0 + 2 * np.arctan(2 * Ql * (1 - freqs / resonant_f))
 
 
 def fit_resonant_params(
@@ -129,9 +171,8 @@ def fit_resonant_params(
     signals: NDArray[np.complex128],
     circle_params: tuple[float, float, float],
     fit_theta0: bool = True,
-    fit_bg_slope: bool = False,
-) -> tuple[float, float, float, float]:
-    """[resonant_freq, Ql, theta0, bg_slope]"""
+) -> tuple[float, float, float]:
+    """Return ``[resonant_freq, Ql, theta0]`` from circle phase."""
     phases = calc_phase(signals, circle_params[0], circle_params[1])
 
     phase_slopes = np.gradient(phases, freqs)
@@ -140,9 +181,7 @@ def fit_resonant_params(
     init_Ql = abs(0.25 * init_freq * phase_slopes[resonance_index])
     init_theta0 = 0.5 * float(np.max(phases) + np.min(phases))
 
-    bg_slope_est = abs((phases[-1] - phases[0]) / (freqs[-1] - freqs[0]))
-
-    fixedparams: list[float | None] = [None] * 4
+    fixedparams: list[float | None] = [None] * 3
     if not fit_theta0:
         init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1]).item()
         while init_theta0 < np.min(phases):
@@ -150,22 +189,73 @@ def fit_resonant_params(
         while init_theta0 > np.max(phases):
             init_theta0 -= 2 * np.pi
         fixedparams[2] = init_theta0
-    if not fit_bg_slope:
-        fixedparams[3] = 0.0
 
     pOpt, _ = fit_func(
         freqs,
         phases,
         phase_func,
-        init_p=[init_freq, init_Ql, init_theta0, 0.0],
+        init_p=[init_freq, init_Ql, init_theta0],
         bounds=(
-            [np.min(freqs), 0, init_theta0 - np.pi, -1.1 * bg_slope_est],
-            [np.max(freqs), 5 * init_Ql, init_theta0 + np.pi, 1.1 * bg_slope_est],
+            [np.min(freqs), 0, init_theta0 - np.pi],
+            [np.max(freqs), 5 * init_Ql, init_theta0 + np.pi],
         ),
         fixedparams=fixedparams,
     )
 
-    return (pOpt[0], pOpt[1], pOpt[2], pOpt[3])
+    return (pOpt[0], pOpt[1], pOpt[2])
+
+
+def validate_complex_fit_inputs(
+    freqs: NDArray[np.float64], signals: NDArray[np.complex128]
+) -> float:
+    """Validate a resonance fit and return its positive frequency span."""
+    if freqs.ndim != 1 or signals.ndim != 1:
+        raise ValueError(
+            "resonance fit expects one-dimensional frequency and signal arrays"
+        )
+    if freqs.shape != signals.shape:
+        raise ValueError(
+            "frequency and signal arrays must have the same shape, got "
+            f"{freqs.shape} and {signals.shape}"
+        )
+    if len(freqs) < 4:
+        raise ValueError("resonance fit requires at least four samples")
+    if not np.all(np.isfinite(freqs)) or not np.all(np.isfinite(signals)):
+        raise ValueError("resonance fit inputs must be finite")
+    span = float(np.ptp(freqs))
+    if span <= 0.0:
+        raise ValueError("resonance fit requires a positive frequency span")
+    if len(np.unique(freqs)) != len(freqs):
+        raise ValueError("resonance fit frequency points must be distinct")
+    return span
+
+
+def remove_background(
+    freqs: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    *,
+    freq: float,
+    edelay: float,
+    bg_amp_slope: float,
+) -> NDArray[np.complex128]:
+    """Remove global delay and multiplicative log-amplitude background."""
+    return (
+        signals
+        * np.exp(1j * 2.0 * np.pi * freqs * edelay)
+        * np.exp(-bg_amp_slope * (freqs - freq))
+    )
+
+
+def align_phase_to_data(
+    phase: float,
+    freqs: NDArray[np.float64],
+    data_phases: NDArray[np.float64],
+    resonant_f: float,
+) -> float:
+    """Move an analytic phase onto the unwrapped data branch at resonance."""
+    order = np.argsort(freqs)
+    reference = float(np.interp(resonant_f, freqs[order], data_phases[order]))
+    return phase + 2.0 * np.pi * round((reference - phase) / (2.0 * np.pi))
 
 
 def normalize_signal(

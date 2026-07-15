@@ -131,10 +131,11 @@ the options, and let the user choose.
   guessing.** A common lab convention is that multi-qubit chip-integrated
   readout resonators are hanger-type, while single-qubit sample-box readout
   modes are often transmission-type, but this is only a heuristic.
-- **For narrow windows and overlapping peaks, treat `fit_bg_slope` as a
-  potential overfit knob.** If the background line is doing obvious work the
-  physics should be doing, re-run with `fit_bg_slope=false` and compare the
-  figure, not just the summary.
+- **Treat `fit_bg_amp_slope` as a multiplicative amplitude-background knob.**
+  It fits a real log-amplitude slope across the whole resonator response and
+  does not add phase slope. For narrow windows or overlapping peaks, re-run
+  with `fit_bg_amp_slope=false` and compare the fitted envelope, circle, and
+  linewidth—not just the summary.
 - **Do not force single-peak `hm` fits onto obviously overlapped or truncated
   features.** In those cases it is better to save the trace, report a manually
   verified dip frequency, and leave linewidth / derived module writeback unset

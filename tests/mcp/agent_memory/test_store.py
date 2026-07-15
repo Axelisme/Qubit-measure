@@ -302,7 +302,7 @@ def test_search_keyword_and_filters(tmp_path):
         exp_type="onetone/freq",
         symptom="asymmetric dip",
         category="analysis-heuristic",
-        body="use hm model and fit_bg_slope",
+        body="use hm model and fit_bg_amp_slope",
     )
     s.record_measurement(
         chip="Q1",

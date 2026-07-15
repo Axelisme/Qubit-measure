@@ -42,7 +42,9 @@ class OneToneFreqAnalyzeParams:
     model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
         "hm"
     )
-    fit_bg_slope: Annotated[bool, ParamMeta(label="Fit background slope")] = True
+    fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
+        True
+    )
 
 
 @dataclass
@@ -93,7 +95,8 @@ class OneToneFreqAdapter(
         ),
         recommended=(
             "Analysis defaults to the hanger-model fit ('hm') with "
-            "background-slope fitting on. A sweep spanning a few linewidths "
+            "multiplicative amplitude-background fitting on. A sweep spanning "
+            "a few linewidths "
             "around the known resonator frequency usually captures the dip "
             "cleanly; widen it if the resonator has drifted. Use "
             "homophasal sampling after a fit has written 'theta0' when you "
@@ -199,7 +202,7 @@ class OneToneFreqAdapter(
         freq, fwhm, fit_params, figure = FreqExp().analyze(
             req.run_result,
             model_type=params.model_type,
-            fit_bg_slope=params.fit_bg_slope,
+            fit_bg_amp_slope=params.fit_bg_amp_slope,
         )
         return OneToneFreqAnalyzeResult(
             freq=freq,

@@ -14,12 +14,14 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
 )
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
     OneToneFreqAdapter,
+    OneToneFreqAnalyzeParams,
     OneToneFreqAnalyzeResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.onetone.power_dep import (
     OneTonePowerDepAdapter,
 )
 from zcu_tools.gui.app.main.adapter import (
+    AnalyzeRequest,
     MetaDictWriteback,
     ModuleWriteback,
     RunRequest,
@@ -77,6 +79,38 @@ def _make_req(
 
 def _lower(schema: CfgSchema, req: RunRequest) -> dict[str, object]:
     return schema_to_raw_dict(schema, None, req.ml)
+
+
+def test_freq_analyze_params_default_and_forwarding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    params = OneToneFreqAnalyzeParams()
+    assert params.fit_bg_amp_slope is True
+
+    run_result = FreqResult(
+        freqs=np.linspace(5990.0, 6010.0, 11),
+        signals=np.ones(11, dtype=np.complex128),
+    )
+    sentinel_figure = MagicMock()
+    analyze = MagicMock(return_value=(6000.0, 1.0, {}, sentinel_figure))
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.adapters.onetone.freq.FreqExp.analyze", analyze
+    )
+    req = AnalyzeRequest(
+        run_result=run_result,
+        analyze_params=params,
+        md=MetaDict(),
+        ml=ModuleLibrary(),
+        predictor=None,
+    )
+
+    OneToneFreqAdapter().analyze(req)
+
+    analyze.assert_called_once_with(
+        run_result,
+        model_type="hm",
+        fit_bg_amp_slope=True,
+    )
 
 
 def _make_pulse_readout(

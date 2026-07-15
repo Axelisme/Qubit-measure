@@ -300,7 +300,9 @@ _ = res_freq_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-f, kappa, params, fig = res_freq_exp.analyze(model_type="hm", fit_bg_slope=True)
+f, kappa, params, fig = res_freq_exp.analyze(
+    model_type="hm", fit_bg_amp_slope=True
+)
 ```
 
 ```python

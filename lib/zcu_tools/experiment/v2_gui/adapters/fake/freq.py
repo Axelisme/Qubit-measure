@@ -154,7 +154,9 @@ class FakeFreqAnalyzeParams:
     model_type: Annotated[Literal["hm", "t", "auto"], ParamMeta(label="Model type")] = (
         "hm"
     )
-    fit_bg_slope: Annotated[bool, ParamMeta(label="Fit background slope")] = False
+    fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
+        False
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,13 +224,13 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
         result: FreqResult | None = None,
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
-        fit_bg_slope: bool = False,
+        fit_bg_amp_slope: bool = False,
     ) -> tuple[float, float, dict[str, Any], Figure]:
         # Analysis is blind by construction — it only sees the result, never the
         # ground-truth sim params; no instance state needed.
         assert result is not None
         return FreqExp().analyze(
-            result, model_type=model_type, fit_bg_slope=fit_bg_slope
+            result, model_type=model_type, fit_bg_amp_slope=fit_bg_amp_slope
         )
 
     def save(self, result: FreqResult) -> None:
@@ -282,8 +284,9 @@ class FakeFreqAdapter(
         ),
         recommended=(
             "Analysis defaults to the hanger-model fit ('hm'). Switch to the "
-            "transmission model ('t') and enable background-slope fitting when "
-            "the signal-to-noise is poor or the baseline is visibly tilted. "
+            "transmission model ('t') and enable amplitude-background fitting "
+            "when the signal-to-noise is poor or the magnitude baseline is "
+            "visibly tilted. "
             "Use this adapter to validate an analysis pipeline before taking "
             "it to real hardware."
         ),
@@ -366,7 +369,7 @@ class FakeFreqAdapter(
         freq, fwhm, fit_params, figure = FakeFreqExp.analyze(
             req.run_result,
             model_type=analyze_params.model_type,
-            fit_bg_slope=analyze_params.fit_bg_slope,
+            fit_bg_amp_slope=analyze_params.fit_bg_amp_slope,
         )
         return FakeFreqAnalyzeResult(
             freq=freq,

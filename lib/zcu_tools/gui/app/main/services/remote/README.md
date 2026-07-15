@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-12 — owner scheduler, gate presence, and UI adapters
+**Last updated:** 2026-07-16 — resonance amplitude-background analyze contract
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -118,11 +118,10 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 51`, `GUI_VERSION = 71`, and
-`MCP_VERSION = 73`（defined in `zcu_tools.mcp.measure.server`）。WIRE 51新增
-`state.hardware_gate` read model；GUI 70把service completion改為Qt-free typed facts；
-GUI 71把cfg input enhancer與exception presenter移至Qt UI adapters；MCP 73把gate
-presence折入`gui_overview.hardware_gate`。
+Current measure-gui values are `WIRE_VERSION = 52`, `GUI_VERSION = 72`, and
+`MCP_VERSION = 73`（defined in `zcu_tools.mcp.measure.server`）。WIRE 52把one-tone
+analyze param原子切換為`fit_bg_amp_slope`，表示multiplicative log-amplitude
+background；GUI 72同步resonance fitting與corrected-domain plotting；MCP 73維持不變。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump

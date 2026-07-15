@@ -281,7 +281,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         edelay: float | None = None,
-        fit_bg_slope: bool = False,
+        fit_bg_amp_slope: bool = False,
     ) -> tuple[float, float, dict[str, Any], Figure]:
         assert result is not None, "no result found"
 
@@ -301,7 +301,9 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         else:
             raise ValueError(f"Invalid model type: {model_type}")
 
-        param_dict = model.fit(freqs, signals, edelay, fit_bg_slope=fit_bg_slope)
+        param_dict = model.fit(
+            freqs, signals, edelay, fit_bg_amp_slope=fit_bg_amp_slope
+        )
         fig = model.visualize_fit(freqs, signals, param_dict)  # type: ignore
 
         return (

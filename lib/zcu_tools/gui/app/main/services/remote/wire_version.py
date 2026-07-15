@@ -81,16 +81,20 @@ from __future__ import annotations
 # v50: EventBus push envelopes add process-wide seq and origin attribution.
 # v51: state.hardware_gate read RPC exposes active exclusion presence as
 # {active:[{kind, origin_kind, note, active_for_seconds}]}.
-WIRE_VERSION = 51
+# v52: one-tone analyze params replace the circle-phase nuisance toggle with
+# fit_bg_amp_slope, which fits a multiplicative log-amplitude background.
+WIRE_VERSION = 52
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
 # v69: hardware-gate presence and owner-loop gate attribution.
 # v70: service completion delivery uses Qt-free typed EventBus facts.
 # v71: cfg input enhancement and exception presentation live in Qt UI adapters.
+# v72: resonance analysis and plotting use multiplicative amplitude-background
+# correction, including the renamed one-tone analyze control.
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 71  # Qt UI presentation adapters
+GUI_VERSION = 72  # resonator amplitude-background analysis

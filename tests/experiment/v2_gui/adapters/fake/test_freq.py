@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-from zcu_tools.gui.app.main.adapter import RunRequest
+from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
+    FakeFreqAdapter,
+    FakeFreqAnalyzeParams,
+    FakeFreqExp,
+)
+from zcu_tools.gui.app.main.adapter import AnalyzeRequest, RunRequest
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.meta_tool import MetaDict
@@ -37,6 +41,34 @@ def _make_req(ml=None):
 def _lower(schema: CfgSchema, req: RunRequest) -> dict:
 
     return schema_to_raw_dict(schema, None, req.ml)
+
+
+def test_fake_freq_analyze_params_default_and_forwarding(monkeypatch) -> None:
+    params = FakeFreqAnalyzeParams()
+    assert params.fit_bg_amp_slope is False
+
+    run_result = MagicMock()
+    sentinel_figure = MagicMock()
+    analyze = MagicMock(return_value=(6000.0, 1.0, {}, sentinel_figure))
+    monkeypatch.setattr(FakeFreqExp, "analyze", analyze)
+    adapter = FakeFreqAdapter(fast_mode=True)
+    ctx = _real_ctx()
+
+    adapter.analyze(
+        AnalyzeRequest(
+            run_result=run_result,
+            analyze_params=params,
+            md=ctx.md,
+            ml=ctx.ml,
+            predictor=ctx.predictor,
+        )
+    )
+
+    analyze.assert_called_once_with(
+        run_result,
+        model_type="hm",
+        fit_bg_amp_slope=False,
+    )
 
 
 def test_fakefreq_build_exp_cfg_basic():

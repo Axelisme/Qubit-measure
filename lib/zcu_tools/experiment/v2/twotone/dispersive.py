@@ -43,8 +43,8 @@ from zcu_tools.utils.fitting.resonance import (
     fit_edelay,
     get_proper_model,
     normalize_signal,
-    remove_edelay,
 )
+from zcu_tools.utils.fitting.resonance.base import remove_background
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
 
     @retrieve_result
     def analyze(
-        self, result: DispersiveResult | None = None, fit_bg_slope: bool = False
+        self, result: DispersiveResult | None = None, fit_bg_amp_slope: bool = False
     ) -> tuple[float, float, Figure]:
         assert result is not None, "no result found"
 
@@ -160,8 +160,18 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         edelay = 0.5 * (g_edelay + e_edelay)
 
         model = get_proper_model(freqs, g_signals)
-        g_params = model.fit(freqs, g_signals, edelay=edelay, fit_bg_slope=fit_bg_slope)
-        e_params = model.fit(freqs, e_signals, edelay=edelay, fit_bg_slope=fit_bg_slope)
+        g_params = model.fit(
+            freqs,
+            g_signals,
+            edelay=edelay,
+            fit_bg_amp_slope=fit_bg_amp_slope,
+        )
+        e_params = model.fit(
+            freqs,
+            e_signals,
+            edelay=edelay,
+            fit_bg_amp_slope=fit_bg_amp_slope,
+        )
 
         g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
         e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]
@@ -207,9 +217,15 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
             color: str,
             label: str,
         ) -> None:
-            rot_signals = remove_edelay(freqs, signals, edelay)
+            corrected = remove_background(
+                freqs,
+                signals,
+                freq=params_dict["freq"],
+                edelay=params_dict["edelay"],
+                bg_amp_slope=params_dict["bg_amp_slope"],
+            )
             norm_signals, norm_circle_params = normalize_signal(
-                rot_signals, params_dict["circle_params"], params_dict["a0"]
+                corrected, params_dict["circle_params"], params_dict["a0"]
             )
             norm_xc, norm_yc, norm_r0 = norm_circle_params
 
