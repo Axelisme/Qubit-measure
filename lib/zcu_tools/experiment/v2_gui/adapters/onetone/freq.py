@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
@@ -38,7 +38,8 @@ EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _SAMPLING_MODE_CHOICES: list[SamplingMode] = ["linear", "homophasal"]
 _HOMOPHASAL_MD_KEYS = ("r_f", "rf_w", "theta0")
-_EDELAY_MD_KEYS = ("res_edelay", "res_edelay_res_ch", "res_edelay_ro_ch")
+_EDELAY_MD_KEY = "res_edelay_calibration"
+_EDELAY_CALIBRATION_FIELDS = frozenset({"edelay", "res_ch", "ro_ch"})
 _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 
 
@@ -97,8 +98,7 @@ class OneToneFreqAdapter(
             "window; 'res_ch' / 'ro_ch' seed drive / readout channels; "
             "'timeFly' seeds the trigger offset. Homophasal sampling also "
             "requires fitted 'r_f', 'rf_w', and 'theta0'. Analysis optionally "
-            "uses route-matched 'res_edelay' / 'res_edelay_res_ch' / "
-            "'res_edelay_ro_ch' calibration values."
+            "uses a route-matched 'res_edelay_calibration' value."
         ),
         expects_ml=(
             "Needs a pulse-readout module, and references a ModuleLibrary "
@@ -168,9 +168,12 @@ class OneToneFreqAdapter(
         if route is None:
             return None
         get = getattr(md_obj, "get")
-        prior = cls._finite_real(get(_EDELAY_MD_KEYS[0]))
-        prior_res_ch = cls._channel(get(_EDELAY_MD_KEYS[1]))
-        prior_ro_ch = cls._channel(get(_EDELAY_MD_KEYS[2]))
+        raw = get(_EDELAY_MD_KEY)
+        if not isinstance(raw, Mapping) or set(raw) != _EDELAY_CALIBRATION_FIELDS:
+            return None
+        prior = cls._finite_real(raw["edelay"])
+        prior_res_ch = cls._channel(raw["res_ch"])
+        prior_ro_ch = cls._channel(raw["ro_ch"])
         if prior is None or prior_res_ch is None or prior_ro_ch is None:
             return None
         if (prior_res_ch, prior_ro_ch) != route:
@@ -207,10 +210,11 @@ class OneToneFreqAdapter(
         raise ValueError(f"Invalid electrical-delay mode: {params.edelay_mode!r}")
 
     @staticmethod
-    def _has_nonuniform_frequency_grid(result: OneToneFreqRunResult) -> bool:
-        if len(result.freqs) < 3:
+    def _has_nonuniform_fitting_grid(result: OneToneFreqRunResult) -> bool:
+        fitting_freqs = result.freqs[1:-1]
+        if len(fitting_freqs) < 3:
             return False
-        steps = np.abs(np.diff(result.freqs))
+        steps = np.abs(np.diff(fitting_freqs))
         return not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
 
     @classmethod
@@ -338,7 +342,7 @@ class OneToneFreqAdapter(
                 route is not None
                 and (
                     edelay_seed is not None
-                    or self._has_nonuniform_frequency_grid(req.run_result)
+                    or self._has_nonuniform_fitting_grid(req.run_result)
                 )
             ),
         )
@@ -379,24 +383,16 @@ class OneToneFreqAdapter(
                     "and pulse-readout route"
                 )
             res_ch, ro_ch = route
-            items.extend(
-                [
-                    MetaDictWriteback(
-                        target_name="res_edelay",
-                        description="Route-qualified resonator electrical delay",
-                        proposed_value=edelay,
-                    ),
-                    MetaDictWriteback(
-                        target_name="res_edelay_res_ch",
-                        description="Generator channel for resonator electrical delay",
-                        proposed_value=res_ch,
-                    ),
-                    MetaDictWriteback(
-                        target_name="res_edelay_ro_ch",
-                        description="Readout channel for resonator electrical delay",
-                        proposed_value=ro_ch,
-                    ),
-                ]
+            items.append(
+                MetaDictWriteback(
+                    target_name=_EDELAY_MD_KEY,
+                    description="Route-qualified resonator electrical-delay calibration",
+                    proposed_value={
+                        "edelay": edelay,
+                        "res_ch": res_ch,
+                        "ro_ch": ro_ch,
+                    },
+                )
             )
         items.extend(
             pulse_readout_module_writeback_items(

@@ -62,7 +62,7 @@
 ## Analysis / Simulation / Waveform
 
 - [0054 — Resonance multiplicative amplitude background](0054-resonance-multiplicative-amplitude-background.md)：real log-amplitude slope 乘完整 resonator response，`edelay` 維持唯一 global phase slope。
-- [0055 — Route-scoped resonator electrical delay](0055-route-scoped-resonator-electrical-delay.md)：boundary search 可 bounded adaptive expansion；成功 delay 依 generator/readout route 持久化為後續 branch seed。
+- [0055 — Route-scoped resonator electrical delay](0055-route-scoped-resonator-electrical-delay.md)：boundary search 可 bounded adaptive expansion；成功 delay 與 generator/readout route 以單一 compound calibration 持久化為後續 branch seed。
 - [0028 — Fluxdep analysis kernel](0028-fluxdep-analysis-kernel.md)：flux-dependence analysis kernel 位於 GUI / notebook adapter 之外。
 - [0029 — Fluxonium prediction engine](0029-fluxonium-prediction-engine.md)：Fluxonium prediction policy 位於 `simulate.fluxonium`。
 - [0030 — Arbitrary waveform optional recipe](0030-arbitrary-waveform-asset-optional-recipe.md)：arbitrary waveform asset 是 qubit-scoped `.npz`，可內嵌 formula recipe。

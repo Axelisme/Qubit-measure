@@ -309,6 +309,47 @@ def test_find_edelay_branch_still_fails_at_adaptive_search_cap(
         )
 
 
+def test_find_edelay_branch_recovers_resonance_waveform_across_multiple_expansions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freq, Ql, edelay = 5549.0, 740.0, 11.299
+    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
+    signals = _hanger_truth(
+        freqs,
+        freq=freq,
+        Ql=Ql,
+        Qc_abs=1100.0,
+        phi=0.12,
+        a0=1.25 * np.exp(0.31j),
+        edelay=edelay,
+        bg_amp_slope=0.004,
+    )
+    radii: list[float] = []
+    original_find = resonance_base._find_edelay_branch
+
+    def capture_radius(
+        freqs: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        rough_edelay: float,
+        search_radius: float,
+    ) -> float:
+        radii.append(search_radius)
+        return original_find(freqs, signals, rough_edelay, search_radius)
+
+    monkeypatch.setattr(resonance_base, "get_rough_edelay", lambda *_args: 0.0)
+    monkeypatch.setattr(resonance_base, "_find_edelay_branch", capture_radius)
+
+    estimated = find_edelay_branch(
+        freqs,
+        signals,
+        search_radius=1.5,
+        max_search_radius=20.0,
+    )
+
+    assert radii == [1.5, 3.0, 6.0, 12.0]
+    assert estimated == pytest.approx(edelay, abs=2e-3)
+
+
 def test_find_edelay_branch_warns_for_near_tied_nonuniform_peaks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

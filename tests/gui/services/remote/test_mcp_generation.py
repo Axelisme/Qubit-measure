@@ -27,7 +27,7 @@ def test_canonical_cfg_contract_revisions_are_exact() -> None:
     )
 
     assert WIRE_VERSION == 53
-    assert GUI_VERSION == 73
+    assert GUI_VERSION == 74
     assert m.MCP_VERSION == 73
 
 

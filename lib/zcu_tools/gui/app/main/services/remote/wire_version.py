@@ -96,9 +96,11 @@ WIRE_VERSION = 53
 # correction, including the renamed one-tone analyze control.
 # v73: one-tone analysis adds route-qualified electrical-delay calibration,
 # adaptive branch-search recovery, and conditional background plotting.
+# v74: resonator electrical-delay calibration persists as one compound MetaDict
+# value, so writeback selection cannot split delay from its route identity.
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 73  # adaptive route-qualified resonator electrical delay
+GUI_VERSION = 74  # compound route-qualified resonator electrical delay

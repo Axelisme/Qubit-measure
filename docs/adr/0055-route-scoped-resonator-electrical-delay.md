@@ -25,11 +25,14 @@ cable delay。另一方面，成功辨識的 delay 只對相同 generator/readou
   - `manual` 必須取得 finite manual seed。
 - prior/manual 值是 branch seed；circle-loss local refinement 仍會調整它。它們不是固定
   `edelay`，也不改變 explicit `edelay` 的 authoritative bypass contract。
-- MetaDict 使用 `res_edelay`、`res_edelay_res_ch`、`res_edelay_ro_ch` 表達 calibration
-  與 route identity。worker 只讀取這三個值，成功結果仍透過 analyze writeback proposal
+- MetaDict 使用單一 compound `res_edelay_calibration = {edelay, res_ch, ro_ch}` 表達
+  calibration 與 route identity。它是一個不可拆分的 writeback item，因此 UI selection
+  不能形成「新 delay + 舊 route tags」；其 non-scalar proposal 在 GUI 中為 read-only。
+  worker 只讀取這個完整且 typed 的 value，成功結果仍透過 analyze writeback proposal
   交給 `ContextService` 寫入。
 - 只有 run snapshot 可辨識 pulse generator/readout route，且本次使用可信 prior/manual
-  seed，或 frequency grid 為 nonuniform 時，才提出 route-scoped prior writeback。
+  seed，或實際參與 fitting（移除首尾點後）的 frequency grid 為 nonuniform 時，才提出
+  route-scoped prior writeback。
   Uniform grid 在沒有可信 seed 時只保留 local canonical alias，不持久化為 calibration。
 - Analyze parameter schema 是 remote wire contract；加入 mode/manual/max radius 時同步遞增
   measure-gui `WIRE_VERSION` 與 `GUI_VERSION`。
@@ -51,5 +54,7 @@ cable delay。另一方面，成功辨識的 delay 只對相同 generator/readou
   fit 可能被帶到錯誤 branch。
 - **只存一個不含 route 的 global edelay：** 更換 generator/readout channel 後 calibration
   不再可信。
+- **把 delay 與 route tags 拆成三個 writeback items：** UI 可只套用其中一部分，產生
+  錯配 calibration tuple；單一 compound MetaDict value 才能讓 selection all-or-none。
 - **background worker 直接修改 MetaDict：** 破壞 [[0006]] 的單一寫入權威與 writeback
   preview/apply 流程。

@@ -159,11 +159,13 @@ readout 不是 pulse readout 時，module writeback graceful skip，只保留 Me
 
 `onetone/freq` 的 electrical-delay analyze policy 提供 `auto` / `calibrated` / `manual`。
 `auto` 優先讀取 MetaDict 中與本次 pulse generator/readout channel 相符的
-`res_edelay` prior，缺少時以 bounded adaptive global search 建立 branch；`calibrated`
+`res_edelay_calibration` prior，缺少時以 bounded adaptive global search 建立 branch；`calibrated`
 要求相符 prior，`manual` 要求 finite seed。prior/manual 都只固定 branch，後續仍作 local
-refinement。只有 nonuniform grid 能自行辨識 absolute branch；uniform grid 若沒有可信 seed，
-不會把 local alias 提案寫成 calibration。可持久化的結果以 `res_edelay`、
-`res_edelay_res_ch`、`res_edelay_ro_ch` 三個 MetaDict writeback items 保存，遵循 ADR-0055。
+refinement。只有實際參與 fitting（移除首尾點後）的 nonuniform grid 能自行辨識 absolute
+branch；uniform grid 若沒有可信 seed，不會把 local alias 提案寫成 calibration。可持久化
+的結果以單一 compound MetaDict writeback item
+`res_edelay_calibration = {edelay, res_ch, ro_ch}` 保存，讓 delay 與 route identity 的選取
+all-or-none，遵循 ADR-0055。
 
 ---
 
