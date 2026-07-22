@@ -6,11 +6,13 @@ from types import SimpleNamespace
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+import zcu_tools.utils.fitting.resonance.base as resonance_base
 from numpy.typing import NDArray
 from zcu_tools.utils.fitting.resonance import (
     HangerModel,
     TransmissionModel,
     calc_phase,
+    find_edelay_branch,
     fit_circle_params,
     fit_edelay,
     get_proper_model,
@@ -180,6 +182,101 @@ def test_fit_edelay_preserves_uniform_grid_alias_class() -> None:
 
     assert abs(alias_error) < 3e-3
     assert abs(estimated) < 0.5 * alias_period
+
+
+def test_related_uniform_traces_share_alias_across_branch_cut() -> None:
+    edelay = 4.997
+    freqs = np.linspace(5000.0, 5030.0, 301)
+    signals = np.asarray(
+        [
+            _hanger_truth(
+                freqs,
+                freq=freq,
+                Ql=740.0,
+                Qc_abs=1100.0,
+                phi=0.12,
+                a0=1.25 * np.exp(0.31j),
+                edelay=edelay,
+                bg_amp_slope=0.004,
+            )
+            for freq in (5008.0, 5013.0)
+        ]
+    )
+
+    branch_seed = find_edelay_branch(freqs, signals)
+    estimates = np.asarray(
+        [fit_edelay(freqs, row, branch_seed=branch_seed) for row in signals]
+    )
+    alias_period = 1.0 / float(freqs[1] - freqs[0])
+    alias_errors = (estimates - edelay + 0.5 * alias_period) % alias_period
+    alias_errors -= 0.5 * alias_period
+
+    np.testing.assert_allclose(alias_errors, 0.0, atol=3e-3)
+    assert np.ptp(estimates) < 1e-3
+
+
+def test_find_edelay_branch_fast_fails_before_oversized_radius_overflow() -> None:
+    freqs = np.asarray([5000.0, 5000.2, 5000.55, 5001.0])
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
+
+    with np.errstate(over="raise"):
+        with pytest.raises(ValueError, match="candidate resource limit"):
+            find_edelay_branch(
+                freqs,
+                signals,
+                search_radius=np.finfo(np.float64).max,
+            )
+
+
+def test_find_edelay_branch_rejects_optimum_at_search_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freqs = np.asarray([0.0, 0.2, 0.55, 0.8])
+    candidate_step = 1.0 / (8.0 * np.ptp(freqs))
+    boundary_delay = 3.0 * candidate_step
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * boundary_delay)
+    monkeypatch.setattr(resonance_base, "get_rough_edelay", lambda *_args: 0.0)
+
+    with pytest.raises(ValueError, match="search boundary"):
+        find_edelay_branch(freqs, signals, search_radius=boundary_delay)
+
+
+def test_find_edelay_branch_warns_for_near_tied_nonuniform_peaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
+    signals = _hanger_truth(
+        freqs,
+        freq=5549.0,
+        Ql=740.0,
+        Qc_abs=1100.0,
+        phi=0.12,
+        a0=1.25 * np.exp(0.31j),
+        edelay=11.299,
+        bg_amp_slope=0.004,
+    )
+    monkeypatch.setattr(resonance_base, "_EDELAY_AMBIGUITY_MARGIN", 2.0)
+
+    with pytest.warns(RuntimeWarning, match="branch search is ambiguous"):
+        find_edelay_branch(freqs, signals)
+
+
+def test_find_edelay_branch_is_chunk_size_invariant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
+    signals = _transmission_truth(
+        freqs,
+        freq=5549.0,
+        Ql=740.0,
+        a0=1.25 * np.exp(0.31j),
+        edelay=11.299,
+        bg_amp_slope=0.004,
+    )
+    expected = find_edelay_branch(freqs, signals)
+    monkeypatch.setattr(resonance_base, "_EDELAY_BRANCH_CHUNK_SIZE", 17)
+
+    assert find_edelay_branch(freqs, signals) == expected
 
 
 @pytest.mark.parametrize("model", [HangerModel, TransmissionModel])

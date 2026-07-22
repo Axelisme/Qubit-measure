@@ -78,6 +78,28 @@ def _is_uniform_frequency_grid(freq_steps: NDArray[np.float64]) -> bool:
     return bool(np.allclose(abs_steps, np.median(abs_steps), rtol=1e-8, atol=0.0))
 
 
+def _aggregate_rough_edelays(
+    freq_steps: NDArray[np.float64], rough_edelays: NDArray[np.float64]
+) -> float:
+    if len(rough_edelays) == 1:
+        return float(rough_edelays[0])
+    if not _is_uniform_frequency_grid(freq_steps):
+        return float(np.median(rough_edelays))
+
+    alias_period = 1.0 / float(np.median(np.abs(freq_steps)))
+    alias_angles = 2.0 * np.pi * rough_edelays / alias_period
+    resultant = np.mean(np.exp(1j * alias_angles))
+    if abs(resultant) < 1e-6:
+        warnings.warn(
+            "related traces have ambiguous uniform-grid delay aliases; using the "
+            "first trace's canonical alias",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return float(rough_edelays[0])
+    return float(np.angle(resultant) * alias_period / (2.0 * np.pi))
+
+
 def _find_edelay_branch(
     freqs: NDArray[np.float64],
     signals: NDArray[np.complex128],
@@ -128,6 +150,12 @@ def _find_edelay_branch(
 
     span = float(np.ptp(freqs))
     candidate_step = 1.0 / (_EDELAY_BRANCH_OVERSAMPLING * span)
+    max_steps_each_side = (_MAX_EDELAY_BRANCH_CANDIDATES - 1) // 2
+    if search_radius > max_steps_each_side * candidate_step:
+        raise ValueError(
+            "electrical-delay branch search exceeds the candidate resource limit; "
+            "reduce search_radius or pass an explicit edelay"
+        )
     steps_each_side = int(np.floor(search_radius / candidate_step))
     candidate_count = 2 * steps_each_side + 1
     if candidate_count > _MAX_EDELAY_BRANCH_CANDIDATES:
@@ -189,7 +217,9 @@ def find_edelay_branch(
     ``signals`` may be a single trace or a row stack sharing ``freqs``. With no
     explicit ``search_radius``, the search covers two alias periods of an equivalent
     uniform grid with the same span and sample count. The radius uses the inverse unit
-    of ``freqs``.
+    of ``freqs``. Uniform-grid row aliases are aggregated circularly over ``1/|df|``.
+    Invalid, boundary-limited, or oversized searches raise ``ValueError``; an
+    ambiguous nonuniform maximum emits ``RuntimeWarning``.
     """
     if freqs.ndim != 1 or signals.ndim not in (1, 2):
         raise ValueError(
@@ -211,7 +241,7 @@ def find_edelay_branch(
     if not np.all(np.isfinite(freqs)) or not np.all(np.isfinite(signals)):
         raise ValueError("electrical-delay branch search inputs must be finite")
     span = float(np.ptp(freqs))
-    if span <= 0.0 or len(np.unique(freqs)) != len(freqs):
+    if not np.isfinite(span) or span <= 0.0 or len(np.unique(freqs)) != len(freqs):
         raise ValueError(
             "electrical-delay branch search requires distinct frequencies with a "
             "positive span"
@@ -222,7 +252,7 @@ def find_edelay_branch(
         [get_rough_edelay(freqs, row) for row in signal_rows],
         dtype=np.float64,
     )
-    rough_edelay = float(np.median(rough_edelays))
+    rough_edelay = _aggregate_rough_edelays(np.diff(freqs), rough_edelays)
     if search_radius is None:
         search_radius = _DEFAULT_EDELAY_SEARCH_PERIODS * (len(freqs) - 1) / span
     return _find_edelay_branch(freqs, signals, rough_edelay, search_radius)

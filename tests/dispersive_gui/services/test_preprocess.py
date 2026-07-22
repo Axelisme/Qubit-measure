@@ -74,6 +74,35 @@ def test_fast_edelays_shares_large_nonuniform_branch_with_scalar_fit() -> None:
     np.testing.assert_allclose(np.median(fast), edelay, atol=3e-3)
 
 
+def test_fast_edelays_keeps_uniform_rows_on_same_alias_across_branch_cut() -> None:
+    edelay = 4.997
+    freqs = np.linspace(5000.0, 5030.0, 301)
+    signals = np.asarray(
+        [
+            HangerModel.calc_signals(
+                freqs,
+                freq,
+                740.0,
+                1100.0,
+                0.12,
+                1.25 * np.exp(0.31j),
+                edelay,
+                0.004,
+            )
+            for freq in (5008.0, 5013.0)
+        ],
+        dtype=np.complex128,
+    )
+
+    estimates = fast_edelays(freqs, signals)
+    alias_period = 1.0 / float(freqs[1] - freqs[0])
+    alias_errors = (estimates - edelay + 0.5 * alias_period) % alias_period
+    alias_errors -= 0.5 * alias_period
+
+    np.testing.assert_allclose(alias_errors, 0.0, atol=3e-3)
+    assert np.ptp(estimates) < 1e-3
+
+
 def test_compute_preprocess_shapes_and_norm():
     fluxs, freqs, signals = _synthetic_onetone()
     result = compute_preprocess(fluxs, freqs, signals)
