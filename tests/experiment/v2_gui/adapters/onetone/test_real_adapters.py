@@ -194,7 +194,10 @@ def test_freq_analyze_auto_ignores_mismatched_route_prior(
 @pytest.mark.parametrize(
     ("params", "error"),
     [
-        (OneToneFreqAnalyzeParams(edelay_mode="calibrated"), "calibrated"),
+        (
+            OneToneFreqAnalyzeParams(edelay_mode="calibrated"),
+            "res_edelay_calibration",
+        ),
         (OneToneFreqAnalyzeParams(edelay_mode="manual"), "manual_edelay"),
         (
             OneToneFreqAnalyzeParams(edelay_mode="manual", manual_edelay=float("nan")),

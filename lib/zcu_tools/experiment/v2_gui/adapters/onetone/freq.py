@@ -200,7 +200,7 @@ class OneToneFreqAdapter(
             if prior is None:
                 raise ValueError(
                     "calibrated edelay mode requires a finite route-matched "
-                    "res_edelay prior"
+                    "res_edelay_calibration prior"
                 )
             return prior, "calibrated"
         if params.edelay_mode == "auto":
