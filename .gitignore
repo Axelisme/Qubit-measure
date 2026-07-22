@@ -7,6 +7,7 @@ wheels/
 .env
 .coverage
 token.json
+.codegraph
 
 .vscode
 .github
