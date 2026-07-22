@@ -86,6 +86,7 @@ def test_freq_analyze_params_default_and_forwarding(
 ) -> None:
     params = OneToneFreqAnalyzeParams()
     assert params.fit_bg_amp_slope is True
+    assert params.fit_bg_phase_curvature is False
     assert params.edelay_mode == "auto"
     assert params.manual_edelay is None
     assert params.max_edelay_search_radius == 100.0
@@ -113,6 +114,7 @@ def test_freq_analyze_params_default_and_forwarding(
         run_result,
         model_type="hm",
         fit_bg_amp_slope=True,
+        fit_bg_phase_curvature=False,
         edelay_branch_seed=None,
         edelay_max_search_radius=100.0,
     )
@@ -149,6 +151,7 @@ def test_freq_analyze_auto_uses_route_matched_edelay_prior(
         run_result,
         model_type="hm",
         fit_bg_amp_slope=True,
+        fit_bg_phase_curvature=False,
         edelay_branch_seed=11.3,
         edelay_max_search_radius=None,
     )

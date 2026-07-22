@@ -505,13 +505,34 @@ def remove_background(
     *,
     freq: float,
     edelay: float,
-    bg_amp_slope: float,
+    bg_amp_slope: float = 0.0,
+    bg_phase_curvature: float = 0.0,
 ) -> NDArray[np.complex128]:
-    """Remove global delay and multiplicative log-amplitude background."""
+    """Remove global delay and multiplicative amplitude/phase background."""
     return (
         signals
         * np.exp(1j * 2.0 * np.pi * freqs * edelay)
-        * np.exp(-bg_amp_slope * (freqs - freq))
+        / calc_background(
+            freqs,
+            freq=freq,
+            bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
+        )
+    )
+
+
+def calc_background(
+    freqs: NDArray[np.float64],
+    *,
+    freq: float,
+    bg_amp_slope: float = 0.0,
+    bg_phase_curvature: float = 0.0,
+) -> NDArray[np.complex128]:
+    """Return the smooth multiplicative resonance background."""
+    centered = freqs - freq
+    return np.asarray(
+        np.exp(bg_amp_slope * centered + 1j * bg_phase_curvature * centered**2),
+        dtype=np.complex128,
     )
 
 

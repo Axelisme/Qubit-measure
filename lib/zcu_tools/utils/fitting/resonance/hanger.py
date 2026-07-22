@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 
 from .base import (
     align_phase_to_data,
+    calc_background,
     calc_phase,
     fit_circle_params,
     fit_edelay,
@@ -22,6 +23,7 @@ from .base import (
     run_complex_refinement,
     validate_complex_fit_inputs,
 )
+from .rational import fit_degree_one_rational
 
 
 def calc_background_signals(
@@ -49,12 +51,14 @@ class HangerParams(TypedDict):
     fwhm: float
     Ql: float
     Qc: complex
-    Qi: float
+    Qi: float | None
+    qi_status: str
     phi: float
     a0: complex
     edelay: float
     theta0: float
     bg_amp_slope: float
+    bg_phase_curvature: float
     circle_params: tuple[float, float, float]
 
 
@@ -70,6 +74,7 @@ class HangerModel:
         a0: complex,
         edelay: float,
         bg_amp_slope: float = 0.0,
+        bg_phase_curvature: float = 0.0,
         **kwargs,
     ) -> NDArray[np.complex128]:
         dx = Ql * (freqs / freq - 1)
@@ -78,7 +83,12 @@ class HangerModel:
             -a0 * np.exp(1j * phi) * (Ql / abs(Qc)) / 2 * (1 - 2j * dx) / (1 + 2j * dx)
         )
         ideal = center + vector
-        background = np.exp(bg_amp_slope * (freqs - freq))
+        background = calc_background(
+            freqs,
+            freq=freq,
+            bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
+        )
         return background * ideal * np.exp(-1j * 2 * np.pi * freqs * edelay)
 
     @classmethod
@@ -97,7 +107,7 @@ class HangerModel:
         )
         phi = calc_phi(norm_yc, norm_r0)
         Qc = calc_Qc(Ql, phi, norm_r0)
-        Qi = calc_Qi(Ql, Qc)
+        Qi, qi_status = cls._resolve_qi(Ql, Qc)
 
         return HangerParams(
             freq=freq,
@@ -105,13 +115,48 @@ class HangerModel:
             Ql=Ql,
             Qc=Qc,
             Qi=Qi,
+            qi_status=qi_status,
             phi=phi,
             a0=a0,
             edelay=edelay,
             theta0=theta0,
             bg_amp_slope=0.0,
+            bg_phase_curvature=0.0,
             circle_params=circle_params,
         )
+
+    @staticmethod
+    def _resolve_qi(Ql: float, Qc: complex) -> tuple[float | None, str]:
+        Qi = calc_Qi(Ql, Qc)
+        if np.isfinite(Qi) and Qi > 0.0:
+            return float(Qi), "physical"
+        return None, "model_incompatible"
+
+    @classmethod
+    def _initializer_for_refinement(
+        cls,
+        freqs: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        edelay: float,
+    ) -> HangerParams:
+        try:
+            corrected = remove_edelay(freqs, signals, edelay)
+            rational_fit = fit_degree_one_rational(freqs, corrected)
+        except ValueError as exc:
+            warnings.warn(
+                "hanger rational initializer failed; using sequential initializer "
+                f"({exc})",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return cls._fit_sequential(freqs, signals, edelay)
+        if rational_fit.residual_rms > 0.25:
+            return cls._fit_sequential(freqs, signals, edelay)
+
+        denoised_raw = rational_fit.evaluate(freqs) * np.exp(
+            -1j * 2.0 * np.pi * freqs * edelay
+        )
+        return cls._fit_sequential(freqs, denoised_raw, edelay)
 
     @classmethod
     def _refine_complex(
@@ -121,7 +166,9 @@ class HangerModel:
         initializer: HangerParams,
         *,
         refine_edelay: bool,
-    ) -> tuple[float, float, float, float, complex, float, float] | None:
+        fit_bg_amp_slope: bool,
+        fit_bg_phase_curvature: bool,
+    ) -> tuple[float, float, float, float, complex, float, float, float] | None:
         span = float(np.ptp(freqs))
         center = 0.5 * float(np.min(freqs) + np.max(freqs))
         amp_scale = max(float(np.sqrt(np.mean(np.abs(signals) ** 2))), 1e-12)
@@ -132,17 +179,29 @@ class HangerModel:
 
         def decode(
             values: NDArray[np.float64],
-        ) -> tuple[float, float, float, float, complex, float, float]:
+        ) -> tuple[float, float, float, float, complex, float, float, float]:
             freq = center + span * values[0]
             Ql = float(np.exp(values[1]))
             Qc_abs = float(np.exp(values[2]))
             phi = float(values[3])
             a0 = amp_scale * complex(values[4], values[5])
-            bg_amp_slope = float(values[6] / span)
+            index = 6
+            if fit_bg_amp_slope:
+                bg_amp_slope = float(values[index] / span)
+                index += 1
+            else:
+                bg_amp_slope = 0.0
+            if fit_bg_phase_curvature:
+                bg_phase_curvature = float(values[index] / span**2)
+                index += 1
+            else:
+                bg_phase_curvature = 0.0
             edelay = (
-                init_edelay + float(values[7] / span) if refine_edelay else init_edelay
+                init_edelay + float(values[index] / span)
+                if refine_edelay
+                else init_edelay
             )
-            return freq, Ql, Qc_abs, phi, a0, edelay, bg_amp_slope
+            return freq, Ql, Qc_abs, phi, a0, edelay, bg_amp_slope, bg_phase_curvature
 
         freq_lower = encode_frequency(float(np.min(freqs)))
         freq_upper = encode_frequency(float(np.max(freqs)))
@@ -161,7 +220,6 @@ class HangerModel:
             np.clip(initializer["phi"], -phi_limit, phi_limit),
             initializer["a0"].real / amp_scale,
             initializer["a0"].imag / amp_scale,
-            0.0,
         ]
         lower = [
             freq_lower,
@@ -170,7 +228,6 @@ class HangerModel:
             -phi_limit,
             -1e3,
             -1e3,
-            -5.0,
         ]
         upper = [
             freq_upper,
@@ -179,15 +236,31 @@ class HangerModel:
             phi_limit,
             1e3,
             1e3,
-            5.0,
         ]
+        if fit_bg_amp_slope:
+            initial.append(0.0)
+            lower.append(-5.0)
+            upper.append(5.0)
+        if fit_bg_phase_curvature:
+            initial.append(0.0)
+            lower.append(-12.0)
+            upper.append(12.0)
         if refine_edelay:
             initial.append(0.0)
             lower.append(-1.0)
             upper.append(1.0)
 
         def residual(values: NDArray[np.float64]) -> NDArray[np.float64]:
-            freq, Ql, Qc_abs, phi, a0, edelay, bg_amp_slope = decode(values)
+            (
+                freq,
+                Ql,
+                Qc_abs,
+                phi,
+                a0,
+                edelay,
+                bg_amp_slope,
+                bg_phase_curvature,
+            ) = decode(values)
             fitted = cls.calc_signals(
                 freqs,
                 freq,
@@ -197,6 +270,7 @@ class HangerModel:
                 a0,
                 edelay,
                 bg_amp_slope,
+                bg_phase_curvature,
             )
             delta = (fitted - signals) / amp_scale
             return np.concatenate((delta.real, delta.imag))
@@ -218,6 +292,7 @@ class HangerModel:
         signals: NDArray[np.complex128],
         edelay: float | None = None,
         fit_bg_amp_slope: bool = False,
+        fit_bg_phase_curvature: bool = False,
         edelay_search_radius: float | None = None,
         edelay_branch_seed: float | None = None,
         edelay_max_search_radius: float | None = None,
@@ -234,16 +309,23 @@ class HangerModel:
                 branch_seed=edelay_branch_seed,
             )
 
-        initializer = cls._fit_sequential(freqs, signals, edelay)
-        if not fit_bg_amp_slope:
-            return initializer
+        sequential = cls._fit_sequential(freqs, signals, edelay)
+        if not fit_bg_amp_slope and not fit_bg_phase_curvature:
+            return sequential
+
+        initializer = cls._initializer_for_refinement(freqs, signals, edelay)
 
         refined = cls._refine_complex(
-            freqs, signals, initializer, refine_edelay=refine_edelay
+            freqs,
+            signals,
+            initializer,
+            refine_edelay=refine_edelay,
+            fit_bg_amp_slope=fit_bg_amp_slope,
+            fit_bg_phase_curvature=fit_bg_phase_curvature,
         )
         if refined is None:
-            return initializer
-        freq, Ql, Qc_abs, phi, a0, edelay, bg_amp_slope = refined
+            return sequential
+        freq, Ql, Qc_abs, phi, a0, edelay, bg_amp_slope, bg_phase_curvature = refined
 
         corrected = remove_background(
             freqs,
@@ -251,6 +333,7 @@ class HangerModel:
             freq=freq,
             edelay=edelay,
             bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
         )
         circle_params = fit_circle_params(corrected.real, corrected.imag)
         data_phases = calc_phase(corrected, circle_params[0], circle_params[1])
@@ -261,15 +344,7 @@ class HangerModel:
             freq,
         )
         Qc = complex(Qc_abs * np.exp(1j * phi))
-        Qi = calc_Qi(Ql, Qc)
-        if not np.isfinite(Qi) or Qi <= 0.0:
-            warnings.warn(
-                "hanger complex refinement produced a non-physical internal Q; "
-                "using sequential initializer",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return initializer
+        Qi, qi_status = cls._resolve_qi(Ql, Qc)
 
         return HangerParams(
             freq=freq,
@@ -277,11 +352,13 @@ class HangerModel:
             Ql=Ql,
             Qc=Qc,
             Qi=Qi,
+            qi_status=qi_status,
             phi=phi,
             a0=a0,
             edelay=edelay,
             theta0=theta0,
             bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
             circle_params=circle_params,
         )
 
@@ -293,6 +370,7 @@ class HangerModel:
         param_dict: HangerParams,
         *,
         fit_bg_amp_slope: bool = True,
+        fit_bg_phase_curvature: bool = False,
     ) -> Figure:
         freq = param_dict["freq"]
         fwhm = param_dict["fwhm"]
@@ -300,14 +378,24 @@ class HangerModel:
         Ql = param_dict["Ql"]
         Qc = param_dict["Qc"]
         Qi = param_dict["Qi"]
+        qi_status = param_dict["qi_status"]
         phi = param_dict["phi"]
         a0 = param_dict["a0"]
         edelay = param_dict["edelay"]
         bg_amp_slope = param_dict["bg_amp_slope"]
+        bg_phase_curvature = param_dict["bg_phase_curvature"]
         circle_params = param_dict["circle_params"]
 
         fit_signals = cls.calc_signals(
-            freqs, freq, Ql, Qc, phi, a0, edelay, bg_amp_slope
+            freqs,
+            freq,
+            Ql,
+            Qc,
+            phi,
+            a0,
+            edelay,
+            bg_amp_slope,
+            bg_phase_curvature,
         )
         corrected = remove_background(
             freqs,
@@ -315,6 +403,7 @@ class HangerModel:
             freq=freq,
             edelay=edelay,
             bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
         )
         norm_signals, norm_circle_params = normalize_signal(
             corrected, circle_params, a0
@@ -329,16 +418,19 @@ class HangerModel:
         ax3 = fig.add_subplot(spec[1, :])
 
         base_info = "freq = " + f"{freq:.1f} MHz\n" + r"$FWHM = $" + f"{fwhm:.1f} MHz"
+        qi_text = f"{Qi:.0f}" if Qi is not None else qi_status
         Q_info = (
             r"$Q_l = $"
             + f"{Ql:.0f}\n"
             + r"$|Q_c| = $"
             + f"{np.abs(Qc):.0f}\n"
             + r"$Q_i = $"
-            + f"{Qi:.0f}"
+            + qi_text
         )
         if fit_bg_amp_slope:
             Q_info += "\n" + r"$g = $" + f"{bg_amp_slope:.4g} MHz$^{{-1}}$"
+        if fit_bg_phase_curvature:
+            Q_info += "\n" + r"$c = $" + f"{bg_phase_curvature:.4g} rad/MHz$^2$"
 
         ax1.plot(norm_signals.real, norm_signals.imag, label="corrected data")
         ax1.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color="red"))

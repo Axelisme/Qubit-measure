@@ -85,7 +85,8 @@ from __future__ import annotations
 # fit_bg_amp_slope, which fits a multiplicative log-amplitude background.
 # v53: one-tone analyze params add electrical-delay mode, manual seed, and
 # adaptive maximum search radius.
-WIRE_VERSION = 53
+# v54: one-tone analyze params add fit_bg_phase_curvature.
+WIRE_VERSION = 54
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -98,9 +99,10 @@ WIRE_VERSION = 53
 # adaptive branch-search recovery, and conditional background plotting.
 # v74: resonator electrical-delay calibration persists as one compound MetaDict
 # value, so writeback selection cannot split delay from its route identity.
+# v75: one-tone analysis adds optional phase-curvature background fitting.
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 74  # compound route-qualified resonator electrical delay
+GUI_VERSION = 75  # optional resonance phase-curvature background fitting

@@ -282,6 +282,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         model_type: Literal["hm", "t", "auto"] = "auto",
         edelay: float | None = None,
         fit_bg_amp_slope: bool = False,
+        fit_bg_phase_curvature: bool = False,
         edelay_branch_seed: float | None = None,
         edelay_max_search_radius: float | None = None,
     ) -> tuple[float, float, dict[str, Any], Figure]:
@@ -308,6 +309,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             signals,
             edelay,
             fit_bg_amp_slope=fit_bg_amp_slope,
+            fit_bg_phase_curvature=fit_bg_phase_curvature,
             edelay_branch_seed=edelay_branch_seed,
             edelay_max_search_radius=edelay_max_search_radius,
         )
@@ -316,6 +318,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             signals,
             param_dict,  # type: ignore[arg-type]
             fit_bg_amp_slope=fit_bg_amp_slope,
+            fit_bg_phase_curvature=fit_bg_phase_curvature,
         )
 
         return (

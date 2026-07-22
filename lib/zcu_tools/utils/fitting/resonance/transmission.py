@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TypedDict
 
 import matplotlib.pyplot as plt
@@ -10,6 +11,7 @@ from numpy.typing import NDArray
 
 from .base import (
     align_phase_to_data,
+    calc_background,
     calc_phase,
     fit_circle_params,
     fit_edelay,
@@ -21,6 +23,7 @@ from .base import (
     run_complex_refinement,
     validate_complex_fit_inputs,
 )
+from .rational import fit_degree_one_rational
 
 
 def calc_peak_signals(
@@ -39,6 +42,7 @@ class TransmissionParams(TypedDict):
     edelay: float
     theta0: float
     bg_amp_slope: float
+    bg_phase_curvature: float
     circle_params: tuple[float, float, float]
 
 
@@ -52,13 +56,19 @@ class TransmissionModel:
         a0: complex,
         edelay: float,
         bg_amp_slope: float = 0.0,
+        bg_phase_curvature: float = 0.0,
         **kwargs,
     ) -> NDArray[np.complex128]:
         dx = Ql * (freqs / freq - 1)
         center = a0 / 2
         vector = (a0 / 2) * (1 - 2j * dx) / (1 + 2j * dx)
         ideal = center + vector
-        background = np.exp(bg_amp_slope * (freqs - freq))
+        background = calc_background(
+            freqs,
+            freq=freq,
+            bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
+        )
         return background * ideal * np.exp(-1j * 2 * np.pi * freqs * edelay)
 
     @classmethod
@@ -86,8 +96,35 @@ class TransmissionModel:
             edelay=edelay,
             theta0=theta0,
             bg_amp_slope=0.0,
+            bg_phase_curvature=0.0,
             circle_params=circle_params,
         )
+
+    @classmethod
+    def _initializer_for_refinement(
+        cls,
+        freqs: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        edelay: float,
+    ) -> TransmissionParams:
+        try:
+            corrected = remove_edelay(freqs, signals, edelay)
+            rational_fit = fit_degree_one_rational(freqs, corrected)
+        except ValueError as exc:
+            warnings.warn(
+                "transmission rational initializer failed; using sequential "
+                f"initializer ({exc})",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return cls._fit_sequential(freqs, signals, edelay)
+        if rational_fit.residual_rms > 0.25:
+            return cls._fit_sequential(freqs, signals, edelay)
+
+        denoised_raw = rational_fit.evaluate(freqs) * np.exp(
+            -1j * 2.0 * np.pi * freqs * edelay
+        )
+        return cls._fit_sequential(freqs, denoised_raw, edelay)
 
     @classmethod
     def _refine_complex(
@@ -97,7 +134,9 @@ class TransmissionModel:
         initializer: TransmissionParams,
         *,
         refine_edelay: bool,
-    ) -> tuple[float, float, complex, float, float] | None:
+        fit_bg_amp_slope: bool,
+        fit_bg_phase_curvature: bool,
+    ) -> tuple[float, float, complex, float, float, float] | None:
         span = float(np.ptp(freqs))
         center = 0.5 * float(np.min(freqs) + np.max(freqs))
         amp_scale = max(float(np.sqrt(np.mean(np.abs(signals) ** 2))), 1e-12)
@@ -108,15 +147,27 @@ class TransmissionModel:
 
         def decode(
             values: NDArray[np.float64],
-        ) -> tuple[float, float, complex, float, float]:
+        ) -> tuple[float, float, complex, float, float, float]:
             freq = center + span * values[0]
             Ql = float(np.exp(values[1]))
             a0 = amp_scale * complex(values[2], values[3])
-            bg_amp_slope = float(values[4] / span)
+            index = 4
+            if fit_bg_amp_slope:
+                bg_amp_slope = float(values[index] / span)
+                index += 1
+            else:
+                bg_amp_slope = 0.0
+            if fit_bg_phase_curvature:
+                bg_phase_curvature = float(values[index] / span**2)
+                index += 1
+            else:
+                bg_phase_curvature = 0.0
             edelay = (
-                init_edelay + float(values[5] / span) if refine_edelay else init_edelay
+                init_edelay + float(values[index] / span)
+                if refine_edelay
+                else init_edelay
             )
-            return freq, Ql, a0, edelay, bg_amp_slope
+            return freq, Ql, a0, edelay, bg_amp_slope, bg_phase_curvature
 
         freq_lower = encode_frequency(float(np.min(freqs)))
         freq_upper = encode_frequency(float(np.max(freqs)))
@@ -132,18 +183,33 @@ class TransmissionModel:
             np.log(max(initializer["Ql"], 1.0)),
             initializer["a0"].real / amp_scale,
             initializer["a0"].imag / amp_scale,
-            0.0,
         ]
-        lower = [freq_lower, np.log(1.0), -1e3, -1e3, -5.0]
-        upper = [freq_upper, np.log(1e9), 1e3, 1e3, 5.0]
+        lower = [freq_lower, np.log(1.0), -1e3, -1e3]
+        upper = [freq_upper, np.log(1e9), 1e3, 1e3]
+        if fit_bg_amp_slope:
+            initial.append(0.0)
+            lower.append(-5.0)
+            upper.append(5.0)
+        if fit_bg_phase_curvature:
+            initial.append(0.0)
+            lower.append(-12.0)
+            upper.append(12.0)
         if refine_edelay:
             initial.append(0.0)
             lower.append(-1.0)
             upper.append(1.0)
 
         def residual(values: NDArray[np.float64]) -> NDArray[np.float64]:
-            freq, Ql, a0, edelay, bg_amp_slope = decode(values)
-            fitted = cls.calc_signals(freqs, freq, Ql, a0, edelay, bg_amp_slope)
+            freq, Ql, a0, edelay, bg_amp_slope, bg_phase_curvature = decode(values)
+            fitted = cls.calc_signals(
+                freqs,
+                freq,
+                Ql,
+                a0,
+                edelay,
+                bg_amp_slope,
+                bg_phase_curvature,
+            )
             delta = (fitted - signals) / amp_scale
             return np.concatenate((delta.real, delta.imag))
 
@@ -164,6 +230,7 @@ class TransmissionModel:
         signals: NDArray[np.complex128],
         edelay: float | None = None,
         fit_bg_amp_slope: bool = False,
+        fit_bg_phase_curvature: bool = False,
         edelay_search_radius: float | None = None,
         edelay_branch_seed: float | None = None,
         edelay_max_search_radius: float | None = None,
@@ -180,16 +247,23 @@ class TransmissionModel:
                 branch_seed=edelay_branch_seed,
             )
 
-        initializer = cls._fit_sequential(freqs, signals, edelay)
-        if not fit_bg_amp_slope:
-            return initializer
+        sequential = cls._fit_sequential(freqs, signals, edelay)
+        if not fit_bg_amp_slope and not fit_bg_phase_curvature:
+            return sequential
+
+        initializer = cls._initializer_for_refinement(freqs, signals, edelay)
 
         refined = cls._refine_complex(
-            freqs, signals, initializer, refine_edelay=refine_edelay
+            freqs,
+            signals,
+            initializer,
+            refine_edelay=refine_edelay,
+            fit_bg_amp_slope=fit_bg_amp_slope,
+            fit_bg_phase_curvature=fit_bg_phase_curvature,
         )
         if refined is None:
-            return initializer
-        freq, Ql, a0, edelay, bg_amp_slope = refined
+            return sequential
+        freq, Ql, a0, edelay, bg_amp_slope, bg_phase_curvature = refined
 
         corrected = remove_background(
             freqs,
@@ -197,6 +271,7 @@ class TransmissionModel:
             freq=freq,
             edelay=edelay,
             bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
         )
         circle_params = fit_circle_params(corrected.real, corrected.imag)
         data_phases = calc_phase(corrected, circle_params[0], circle_params[1])
@@ -210,6 +285,7 @@ class TransmissionModel:
             edelay=edelay,
             theta0=theta0,
             bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
             circle_params=circle_params,
         )
 
@@ -221,6 +297,7 @@ class TransmissionModel:
         param_dict: TransmissionParams,
         *,
         fit_bg_amp_slope: bool = True,
+        fit_bg_phase_curvature: bool = False,
     ) -> Figure:
         freq = param_dict["freq"]
         fwhm = param_dict["fwhm"]
@@ -229,16 +306,20 @@ class TransmissionModel:
         a0 = param_dict["a0"]
         edelay = param_dict["edelay"]
         bg_amp_slope = param_dict["bg_amp_slope"]
+        bg_phase_curvature = param_dict["bg_phase_curvature"]
         circle_params = param_dict["circle_params"]
 
         xc, yc, r0 = circle_params
-        fit_signals = cls.calc_signals(freqs, freq, Ql, a0, edelay, bg_amp_slope)
+        fit_signals = cls.calc_signals(
+            freqs, freq, Ql, a0, edelay, bg_amp_slope, bg_phase_curvature
+        )
         corrected = remove_background(
             freqs,
             signals,
             freq=freq,
             edelay=edelay,
             bg_amp_slope=bg_amp_slope,
+            bg_phase_curvature=bg_phase_curvature,
         )
 
         norm_signals, norm_circle_params = normalize_signal(
@@ -256,6 +337,8 @@ class TransmissionModel:
         Q_info = r"$Q_l = $" + f"{Ql:.0f}"
         if fit_bg_amp_slope:
             Q_info += "\n" + r"$g = $" + f"{bg_amp_slope:.4g} MHz$^{{-1}}$"
+        if fit_bg_phase_curvature:
+            Q_info += "\n" + r"$c = $" + f"{bg_phase_curvature:.4g} rad/MHz$^2$"
 
         ax1.plot(norm_signals.real, norm_signals.imag, label="corrected data")
         ax1.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color="red"))

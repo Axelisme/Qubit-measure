@@ -34,6 +34,7 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
     assert reply["analyze_params"] == {
         "model_type": "hm",
         "fit_bg_amp_slope": True,
+        "fit_bg_phase_curvature": False,
         "edelay_mode": "auto",
         "manual_edelay": None,
         "max_edelay_search_radius": 100.0,
@@ -45,6 +46,7 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
             "tab_id": "t",
             "updates": {
                 "fit_bg_amp_slope": False,
+                "fit_bg_phase_curvature": True,
                 "edelay_mode": "manual",
                 "manual_edelay": 11.3,
                 "max_edelay_search_radius": 150.0,
@@ -55,6 +57,7 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
     forwarded = adapter.run_analyze_control.analyze.call_args.args[1]
     assert forwarded == OneToneFreqAnalyzeParams(
         fit_bg_amp_slope=False,
+        fit_bg_phase_curvature=True,
         edelay_mode="manual",
         manual_edelay=11.3,
         max_edelay_search_radius=150.0,

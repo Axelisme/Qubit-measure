@@ -46,6 +46,7 @@ def _lower(schema: CfgSchema, req: RunRequest) -> dict:
 def test_fake_freq_analyze_params_default_and_forwarding(monkeypatch) -> None:
     params = FakeFreqAnalyzeParams()
     assert params.fit_bg_amp_slope is False
+    assert params.fit_bg_phase_curvature is False
 
     run_result = MagicMock()
     sentinel_figure = MagicMock()
@@ -68,6 +69,7 @@ def test_fake_freq_analyze_params_default_and_forwarding(monkeypatch) -> None:
         run_result,
         model_type="hm",
         fit_bg_amp_slope=False,
+        fit_bg_phase_curvature=False,
     )
 
 

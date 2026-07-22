@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-22 — resonance electrical-delay branch search
+**Last updated:** 2026-07-23 — resonance background model
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -71,12 +71,21 @@ coherence branch。resonance 初值由
 frequency-aware circle-phase slope 決定；generalized eigenproblem 以最接近零的
 eigenpair 表示圓，不因浮點誤差把 exact-circle eigenvalue 推到微小負值就選錯解。
 
-Resonance model 的 optional background 使用 real log-amplitude slope：
-`exp(g * (f - f_r))` 乘在完整 ideal response 上，`g` 單位為 MHz⁻¹；`edelay`
-維持唯一 global phase slope。停用 amplitude-background fitting 時保留 sequential
-circle/phase path；啟用時以該結果初始化 raw complex I/Q joint refinement，plot 的
-IQ/circle/phase 使用移除 delay 與 amplitude envelope 後的 corrected domain。Magnitude
-plot 只有在本次啟用 background fitting 時才顯示 background envelope 與 `g`。
+Resonance model 的 optional background 使用兩個具名乘法項：real log-amplitude
+slope `exp(g * (f - f_r))` 與 resonance-centered quadratic phase
+`exp(i * c * (f - f_r)^2)`。`g` 單位為 MHz⁻¹；`c` 單位為 rad/MHz²；`edelay`
+維持唯一 global linear phase slope。兩個 background fit option 彼此獨立，停用的
+term 固定為零且不進 joint-refinement 參數。兩個 option 都停用時保留 sequential
+circle/phase path；任一 option 啟用時以 sequential / rational initializer 進 raw
+complex I/Q joint refinement，plot 的 IQ/circle/phase 使用移除 delay 與已啟用
+background 後的 corrected domain。Magnitude plot 只有在本次啟用 amplitude
+background fitting 時才顯示 background envelope 與 `g`；phase curvature 只在啟用時
+顯示 `c`。
+
+Resonance rational initializer 是 internal helper，不是 public fitting facade，也不估
+absolute electrical-delay branch。Caller 先用 route-scoped delay contract 移除 delay；
+initializer 只在 corrected trace 上提供 degree-1 single-pole 初值，病態或不可信結果會
+warning 並回退 sequential initializer。
 
 ## throttle / interpolation helpers
 

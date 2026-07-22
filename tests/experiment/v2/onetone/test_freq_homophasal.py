@@ -229,6 +229,7 @@ def test_freq_analyze_forwards_delay_search_and_plot_mode(
         result,
         model_type="hm",
         fit_bg_amp_slope=False,
+        fit_bg_phase_curvature=True,
         edelay_branch_seed=11.0,
         edelay_max_search_radius=None,
     )
@@ -242,6 +243,7 @@ def test_freq_analyze_forwards_delay_search_and_plot_mode(
     assert fit_args[2] is None
     assert fit_kwargs == {
         "fit_bg_amp_slope": False,
+        "fit_bg_phase_curvature": True,
         "edelay_branch_seed": 11.0,
         "edelay_max_search_radius": None,
     }
@@ -250,5 +252,8 @@ def test_freq_analyze_forwards_delay_search_and_plot_mode(
     np.testing.assert_array_equal(visualize_args[0], trimmed_freqs)
     np.testing.assert_array_equal(visualize_args[1], trimmed_signals)
     assert visualize_args[2] is params
-    assert visualize_kwargs == {"fit_bg_amp_slope": False}
+    assert visualize_kwargs == {
+        "fit_bg_amp_slope": False,
+        "fit_bg_phase_curvature": True,
+    }
     assert analyzed == (6000.0, 1.0, params, figure)

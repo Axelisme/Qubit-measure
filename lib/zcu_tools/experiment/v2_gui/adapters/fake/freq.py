@@ -157,6 +157,9 @@ class FakeFreqAnalyzeParams:
     fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
         False
     )
+    fit_bg_phase_curvature: Annotated[bool, ParamMeta(label="Fit phase curvature")] = (
+        False
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +228,16 @@ class FakeFreqExp(AbsExperiment[FreqResult, FakeFreqCfg]):
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         fit_bg_amp_slope: bool = False,
+        fit_bg_phase_curvature: bool = False,
     ) -> tuple[float, float, dict[str, Any], Figure]:
         # Analysis is blind by construction — it only sees the result, never the
         # ground-truth sim params; no instance state needed.
         assert result is not None
         return FreqExp().analyze(
-            result, model_type=model_type, fit_bg_amp_slope=fit_bg_amp_slope
+            result,
+            model_type=model_type,
+            fit_bg_amp_slope=fit_bg_amp_slope,
+            fit_bg_phase_curvature=fit_bg_phase_curvature,
         )
 
     def save(self, result: FreqResult) -> None:
@@ -370,6 +377,7 @@ class FakeFreqAdapter(
             req.run_result,
             model_type=analyze_params.model_type,
             fit_bg_amp_slope=analyze_params.fit_bg_amp_slope,
+            fit_bg_phase_curvature=analyze_params.fit_bg_phase_curvature,
         )
         return FakeFreqAnalyzeResult(
             freq=freq,

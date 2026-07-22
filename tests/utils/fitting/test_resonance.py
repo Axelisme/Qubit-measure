@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,6 +20,7 @@ from zcu_tools.utils.fitting.resonance import (
     normalize_signal,
     phase_func,
 )
+from zcu_tools.utils.fitting.resonance.rational import fit_degree_one_rational
 
 
 def _hanger_truth(
@@ -31,11 +33,13 @@ def _hanger_truth(
     a0: complex,
     edelay: float,
     bg_amp_slope: float,
+    bg_phase_curvature: float = 0.0,
 ) -> NDArray[np.complex128]:
     """Independent analytic oracle; intentionally does not call production calc."""
     detuning = Ql * (freqs / freq - 1.0)
     ideal = a0 * (1.0 - (Ql / Qc_abs) * np.exp(1j * phi) / (1.0 + 2j * detuning))
-    background = np.exp(bg_amp_slope * (freqs - freq))
+    centered = freqs - freq
+    background = np.exp(bg_amp_slope * centered + 1j * bg_phase_curvature * centered**2)
     delay = np.exp(-1j * 2.0 * np.pi * freqs * edelay)
     return np.asarray(background * ideal * delay, dtype=np.complex128)
 
@@ -48,11 +52,13 @@ def _transmission_truth(
     a0: complex,
     edelay: float,
     bg_amp_slope: float,
+    bg_phase_curvature: float = 0.0,
 ) -> NDArray[np.complex128]:
     """Independent analytic oracle; intentionally does not call production calc."""
     detuning = Ql * (freqs / freq - 1.0)
     ideal = a0 / (1.0 + 2j * detuning)
-    background = np.exp(bg_amp_slope * (freqs - freq))
+    centered = freqs - freq
+    background = np.exp(bg_amp_slope * centered + 1j * bg_phase_curvature * centered**2)
     delay = np.exp(-1j * 2.0 * np.pi * freqs * edelay)
     return np.asarray(background * ideal * delay, dtype=np.complex128)
 
@@ -68,6 +74,32 @@ def _homophasal_like_grid(
         freq * (1.0 - np.tan(phases / 2.0) / (2.0 * Ql)),
         dtype=np.float64,
     )
+
+
+@pytest.mark.parametrize("descending", [False, True])
+def test_rational_initializer_recovers_degree_one_nonuniform_trace(
+    descending: bool,
+) -> None:
+    freqs = _homophasal_like_grid(6000.0, 700.0, 35.0, 301)
+    if descending:
+        freqs = freqs[::-1]
+    x = (freqs - 6000.0) / 70.0
+    signals = (
+        1.7 * np.exp(0.2j) * (0.8 - 0.3j + (0.6 + 0.1j) * x) / (1.0 + (-0.2 + 0.7j) * x)
+    )
+
+    result = fit_degree_one_rational(freqs, signals)
+
+    np.testing.assert_allclose(result.evaluate(freqs), signals, atol=1e-12)
+    assert result.residual_rms < 1e-12
+
+
+def test_rational_initializer_rejects_degenerate_signal() -> None:
+    freqs = np.linspace(5990.0, 6010.0, 11)
+    signals = np.zeros_like(freqs, dtype=np.complex128)
+
+    with pytest.raises(ValueError, match="non-zero signal scale"):
+        fit_degree_one_rational(freqs, signals)
 
 
 def test_transmission_fit_recovers_freq_and_Ql():
@@ -97,7 +129,7 @@ def test_circle_fit_recovers_nonuniform_exact_circle():
     center = 2.3 - 0.7j
     radius = 1.9
     angles = np.asarray(np.linspace(-2.8, 2.4, 301) ** 3 / 8.0, dtype=np.float64)
-    signals = center + radius * np.exp(1j * angles)
+    signals = np.asarray(center + radius * np.exp(1j * angles), dtype=np.complex128)
 
     xc, yc, fitted_radius = fit_circle_params(signals.real, signals.imag)
 
@@ -407,7 +439,7 @@ def test_model_fit_recovers_large_delay_nonuniform_truth(
         signals = _transmission_truth(freqs, **common)
 
     params = model.fit(freqs, signals, fit_bg_amp_slope=True)
-    fitted = model.calc_signals(freqs, **params)
+    fitted = model.calc_signals(freqs, **params)  # type: ignore[arg-type]
     nrmse = np.sqrt(np.mean(np.abs(fitted - signals) ** 2)) / np.ptp(np.abs(signals))
 
     np.testing.assert_allclose(params["freq"], freq, atol=0.08)
@@ -586,8 +618,9 @@ def test_bg_amp_fit_recovers_analytic_truth_across_models_and_grids(
     np.testing.assert_allclose(params["bg_amp_slope"], bg_amp_slope, atol=3e-4)
     np.testing.assert_allclose(params["edelay"], edelay, atol=5e-4)
     if model is HangerModel:
-        np.testing.assert_allclose(abs(params["Qc"]), 1150.0, rtol=0.04)
-        np.testing.assert_allclose(params["phi"], 0.13, atol=0.02)
+        hanger_params: Any = params
+        np.testing.assert_allclose(abs(hanger_params["Qc"]), 1150.0, rtol=0.04)
+        np.testing.assert_allclose(hanger_params["phi"], 0.13, atol=0.02)
 
 
 def test_bg_amp_signal_is_global_positive_real_multiplier() -> None:
@@ -623,6 +656,7 @@ def test_disabled_fit_returns_zero_amplitude_slope() -> None:
     params = TransmissionModel.fit(freqs, signals, edelay=0.0)
 
     assert params["bg_amp_slope"] == 0.0
+    assert params["bg_phase_curvature"] == 0.0
     assert set(params) == {
         "freq",
         "fwhm",
@@ -631,8 +665,68 @@ def test_disabled_fit_returns_zero_amplitude_slope() -> None:
         "edelay",
         "theta0",
         "bg_amp_slope",
+        "bg_phase_curvature",
         "circle_params",
     }
+
+
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
+@pytest.mark.parametrize(
+    (
+        "fit_bg_amp_slope",
+        "fit_bg_phase_curvature",
+        "bg_amp_slope",
+        "bg_phase_curvature",
+    ),
+    [
+        (True, False, 0.010, 0.0),
+        (False, True, 0.0, -8.0e-4),
+        (True, True, -0.008, 6.0e-4),
+    ],
+)
+def test_background_options_recover_only_enabled_terms(
+    model: type[HangerModel] | type[TransmissionModel],
+    fit_bg_amp_slope: bool,
+    fit_bg_phase_curvature: bool,
+    bg_amp_slope: float,
+    bg_phase_curvature: float,
+) -> None:
+    freq, Ql = 6053.0, 820.0
+    freqs = _homophasal_like_grid(freq, Ql, 35.0, 501)
+    common = dict(
+        freq=freq,
+        Ql=Ql,
+        a0=1.4 * np.exp(0.37j),
+        edelay=0.031,
+        bg_amp_slope=bg_amp_slope,
+        bg_phase_curvature=bg_phase_curvature,
+    )
+    if model is HangerModel:
+        signals = _hanger_truth(freqs, Qc_abs=1150.0, phi=0.13, **common)
+    else:
+        signals = _transmission_truth(freqs, **common)
+
+    params = model.fit(
+        freqs,
+        signals,
+        edelay=common["edelay"],
+        fit_bg_amp_slope=fit_bg_amp_slope,
+        fit_bg_phase_curvature=fit_bg_phase_curvature,
+    )
+
+    np.testing.assert_allclose(params["freq"], freq, atol=0.08)
+    np.testing.assert_allclose(params["Ql"], Ql, rtol=0.03)
+    np.testing.assert_allclose(params["edelay"], common["edelay"], atol=5e-4)
+    np.testing.assert_allclose(
+        params["bg_amp_slope"],
+        bg_amp_slope if fit_bg_amp_slope else 0.0,
+        atol=3e-4,
+    )
+    np.testing.assert_allclose(
+        params["bg_phase_curvature"],
+        bg_phase_curvature if fit_bg_phase_curvature else 0.0,
+        atol=8e-5,
+    )
 
 
 def test_fixed_noise_refinement_reduces_complex_residual() -> None:
@@ -720,7 +814,9 @@ def test_refined_corrected_geometry_and_quality_factors_are_consistent() -> None
     np.testing.assert_allclose(params["circle_params"], expected_circle, atol=1e-10)
     np.testing.assert_allclose(abs(params["Qc"]), Qc_abs, rtol=0.04)
     expected_qi = 1.0 / (1.0 / params["Ql"] - np.real(1.0 / params["Qc"]))
+    assert params["Qi"] is not None
     np.testing.assert_allclose(params["Qi"], expected_qi)
+    assert params["qi_status"] == "physical"
 
     phase_data = calc_phase(corrected, expected_circle[0], expected_circle[1])
     order = np.argsort(freqs)
@@ -755,7 +851,13 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
     signals = truth_fn(freqs, **truth_kwargs, **common)
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=True)
 
-    fig = model.visualize_fit(freqs, signals, params, fit_bg_amp_slope=True)
+    fig = model.visualize_fit(
+        freqs,
+        signals,
+        params,  # type: ignore[arg-type]
+        fit_bg_amp_slope=True,
+        fit_bg_phase_curvature=False,
+    )
     try:
         iq_ax, phase_ax, magnitude_ax = fig.axes
         iq_data = next(
@@ -779,24 +881,29 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
         corrected = signals * np.exp(1j * 2.0 * np.pi * freqs * params["edelay"])
         corrected *= np.exp(-params["bg_amp_slope"] * (freqs - params["freq"]))
         norm, _ = normalize_signal(corrected, params["circle_params"], params["a0"])
-        np.testing.assert_allclose(iq_data.get_xdata(), norm.real)
-        np.testing.assert_allclose(iq_data.get_ydata(), norm.imag)
         np.testing.assert_allclose(
-            phase_fit.get_ydata(),
+            np.asarray(iq_data.get_xdata(), dtype=np.float64), norm.real
+        )
+        np.testing.assert_allclose(
+            np.asarray(iq_data.get_ydata(), dtype=np.float64), norm.imag
+        )
+        np.testing.assert_allclose(
+            np.asarray(phase_fit.get_ydata(), dtype=np.float64),
             phase_func(freqs, params["freq"], params["Ql"], params["theta0"]),
         )
-        np.testing.assert_allclose(raw_data.get_ydata(), np.abs(signals))
         np.testing.assert_allclose(
-            total_fit.get_ydata(), np.abs(model.calc_signals(freqs, **params))
+            np.asarray(raw_data.get_ydata(), dtype=np.float64), np.abs(signals)
         )
         np.testing.assert_allclose(
-            envelope.get_ydata(),
+            np.asarray(total_fit.get_ydata(), dtype=np.float64),
+            np.abs(model.calc_signals(freqs, **params)),  # type: ignore[arg-type]
+        )
+        np.testing.assert_allclose(
+            np.asarray(envelope.get_ydata(), dtype=np.float64),
             abs(params["a0"])
             * np.exp(params["bg_amp_slope"] * (freqs - params["freq"])),
         )
-        assert all(
-            "phase background" not in line.get_label() for line in phase_ax.lines
-        )
+        assert all("rad/MHz" not in text.get_text() for text in magnitude_ax.texts)
         fit_info = next(
             text for text in magnitude_ax.texts if "MHz$^{-1}$" in text.get_text()
         )
@@ -804,7 +911,7 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
         assert fit_info.get_horizontalalignment() == "right"
         legend = magnitude_ax.get_legend()
         assert legend is not None
-        assert legend._loc == 3  # lower left
+        assert getattr(legend, "_loc") == 3  # lower left
     finally:
         plt.close(fig)
 
@@ -833,7 +940,13 @@ def test_visualization_omits_background_when_fit_is_disabled(
     signals = truth_fn(freqs, **truth_kwargs, **common)
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=False)
 
-    fig = model.visualize_fit(freqs, signals, params, fit_bg_amp_slope=False)
+    fig = model.visualize_fit(
+        freqs,
+        signals,
+        params,  # type: ignore[arg-type]
+        fit_bg_amp_slope=False,
+        fit_bg_phase_curvature=False,
+    )
     try:
         magnitude_ax = fig.axes[2]
         labels = [line.get_label() for line in magnitude_ax.lines]
@@ -844,5 +957,72 @@ def test_visualization_omits_background_when_fit_is_disabled(
             text.get_text() for text in legend.get_texts()
         }
         assert all("MHz$^{-1}$" not in text.get_text() for text in magnitude_ax.texts)
+        assert all("rad/MHz" not in text.get_text() for text in magnitude_ax.texts)
+    finally:
+        plt.close(fig)
+
+
+def test_hanger_model_incompatible_qi_keeps_complex_fit() -> None:
+    freqs = np.linspace(5965.0, 6035.0, 401)
+    signals = _hanger_truth(
+        freqs,
+        freq=6000.0,
+        Ql=700.0,
+        Qc_abs=400.0,
+        phi=0.0,
+        a0=1.2 * np.exp(0.3j),
+        edelay=0.0,
+        bg_amp_slope=0.008,
+        bg_phase_curvature=5.0e-4,
+    )
+
+    params = HangerModel.fit(
+        freqs,
+        signals,
+        edelay=0.0,
+        fit_bg_amp_slope=True,
+        fit_bg_phase_curvature=True,
+    )
+
+    assert params["Qi"] is None
+    assert params["qi_status"] == "model_incompatible"
+    np.testing.assert_allclose(params["bg_amp_slope"], 0.008, atol=3e-4)
+    np.testing.assert_allclose(params["bg_phase_curvature"], 5.0e-4, atol=8e-5)
+    fitted = HangerModel.calc_signals(freqs, **params)
+    assert np.sqrt(np.mean(np.abs(fitted - signals) ** 2)) < 1e-5
+
+
+def test_visualization_shows_phase_curvature_only_when_enabled() -> None:
+    freqs = np.linspace(5965.0, 6035.0, 401)
+    signals = _transmission_truth(
+        freqs,
+        freq=6000.0,
+        Ql=700.0,
+        a0=1.2 * np.exp(0.3j),
+        edelay=0.021,
+        bg_amp_slope=0.0,
+        bg_phase_curvature=7.0e-4,
+    )
+    params = TransmissionModel.fit(
+        freqs,
+        signals,
+        edelay=0.021,
+        fit_bg_phase_curvature=True,
+    )
+
+    fig = TransmissionModel.visualize_fit(
+        freqs,
+        signals,
+        params,
+        fit_bg_amp_slope=False,
+        fit_bg_phase_curvature=True,
+    )
+    try:
+        magnitude_ax = fig.axes[2]
+        assert any("rad/MHz" in text.get_text() for text in magnitude_ax.texts)
+        assert all(
+            line.get_label() != "multiplicative background envelope"
+            for line in magnitude_ax.lines
+        )
     finally:
         plt.close(fig)

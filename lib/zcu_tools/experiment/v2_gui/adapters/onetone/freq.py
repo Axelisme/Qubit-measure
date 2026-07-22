@@ -51,6 +51,9 @@ class OneToneFreqAnalyzeParams:
     fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
         True
     )
+    fit_bg_phase_curvature: Annotated[bool, ParamMeta(label="Fit phase curvature")] = (
+        False
+    )
     edelay_mode: Annotated[EDelayMode, ParamMeta(label="Electrical-delay mode")] = (
         "auto"
     )
@@ -325,6 +328,7 @@ class OneToneFreqAdapter(
             req.run_result,
             model_type=params.model_type,
             fit_bg_amp_slope=params.fit_bg_amp_slope,
+            fit_bg_phase_curvature=params.fit_bg_phase_curvature,
             edelay_branch_seed=edelay_seed,
             edelay_max_search_radius=max_search_radius,
         )
