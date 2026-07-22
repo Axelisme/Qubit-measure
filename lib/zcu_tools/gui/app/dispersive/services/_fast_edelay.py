@@ -11,10 +11,10 @@ optimizations vs the utility path:
 - numba releases the GIL, so the parallelism is real and needs no process fork (so a
   Qt ``GuiProgressBar`` is never pickled across a worker boundary).
 
-This is intentionally NOT in ``zcu_tools.utils`` — it specializes the resonance
-``fit_edelay`` for the dispersive preprocessing hot path and must not change the shared
-utility's numerics. The result matches the utility's edelay to within the grid's
-discretisation (the grid search itself is identical).
+This is intentionally NOT in ``zcu_tools.utils`` — it specializes the local circle
+refinement for the dispersive preprocessing hot path. Global branch discovery reuses
+the shared utility once across all flux rows; the physical cable delay is common, while
+the numba kernel retains per-row local refinement.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from zcu_tools.utils.fitting.resonance.base import get_rough_edelay
+from zcu_tools.utils.fitting.resonance.base import find_edelay_branch
 
 # Electronic-delay grid: search ±5/(freq span) over this many points (the utility's
 # fit_edelay uses 1000; numba makes 1000 cheap enough to keep full precision).
@@ -34,7 +34,7 @@ _N_GRID = 1000
 def _edelay_kernel(
     freqs: NDArray[np.float64],
     signals: NDArray[np.complex128],
-    roughs: NDArray[np.float64],
+    seeds: NDArray[np.float64],
     fit_range: float,
 ) -> NDArray[np.float64]:
     """Per-flux edelay via grid search + inlined Kasa circle fit (parallel over flux)."""
@@ -43,8 +43,8 @@ def _edelay_kernel(
     grid = np.linspace(-fit_range, fit_range, _N_GRID)
     two_pi = 2.0 * np.pi
     for i in prange(n_flux):
-        # remove the rough delay once, then search residual delays on the grid
-        s2 = np.exp(1j * two_pi * freqs * roughs[i]) * signals[i]
+        # remove the shared branch seed once, then search residual delays on the grid
+        s2 = np.exp(1j * two_pi * freqs * seeds[i]) * signals[i]
         best_loss = 1e18
         best_j = 0
         xs = np.empty(n_freq, dtype=np.float64)
@@ -86,26 +86,34 @@ def _edelay_kernel(
             if loss < best_loss:
                 best_loss = loss
                 best_j = j
-        out[i] = grid[best_j] + roughs[i]
+        out[i] = grid[best_j] + seeds[i]
     return out
 
 
 def fast_edelays(
     freqs: NDArray[np.float64],
     signals: NDArray[np.complex128],
+    *,
+    search_radius: float | None = None,
 ) -> NDArray[np.float64]:
     """The per-flux electronic delays for a (n_flux, n_freq) signal grid.
 
     ``freqs`` is the shared frequency axis; ``signals[i]`` is flux row ``i``. Returns
-    one edelay per flux row (the median over these is the spectrum's edelay). The
-    rough-delay seed per row is computed in Python (cheap), then the numba kernel runs
-    the parallel grid search.
+    one edelay per flux row (the median over these is the spectrum's edelay). One
+    branch seed is estimated from all rows, then the numba kernel performs the
+    local circle refinement for every row in parallel.
     """
     freqs = np.ascontiguousarray(freqs, dtype=np.float64)
     signals = np.ascontiguousarray(signals, dtype=np.complex128)
-    roughs = np.array(
-        [get_rough_edelay(freqs, signals[i]) for i in range(signals.shape[0])],
-        dtype=np.float64,
+    if freqs.ndim != 1 or signals.ndim != 2:
+        raise ValueError("fast edelay fit expects a 1D frequency axis and 2D signals")
+    if signals.shape[1] != len(freqs):
+        raise ValueError("fast edelay frequency and signal lengths must match")
+    branch_seed = find_edelay_branch(
+        freqs,
+        signals,
+        search_radius=search_radius,
     )
+    seeds = np.full(signals.shape[0], branch_seed, dtype=np.float64)
     fit_range = 5.0 / float(np.ptp(freqs))
-    return _edelay_kernel(freqs, signals, roughs, fit_range)
+    return _edelay_kernel(freqs, signals, seeds, fit_range)

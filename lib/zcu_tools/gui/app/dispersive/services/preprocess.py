@@ -4,16 +4,15 @@ Extracts the normalized phase image the dispersive tuning / fit work against fro
 the raw complex S-parameter signals: fit + remove the electronic delay, smooth,
 fit a common circle centre, take the phase, then differentiate / abs / row-normalize.
 
-Pure and Qt-free. The heavy per-flux electronic-delay fit (a 1000-point grid search
-each) runs through ``fast_edelays`` — a GUI-local numba kernel that JIT-compiles the
-whole (n_flux × grid) double loop and parallelises the per-flux outer loop in
-``prange`` (~14x over the previous loky-fork path, measured). numba releases the GIL,
-so the parallelism needs no process fork — nothing is pickled, so a Qt
+Pure and Qt-free. ``fast_edelays`` first discovers one electrical-delay branch shared
+by every flux row, then a GUI-local numba kernel JIT-compiles the per-row 1000-point
+local circle refinement and parallelises the flux loop in ``prange``. numba releases
+the GIL, so the parallelism needs no process fork — nothing is pickled, so a Qt
 ``GuiProgressBar`` cannot leak across a worker boundary; since the kernel is a single
-black-box call (~0.1s), the GUI shows a busy/indeterminate bar rather than per-flux
-ticks. The whole ``compute`` still runs on a worker thread so it cannot block the
-event loop. The remaining steps reuse the resonance primitives from
-``zcu_tools.utils.fitting.resonance``.
+black-box call (about 0.1 s for a representative 64 × 301 warm run), the GUI shows a
+busy/indeterminate bar rather than per-flux ticks. The whole ``compute`` still runs on
+a worker thread so it cannot block the event loop. The remaining steps reuse the
+resonance primitives from ``zcu_tools.utils.fitting.resonance``.
 """
 
 from __future__ import annotations

@@ -40,6 +40,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.fitting.resonance import (
+    find_edelay_branch,
     fit_edelay,
     get_proper_model,
     normalize_signal,
@@ -155,8 +156,9 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         g_signals, e_signals = signals[0, :], signals[1, :]
         g_amps, e_amps = np.abs(g_signals), np.abs(e_signals)
 
-        g_edelay = fit_edelay(freqs, g_signals)
-        e_edelay = fit_edelay(freqs, e_signals)
+        branch_seed = find_edelay_branch(freqs, np.stack((g_signals, e_signals)))
+        g_edelay = fit_edelay(freqs, g_signals, branch_seed=branch_seed)
+        e_edelay = fit_edelay(freqs, e_signals, branch_seed=branch_seed)
         edelay = 0.5 * (g_edelay + e_edelay)
 
         model = get_proper_model(freqs, g_signals)

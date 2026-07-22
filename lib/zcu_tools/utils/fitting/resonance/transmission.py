@@ -164,12 +164,17 @@ class TransmissionModel:
         signals: NDArray[np.complex128],
         edelay: float | None = None,
         fit_bg_amp_slope: bool = False,
+        edelay_search_radius: float | None = None,
     ) -> TransmissionParams:
-        """dict[freq, fwhm, Ql, a0, edelay, circle_params]"""
+        """Fit a transmission response, resolving delay aliases within a radius."""
         validate_complex_fit_inputs(freqs, signals)
         refine_edelay = edelay is None
         if edelay is None:
-            edelay = fit_edelay(freqs, signals)
+            edelay = fit_edelay(
+                freqs,
+                signals,
+                search_radius=edelay_search_radius,
+            )
 
         initializer = cls._fit_sequential(freqs, signals, edelay)
         if not fit_bg_amp_slope:

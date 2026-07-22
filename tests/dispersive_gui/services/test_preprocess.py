@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.gui.app.dispersive.services._fast_edelay import fast_edelays
 from zcu_tools.gui.app.dispersive.services.preprocess import (
     PreprocessService,
     compute_preprocess,
@@ -14,6 +15,7 @@ from zcu_tools.gui.app.dispersive.state import (
     OnetoneEntry,
 )
 from zcu_tools.notebook.persistance import SpectrumData
+from zcu_tools.utils.fitting.resonance import HangerModel, fit_edelay
 
 
 def _synthetic_onetone(n_flux=10, n_freq=60):
@@ -30,6 +32,46 @@ def _synthetic_onetone(n_flux=10, n_freq=60):
         phase = np.exp(1j * 2 * np.pi * freqs * edelay)
         signals[i] = base * phase + 0.01 * (rng.randn(n_freq) + 1j * rng.randn(n_freq))
     return fluxs, freqs, signals
+
+
+def _homophasal_like_grid(
+    freq: float, Ql: float, half_span: float, count: int
+) -> np.ndarray:
+    def theta(value: float) -> float:
+        return 2.0 * np.arctan(2.0 * Ql * (1.0 - value / freq))
+
+    phases = np.linspace(theta(freq - half_span), theta(freq + half_span), count)
+    return np.asarray(
+        freq * (1.0 - np.tan(phases / 2.0) / (2.0 * Ql)),
+        dtype=np.float64,
+    )
+
+
+def test_fast_edelays_shares_large_nonuniform_branch_with_scalar_fit() -> None:
+    freq, Ql, edelay = 5549.0, 740.0, 11.299
+    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
+    signals = np.asarray(
+        [
+            HangerModel.calc_signals(
+                freqs,
+                freq + offset,
+                Ql,
+                1100.0,
+                0.12,
+                1.25 * np.exp(0.31j),
+                edelay,
+                0.004,
+            )
+            for offset in (-0.3, 0.0, 0.25)
+        ],
+        dtype=np.complex128,
+    )
+
+    fast = fast_edelays(freqs, signals)
+    scalar = np.asarray([fit_edelay(freqs, row) for row in signals])
+
+    np.testing.assert_allclose(fast, scalar, atol=3e-3)
+    np.testing.assert_allclose(np.median(fast), edelay, atol=3e-3)
 
 
 def test_compute_preprocess_shapes_and_norm():

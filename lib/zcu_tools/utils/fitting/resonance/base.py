@@ -9,6 +9,12 @@ from numpy.typing import NDArray
 
 from ..base import fit_func
 
+_DEFAULT_EDELAY_SEARCH_PERIODS = 2.0
+_EDELAY_BRANCH_OVERSAMPLING = 8.0
+_EDELAY_BRANCH_CHUNK_SIZE = 512
+_MAX_EDELAY_BRANCH_CANDIDATES = 100_001
+_EDELAY_AMBIGUITY_MARGIN = 1e-6
+
 
 def run_complex_refinement(
     residual: Callable[[NDArray[np.float64]], NDArray[np.float64]],
@@ -65,6 +71,161 @@ def get_rough_edelay(
     slope = np.median(local_slopes)
 
     return -slope / (2 * np.pi)
+
+
+def _is_uniform_frequency_grid(freq_steps: NDArray[np.float64]) -> bool:
+    abs_steps = np.abs(freq_steps)
+    return bool(np.allclose(abs_steps, np.median(abs_steps), rtol=1e-8, atol=0.0))
+
+
+def _find_edelay_branch(
+    freqs: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    rough_edelay: float,
+    search_radius: float,
+) -> float:
+    """Find the nonuniform-grid delay branch from adjacent unit-phasor coherence."""
+    if not np.isfinite(search_radius) or search_radius <= 0.0:
+        raise ValueError(
+            "electrical-delay branch search radius must be positive and finite"
+        )
+
+    freq_steps = np.diff(freqs)
+    if not (np.all(freq_steps > 0.0) or np.all(freq_steps < 0.0)):
+        raise ValueError("resonance fit frequencies must be strictly monotonic")
+    if signals.ndim == 1:
+        signal_rows = signals[None, :]
+    elif signals.ndim == 2:
+        signal_rows = signals
+    else:
+        raise ValueError("electrical-delay branch search expects one or two dimensions")
+    if signal_rows.shape[-1] != len(freqs):
+        raise ValueError(
+            "electrical-delay branch search frequency and signal lengths must match"
+        )
+
+    amplitudes = np.abs(signal_rows)
+    max_amplitudes = np.max(amplitudes, axis=1, keepdims=True)
+    if np.any(max_amplitudes <= 0.0):
+        raise ValueError("electrical-delay branch search requires non-zero signal rows")
+    if _is_uniform_frequency_grid(freq_steps):
+        # A uniform grid cannot distinguish delays separated by 1 / |df|. Keep the
+        # local alias supplied by get_rough_edelay rather than selecting an arbitrary
+        # equivalent branch from a finite global search interval.
+        return rough_edelay
+    valid = amplitudes > max_amplitudes * 1e-12
+    valid_pairs = valid[:, 1:] & valid[:, :-1]
+    if np.count_nonzero(valid_pairs) < 3:
+        raise ValueError(
+            "electrical-delay branch search requires at least three valid signal pairs"
+        )
+
+    units = np.zeros_like(signal_rows)
+    units[valid] = signal_rows[valid] / amplitudes[valid]
+    phase_steps = units[:, 1:] * np.conj(units[:, :-1])
+    weighted_phase_steps = np.sum(valid_pairs * phase_steps, axis=0)
+    weight_sum = float(np.count_nonzero(valid_pairs))
+
+    span = float(np.ptp(freqs))
+    candidate_step = 1.0 / (_EDELAY_BRANCH_OVERSAMPLING * span)
+    steps_each_side = int(np.floor(search_radius / candidate_step))
+    candidate_count = 2 * steps_each_side + 1
+    if candidate_count > _MAX_EDELAY_BRANCH_CANDIDATES:
+        raise ValueError(
+            "electrical-delay branch search would require "
+            f"{candidate_count} candidates; reduce search_radius or pass an explicit "
+            "edelay"
+        )
+    offsets = candidate_step * np.arange(
+        -steps_each_side, steps_each_side + 1, dtype=np.float64
+    )
+    candidates = rough_edelay + offsets
+    scores = np.empty(candidate_count, dtype=np.float64)
+    for start in range(0, candidate_count, _EDELAY_BRANCH_CHUNK_SIZE):
+        stop = min(start + _EDELAY_BRANCH_CHUNK_SIZE, candidate_count)
+        corrections = np.exp(
+            1j * 2.0 * np.pi * candidates[start:stop, None] * freq_steps[None, :]
+        )
+        scores[start:stop] = np.real(corrections @ weighted_phase_steps) / weight_sum
+
+    best_score = float(np.max(scores))
+    tie_atol = 64.0 * np.finfo(np.float64).eps * max(1.0, abs(best_score))
+    tied = np.flatnonzero(scores >= best_score - tie_atol)
+    best_index = int(tied[np.argmin(np.abs(offsets[tied]))])
+    if best_index == 0 or best_index == candidate_count - 1:
+        raise ValueError(
+            "electrical-delay branch optimum reached the search boundary; increase "
+            "search_radius or pass an explicit edelay"
+        )
+
+    peak_indices = (
+        np.flatnonzero((scores[1:-1] > scores[:-2]) & (scores[1:-1] >= scores[2:])) + 1
+    )
+    other_peaks = peak_indices[peak_indices != best_index]
+    score_margin = (
+        best_score - float(np.max(scores[other_peaks]))
+        if len(other_peaks) > 0
+        else None
+    )
+    if score_margin is not None and score_margin < _EDELAY_AMBIGUITY_MARGIN:
+        warnings.warn(
+            "electrical-delay branch search is ambiguous; using the strongest "
+            "adjacent-phase-coherence branch",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    return float(candidates[best_index])
+
+
+def find_edelay_branch(
+    freqs: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    *,
+    search_radius: float | None = None,
+) -> float:
+    """Return a global electrical-delay branch seed for one or more signal rows.
+
+    ``signals`` may be a single trace or a row stack sharing ``freqs``. With no
+    explicit ``search_radius``, the search covers two alias periods of an equivalent
+    uniform grid with the same span and sample count. The radius uses the inverse unit
+    of ``freqs``.
+    """
+    if freqs.ndim != 1 or signals.ndim not in (1, 2):
+        raise ValueError(
+            "electrical-delay branch search expects a one-dimensional frequency "
+            "axis and one- or two-dimensional signals"
+        )
+    if signals.shape[-1] != len(freqs):
+        raise ValueError(
+            "electrical-delay branch search frequency and signal lengths must match"
+        )
+    if signals.ndim == 2 and signals.shape[0] == 0:
+        raise ValueError(
+            "electrical-delay branch search requires at least one signal row"
+        )
+    if len(freqs) < 4:
+        raise ValueError(
+            "electrical-delay branch search requires at least four samples"
+        )
+    if not np.all(np.isfinite(freqs)) or not np.all(np.isfinite(signals)):
+        raise ValueError("electrical-delay branch search inputs must be finite")
+    span = float(np.ptp(freqs))
+    if span <= 0.0 or len(np.unique(freqs)) != len(freqs):
+        raise ValueError(
+            "electrical-delay branch search requires distinct frequencies with a "
+            "positive span"
+        )
+
+    signal_rows = signals[None, :] if signals.ndim == 1 else signals
+    rough_edelays = np.asarray(
+        [get_rough_edelay(freqs, row) for row in signal_rows],
+        dtype=np.float64,
+    )
+    rough_edelay = float(np.median(rough_edelays))
+    if search_radius is None:
+        search_radius = _DEFAULT_EDELAY_SEARCH_PERIODS * (len(freqs) - 1) / span
+    return _find_edelay_branch(freqs, signals, rough_edelay, search_radius)
 
 
 def remove_edelay(
@@ -132,9 +293,35 @@ def fit_circle_params(
     return center_x, center_y, radius
 
 
-def fit_edelay(freqs: NDArray[np.float64], signals: NDArray[np.complex128]) -> float:
-    rough_edelay = get_rough_edelay(freqs, signals)
-    signals = remove_edelay(freqs, signals, rough_edelay)
+def fit_edelay(
+    freqs: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    *,
+    search_radius: float | None = None,
+    branch_seed: float | None = None,
+) -> float:
+    """Fit electrical delay, resolving nonuniform-grid aliases within a finite radius.
+
+    ``search_radius`` uses the inverse unit of ``freqs`` (microseconds when ``freqs``
+    is in MHz). The default covers two average-grid alias periods. Uniform grids retain
+    the local canonical alias because their absolute delay branch is not identifiable
+    from the sampled data. ``branch_seed`` lets a caller share one previously discovered
+    branch across related traces and skips the global search.
+    """
+    validate_complex_fit_inputs(freqs, signals)
+    if branch_seed is not None and search_radius is not None:
+        raise ValueError("branch_seed and search_radius are mutually exclusive")
+    if branch_seed is None:
+        branch_edelay = find_edelay_branch(
+            freqs,
+            signals,
+            search_radius=search_radius,
+        )
+    elif np.isfinite(branch_seed):
+        branch_edelay = branch_seed
+    else:
+        raise ValueError("electrical-delay branch seed must be finite")
+    signals = remove_edelay(freqs, signals, branch_edelay)
 
     def loss_func(edelay: float) -> float:
         rot_signals = remove_edelay(freqs, signals, edelay)
@@ -146,7 +333,7 @@ def fit_edelay(freqs: NDArray[np.float64], signals: NDArray[np.complex128]) -> f
     fit_range = 5.0 / np.ptp(freqs)
     edelays = np.linspace(-fit_range, fit_range, 1000)
     loss_values = [loss_func(edelay) for edelay in edelays]
-    edelay = edelays[np.argmin(loss_values)] + rough_edelay
+    edelay = edelays[np.argmin(loss_values)] + branch_edelay
 
     return edelay
 

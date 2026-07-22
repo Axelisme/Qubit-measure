@@ -12,6 +12,7 @@ from zcu_tools.utils.fitting.resonance import (
     TransmissionModel,
     calc_phase,
     fit_circle_params,
+    fit_edelay,
     get_proper_model,
     normalize_signal,
     phase_func,
@@ -122,6 +123,140 @@ def test_hanger_fit_recovers_nonuniform_grid_with_edelay():
     np.testing.assert_allclose(params["freq"], f0, atol=0.1)
     np.testing.assert_allclose(params["Ql"], Ql, rtol=0.1)
     np.testing.assert_allclose(params["edelay"], edelay, atol=1e-3)
+
+
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
+@pytest.mark.parametrize("descending", [False, True])
+def test_fit_edelay_recovers_large_delay_branch_on_nonuniform_grid(
+    model: type[HangerModel] | type[TransmissionModel],
+    descending: bool,
+) -> None:
+    freq, Ql, edelay = 5549.0, 740.0, 11.299
+    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
+    if descending:
+        freqs = freqs[::-1]
+    if model is HangerModel:
+        signals = _hanger_truth(
+            freqs,
+            freq=freq,
+            Ql=Ql,
+            Qc_abs=1100.0,
+            phi=0.12,
+            a0=1.25 * np.exp(0.31j),
+            edelay=edelay,
+            bg_amp_slope=0.004,
+        )
+    else:
+        signals = _transmission_truth(
+            freqs,
+            freq=freq,
+            Ql=Ql,
+            a0=1.25 * np.exp(0.31j),
+            edelay=edelay,
+            bg_amp_slope=0.004,
+        )
+
+    np.testing.assert_allclose(fit_edelay(freqs, signals), edelay, atol=3e-3)
+
+
+def test_fit_edelay_preserves_uniform_grid_alias_class() -> None:
+    freq, Ql, edelay = 5549.0, 740.0, 11.299
+    freqs = np.linspace(freq - 15.0, freq + 15.0, 301)
+    signals = _hanger_truth(
+        freqs,
+        freq=freq,
+        Ql=Ql,
+        Qc_abs=1100.0,
+        phi=0.12,
+        a0=1.25 * np.exp(0.31j),
+        edelay=edelay,
+        bg_amp_slope=0.004,
+    )
+
+    estimated = fit_edelay(freqs, signals)
+    alias_period = 1.0 / float(freqs[1] - freqs[0])
+    alias_error = (estimated - edelay + 0.5 * alias_period) % alias_period
+    alias_error -= 0.5 * alias_period
+
+    assert abs(alias_error) < 3e-3
+    assert abs(estimated) < 0.5 * alias_period
+
+
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
+def test_model_fit_recovers_large_delay_nonuniform_truth(
+    model: type[HangerModel] | type[TransmissionModel],
+) -> None:
+    freq, Ql, edelay = 5549.0, 740.0, 11.299
+    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
+    common = dict(
+        freq=freq,
+        Ql=Ql,
+        a0=1.25 * np.exp(0.31j),
+        edelay=edelay,
+        bg_amp_slope=0.004,
+    )
+    if model is HangerModel:
+        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
+    else:
+        signals = _transmission_truth(freqs, **common)
+
+    params = model.fit(freqs, signals, fit_bg_amp_slope=True)
+    fitted = model.calc_signals(freqs, **params)
+    nrmse = np.sqrt(np.mean(np.abs(fitted - signals) ** 2)) / np.ptp(np.abs(signals))
+
+    np.testing.assert_allclose(params["freq"], freq, atol=0.08)
+    np.testing.assert_allclose(params["Ql"], Ql, rtol=0.03)
+    np.testing.assert_allclose(params["edelay"], edelay, atol=2e-3)
+    assert nrmse < 0.01
+
+
+def test_explicit_edelay_bypasses_branch_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freqs = _homophasal_like_grid(5549.0, 740.0, 15.0, 301)
+    signals = _hanger_truth(
+        freqs,
+        freq=5549.0,
+        Ql=740.0,
+        Qc_abs=1100.0,
+        phi=0.12,
+        a0=1.25 * np.exp(0.31j),
+        edelay=11.299,
+        bg_amp_slope=0.0,
+    )
+
+    def unexpected_search(*_args: object, **_kwargs: object) -> float:
+        raise AssertionError("explicit edelay must bypass branch search")
+
+    monkeypatch.setattr(
+        "zcu_tools.utils.fitting.resonance.hanger.fit_edelay",
+        unexpected_search,
+    )
+
+    params = HangerModel.fit(
+        freqs,
+        signals,
+        edelay=11.299,
+        edelay_search_radius=-1.0,
+    )
+
+    assert params["edelay"] == 11.299
+
+
+def test_fit_edelay_rejects_nonmonotonic_frequency_grid() -> None:
+    freqs = np.asarray([5000.0, 5000.2, 5000.1, 5000.3])
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
+
+    with pytest.raises(ValueError, match="strictly monotonic"):
+        fit_edelay(freqs, signals)
+
+
+def test_fit_edelay_rejects_branch_seed_with_search_radius() -> None:
+    freqs = np.linspace(4990.0, 5010.0, 101)
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        fit_edelay(freqs, signals, branch_seed=0.2, search_radius=5.0)
 
 
 def test_get_proper_model_hanger_vs_transmission():

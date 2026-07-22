@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 
 from .base import (
     calc_phase,
+    find_edelay_branch,
     fit_circle_params,
     fit_edelay,
     fit_resonant_params,
