@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-09 — effective T1 component labels
+**Last updated:** 2026-07-22 — f01 flux correction diagnostics
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -9,6 +9,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - 頻率 `freqs`: GHz；`omegas` (角頻率): rad/ns；兩者由 `freq2omega` 互轉。
 - T1 / T1err: ns。
 - 溫度 `Temp`: K (典型 ~20 mK)。
+- Purcell 參數 `bare_rf` / `g` / `kappa_ghz`: GHz。
 - 能量 `params = (EJ, EC, EL)`: GHz。
 - Dipole / spectral density: GHz，Q = T1 × dipole → 無量綱。
 
@@ -17,7 +18,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 ### `utils.py` — 基礎工具
 
 - `freq2omega(f)`：GHz → rad/ns。
-- `correct_flux_from_f01(dev_values, f01_freqs, params, flux_half, flux_period, ...)`：用量到的 f01 頻率把 device-value 校準得到的 flux 軸拉回 fluxonium 模型；`f01_freqs` 單位是 GHz，回傳 `F01FluxCorrectionResult`，其中 `corrected_fluxs` 供後續矩陣元/T1 擬合使用，`corrected_dev_values` 供現有 plotting helpers 使用。
+- `correct_flux_from_f01(dev_values, f01_freqs, params, flux_half, flux_period, ...)`：從 `notebook.analysis.fit_tools` re-export；用量到的 f01 頻率把 device-value 校準得到的 flux 軸拉回 fluxonium 模型；`f01_freqs` 單位是 GHz，回傳 `F01FluxCorrectionResult`，其中 `corrected_fluxs` 供後續矩陣元/T1 擬合使用，`corrected_dev_values` 供現有 plotting helpers 使用。
 - `convert_eV_to_Hz(v)`：eV → Hz（用於超導能隙）。
 - `calc_therm_ratio(omega, T)`：計算 `ℏω/(kT)`，是所有 spectral density 的核心 Bose 因子參數。
 - `format_exponent(n)`：把數字渲染成 LaTeX 科學記號，供圖例用。
@@ -35,13 +36,24 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 ### `t1_curve_fit.py` / `fit.py` — white-list T1 noise fit
 
 - `T1FitParams(Temp=..., Q_cap=None, x_qp=None, Q_ind=None)`：fit 初值與結果容器；`Temp` 單位 K 且必填，三個 noise params 使用白名單語義，只有非 `None` 的參數會納入模型。
-- `fit_t1_noise_params(fluxs, T1s, params, *, init, bounds=None, fixed=(), T1errs=None, residual_mode="log", progress=False, ...)`：用 `least_squares` 一次擬合 active noise params 與 `Temp`。`fluxs` 是 normalized flux；`T1s/T1errs` 是 ns；`params=(EJ,EC,EL)` 是 GHz。`progress=True` 時用 repo 的 progress-bar backend 顯示 residual evaluation 進度。
+- `fit_t1_noise_params(fluxs, T1s, params, *, init, bounds=None, fixed=(), T1errs=None, T1_error_policy=None, flux_weighting=None, residual_mode="log", extra_relaxation_rate_fn=None, progress=False, ...)`：用 `least_squares` 一次擬合 active noise params 與 `Temp`。`fluxs` 是 normalized flux；`T1s/T1errs` 是 ns；`params=(EJ,EC,EL)` 是 GHz。`extra_relaxation_rate_fn(current_params)` 可額外提供固定或溫度相依的 relaxation rate (1/ns)，會以 rate 加到模型 T1 中；`progress=True` 時用 repo 的 progress-bar backend 顯示 residual evaluation 進度。
 - 擬合在 log-parameter 空間進行，active 參數必須為正，且至少要提供一個 noise param；`bounds` 用 active 參數名部分覆蓋預設範圍，`fixed` 用 active 參數名固定任意多個參數，固定值取自 `init`。
 - `fixed=("Q_ind",)` 代表 inductive channel 仍在模型中、只是固定 `Q_ind`；若要完全不考慮 inductive loss，建立 `T1FitParams` 時不要提供 `Q_ind`。
-- 預設 residual 是 log T1；若提供 `T1errs`，finite positive error 會轉成權重，`NaN` 表示該點不加權。
+- 預設 residual 是 log T1；若提供 `T1errs`，finite positive error 會轉成權重。`T1_error_policy` 可用 shared `MeasurementErrorPolicy` 決定 `NaN` error 如何補值；`flux_weighting` 可用 shared `FluxResidualWeighting(mode="equal_flux_bin")` 讓不同 flux bin 對 residual cost 有一致權重。
 - `success=True` 只表示 SciPy optimizer 達到終止條件；是否可信要看 residual、`reduced_chi2`、stderr 與參數是否貼近 bounds。固定參數的 stderr 回報為 0，代表未估計而不是物理不確定度為 0；inactive noise params 的 result / stderr 為 `None`。
 - `t1_curve_fit.py` 是明確的 public module name；`fit.py` 保留為既有 import path，兩者 export 同一組 API。
 - notebook 若要把 all-in-one fit 結果交給後續模擬，使用 `QubitParams.set_t1_curve_fit(T1CurveFit(...))` 寫入 `params.json` 的 `t1_curve_fit` section。這個 section 只放 active noise params、stderr、fixed/free、bounds 與 fit metadata；省略的 noise key 表示該 channel 未納入模型。sample arrays、residual arrays 與 dense model curve 留在 notebook 輸出或資料檔。
+
+### `workflow.py` — notebook-facing fixed workflow
+
+- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、以 f01 校準 current scale、f01-based flux correction、T1/T1err 單位轉換與 fit-window filtering。notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
+- `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
+- `PurcellEffectParams(kappa_ghz, bare_rf=None, g=None)` 是 optional Purcell 設定；`bare_rf` / `g` 省略時使用 context 從 `params.json` 讀出的 dispersive handoff。
+- `calculate_purcell_t1_limit()` 對 Purcell sweep 使用 bounded LRU cache，並在 notebook workflow 內部關閉 scqubits sweep progress；cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
+- `analyze_t1_{capacitive,quasiparticle,inductive}_limit(..., purcell=None)` 是逐項機制 probe；若提供 Purcell，會先以 rate domain 扣除 Purcell relaxation，再用 intrinsic T1 反推 pointwise Q、建議初值、上下界參考與 summary table。
+- `make_t1_fit_init()` / `make_t1_fit_bounds()` / `fit_t1_curve(..., purcell=None)` 是綜合擬合階段；`active_mechanisms` 決定納入哪些通道，`mechanisms_to_fixed_params()` 決定哪些 active parameter 只固定不擬合。Purcell 在 combined fit 中以 `1/T1_Purcell(Temp)` 加到總 relaxation rate，因此 `Temp` 若是 free parameter，Purcell 也會跟著更新。
+- `build_t1_channel_curves(..., purcell=None)` / `plot_t1_channel_analysis()` 產生 uniform flux grid 上的 effective T1 與獨立機制上限曲線；若 combined fit 或參數有 Purcell，component curves 會多一條 Purcell 上限。圖內 legend 只放 curve name，擬合參數文字放在 axes 右側。
+- `write_t1_curve_fit()` 是顯式 writeback；workflow 不會在 fitting 階段自動寫入 `params.json`。
 
 ### `Qcap.py` — 介電耗散 (電容通道)
 
@@ -65,12 +77,12 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ## 典型使用流程
 
-1. 從 sample 表讀出 device value、f01 頻率、T1 與 T1err；若 fluxdep fit 與 T1 scan 之間可能有小漂移，先用 `correct_flux_from_f01` 產生校正後 flux 軸。
-2. 用 `scqubits.Fluxonium` 在 `t_fluxs` 解出 `spectrum_data`，取樣點 flux 處求 `omegas` 與矩陣元 (`n`, `φ`, 或 `sin(φ/2)`)。
-3. 呼叫 `calc_Q{cap,ind,qp}_vs_omega` 得到 Q(ω) 與誤差。
-4. 若想自洽找溫度：`find_proper_Temp(T0, lambda T: calc_Qxxx_vs_omega(..., Temp=T))`。
-5. `plot_Q_vs_omega` + `add_Q_fit` 檢視頻率相依性。
-6. `plot_t1_with_sample` 把候選 Q 值 / Q(ω) 函數疊回 T1(φ) 曲線做視覺比對。
+1. 從 sample 表讀出 device value、f01 頻率、T1 與 T1err；用 `calibrate_t1_flux()` 判斷 current scale，再用 `prepare_t1_curve_data()` 產生 f01-corrected flux 軸，並用 `plot_t1_flux_calibration()` 檢查校正前後位置。
+2. 在 fit window 設定 `MeasurementErrorPolicy` 與 `FluxResidualWeighting`；預設保留 `T1err=NaN` 的點並在 fit 內補值。
+3. 視需要建立 `PurcellEffectParams`；此設定同時傳給逐項 probe、combined fit 與 channel curves。
+4. 依序跑 capacitive、quasiparticle、inductive probe，檢查每個機制的 pointwise Q 與單機制 T1 上限。
+5. 用 probe 結果建立 combined-fit 初值；用 `active_mechanisms` / `fixed_mechanisms` 控制納入與固定的通道。
+6. 在 uniform `t_fluxs` 上畫 effective T1 與各獨立機制曲線；需要交給 T2 分析時再顯式 `write_t1_curve_fit()`。
 
 ## 注意事項
 

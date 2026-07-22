@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-07-07 — floquet Fourier helper reuse
+**Last updated:** 2026-07-22 — Purcell progress control
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -54,7 +54,7 @@
   - `_with` 版本接受已建好的 `Fluxonium` 物件與可選的 `spectrum_data`,供重複呼叫時重用。
   - 內部用 `scq_settings.scq_t1_default_warning(False)` 暫時關閉 `scq_settings.T1_DEFAULT_WARNING`,並以 1 秒門檻啟動 `tqdm` 進度條(短任務不顯示)。
 - **`calculate_eff_t1_vs_flux_fast` / `calculate_eff_t1_fast`**(`coherence_fast.py`)— scqubits-free numpy 等效,**~60x**(13.6s→0.36s/100flux/4ch)。**逐點對齊 scqubits 到 ~1e-13 相對**(見 `tests/simulate/fluxonium/test_coherence_fast.py`)。**兩個瓶頸都繞掉**:(1) eigensolve 用 `energies.py` 的 cos/sin 預算技巧自己 `eigh`(`H=-EJ·cos(φ+β)`);(2) flux-dependent noise 算子(`dH/dflux=-2πEJ·sin(φ+β)`、`sin(φ/2+π·flux)`)用三角恆等式 `sin(αφ+β)=sin(αφ)cos(β)+cos(αφ)sin(β)` 從一次算好的 `sin/cos(αφ)` 重組,**消掉 scqubits 每 flux 一次的 `scipy.linalg.sinm`**(profiling:flux_bias_line 2.6s + quasiparticle 5.6s/100flux 全在 sinm)。**5 個 noise spectral density 公式逐字移植自 `scqubits/core/noise.py`**(常數 `R_k=h/e²`、`to_standard_units=×1e9`、`calc_therm_ratio`、各 channel 的 Q_cap/Q_ind/Y_qp 預設),Fermi rate = `|⟨i|op|j⟩|²·[S(ω)+S(-ω)]`、`T1[ns]=2π/Σrate`。介面同 scqubits(`noise_channels` 為 str 或 `(str,opts)`,支援 per-channel Q_cap/Q_ind/Y_qp/M/Z/x_qp/Delta);不支援的 channel raise `UnsupportedNoiseChannelError`。**fast-fail kwarg 驗證**:固定 `total=True`,傳 `total=False`、頂層未知 kwarg、或 per-channel opts 放了該 channel 不接受的鍵(如 `t1_capacitive` 放 `M`),都 raise `UnsupportedNoiseOptionError`(不靜默丟棄,免回傳 wrong-but-plausible T1)。每 channel 的合法 opts 在 `_CHANNELS` 第二元素(frozenset)。**flux-independent 算子用 `_t1_operators` @lru_cache(params,cutoff,qub_dim)**(對標 dispersive 的 `_fluxonium_operators`;noise opts/Temp/transition 不進 key,不同 noise 設定共用同份算子)——同 params 重複呼叫(t1_curve 掃 noise_values 的典型場景)固定成本(~110ms 的 scqubits 算子建構)只付一次。**per-flux loop 已批次化**:H 堆成 `(N,dim,dim)` 一次 batched `np.linalg.eigh`,算子變換/Fermi rate 全向量化。warm cache 下各 N 比 scqubits 慢路徑快 ~7-10x;cold + 小 N(<~50)單次呼叫仍可能比慢路徑慢(一次性 ~110ms,刻意不加 N 閾值 dispatch 以免複雜化語義)。**半通量 0.5**:quasiparticle `sin(φ/2)` 矩陣元 parity-vanish → T1~∞(~1e32 ns),fast 與 scqubits 都同意 rate≈0(殘差相對差大但物理上都是無限,非 bug)。舊 scqubits 版全保留。
-- `calculate_purcell_t1_vs_flux` — 自訂 Purcell 通道 T1,手動求和 resonator 熱態佔據下的 `⟨0,n'|a†|1,n⟩` / `⟨0,n'|a|1,n⟩` 矩陣元:
+- `calculate_purcell_t1_vs_flux(..., progress=True)` — 自訂 Purcell 通道 T1,手動求和 resonator 熱態佔據下的 `⟨0,n'|a†|1,n⟩` / `⟨0,n'|a|1,n⟩` 矩陣元；`progress=False` 會暫時關閉 scqubits sweep progress，供 fitting loop 內部靜音使用:
   - `P_res(n) = (1 − e^{−βℏωr}) e^{−nβℏωr}`
   - `Γ↑ = Σ P_res(n) κ n_th(ΔE) |⟨…|a†|…⟩|²`
   - `Γ↓ = Σ P_res(n) κ (n_th(−ΔE)+1) |⟨…|a|…⟩|²`

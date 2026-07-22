@@ -32,6 +32,28 @@ def test_plot_eff_t1_with_sample_draws_component_limits() -> None:
         plt.close(fig)
 
 
+def test_plot_eff_t1_with_sample_keeps_sample_ylim_with_large_component() -> None:
+    fig, ax = plot_eff_t1_with_sample(
+        np.array([-1.0, 0.0, 1.0], dtype=np.float64),
+        np.array([8.0, 10.0, 9.0], dtype=np.float64),
+        np.array([0.5, 0.6, 0.5], dtype=np.float64),
+        np.array([7.0, 8.0, 7.5], dtype=np.float64),
+        flux_half=0.0,
+        flux_period=2.0,
+        t_fluxs=np.array([0.0, 0.5, 1.0], dtype=np.float64),
+        component_t1s={
+            "Purcell": np.array([1000.0, 1100.0, 1200.0], dtype=np.float64),
+        },
+    )
+
+    try:
+        _, labels = ax.get_legend_handles_labels()
+        assert "Purcell" in labels
+        assert ax.get_ylim()[1] < 1200.0
+    finally:
+        plt.close(fig)
+
+
 def test_plot_eff_t1_with_sample_rejects_component_shape_mismatch() -> None:
     with pytest.raises(ValueError, match="component_t1s\\['bad'\\]"):
         fig, _ = plot_eff_t1_with_sample(

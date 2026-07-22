@@ -299,7 +299,13 @@ def plot_eff_t1_with_sample(
 
     range = np.ptp(s_fluxs)
     ax.set_xlim(s_fluxs.min() - 0.01 * range, s_fluxs.max() + 0.01 * range)
-    ax.set_ylim(0.5 * s_T1s.min(), 3.0 * s_T1s.max())
+    ax.set_ylim(
+        *_t1_plot_ylim(
+            np.asarray(s_T1s, dtype=np.float64),
+            t1_effs,
+            component_t1s,
+        )
+    )
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
@@ -336,3 +342,15 @@ def plot_eff_t1_with_sample(
     ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
+
+
+def _t1_plot_ylim(
+    sample_T1s: NDArray[np.float64],
+    effective_T1s: NDArray[np.float64],  # noqa: ARG001
+    component_T1s: Mapping[str, NDArray[np.float64]] | None,  # noqa: ARG001
+) -> tuple[float, float]:
+    values = np.asarray(sample_T1s, dtype=np.float64)
+    values = values[np.isfinite(values) & (values > 0.0)]
+    if values.size == 0:
+        raise ValueError("T1 plot needs at least one positive finite sample T1 value")
+    return 0.5 * float(np.min(values)), 3.0 * float(np.max(values))

@@ -1,13 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, least_squares
 
+from zcu_tools.notebook.analysis.fit_tools import (
+    ErrorResolutionResult,
+    FluxResidualWeighting,
+    FluxResidualWeights,
+    MeasurementErrorPolicy,
+    build_flux_residual_weights,
+    least_squares_cost,
+    reduced_chi2_from_cost,
+    resolve_measurement_errors,
+)
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.progress_bar.base import BaseProgressBar
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
@@ -32,12 +42,27 @@ _DEFAULT_BOUNDS: dict[ParameterName, tuple[float, float]] = {
 }
 
 
+def _default_flux_weights() -> FluxResidualWeights:
+    return FluxResidualWeights(
+        residual_weights=np.ones(0, dtype=np.float64),
+        bin_indices=np.zeros(0, dtype=np.int64),
+        bin_counts=np.zeros(0, dtype=np.int64),
+        effective_observation_count=0.0,
+        mode="sample",
+        bin_width=None,
+        bin_count=None,
+    )
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class T1FitParams:
     Temp: float
     Q_cap: float | None = None
     x_qp: float | None = None
     Q_ind: float | None = None
+
+
+ExtraRelaxationRateFn = Callable[[T1FitParams], NDArray[np.float64]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +78,8 @@ class T1FitResult:
     success: bool
     message: str
     optimizer_result: OptimizeResult | None
+    T1_error_resolution: ErrorResolutionResult | None = None
+    flux_weights: FluxResidualWeights = field(default_factory=_default_flux_weights)
 
 
 def fit_t1_noise_params(
@@ -64,6 +91,8 @@ def fit_t1_noise_params(
     bounds: Mapping[str, tuple[float, float]] | None = None,
     fixed: Iterable[str] = (),
     T1errs: NDArray[np.float64] | None = None,
+    T1_error_policy: MeasurementErrorPolicy | None = None,
+    flux_weighting: FluxResidualWeighting | None = None,
     residual_mode: ResidualMode = "log",
     loss: str = "linear",
     max_nfev: int | None = None,
@@ -74,6 +103,7 @@ def fit_t1_noise_params(
     qub_dim: int = 20,
     i: int = 1,
     j: int = 0,
+    extra_relaxation_rate_fn: ExtraRelaxationRateFn | None = None,
     progress: bool = False,
 ) -> T1FitResult:
     """Fit active T1 noise parameters against measured T1 vs normalized flux.
@@ -83,7 +113,7 @@ def fit_t1_noise_params(
     ``Q_cap``, ``x_qp``, and ``Q_ind`` are white-listed by providing non-``None``
     values in ``init``.
     """
-    fluxs_arr, T1s_arr, T1errs_arr = _validate_data(fluxs, T1s, T1errs)
+    data = _validate_data(fluxs, T1s, T1errs, T1_error_policy, flux_weighting)
     if residual_mode not in ("log", "linear"):
         raise ValueError("residual_mode must be 'log' or 'linear'")
     active_names = _active_parameter_names(init)
@@ -101,9 +131,9 @@ def fit_t1_noise_params(
 
     def model(current: T1FitParams) -> NDArray[np.float64]:
         noise_channels = _noise_channels_from_params(current, active_names)
-        return calculate_eff_t1_vs_flux_fast(
+        intrinsic_T1s = calculate_eff_t1_vs_flux_fast(
             params,
-            fluxs_arr,
+            data.fluxs,
             noise_channels,
             current.Temp,
             cutoff=cutoff,
@@ -111,27 +141,42 @@ def fit_t1_noise_params(
             i=i,
             j=j,
         )
+        if extra_relaxation_rate_fn is None:
+            return intrinsic_T1s
+        extra_rates = _validate_extra_relaxation_rates(
+            extra_relaxation_rate_fn(current),
+            shape=data.T1s.shape,
+        )
+        return _combine_t1_with_extra_rates(intrinsic_T1s, extra_rates)
 
     def residual_from_params(current: T1FitParams) -> NDArray[np.float64]:
         return _calc_residuals(
-            model(current), T1s_arr, T1errs_arr, residual_mode=residual_mode
+            model(current),
+            data,
+            residual_mode=residual_mode,
         )
 
     if not free_names:
         fixed_model = model(init)
         residuals = _calc_residuals(
-            fixed_model, T1s_arr, T1errs_arr, residual_mode=residual_mode
+            fixed_model,
+            data,
+            residual_mode=residual_mode,
         )
-        cost = _cost(residuals)
+        cost = least_squares_cost(residuals)
         return T1FitResult(
             params=init,
             stderr=_zero_stderr(active_names),
             fixed=fixed_names,
             free=free_names,
+            T1_error_resolution=data.T1_error_resolution,
+            flux_weights=data.flux_weights,
             model_T1s=fixed_model,
             residuals=residuals,
             cost=cost,
-            reduced_chi2=_reduced_chi2(cost, len(residuals), 0),
+            reduced_chi2=reduced_chi2_from_cost(
+                cost, data.flux_weights.effective_observation_count, 0
+            ),
             success=True,
             message="all parameters fixed",
             optimizer_result=None,
@@ -148,7 +193,7 @@ def fit_t1_noise_params(
             current_values[name] = float(value)
         residuals = residual_from_params(_values_to_params(current_values))
         if pbar is not None:
-            best_cost = min(best_cost, _cost(residuals))
+            best_cost = min(best_cost, least_squares_cost(residuals))
             pbar.set_description(f"T1 fit cost={best_cost:.3g}")
             pbar.update()
         return residuals
@@ -177,31 +222,54 @@ def fit_t1_noise_params(
     fit_params = _values_to_params(fit_values)
     fit_model = model(fit_params)
     residuals = _calc_residuals(
-        fit_model, T1s_arr, T1errs_arr, residual_mode=residual_mode
+        fit_model,
+        data,
+        residual_mode=residual_mode,
     )
-    cost = _cost(residuals)
-    stderr = _estimate_stderr(opt, fit_values, active_names, free_names, len(residuals))
+    cost = least_squares_cost(residuals)
+    stderr = _estimate_stderr(
+        opt,
+        fit_values,
+        active_names,
+        free_names,
+        data.flux_weights.effective_observation_count,
+    )
 
     return T1FitResult(
         params=fit_params,
         stderr=stderr,
         fixed=fixed_names,
         free=free_names,
+        T1_error_resolution=data.T1_error_resolution,
+        flux_weights=data.flux_weights,
         model_T1s=fit_model,
         residuals=residuals,
         cost=cost,
-        reduced_chi2=_reduced_chi2(cost, len(residuals), len(free_names)),
+        reduced_chi2=reduced_chi2_from_cost(
+            cost, data.flux_weights.effective_observation_count, len(free_names)
+        ),
         success=bool(opt.success),
         message=str(opt.message),
         optimizer_result=opt,
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _T1FitData:
+    fluxs: NDArray[np.float64]
+    T1s: NDArray[np.float64]
+    T1errs: NDArray[np.float64] | None
+    T1_error_resolution: ErrorResolutionResult | None
+    flux_weights: FluxResidualWeights
+
+
 def _validate_data(
     fluxs: NDArray[np.float64],
     T1s: NDArray[np.float64],
     T1errs: NDArray[np.float64] | None,
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64] | None]:
+    T1_error_policy: MeasurementErrorPolicy | None,
+    flux_weighting: FluxResidualWeighting | None,
+) -> _T1FitData:
     fluxs_arr = np.asarray(fluxs, dtype=np.float64)
     T1s_arr = np.asarray(T1s, dtype=np.float64)
     if fluxs_arr.ndim != 1 or T1s_arr.ndim != 1:
@@ -215,8 +283,19 @@ def _validate_data(
     if not np.all(np.isfinite(T1s_arr)) or np.any(T1s_arr <= 0.0):
         raise ValueError("T1s must be finite and positive")
 
+    flux_weights = build_flux_residual_weights(
+        fluxs_arr,
+        flux_weighting,
+        sample_count=len(T1s_arr),
+    )
     if T1errs is None:
-        return fluxs_arr, T1s_arr, None
+        return _T1FitData(
+            fluxs=fluxs_arr,
+            T1s=T1s_arr,
+            T1errs=None,
+            T1_error_resolution=None,
+            flux_weights=flux_weights,
+        )
 
     T1errs_arr = np.asarray(T1errs, dtype=np.float64)
     if T1errs_arr.shape != T1s_arr.shape:
@@ -224,7 +303,20 @@ def _validate_data(
     valid_err = np.isnan(T1errs_arr) | (np.isfinite(T1errs_arr) & (T1errs_arr > 0.0))
     if not np.all(valid_err):
         raise ValueError("T1errs must be positive finite values or NaN")
-    return fluxs_arr, T1s_arr, T1errs_arr
+    T1_error_resolution = resolve_measurement_errors(
+        T1s_arr,
+        T1errs_arr,
+        policy=T1_error_policy,
+        flux_weights=flux_weights,
+        name="T1errs",
+    )
+    return _T1FitData(
+        fluxs=fluxs_arr,
+        T1s=T1s_arr,
+        T1errs=T1_error_resolution.effective_errors,
+        T1_error_resolution=T1_error_resolution,
+        flux_weights=flux_weights,
+    )
 
 
 def _active_parameter_names(init: T1FitParams) -> tuple[ParameterName, ...]:
@@ -299,30 +391,64 @@ def _validate_init(
 
 def _calc_residuals(
     model_T1s: NDArray[np.float64],
-    T1s: NDArray[np.float64],
-    T1errs: NDArray[np.float64] | None,
+    data: _T1FitData,
     *,
     residual_mode: ResidualMode,
 ) -> NDArray[np.float64]:
     model_T1s = np.asarray(model_T1s, dtype=np.float64)
-    if model_T1s.shape != T1s.shape:
+    if model_T1s.shape != data.T1s.shape:
         raise ValueError("model T1 output shape does not match T1s")
     if np.any(~np.isfinite(model_T1s)) or np.any(model_T1s <= 0.0):
-        return np.full_like(T1s, 1e12, dtype=np.float64)
+        return np.full_like(data.T1s, 1e12, dtype=np.float64)
 
     if residual_mode == "log":
-        residuals = np.log(model_T1s) - np.log(T1s)
-        if T1errs is not None:
-            weights = _nan_as_unweighted(T1errs / T1s)
+        residuals = np.log(model_T1s) - np.log(data.T1s)
+        if data.T1errs is not None:
+            weights = _nan_as_unweighted(data.T1errs / data.T1s)
             residuals = residuals / weights
     elif residual_mode == "linear":
-        residuals = model_T1s - T1s
-        if T1errs is not None:
-            residuals = residuals / _nan_as_unweighted(T1errs)
+        residuals = model_T1s - data.T1s
+        if data.T1errs is not None:
+            residuals = residuals / _nan_as_unweighted(data.T1errs)
     else:
         raise ValueError("residual_mode must be 'log' or 'linear'")
 
-    return residuals.astype(np.float64, copy=False)
+    return (residuals * data.flux_weights.residual_weights).astype(
+        np.float64, copy=False
+    )
+
+
+def _combine_t1_with_extra_rates(
+    intrinsic_T1s: NDArray[np.float64],
+    extra_rates: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    intrinsic_arr = np.asarray(intrinsic_T1s, dtype=np.float64)
+    rates = np.divide(
+        1.0,
+        intrinsic_arr,
+        out=np.full_like(intrinsic_arr, np.nan, dtype=np.float64),
+        where=np.isfinite(intrinsic_arr) & (intrinsic_arr > 0.0),
+    )
+    rates += extra_rates
+    return np.divide(
+        1.0,
+        rates,
+        out=np.full_like(rates, np.nan, dtype=np.float64),
+        where=np.isfinite(rates) & (rates > 0.0),
+    )
+
+
+def _validate_extra_relaxation_rates(
+    rates: NDArray[np.float64],
+    *,
+    shape: tuple[int, ...],
+) -> NDArray[np.float64]:
+    rates_arr = np.asarray(rates, dtype=np.float64)
+    if rates_arr.shape != shape:
+        raise ValueError("extra relaxation rate output shape does not match T1s")
+    if np.any(~np.isfinite(rates_arr)) or np.any(rates_arr < 0.0):
+        raise ValueError("extra relaxation rates must be finite and non-negative")
+    return rates_arr
 
 
 def _nan_as_unweighted(values: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -334,7 +460,7 @@ def _estimate_stderr(
     fit_values: Mapping[ParameterName, float],
     active_names: tuple[ParameterName, ...],
     free_names: tuple[ParameterName, ...],
-    n_residuals: int,
+    observation_count: float,
 ) -> T1FitParams:
     stderr_values: dict[ParameterName, float] = {name: 0.0 for name in active_names}
     n_free = len(free_names)
@@ -344,7 +470,7 @@ def _estimate_stderr(
     try:
         jac = np.asarray(opt.jac, dtype=np.float64)
         cov_log = np.linalg.pinv(jac.T @ jac)
-        cov_log *= _reduced_chi2(float(opt.cost), n_residuals, n_free)
+        cov_log *= reduced_chi2_from_cost(float(opt.cost), observation_count, n_free)
         log_stderr = np.sqrt(np.maximum(np.diag(cov_log), 0.0))
         for name, value in zip(free_names, log_stderr, strict=True):
             stderr_values[name] = fit_values[name] * float(value)
@@ -411,15 +537,6 @@ def _optional_value(
 def _zero_stderr(active_names: tuple[ParameterName, ...]) -> T1FitParams:
     values: dict[ParameterName, float] = {name: 0.0 for name in active_names}
     return _values_to_params(values)
-
-
-def _cost(residuals: NDArray[np.float64]) -> float:
-    return float(0.5 * np.sum(residuals**2))
-
-
-def _reduced_chi2(cost: float, n_residuals: int, n_free: int) -> float:
-    dof = max(n_residuals - n_free, 1)
-    return float(2.0 * cost / dof)
 
 
 __all__ = ["T1FitParams", "T1FitResult", "fit_t1_noise_params"]

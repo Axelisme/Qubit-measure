@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import zcu_tools.notebook.analysis.fit_tools.flux as flux_mod
-from zcu_tools.notebook.analysis.t1_curve import correct_flux_from_f01
+from zcu_tools.notebook.analysis.fit_tools import correct_flux_from_f01
 
 
 class _FakePredictor:

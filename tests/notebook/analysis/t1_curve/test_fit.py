@@ -8,7 +8,12 @@ import pytest
 import zcu_tools.notebook.analysis.t1_curve.fit as fit_mod
 import zcu_tools.notebook.analysis.t1_curve.t1_curve_fit as public_fit_mod
 from numpy.typing import NDArray
-from zcu_tools.notebook.analysis.t1_curve import T1FitParams, fit_t1_noise_params
+from zcu_tools.notebook.analysis.t1_curve import (
+    FluxResidualWeighting,
+    MeasurementErrorPolicy,
+    T1FitParams,
+    fit_t1_noise_params,
+)
 
 _PARAMS = (3.469, 0.952, 0.582)
 
@@ -196,6 +201,180 @@ def test_fit_t1_noise_params_all_fixed_skips_optimizer(
     assert result.message == "all parameters fixed"
     assert result.cost == pytest.approx(0.0, abs=1e-24)
     np.testing.assert_allclose(result.residuals, 0.0, atol=1e-12)
+
+
+def test_fit_t1_noise_params_adds_extra_relaxation_rate_from_callable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def intrinsic_model(
+        params: tuple[float, float, float],  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        noise_channels: Sequence[tuple[str, dict[str, float]]],  # noqa: ARG001
+        Temp: float,  # noqa: ARG001
+        **kwargs: Any,  # noqa: ARG001
+    ) -> NDArray[np.float64]:
+        return np.full_like(fluxs, 20.0, dtype=np.float64)
+
+    captured_temps: list[float] = []
+
+    def extra_rate(current: T1FitParams) -> NDArray[np.float64]:
+        captured_temps.append(current.Temp)
+        return np.full_like(fluxs, 0.05, dtype=np.float64)
+
+    monkeypatch.setattr(fit_mod, "calculate_eff_t1_vs_flux_fast", intrinsic_model)
+    fluxs = np.array([0.49, 0.50, 0.51], dtype=np.float64)
+    expected_total_T1s = np.full_like(fluxs, 10.0, dtype=np.float64)
+
+    result = fit_t1_noise_params(
+        fluxs,
+        expected_total_T1s,
+        _PARAMS,
+        init=T1FitParams(Q_cap=8e5, Temp=0.06),
+        fixed=("Q_cap", "Temp"),
+        residual_mode="linear",
+        extra_relaxation_rate_fn=extra_rate,
+    )
+
+    np.testing.assert_allclose(result.model_T1s, expected_total_T1s)
+    np.testing.assert_allclose(result.residuals, 0.0, atol=1e-12)
+    assert captured_temps == pytest.approx([0.06])
+
+
+def test_fit_t1_noise_params_equalizes_flux_bins_with_fixed_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def shifted_model(
+        params: tuple[float, float, float],  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        noise_channels: Sequence[tuple[str, dict[str, float]]],  # noqa: ARG001
+        Temp: float,  # noqa: ARG001
+        **kwargs: Any,  # noqa: ARG001
+    ) -> NDArray[np.float64]:
+        return np.full_like(fluxs, 20.0, dtype=np.float64)
+
+    monkeypatch.setattr(fit_mod, "calculate_eff_t1_vs_flux_fast", shifted_model)
+    fluxs = np.array([0.490, 0.491, 0.492, 0.510], dtype=np.float64)
+    T1s = np.full_like(fluxs, 10.0, dtype=np.float64)
+    init = T1FitParams(Q_cap=8e5, Temp=0.06)
+
+    result = fit_t1_noise_params(
+        fluxs,
+        T1s,
+        _PARAMS,
+        init=init,
+        fixed=("Q_cap", "Temp"),
+        residual_mode="linear",
+        flux_weighting=FluxResidualWeighting(
+            mode="equal_flux_bin",
+            bin_width=0.005,
+            origin=0.49,
+        ),
+    )
+
+    assert result.flux_weights.effective_observation_count == 2.0
+    np.testing.assert_allclose(
+        result.residuals,
+        [10.0 / np.sqrt(3.0), 10.0 / np.sqrt(3.0), 10.0 / np.sqrt(3.0), 10.0],
+    )
+    assert 0.5 * np.sum(result.residuals[:3] ** 2) == pytest.approx(
+        0.5 * result.residuals[3] ** 2
+    )
+    assert result.reduced_chi2 == pytest.approx(100.0)
+
+
+def test_fit_t1_noise_params_default_keeps_nan_error_unweighted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def shifted_model(
+        params: tuple[float, float, float],  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        noise_channels: Sequence[tuple[str, dict[str, float]]],  # noqa: ARG001
+        Temp: float,  # noqa: ARG001
+        **kwargs: Any,  # noqa: ARG001
+    ) -> NDArray[np.float64]:
+        return np.full_like(fluxs, 20.0, dtype=np.float64)
+
+    monkeypatch.setattr(fit_mod, "calculate_eff_t1_vs_flux_fast", shifted_model)
+    fluxs = np.array([0.490, 0.510], dtype=np.float64)
+    T1s = np.full_like(fluxs, 10.0, dtype=np.float64)
+
+    result = fit_t1_noise_params(
+        fluxs,
+        T1s,
+        _PARAMS,
+        init=T1FitParams(Q_cap=8e5, Temp=0.06),
+        fixed=("Q_cap", "Temp"),
+        T1errs=np.array([2.0, np.nan], dtype=np.float64),
+        residual_mode="linear",
+    )
+
+    assert result.T1_error_resolution is not None
+    np.testing.assert_allclose(
+        result.T1_error_resolution.effective_errors,
+        [2.0, np.nan],
+    )
+    np.testing.assert_allclose(result.residuals, [5.0, 10.0])
+
+
+def test_t1_fit_result_constructor_accepts_base_public_signature() -> None:
+    result = fit_mod.T1FitResult(
+        params=T1FitParams(Q_cap=8e5, Temp=0.06),
+        stderr=T1FitParams(Q_cap=0.0, Temp=0.0),
+        fixed=("Q_cap", "Temp"),
+        free=(),
+        model_T1s=np.array([10.0], dtype=np.float64),
+        residuals=np.array([0.0], dtype=np.float64),
+        cost=0.0,
+        reduced_chi2=0.0,
+        success=True,
+        message="ok",
+        optimizer_result=None,
+    )
+
+    assert result.T1_error_resolution is None
+    assert result.flux_weights.effective_observation_count == 0.0
+
+
+def test_fit_t1_noise_params_fills_nan_errors_by_flux_bin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fit_mod, "calculate_eff_t1_vs_flux_fast", _fake_t1_model)
+    fluxs = np.array([0.490, 0.491, 0.510], dtype=np.float64)
+    init = T1FitParams(Q_cap=8e5, Temp=0.06)
+    T1s = _fake_t1_model(_PARAMS, fluxs, _noise_channels(init), init.Temp)
+    T1errs = np.array([100.0, np.nan, np.nan], dtype=np.float64)
+
+    result = fit_t1_noise_params(
+        fluxs,
+        T1s,
+        _PARAMS,
+        init=init,
+        fixed=("Q_cap", "Temp"),
+        T1errs=T1errs,
+        T1_error_policy=MeasurementErrorPolicy(
+            nan_policy="bin_median",
+            fallback_error=250.0,
+        ),
+        flux_weighting=FluxResidualWeighting(
+            mode="equal_flux_bin",
+            bin_width=0.005,
+            origin=0.49,
+        ),
+    )
+
+    assert result.T1_error_resolution is not None
+    np.testing.assert_allclose(
+        result.T1_error_resolution.effective_errors,
+        [100.0, 100.0, 100.0],
+    )
+    np.testing.assert_array_equal(
+        result.T1_error_resolution.bin_fill_mask,
+        [False, True, False],
+    )
+    np.testing.assert_array_equal(
+        result.T1_error_resolution.global_fill_mask,
+        [False, False, True],
+    )
 
 
 def test_fit_t1_noise_params_updates_progress_bar(

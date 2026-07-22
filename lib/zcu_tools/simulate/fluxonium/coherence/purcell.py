@@ -6,6 +6,8 @@ import numpy as np
 import scipy.constants as sc
 from numpy.typing import NDArray
 
+from zcu_tools.simulate.fluxonium.scq_settings import scq_progress
+
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.oscillator import Oscillator
@@ -103,6 +105,7 @@ def calculate_purcell_t1_vs_flux(
     g: float,
     Temp: float,
     params: tuple[float, float, float],
+    progress: bool = True,
 ) -> NDArray[np.float64]:
     """
     bare_rf, kappa, g: GHz, Temp: K, params: GHz -> ns
@@ -127,59 +130,64 @@ def calculate_purcell_t1_vs_flux(
     def update_hilbertspace(flux: float) -> None:
         fluxonium.flux = flux
 
-    sweep = ParameterSweep(
-        hilbertspace=hilbertspace,
-        paramvals_by_name={"flux": fluxs},
-        update_hilbertspace=update_hilbertspace,
-        evals_count=Nf * Nr,
-        subsys_update_info={"flux": [fluxonium]},
-    )
-
-    def get_purcell_t1(
-        paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
-    ) -> NDArray[np.float64]:
-        fluxonium = paramsweep.get_subsys(0)
-        resonator = paramsweep.get_subsys(1)
-        assert isinstance(fluxonium, Fluxonium)
-        assert isinstance(resonator, Oscillator)
-
-        evals = paramsweep["evals"][paramindex_tuple]
-        evecs = paramsweep["evecs"][paramindex_tuple]
-        Vec_n = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]
-
-        def get_esys(state: int) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
-            idxs = [paramsweep.dressed_index((state, n), paramindex_tuple) for n in ns]
-            mask = np.array([idx is None for idx in idxs])
-
-            # mask the None index
-            idxs = np.array([idx if idx is not None else 0 for idx in idxs])
-
-            En = evals[idxs]
-            Vec_n = evecs[idxs]
-
-            # fill the None index with nan
-            En[mask] = np.nan
-
-            return En, Vec_n
-
-        # calculate the transition rate of 0-1 caused by Purcell effect
-        Egn, Vec_gn = get_esys(0)
-        Een, Vec_en = get_esys(1)
-
-        return purcell(
-            Egn,
-            Vec_gn,
-            Een,
-            Vec_en,
-            Vec_n,
-            bare_rf=bare_rf,
-            kappa=kappa,
-            Temp=Temp,
-            ns=ns,
-            fluxonium=fluxonium,
-            resonator=resonator,
+    with scq_progress(progress):
+        sweep = ParameterSweep(
+            hilbertspace=hilbertspace,
+            paramvals_by_name={"flux": fluxs},
+            update_hilbertspace=update_hilbertspace,
+            evals_count=Nf * Nr,
+            subsys_update_info={"flux": [fluxonium]},
         )
 
-    sweep.add_sweep(get_purcell_t1, sweep_name="purcell_t1")
+        def get_purcell_t1(
+            paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
+        ) -> NDArray[np.float64]:
+            fluxonium = paramsweep.get_subsys(0)
+            resonator = paramsweep.get_subsys(1)
+            assert isinstance(fluxonium, Fluxonium)
+            assert isinstance(resonator, Oscillator)
+
+            evals = paramsweep["evals"][paramindex_tuple]
+            evecs = paramsweep["evecs"][paramindex_tuple]
+            Vec_n = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]
+
+            def get_esys(
+                state: int,
+            ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
+                idxs = [
+                    paramsweep.dressed_index((state, n), paramindex_tuple) for n in ns
+                ]
+                mask = np.array([idx is None for idx in idxs])
+
+                # mask the None index
+                idxs = np.array([idx if idx is not None else 0 for idx in idxs])
+
+                En = evals[idxs]
+                Vec_n = evecs[idxs]
+
+                # fill the None index with nan
+                En[mask] = np.nan
+
+                return En, Vec_n
+
+            # calculate the transition rate of 0-1 caused by Purcell effect
+            Egn, Vec_gn = get_esys(0)
+            Een, Vec_en = get_esys(1)
+
+            return purcell(
+                Egn,
+                Vec_gn,
+                Een,
+                Vec_en,
+                Vec_n,
+                bare_rf=bare_rf,
+                kappa=kappa,
+                Temp=Temp,
+                ns=ns,
+                fluxonium=fluxonium,
+                resonator=resonator,
+            )
+
+        sweep.add_sweep(get_purcell_t1, sweep_name="purcell_t1")
 
     return sweep["purcell_t1"]
