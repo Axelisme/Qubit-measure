@@ -23,7 +23,10 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from zcu_tools.utils.fitting.resonance.base import find_edelay_branch
+from zcu_tools.utils.fitting.resonance.base import (
+    _align_uniform_edelay_aliases,
+    find_edelay_branch,
+)
 
 # Electronic-delay grid: search ±5/(freq span) over this many points (the utility's
 # fit_edelay uses 1000; numba makes 1000 cheap enough to keep full precision).
@@ -116,4 +119,5 @@ def fast_edelays(
     )
     seeds = np.full(signals.shape[0], branch_seed, dtype=np.float64)
     fit_range = 5.0 / float(np.ptp(freqs))
-    return _edelay_kernel(freqs, signals, seeds, fit_range)
+    edelays = _edelay_kernel(freqs, signals, seeds, fit_range)
+    return _align_uniform_edelay_aliases(np.diff(freqs), edelays, branch_seed)

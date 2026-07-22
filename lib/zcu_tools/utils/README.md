@@ -60,7 +60,9 @@ branch，再由 circle loss 做 bounded local refinement。預設搜尋兩個等
 alias periods，caller 可用同 frequency 反單位的 radius 覆寫；related traces 可共用
 一個 branch seed。等距 grid 無法辨識相差 `1/Δf` 的 delay，因此保留 local
 canonical alias；多 trace 的 local aliases 以該週期作 circular aggregation，避免
-在 `±1/(2Δf)` branch cut 做錯誤線性平均，而不宣稱得到唯一物理 cable delay。
+在 `±1/(2Δf)` branch cut 做錯誤線性平均；各 trace 局部精修後也會對齊到共用
+seed 最近的等價 alias，讓下游的 median/mean 不會混合相鄰週期，而不宣稱得到唯一物理
+cable delay。
 非等距 candidate 的最佳點碰到 search boundary、搜尋規模超過資源上限或輸入無效時
 raise `ValueError`；可分辨的 local maxima 近 tie 時發出 `RuntimeWarning` 並使用最高
 coherence branch。resonance 初值由

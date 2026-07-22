@@ -100,6 +100,21 @@ def _aggregate_rough_edelays(
     return float(np.angle(resultant) * alias_period / (2.0 * np.pi))
 
 
+def _align_uniform_edelay_aliases(
+    freq_steps: NDArray[np.float64],
+    edelays: NDArray[np.float64],
+    reference: float,
+) -> NDArray[np.float64]:
+    """Align equivalent uniform-grid delays to the alias nearest ``reference``."""
+    if not _is_uniform_frequency_grid(freq_steps):
+        return edelays
+
+    alias_period = 1.0 / float(np.median(np.abs(freq_steps)))
+    offsets = (edelays - reference + 0.5 * alias_period) % alias_period
+    offsets -= 0.5 * alias_period
+    return reference + offsets
+
+
 def _find_edelay_branch(
     freqs: NDArray[np.float64],
     signals: NDArray[np.complex128],
@@ -364,8 +379,11 @@ def fit_edelay(
     edelays = np.linspace(-fit_range, fit_range, 1000)
     loss_values = [loss_func(edelay) for edelay in edelays]
     edelay = edelays[np.argmin(loss_values)] + branch_edelay
+    edelay = _align_uniform_edelay_aliases(
+        np.diff(freqs), np.asarray([edelay]), branch_edelay
+    )[0]
 
-    return edelay
+    return float(edelay)
 
 
 def calc_phase(

@@ -103,6 +103,37 @@ def test_fast_edelays_keeps_uniform_rows_on_same_alias_across_branch_cut() -> No
     assert np.ptp(estimates) < 1e-3
 
 
+def test_four_point_uniform_edelays_align_before_downstream_median() -> None:
+    edelay = 0.02
+    freqs = np.linspace(5000.0, 5030.0, 4)
+    signals = np.asarray(
+        [
+            HangerModel.calc_signals(
+                freqs,
+                freq,
+                740.0,
+                1100.0,
+                0.12,
+                1.25 * np.exp(0.31j),
+                edelay,
+                0.0,
+            )
+            for freq in (5008.0, 5013.0)
+        ],
+        dtype=np.complex128,
+    )
+
+    fast = fast_edelays(freqs, signals)
+    result = compute_preprocess(np.asarray([0.0, 1.0]), freqs, signals)
+    alias_period = 1.0 / float(freqs[1] - freqs[0])
+    median_error = (result.edelay - edelay + 0.5 * alias_period) % alias_period
+    median_error -= 0.5 * alias_period
+
+    np.testing.assert_allclose(result.edelays, fast)
+    assert np.ptp(fast) < 0.5 * alias_period
+    assert abs(median_error) < 3e-3
+
+
 def test_compute_preprocess_shapes_and_norm():
     fluxs, freqs, signals = _synthetic_onetone()
     result = compute_preprocess(fluxs, freqs, signals)

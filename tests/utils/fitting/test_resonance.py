@@ -215,6 +215,37 @@ def test_related_uniform_traces_share_alias_across_branch_cut() -> None:
     assert np.ptp(estimates) < 1e-3
 
 
+def test_related_four_point_uniform_traces_align_refined_aliases() -> None:
+    edelay = 0.02
+    freqs = np.linspace(5000.0, 5030.0, 4)
+    signals = np.asarray(
+        [
+            _hanger_truth(
+                freqs,
+                freq=freq,
+                Ql=740.0,
+                Qc_abs=1100.0,
+                phi=0.12,
+                a0=1.25 * np.exp(0.31j),
+                edelay=edelay,
+                bg_amp_slope=0.0,
+            )
+            for freq in (5008.0, 5013.0)
+        ]
+    )
+
+    branch_seed = find_edelay_branch(freqs, signals)
+    estimates = np.asarray(
+        [fit_edelay(freqs, row, branch_seed=branch_seed) for row in signals]
+    )
+    alias_period = 1.0 / float(freqs[1] - freqs[0])
+    mean_error = (np.mean(estimates) - edelay + 0.5 * alias_period) % alias_period
+    mean_error -= 0.5 * alias_period
+
+    assert np.ptp(estimates) < 0.5 * alias_period
+    assert abs(mean_error) < 3e-3
+
+
 def test_find_edelay_branch_fast_fails_before_oversized_radius_overflow() -> None:
     freqs = np.asarray([5000.0, 5000.2, 5000.55, 5001.0])
     signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
