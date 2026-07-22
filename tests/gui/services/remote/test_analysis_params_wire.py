@@ -34,18 +34,31 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
     assert reply["analyze_params"] == {
         "model_type": "hm",
         "fit_bg_amp_slope": True,
+        "edelay_mode": "auto",
+        "manual_edelay": None,
+        "max_edelay_search_radius": 100.0,
     }
 
     started = _h_tab_analyze(
         adapter,
         {
             "tab_id": "t",
-            "updates": {"fit_bg_amp_slope": False},
+            "updates": {
+                "fit_bg_amp_slope": False,
+                "edelay_mode": "manual",
+                "manual_edelay": 11.3,
+                "max_edelay_search_radius": 150.0,
+            },
         },
     )
     assert started == {"operation_id": "op-1"}
     forwarded = adapter.run_analyze_control.analyze.call_args.args[1]
-    assert forwarded == OneToneFreqAnalyzeParams(fit_bg_amp_slope=False)
+    assert forwarded == OneToneFreqAnalyzeParams(
+        fit_bg_amp_slope=False,
+        edelay_mode="manual",
+        manual_edelay=11.3,
+        max_edelay_search_radius=150.0,
+    )
 
 
 def test_remote_analyze_params_rejects_removed_key() -> None:

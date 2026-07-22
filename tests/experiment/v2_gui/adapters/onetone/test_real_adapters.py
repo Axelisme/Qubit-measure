@@ -86,13 +86,16 @@ def test_freq_analyze_params_default_and_forwarding(
 ) -> None:
     params = OneToneFreqAnalyzeParams()
     assert params.fit_bg_amp_slope is True
+    assert params.edelay_mode == "auto"
+    assert params.manual_edelay is None
+    assert params.max_edelay_search_radius == 100.0
 
     run_result = FreqResult(
         freqs=np.linspace(5990.0, 6010.0, 11),
         signals=np.ones(11, dtype=np.complex128),
     )
     sentinel_figure = MagicMock()
-    analyze = MagicMock(return_value=(6000.0, 1.0, {}, sentinel_figure))
+    analyze = MagicMock(return_value=(6000.0, 1.0, {"edelay": 0.25}, sentinel_figure))
     monkeypatch.setattr(
         "zcu_tools.experiment.v2_gui.adapters.onetone.freq.FreqExp.analyze", analyze
     )
@@ -104,13 +107,159 @@ def test_freq_analyze_params_default_and_forwarding(
         predictor=None,
     )
 
-    OneToneFreqAdapter().analyze(req)
+    result = OneToneFreqAdapter().analyze(req)
 
     analyze.assert_called_once_with(
         run_result,
         model_type="hm",
         fit_bg_amp_slope=True,
+        edelay_branch_seed=None,
+        edelay_max_search_radius=100.0,
     )
+    assert result.edelay_source == "global"
+    assert result.edelay_persistable is False
+
+
+def test_freq_analyze_auto_uses_route_matched_edelay_prior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    md = MetaDict()
+    md.res_edelay = 11.3
+    md.res_edelay_res_ch = 3
+    md.res_edelay_ro_ch = 5
+    run_result = FreqResult(
+        freqs=np.linspace(5990.0, 6010.0, 11),
+        signals=np.ones(11, dtype=np.complex128),
+        cfg_snapshot=_snapshot_with_readout(_make_pulse_readout(ch=3, ro_ch=5)),
+    )
+    analyze = MagicMock(return_value=(6000.0, 1.0, {"edelay": 11.31}, MagicMock()))
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.adapters.onetone.freq.FreqExp.analyze", analyze
+    )
+
+    result = OneToneFreqAdapter().analyze(
+        AnalyzeRequest(
+            run_result=run_result,
+            analyze_params=OneToneFreqAnalyzeParams(),
+            md=md,
+            ml=ModuleLibrary(),
+            predictor=None,
+        )
+    )
+
+    analyze.assert_called_once_with(
+        run_result,
+        model_type="hm",
+        fit_bg_amp_slope=True,
+        edelay_branch_seed=11.3,
+        edelay_max_search_radius=None,
+    )
+    assert result.edelay == pytest.approx(11.31)
+    assert result.edelay_source == "calibrated"
+    assert result.edelay_persistable is True
+
+
+def test_freq_analyze_auto_ignores_mismatched_route_prior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    md = MetaDict()
+    md.res_edelay = 11.3
+    md.res_edelay_res_ch = 4
+    md.res_edelay_ro_ch = 5
+    freqs = np.asarray(
+        [5990.0, 5992.0, 5995.0, 5999.0, 6004.0, 6010.0], dtype=np.float64
+    )
+    run_result = FreqResult(
+        freqs=freqs,
+        signals=np.ones(len(freqs), dtype=np.complex128),
+        cfg_snapshot=_snapshot_with_readout(_make_pulse_readout(ch=3, ro_ch=5)),
+    )
+    analyze = MagicMock(return_value=(6000.0, 1.0, {"edelay": 9.5}, MagicMock()))
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.adapters.onetone.freq.FreqExp.analyze", analyze
+    )
+
+    result = OneToneFreqAdapter().analyze(
+        AnalyzeRequest(
+            run_result=run_result,
+            analyze_params=OneToneFreqAnalyzeParams(),
+            md=md,
+            ml=ModuleLibrary(),
+            predictor=None,
+        )
+    )
+
+    assert analyze.call_args.kwargs["edelay_branch_seed"] is None
+    assert analyze.call_args.kwargs["edelay_max_search_radius"] == 100.0
+    assert result.edelay_source == "global"
+    assert result.edelay_persistable is True
+
+
+@pytest.mark.parametrize(
+    ("params", "error"),
+    [
+        (OneToneFreqAnalyzeParams(edelay_mode="calibrated"), "calibrated"),
+        (OneToneFreqAnalyzeParams(edelay_mode="manual"), "manual_edelay"),
+        (
+            OneToneFreqAnalyzeParams(edelay_mode="manual", manual_edelay=float("nan")),
+            "finite",
+        ),
+        (
+            OneToneFreqAnalyzeParams(max_edelay_search_radius=-1.0),
+            "max_edelay_search_radius",
+        ),
+    ],
+)
+def test_freq_analyze_delay_mode_missing_inputs_fast_fail(
+    params: OneToneFreqAnalyzeParams,
+    error: str,
+) -> None:
+    req = AnalyzeRequest(
+        run_result=FreqResult(
+            freqs=np.linspace(5990.0, 6010.0, 11),
+            signals=np.ones(11, dtype=np.complex128),
+        ),
+        analyze_params=params,
+        md=MetaDict(),
+        ml=ModuleLibrary(),
+        predictor=None,
+    )
+
+    with pytest.raises(ValueError, match=error):
+        OneToneFreqAdapter().analyze(req)
+
+
+def test_freq_analyze_manual_seed_is_refined_and_persistable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_result = FreqResult(
+        freqs=np.linspace(5990.0, 6010.0, 11),
+        signals=np.ones(11, dtype=np.complex128),
+        cfg_snapshot=_snapshot_with_readout(_make_pulse_readout(ch=3, ro_ch=5)),
+    )
+    analyze = MagicMock(return_value=(6000.0, 1.0, {"edelay": 11.31}, MagicMock()))
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.adapters.onetone.freq.FreqExp.analyze", analyze
+    )
+
+    result = OneToneFreqAdapter().analyze(
+        AnalyzeRequest(
+            run_result=run_result,
+            analyze_params=OneToneFreqAnalyzeParams(
+                edelay_mode="manual",
+                manual_edelay=11.0,
+                max_edelay_search_radius=-1.0,
+            ),
+            md=MetaDict(),
+            ml=ModuleLibrary(),
+            predictor=None,
+        )
+    )
+
+    assert analyze.call_args.kwargs["edelay_branch_seed"] == 11.0
+    assert analyze.call_args.kwargs["edelay_max_search_radius"] is None
+    assert result.edelay_source == "manual"
+    assert result.edelay_persistable is True
 
 
 def _make_pulse_readout(
@@ -371,6 +520,39 @@ def test_onetone_freq_writeback_proposes_readout_rf_from_cfg_snapshot() -> None:
         trig_offset=0.25,
         gen_ch=9,
     )
+
+
+def test_onetone_freq_writeback_proposes_route_scoped_edelay_prior() -> None:
+    adapter = OneToneFreqAdapter()
+    analyze_result = OneToneFreqAnalyzeResult(
+        freq=6000.0,
+        fwhm=20.0,
+        params={"theta0": 0.35},
+        figure=MagicMock(),
+        edelay=11.31,
+        edelay_source="calibrated",
+        edelay_persistable=True,
+    )
+
+    items = list(
+        adapter.get_writeback_items(
+            _freq_writeback_request(
+                analyze_result,
+                cfg_snapshot=_snapshot_with_readout(_make_pulse_readout(ch=3, ro_ch=5)),
+            )
+        )
+    )
+
+    md_items = [item for item in items if isinstance(item, MetaDictWriteback)]
+    assert [item.target_name for item in md_items] == [
+        "r_f",
+        "rf_w",
+        "theta0",
+        "res_edelay",
+        "res_edelay_res_ch",
+        "res_edelay_ro_ch",
+    ]
+    assert [item.proposed_value for item in md_items[-3:]] == [11.31, 3, 5]
 
 
 def test_onetone_freq_readout_rf_skips_non_pulse_snapshot() -> None:

@@ -219,6 +219,8 @@ class HangerModel:
         edelay: float | None = None,
         fit_bg_amp_slope: bool = False,
         edelay_search_radius: float | None = None,
+        edelay_branch_seed: float | None = None,
+        edelay_max_search_radius: float | None = None,
     ) -> HangerParams:
         """Fit a hanger response, optionally resolving delay aliases within a radius."""
         validate_complex_fit_inputs(freqs, signals)
@@ -228,6 +230,8 @@ class HangerModel:
                 freqs,
                 signals,
                 search_radius=edelay_search_radius,
+                max_search_radius=edelay_max_search_radius,
+                branch_seed=edelay_branch_seed,
             )
 
         initializer = cls._fit_sequential(freqs, signals, edelay)
@@ -282,7 +286,14 @@ class HangerModel:
         )
 
     @classmethod
-    def visualize_fit(cls, freqs, signals, param_dict: HangerParams) -> Figure:
+    def visualize_fit(
+        cls,
+        freqs: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        param_dict: HangerParams,
+        *,
+        fit_bg_amp_slope: bool = True,
+    ) -> Figure:
         freq = param_dict["freq"]
         fwhm = param_dict["fwhm"]
         theta0 = param_dict["theta0"]
@@ -324,10 +335,10 @@ class HangerModel:
             + r"$|Q_c| = $"
             + f"{np.abs(Qc):.0f}\n"
             + r"$Q_i = $"
-            + f"{Qi:.0f}\n"
-            + r"$g = $"
-            + f"{bg_amp_slope:.4g} MHz$^{{-1}}$"
+            + f"{Qi:.0f}"
         )
+        if fit_bg_amp_slope:
+            Q_info += "\n" + r"$g = $" + f"{bg_amp_slope:.4g} MHz$^{{-1}}$"
 
         ax1.plot(norm_signals.real, norm_signals.imag, label="corrected data")
         ax1.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color="red"))
@@ -357,12 +368,13 @@ class HangerModel:
 
         ax3.plot(freqs, np.abs(signals), ".", label="raw data")
         ax3.plot(freqs, np.abs(fit_signals), label="total fit")
-        ax3.plot(
-            freqs,
-            np.abs(a0) * np.exp(bg_amp_slope * (freqs - freq)),
-            "--",
-            label="multiplicative background envelope",
-        )
+        if fit_bg_amp_slope:
+            ax3.plot(
+                freqs,
+                np.abs(a0) * np.exp(bg_amp_slope * (freqs - freq)),
+                "--",
+                label="multiplicative background envelope",
+            )
         ax3.axvline(freq, color="k", linestyle="--", label=base_info)
         ax3.text(
             0.98,

@@ -3,9 +3,10 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from numbers import Real
+from numbers import Integral, Real
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
+import numpy as np
 from matplotlib.figure import Figure
 
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, FreqExp, FreqResult
@@ -32,9 +33,13 @@ from zcu_tools.gui.app.main.adapter import (
 
 OneToneFreqRunResult: TypeAlias = FreqResult
 SamplingMode: TypeAlias = Literal["linear", "homophasal"]
+EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
+EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _SAMPLING_MODE_CHOICES: list[SamplingMode] = ["linear", "homophasal"]
 _HOMOPHASAL_MD_KEYS = ("r_f", "rf_w", "theta0")
+_EDELAY_MD_KEYS = ("res_edelay", "res_edelay_res_ch", "res_edelay_ro_ch")
+_DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 
 
 @dataclass
@@ -45,6 +50,15 @@ class OneToneFreqAnalyzeParams:
     fit_bg_amp_slope: Annotated[bool, ParamMeta(label="Fit amplitude background")] = (
         True
     )
+    edelay_mode: Annotated[EDelayMode, ParamMeta(label="Electrical-delay mode")] = (
+        "auto"
+    )
+    manual_edelay: Annotated[
+        float | None, ParamMeta(label="Manual electrical delay")
+    ] = None
+    max_edelay_search_radius: Annotated[
+        float, ParamMeta(label="Maximum electrical-delay search radius")
+    ] = _DEFAULT_MAX_EDELAY_SEARCH_RADIUS
 
 
 @dataclass
@@ -53,6 +67,9 @@ class OneToneFreqAnalyzeResult(AnalyzeResultBase):
     fwhm: float
     params: dict[str, Any]
     figure: Figure
+    edelay: float | None = None
+    edelay_source: EDelaySource = "global"
+    edelay_persistable: bool = False
 
 
 class OneToneFreqAdapter(
@@ -79,7 +96,9 @@ class OneToneFreqAdapter(
             "'rf_w' seeds the default span; 'res_probe_len' seeds the readout "
             "window; 'res_ch' / 'ro_ch' seed drive / readout channels; "
             "'timeFly' seeds the trigger offset. Homophasal sampling also "
-            "requires fitted 'r_f', 'rf_w', and 'theta0'."
+            "requires fitted 'r_f', 'rf_w', and 'theta0'. Analysis optionally "
+            "uses route-matched 'res_edelay' / 'res_edelay_res_ch' / "
+            "'res_edelay_ro_ch' calibration values."
         ),
         expects_ml=(
             "Needs a pulse-readout module, and references a ModuleLibrary "
@@ -91,7 +110,9 @@ class OneToneFreqAdapter(
             "result includes a pulse-readout cfg snapshot, it also proposes "
             "ModuleLibrary 'readout_rf' from that readout template, changing "
             "only pulse/readout frequency to the fitted 'r_f' while preserving "
-            "gain, lengths, channels, and trigger timing."
+            "gain, lengths, channels, and trigger timing. A route-qualified "
+            "electrical-delay calibration is proposed only when its absolute "
+            "branch is identifiable or a trusted prior/manual seed was used."
         ),
         recommended=(
             "Analysis defaults to the hanger-model fit ('hm') with "
@@ -102,8 +123,95 @@ class OneToneFreqAdapter(
             "homophasal sampling after a fit has written 'theta0' when you "
             "want equal resonator-circle phase spacing instead of a linear "
             "frequency grid."
+            " Electrical-delay mode 'auto' uses a route-matched calibration "
+            "when available and otherwise runs bounded adaptive search; use "
+            "'calibrated' to require that prior or 'manual' to supply a seed."
         ),
     )
+
+    @staticmethod
+    def _readout_route(result: OneToneFreqRunResult) -> tuple[int, int] | None:
+        cfg = result.cfg_snapshot
+        if cfg is None:
+            return None
+        try:
+            res_ch = cfg.modules.readout.pulse_cfg.ch
+            ro_ch = cfg.modules.readout.ro_cfg.ro_ch
+        except AttributeError:
+            return None
+        if (
+            isinstance(res_ch, bool)
+            or not isinstance(res_ch, Integral)
+            or isinstance(ro_ch, bool)
+            or not isinstance(ro_ch, Integral)
+        ):
+            return None
+        return int(res_ch), int(ro_ch)
+
+    @staticmethod
+    def _finite_real(value: object) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, Real):
+            return None
+        converted = float(value)
+        return converted if np.isfinite(converted) else None
+
+    @staticmethod
+    def _channel(value: object) -> int | None:
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            return None
+        return int(value)
+
+    @classmethod
+    def _route_matched_prior(
+        cls, md_obj: object, route: tuple[int, int] | None
+    ) -> float | None:
+        if route is None:
+            return None
+        get = getattr(md_obj, "get")
+        prior = cls._finite_real(get(_EDELAY_MD_KEYS[0]))
+        prior_res_ch = cls._channel(get(_EDELAY_MD_KEYS[1]))
+        prior_ro_ch = cls._channel(get(_EDELAY_MD_KEYS[2]))
+        if prior is None or prior_res_ch is None or prior_ro_ch is None:
+            return None
+        if (prior_res_ch, prior_ro_ch) != route:
+            return None
+        return prior
+
+    @classmethod
+    def _resolve_edelay_seed(
+        cls,
+        params: OneToneFreqAnalyzeParams,
+        md_obj: object,
+        route: tuple[int, int] | None,
+    ) -> tuple[float | None, EDelaySource]:
+        if params.edelay_mode == "manual":
+            if params.manual_edelay is None:
+                raise ValueError("manual edelay mode requires manual_edelay")
+            seed = cls._finite_real(params.manual_edelay)
+            if seed is None:
+                raise ValueError("manual_edelay must be finite")
+            return seed, "manual"
+
+        prior = cls._route_matched_prior(md_obj, route)
+        if params.edelay_mode == "calibrated":
+            if prior is None:
+                raise ValueError(
+                    "calibrated edelay mode requires a finite route-matched "
+                    "res_edelay prior"
+                )
+            return prior, "calibrated"
+        if params.edelay_mode == "auto":
+            if prior is not None:
+                return prior, "calibrated"
+            return None, "global"
+        raise ValueError(f"Invalid electrical-delay mode: {params.edelay_mode!r}")
+
+    @staticmethod
+    def _has_nonuniform_frequency_grid(result: OneToneFreqRunResult) -> bool:
+        if len(result.freqs) < 3:
+            return False
+        steps = np.abs(np.diff(result.freqs))
+        return not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
@@ -199,16 +307,40 @@ class OneToneFreqAdapter(
         self, req: AnalyzeRequest[OneToneFreqRunResult, OneToneFreqAnalyzeParams]
     ) -> OneToneFreqAnalyzeResult:
         params = req.analyze_params
+        route = self._readout_route(req.run_result)
+        edelay_seed, edelay_source = self._resolve_edelay_seed(params, req.md, route)
+        max_search_radius: float | None = None
+        if edelay_seed is None:
+            max_search_radius = self._finite_real(params.max_edelay_search_radius)
+            if max_search_radius is None or max_search_radius <= 0.0:
+                raise ValueError(
+                    "max_edelay_search_radius must be positive and finite, got "
+                    f"{params.max_edelay_search_radius!r}"
+                )
         freq, fwhm, fit_params, figure = FreqExp().analyze(
             req.run_result,
             model_type=params.model_type,
             fit_bg_amp_slope=params.fit_bg_amp_slope,
+            edelay_branch_seed=edelay_seed,
+            edelay_max_search_radius=max_search_radius,
         )
+        edelay = self._finite_real(fit_params.get("edelay"))
+        if edelay is None:
+            raise ValueError("one-tone fit result must contain a finite edelay")
         return OneToneFreqAnalyzeResult(
             freq=freq,
             fwhm=fwhm,
             params=fit_params,
             figure=figure,
+            edelay=edelay,
+            edelay_source=edelay_source,
+            edelay_persistable=(
+                route is not None
+                and (
+                    edelay_seed is not None
+                    or self._has_nonuniform_frequency_grid(req.run_result)
+                )
+            ),
         )
 
     def get_writeback_items(
@@ -238,6 +370,34 @@ class OneToneFreqAdapter(
                 proposed_value=float(theta0),
             ),
         ]
+        if result.edelay_persistable:
+            route = self._readout_route(req.run_result)
+            edelay = self._finite_real(result.edelay)
+            if route is None or edelay is None:
+                raise ValueError(
+                    "persistable electrical delay requires a finite fitted edelay "
+                    "and pulse-readout route"
+                )
+            res_ch, ro_ch = route
+            items.extend(
+                [
+                    MetaDictWriteback(
+                        target_name="res_edelay",
+                        description="Route-qualified resonator electrical delay",
+                        proposed_value=edelay,
+                    ),
+                    MetaDictWriteback(
+                        target_name="res_edelay_res_ch",
+                        description="Generator channel for resonator electrical delay",
+                        proposed_value=res_ch,
+                    ),
+                    MetaDictWriteback(
+                        target_name="res_edelay_ro_ch",
+                        description="Readout channel for resonator electrical delay",
+                        proposed_value=ro_ch,
+                    ),
+                ]
+            )
         items.extend(
             pulse_readout_module_writeback_items(
                 req.run_result.cfg_snapshot,

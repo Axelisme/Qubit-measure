@@ -272,6 +272,43 @@ def test_find_edelay_branch_rejects_optimum_at_search_boundary(
         find_edelay_branch(freqs, signals, search_radius=boundary_delay)
 
 
+def test_find_edelay_branch_expands_boundary_limited_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freqs = np.asarray([0.0, 0.2, 0.55, 0.8])
+    candidate_step = 1.0 / (8.0 * np.ptp(freqs))
+    boundary_delay = 3.0 * candidate_step
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * boundary_delay)
+    monkeypatch.setattr(resonance_base, "get_rough_edelay", lambda *_args: 0.0)
+
+    estimated = find_edelay_branch(
+        freqs,
+        signals,
+        search_radius=boundary_delay,
+        max_search_radius=2.0 * boundary_delay,
+    )
+
+    assert estimated == pytest.approx(boundary_delay)
+
+
+def test_find_edelay_branch_still_fails_at_adaptive_search_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freqs = np.asarray([0.0, 0.2, 0.55, 0.8])
+    candidate_step = 1.0 / (8.0 * np.ptp(freqs))
+    boundary_delay = 6.0 * candidate_step
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * boundary_delay)
+    monkeypatch.setattr(resonance_base, "get_rough_edelay", lambda *_args: 0.0)
+
+    with pytest.raises(ValueError, match="max_search_radius"):
+        find_edelay_branch(
+            freqs,
+            signals,
+            search_radius=3.0 * candidate_step,
+            max_search_radius=boundary_delay,
+        )
+
+
 def test_find_edelay_branch_warns_for_near_tied_nonuniform_peaks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -385,6 +422,51 @@ def test_fit_edelay_rejects_branch_seed_with_search_radius() -> None:
 
     with pytest.raises(ValueError, match="mutually exclusive"):
         fit_edelay(freqs, signals, branch_seed=0.2, search_radius=5.0)
+
+
+def test_fit_edelay_rejects_branch_seed_with_max_search_radius() -> None:
+    freqs = np.linspace(4990.0, 5010.0, 101)
+    signals = np.exp(-1j * 2.0 * np.pi * freqs * 0.2)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        fit_edelay(freqs, signals, branch_seed=0.2, max_search_radius=5.0)
+
+
+@pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
+def test_model_fit_uses_edelay_branch_seed(
+    model: type[HangerModel] | type[TransmissionModel],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freq, Ql, edelay = 5549.0, 740.0, 11.299
+    freqs = _homophasal_like_grid(freq, Ql, 15.0, 301)
+    common = dict(
+        freq=freq,
+        Ql=Ql,
+        a0=1.25 * np.exp(0.31j),
+        edelay=edelay,
+        bg_amp_slope=0.0,
+    )
+    if model is HangerModel:
+        signals = _hanger_truth(freqs, Qc_abs=1100.0, phi=0.12, **common)
+    else:
+        signals = _transmission_truth(freqs, **common)
+
+    observed: dict[str, object] = {}
+    original = resonance_base.fit_edelay
+
+    def capture_seed(*args: object, **kwargs: object) -> float:
+        observed.update(kwargs)
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    module = "hanger" if model is HangerModel else "transmission"
+    monkeypatch.setattr(
+        f"zcu_tools.utils.fitting.resonance.{module}.fit_edelay", capture_seed
+    )
+
+    params = model.fit(freqs, signals, edelay_branch_seed=edelay)
+
+    assert observed["branch_seed"] == edelay
+    np.testing.assert_allclose(params["edelay"], edelay, atol=3e-3)
 
 
 def test_get_proper_model_hanger_vs_transmission():
@@ -632,7 +714,7 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
     signals = truth_fn(freqs, **truth_kwargs, **common)
     params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=True)
 
-    fig = model.visualize_fit(freqs, signals, params)
+    fig = model.visualize_fit(freqs, signals, params, fit_bg_amp_slope=True)
     try:
         iq_ax, phase_ax, magnitude_ax = fig.axes
         iq_data = next(
@@ -682,5 +764,44 @@ def test_visualization_uses_corrected_domain_and_background_envelope(
         legend = magnitude_ax.get_legend()
         assert legend is not None
         assert legend._loc == 3  # lower left
+    finally:
+        plt.close(fig)
+
+
+@pytest.mark.parametrize(
+    ("model", "truth_kwargs"),
+    [
+        (HangerModel, {"Qc_abs": 980.0, "phi": 0.12}),
+        (TransmissionModel, {}),
+    ],
+)
+def test_visualization_omits_background_when_fit_is_disabled(
+    model: type[HangerModel] | type[TransmissionModel],
+    truth_kwargs: dict[str, float],
+) -> None:
+    freq, Ql = 6000.0, 700.0
+    freqs = np.linspace(5965.0, 6035.0, 401)
+    common = dict(
+        freq=freq,
+        Ql=Ql,
+        a0=1.2 * np.exp(0.3j),
+        edelay=0.021,
+        bg_amp_slope=0.0,
+    )
+    truth_fn = _hanger_truth if model is HangerModel else _transmission_truth
+    signals = truth_fn(freqs, **truth_kwargs, **common)
+    params = model.fit(freqs, signals, edelay=common["edelay"], fit_bg_amp_slope=False)
+
+    fig = model.visualize_fit(freqs, signals, params, fit_bg_amp_slope=False)
+    try:
+        magnitude_ax = fig.axes[2]
+        labels = [line.get_label() for line in magnitude_ax.lines]
+        assert "multiplicative background envelope" not in labels
+        legend = magnitude_ax.get_legend()
+        assert legend is not None
+        assert "multiplicative background envelope" not in {
+            text.get_text() for text in legend.get_texts()
+        }
+        assert all("MHz$^{-1}$" not in text.get_text() for text in magnitude_ax.texts)
     finally:
         plt.close(fig)

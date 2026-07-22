@@ -16,6 +16,10 @@ _MAX_EDELAY_BRANCH_CANDIDATES = 100_001
 _EDELAY_AMBIGUITY_MARGIN = 1e-6
 
 
+class _EDelaySearchBoundaryError(ValueError):
+    """Internal signal that the current branch-search radius was truncated."""
+
+
 def run_complex_refinement(
     residual: Callable[[NDArray[np.float64]], NDArray[np.float64]],
     initial: Sequence[float],
@@ -196,7 +200,7 @@ def _find_edelay_branch(
     tied = np.flatnonzero(scores >= best_score - tie_atol)
     best_index = int(tied[np.argmin(np.abs(offsets[tied]))])
     if best_index == 0 or best_index == candidate_count - 1:
-        raise ValueError(
+        raise _EDelaySearchBoundaryError(
             "electrical-delay branch optimum reached the search boundary; increase "
             "search_radius or pass an explicit edelay"
         )
@@ -226,6 +230,7 @@ def find_edelay_branch(
     signals: NDArray[np.complex128],
     *,
     search_radius: float | None = None,
+    max_search_radius: float | None = None,
 ) -> float:
     """Return a global electrical-delay branch seed for one or more signal rows.
 
@@ -233,7 +238,9 @@ def find_edelay_branch(
     explicit ``search_radius``, the search covers two alias periods of an equivalent
     uniform grid with the same span and sample count. The radius uses the inverse unit
     of ``freqs``. Uniform-grid row aliases are aggregated circularly over ``1/|df|``.
-    Invalid, boundary-limited, or oversized searches raise ``ValueError``; an
+    ``max_search_radius`` opt-in enables geometric expansion when the best candidate
+    reaches the current boundary. It caps expansion but never shrinks the initial
+    search. Invalid, boundary-limited, or oversized searches raise ``ValueError``; an
     ambiguous nonuniform maximum emits ``RuntimeWarning``.
     """
     if freqs.ndim != 1 or signals.ndim not in (1, 2):
@@ -270,7 +277,27 @@ def find_edelay_branch(
     rough_edelay = _aggregate_rough_edelays(np.diff(freqs), rough_edelays)
     if search_radius is None:
         search_radius = _DEFAULT_EDELAY_SEARCH_PERIODS * (len(freqs) - 1) / span
-    return _find_edelay_branch(freqs, signals, rough_edelay, search_radius)
+    if max_search_radius is not None and (
+        not np.isfinite(max_search_radius) or max_search_radius <= 0.0
+    ):
+        raise ValueError(
+            "electrical-delay maximum search radius must be positive and finite"
+        )
+
+    current_radius = search_radius
+    while True:
+        try:
+            return _find_edelay_branch(freqs, signals, rough_edelay, current_radius)
+        except _EDelaySearchBoundaryError as exc:
+            if max_search_radius is None:
+                raise
+            if current_radius >= max_search_radius:
+                raise ValueError(
+                    "electrical-delay branch optimum reached the search boundary at "
+                    "the maximum search radius; increase max_search_radius or use a "
+                    "calibrated/manual edelay seed"
+                ) from exc
+            current_radius = min(2.0 * current_radius, max_search_radius)
 
 
 def remove_edelay(
@@ -343,24 +370,31 @@ def fit_edelay(
     signals: NDArray[np.complex128],
     *,
     search_radius: float | None = None,
+    max_search_radius: float | None = None,
     branch_seed: float | None = None,
 ) -> float:
     """Fit electrical delay, resolving nonuniform-grid aliases within a finite radius.
 
     ``search_radius`` uses the inverse unit of ``freqs`` (microseconds when ``freqs``
-    is in MHz). The default covers two average-grid alias periods. Uniform grids retain
-    the local canonical alias because their absolute delay branch is not identifiable
-    from the sampled data. ``branch_seed`` lets a caller share one previously discovered
+    is in MHz). The default covers two average-grid alias periods. An explicit
+    ``max_search_radius`` enables bounded geometric expansion. Uniform grids retain the
+    local canonical alias because their absolute delay branch is not identifiable from
+    the sampled data. ``branch_seed`` lets a caller share one previously discovered
     branch across related traces and skips the global search.
     """
     validate_complex_fit_inputs(freqs, signals)
-    if branch_seed is not None and search_radius is not None:
-        raise ValueError("branch_seed and search_radius are mutually exclusive")
+    if branch_seed is not None and (
+        search_radius is not None or max_search_radius is not None
+    ):
+        raise ValueError(
+            "branch_seed and electrical-delay search radii are mutually exclusive"
+        )
     if branch_seed is None:
         branch_edelay = find_edelay_branch(
             freqs,
             signals,
             search_radius=search_radius,
+            max_search_radius=max_search_radius,
         )
     elif np.isfinite(branch_seed):
         branch_edelay = branch_seed

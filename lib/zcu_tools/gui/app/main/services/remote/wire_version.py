@@ -83,7 +83,9 @@ from __future__ import annotations
 # {active:[{kind, origin_kind, note, active_for_seconds}]}.
 # v52: one-tone analyze params replace the circle-phase nuisance toggle with
 # fit_bg_amp_slope, which fits a multiplicative log-amplitude background.
-WIRE_VERSION = 52
+# v53: one-tone analyze params add electrical-delay mode, manual seed, and
+# adaptive maximum search radius.
+WIRE_VERSION = 53
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -92,9 +94,11 @@ WIRE_VERSION = 52
 # v71: cfg input enhancement and exception presentation live in Qt UI adapters.
 # v72: resonance analysis and plotting use multiplicative amplitude-background
 # correction, including the renamed one-tone analyze control.
+# v73: one-tone analysis adds route-qualified electrical-delay calibration,
+# adaptive branch-search recovery, and conditional background plotting.
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 72  # resonator amplitude-background analysis
+GUI_VERSION = 73  # adaptive route-qualified resonator electrical delay

@@ -31,8 +31,10 @@ S(f)=\exp\left[g(f-f_r)\right]S_0(f)
   `f_r/Q_l/a0/g`。caller 沒有固定 `edelay` 時，refinement 同時調整它。
 - Refinement 後先從 raw samples 移除 final delay 與 amplitude envelope，再重算
   `circle_params`、circle phase 與 derived quality factors。
-- IQ/circle/phase figure 使用 corrected domain；raw magnitude figure 同時顯示 total
-  fit 與 `|a0| exp[g(f-f_r)]` background envelope。
+- IQ/circle/phase figure 使用 corrected domain；raw magnitude figure 顯示 total fit。
+  只有本次 analyze 啟用 amplitude-background fitting 時才額外顯示
+  `|a0| exp[g(f-f_r)]` background envelope、其 legend entry 與 fitted `g`；停用時不把
+  固定的 `g = 0` 畫成已擬合 background。
 - Analyze param 原子切換為 `fit_bg_amp_slope`，不提供舊 key alias 或 session migration。
   measure-gui `WIRE_VERSION` 與 `GUI_VERSION` 同步遞增，MCP code version 不變。
 

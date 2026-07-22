@@ -57,14 +57,16 @@ Resonance circle fitting 將 electrical-delay 估計拆成兩層。`get_rough_ed
 保留便宜的相鄰 wrapped-slope local alias；非等距 frequency grid 由
 `find_edelay_branch` 最大化相鄰 unit-phasor coherence，在有限範圍內找 global
 branch，再由 circle loss 做 bounded local refinement。預設搜尋兩個等效平均取樣
-alias periods，caller 可用同 frequency 反單位的 radius 覆寫；related traces 可共用
-一個 branch seed。等距 grid 無法辨識相差 `1/Δf` 的 delay，因此保留 local
+alias periods，caller 可用同 frequency 反單位的 radius 覆寫；另提供 opt-in maximum
+radius，讓 boundary-limited search 以 bounded geometric expansion 恢復；related traces
+可共用一個 branch seed。等距 grid 無法辨識相差 `1/Δf` 的 delay，因此保留 local
 canonical alias；多 trace 的 local aliases 以該週期作 circular aggregation，避免
 在 `±1/(2Δf)` branch cut 做錯誤線性平均；各 trace 局部精修後也會對齊到共用
 seed 最近的等價 alias，讓下游的 median/mean 不會混合相鄰週期，而不宣稱得到唯一物理
 cable delay。
-非等距 candidate 的最佳點碰到 search boundary、搜尋規模超過資源上限或輸入無效時
-raise `ValueError`；可分辨的 local maxima 近 tie 時發出 `RuntimeWarning` 並使用最高
+未啟用 adaptive expansion 或擴張到 cap 後，非等距 candidate 的最佳點仍碰到 search
+boundary，以及搜尋規模超過資源上限或輸入無效時，皆 raise `ValueError`；可分辨的
+local maxima 近 tie 時發出 `RuntimeWarning` 並使用最高
 coherence branch。resonance 初值由
 frequency-aware circle-phase slope 決定；generalized eigenproblem 以最接近零的
 eigenpair 表示圓，不因浮點誤差把 exact-circle eigenvalue 推到微小負值就選錯解。
@@ -73,7 +75,8 @@ Resonance model 的 optional background 使用 real log-amplitude slope：
 `exp(g * (f - f_r))` 乘在完整 ideal response 上，`g` 單位為 MHz⁻¹；`edelay`
 維持唯一 global phase slope。停用 amplitude-background fitting 時保留 sequential
 circle/phase path；啟用時以該結果初始化 raw complex I/Q joint refinement，plot 的
-IQ/circle/phase 使用移除 delay 與 amplitude envelope 後的 corrected domain。
+IQ/circle/phase 使用移除 delay 與 amplitude envelope 後的 corrected domain。Magnitude
+plot 只有在本次啟用 background fitting 時才顯示 background envelope 與 `g`。
 
 ## throttle / interpolation helpers
 

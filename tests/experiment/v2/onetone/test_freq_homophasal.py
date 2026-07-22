@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import pickle
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -10,6 +11,7 @@ from zcu_tools.experiment.v2.onetone.freq import (
     FreqCfg,
     FreqExp,
     FreqModuleCfg,
+    FreqResult,
     FreqSweepCfg,
     HomophasalSamplingCfg,
     homophasal_freqs_from_sweep,
@@ -202,3 +204,51 @@ def test_homophasal_run_sends_numpy_version_independent_binprog(
     payload = pickle.dumps(((transmitted_binprogs[0],), {}), protocol=4)
     _LegacyNumpyUnpickler(io.BytesIO(payload)).load()
     assert isinstance(transmitted_binprogs[0]["dmem"], list)
+
+
+def test_freq_analyze_forwards_delay_search_and_plot_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freqs = np.asarray([5990.0, 5995.0, 6000.0, 6005.0, 6010.0])
+    signals = np.ones(5, dtype=np.complex128)
+    params = {
+        "freq": 6000.0,
+        "fwhm": 1.0,
+        "edelay": 11.3,
+    }
+    figure = MagicMock()
+    fit = MagicMock(return_value=params)
+    visualize = MagicMock(return_value=figure)
+    monkeypatch.setattr("zcu_tools.experiment.v2.onetone.freq.HangerModel.fit", fit)
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2.onetone.freq.HangerModel.visualize_fit", visualize
+    )
+
+    result = FreqResult(freqs=freqs, signals=signals)
+    analyzed = FreqExp().analyze(
+        result,
+        model_type="hm",
+        fit_bg_amp_slope=False,
+        edelay_branch_seed=11.0,
+        edelay_max_search_radius=None,
+    )
+
+    trimmed_freqs = freqs[1:-1]
+    trimmed_signals = signals[1:-1]
+    assert fit.call_count == 1
+    fit_args, fit_kwargs = fit.call_args
+    np.testing.assert_array_equal(fit_args[0], trimmed_freqs)
+    np.testing.assert_array_equal(fit_args[1], trimmed_signals)
+    assert fit_args[2] is None
+    assert fit_kwargs == {
+        "fit_bg_amp_slope": False,
+        "edelay_branch_seed": 11.0,
+        "edelay_max_search_radius": None,
+    }
+    assert visualize.call_count == 1
+    visualize_args, visualize_kwargs = visualize.call_args
+    np.testing.assert_array_equal(visualize_args[0], trimmed_freqs)
+    np.testing.assert_array_equal(visualize_args[1], trimmed_signals)
+    assert visualize_args[2] is params
+    assert visualize_kwargs == {"fit_bg_amp_slope": False}
+    assert analyzed == (6000.0, 1.0, params, figure)
