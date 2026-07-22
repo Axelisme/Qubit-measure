@@ -44,7 +44,7 @@ def plot_Q_vs_omega(
     ax.set_yscale("log")
     ax.set_xlabel(r"$\omega$ (rad/ns)")
     ax.set_ylabel(Qname)
-    ax.legend()
+    ax.legend(fontsize="small")
     ax.grid()
 
     return fig, ax
@@ -87,7 +87,7 @@ def add_Q_fit(
         label = rf"$Q(\omega) = {format_exponent(Q_0)} \omega^{{{esp:.1f}}}$"
         ax.plot(omegas, fit_Qs, label=label)
 
-    ax.legend()
+    ax.legend(fontsize="small")
 
     return np.copy(omegas), fit_Qs
 
@@ -239,7 +239,7 @@ def plot_t1_with_sample(
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
-    ax.legend(fontsize="x-large")
+    ax.legend(fontsize="small")
     ax.grid()
 
     ax2 = ax.secondary_xaxis(
@@ -309,7 +309,7 @@ def plot_eff_t1_with_sample(
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
-    ax.legend(fontsize="x-large")
+    ax.legend(fontsize="small")
     ax.grid()
 
     if parameter_text:

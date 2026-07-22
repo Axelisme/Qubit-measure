@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-22 — f01 flux correction diagnostics
+**Last updated:** 2026-07-22 — explicit Purcell parameters and dipole plots
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -46,13 +46,13 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ### `workflow.py` — notebook-facing fixed workflow
 
-- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、以 f01 校準 current scale、f01-based flux correction、T1/T1err 單位轉換與 fit-window filtering。notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
+- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、以 f01 校準 current scale、f01-based flux correction、T1/T1err 單位轉換與 fit-window filtering。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；Purcell 的 readout 參數由 notebook 明確輸入。notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
 - `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
-- `PurcellEffectParams(kappa_ghz, bare_rf=None, g=None)` 是 optional Purcell 設定；`bare_rf` / `g` 省略時使用 context 從 `params.json` 讀出的 dispersive handoff。
+- `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz，不從 `params.json` 或 context 補值。
 - `calculate_purcell_t1_limit()` 對 Purcell sweep 使用 bounded LRU cache，並在 notebook workflow 內部關閉 scqubits sweep progress；cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
-- `analyze_t1_{capacitive,quasiparticle,inductive}_limit(..., purcell=None)` 是逐項機制 probe；若提供 Purcell，會先以 rate domain 扣除 Purcell relaxation，再用 intrinsic T1 反推 pointwise Q、建議初值、上下界參考與 summary table。
+- `analyze_t1_{capacitive,quasiparticle,inductive}_limit(..., purcell=None)` 是逐項機制 probe；若提供 Purcell，會先以 rate domain 扣除 Purcell relaxation，再用 intrinsic T1 反推 pointwise Q、建議初值、上下界參考與 summary table。`plot_t1_mechanism_dipole(probe)` 會用同一組 T1 口徑畫 T1 over dipole。
 - `make_t1_fit_init()` / `make_t1_fit_bounds()` / `fit_t1_curve(..., purcell=None)` 是綜合擬合階段；`active_mechanisms` 決定納入哪些通道，`mechanisms_to_fixed_params()` 決定哪些 active parameter 只固定不擬合。Purcell 在 combined fit 中以 `1/T1_Purcell(Temp)` 加到總 relaxation rate，因此 `Temp` 若是 free parameter，Purcell 也會跟著更新。
-- `build_t1_channel_curves(..., purcell=None)` / `plot_t1_channel_analysis()` 產生 uniform flux grid 上的 effective T1 與獨立機制上限曲線；若 combined fit 或參數有 Purcell，component curves 會多一條 Purcell 上限。圖內 legend 只放 curve name，擬合參數文字放在 axes 右側。
+- `build_t1_channel_curves(..., purcell=None)` / `plot_t1_channel_analysis()` 產生 uniform flux grid 上的 effective T1 與獨立機制上限曲線；若 combined fit 或參數有 Purcell，component curves 會多一條 Purcell 上限。圖內 legend 只放 curve name 且使用小字體，擬合參數文字放在 axes 右側。
 - `write_t1_curve_fit()` 是顯式 writeback；workflow 不會在 fitting 階段自動寫入 `params.json`。
 
 ### `Qcap.py` — 介電耗散 (電容通道)

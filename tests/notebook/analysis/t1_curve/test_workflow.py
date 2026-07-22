@@ -59,7 +59,8 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
 
     assert ctx.params == pytest.approx((3.4, 0.9, 0.6))
     assert ctx.flux_period == pytest.approx(1.0)
-    assert ctx.bare_rf == pytest.approx(5.7)
+    assert "bare_rf (GHz)" not in set(ctx.params_table["parameter"])
+    assert "g (GHz)" not in set(ctx.params_table["parameter"])
     assert len(ctx.samples_preview) == 1
 
 
@@ -221,20 +222,23 @@ def test_calculate_purcell_t1_limit_reuses_lru_cache(
 
     def _fake_purcell_limit(
         fluxs: NDArray[np.float64],
-        bare_rf: float,  # noqa: ARG001
-        kappa: float,  # noqa: ARG001
-        g: float,  # noqa: ARG001
+        bare_rf: float,
+        kappa: float,
+        g: float,
         Temp: float,
         params: tuple[float, float, float],  # noqa: ARG001
         progress: bool,
     ) -> NDArray[np.float64]:
         nonlocal call_count
         call_count += 1
+        assert bare_rf == pytest.approx(5.8)
+        assert kappa == pytest.approx(14.8e-3)
+        assert g == pytest.approx(0.07)
         assert progress is False
         return np.full_like(fluxs, 1000.0 + Temp)
 
     monkeypatch.setattr(workflow, "calculate_purcell_t1_vs_flux", _fake_purcell_limit)
-    purcell = PurcellEffectParams(kappa_ghz=14.8e-3)
+    purcell = _synthetic_purcell()
 
     try:
         first = workflow.calculate_purcell_t1_limit(context, fluxs, purcell, Temp=0.06)
@@ -290,7 +294,7 @@ def test_t1_mechanism_probe_subtracts_purcell_before_q(
     probe = workflow.analyze_t1_capacitive_limit(
         data,
         Temp=0.06,
-        purcell=PurcellEffectParams(kappa_ghz=14.8e-3),
+        purcell=_synthetic_purcell(),
     )
 
     np.testing.assert_allclose(captured["T1_ns"], 2.0 * data.fit.T1_ns)
@@ -301,6 +305,73 @@ def test_t1_mechanism_probe_subtracts_purcell_before_q(
     assert probe.purcell is not None
     assert probe.purcell_correction is not None
     assert "Purcell T1 (ns)" in probe.pointwise_table
+
+
+def test_t1_mechanism_dipole_plot_uses_t1_after_purcell_subtraction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+    captured: dict[str, object] = {}
+
+    def _fake_purcell(
+        context: T1CurveContext,  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        purcell: PurcellEffectParams,  # noqa: ARG001
+        *,
+        Temp: float,  # noqa: ARG001
+    ) -> NDArray[np.float64]:
+        return 2.0 * data.fit.T1_ns[: len(fluxs)]
+
+    def _fake_arrays(
+        _data: T1PreparedData,
+        mechanism: workflow.MechanismName,
+        _Temp: float,
+        *,
+        T1_ns: NDArray[np.float64] | None = None,
+        T1err_ns: NDArray[np.float64] | None = None,  # noqa: ARG001
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        assert mechanism == "capacitive"
+        assert T1_ns is not None
+        return (
+            np.array([1.0e5, 2.0e5, 4.0e5], dtype=np.float64),
+            np.array([1.0e4, np.nan, 4.0e4], dtype=np.float64),
+            np.array([2.0, 3.0, 4.0], dtype=np.float64),
+        )
+
+    def _fake_plot_t1_vs_elements(
+        dipoles: NDArray[np.float64],
+        T1s: NDArray[np.float64],
+        T1errs: NDArray[np.float64] | None = None,
+        dipole_name: str = "d_{01}",  # noqa: ARG001
+        Q_name: str = r"$Q_{cap}$",
+        product2val: Callable[[float], float] = lambda x: x,  # noqa: ARG005
+    ) -> tuple[Figure, Axes]:
+        captured["dipoles"] = dipoles
+        captured["T1s"] = T1s
+        captured["T1errs"] = T1errs
+        captured["Q_name"] = Q_name
+        return plt.subplots()
+
+    monkeypatch.setattr(workflow, "calculate_purcell_t1_limit", _fake_purcell)
+    monkeypatch.setattr(workflow, "_calculate_mechanism_arrays", _fake_arrays)
+    monkeypatch.setattr(workflow, "plot_t1_vs_elements", _fake_plot_t1_vs_elements)
+
+    probe = workflow.analyze_t1_capacitive_limit(
+        data,
+        Temp=0.06,
+        purcell=_synthetic_purcell(),
+    )
+    fig, _ = workflow.plot_t1_mechanism_dipole(probe)
+    plt.close(fig)
+
+    np.testing.assert_allclose(
+        cast(NDArray[np.float64], captured["T1s"]),
+        2.0 * data.fit.T1_ns,
+    )
+    np.testing.assert_allclose(
+        cast(NDArray[np.float64], captured["dipoles"]), [2, 3, 4]
+    )
+    assert captured["Q_name"] == r"$Q_{cap}$"
 
 
 def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
@@ -375,7 +446,7 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
         probe,
         t_flux_count=5,
         flux_range=(0.4, 0.6),
-        purcell=PurcellEffectParams(kappa_ghz=14.8e-3),
+        purcell=_synthetic_purcell(),
     )
     plt.close(fig)
 
@@ -498,7 +569,7 @@ def test_fit_t1_curve_passes_purcell_rate_callable(
     combined = fit_t1_curve(
         data,
         init=T1FitParams(Q_cap=7.0e5, Temp=0.06),
-        purcell=PurcellEffectParams(kappa_ghz=14.8e-3),
+        purcell=_synthetic_purcell(),
     )
 
     rate_fn = cast(
@@ -616,7 +687,7 @@ def test_build_t1_channel_curves_adds_purcell_component(
         message="ok",
         optimizer_result=None,
     )
-    purcell = PurcellEffectParams(kappa_ghz=14.8e-3)
+    purcell = _synthetic_purcell()
     combined = workflow.T1CombinedFit(
         data=data,
         init=fit_result.params,
@@ -685,14 +756,16 @@ def _synthetic_context(samples: pd.DataFrame) -> T1CurveContext:
         flux_half=0.0,
         flux_int=0.5,
         flux_period=1.0,
-        bare_rf=5.8,
-        g=0.07,
         samples_df=samples,
         params_table=pd.DataFrame(),
         samples_preview=samples,
         available_columns=tuple(samples.columns),
     )
     return context
+
+
+def _synthetic_purcell() -> PurcellEffectParams:
+    return PurcellEffectParams(kappa_ghz=14.8e-3, bare_rf=5.8, g=0.07)
 
 
 def _synthetic_prepared_data() -> T1PreparedData:

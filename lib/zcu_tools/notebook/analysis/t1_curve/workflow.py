@@ -39,6 +39,7 @@ from .base import (
     plot_eff_t1_with_sample,
     plot_Q_vs_omega,
     plot_sample_t1,
+    plot_t1_vs_elements,
 )
 from .fit import (
     NoiseParameterName,
@@ -96,17 +97,15 @@ _CACHE_FLOAT_DECIMALS = 12
 @dataclass(frozen=True, slots=True)
 class PurcellEffectParams:
     kappa_ghz: float
-    bare_rf: float | None = None
-    g: float | None = None
+    bare_rf: float
+    g: float
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.kappa_ghz) or self.kappa_ghz <= 0.0:
             raise ValueError("kappa_ghz must be positive and finite")
-        if self.bare_rf is not None and (
-            not np.isfinite(self.bare_rf) or self.bare_rf <= 0.0
-        ):
+        if not np.isfinite(self.bare_rf) or self.bare_rf <= 0.0:
             raise ValueError("bare_rf must be positive and finite")
-        if self.g is not None and (not np.isfinite(self.g) or self.g <= 0.0):
+        if not np.isfinite(self.g) or self.g <= 0.0:
             raise ValueError("g must be positive and finite")
 
 
@@ -116,8 +115,6 @@ class T1CurveAnalysisConfig:
     analysis_flux_range: tuple[float, float] = (0.0, 1.0)
     image_dir: str | None = None
     samples_filename: str = "samples.csv"
-    default_bare_rf: float = 5.0
-    default_g: float = 0.1
     current_scale_candidates: tuple[float, ...] = (1.0, 1000.0)
     max_abs_flux_correction: float = 0.03
     max_rel_t1_err: float = 0.25
@@ -166,8 +163,6 @@ class T1CurveContext:
     flux_half: float
     flux_int: float
     flux_period: float
-    bare_rf: float
-    g: float
     samples_df: pd.DataFrame
     params_table: pd.DataFrame
     samples_preview: pd.DataFrame
@@ -298,8 +293,6 @@ def load_t1_curve_context(
     result_dir: str,
     samples_filename: str = "samples.csv",
     image_dir: str | None = None,
-    default_bare_rf: float = 5.0,
-    default_g: float = 0.1,
     preview_rows: int = 10,
 ) -> T1CurveContext:
     resolved_image_dir = image_dir or os.path.join(result_dir, "t1_curve")
@@ -307,16 +300,11 @@ def load_t1_curve_context(
     os.makedirs(resolved_image_dir, exist_ok=True)
 
     params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
-    fit_inputs = params_file.require_dispersive_inputs(default_bare_rf=default_bare_rf)
-    dispersive_fit = params_file.get_dispersive_fit()
+    fit_inputs = params_file.require_fluxdep_fit()
     samples_df = pd.read_csv(os.path.join(result_dir, samples_filename))
     _validate_required_columns(samples_df)
 
     params = fit_inputs.params
-    bare_rf = (
-        fit_inputs.bare_rf_seed if dispersive_fit is None else dispersive_fit.bare_rf
-    )
-    g = default_g if dispersive_fit is None else dispersive_fit.g
     params_table = pd.DataFrame(
         [
             ("EJ (GHz)", params[0]),
@@ -325,8 +313,6 @@ def load_t1_curve_context(
             ("flux_half", fit_inputs.flux_half),
             ("flux_int", fit_inputs.flux_int),
             ("flux_period", fit_inputs.flux_period),
-            ("bare_rf (GHz)", bare_rf),
-            ("g (GHz)", g),
         ],
         columns=["parameter", "value"],
     )
@@ -339,8 +325,6 @@ def load_t1_curve_context(
         flux_half=fit_inputs.flux_half,
         flux_int=fit_inputs.flux_int,
         flux_period=fit_inputs.flux_period,
-        bare_rf=bare_rf,
-        g=g,
         samples_df=samples_df,
         params_table=params_table,
         samples_preview=samples_df.head(preview_rows),
@@ -447,17 +431,15 @@ def calculate_purcell_t1_limit(
     *,
     Temp: float,
 ) -> NDArray[np.float64]:
-    resolved_bare_rf = context.bare_rf if purcell.bare_rf is None else purcell.bare_rf
-    resolved_g = context.g if purcell.g is None else purcell.g
     if not np.isfinite(Temp) or Temp <= 0.0:
         raise ValueError("Temp must be positive and finite")
     return np.asarray(
         _calculate_purcell_t1_limit_cached(
             _float_tuple_cache_key(context.params),
             _array_cache_key(np.asarray(fluxs, dtype=np.float64), name="fluxs"),
-            _float_cache_key(resolved_bare_rf),
+            _float_cache_key(purcell.bare_rf),
             _float_cache_key(purcell.kappa_ghz),
-            _float_cache_key(resolved_g),
+            _float_cache_key(purcell.g),
             _float_cache_key(Temp),
         ),
         dtype=np.float64,
@@ -837,7 +819,7 @@ def fit_t1_curve(
         progress=progress,
     )
     params_table = _fit_params_table(init, fit_result)
-    purcell_rows = _purcell_fit_summary_rows(context, purcell)
+    purcell_rows = _purcell_fit_summary_rows(purcell)
     summary_table = pd.DataFrame(
         [
             ("fit success", str(fit_result.success)),
@@ -878,7 +860,6 @@ def build_t1_channel_curves(
     flux_range: tuple[float, float] | None = None,
     purcell: PurcellEffectParams | None = None,
     include_purcell: bool | None = None,
-    purcell_kappa_ghz: float | None = None,
 ) -> T1ChannelAnalysis:
     data = combined_fit.data
     context = data.calibration.context
@@ -886,7 +867,6 @@ def build_t1_channel_curves(
         combined_fit,
         purcell=purcell,
         include_purcell=include_purcell,
-        purcell_kappa_ghz=purcell_kappa_ghz,
     )
     resolved_flux_range = flux_range or data.analysis_flux_range
     grid_fluxs = np.linspace(
@@ -1070,7 +1050,7 @@ def plot_t1_flux_calibration(data: T1PreparedData) -> tuple[Figure, Axes]:
     ax.set_ylabel("f01 frequency (MHz)")
     ax.set_title("f01 flux correction")
     ax.grid(axis="x", alpha=0.25)
-    ax.legend(loc="best")
+    ax.legend(loc="best", fontsize="small")
     return fig, ax
 
 
@@ -1087,7 +1067,54 @@ def plot_t1_mechanism_probe(probe: T1MechanismProbe) -> tuple[Figure, Axes]:
         label=f"{_CURVE_LABELS[probe.mechanism]} probe",
     )
     ax.set_title(f"Temp = {probe.temperature * 1e3:.2f} mK")
-    ax.legend()
+    ax.legend(fontsize="small")
+    return fig, ax
+
+
+def plot_t1_mechanism_dipole(probe: T1MechanismProbe) -> tuple[Figure, Axes]:
+    T1_for_q = (
+        probe.data.fit.T1_ns
+        if probe.purcell_correction is None
+        else probe.purcell_correction.intrinsic_T1_ns
+    )
+    T1err_for_q = (
+        probe.data.fit.T1err_ns
+        if probe.purcell_correction is None
+        else probe.purcell_correction.intrinsic_T1err_ns
+    )
+    valid = _omega_mask(probe.data.fit.omegas, probe.omega_range)
+    if probe.purcell_correction is not None:
+        valid &= probe.purcell_correction.valid_mask
+    valid &= (
+        np.isfinite(probe.dipoles)
+        & (probe.dipoles > 0.0)
+        & np.isfinite(T1_for_q)
+        & (T1_for_q > 0.0)
+        & np.isfinite(probe.q_values)
+        & (probe.q_values > 0.0)
+    )
+    if not np.any(valid):
+        raise ValueError(f"No finite positive {probe.mechanism} dipole points to plot")
+
+    Q_name = (
+        r"$x_{qp}$"
+        if probe.mechanism == "quasiparticle"
+        else _Q_LABELS[probe.mechanism]
+    )
+    product2val: Callable[[float], float] = (
+        (lambda product: 1.0 / product)
+        if probe.mechanism == "quasiparticle"
+        else (lambda product: product)
+    )
+    fig, ax = plot_t1_vs_elements(
+        probe.dipoles[valid],
+        T1_for_q[valid],
+        T1err_for_q[valid],
+        Q_name=Q_name,
+        product2val=product2val,
+    )
+    title_suffix = " after Purcell subtraction" if probe.purcell_correction else ""
+    ax.set_title(f"Temp = {probe.temperature * 1e3:.2f} mK{title_suffix}")
     return fig, ax
 
 
@@ -1152,7 +1179,7 @@ def plot_t1_mechanism_limit(
         }
         component_t1s = {**component_t1s, "Purcell": purcell_T1s}
         plot_label = f"{plot_label} + Purcell"
-        parameter_lines.extend(_purcell_parameter_text_lines(context, resolved_purcell))
+        parameter_lines.extend(_purcell_parameter_text_lines(resolved_purcell))
     fig, ax = plot_eff_t1_with_sample(
         data.sample.values,
         data.sample.T1_ns,
@@ -1181,7 +1208,7 @@ def plot_t1_channel_analysis(
     if parameter_text is None:
         parameter_text = t1_parameter_text(
             combined_fit.fit_result,
-            extra_lines=_purcell_parameter_text_lines(context, combined_fit.purcell),
+            extra_lines=_purcell_parameter_text_lines(combined_fit.purcell),
         )
     fig, ax = plot_eff_t1_with_sample(
         data.sample.values,
@@ -1279,17 +1306,14 @@ def t1_parameter_text(
 
 
 def _purcell_parameter_text_lines(
-    context: T1CurveContext,
     purcell: PurcellEffectParams | None,
 ) -> tuple[str, ...]:
     if purcell is None:
         return ()
-    bare_rf = context.bare_rf if purcell.bare_rf is None else purcell.bare_rf
-    g = context.g if purcell.g is None else purcell.g
     return (
         f"Purcell kappa = {purcell.kappa_ghz:.3e} GHz",
-        f"Purcell bare_rf = {bare_rf:.6g} GHz",
-        f"Purcell g = {g:.3e} GHz",
+        f"Purcell bare_rf = {purcell.bare_rf:.6g} GHz",
+        f"Purcell g = {purcell.g:.3e} GHz",
     )
 
 
@@ -1300,8 +1324,6 @@ def run_t1_curve_analysis(
         result_dir=config.result_dir,
         samples_filename=config.samples_filename,
         image_dir=config.image_dir,
-        default_bare_rf=config.default_bare_rf,
-        default_g=config.default_g,
     )
     calibration = calibrate_t1_flux(
         context,
@@ -1552,18 +1574,15 @@ def _purcell_probe_summary_rows(
 
 
 def _purcell_fit_summary_rows(
-    context: T1CurveContext,
     purcell: PurcellEffectParams | None,
 ) -> list[tuple[str, str]]:
     if purcell is None:
         return [("Purcell", "off")]
-    bare_rf = context.bare_rf if purcell.bare_rf is None else purcell.bare_rf
-    g = context.g if purcell.g is None else purcell.g
     return [
         ("Purcell", "on"),
         ("Purcell kappa (GHz)", f"{purcell.kappa_ghz:.6g}"),
-        ("Purcell bare_rf (GHz)", f"{bare_rf:.6g}"),
-        ("Purcell g (GHz)", f"{g:.6g}"),
+        ("Purcell bare_rf (GHz)", f"{purcell.bare_rf:.6g}"),
+        ("Purcell g (GHz)", f"{purcell.g:.6g}"),
     ]
 
 
@@ -1572,14 +1591,15 @@ def _resolve_channel_purcell(
     *,
     purcell: PurcellEffectParams | None,
     include_purcell: bool | None,
-    purcell_kappa_ghz: float | None,
 ) -> PurcellEffectParams | None:
     if purcell is not None:
         return purcell
     if include_purcell is True:
-        if purcell_kappa_ghz is None:
-            raise ValueError("purcell_kappa_ghz is required when include_purcell=True")
-        return PurcellEffectParams(kappa_ghz=purcell_kappa_ghz)
+        if combined_fit.purcell is None:
+            raise ValueError(
+                "pass purcell=PurcellEffectParams(...) when include_purcell=True"
+            )
+        return combined_fit.purcell
     if include_purcell is False:
         return None
     return combined_fit.purcell
@@ -2070,6 +2090,7 @@ __all__ = [
     "plot_t1_channel_analysis",
     "plot_t1_curve_data",
     "plot_t1_flux_calibration",
+    "plot_t1_mechanism_dipole",
     "plot_t1_mechanism_limit",
     "plot_t1_mechanism_probe",
     "prepare_t1_curve_data",

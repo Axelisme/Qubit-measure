@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.4
   kernelspec:
-    display_name: zcu-tools
+    display_name: Python 3
     language: python
     name: python3
   language_info:
@@ -52,8 +52,6 @@ ctx = zt1.load_t1_curve_context(
     result_dir="../../result/Q12_2D[7]/Q4",
     samples_filename="samples.csv",
     image_dir=None,
-    default_bare_rf=5.0,
-    default_g=0.1,
 )
 ```
 
@@ -77,7 +75,7 @@ print(f"finite T1 rows = {len(cal.t1_df)}")
 # Fit Window
 
 ```python
-analysis_flux_range = (0.49, 1.0)
+analysis_flux_range = (0.48, 1.02)
 ```
 
 ```python
@@ -88,8 +86,8 @@ data = zt1.prepare_t1_curve_data(
     max_rel_t1_err=0.25,
     use_weighted_points_only=False,
 )
-fig, _ = zt1.plot_t1_flux_calibration(data)
-figure_paths["flux_calibration"] = zt1.save_t1_curve_figure(fig, ctx, "flux_calibration.png")
+# fig, _ = zt1.plot_t1_flux_calibration(data)
+# figure_paths["flux_calibration"] = zt1.save_t1_curve_figure(fig, ctx, "flux_calibration.png")
 
 fig, _ = zt1.plot_t1_curve_data(data)
 figure_paths["t1_samples"] = zt1.save_t1_curve_figure(fig, ctx, "T1s.png")
@@ -98,10 +96,14 @@ figure_paths["t1_samples"] = zt1.save_t1_curve_figure(fig, ctx, "T1s.png")
 # Purcell Effect
 
 ```python
+purcell_bare_rf = 5.793127423605109  # GHz
+purcell_g = 0.07390631094081157  # GHz
+purcell_kappa_ghz = 14.8e-3  # GHz
+
 purcell = zt1.PurcellEffectParams(
-    kappa_ghz=14.8e-3,
-    bare_rf=None,
-    g=None,
+    kappa_ghz=purcell_kappa_ghz,
+    bare_rf=purcell_bare_rf,
+    g=purcell_g,
 )
 # purcell = None  # Disable Purcell in probe, combined fit, and plots.
 
@@ -120,21 +122,27 @@ cap_probe = zt1.analyze_t1_capacitive_limit(
     Temp=Temp,
     purcell=purcell,
     omega_range=(None, None),
-    fit_temperature=False,
+    fit_temperature=True,
     fit_constant=True,
     statistic="median",
     parameter_init=None,
+)
+fig, _ = zt1.plot_t1_mechanism_probe(cap_probe)
+figure_paths["Qcap_vs_omega"] = zt1.save_t1_curve_figure(
+    fig, ctx, "Qcap_vs_omega.png"
 )
 
 print(f"Q_cap probe = {cap_probe.parameter_init:.3e}")
 ```
 
 ```python
-fig, _ = zt1.plot_t1_mechanism_probe(cap_probe)
-figure_paths["Qcap_vs_omega"] = zt1.save_t1_curve_figure(
-    fig, ctx, "Qcap_vs_omega.png"
+fig, _ = zt1.plot_t1_mechanism_dipole(cap_probe)
+figure_paths["T1_vs_dipole_cap"] = zt1.save_t1_curve_figure(
+    fig, ctx, "T1s_vs_|d01|_cap.png"
 )
+```
 
+```python
 fig, _ = zt1.plot_t1_mechanism_limit(
     cap_probe,
     t_flux_count=1000,
@@ -159,16 +167,22 @@ qp_probe = zt1.analyze_t1_quasiparticle_limit(
     statistic="median",
     parameter_init=None,
 )
-
-print(f"x_qp probe = {qp_probe.parameter_init:.3e}")
-```
-
-```python
 fig, _ = zt1.plot_t1_mechanism_probe(qp_probe)
 figure_paths["Qqp_vs_omega"] = zt1.save_t1_curve_figure(
     fig, ctx, "Qqp_vs_omega.png"
 )
 
+print(f"x_qp probe = {qp_probe.parameter_init:.3e}")
+```
+
+```python
+fig, _ = zt1.plot_t1_mechanism_dipole(qp_probe)
+figure_paths["T1_vs_dipole_qp"] = zt1.save_t1_curve_figure(
+    fig, ctx, "T1s_vs_|d01|_qp.png"
+)
+```
+
+```python
 fig, _ = zt1.plot_t1_mechanism_limit(
     qp_probe,
     t_flux_count=1000,
@@ -193,16 +207,22 @@ ind_probe = zt1.analyze_t1_inductive_limit(
     statistic="median",
     parameter_init=None,
 )
-
-print(f"Q_ind probe = {ind_probe.parameter_init:.3e}")
-```
-
-```python
 fig, _ = zt1.plot_t1_mechanism_probe(ind_probe)
 figure_paths["Qind_vs_omega"] = zt1.save_t1_curve_figure(
     fig, ctx, "Qind_vs_omega.png"
 )
 
+print(f"Q_ind probe = {ind_probe.parameter_init:.3e}")
+```
+
+```python
+fig, _ = zt1.plot_t1_mechanism_dipole(ind_probe)
+figure_paths["T1_vs_dipole_ind"] = zt1.save_t1_curve_figure(
+    fig, ctx, "T1s_vs_|d01|_ind.png"
+)
+```
+
+```python
 fig, _ = zt1.plot_t1_mechanism_limit(
     ind_probe,
     t_flux_count=1000,
@@ -217,9 +237,13 @@ figure_paths["T1_fit_Qind"] = zt1.save_t1_curve_figure(
 # Combined Fit
 
 ```python
+active_mechanisms = ("capacitive", "inductive")
+fix_mechanisms = ("Temp",)
+
 fit_init = zt1.make_t1_fit_init(
-    active_mechanisms=("capacitive", "inductive"),
-    Temp=Temp,
+    active_mechanisms=active_mechanisms,
+    # Temp=Temp,
+    Temp=60e-3,
     cap_probe=cap_probe,
     qp_probe=qp_probe,
     ind_probe=ind_probe,
@@ -235,15 +259,13 @@ fit_bounds = zt1.make_t1_fit_bounds(
     x_qp_lower_floor=1e-12,
     x_qp_upper_cap=1.0,
 )
-```
 
-```python
 combined_fit = zt1.fit_t1_curve(
     data,
     init=fit_init,
     purcell=purcell,
     bounds=fit_bounds,
-    fixed=zt1.mechanisms_to_fixed_params(()),
+    fixed=zt1.mechanisms_to_fixed_params(fix_mechanisms),
     T1_error_policy=zt1.MeasurementErrorPolicy(
         nan_policy="bin_median",
         relative_floor=0.05,
@@ -279,9 +301,7 @@ channel_analysis = zt1.build_t1_channel_curves(
     flux_range=analysis_flux_range,
     purcell=purcell,
 )
-```
 
-```python
 fig, _ = zt1.plot_t1_channel_analysis(channel_analysis)
 figure_paths["channel_overlay"] = zt1.save_t1_curve_figure(
     fig, ctx, "T1s_fit_eff.png", bbox_inches="tight"
@@ -293,8 +313,6 @@ figure_paths["channel_overlay"] = zt1.save_t1_curve_figure(
 ```python
 zt1.write_t1_curve_fit(combined_fit)
 ```
-
-# Result Object
 
 ```python
 analysis = zt1.collect_t1_curve_result(
