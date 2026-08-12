@@ -1,6 +1,6 @@
 # `fit_tools` 模塊重點文檔
 
-**Last updated:** 2026-07-22 — sample merge workflow boundary
+**Last updated:** 2026-07-23 — effective temperature chain tools
 
 `fit_tools` 放跨 T1/T2 分析都會用到的純計算工具。它不包含任何 T1/T2 物理機制模型；機制模型留在各自的 `t1_curve` / `t2_curve` 模塊。
 
@@ -31,6 +31,13 @@
 
 - `least_squares_cost(residuals)` 回傳 `0.5 * sum(residuals**2)`。
 - `reduced_chi2_from_cost(cost, observation_count, free_parameter_count)` 用 effective observation count 計算 reduced chi2；flux-bin 平衡時 observation count 是 occupied bin 數，而不是 sample 數。
+
+### `effective_temperature.py` — attenuator-chain thermal noise
+
+- `ThermalAttenuatorStage(name, Temp_K, attenuation_db)` 描述一個實際位於該溫度的 passive attenuator；任意多層用 tuple/list 串起來。
+- `calculate_thermal_chain(frequencies_hz, stages, input_temperature_K=300.0, impedance_ohm=50.0)` 用 passive attenuator cascade 計算 output-referred PSD、等效 photon number 與等效溫度。每層視為無長度 lumped attenuator，只輸入溫度與 attenuation；自身熱噪聲使用 `linear_loss = 10^(att_db/10)` 對應的 emissivity `1 - 1/linear_loss`，source 與各層 emission 再乘以下游 attenuation 後相加。
+- `evaluate_thermal_chain_at_frequency(...)` 對單一 probe/readout 頻率回傳 `T_eff`、`n` 與 PSD，避免 notebook 先插值再反解。
+- `plot_thermal_chain_psd(...)` 與 `plot_effective_temperature_vs_frequency(...)` 回傳 `(fig, ax)`，notebook 只決定頻率軸、probe frequency、highlight range 與存檔路徑。PSD 圖維持舊 notebook 的顯示口徑：各溫區曲線是 raw source PSD，黑色 `Effective` 曲線才是 attenuator chain 後的 output-referred total。
 
 ## 設計原則
 

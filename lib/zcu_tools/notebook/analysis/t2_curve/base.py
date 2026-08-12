@@ -214,7 +214,6 @@ def t2_parameter_text(
         )
     if fit_result.params.n_th is not None:
         lines.append(rf"$n_{{th}}$ = {fit_result.params.n_th:.3e}")
-    lines.append(f"reduced chi2 = {fit_result.reduced_chi2:.3g}")
     lines.extend(extra_lines)
     return "\n".join(lines)
 

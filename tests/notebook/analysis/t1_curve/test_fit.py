@@ -62,7 +62,7 @@ def test_fit_t1_noise_params_recovers_all_free_parameters(
         T1s,
         _PARAMS,
         init=T1FitParams(Q_cap=5e5, x_qp=2.5e-6, Q_ind=4e7, Temp=0.08),
-        bounds={"Temp": (20e-3, 120e-3)},
+        bounds={"Temp": (None, 120e-3)},
         cutoff=12,
         qub_dim=4,
     )
@@ -415,6 +415,7 @@ def test_fit_t1_noise_params_updates_progress_bar(
         ({"bounds": {"bad": (1.0, 2.0)}}, "unknown bound"),
         ({"fixed": ("bad",)}, "unknown fixed"),
         ({"bounds": {"Q_cap": (9e5, 1e6)}}, "within bounds"),
+        ({"bounds": {"Q_cap": (None, 1e6)}}, "only Temp lower bound"),
     ],
 )
 def test_fit_t1_noise_params_validates_params_and_bounds(

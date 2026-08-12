@@ -76,6 +76,8 @@ print(f"finite T1 rows = {len(cal.t1_df)}")
 
 ```python
 analysis_flux_range = (0.48, 1.02)
+
+Temp_lower = 56.6e-3
 ```
 
 ```python
@@ -96,23 +98,49 @@ figure_paths["t1_samples"] = zt1.save_t1_curve_figure(fig, ctx, "T1s.png")
 # Purcell Effect
 
 ```python
-purcell_bare_rf = 5.793127423605109  # GHz
-purcell_g = 0.07390631094081157  # GHz
 purcell_kappa_ghz = 14.8e-3  # GHz
 
-purcell = zt1.PurcellEffectParams(
-    kappa_ghz=purcell_kappa_ghz,
-    bare_rf=purcell_bare_rf,
-    g=purcell_g,
-)
+purcell = zt1.load_t1_purcell_params(ctx, kappa_ghz=purcell_kappa_ghz)
 # purcell = None  # Disable Purcell in probe, combined fit, and plots.
 
 print("Purcell enabled =", purcell is not None)
+if purcell is not None:
+    print(f"bare_rf = {purcell.bare_rf:.6g} GHz")
+    print(f"g = {purcell.g:.6g} GHz")
+    print(f"kappa = {purcell.kappa_ghz:.6g} GHz")
+```
+
+```python
+purcell_Temp_upper = 150e-3
+if purcell is not None:
+    purcell_Temp_upper = zt1.estimate_purcell_Temp_upper_bound(
+        data,
+        purcell,
+        Temp_range=(20e-3, 150e-3),
+        tolerance=1e-3,
+        max_iter=12,
+        progress=True,
+    )
+
+print(f"Purcell Temp upper = {purcell_Temp_upper * 1e3:.2f} mK")
+
+if purcell is not None:
+    fig, _ = zt1.plot_purcell_Temp_upper_bound(
+        data,
+        purcell,
+        Temp=purcell_Temp_upper,
+        t_flux_count=1000,
+        flux_range=analysis_flux_range,
+    )
+    figure_paths["purcell_temp_upper"] = zt1.save_t1_curve_figure(
+        fig, ctx, "Purcell_Temp_upper.png", bbox_inches="tight"
+    )
 ```
 
 # Capacitive-Loss Probe
 
 ```python
+probe_Temp_bounds = (Temp_lower, purcell_Temp_upper)
 Temp = 60e-3
 ```
 
@@ -122,7 +150,8 @@ cap_probe = zt1.analyze_t1_capacitive_limit(
     Temp=Temp,
     purcell=purcell,
     omega_range=(None, None),
-    fit_temperature=True,
+    # fit_temperature=True,
+    Temp_bounds=probe_Temp_bounds,
     fit_constant=True,
     statistic="median",
     parameter_init=None,
@@ -162,7 +191,8 @@ qp_probe = zt1.analyze_t1_quasiparticle_limit(
     Temp=Temp,
     purcell=purcell,
     omega_range=(6.0, None),
-    fit_temperature=False,
+    # fit_temperature=True,
+    Temp_bounds=probe_Temp_bounds,
     fit_constant=True,
     statistic="median",
     parameter_init=None,
@@ -202,7 +232,8 @@ ind_probe = zt1.analyze_t1_inductive_limit(
     Temp=Temp,
     purcell=purcell,
     omega_range=(None, 4.0),
-    fit_temperature=False,
+    # fit_temperature=True,
+    Temp_bounds=probe_Temp_bounds,
     fit_constant=True,
     statistic="median",
     parameter_init=None,
@@ -238,23 +269,21 @@ figure_paths["T1_fit_Qind"] = zt1.save_t1_curve_figure(
 
 ```python
 active_mechanisms = ("capacitive", "inductive")
-fix_mechanisms = ("Temp",)
+# fix_mechanisms = ("Temp",)
+fix_mechanisms = ()
 
 fit_init = zt1.make_t1_fit_init(
     active_mechanisms=active_mechanisms,
-    # Temp=Temp,
-    Temp=60e-3,
+    Temp=Temp,
+    # Temp=60e-3,
     cap_probe=cap_probe,
     qp_probe=qp_probe,
     ind_probe=ind_probe,
-    Q_cap=None,
-    x_qp=None,
-    Q_ind=None,
 )
 fit_bounds = zt1.make_t1_fit_bounds(
     fit_init,
     factor=100.0,
-    Temp_bounds=(10e-3, 300e-3),
+    Temp_bounds=probe_Temp_bounds,
     Q_lower_floor=1.0,
     x_qp_lower_floor=1e-12,
     x_qp_upper_cap=1.0,
@@ -327,4 +356,8 @@ analysis = zt1.collect_t1_curve_result(
     figure_paths=figure_paths,
 )
 analysis.figure_paths
+```
+
+```python
+
 ```

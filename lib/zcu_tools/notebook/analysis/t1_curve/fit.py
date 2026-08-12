@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -25,6 +25,7 @@ from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
 NoiseParameterName = Literal["Q_cap", "x_qp", "Q_ind"]
 ParameterName = Literal["Q_cap", "x_qp", "Q_ind", "Temp"]
 ResidualMode = Literal["log", "linear"]
+FitBounds = Mapping[str, tuple[float | None, float]]
 
 _NOISE_PARAMETER_NAMES: tuple[NoiseParameterName, ...] = ("Q_cap", "x_qp", "Q_ind")
 _PARAMETER_NAMES: tuple[ParameterName, ...] = ("Q_cap", "x_qp", "Q_ind", "Temp")
@@ -88,7 +89,7 @@ def fit_t1_noise_params(
     params: tuple[float, float, float],
     *,
     init: T1FitParams,
-    bounds: Mapping[str, tuple[float, float]] | None = None,
+    bounds: FitBounds | None = None,
     fixed: Iterable[str] = (),
     T1errs: NDArray[np.float64] | None = None,
     T1_error_policy: MeasurementErrorPolicy | None = None,
@@ -345,7 +346,7 @@ def _validate_fixed(
 
 
 def _validate_bounds(
-    bounds: Mapping[str, tuple[float, float]] | None,
+    bounds: FitBounds | None,
     active_names: tuple[ParameterName, ...],
 ) -> tuple[dict[ParameterName, float], dict[ParameterName, float]]:
     merged = dict(_DEFAULT_BOUNDS)
@@ -358,7 +359,13 @@ def _validate_bounds(
             raise ValueError(
                 f"bounds contain inactive parameter(s): {sorted(inactive)}"
             )
-        merged.update(bounds)  # type: ignore[arg-type]
+        for raw_name, (raw_lower, raw_upper) in bounds.items():
+            name = cast(ParameterName, raw_name)
+            if raw_lower is None:
+                if name != "Temp":
+                    raise ValueError("only Temp lower bound can be None")
+                raw_lower = _DEFAULT_BOUNDS["Temp"][0]
+            merged[name] = (float(raw_lower), float(raw_upper))
 
     lower: dict[ParameterName, float] = {}
     upper: dict[ParameterName, float] = {}

@@ -25,6 +25,7 @@ from zcu_tools.notebook.analysis.t1_curve import (
     calibrate_t1_flux,
     fit_t1_curve,
     load_t1_curve_context,
+    load_t1_purcell_params,
     make_t1_fit_init,
     mechanisms_to_fixed_params,
     prepare_t1_curve_data,
@@ -62,6 +63,41 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
     assert "bare_rf (GHz)" not in set(ctx.params_table["parameter"])
     assert "g (GHz)" not in set(ctx.params_table["parameter"])
     assert len(ctx.samples_preview) == 1
+
+
+def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None:
+    (tmp_path / "params.json").write_text(
+        """
+{
+  "fluxdep_fit": {
+    "params": {"EJ": 3.4, "EC": 0.9, "EL": 0.6},
+    "flux_half": 0.0,
+    "flux_int": 0.5,
+    "flux_period": 1.0,
+    "plot_transitions": {"r_f": 5.7}
+  },
+  "dispersive": {
+    "bare_rf": 5.793127423605109,
+    "g": 0.07390631094081157
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "calibrated mA": [0.0],
+            "Freq (MHz)": [350.0],
+            "T1 (us)": [40.0],
+        }
+    ).to_csv(tmp_path / "samples.csv", index=False)
+
+    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
+    purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3)
+
+    assert purcell.kappa_ghz == pytest.approx(14.8e-3)
+    assert purcell.bare_rf == pytest.approx(5.793127423605109)
+    assert purcell.g == pytest.approx(0.07390631094081157)
 
 
 def test_calibrate_t1_flux_filters_finite_rows_and_records_scale(
@@ -189,6 +225,72 @@ def test_t1_mechanism_probe_uses_pointwise_q_for_init(
     assert probe.parameter_init == pytest.approx(2.0e5)
     assert probe.pointwise_table["Q"].tolist() == pytest.approx([1.0e5, 2.0e5, 4.0e5])
 
+    fig, ax = workflow.plot_t1_mechanism_probe(probe)
+    try:
+        expected_center = np.mean(np.log(probe.q_values))
+        expected_spread = np.std(np.log(probe.q_values))
+        assert ax.get_ylim() == pytest.approx(
+            (
+                np.exp(expected_center - 3.0 * expected_spread),
+                np.exp(expected_center + 3.0 * expected_spread),
+            )
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_t1_mechanism_probe_passes_temperature_bounds_to_temp_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+    captured: dict[str, object] = {}
+
+    def _fake_find_temp(
+        guess_Temp: float,
+        calc_Q_fn: Callable[[float], NDArray[np.float64]],  # noqa: ARG001
+        *,
+        Temp_bounds: tuple[float | None, float],
+    ) -> float:
+        captured["guess_Temp"] = guess_Temp
+        captured["Temp_bounds"] = Temp_bounds
+        return 0.08
+
+    def _fake_arrays(
+        _data: T1PreparedData,
+        mechanism: workflow.MechanismName,
+        Temp: float,
+        *,
+        T1_ns: NDArray[np.float64] | None = None,
+        T1err_ns: NDArray[np.float64] | None = None,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        assert mechanism == "capacitive"
+        assert Temp == pytest.approx(0.08)
+        assert T1_ns is not None
+        assert T1err_ns is not None
+        return (
+            np.array([1.0e5, 2.0e5, 4.0e5], dtype=np.float64),
+            np.array([1.0e4, 2.0e4, 4.0e4], dtype=np.float64),
+            np.array([2.0, 2.0, 2.0], dtype=np.float64),
+        )
+
+    monkeypatch.setattr(workflow, "find_proper_Temp", _fake_find_temp)
+    monkeypatch.setattr(workflow, "_calculate_mechanism_arrays", _fake_arrays)
+
+    probe = workflow.analyze_t1_capacitive_limit(
+        data,
+        Temp=0.06,
+        purcell=_synthetic_purcell(),
+        fit_temperature=True,
+        Temp_bounds=(None, 120e-3),
+    )
+
+    assert captured["guess_Temp"] == pytest.approx(0.06)
+    captured_bounds = cast(tuple[float | None, float], captured["Temp_bounds"])
+    assert captured_bounds[0] is None
+    assert captured_bounds[1] == pytest.approx(120e-3)
+    assert probe.temperature == pytest.approx(0.08)
+    assert "default..120.00 mK" in set(probe.summary_table["value"])
+
 
 def test_subtract_relaxation_limit_uses_rate_domain() -> None:
     observed_T1s = np.array([40_000.0, 50_000.0], dtype=np.float64)
@@ -252,6 +354,114 @@ def test_calculate_purcell_t1_limit_reuses_lru_cache(
     np.testing.assert_allclose(first, second)
     np.testing.assert_allclose(third, 1000.07)
     assert call_count == 2
+
+
+def test_estimate_purcell_temp_upper_bound_uses_observed_t1_constraint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+
+    def _fake_purcell(
+        context: T1CurveContext,  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        purcell: PurcellEffectParams,  # noqa: ARG001
+        *,
+        Temp: float,
+    ) -> NDArray[np.float64]:
+        return np.full(len(fluxs), 100_000.0 - 1_000_000.0 * Temp)
+
+    monkeypatch.setattr(workflow, "calculate_purcell_t1_limit", _fake_purcell)
+
+    Temp_upper = workflow.estimate_purcell_Temp_upper_bound(
+        data,
+        _synthetic_purcell(),
+        Temp_range=(10e-3, 90e-3),
+        tolerance=1e-5,
+        max_iter=20,
+    )
+
+    assert Temp_upper == pytest.approx(58e-3, abs=1e-4)
+
+
+def test_estimate_purcell_temp_upper_bound_updates_progress_bar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+    bars: list[_RecordingProgressBar] = []
+
+    def _fake_purcell(
+        context: T1CurveContext,  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        purcell: PurcellEffectParams,  # noqa: ARG001
+        *,
+        Temp: float,
+    ) -> NDArray[np.float64]:
+        return np.full(len(fluxs), 100_000.0 - 1_000_000.0 * Temp)
+
+    def _make_pbar(*_args: object, **kwargs: object) -> _RecordingProgressBar:
+        bar = _RecordingProgressBar(**kwargs)
+        bars.append(bar)
+        return bar
+
+    monkeypatch.setattr(workflow, "calculate_purcell_t1_limit", _fake_purcell)
+    monkeypatch.setattr(workflow, "make_pbar", _make_pbar)
+
+    workflow.estimate_purcell_Temp_upper_bound(
+        data,
+        _synthetic_purcell(),
+        Temp_range=(10e-3, 90e-3),
+        tolerance=1e-8,
+        max_iter=4,
+        progress=True,
+    )
+
+    assert len(bars) == 1
+    assert bars[0].total == 6
+    assert bars[0].n == 6
+    assert bars[0].closed
+    assert any(desc.startswith("Purcell Temp=") for desc in bars[0].descriptions)
+
+
+def test_plot_purcell_temp_upper_bound_overlays_t1_samples_and_curve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+    captured: dict[str, object] = {}
+
+    def _fake_purcell(
+        context: T1CurveContext,  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        purcell: PurcellEffectParams,  # noqa: ARG001
+        *,
+        Temp: float,
+    ) -> NDArray[np.float64]:
+        captured["fluxs"] = fluxs
+        captured["Temp"] = Temp
+        return np.linspace(50_000.0, 60_000.0, len(fluxs), dtype=np.float64)
+
+    monkeypatch.setattr(workflow, "calculate_purcell_t1_limit", _fake_purcell)
+
+    fig, ax = workflow.plot_purcell_Temp_upper_bound(
+        data,
+        _synthetic_purcell(),
+        Temp=58e-3,
+        t_flux_count=5,
+        flux_range=(0.49, 0.51),
+    )
+
+    try:
+        assert captured["Temp"] == pytest.approx(58e-3)
+        np.testing.assert_allclose(
+            cast(NDArray[np.float64], captured["fluxs"]),
+            np.linspace(0.49, 0.51, 5),
+        )
+        _, labels = ax.get_legend_handles_labels()
+        assert "T1 samples" in labels
+        assert "Purcell upper @ 58.00 mK" in labels
+        assert ax.get_xlabel() == r"Flux quanta ($\Phi_{ext}/\Phi_0$)"
+        assert ax.get_yscale() == "log"
+    finally:
+        plt.close(fig)
 
 
 def test_t1_mechanism_probe_subtracts_purcell_before_q(
@@ -428,12 +638,18 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
         title: str | None = None,  # noqa: ARG001
         xlabel: str = "Current (mA)",  # noqa: ARG001
         component_t1s: dict[str, NDArray[np.float64]] | None = None,
+        component_bands: (
+            dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]] | None
+        ) = None,
         parameter_text: str | None = None,
+        show_value_axis: bool = False,  # noqa: ARG001
     ) -> tuple[Figure, Axes]:
         captured["t1_effs"] = t1_effs
         captured["component_t1s"] = component_t1s
+        captured["component_bands"] = component_bands
         captured["label"] = label
         captured["parameter_text"] = parameter_text
+        captured["title"] = title
         return plt.subplots()
 
     monkeypatch.setattr(workflow, "_calculate_mechanism_arrays", _fake_arrays)
@@ -454,13 +670,25 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
     assert captured["label"] == "capacitive + Purcell"
     assert "Purcell" in component_t1s
     np.testing.assert_allclose(component_t1s["Purcell"], 40.0)
-    np.testing.assert_allclose(component_t1s["capacitive lower"], 40.0 / 3.0)
-    np.testing.assert_allclose(component_t1s["capacitive upper"], 40.0 / 9.0)
+    np.testing.assert_allclose(component_t1s["- lower"], 40.0 / 3.0)
+    np.testing.assert_allclose(component_t1s["- upper"], 40.0 / 9.0)
+    component_bands = cast(
+        dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]],
+        captured["component_bands"],
+    )
+    band_lower, band_upper = component_bands["capacitive bounds"]
+    np.testing.assert_allclose(band_lower, 40.0 / 3.0)
+    np.testing.assert_allclose(band_upper, 40.0 / 9.0)
     np.testing.assert_allclose(
         cast(NDArray[np.float64], captured["t1_effs"]),
         8.0,
     )
-    assert "Purcell kappa" in str(captured["parameter_text"])
+    parameter_text = str(captured["parameter_text"])
+    assert "Q_cap" in parameter_text
+    assert "Temp" in parameter_text
+    assert "Purcell kappa" not in parameter_text
+    assert "lower" not in parameter_text
+    assert captured["title"] is None
 
 
 def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
@@ -508,6 +736,7 @@ def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
     combined = fit_t1_curve(
         data,
         init=T1FitParams(Q_cap=7.0e5, Temp=0.06),
+        bounds={"Temp": (None, 120e-3), "Q_cap": (1.0e4, 1.0e8)},
         T1_error_policy=error_policy,
         flux_weighting=flux_weighting,
     )
@@ -520,6 +749,9 @@ def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
     )
     assert captured["T1_error_policy"] is error_policy
     assert captured["flux_weighting"] is flux_weighting
+    captured_bounds = cast(dict[str, tuple[float, float]], captured["bounds"])
+    assert captured_bounds["Temp"] == pytest.approx((10e-3, 120e-3))
+    assert combined.bounds == captured_bounds
     assert combined.fit_result.success
 
 
@@ -581,6 +813,29 @@ def test_fit_t1_curve_passes_purcell_rate_callable(
     np.testing.assert_allclose(rates, [0.01, 0.005, 0.0025])
     assert captured["purcell_temp"] == pytest.approx(0.07)
     assert combined.purcell is not None
+
+
+def test_t1_parameter_text_shows_only_active_noise_params_and_temp() -> None:
+    result = T1FitResult(
+        params=T1FitParams(Q_cap=7.0e5, Temp=0.06),
+        stderr=T1FitParams(Q_cap=0.0, Temp=0.0),
+        fixed=(),
+        free=("Q_cap", "Temp"),
+        model_T1s=np.array([1.0], dtype=np.float64),
+        residuals=np.array([0.0], dtype=np.float64),
+        cost=0.0,
+        reduced_chi2=12.3,
+        success=True,
+        message="ok",
+        optimizer_result=None,
+    )
+
+    text = workflow.t1_parameter_text(result)
+
+    assert "Q_cap" in text
+    assert "Temp" in text
+    assert "reduced chi2" not in text
+    assert "Purcell kappa" not in text
 
 
 def test_plot_t1_flux_calibration_shows_before_after_positions() -> None:
@@ -810,3 +1065,22 @@ def _synthetic_prepared_data() -> T1PreparedData:
         source_rows=len(curve.fluxs),
         summary_table=pd.DataFrame(),
     )
+
+
+class _RecordingProgressBar:
+    def __init__(self, **kwargs: object) -> None:
+        self.total = kwargs.get("total")
+        self.n: int | float = 0
+        self.closed = False
+        self.descriptions: list[str] = []
+        if "desc" in kwargs:
+            self.descriptions.append(str(kwargs["desc"]))
+
+    def update(self, value: int | float = 1) -> None:
+        self.n += value
+
+    def set_description(self, description: str) -> None:
+        self.descriptions.append(description)
+
+    def close(self) -> None:
+        self.closed = True

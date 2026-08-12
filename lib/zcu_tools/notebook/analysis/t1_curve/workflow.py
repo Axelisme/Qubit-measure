@@ -26,6 +26,7 @@ from zcu_tools.notebook.analysis.fit_tools import (
     choose_current_scale_from_f01,
     correct_flux_from_f01,
 )
+from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate import value2flux
 from zcu_tools.simulate.fluxonium import (
     calculate_eff_t1_vs_flux_fast,
@@ -35,13 +36,18 @@ from zcu_tools.simulate.fluxonium import (
 )
 
 from .base import (
+    DEFAULT_TEMP_LOWER_BOUND,
+    DEFAULT_TEMP_UPPER_BOUND,
+    TempBounds,
     find_proper_Temp,
     plot_eff_t1_with_sample,
     plot_Q_vs_omega,
     plot_sample_t1,
     plot_t1_vs_elements,
+    resolve_Temp_bounds,
 )
 from .fit import (
+    FitBounds,
     NoiseParameterName,
     ParameterName,
     ResidualMode,
@@ -133,6 +139,10 @@ class T1CurveAnalysisConfig:
         )
     )
     Temp: float = 60e-3
+    probe_Temp_bounds: TempBounds = (
+        DEFAULT_TEMP_LOWER_BOUND,
+        DEFAULT_TEMP_UPPER_BOUND,
+    )
     purcell: PurcellEffectParams | None = None
     active_mechanisms: tuple[MechanismName, ...] = (
         "capacitive",
@@ -144,7 +154,7 @@ class T1CurveAnalysisConfig:
     fit_Q_cap_override: float | None = None
     fit_x_qp_override: float | None = None
     fit_Q_ind_override: float | None = None
-    fit_bounds: Mapping[str, tuple[float, float]] | None = None
+    fit_bounds: FitBounds | None = None
     residual_mode: ResidualMode = "log"
     loss: str = "linear"
     max_nfev: int = 10000
@@ -332,6 +342,24 @@ def load_t1_curve_context(
     )
 
 
+def load_t1_purcell_params(
+    context: T1CurveContext,
+    *,
+    kappa_ghz: float,
+) -> PurcellEffectParams:
+    params_file = QubitParams(
+        os.path.join(context.result_dir, "params.json"), readonly=True
+    )
+    dispersive_fit = params_file.get_dispersive_fit()
+    if dispersive_fit is None:
+        raise RuntimeError("params.json needs a dispersive section with bare_rf and g")
+    return PurcellEffectParams(
+        kappa_ghz=kappa_ghz,
+        bare_rf=dispersive_fit.bare_rf,
+        g=dispersive_fit.g,
+    )
+
+
 def calibrate_t1_flux(
     context: T1CurveContext,
     *,
@@ -450,6 +478,160 @@ def clear_t1_purcell_cache() -> None:
     _calculate_purcell_t1_limit_cached.cache_clear()
 
 
+def estimate_purcell_Temp_upper_bound(
+    data: T1PreparedData,
+    purcell: PurcellEffectParams,
+    *,
+    Temp_range: tuple[float, float] = (
+        DEFAULT_TEMP_LOWER_BOUND,
+        DEFAULT_TEMP_UPPER_BOUND,
+    ),
+    tolerance: float = 1e-3,
+    max_iter: int = 12,
+    progress: bool = False,
+) -> float:
+    """Estimate the largest Temp compatible with observed T1 and Purcell loss.
+
+    The constraint is ``T1_Purcell(flux, Temp) >= T1_observed`` for every fit point.
+    A lower bound is not inferred from Purcell; ``Temp_range[0]`` is only the search
+    floor used to verify that a feasible point exists.
+    """
+    lower, upper = Temp_range
+    if (
+        not np.isfinite(lower)
+        or not np.isfinite(upper)
+        or lower <= 0.0
+        or upper <= lower
+    ):
+        raise ValueError("Temp_range must be positive finite (lower, upper)")
+    if tolerance <= 0.0 or not np.isfinite(tolerance):
+        raise ValueError("tolerance must be positive and finite")
+    if max_iter < 1:
+        raise ValueError("max_iter must be at least 1")
+
+    fluxs = np.asarray(data.fit.fluxs, dtype=np.float64)
+    observed_T1s = np.asarray(data.fit.T1_ns, dtype=np.float64)
+    valid = np.isfinite(fluxs) & np.isfinite(observed_T1s) & (observed_T1s > 0.0)
+    if not np.any(valid):
+        raise ValueError("data.fit must contain at least one finite positive T1 point")
+    fit_fluxs = fluxs[valid]
+    fit_T1s = observed_T1s[valid]
+
+    pbar = (
+        make_pbar(desc="Purcell Temp upper bound", total=max_iter + 2, leave=False)
+        if progress
+        else None
+    )
+
+    def log_margin(Temp: float) -> float:
+        purcell_T1s = calculate_purcell_t1_limit(
+            data.calibration.context,
+            fit_fluxs,
+            purcell,
+            Temp=Temp,
+        )
+        if (
+            purcell_T1s.shape != fit_T1s.shape
+            or np.any(~np.isfinite(purcell_T1s))
+            or np.any(purcell_T1s <= 0.0)
+        ):
+            raise ValueError("Purcell T1 calculation returned invalid values")
+        margin = float(np.min(np.log(purcell_T1s / fit_T1s)))
+        if pbar is not None:
+            pbar.set_description(
+                f"Purcell Temp={Temp * 1e3:.2f} mK margin={margin:.3g}"
+            )
+            pbar.update()
+        return margin
+
+    try:
+        lower_margin = log_margin(float(lower))
+        if lower_margin < 0.0:
+            raise ValueError(
+                "Purcell T1 is already below observed T1 at Temp_range lower bound"
+            )
+        upper_margin = log_margin(float(upper))
+        if upper_margin >= 0.0:
+            return float(upper)
+
+        feasible_Temp = float(lower)
+        infeasible_Temp = float(upper)
+        for _ in range(max_iter):
+            mid_Temp = 0.5 * (feasible_Temp + infeasible_Temp)
+            mid_margin = log_margin(mid_Temp)
+            if abs(mid_margin) <= tolerance:
+                return float(mid_Temp)
+            if mid_margin >= 0.0:
+                feasible_Temp = mid_Temp
+            else:
+                infeasible_Temp = mid_Temp
+        return float(feasible_Temp)
+    finally:
+        if pbar is not None:
+            pbar.close()
+
+
+def plot_purcell_Temp_upper_bound(
+    data: T1PreparedData,
+    purcell: PurcellEffectParams,
+    *,
+    Temp: float,
+    t_flux_count: int = 1000,
+    flux_range: tuple[float, float] | None = None,
+) -> tuple[Figure, Axes]:
+    if t_flux_count < 2:
+        raise ValueError("t_flux_count must be at least 2")
+    resolved_flux_range = flux_range or data.analysis_flux_range
+    t_fluxs = np.linspace(
+        resolved_flux_range[0], resolved_flux_range[1], t_flux_count, dtype=np.float64
+    )
+    purcell_T1s = calculate_purcell_t1_limit(
+        data.calibration.context,
+        t_fluxs,
+        purcell,
+        Temp=Temp,
+    )
+
+    fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
+    sample = data.sample
+    ax.errorbar(
+        sample.fluxs,
+        sample.T1_ns,
+        yerr=sample.T1err_ns,
+        fmt=".",
+        color="tab:blue",
+        label="T1 samples",
+        zorder=3,
+    )
+    if len(data.fit.fluxs) != len(sample.fluxs) or not np.array_equal(
+        data.fit.fluxs, sample.fluxs
+    ):
+        ax.scatter(
+            data.fit.fluxs,
+            data.fit.T1_ns,
+            color="tab:blue",
+            s=18,
+            label="fit points",
+            zorder=4,
+        )
+    ax.plot(
+        t_fluxs,
+        purcell_T1s,
+        color="tab:red",
+        linestyle="-.",
+        linewidth=2.0,
+        label=f"Purcell upper @ {Temp * 1e3:.2f} mK",
+        zorder=2,
+    )
+    ax.set_xlim(*resolved_flux_range)
+    ax.set_xlabel(r"Flux quanta ($\Phi_{ext}/\Phi_0$)")
+    ax.set_ylabel(r"$T_1$ (ns)")
+    ax.set_yscale("log")
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize="small")
+    return fig, ax
+
+
 def subtract_relaxation_limit(
     observed_T1_ns: NDArray[np.float64],
     observed_T1err_ns: NDArray[np.float64] | None,
@@ -510,6 +692,7 @@ def analyze_t1_capacitive_limit(
     purcell: PurcellEffectParams | None = None,
     omega_range: tuple[float | None, float | None] = (None, None),
     fit_temperature: bool = False,
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
     fit_constant: bool = True,
     statistic: ProbeStatistic = "median",
     parameter_init: float | None = None,
@@ -521,6 +704,7 @@ def analyze_t1_capacitive_limit(
         purcell=purcell,
         omega_range=omega_range,
         fit_temperature=fit_temperature,
+        Temp_bounds=Temp_bounds,
         fit_constant=fit_constant,
         statistic=statistic,
         parameter_init=parameter_init,
@@ -534,6 +718,7 @@ def analyze_t1_quasiparticle_limit(
     purcell: PurcellEffectParams | None = None,
     omega_range: tuple[float | None, float | None] = (6.0, None),
     fit_temperature: bool = False,
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
     fit_constant: bool = True,
     statistic: ProbeStatistic = "median",
     parameter_init: float | None = None,
@@ -545,6 +730,7 @@ def analyze_t1_quasiparticle_limit(
         purcell=purcell,
         omega_range=omega_range,
         fit_temperature=fit_temperature,
+        Temp_bounds=Temp_bounds,
         fit_constant=fit_constant,
         statistic=statistic,
         parameter_init=parameter_init,
@@ -558,6 +744,7 @@ def analyze_t1_inductive_limit(
     purcell: PurcellEffectParams | None = None,
     omega_range: tuple[float | None, float | None] = (None, 4.0),
     fit_temperature: bool = False,
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
     fit_constant: bool = True,
     statistic: ProbeStatistic = "median",
     parameter_init: float | None = None,
@@ -569,6 +756,7 @@ def analyze_t1_inductive_limit(
         purcell=purcell,
         omega_range=omega_range,
         fit_temperature=fit_temperature,
+        Temp_bounds=Temp_bounds,
         fit_constant=fit_constant,
         statistic=statistic,
         parameter_init=parameter_init,
@@ -583,13 +771,21 @@ def analyze_t1_mechanism_limit(
     purcell: PurcellEffectParams | None = None,
     omega_range: tuple[float | None, float | None] = (None, None),
     fit_temperature: bool = False,
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
     fit_constant: bool = True,
     statistic: ProbeStatistic = "median",
     parameter_init: float | None = None,
 ) -> T1MechanismProbe:
     _validate_mechanisms((mechanism,))
     temp = (
-        _fit_mechanism_temperature(data, mechanism, Temp, omega_range, purcell)
+        _fit_mechanism_temperature(
+            data,
+            mechanism,
+            Temp,
+            omega_range,
+            purcell,
+            Temp_bounds=Temp_bounds,
+        )
         if fit_temperature
         else Temp
     )
@@ -663,6 +859,7 @@ def analyze_t1_mechanism_limit(
             ("mechanism", mechanism),
             ("parameter", parameter_name),
             ("Temp", f"{temp * 1e3:.2f} mK"),
+            ("Temp bounds", _format_temperature_bounds(Temp_bounds)),
             *purcell_summary_rows,
             ("omega range", _format_range(omega_range)),
             ("fit constant", str(fit_constant)),
@@ -757,7 +954,7 @@ def make_t1_fit_bounds(
     init: T1FitParams,
     *,
     factor: float = 100.0,
-    Temp_bounds: tuple[float, float] = (10e-3, 300e-3),
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
     Q_lower_floor: float = 1.0,
     x_qp_lower_floor: float = 1e-12,
     Q_upper_cap: float = np.inf,
@@ -765,7 +962,7 @@ def make_t1_fit_bounds(
 ) -> dict[str, tuple[float, float]]:
     if factor <= 1.0:
         raise ValueError("factor must be larger than 1")
-    bounds: dict[str, tuple[float, float]] = {"Temp": Temp_bounds}
+    bounds: dict[str, tuple[float, float]] = {"Temp": resolve_Temp_bounds(Temp_bounds)}
     if init.Q_cap is not None:
         bounds["Q_cap"] = (
             max(Q_lower_floor, init.Q_cap / factor),
@@ -784,12 +981,28 @@ def make_t1_fit_bounds(
     return bounds
 
 
+def _normalize_t1_fit_bounds(
+    bounds: FitBounds | None,
+) -> dict[str, tuple[float, float]] | None:
+    if bounds is None:
+        return None
+    normalized: dict[str, tuple[float, float]] = {}
+    for name, (lower, upper) in bounds.items():
+        if lower is None:
+            if name != "Temp":
+                raise ValueError("only Temp lower bound can be None")
+            normalized[name] = resolve_Temp_bounds((None, upper))
+        else:
+            normalized[name] = (float(lower), float(upper))
+    return normalized
+
+
 def fit_t1_curve(
     data: T1PreparedData,
     *,
     init: T1FitParams,
     purcell: PurcellEffectParams | None = None,
-    bounds: Mapping[str, tuple[float, float]] | None = None,
+    bounds: FitBounds | None = None,
     fixed: tuple[ParameterName, ...] = (),
     T1_error_policy: MeasurementErrorPolicy | None = None,
     flux_weighting: FluxResidualWeighting | None = None,
@@ -802,12 +1015,13 @@ def fit_t1_curve(
     extra_relaxation_rate_fn = (
         _purcell_rate_fn(data, purcell) if purcell is not None else None
     )
+    fit_bounds = _normalize_t1_fit_bounds(bounds)
     fit_result = fit_t1_noise_params(
         data.fit.fluxs,
         data.fit.T1_ns,
         context.params,
         init=init,
-        bounds=bounds,
+        bounds=fit_bounds,
         fixed=fixed,
         T1errs=data.fit.T1err_ns,
         T1_error_policy=T1_error_policy,
@@ -841,7 +1055,7 @@ def fit_t1_curve(
     return T1CombinedFit(
         data=data,
         init=init,
-        bounds=bounds,
+        bounds=fit_bounds,
         fixed=fixed,
         residual_mode=residual_mode,
         loss=loss,
@@ -1066,7 +1280,7 @@ def plot_t1_mechanism_probe(probe: T1MechanismProbe) -> tuple[Figure, Axes]:
         probe.fit_q_values,
         label=f"{_CURVE_LABELS[probe.mechanism]} probe",
     )
-    ax.set_title(f"Temp = {probe.temperature * 1e3:.2f} mK")
+    _set_log_y_limits_to_three_sigma(ax, probe.q_values)
     ax.legend(fontsize="small")
     return fig, ax
 
@@ -1113,8 +1327,6 @@ def plot_t1_mechanism_dipole(probe: T1MechanismProbe) -> tuple[Figure, Axes]:
         Q_name=Q_name,
         product2val=product2val,
     )
-    title_suffix = " after Purcell subtraction" if probe.purcell_correction else ""
-    ax.set_title(f"Temp = {probe.temperature * 1e3:.2f} mK{title_suffix}")
     return fig, ax
 
 
@@ -1149,16 +1361,17 @@ def plot_t1_mechanism_limit(
     }
     probe_curve_name = f"{_CURVE_LABELS[probe.mechanism]} probe"
     display_T1s = mechanism_curves[probe_curve_name]
+    mechanism_label = _CURVE_LABELS[probe.mechanism]
+    lower_curve_name = f"{mechanism_label} lower"
+    upper_curve_name = f"{mechanism_label} upper"
     component_t1s = {
-        key: value
-        for key, value in mechanism_curves.items()
-        if not key.endswith(" probe")
+        "- lower": mechanism_curves[lower_curve_name],
+        "- upper": mechanism_curves[upper_curve_name],
     }
-    plot_label = _CURVE_LABELS[probe.mechanism]
+    plot_label = mechanism_label
     parameter_lines = [
         _format_parameter(probe.parameter_name, probe.parameter_init),
-        f"lower = {_format_parameter_value(probe.parameter_name, probe.parameter_lower)}",
-        f"upper = {_format_parameter_value(probe.parameter_name, probe.parameter_upper)}",
+        f"Temp = {probe.temperature * 1e3:.2f} mK",
     ]
     if resolved_purcell is not None:
         purcell_T1s = calculate_purcell_t1_limit(
@@ -1173,13 +1386,18 @@ def plot_t1_mechanism_limit(
         }
         display_T1s = combined_curves[probe_curve_name]
         component_t1s = {
-            key: value
-            for key, value in combined_curves.items()
-            if not key.endswith(" probe")
+            "- lower": combined_curves[lower_curve_name],
+            "- upper": combined_curves[upper_curve_name],
         }
         component_t1s = {**component_t1s, "Purcell": purcell_T1s}
         plot_label = f"{plot_label} + Purcell"
-        parameter_lines.extend(_purcell_parameter_text_lines(resolved_purcell))
+    band_label = f"{mechanism_label} bounds"
+    component_bands = {
+        band_label: (
+            component_t1s["- lower"],
+            component_t1s["- upper"],
+        )
+    }
     fig, ax = plot_eff_t1_with_sample(
         data.sample.values,
         data.sample.T1_ns,
@@ -1189,8 +1407,8 @@ def plot_t1_mechanism_limit(
         context.flux_period,
         t_fluxs,
         label=plot_label,
-        title=f"Temp = {probe.temperature * 1e3:.2f} mK",
         component_t1s=component_t1s,
+        component_bands=component_bands,
         parameter_text="\n".join(parameter_lines),
     )
     ax.set_xlim(*resolved_flux_range)
@@ -1206,10 +1424,7 @@ def plot_t1_channel_analysis(
     data = combined_fit.data
     context = data.calibration.context
     if parameter_text is None:
-        parameter_text = t1_parameter_text(
-            combined_fit.fit_result,
-            extra_lines=_purcell_parameter_text_lines(combined_fit.purcell),
-        )
+        parameter_text = t1_parameter_text(combined_fit.fit_result)
     fig, ax = plot_eff_t1_with_sample(
         data.sample.values,
         data.sample.T1_ns,
@@ -1219,7 +1434,6 @@ def plot_t1_channel_analysis(
         context.flux_period,
         channel_analysis.curves.fluxs,
         label="effective T1",
-        title=f"Temperature = {combined_fit.fit_result.params.Temp * 1e3:.2f} mK",
         component_t1s=channel_analysis.curves.component_T1s_ns,
         parameter_text=parameter_text,
     )
@@ -1300,7 +1514,6 @@ def t1_parameter_text(
     if params.Q_ind is not None:
         lines.append(_format_parameter("Q_ind", params.Q_ind))
     lines.append(f"Temp = {params.Temp * 1e3:.2f} mK")
-    lines.append(f"reduced chi2 = {fit_result.reduced_chi2:.3g}")
     lines.extend(extra_lines)
     return "\n".join(lines)
 
@@ -1337,17 +1550,32 @@ def run_t1_curve_analysis(
         use_weighted_points_only=config.use_weighted_points_only,
     )
     cap_probe = (
-        analyze_t1_capacitive_limit(data, Temp=config.Temp, purcell=config.purcell)
+        analyze_t1_capacitive_limit(
+            data,
+            Temp=config.Temp,
+            purcell=config.purcell,
+            Temp_bounds=config.probe_Temp_bounds,
+        )
         if "capacitive" in config.active_mechanisms
         else None
     )
     qp_probe = (
-        analyze_t1_quasiparticle_limit(data, Temp=config.Temp, purcell=config.purcell)
+        analyze_t1_quasiparticle_limit(
+            data,
+            Temp=config.Temp,
+            purcell=config.purcell,
+            Temp_bounds=config.probe_Temp_bounds,
+        )
         if "quasiparticle" in config.active_mechanisms
         else None
     )
     ind_probe = (
-        analyze_t1_inductive_limit(data, Temp=config.Temp, purcell=config.purcell)
+        analyze_t1_inductive_limit(
+            data,
+            Temp=config.Temp,
+            purcell=config.purcell,
+            Temp_bounds=config.probe_Temp_bounds,
+        )
         if "inductive" in config.active_mechanisms
         else None
     )
@@ -1759,6 +1987,8 @@ def _fit_mechanism_temperature(
     Temp: float,
     omega_range: tuple[float | None, float | None],
     purcell: PurcellEffectParams | None,
+    *,
+    Temp_bounds: TempBounds,
 ) -> float:
     mask = _omega_mask(data.fit.omegas, omega_range)
 
@@ -1790,7 +2020,7 @@ def _fit_mechanism_temperature(
             finite &= purcell_correction.valid_mask
         return q_values[finite]
 
-    return find_proper_Temp(Temp, calc_Q_fn)
+    return find_proper_Temp(Temp, calc_Q_fn, Temp_bounds=Temp_bounds)
 
 
 def _omega_mask(
@@ -2047,6 +2277,31 @@ def _format_range(value_range: tuple[float | None, float | None]) -> str:
     return f"{lower_text}..{upper_text}"
 
 
+def _format_temperature_bounds(Temp_bounds: TempBounds) -> str:
+    lower_raw, _upper_raw = Temp_bounds
+    lower, upper = resolve_Temp_bounds(Temp_bounds)
+    lower_text = "default" if lower_raw is None else f"{lower * 1e3:.2f}"
+    return f"{lower_text}..{upper * 1e3:.2f} mK"
+
+
+def _set_log_y_limits_to_three_sigma(
+    ax: Axes,
+    values: NDArray[np.float64],
+) -> None:
+    positive = np.asarray(values, dtype=np.float64)
+    positive = positive[np.isfinite(positive) & (positive > 0.0)]
+    if positive.size < 2:
+        return
+    log_values = np.log(positive)
+    spread = float(np.std(log_values))
+    if not np.isfinite(spread) or spread <= 0.0:
+        return
+    center = float(np.mean(log_values))
+    ax.set_ylim(
+        float(np.exp(center - 3.0 * spread)), float(np.exp(center + 3.0 * spread))
+    )
+
+
 def _format_parameter(name: str, value: float) -> str:
     return f"{name} = {_format_parameter_value(name, value)}"
 
@@ -2082,8 +2337,10 @@ __all__ = [
     "calibrate_t1_flux",
     "clear_t1_purcell_cache",
     "collect_t1_curve_result",
+    "estimate_purcell_Temp_upper_bound",
     "fit_t1_curve",
     "load_t1_curve_context",
+    "load_t1_purcell_params",
     "make_t1_fit_bounds",
     "make_t1_fit_init",
     "mechanisms_to_fixed_params",
@@ -2093,6 +2350,7 @@ __all__ = [
     "plot_t1_mechanism_dipole",
     "plot_t1_mechanism_limit",
     "plot_t1_mechanism_probe",
+    "plot_purcell_Temp_upper_bound",
     "prepare_t1_curve_data",
     "run_t1_curve_analysis",
     "save_t1_curve_figure",
