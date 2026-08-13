@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-23 — resonance phase-curvature analyze contract
+**Last updated:** 2026-08-13 — JPA 校準 family catalog（GUI_VERSION 76）
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -118,11 +118,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 54`, `GUI_VERSION = 75`, and
+Current measure-gui values are `WIRE_VERSION = 54`, `GUI_VERSION = 76`, and
 `MCP_VERSION = 73`（defined in `zcu_tools.mcp.measure.server`）。WIRE 54讓one-tone
 analyze params新增`fit_bg_phase_curvature`，表示optional resonance-centered
-quadratic phase background；GUI 75同步resonance fitting與conditional plotting；
-MCP 73維持不變。
+quadratic phase background；GUI 76記錄JPA校準family（六個`jpa/*` adapters）進入
+startup catalog；MCP 73維持不變。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump

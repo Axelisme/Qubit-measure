@@ -35,6 +35,14 @@ from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, ProgramShape
 
 from .adapters._support import ROLE_FACTORIES
 from .adapters.fake.freq import FakeFreqAdapter
+from .adapters.jpa import (
+    JpaAutoOptimizeAdapter,
+    JpaCheckAdapter,
+    JpaFluxAdapter,
+    JpaFluxOneToneAdapter,
+    JpaFreqAdapter,
+    JpaPowerAdapter,
+)
 from .adapters.lookback import LookbackAdapter
 from .adapters.onetone.flux_dep import OneToneFluxDepAdapter
 from .adapters.onetone.freq import OneToneFreqAdapter
@@ -124,6 +132,12 @@ ADAPTERS = {
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
     "singleshot/mist/power_freq": MistPowerFreqAdapter,
+    "jpa/freq": JpaFreqAdapter,
+    "jpa/flux": JpaFluxAdapter,
+    "jpa/power": JpaPowerAdapter,
+    "jpa/auto_optimize": JpaAutoOptimizeAdapter,
+    "jpa/flux_onetone": JpaFluxOneToneAdapter,
+    "jpa/check": JpaCheckAdapter,
 }
 
 

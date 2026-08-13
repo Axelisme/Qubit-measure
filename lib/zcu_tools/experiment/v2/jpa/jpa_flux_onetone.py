@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -66,11 +65,13 @@ class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
-    # inner axis (fastest-varying) = freqs (MHz on disk); outer = jpa flux (a.u.)
+    # Axes are declared inner-first (ADR-0027): inner (fastest-varying) axis is
+    # freqs (stored as Hz on disk, MHz in memory); outer axis is jpa flux (a.u.).
+    # signals.shape == (len(fluxes), len(freqs)); non-square sweeps round-trip.
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("fluxes", "JPA Flux value", "a.u."),
             Axis("freqs", "Readout frequency", "Hz", scale=MHZ_TO_HZ),
+            Axis("fluxes", "JPA Flux value", "a.u."),
         ),
         z=ZSpec("signals", "Signal", "a.u."),
         result_type=OneToneFluxResult,

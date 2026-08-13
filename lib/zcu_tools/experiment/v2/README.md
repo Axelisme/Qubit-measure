@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-07-15 — homophasal native-style table sweep
+**Last updated:** 2026-08-13 — JPA 校準 family（六個 adapter）
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -37,7 +37,7 @@ experiment/v2/
 ├── singleshot/              # 單次讀取相關（ge, check, len_rabi, ac_stark, mist, t1）
 ├── fastflux/                # 快速 flux 掃描（t1, mist, twotone, distortion）
 ├── mist/                    # MIST（measurement-induced state transition）flux/power dep
-├── jpa/                     # JPA 校準（flux/freq/power/自動最佳化）
+├── jpa/                     # JPA 校準（freq/flux/power/auto_optimize/flux_onetone/check）
 ├── overnight/               # 隔夜穩定度量測（OvernightExecutor + measurement leaves）
 └── autofluxdep/             # FluxDepExecutor：多 measurement 自動 flux 掃描（搭配 FluxoniumPredictor）
 ```

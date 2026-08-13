@@ -105,4 +105,7 @@ WIRE_VERSION = 54
 # stale-process check to flag; independent of WIRE_VERSION (a wire-contract change
 # bumps both; a pure-internal GUI change bumps only this). Git history holds the
 # per-version evolution.
-GUI_VERSION = 75  # optional resonance phase-curvature background fitting
+# v76: six JPA calibration adapters (jpa/freq, jpa/flux, jpa/power,
+# jpa/auto_optimize, jpa/flux_onetone, jpa/check) shipped in the startup
+# catalog and reachable through the generic tab creation / remote listing flow.
+GUI_VERSION = 76  # JPA calibration family in the startup catalog

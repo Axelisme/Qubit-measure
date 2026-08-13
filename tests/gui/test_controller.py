@@ -770,6 +770,40 @@ def test_get_adapter_names_includes_fake(cf):
     assert "fake" in cf.ctrl.get_adapter_names()
 
 
+def test_get_adapter_names_lists_six_jpa_adapters_in_bringup_order(cf):
+    # The generic remote adapter listing (view.adapter_list) serves the
+    # startup catalog in insertion order; JPA-07 pins the six family names.
+    jpa_names = [n for n in cf.ctrl.get_adapter_names() if n.startswith("jpa/")]
+    assert jpa_names == [
+        "jpa/freq",
+        "jpa/flux",
+        "jpa/power",
+        "jpa/auto_optimize",
+        "jpa/flux_onetone",
+        "jpa/check",
+    ]
+
+
+def test_get_adapter_guide_serves_complete_jpa_family(cf):
+    for name in (
+        "jpa/freq",
+        "jpa/flux",
+        "jpa/power",
+        "jpa/auto_optimize",
+        "jpa/flux_onetone",
+        "jpa/check",
+    ):
+        guide = cf.ctrl.get_adapter_guide(name)
+        assert set(guide) == {
+            "behavior",
+            "expects_md",
+            "expects_ml",
+            "typical_writeback",
+            "recommended",
+        }
+        assert all(guide[field] for field in guide)
+
+
 def test_new_context_with_bind_device_resolves_unit_and_value(cf):
     # bind_device -> Controller reads unit (strict whitelist) + current value
     # from the device, then hands them to ContextService. The agent never

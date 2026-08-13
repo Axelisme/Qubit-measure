@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-22 — route-scoped resonator electrical delay
+**Last updated:** 2026-08-13 — JPA 校準 family 的 catalog 契約
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -16,7 +16,7 @@ experiment/v2_gui/
 └── adapters/
     ├── base.py          — BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]（共用實作）
     ├── _support/        — private cross-adapter mechanics：MeasureCfgBuilder / typed Seed recipes / role defaults
-    ├── lookback / onetone / twotone / fake
+    ├── lookback / onetone / twotone / jpa / fake
     └── twotone/reset/   — reset 校準實驗群（single_tone / dual_tone / bath / check）
 ```
 
@@ -187,6 +187,33 @@ sampling，讓同一個 start/stop/expts 掃描在 resonator circle phase 上等
 `twotone/flux_dep` 是 readout 與 `q_f` 可信後的後續 qubit model mapping，不是早期找
 flux 的工具；readout/qubit 參數還沒處理好時通常看不到可用 arc。Writeback 責任留給
 agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
+
+---
+
+## JPA 校準 family（`adapters/jpa/`）
+
+JPA（Josephson parametric amplifier）校準由六個 adapter 構成單一可發現的
+family：startup catalog（`registry.py` 的 `ADAPTERS`）依 bring-up 順序註冊，generic
+tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列出全部六個名稱：
+
+| 順序 | adapter | 角色 |
+| --- | --- | --- |
+| 1 | `jpa/freq` | 找 JPA pump frequency（FIT analysis，寫回 `best_jpa_freq`） |
+| 2 | `jpa/flux` | 找 JPA flux sweet spot（FIT analysis，寫回 `best_jpa_flux`） |
+| 3 | `jpa/power` | 找 JPA pump power（FIT analysis，寫回 `best_jpa_power`） |
+| 4 | `jpa/auto_optimize` | 聯合最佳化 flux/freq/power（FIT analysis，一次提出三個 `best_jpa_*`） |
+| 5 | `jpa/flux_onetone` | flux × readout frequency 2D survey（`analysis=NONE`，無 writeback） |
+| 6 | `jpa/check` | pump off/on 比較診斷（figure-only analysis，無 writeback） |
+
+共同 mechanics 在 `adapters/jpa/_shared.py`：RF 選擇使用 `jpa_rf_dev` role
+（`set_freq` / `set_power` / `set_output` knob 能力檢查），flux 選擇使用
+`jpa_flux_dev` role（`set_flux` knob）；lowering 與 preflight 只作用於 cached
+device snapshot，任何硬體工作前 fast-fail。capabilities 一致：四個校準 adapter
+是 `analysis=FIT` 並提出 `MetaDictWriteback`，survey/diagnostic 兩個 adapter 不提供
+writeback。每個 adapter 的 operator guide 都以現在式說明 seeded bounds 是
+bring-up defaults 而非 certified safety limits，operator 必須先 review device 與
+sweep 再 run；`jpa/check` 特別警告 run 結束時 pump output 保持 ON。真實硬體
+acceptance 由 operator 在 device/sweep review 後執行，不屬於 adapter code。
 
 ---
 

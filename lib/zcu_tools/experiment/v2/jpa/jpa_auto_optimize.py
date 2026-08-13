@@ -251,7 +251,17 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 
 
 class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
+    # Auto-optimize needs at least 4 iterations to produce valid samples: reject
+    # smaller budgets before any sampling (JPAOptimizer construction) or device
+    # setup (setup_devices inside the scan loop) begins.
+    MIN_NUM_POINTS = 4
+
     def run(self, soc, soccfg, cfg: JPAOptCfg, num_points: int) -> JPAOptimizeResult:
+        if num_points < self.MIN_NUM_POINTS:
+            raise ValueError(
+                "JPA auto-optimize requires num_points >= "
+                f"{self.MIN_NUM_POINTS} to produce valid samples, got {num_points}"
+            )
         orig_cfg = deepcopy(cfg)
         flux_sweep = cfg.sweep.jpa_flux
         freq_sweep = cfg.sweep.jpa_freq

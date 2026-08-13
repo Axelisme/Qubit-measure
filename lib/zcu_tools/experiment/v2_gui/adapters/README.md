@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — strict experiment policy ownership
+**Last updated:** 2026-08-13 — JPA 校準 family
 
 # measure experiment adapters
 
@@ -9,8 +9,11 @@
 ## Ownership
 
 - `base.py` 擁有所有 adapter 共用的 framework implementation，不含特定實驗 policy。
-- `lookback.py`、`onetone/`、`twotone/`、`singleshot/`、`fake/` 是 concrete experiment
+- `lookback.py`、`onetone/`、`twotone/`、`singleshot/`、`jpa/`、`fake/` 是 concrete experiment
   definitions；同一實驗專用的 helper 就近放在該檔案或同群組的 `_shared.py`。
+  `jpa/` 的六個 adapter（`freq` / `flux` / `power` / `auto_optimize` /
+  `flux_onetone` / `check`）是單一可發現的 JPA 校準 family，依 bring-up 順序
+  註冊於 `../registry.py`，家族契約見 `../README.md`。
 - `_support/` 是 private package，只放至少被兩個 concrete adapters 共用的 mechanics；它
   不擁有 registry order，也不 import concrete adapter。
 - `../registry.py` 是 composition root，明確列出 adapter 與 role catalog 項目。
