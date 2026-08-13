@@ -102,6 +102,7 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, OneToneFluxResult]):
                     "ro_cfg.ro_freq": 0.0,
                 },
             )
+            .relax_delay(0.1)
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
@@ -121,6 +122,8 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, OneToneFluxResult]):
                 label="Freq (MHz)",
                 default=res_freq_range(expts=_JPA_FLUX_ONETONE_FREQ_EXPTS),
             )
+            .reps(100)
+            .rounds(10)
             .build()
         )
 

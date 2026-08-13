@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.device import FakeDevice, GlobalDeviceManager
 from zcu_tools.experiment.v2_gui.adapters.jpa import (
     JpaAutoAnalyzeResult,
     JpaFluxAnalyzeResult,
@@ -34,8 +35,10 @@ from zcu_tools.gui.app.main.adapter import (
     ExpAdapterProtocol,
     ExpContext,
     MetaDictWriteback,
+    RunRequest,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services.tab import TabService
 from zcu_tools.gui.app.main.state import State
@@ -53,6 +56,15 @@ JPA_FAMILY = [
     "jpa/flux_onetone",
     "jpa/check",
 ]
+
+_ACQUISITION_DEFAULTS = {
+    "jpa/freq": (10000, 1, 0.5),
+    "jpa/flux": (10000, 1, 0.5),
+    "jpa/power": (10000, 1, 0.5),
+    "jpa/auto_optimize": (1000, 1, 30.5),
+    "jpa/flux_onetone": (100, 10, 0.1),
+    "jpa/check": (1000, 5, 0.5),
+}
 
 _GUIDE_FIELDS = (
     "behavior",
@@ -110,6 +122,46 @@ def test_generic_tab_creation_yields_cfg_for_every_jpa_adapter(name: str) -> Non
     assert isinstance(tab.adapter, ExpAdapterProtocol)
     assert isinstance(tab.adapter.capabilities, AdapterCapabilities)
 
+    raw = schema_to_raw_dict(tab.cfg_schema, state.exp_context.md, state.exp_context.ml)
+    expected_reps, expected_rounds, expected_relax_delay = _ACQUISITION_DEFAULTS[name]
+    assert raw["reps"] == expected_reps
+    assert raw["rounds"] == expected_rounds
+    assert raw["relax_delay"] == expected_relax_delay
+    assert "initial_delay" not in raw
+
+
+@pytest.mark.parametrize("name", JPA_FAMILY)
+def test_family_preserves_edited_acquisition_controls_in_core_cfg(name: str) -> None:
+    ctx = _empty_ctx()
+    adapter = ADAPTERS[name]()
+    schema = adapter.make_default_cfg(ctx)
+    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    raw["reps"] = 7
+    raw["rounds"] = 3
+    raw["relax_delay"] = 12.5
+
+    GlobalDeviceManager.register_device("jpa-rf", FakeDevice())
+    GlobalDeviceManager.register_device("jpa-flux", FakeDevice())
+    try:
+        dev = raw["dev"]
+        assert isinstance(dev, dict)
+        if "jpa_rf_dev" in dev:
+            dev["jpa_rf_dev"] = "jpa-rf"
+        if "jpa_flux_dev" in dev:
+            dev["jpa_flux_dev"] = "jpa-flux"
+        cfg = adapter.build_exp_cfg(
+            raw,
+            RunRequest(md=ctx.md, ml=ctx.ml, soc=None, soccfg=None),
+        )
+    finally:
+        GlobalDeviceManager.drop_device("jpa-rf", ignore_error=True)
+        GlobalDeviceManager.drop_device("jpa-flux", ignore_error=True)
+
+    assert cfg.reps == 7
+    assert cfg.rounds == 3
+    assert cfg.relax_delay == 12.5
+    assert cfg.initial_delay == 1.0
+
 
 def test_family_analysis_capabilities_are_consistent() -> None:
     # The four calibration adapters fit an optimum; the 2D survey and the
@@ -153,7 +205,14 @@ def test_family_analysis_capabilities_are_consistent() -> None:
     ],
 )
 def test_calibration_adapters_propose_family_writeback_targets(
-    name: str, analyze_result: object, expected_targets: list[str]
+    name: str,
+    analyze_result: (
+        JpaFreqAnalyzeResult
+        | JpaFluxAnalyzeResult
+        | JpaPowerAnalyzeResult
+        | JpaAutoAnalyzeResult
+    ),
+    expected_targets: list[str],
 ) -> None:
     adapter = ADAPTERS[name]()
     items = list(

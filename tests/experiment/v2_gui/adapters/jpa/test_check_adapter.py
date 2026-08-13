@@ -340,7 +340,11 @@ def test_analyze_returns_figure_only_comparison_result(monkeypatch) -> None:
     monkeypatch.setattr(CheckExp, "analyze", staticmethod(lambda result: fig))
     adapter = JpaCheckAdapter()
     req = AnalyzeRequest(
-        run_result=MagicMock(),
+        run_result=CheckResult(
+            outputs=np.array([0, 1]),
+            freqs=np.array([6490.0, 6500.0, 6510.0]),
+            signals=np.zeros((2, 3), dtype=np.complex128),
+        ),
         analyze_params=NoAnalyzeParams(),
         md=MetaDict(),
         ml=_make_ml(),

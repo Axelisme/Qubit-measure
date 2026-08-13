@@ -108,4 +108,6 @@ WIRE_VERSION = 54
 # v76: six JPA calibration adapters (jpa/freq, jpa/flux, jpa/power,
 # jpa/auto_optimize, jpa/flux_onetone, jpa/check) shipped in the startup
 # catalog and reachable through the generic tab creation / remote listing flow.
-GUI_VERSION = 76  # JPA calibration family in the startup catalog
+# v77: the JPA family exposes acquisition controls, explains auto-optimizer
+# resolution allocation, and uses one neutral flux device-value contract.
+GUI_VERSION = 77  # JPA calibration hardening

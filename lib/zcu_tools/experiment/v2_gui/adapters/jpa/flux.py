@@ -144,6 +144,7 @@ class JpaFluxAdapter(
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()
+            .relax_delay(0.5)
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
@@ -159,6 +160,8 @@ class JpaFluxAdapter(
                 ),
             )
             .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
+            .reps(10000)
+            .rounds(1)
             .build()
         )
 

@@ -429,6 +429,7 @@ def test_migrate_ckp_validation_failure_cleans_temp_and_keeps_output(
         migrate_mod.ConverterSpec(
             convert=spec.convert,
             validate=fail_validation,
+            input_paths=spec.input_paths,
             validate_input=spec.validate_input,
         ),
     )

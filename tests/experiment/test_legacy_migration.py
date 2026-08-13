@@ -4,11 +4,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.legacy_migration import CONVERTERS as LIB_CONVERTERS
 from zcu_tools.experiment.v2.onetone.flux_dep import FluxDepExp as OneToneFluxDepExp
 from zcu_tools.experiment.v2.onetone.freq import FreqExp as OneToneFreqExp
 from zcu_tools.experiment.v2.twotone.fluxdep import FreqFluxExp
 from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 
+import script.migrate_experiment_data as migrate_mod
 from script.migrate_experiment_data import migrate_experiment_data
 
 
@@ -128,3 +130,171 @@ def test_migration_rejects_unsupported_legacy_axis_unit(tmp_path: Path) -> None:
             input_path=legacy_path,
             output_path=tmp_path / "canonical_bad_unit.hdf5",
         )
+
+
+def test_migration_rejects_same_input_and_output_path_with_overwrite(
+    tmp_path: Path,
+) -> None:
+    legacy_path = tmp_path / "legacy_onetone_freq.hdf5"
+    _write_legacy_onetone_freq(legacy_path)
+    legacy_bytes = legacy_path.read_bytes()
+
+    with pytest.raises(ValueError, match="same file"):
+        migrate_experiment_data(
+            experiment="onetone/freq",
+            input_path=legacy_path,
+            output_path=legacy_path,
+            overwrite=True,
+        )
+    assert legacy_path.read_bytes() == legacy_bytes
+
+
+def test_migration_rejects_pathname_alias_of_input_with_overwrite(
+    tmp_path: Path,
+) -> None:
+    legacy_path = tmp_path / "legacy_onetone_freq.hdf5"
+    _write_legacy_onetone_freq(legacy_path)
+    alias = tmp_path / "sub" / ".." / "legacy_onetone_freq.hdf5"
+    legacy_bytes = legacy_path.read_bytes()
+
+    with pytest.raises(ValueError, match="same file"):
+        migrate_experiment_data(
+            experiment="onetone/freq",
+            input_path=legacy_path,
+            output_path=alias,
+            overwrite=True,
+        )
+    assert legacy_path.read_bytes() == legacy_bytes
+
+
+def test_migration_rejects_symlink_alias_of_input_with_overwrite(
+    tmp_path: Path,
+) -> None:
+    legacy_path = tmp_path / "legacy_onetone_freq.hdf5"
+    _write_legacy_onetone_freq(legacy_path)
+    alias = tmp_path / "alias.hdf5"
+    alias.symlink_to(legacy_path)
+    legacy_bytes = legacy_path.read_bytes()
+
+    with pytest.raises(ValueError, match="same file"):
+        migrate_experiment_data(
+            experiment="onetone/freq",
+            input_path=legacy_path,
+            output_path=alias,
+            overwrite=True,
+        )
+    assert legacy_path.read_bytes() == legacy_bytes
+
+
+def test_migration_rejects_hardlink_alias_of_input_with_overwrite(
+    tmp_path: Path,
+) -> None:
+    legacy_path = tmp_path / "legacy_onetone_freq.hdf5"
+    _write_legacy_onetone_freq(legacy_path)
+    alias = tmp_path / "hardlink.hdf5"
+    alias.hardlink_to(legacy_path)
+    legacy_bytes = legacy_path.read_bytes()
+
+    with pytest.raises(ValueError, match="same file"):
+        migrate_experiment_data(
+            experiment="onetone/freq",
+            input_path=legacy_path,
+            output_path=alias,
+            overwrite=True,
+        )
+    assert legacy_path.read_bytes() == legacy_bytes
+
+
+def test_migration_still_overwrites_separate_existing_output(tmp_path: Path) -> None:
+    legacy_path = tmp_path / "legacy_onetone_freq.hdf5"
+    _write_legacy_onetone_freq(legacy_path)
+    output = tmp_path / "canonical.hdf5"
+    output.write_bytes(b"existing separate file")
+
+    migrated = migrate_experiment_data(
+        experiment="onetone/freq",
+        input_path=legacy_path,
+        output_path=output,
+        overwrite=True,
+    )
+    assert migrated == output
+    assert output.read_bytes() != b"existing separate file"
+
+
+_SIDECAR_INPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "singleshot/ac_stark": ("_g_pop", "_e_pop"),
+    "singleshot/mist/power_freq": ("_g_population", "_e_population"),
+    "singleshot/t1/t1": ("_initg", "_inite"),
+    "singleshot/t1/t1_with_tone": ("_initg", "_inite"),
+    "singleshot/t1/t1_with_tone_sweep": (
+        "_gg_pop",
+        "_ge_pop",
+        "_eg_pop",
+        "_ee_pop",
+    ),
+    "twotone/ckp": ("_ground", "_excited"),
+    "twotone/ro_optimize/auto_optimize": ("_params", "_signals"),
+    "jpa/jpa_auto_optimize": ("_params", "_phases", "_signals"),
+}
+
+_SINGLE_FILE_EXPERIMENTS = {
+    "onetone/freq",
+    "onetone/flux_dep",
+    "twotone/freq",
+    "twotone/flux_dep",
+    "twotone/flux_dep/freq",
+    "twotone/fluxdep",
+    "singleshot/ge",
+    "singleshot/len_rabi",
+    "singleshot/mist/freq",
+    "singleshot/mist/power",
+    "singleshot/mist/pre_freq",
+    "twotone/reset/bath/length",
+    "twotone/cpmg",
+    "jpa/jpa_auto_optimize/legacy_a",
+}
+
+
+def test_registered_converters_partition_into_single_file_and_sidecar() -> None:
+    """Every registered converter declares its actual input resolution; the
+    two declared classes (single-file vs sidecar-base) cover the whole
+    registry, so no converter is left with an unverified input declaration.
+    """
+    assert set(migrate_mod.CONVERTERS) == _SINGLE_FILE_EXPERIMENTS | set(
+        _SIDECAR_INPUT_SUFFIXES
+    )
+
+
+def test_registered_single_file_converters_resolve_to_the_input_itself(
+    tmp_path: Path,
+) -> None:
+    for experiment in sorted(_SINGLE_FILE_EXPERIMENTS):
+        base = tmp_path / f"legacy_{experiment.replace('/', '_')}"
+        resolved = migrate_mod.CONVERTERS[experiment].input_paths(base)
+        assert resolved == (base,)
+
+
+def test_registered_sidecar_converters_resolve_their_exact_input_files(
+    tmp_path: Path,
+) -> None:
+    """Sidecar-base converters resolve exactly the sidecar files their loader
+    reads (same resolution helpers), so the generic guard protects every
+    actual input without guessing filename patterns itself.
+    """
+    for experiment, suffixes in _SIDECAR_INPUT_SUFFIXES.items():
+        base = tmp_path / f"legacy_{experiment.replace('/', '_')}"
+        resolved = migrate_mod.CONVERTERS[experiment].input_paths(base)
+        assert tuple(path.name for path in resolved) == tuple(
+            base.name + suffix + ".hdf5" for suffix in suffixes
+        )
+
+
+def test_lib_single_file_registry_resolves_to_the_input_itself(
+    tmp_path: Path,
+) -> None:
+    """The lib registry (used by the GUI adapter fallback) stays single-file
+    and resolves each converter's input to the file itself.
+    """
+    for name, spec in LIB_CONVERTERS.items():
+        base = tmp_path / f"legacy_{name.replace('/', '_')}"
+        assert spec.input_paths(base) == (base,)

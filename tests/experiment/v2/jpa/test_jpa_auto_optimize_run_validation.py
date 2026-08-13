@@ -11,6 +11,7 @@ from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
     JPAOptModuleCfg,
     JPAOptSweepCfg,
 )
+from zcu_tools.experiment.v2.jpa.jpa_optimizer import JPAOptimizer
 from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules import ConstWaveformCfg
@@ -62,6 +63,34 @@ def test_auto_optimize_rejects_num_points_below_four_before_sampling_or_device_s
     with pytest.raises(ValueError, match="num_points"):
         exp.run(None, None, _cfg(), num_points=num_points)
     assert exp.last_result is None
+
+
+def test_relative_resolution_hints_change_phase1_flux_allocation() -> None:
+    total_points = 1000
+    bounds = (0.0, 1.0)
+    balanced = SweepCfg(start=bounds[0], stop=bounds[1], expts=10, step=1 / 9)
+    flux_prioritized = SweepCfg(start=bounds[0], stop=bounds[1], expts=40, step=1 / 39)
+
+    balanced_optimizer = JPAOptimizer(
+        balanced,
+        balanced,
+        balanced,
+        total_points=total_points,
+    )
+    flux_prioritized_optimizer = JPAOptimizer(
+        flux_prioritized,
+        balanced,
+        balanced,
+        total_points=total_points,
+    )
+
+    assert balanced_optimizer.bounds == flux_prioritized_optimizer.bounds
+    assert balanced_optimizer.phase1_budget == 500
+    assert flux_prioritized_optimizer.phase1_budget == 500
+    assert balanced_optimizer.num_flux_points == 8
+    assert balanced_optimizer.budget_per_flux == 62
+    assert flux_prioritized_optimizer.num_flux_points == 20
+    assert flux_prioritized_optimizer.budget_per_flux == 25
 
 
 def test_auto_optimize_valid_budget_keeps_run_contract(

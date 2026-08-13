@@ -51,7 +51,7 @@
 ## Persistence
 
 - [0015 — PersistenceCaretaker](0015-persistence-caretaker-memento-single-file.md)：GUI app-state 用單一 memento file，由 caretaker 管理讀寫時機。
-- [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、grouped dataset roles。
+- [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、strict grouped dataset roles；legacy artifacts 只經 explicit migration 進入 canonical 格式。
 - [0039 — QubitParams owns params.json](0039-qubit-params-json-owner.md)：`meta_tool.QubitParams` 是 result-scope `params.json` 的 typed 讀寫權威。
 - [0040 — Autofluxdep run result artifact](0040-autofluxdep-run-result-artifact.md)：autofluxdep run output 以 run directory、journal 與 per-node streaming Labber-readable HDF5 作 canonical artifact。
 
