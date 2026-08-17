@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-08-13 — JPA 校準 family 的 acquisition、optimizer 與 neutral flux 契約
+**Last updated:** 2026-08-17 — T1 non-uniform equal-arc contract
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -92,8 +92,9 @@ ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內
 `onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
 結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
 `twotone/time_domain/t1` 的 `uniform` 是 run-only 欄位：預設 `True` 使用線性 delay
-sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，但把 sweep
-分布交給底層 non-uniform T1 run path。
+sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
+沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
+conversion 保留點數與順序，格點 collision 直接提示擴大 span 或減少 points，而不靜默減點。
 
 跨session狀態的少數default走`value_source(key, target_type, fallback?)` Seed，於definition
 instantiate時透過`ctx.values` resolve once，成功後寫入普通direct value，不把lazy ref放進cfg

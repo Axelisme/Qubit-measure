@@ -87,6 +87,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1ModuleCfg,
     T1SweepCfg,
 )
+from zcu_tools.experiment.v2.twotone.time_domain.t1_axis import t1_delay_axis
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
     T2EchoCfg,
     T2EchoExp,
@@ -99,6 +100,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
     T2RamseyModuleCfg,
     T2RamseySweepCfg,
 )
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -353,42 +355,75 @@ def test_len_rabi_recovers_gain_scaling() -> None:
 # --------------------------------------------------------------- T1
 
 
-def test_t1_recovers_t1() -> None:
-    """T1 fit recovers the injected SimParams.T1.
-
-    Injected: sim.T1 = 20 µs.  A pi pulse excites the qubit, a swept delay lets
-    it relax, and T1Exp.analyze fits the exponential decay; the fitted T1 must
-    equal the injected value.
-    """
-
-    soc, soccfg = make_mock_soc(sim=_SIM)
-    f_qubit = _f_qubit_mhz()
-
+def _t1_cfg(length: SweepCfg | list[float]) -> T1Cfg:
     # gain * length == pi_gain_len (1.0 * 0.4) is an exact pi rotation.
     pi_pulse = PulseCfg(
         ch=0,
         nqz=1,
         gain=1.0,
-        freq=f_qubit,
+        freq=_f_qubit_mhz(),
         phase=0.0,
         waveform=ConstWaveformCfg(length=0.4),
     )
-    cfg = T1Cfg(
+    return T1Cfg(
         reps=120,
         rounds=2,
         modules=T1ModuleCfg(reset=None, pi_pulse=pi_pulse, readout=_readout()),
-        sweep=T1SweepCfg(
-            length=SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
-        ),
+        sweep=T1SweepCfg(length=length),
         relax_delay=_RESET_RELAX_DELAY,
     )
 
+
+def _quantized_times(soccfg, delays: np.ndarray | list[float]) -> np.ndarray:
+    return np.asarray(
+        [soccfg.cycles2us(int(soccfg.us2cycles(float(delay)))) for delay in delays],
+        dtype=np.float64,
+    )
+
+
+@pytest.mark.parametrize("uniform", [True, False])
+def test_t1_recovers_t1(uniform: bool) -> None:
+    """T1 fit recovers the injected SimParams.T1 and reports physical times."""
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
+    cfg = _t1_cfg(length_sweep)
+
     exp = T1Exp()
-    result = exp.run(soc, soccfg, cfg)
+    result = exp.run(soc, soccfg, cfg, uniform=uniform)
     t1, _t1err, _fig = exp.analyze(result)
 
-    # Recovered T1 == injected sim.T1 (20 µs).
+    if uniform:
+        expected_times = sweep2array(length_sweep, "time", {"soccfg": soccfg})
+    else:
+        ideal_times = t1_delay_axis(
+            start=length_sweep.start,
+            stop=length_sweep.stop,
+            expts=length_sweep.expts,
+            uniform=False,
+            model_t1=0.2 * length_sweep.stop,
+        )
+        expected_times = _quantized_times(soccfg, ideal_times)
+
+    assert len(result.times) == length_sweep.expts
+    assert result.signals.shape == result.times.shape
+    np.testing.assert_array_equal(result.times, expected_times)
+    assert result.times[0] == expected_times[0]
+    assert result.times[-1] == expected_times[-1]
+    assert np.all(np.diff(result.times) > 0.0)
     assert t1 == pytest.approx(_SIM.T1, rel=0.05)
+
+
+def test_t1_nonuniform_preserves_direct_delay_list() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    direct_times = [0.0, 0.7, 4.3, 17.2, 80.0]
+    cfg = _t1_cfg(direct_times)
+
+    result = T1Exp().run(soc, soccfg, cfg, uniform=False)
+
+    expected_times = _quantized_times(soccfg, direct_times)
+    np.testing.assert_array_equal(result.times, expected_times)
+    assert result.signals.shape == expected_times.shape
+    assert np.all(np.diff(result.times) > 0.0)
 
 
 # --------------------------------------------------------------- T2 Ramsey / echo runners

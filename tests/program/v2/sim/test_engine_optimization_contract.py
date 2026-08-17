@@ -6,7 +6,7 @@ Public simulator physics and shape behavior stays in ``test_engine.py``.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import numpy as np
 import pytest
@@ -309,8 +309,11 @@ def test_sequence_prefix_cache_reuses_common_prefix() -> None:
 
     abc = cache.propagator((a, b, c))
     assert cache.size == 4
-    abd = cache.propagator((a, b, d))
+    abc_again = cache.propagator((a, b, c))
+    assert abc_again is abc
+    assert cache.size == 4
 
+    abd = cache.propagator((a, b, d))
     assert cache.size == 5
     assert abc.flags.writeable is False
     assert abd.flags.writeable is False
@@ -690,10 +693,10 @@ def test_population_chain_q_post_near_one_still_uses_damping(
     assert calls == 3
 
 
-def test_engine_reuses_evolution_lowering_for_readout_only_sweep(
+def test_engine_builds_per_point_evolution_for_readout_only_sweep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Readout-only axes avoid per-detune re-lowering while sweeping readout."""
+    """Every lowered point is evolved through one shared prefix cache."""
 
     sim = _SIM.model_copy(update={"T2": 10.0, "T2_star": 5.0})
     _soc, soccfg = make_mock_soc(sim=sim)
@@ -718,24 +721,52 @@ def test_engine_reuses_evolution_lowering_for_readout_only_sweep(
     prog.compile()
 
     lower_calls = 0
+    evolution_calls = 0
+    sequence_caches: set[engine_module._SequencePropagatorCache] = set()
     real_lower = SimEngine._lower
+    real_evolution = SimEngine._point_evolution_props
 
     def spy_lower(
         self: SimEngine,
         point: dict[str, int],
         f_qubit_ghz: float,
         detune_offset: float,
-    ):
+    ) -> LoweredPoint:
         nonlocal lower_calls
         lower_calls += 1
         return real_lower(self, point, f_qubit_ghz, detune_offset)
 
+    def spy_point_evolution_props(
+        self: SimEngine,
+        point: dict[str, int],
+        f_qubit_ghz: float,
+        lowered: LoweredPoint,
+        *,
+        yield_hook: Callable[[], None] | None = None,
+        sequence_cache: engine_module._SequencePropagatorCache | None = None,
+    ) -> engine_module._EvolutionProps:
+        nonlocal evolution_calls
+        evolution_calls += 1
+        assert sequence_cache is not None
+        sequence_caches.add(sequence_cache)
+        return real_evolution(
+            self,
+            point,
+            f_qubit_ghz,
+            lowered,
+            yield_hook=yield_hook,
+            sequence_cache=sequence_cache,
+        )
+
     monkeypatch.setattr(SimEngine, "_lower", spy_lower)
+    monkeypatch.setattr(SimEngine, "_point_evolution_props", spy_point_evolution_props)
 
     engine = SimEngine(prog, sim)
     engine._ensure_signal()
 
     assert lower_calls == sw.expts
+    assert evolution_calls == sw.expts
+    assert len(sequence_caches) == 1
 
 
 def test_engine_readout_only_positive_temp_uses_operating_frequency() -> None:

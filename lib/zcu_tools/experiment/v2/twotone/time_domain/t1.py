@@ -26,6 +26,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.twotone.time_domain.t1_axis import t1_delay_axis
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
@@ -55,6 +56,44 @@ class T1Result:
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # (times, signals)
+
+
+def quantize_t1_delays(
+    soccfg: Any,
+    delays: list[float] | NDArray[np.float64],
+) -> tuple[NDArray[np.int32], NDArray[np.float64]]:
+    """Convert ideal delays to cycles without changing point identity or order."""
+    ideal_delays = np.asarray(delays, dtype=np.float64)
+    start = float(ideal_delays.flat[0]) if ideal_delays.size else None
+    stop = float(ideal_delays.flat[-1]) if ideal_delays.size else None
+    expts = int(ideal_delays.size)
+
+    def quantization_error() -> ValueError:
+        return ValueError(
+            "delay sweep collapsed after cycle quantization: "
+            f"start={start!r}, stop={stop!r}, expts={expts}; "
+            "increase the delay span or reduce the number of points"
+        )
+
+    if (
+        ideal_delays.ndim != 1
+        or ideal_delays.size == 0
+        or not np.all(np.isfinite(ideal_delays))
+    ):
+        raise quantization_error()
+
+    length_cycles = np.asarray(
+        [int(soccfg.us2cycles(float(delay))) for delay in ideal_delays],
+        dtype=np.int32,
+    )
+    if length_cycles.size != ideal_delays.size or np.any(np.diff(length_cycles) <= 0):
+        raise quantization_error()
+
+    quantized_delays = np.asarray(
+        [soccfg.cycles2us(int(cycle)) for cycle in length_cycles],
+        dtype=np.float64,
+    )
+    return length_cycles, quantized_delays
 
 
 class T1ModuleCfg(ConfigBase):
@@ -101,20 +140,16 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         length_sweep = cfg.sweep.length
 
         if isinstance(length_sweep, SweepCfg):
-            expected_t1 = 0.2 * length_sweep.stop
-            y0 = np.exp(-length_sweep.start / expected_t1)
-            yN = np.exp(-length_sweep.stop / expected_t1)
-            y_seq = np.linspace(y0, yN, length_sweep.expts, endpoint=True)
-            lengths = -expected_t1 * np.log(y_seq)
+            lengths = t1_delay_axis(
+                start=length_sweep.start,
+                stop=length_sweep.stop,
+                expts=length_sweep.expts,
+                uniform=False,
+                model_t1=0.2 * length_sweep.stop,
+            )
         else:
-            lengths = np.asarray(length_sweep)
-        length_cycles = np.asarray(
-            [int(soccfg.us2cycles(t)) for t in lengths], dtype=np.int32
-        )
-        length_cycles = np.unique(length_cycles)
-        lengths = np.asarray(
-            [soccfg.cycles2us(int(cycle)) for cycle in length_cycles], dtype=np.float64
-        )
+            lengths = np.asarray(length_sweep, dtype=np.float64)
+        length_cycles, lengths = quantize_t1_delays(soccfg, lengths)
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
             signals_buffer = SignalBuffer(
