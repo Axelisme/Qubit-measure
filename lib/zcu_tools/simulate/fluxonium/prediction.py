@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Literal
 
@@ -101,6 +101,30 @@ class FluxoniumPrediction:
         )
         self.affine = FluxAffineMap(flux_half, flux_period, flux_bias)
         self.resolution = resolution
+
+    @property
+    def flux_half(self) -> float:
+        return self.affine.flux_half
+
+    @flux_half.setter
+    def flux_half(self, new_flux_half: float) -> None:
+        self.affine = replace(self.affine, flux_half=new_flux_half)
+
+    @property
+    def flux_period(self) -> float:
+        return self.affine.flux_period
+
+    @flux_period.setter
+    def flux_period(self, new_flux_period: float) -> None:
+        self.affine = replace(self.affine, flux_period=new_flux_period)
+
+    @property
+    def flux_bias(self) -> float:
+        return self.affine.flux_bias
+
+    @flux_bias.setter
+    def flux_bias(self, new_flux_bias: float) -> None:
+        self.affine = replace(self.affine, flux_bias=new_flux_bias)
 
     def value_to_flux(self, value: float) -> float:
         return self.affine.value_to_flux(value)
