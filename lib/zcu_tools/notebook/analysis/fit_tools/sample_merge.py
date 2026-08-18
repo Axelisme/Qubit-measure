@@ -1,9 +1,23 @@
+"""Flux-first SampleMerge: merge v2 sample CSVs into one authoritative target frame.
+
+Each source is a flat v2 CSV (``validate_sample_table_v2``). Per-row flux is
+resolved through the shared provenance SSOT ``resolve_sample_flux`` (explicit
+``flux`` -> row ``flux_int``/``flux_period`` frame -> caller-declared
+``fallback_frame``), shifted by the caller's explicit integer branch offset,
+optionally corrected by one small batch offset fitted against the target f01
+model, and finally mapped to the target frame's device values. The merged
+output is a complete flat v2 coordinate: adjusted ``flux`` plus target
+``dev_value``/``dev_unit``/``flux_int``/``flux_period``, followed by the
+caller-owned measurement columns. Units and integer branches are never
+inferred; source CSVs are never overwritten.
+"""
+
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Self, cast
+from typing import Literal, Self, cast, overload
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,95 +27,144 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import minimize_scalar
 
-from zcu_tools.meta_tool import QubitParams
-from zcu_tools.simulate import flux2value, value2flux
+from zcu_tools.meta_tool import (
+    DEV_UNIT_COLUMN,
+    DEV_VALUE_COLUMN,
+    DeviceValueUnit,
+    FLUX_COLUMN,
+    FLUX_INT_COLUMN,
+    FLUX_PERIOD_COLUMN,
+    QubitParams,
+    SAMPLE_COORDINATE_COLUMNS,
+    SampleFluxFrame,
+    SampleFluxResolution,
+    resolve_sample_flux,
+    validate_sample_table_v2,
+)
 
 from .flux import predict_f01_mhz
 
-SampleCurrentUnit = Literal["mA", "A"]
-BatchFluxOffsetReference = Literal["source", "target"]
 BatchFluxOffsetObjective = Literal["soft_l1", "median_abs", "mean_abs", "rms"]
 
-_INPUT_COLUMNS = (
-    "calibrated mA",
-    "Freq (MHz)",
-    "T1 (us)",
-    "T1err (us)",
-    "T2r (us)",
-    "T2r err (us)",
-    "T2e (us)",
-    "T2e err (us)",
-    "date",
-)
-_OUTPUT_COLUMNS = (
-    "calibrated mA",
-    "Flux",
-    "Freq (MHz)",
-    "T1 (us)",
-    "T1err (us)",
-    "T2r (us)",
-    "T2r err (us)",
-    "T2e (us)",
-    "T2e err (us)",
-    "date",
-)
-_COLUMN_ALIASES: Mapping[str, tuple[str, ...]] = {
-    "calibrated mA": ("calibrated mA",),
-    "Freq (MHz)": ("Freq (MHz)", "Freq", "f01 (MHz)", "f01"),
-    "T1 (us)": ("T1 (us)", "T1"),
-    "T1err (us)": ("T1err (us)", "T1 err (us)", "T1err", "T1 err"),
-    "T2r (us)": ("T2r (us)", "T2R", "T2r", "T2R (us)"),
-    "T2r err (us)": ("T2r err (us)", "T2R err", "T2r err", "T2Rerr"),
-    "T2e (us)": ("T2e (us)", "T2E", "T2e", "T2E (us)"),
-    "T2e err (us)": ("T2e err (us)", "T2E err", "T2e err", "T2Eerr"),
-    "date": ("date", "Date"),
-}
+#: Exact caller-owned measurement column holding the observed f01 used by the
+#: optional batch flux offset fit and diagnostics. v2 CSVs carry no aliases;
+#: a missing column simply disables the batch fit (no inference).
+F01_FREQUENCY_COLUMN = "Freq (MHz)"
+
+_FLUX_SOURCE_LABELS = ("explicit", "row-frame", "fallback-frame")
 
 
 @dataclass(frozen=True, slots=True)
 class FluxFrame:
+    """Analysis affine flux frame: f01 model params plus the v2 device frame.
+
+    Construction fast-fails on unsupported A/V ``dev_unit``, non-finite
+    ``flux_int`` and non-positive/non-finite ``flux_period``; the f01 model
+    ``params`` must be three finite floats. ``flux_from_dev_value`` /
+    ``dev_value_from_flux`` provide the scalar/array round trip
+    ``(dev_value - flux_int) / flux_period``.
+    """
+
     params: tuple[float, float, float]
-    flux_half: float
+    dev_unit: DeviceValueUnit
+    flux_int: float
     flux_period: float
     label: str
+    _sample_frame: SampleFluxFrame = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.params, tuple)
+            or len(self.params) != 3
+            or not all(
+                isinstance(value, (int, float)) and np.isfinite(value)
+                for value in self.params
+            )
+        ):
+            raise ValueError(
+                f"params must be a tuple of three finite floats, got {self.params!r}"
+            )
+        object.__setattr__(
+            self,
+            "_sample_frame",
+            SampleFluxFrame(self.dev_unit, self.flux_int, self.flux_period),
+        )
 
     @classmethod
     def from_result_dir(
-        cls, result_dir: str | Path, *, label: str | None = None
+        cls,
+        result_dir: str | Path,
+        *,
+        dev_unit: DeviceValueUnit,
+        label: str | None = None,
     ) -> Self:
+        """Build a frame from a result dir's ``fluxdep_fit``.
+
+        ``dev_unit`` is required because the persisted params carry no unit
+        metadata; the caller declares the device's A/V unit explicitly.
+        """
         path = Path(result_dir)
         fit = QubitParams.for_result_dir(path, readonly=True).require_fluxdep_fit()
         return cls(
             params=fit.params,
-            flux_half=fit.flux_half,
+            dev_unit=dev_unit,
+            flux_int=fit.flux_int,
             flux_period=fit.flux_period,
             label=label or str(path),
         )
 
+    @overload
+    def flux_from_dev_value(self, value: float) -> float: ...
+
+    @overload
+    def flux_from_dev_value(
+        self, value: NDArray[np.float64]
+    ) -> NDArray[np.float64]: ...
+
+    def flux_from_dev_value(
+        self, value: float | NDArray[np.float64]
+    ) -> float | NDArray[np.float64]:
+        return self._sample_frame.flux_from_dev_value(value)
+
+    @overload
+    def dev_value_from_flux(self, flux: float) -> float: ...
+
+    @overload
+    def dev_value_from_flux(self, flux: NDArray[np.float64]) -> NDArray[np.float64]: ...
+
+    def dev_value_from_flux(
+        self, flux: float | NDArray[np.float64]
+    ) -> float | NDArray[np.float64]:
+        return self._sample_frame.dev_value_from_flux(flux)
+
 
 @dataclass(frozen=True, slots=True)
 class SampleSource:
+    """One v2 sample CSV feeding the merge.
+
+    ``fallback_frame`` resolves migrated rows that carry neither explicit
+    ``flux`` nor a row frame (its unit must match the row ``dev_unit``).
+    ``integer_flux_offset`` is the caller-declared integer branch shift applied
+    to the resolved flux; the merge never infers an integer branch. The
+    optional batch offset fields fit one small constant flux offset against the
+    target f01 model.
+    """
+
     path: str | Path
-    unit: SampleCurrentUnit = "mA"
     label: str | None = None
-    source_result_dir: str | Path | None = None
-    source_frame: FluxFrame | None = None
-    current_scale_to_source_frame: float = 1.0
+    fallback_frame: FluxFrame | None = None
+    integer_flux_offset: int = 0
     fit_batch_flux_offset: bool = False
-    batch_flux_offset_reference: BatchFluxOffsetReference = "source"
     batch_flux_offset_objective: BatchFluxOffsetObjective = "soft_l1"
     batch_flux_offset_range: tuple[float, float] | None = None
-    manual_flux_offset: float = 0.0
     max_abs_batch_flux_offset: float = 0.03
     f01_fit_scale_mhz: float = 20.0
 
     def __post_init__(self) -> None:
-        if self.unit not in ("mA", "A"):
-            raise ValueError("unit must be 'mA' or 'A'")
-        if self.source_result_dir is not None and self.source_frame is not None:
-            raise ValueError("Use either source_result_dir or source_frame, not both")
-        if self.batch_flux_offset_reference not in ("source", "target"):
-            raise ValueError("batch_flux_offset_reference must be 'source' or 'target'")
+        if not isinstance(self.integer_flux_offset, int) or isinstance(
+            self.integer_flux_offset, bool
+        ):
+            raise ValueError("integer_flux_offset must be an int")
         if self.batch_flux_offset_objective not in (
             "soft_l1",
             "median_abs",
@@ -119,15 +182,6 @@ class SampleSource:
                     "batch_flux_offset_range must be an increasing finite pair"
                 )
         if (
-            not np.isfinite(self.current_scale_to_source_frame)
-            or self.current_scale_to_source_frame <= 0.0
-        ):
-            raise ValueError(
-                "current_scale_to_source_frame must be positive and finite"
-            )
-        if not np.isfinite(self.manual_flux_offset):
-            raise ValueError("manual_flux_offset must be finite")
-        if (
             not np.isfinite(self.max_abs_batch_flux_offset)
             or self.max_abs_batch_flux_offset < 0.0
         ):
@@ -141,9 +195,6 @@ class SampleSource:
 @dataclass(frozen=True, slots=True)
 class BatchFluxOffsetResult:
     fitted_flux_offset: float
-    manual_flux_offset: float
-    total_flux_offset: float
-    reference: BatchFluxOffsetReference
     objective: BatchFluxOffsetObjective
     finite_f01_rows: int
     success: bool
@@ -160,69 +211,72 @@ class SampleMergeResult:
 
 def merge_sample_sources(
     *,
-    target_result_dir: str | Path,
+    target_frame: FluxFrame,
     sources: Iterable[SampleSource],
-    target_frame: FluxFrame | None = None,
 ) -> SampleMergeResult:
-    """Merge raw sample tables into one canonical target-frame ``samples.csv``.
+    """Merge v2 sample tables into one authoritative ``target_frame``.
 
-    The returned ``merged`` table is intentionally small and compatible with the
-    T1/T2 curve notebooks. Source provenance and batch diagnostics are kept in
-    ``diagnostics`` instead of being written into the analysis-facing sample table.
+    The pipeline per source is: resolve flux with shared provenance
+    (``resolve_sample_flux``) -> apply the caller-declared
+    ``integer_flux_offset`` -> optionally fit one small batch offset against
+    the target f01 model -> map to the target frame's ``dev_value``. Units and
+    integer branches are never inferred; unresolved rows fail fast with their
+    indexes. Source CSVs are never modified.
+
+    The returned ``merged`` table is a complete flat v2 coordinate
+    (``flux``, ``dev_value``, ``dev_unit``, ``flux_int``, ``flux_period``)
+    followed by the caller-owned measurement columns. Per-row provenance and
+    offsets are kept in ``diagnostics`` instead of being written into the
+    analysis-facing table.
     """
 
-    target_path = Path(target_result_dir)
-    resolved_target_frame = target_frame or FluxFrame.from_result_dir(
-        target_path, label=str(target_path)
-    )
     merged_parts: list[pd.DataFrame] = []
     diagnostic_parts: list[pd.DataFrame] = []
     summary_rows: list[dict[str, object]] = []
 
     for source in tuple(sources):
-        source_frame = _resolve_source_frame(source, resolved_target_frame)
-        source_path = _resolve_source_path(source.path, target_path)
+        source_path = Path(source.path)
         source_label = source.label or source_path.stem
         raw = pd.read_csv(source_path, encoding="utf-8-sig")
-        normalized = _canonicalize_sample_columns(raw, source_label=source_label)
-        source_values = (
-            _float_column(normalized, "calibrated mA")
-            * source.current_scale_to_source_frame
+        validate_sample_table_v2(raw, allow_empty=True)
+        resolution = resolve_sample_flux(
+            raw,
+            fallback_frame=_as_sample_frame(source.fallback_frame),
         )
-        source_flux_raw = np.asarray(
-            value2flux(source_values, source_frame.flux_half, source_frame.flux_period),
-            dtype=np.float64,
+        flux_resolved = resolution.values
+        flux_shifted = flux_resolved + float(source.integer_flux_offset)
+        f01_mhz = (
+            _float_column(raw, F01_FREQUENCY_COLUMN)
+            if F01_FREQUENCY_COLUMN in raw.columns
+            else None
         )
-        f01_mhz = _float_column(normalized, "Freq (MHz)")
         batch = _fit_batch_offset(
-            source_flux_raw,
+            flux_shifted,
             f01_mhz,
-            source_frame=source_frame,
-            target_frame=resolved_target_frame,
+            target_frame=target_frame,
             source=source,
         )
-        source_flux = source_flux_raw + batch.total_flux_offset
-        canonical_values = np.asarray(
-            flux2value(
-                source_flux,
-                resolved_target_frame.flux_half,
-                resolved_target_frame.flux_period,
-            ),
-            dtype=np.float64,
+        flux_final = flux_shifted + batch.fitted_flux_offset
+        dev_values = np.asarray(
+            target_frame.dev_value_from_flux(flux_final), dtype=np.float64
         )
 
-        merged = _make_output_table(normalized, canonical_values, source_flux)
+        merged = _make_output_table(
+            raw,
+            dev_values=dev_values,
+            flux_final=flux_final,
+            target_frame=target_frame,
+        )
         diagnostics = _make_diagnostics_table(
-            normalized,
+            raw,
             source=source,
             source_label=source_label,
             source_path=source_path,
-            source_frame=source_frame,
-            target_frame=resolved_target_frame,
-            source_values=source_values,
-            source_flux_raw=source_flux_raw,
-            source_flux=source_flux,
-            canonical_values=canonical_values,
+            target_frame=target_frame,
+            resolution=resolution,
+            flux_resolved=flux_resolved,
+            flux_final=flux_final,
+            dev_values=dev_values,
             batch=batch,
         )
         merged_parts.append(merged)
@@ -232,10 +286,9 @@ def merge_sample_sources(
                 source_label=source_label,
                 source=source,
                 source_path=source_path,
-                source_frame=source_frame,
-                normalized=normalized,
-                source_flux_raw=source_flux_raw,
-                source_flux=source_flux,
+                target_frame=target_frame,
+                raw=raw,
+                resolution=resolution,
                 diagnostics=diagnostics,
                 batch=batch,
             )
@@ -251,7 +304,7 @@ def merge_sample_sources(
         merged=merged_df,
         diagnostics=diagnostics_df,
         summary_table=summary_table,
-        target_frame=resolved_target_frame,
+        target_frame=target_frame,
     )
 
 
@@ -261,7 +314,12 @@ def write_merged_samples(
     *,
     index: bool = False,
 ) -> Path:
+    """Write the merged v2 table to a caller-owned path.
+
+    Refuses to overwrite any source CSV that fed the merge.
+    """
     output_path = Path(path)
+    _require_distinct_from_sources(result, output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     result.merged.to_csv(output_path, index=index)
     return output_path
@@ -273,7 +331,12 @@ def write_sample_merge_report(
     *,
     index: bool = False,
 ) -> Path:
+    """Write the merge diagnostics report to a caller-owned path.
+
+    Refuses to overwrite any source CSV that fed the merge.
+    """
     output_path = Path(path)
+    _require_distinct_from_sources(result, output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     result.diagnostics.to_csv(output_path, index=index)
     return output_path
@@ -282,14 +345,19 @@ def write_sample_merge_report(
 def plot_sample_merge_f01_diagnostics(
     result: SampleMergeResult,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
-    finite = np.isfinite(_float_column(result.merged, "Flux")) & np.isfinite(
-        _float_column(result.merged, "Freq (MHz)")
+    merged = result.merged
+    if F01_FREQUENCY_COLUMN not in merged.columns:
+        raise ValueError(
+            f"merged table has no {F01_FREQUENCY_COLUMN!r} column for diagnostics"
+        )
+    finite = np.isfinite(_float_column(merged, FLUX_COLUMN)) & np.isfinite(
+        _float_column(merged, F01_FREQUENCY_COLUMN)
     )
     if not np.any(finite):
-        raise ValueError("No finite Flux/Freq rows are available for plotting")
+        raise ValueError("No finite flux/Freq rows are available for plotting")
 
-    fluxs = _float_column(result.merged, "Flux")
-    f01_mhz = _float_column(result.merged, "Freq (MHz)")
+    fluxs = _float_column(merged, FLUX_COLUMN)
+    f01_mhz = _float_column(merged, F01_FREQUENCY_COLUMN)
     labels = result.diagnostics["source_label"].astype(str)
     target_model = predict_f01_mhz(result.target_frame.params, fluxs)
     residual = f01_mhz - target_model
@@ -329,59 +397,46 @@ def plot_sample_merge_f01_diagnostics(
     return fig, (ax_curve, ax_residual)
 
 
-def _resolve_source_frame(source: SampleSource, target_frame: FluxFrame) -> FluxFrame:
-    if source.source_frame is not None:
-        return source.source_frame
-    if source.source_result_dir is not None:
-        return FluxFrame.from_result_dir(source.source_result_dir)
-    return target_frame
-
-
-def _resolve_source_path(path: str | Path, target_result_dir: Path) -> Path:
-    source_path = Path(path)
-    if source_path.is_absolute():
-        return source_path
-    candidate = target_result_dir / source_path
-    return candidate if candidate.exists() else source_path
+def _as_sample_frame(frame: FluxFrame | None) -> SampleFluxFrame | None:
+    if frame is None:
+        return None
+    return SampleFluxFrame(frame.dev_unit, frame.flux_int, frame.flux_period)
 
 
 def _fit_batch_offset(
-    source_flux_raw: NDArray[np.float64],
-    f01_mhz: NDArray[np.float64],
+    flux_shifted: NDArray[np.float64],
+    f01_mhz: NDArray[np.float64] | None,
     *,
-    source_frame: FluxFrame,
     target_frame: FluxFrame,
     source: SampleSource,
 ) -> BatchFluxOffsetResult:
-    finite = np.isfinite(source_flux_raw) & np.isfinite(f01_mhz)
+    f01 = (
+        f01_mhz
+        if f01_mhz is not None
+        else np.full(flux_shifted.shape, np.nan, dtype=np.float64)
+    )
+    finite = np.isfinite(flux_shifted) & np.isfinite(f01)
     if source.batch_flux_offset_range is not None:
         lower, upper = source.batch_flux_offset_range
-        fit_axis = source_flux_raw + float(source.manual_flux_offset)
+        fit_axis = flux_shifted
         finite &= (fit_axis >= lower) & (fit_axis <= upper)
     finite_count = int(np.count_nonzero(finite))
-    manual = float(source.manual_flux_offset)
     if not source.fit_batch_flux_offset or finite_count == 0:
         return BatchFluxOffsetResult(
             fitted_flux_offset=0.0,
-            manual_flux_offset=manual,
-            total_flux_offset=manual,
-            reference=source.batch_flux_offset_reference,
             objective=source.batch_flux_offset_objective,
             finite_f01_rows=finite_count,
             success=True,
             cost=np.nan,
         )
 
-    fit_fluxs = source_flux_raw[finite]
-    fit_f01 = f01_mhz[finite]
+    fit_fluxs = flux_shifted[finite]
+    fit_f01 = f01[finite]
     bound = float(source.max_abs_batch_flux_offset)
     f_scale = float(source.f01_fit_scale_mhz)
-    fit_frame = (
-        target_frame if source.batch_flux_offset_reference == "target" else source_frame
-    )
 
     def objective(delta: float) -> float:
-        residual = predict_f01_mhz(fit_frame.params, fit_fluxs + manual + delta)
+        residual = predict_f01_mhz(target_frame.params, fit_fluxs + delta)
         residual = residual - fit_f01
         return _batch_flux_offset_cost(
             residual,
@@ -401,9 +456,6 @@ def _fit_batch_offset(
 
     return BatchFluxOffsetResult(
         fitted_flux_offset=fitted,
-        manual_flux_offset=manual,
-        total_flux_offset=manual + fitted,
-        reference=source.batch_flux_offset_reference,
         objective=source.batch_flux_offset_objective,
         finite_f01_rows=finite_count,
         success=success,
@@ -431,139 +483,75 @@ def _batch_flux_offset_cost(
     raise AssertionError(f"unhandled batch_flux_offset_objective {objective!r}")
 
 
-def _canonicalize_sample_columns(
-    raw: pd.DataFrame, *, source_label: str
-) -> pd.DataFrame:
-    normalized_names = {
-        _normalize_column_name(column): str(column) for column in raw.columns
-    }
-    columns: dict[str, pd.Series] = {}
-    for canonical in _INPUT_COLUMNS:
-        matches: list[str] = [
-            normalized_names[name]
-            for alias in _COLUMN_ALIASES[canonical]
-            if (name := _normalize_column_name(alias)) in normalized_names
-        ]
-        if canonical == "date":
-            columns[canonical] = _coalesce_object_columns(raw, matches)
-        else:
-            columns[canonical] = _coalesce_numeric_columns(
-                raw,
-                matches,
-                canonical=canonical,
-                source_label=source_label,
-            )
-    if not np.any(np.isfinite(columns["calibrated mA"].to_numpy(dtype=np.float64))):
-        raise ValueError(f"{source_label}: missing finite 'calibrated mA' rows")
-    return pd.DataFrame(columns)
-
-
-def _normalize_column_name(column: object) -> str:
-    return (
-        str(column)
-        .replace("\ufeff", "")
-        .strip()
-        .lower()
-        .replace("_", " ")
-        .replace("-", " ")
-    )
-
-
-def _coalesce_numeric_columns(
-    raw: pd.DataFrame,
-    matches: list[str],
-    *,
-    canonical: str,
-    source_label: str,
-) -> pd.Series:
-    if not matches:
-        return pd.Series(np.nan, index=raw.index, dtype=np.float64)
-
-    result = cast(
-        pd.Series, pd.to_numeric(_series(raw, matches[0]), errors="coerce")
-    ).astype(float)
-    for column in matches[1:]:
-        values = cast(
-            pd.Series, pd.to_numeric(_series(raw, column), errors="coerce")
-        ).astype(float)
-        overlap = result.notna() & values.notna()
-        conflict = overlap & ~np.isclose(result, values, rtol=0.0, atol=1e-12)
-        if bool(conflict.any()):
-            raise ValueError(
-                f"{source_label}: conflicting aliases for {canonical!r}: "
-                f"{matches[0]!r} and {column!r}"
-            )
-        result = result.combine_first(values)
-    return result
-
-
-def _coalesce_object_columns(raw: pd.DataFrame, matches: list[str]) -> pd.Series:
-    if not matches:
-        return pd.Series([pd.NA] * len(raw), index=raw.index, dtype="object")
-    result = _series(raw, matches[0]).astype("object")
-    for column in matches[1:]:
-        values = _series(raw, column).astype("object")
-        result = result.where(result.notna(), values)
-    return result
-
-
 def _make_output_table(
-    normalized: pd.DataFrame,
-    canonical_values: NDArray[np.float64],
-    canonical_fluxs: NDArray[np.float64],
+    raw: pd.DataFrame,
+    *,
+    dev_values: NDArray[np.float64],
+    flux_final: NDArray[np.float64],
+    target_frame: FluxFrame,
 ) -> pd.DataFrame:
-    output = normalized.copy()
-    output["calibrated mA"] = canonical_values
-    output["Flux"] = canonical_fluxs
-    return output.loc[:, _OUTPUT_COLUMNS]
+    row_count = len(raw)
+    output = pd.DataFrame(
+        {
+            FLUX_COLUMN: np.asarray(flux_final, dtype=np.float64),
+            DEV_VALUE_COLUMN: np.asarray(dev_values, dtype=np.float64),
+            DEV_UNIT_COLUMN: np.full(row_count, target_frame.dev_unit, dtype=object),
+            FLUX_INT_COLUMN: np.full(
+                row_count, target_frame.flux_int, dtype=np.float64
+            ),
+            FLUX_PERIOD_COLUMN: np.full(
+                row_count, target_frame.flux_period, dtype=np.float64
+            ),
+        }
+    )
+    measurement_columns = [
+        column for column in raw.columns if column not in SAMPLE_COORDINATE_COLUMNS
+    ]
+    for column in measurement_columns:
+        output[column] = raw[column].to_numpy()
+    return output
 
 
 def _make_diagnostics_table(
-    normalized: pd.DataFrame,
+    raw: pd.DataFrame,
     *,
     source: SampleSource,
     source_label: str,
     source_path: Path,
-    source_frame: FluxFrame,
     target_frame: FluxFrame,
-    source_values: NDArray[np.float64],
-    source_flux_raw: NDArray[np.float64],
-    source_flux: NDArray[np.float64],
-    canonical_values: NDArray[np.float64],
+    resolution: SampleFluxResolution,
+    flux_resolved: NDArray[np.float64],
+    flux_final: NDArray[np.float64],
+    dev_values: NDArray[np.float64],
     batch: BatchFluxOffsetResult,
 ) -> pd.DataFrame:
-    f01_mhz = _float_column(normalized, "Freq (MHz)")
-    source_before = _predict_residual_or_nan(
-        source_frame.params,
-        source_flux_raw + batch.manual_flux_offset,
-        f01_mhz,
+    f01_mhz = (
+        _float_column(raw, F01_FREQUENCY_COLUMN)
+        if F01_FREQUENCY_COLUMN in raw.columns
+        else np.full(len(raw), np.nan, dtype=np.float64)
     )
-    source_after = _predict_residual_or_nan(source_frame.params, source_flux, f01_mhz)
-    target_before = _predict_residual_or_nan(
-        target_frame.params,
-        source_flux_raw + batch.manual_flux_offset,
-        f01_mhz,
+    before_batch = flux_resolved + float(source.integer_flux_offset)
+    residual_before = _predict_residual_or_nan(
+        target_frame.params, before_batch, f01_mhz
     )
-    target_after = _predict_residual_or_nan(target_frame.params, source_flux, f01_mhz)
+    residual_after = _predict_residual_or_nan(target_frame.params, flux_final, f01_mhz)
     return pd.DataFrame(
         {
             "source_label": source_label,
-            "source_path": str(source_path),
-            "source_unit": source.unit,
-            "source_frame": source_frame.label,
-            "batch_flux_offset_reference": batch.reference,
+            "source_path": str(source_path.resolve()),
+            "flux_source": list(resolution.sources),
+            "integer_flux_offset": source.integer_flux_offset,
             "batch_flux_offset_objective": batch.objective,
-            "row_index": np.arange(len(normalized), dtype=np.int64),
-            "source_value": source_values,
-            "source_flux_raw": source_flux_raw,
-            "batch_flux_offset": batch.total_flux_offset,
-            "Flux": source_flux,
-            "calibrated mA": canonical_values,
-            "Freq (MHz)": f01_mhz,
-            "source_residual_before_offset_MHz": source_before,
-            "source_residual_after_offset_MHz": source_after,
-            "target_residual_before_offset_MHz": target_before,
-            "target_residual_after_merge_MHz": target_after,
+            "fitted_flux_offset": batch.fitted_flux_offset,
+            "batch_flux_offset": batch.fitted_flux_offset,
+            "row_index": np.arange(len(raw), dtype=np.int64),
+            "dev_value": _float_column(raw, DEV_VALUE_COLUMN),
+            "dev_unit": raw[DEV_UNIT_COLUMN].astype(str).to_numpy(),
+            "flux_resolved": flux_resolved,
+            "flux": flux_final,
+            "dev_value_target": dev_values,
+            "residual_before_offset_MHz": residual_before,
+            "residual_after_merge_MHz": residual_after,
         }
     )
 
@@ -573,57 +561,68 @@ def _summary_row(
     source_label: str,
     source: SampleSource,
     source_path: Path,
-    source_frame: FluxFrame,
-    normalized: pd.DataFrame,
-    source_flux_raw: NDArray[np.float64],
-    source_flux: NDArray[np.float64],
+    target_frame: FluxFrame,
+    raw: pd.DataFrame,
+    resolution: SampleFluxResolution,
     diagnostics: pd.DataFrame,
     batch: BatchFluxOffsetResult,
 ) -> dict[str, object]:
-    finite_flux = np.isfinite(source_flux)
-    source_residual_before = _float_column(
-        diagnostics, "source_residual_before_offset_MHz"
-    )
-    source_residual_after = _float_column(
-        diagnostics, "source_residual_after_offset_MHz"
-    )
-    target_residual_before = _float_column(
-        diagnostics, "target_residual_before_offset_MHz"
-    )
-    target_residual_after = _float_column(
-        diagnostics, "target_residual_after_merge_MHz"
-    )
+    source_counts = {
+        name: sum(1 for item in resolution.sources if item == name)
+        for name in _FLUX_SOURCE_LABELS
+    }
+    flux_resolved = _float_column(diagnostics, "flux_resolved")
+    flux_final = _float_column(diagnostics, "flux")
+    residual_before = _float_column(diagnostics, "residual_before_offset_MHz")
+    residual_after = _float_column(diagnostics, "residual_after_merge_MHz")
     return {
         "source": source_label,
-        "path": str(source_path),
-        "unit": source.unit,
-        "source_frame": source_frame.label,
-        "rows": len(normalized),
-        "finite_f01_rows": batch.finite_f01_rows,
+        "path": str(source_path.resolve()),
+        "rows": len(raw),
+        "explicit_flux_rows": source_counts["explicit"],
+        "row_frame_flux_rows": source_counts["row-frame"],
+        "fallback_frame_flux_rows": source_counts["fallback-frame"],
+        "integer_flux_offset": source.integer_flux_offset,
         "fit_batch_flux_offset": source.fit_batch_flux_offset,
-        "batch_flux_offset_reference": batch.reference,
         "batch_flux_offset_objective": batch.objective,
         "batch_flux_offset_range": source.batch_flux_offset_range,
-        "manual_flux_offset": batch.manual_flux_offset,
         "fitted_flux_offset": batch.fitted_flux_offset,
-        "total_flux_offset": batch.total_flux_offset,
         "batch_fit_success": batch.success,
         "batch_fit_cost": batch.cost,
-        "raw_flux_min": _nan_stat(source_flux_raw, np.nanmin),
-        "raw_flux_max": _nan_stat(source_flux_raw, np.nanmax),
-        "merged_flux_min": _nan_stat(source_flux[finite_flux], np.nanmin),
-        "merged_flux_max": _nan_stat(source_flux[finite_flux], np.nanmax),
-        "source_residual_median_abs_before_offset_MHz": _finite_abs_median(
-            source_residual_before
-        ),
-        "source_residual_median_abs_after_offset_MHz": _finite_abs_median(
-            source_residual_after
-        ),
-        "target_residual_median_abs_before_offset_MHz": _finite_abs_median(
-            target_residual_before
-        ),
-        "target_residual_median_abs_MHz": _finite_abs_median(target_residual_after),
+        "finite_f01_rows": batch.finite_f01_rows,
+        "target_frame": target_frame.label,
+        "flux_resolved_min": _nan_stat(flux_resolved, np.nanmin),
+        "flux_resolved_max": _nan_stat(flux_resolved, np.nanmax),
+        "merged_flux_min": _nan_stat(flux_final, np.nanmin),
+        "merged_flux_max": _nan_stat(flux_final, np.nanmax),
+        "residual_median_abs_before_offset_MHz": _finite_abs_median(residual_before),
+        "residual_median_abs_after_merge_MHz": _finite_abs_median(residual_after),
     }
+
+
+def _require_distinct_from_sources(
+    result: SampleMergeResult, output_path: Path
+) -> None:
+    """Raise before writing ``output_path`` if it equals any source CSV path.
+
+    Source paths come from the per-source ``summary_table`` so that header-only
+    (zero-row) sources — which have no row diagnostics — are protected too.
+    Row-level diagnostic paths are unioned in as defense in depth. Paths are
+    resolved so exact/relative/symlink-equivalent spellings cannot bypass the
+    check to the extent ``Path.resolve`` already supports.
+    """
+    resolved_output = output_path.resolve()
+    source_paths = {
+        Path(value).resolve()
+        for value in result.summary_table["path"].astype(str).unique()
+    }
+    if "source_path" in result.diagnostics.columns:
+        source_paths.update(
+            Path(value).resolve()
+            for value in result.diagnostics["source_path"].astype(str).unique()
+        )
+    if resolved_output in source_paths:
+        raise ValueError(f"refusing to overwrite source CSV {output_path}")
 
 
 def _predict_residual_or_nan(

@@ -34,7 +34,11 @@ import pandas as pd
 import zcu_tools.notebook.analysis.plot as zp
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
 from zcu_tools.meta_tool import QubitParams
-from zcu_tools.simulate import flx2mA, mA2flx
+from zcu_tools.meta_tool.sample_schema import (
+    SampleFluxFrame,
+    resolve_sample_flux,
+    validate_sample_table_v2,
+)
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 ```
 
@@ -54,8 +58,17 @@ fit = params_file.require_fluxdep_fit()
 dispersive = params_file.get_dispersive_fit()
 
 params = fit.params
-mA_c = fit.flux_half
-period = fit.flux_period
+# v2 flux frame from the fit calibration: flux_int is the device value at
+# flux=0 (flux_half was the device value at flux=0.5). The fit carries no unit
+# metadata, so the calibration unit is declared explicitly here — this device
+# is a current source, "A" — never inferred from column names or magnitudes.
+# This same caller-declared frame also resolves sample rows that carry no
+# explicit flux and no row frame (see the Load Sample Points cell).
+frame = SampleFluxFrame(
+    dev_unit="A",
+    flux_int=fit.flux_half - 0.5 * fit.flux_period,
+    flux_period=fit.flux_period,
+)
 allows = fit.plot_transitions
 EJ, EC, EL = params
 
@@ -75,7 +88,7 @@ if "sample_f" in allows:
 
 
 flxs = np.linspace(0.5, 1.0, 100)
-mAs = flx2mA(flxs, mA_c, period)
+dev_values = frame.dev_value_from_flux(flxs)
 ```
 
 ```python
@@ -89,16 +102,22 @@ spectrum_data = None
 loadpath = f"../../result/{qub_name}/samples.csv"
 
 freqs_df = pd.read_csv(loadpath)
-s_mAs = np.array(freqs_df["calibrated mA"].values)  # mA
+# v2 contract: legacy coordinate tables (e.g. "calibrated mA") fail here
+# before any plotting. The shared resolver returns per-row flux with
+# explicit -> row-frame precedence; rows without either fall back to the
+# fit-calibration frame declared above, and rows that still cannot be
+# resolved fail with their indexes.
+validate_sample_table_v2(freqs_df)
+resolution = resolve_sample_flux(freqs_df, fallback_frame=frame)
+s_flxs = resolution.values  # dimensionless flux
 s_fpts = np.array(freqs_df["Freq (MHz)"].values) * 1e-3  # GHz
 s_T1s = np.array(freqs_df["T1 (us)"].values)
 s_T1errs = np.array(freqs_df["T1err (us)"].values)
 
 # sort by flux
-s_mAs, s_fpts, s_T1s, s_T1errs = tuple(
-    np.array(a) for a in zip(*sorted(zip(s_mAs, s_fpts, s_T1s, s_T1errs)))
+s_flxs, s_fpts, s_T1s, s_T1errs = tuple(
+    np.array(a) for a in zip(*sorted(zip(s_flxs, s_fpts, s_T1s, s_T1errs)))
 )
-s_flxs = mA2flx(s_mAs, mA_c, period)
 
 freqs_df.head(10)
 ```
@@ -109,7 +128,7 @@ freqs_df.head(10)
 show_idxs = [(i, j) for i in range(2) for j in range(5) if j > i]
 
 fig, _ = zp.plot_matrix_elements(
-    params, flxs, show_idxs, mAs=mAs, spectrum_data=spectrum_data
+    params, flxs, show_idxs, dev_values=dev_values, spectrum_data=spectrum_data
 )
 fig.show()
 ```
@@ -122,7 +141,7 @@ fig.write_image(f"../../result/{qub_name}/image/matrixelem.png", format="png")
 # Dispersive
 
 ```python
-fig = zp.plot_dispersive_shift(params, flxs, r_f=r_f, g=g, mAs=mAs, upto=1)
+fig = zp.plot_dispersive_shift(params, flxs, bare_rf=r_f, g=g, dev_values=dev_values, upto=1)
 ```
 
 ```python
@@ -169,11 +188,13 @@ v_allows = {
 fig = (
     FreqFluxDependVisualizer()
     .plot_simulation_lines(flxs, energies, v_allows)
-    .add_constant_freq(v_allows["r_f"], "r_f")
-    .add_constant_freq(v_allows["sample_f"], "sample_f")
-    .add_constant_freq(2 * v_allows["sample_f"] - v_allows["r_f"], "mirror r_f")
-    # .plot_sample_points(freqs_df, lambda x: mA2flx(x, mA_c, period))
-    .add_secondary_xaxis(flxs, mAs)
+    .plot_sample_points(freqs_df, fallback_frame=frame)
+    .plot_constant_freq(v_allows["r_f"], "r_f")
+    .plot_constant_freq(v_allows["sample_f"], "sample_f")
+    .plot_constant_freq(
+        2 * v_allows["sample_f"] - v_allows["r_f"], "mirror r_f"
+    )
+    .add_dev_values_ticks(flxs, dev_values)
     .get_figure()
 )
 fig.update_layout(
@@ -204,7 +225,7 @@ fig, t1s = zp.plot_t1s(
     flxs,
     noise_channels=noise_channels,
     Temp=Temp,
-    mAs=mAs,
+    dev_values=dev_values,
 )
 title1 = f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}"
 title2 = ", ".join(

@@ -1,4 +1,4 @@
-"""SampleTable export tests for autofluxdep run artifacts."""
+"""SampleTable v2 export tests for autofluxdep run artifacts."""
 
 from __future__ import annotations
 
@@ -22,12 +22,26 @@ from zcu_tools.gui.app.autofluxdep.services import (
 from zcu_tools.gui.app.autofluxdep.services.run_store import RunStore
 from zcu_tools.gui.app.autofluxdep.services.sample_table_export import (
     export_sample_table_from_artifact,
+    sample_rows_from_journal,
 )
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 
 from ._helpers import make_builder, place
 
 _SAMPLE_DATE = "2026-07-06 12:34:56"
+
+_EXPECTED_COLUMNS = [
+    "dev_value",
+    "dev_unit",
+    "Freq (MHz)",
+    "T1 (us)",
+    "T1err (us)",
+    "T2r (us)",
+    "T2r err (us)",
+    "T2e (us)",
+    "T2e err (us)",
+    "date",
+]
 
 
 @pytest.fixture(autouse=True)
@@ -55,19 +69,25 @@ def _node_names() -> tuple[str, ...]:
     return ("qubit_freq", "lenrabi", "t1", "t2ramsey", "t2echo")
 
 
-def _store(tmp_path: Path, *, results: dict[str, object] | None = None) -> RunStore:
+def _store(
+    tmp_path: Path,
+    *,
+    results: dict[str, object] | None = None,
+    flux_device_name: str | None = "fake_flux",
+    flux_unit: str = "A",
+) -> RunStore:
     nodes = [place(make_builder(name)) for name in _node_names()]
     return RunStore.create(
         project=_project(tmp_path),
         flux_values=[0.0, 0.5],
-        flux_device_name="fake_flux",
+        flux_device_name=flux_device_name,
+        flux_unit=flux_unit,
         nodes=nodes,
         results=results or {},
     )
 
 
-def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
-    store = _store(tmp_path)
+def _commit_full_first_point(store: RunStore) -> None:
     store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
     store.write_node_row(
         "lenrabi",
@@ -82,6 +102,10 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
     store.write_node_row("t2echo", 0, Patch({"t2e": 31.0, "t2e_err": 0.6}), InfoStore())
     store.commit_flux(0, 0.125, InfoStore())
 
+
+def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
+    store = _store(tmp_path)
+    _commit_full_first_point(store)
     store.write_node_row("qubit_freq", 1, Patch({"qubit_freq": 6001.0}), InfoStore())
     store.finalize("finished")
 
@@ -89,20 +113,11 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
 
     assert result.row_count == 1
     df = pd.read_csv(result.path)
-    assert list(df.columns) == [
-        "calibrated mA",
-        "Freq (MHz)",
-        "T1 (us)",
-        "T1err (us)",
-        "T2r (us)",
-        "T2r err (us)",
-        "T2e (us)",
-        "T2e err (us)",
-        "date",
-    ]
+    assert list(df.columns) == _EXPECTED_COLUMNS
     assert len(df) == 1
     row = df.iloc[0]
-    assert row["calibrated mA"] == 0.125
+    assert row["dev_value"] == 0.125
+    assert row["dev_unit"] == "A"
     assert row["Freq (MHz)"] == 5001.25
     assert row["T1 (us)"] == 12.0
     assert row["T1err (us)"] == 0.4
@@ -111,6 +126,7 @@ def test_export_sample_table_uses_notebook_keys_and_committed_rows(tmp_path):
     assert row["T2e (us)"] == 31.0
     assert row["T2e err (us)"] == 0.6
     assert row["date"] == _SAMPLE_DATE
+    assert {"flux", "flux_int", "flux_period"}.isdisjoint(df.columns)
     assert "comment" not in df.columns
     assert "pi_length" not in df.columns
     assert "rabi_len" not in df.columns
@@ -127,7 +143,8 @@ def test_export_sample_table_appends_by_default(tmp_path):
     pd.DataFrame(
         [
             {
-                "calibrated mA": -1.0,
+                "dev_value": -1.0,
+                "dev_unit": "A",
                 "Freq (MHz)": 4000.0,
                 "date": "2026-07-01 00:00:00",
             }
@@ -139,10 +156,12 @@ def test_export_sample_table_appends_by_default(tmp_path):
     assert result.row_count == 1
     df = pd.read_csv(output)
     assert len(df) == 2
-    assert df.loc[0, "calibrated mA"] == -1.0
+    assert df.loc[0, "dev_value"] == -1.0
+    assert df.loc[0, "dev_unit"] == "A"
     assert df.loc[0, "Freq (MHz)"] == 4000.0
     assert df.loc[0, "date"] == "2026-07-01 00:00:00"
-    assert df.loc[1, "calibrated mA"] == 0.0
+    assert df.loc[1, "dev_value"] == 0.0
+    assert df.loc[1, "dev_unit"] == "A"
     assert df.loc[1, "Freq (MHz)"] == 5001.25
     assert df.loc[1, "T1 (us)"] == 12.0
     assert df.loc[1, "date"] == _SAMPLE_DATE
@@ -169,7 +188,8 @@ def test_export_sample_table_can_overwrite_existing_file(tmp_path):
     df = pd.read_csv(output)
     assert df.to_dict(orient="records") == [
         {
-            "calibrated mA": 0.0,
+            "dev_value": 0.0,
+            "dev_unit": "A",
             "Freq (MHz)": 5001.25,
             "date": _SAMPLE_DATE,
         }
@@ -187,7 +207,8 @@ def test_export_sample_table_accepts_paired_data_run_directory(tmp_path):
     df = pd.read_csv(result.path)
     assert df.to_dict(orient="records") == [
         {
-            "calibrated mA": 0.0,
+            "dev_value": 0.0,
+            "dev_unit": "A",
             "Freq (MHz)": 5001.25,
             "date": _SAMPLE_DATE,
         }
@@ -215,11 +236,38 @@ def test_export_sample_table_falls_back_to_qubit_freq_row_summary(tmp_path):
     df = pd.read_csv(exported.path)
     assert df.to_dict(orient="records") == [
         {
-            "calibrated mA": 0.0,
+            "dev_value": 0.0,
+            "dev_unit": "A",
             "Freq (MHz)": 5123.0,
             "date": _SAMPLE_DATE,
         }
     ]
+
+
+def test_export_sample_table_uses_snapshot_unit_for_voltage_device(tmp_path):
+    store = _store(tmp_path, flux_unit="V")
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
+    store.commit_flux(0, 1.25, InfoStore())
+    store.finalize("finished")
+
+    exported = export_sample_table_from_artifact(store.run_dir)
+
+    df = pd.read_csv(exported.path)
+    assert df.to_dict(orient="records") == [
+        {
+            "dev_value": 1.25,
+            "dev_unit": "V",
+            "Freq (MHz)": 5001.25,
+            "date": _SAMPLE_DATE,
+        }
+    ]
+
+
+def test_sample_rows_from_journal_requires_authoritative_unit():
+    with pytest.raises(ValueError, match="authoritative"):
+        sample_rows_from_journal([], dev_unit="", date=_SAMPLE_DATE)
+    with pytest.raises(ValueError, match="authoritative"):
+        sample_rows_from_journal([], dev_unit="mA", date=_SAMPLE_DATE)
 
 
 def test_export_sample_table_rejects_non_terminal_run(tmp_path):
@@ -238,6 +286,84 @@ def test_export_sample_table_rejects_runs_without_completed_sample_rows(tmp_path
 
     with pytest.raises(ValueError, match="no completed flux points"):
         export_sample_table_from_artifact(store.run_dir)
+
+
+def test_export_sample_table_rejects_legacy_empty_unit_artifact_before_mutation(
+    tmp_path,
+):
+    store = _store(tmp_path, flux_unit="")
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
+    store.commit_flux(0, 0.0, InfoStore())
+    store.finalize("finished")
+    output = tmp_path / "samples.csv"
+    output.write_text("keep-me\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="authoritative"):
+        export_sample_table_from_artifact(store.manifest_path, filepath=output)
+
+    assert output.read_text(encoding="utf-8") == "keep-me\n"
+
+
+def test_export_sample_table_bare_sweep_artifact_fails_before_creating_csv(
+    tmp_path,
+):
+    store = _store(tmp_path, flux_device_name=None, flux_unit="")
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
+    store.commit_flux(0, 0.0, InfoStore())
+    store.finalize("finished")
+
+    with pytest.raises(ValueError, match="authoritative"):
+        export_sample_table_from_artifact(store.run_dir)
+
+    assert not (store.data_dir / "exports" / "sample" / "samples.csv").exists()
+
+
+def test_export_sample_table_rejects_unsupported_device_artifact_before_mutation(
+    tmp_path,
+):
+    store = _store(tmp_path, flux_device_name="yoko", flux_unit="")
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
+    store.commit_flux(0, 0.0, InfoStore())
+    store.finalize("finished")
+    output = tmp_path / "samples.csv"
+    output.write_text("keep-me\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="authoritative"):
+        export_sample_table_from_artifact(store.manifest_path, filepath=output)
+
+    assert output.read_text(encoding="utf-8") == "keep-me\n"
+
+
+def test_export_sample_table_rejects_legacy_existing_table_before_mutation(tmp_path):
+    store = _store(tmp_path)
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
+    store.commit_flux(0, 0.0, InfoStore())
+    store.finalize("finished")
+    output = tmp_path / "legacy_samples.csv"
+    pd.DataFrame([{"calibrated mA": -1.0, "Freq (MHz)": 4000.0}]).to_csv(
+        output, index=False
+    )
+    before = output.read_bytes()
+
+    with pytest.raises(ValueError, match="stale legacy"):
+        export_sample_table_from_artifact(store.manifest_path, filepath=output)
+
+    assert output.read_bytes() == before
+
+
+def test_export_sample_table_rejects_invalid_existing_table_before_mutation(tmp_path):
+    store = _store(tmp_path)
+    store.write_node_row("qubit_freq", 0, Patch({"qubit_freq": 5001.25}), InfoStore())
+    store.commit_flux(0, 0.0, InfoStore())
+    store.finalize("finished")
+    output = tmp_path / "invalid_samples.csv"
+    pd.DataFrame([{"dev_value": 1.0, "Freq (MHz)": 4000.0}]).to_csv(output, index=False)
+    before = output.read_bytes()
+
+    with pytest.raises(ValueError, match="missing required v2 coordinate column"):
+        export_sample_table_from_artifact(store.manifest_path, filepath=output)
+
+    assert output.read_bytes() == before
 
 
 def test_controller_export_sample_table_async_uses_background_runner(tmp_path):

@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-23 — T1 mechanism plot styling
+**Last updated:** 2026-08-18 — v2 flux resolution (resolve_sample_flux) in T1 analysis workflow
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -18,7 +18,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 ### `utils.py` — 基礎工具
 
 - `freq2omega(f)`：GHz → rad/ns。
-- `correct_flux_from_f01(dev_values, f01_freqs, params, flux_half, flux_period, ...)`：從 `notebook.analysis.fit_tools` re-export；用量到的 f01 頻率把 device-value 校準得到的 flux 軸拉回 fluxonium 模型；`f01_freqs` 單位是 GHz，回傳 `F01FluxCorrectionResult`，其中 `corrected_fluxs` 供後續矩陣元/T1 擬合使用，`corrected_dev_values` 供現有 plotting helpers 使用。
+- `correct_flux_from_f01(raw_fluxs, f01_freqs_ghz, params, ..., max_abs_flux_correction=0.03)`：從 `notebook.analysis.fit_tools` re-export；以 GHz 輸入的實測 f01 校正 dimensionless normalized flux，內部明確轉成 MHz 後餵給 MHz-based predictor。回傳 `F01FluxCorrectionResult`（raw/corrected flux、accepted mask 與 applied correction）；錯誤候選超過 threshold 時保留 raw flux。explicit flux 由 workflow 決定不重複校正。
 - `convert_eV_to_Hz(v)`：eV → Hz（用於超導能隙）。
 - `calc_therm_ratio(omega, T)`：計算 `ℏω/(kT)`，是所有 spectral density 的核心 Bose 因子參數。
 - `format_exponent(n)`：把數字渲染成 LaTeX 科學記號，供圖例用。
@@ -46,7 +46,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ### `workflow.py` — notebook-facing fixed workflow
 
-- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、以 f01 校準 current scale、f01-based flux correction、T1/T1err 單位轉換與 fit-window filtering。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
+- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_sample_flux` 取得 normalized flux；`Freq (MHz)` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
 - `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
 - `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz。`load_t1_purcell_params(context, kappa_ghz=...)` 會從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，目前 `kappa_ghz` 仍由 notebook 明確輸入。
 - `calculate_purcell_t1_limit()` 對 Purcell sweep 使用 bounded LRU cache，並在 notebook workflow 內部關閉 scqubits sweep progress；cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
@@ -78,7 +78,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ## 典型使用流程
 
-1. 從 sample 表讀出 device value、f01 頻率、T1 與 T1err；用 `calibrate_t1_flux()` 判斷 current scale，再用 `prepare_t1_curve_data()` 產生 f01-corrected flux 軸，並用 `plot_t1_flux_calibration()` 檢查校正前後位置。
+1. 從 sample 表以 `resolve_sample_flux` 取得 normalized flux、f01 頻率、T1 與 T1err；用 `calibrate_t1_flux()` 取得 resolution provenance，再用 `prepare_t1_curve_data()` 產生 integer-aligned、f01-corrected flux 軸，並用 `plot_t1_flux_calibration()` 檢查校正前後位置。
 2. 在 fit window 設定 `MeasurementErrorPolicy` 與 `FluxResidualWeighting`；預設保留 `T1err=NaN` 的點並在 fit 內補值。
 3. 視需要建立 `PurcellEffectParams`，並用 Purcell 可行性估計 `Temp` 上限；此設定同時傳給逐項 probe、combined fit 與 channel curves。
 4. 依序跑 capacitive、quasiparticle、inductive probe，檢查每個機制的 pointwise Q 與單機制 T1 上限。

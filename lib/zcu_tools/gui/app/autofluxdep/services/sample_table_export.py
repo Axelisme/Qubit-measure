@@ -1,4 +1,21 @@
-"""Export autofluxdep run artifacts to notebook-style SampleTable CSV files."""
+"""Export autofluxdep run artifacts to flat SampleTable v2 CSV files.
+
+The authoritative device unit is snapshotted once at run creation into the
+manifest (``workflow.flux.unit``); export never infers, defaults, or re-reads
+live device state. Journal ``flux_value`` passes through unchanged as
+``dev_value`` with the snapshot ``dev_unit``. AutoFlux has no point calibration
+frame, so no ``flux``/``flux_int``/``flux_period`` columns are fabricated.
+Rows are the successfully committed flux points (one per "flux_committed"
+journal event, in order): for each point, node values are read from the row's
+journal patch (user-set keys) and row summary (node-computed keys), so the
+export is a pure function of the run artifact.
+
+Bare sweeps, missing devices, unknown/unsupported units, and legacy empty-unit
+artifacts are permitted to run under existing policy but cannot be exported:
+every such failure happens before any CSV mutation. Appends proceed only when
+both the existing table and the candidate rows validate as flat v2;
+``append=False`` overwrites the file with a fresh v2 export.
+"""
 
 from __future__ import annotations
 
@@ -9,17 +26,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_journal_events,
     load_manifest,
 )
+from zcu_tools.meta_tool.sample_schema import (
+    DEV_UNIT_COLUMN,
+    DEV_VALUE_COLUMN,
+    validate_sample_table_v2,
+)
 from zcu_tools.meta_tool.table import SampleTable
 
-CALIBRATED_FLUX_COLUMN = "calibrated mA"
 DATE_COLUMN = "date"
 
 SAMPLE_COLUMNS: tuple[str, ...] = (
-    CALIBRATED_FLUX_COLUMN,
+    DEV_VALUE_COLUMN,
+    DEV_UNIT_COLUMN,
     "Freq (MHz)",
     "T1 (us)",
     "T1err (us)",
@@ -29,6 +53,8 @@ SAMPLE_COLUMNS: tuple[str, ...] = (
     "T2e err (us)",
     DATE_COLUMN,
 )
+
+_FLUX_UNITS = frozenset({"A", "V"})
 
 _PATCH_SAMPLE_KEYS: tuple[tuple[str, str], ...] = (
     ("qubit_freq", "Freq (MHz)"),
@@ -134,18 +160,23 @@ def export_sample_table_from_artifact(
     *,
     append: bool = True,
 ) -> SampleTableExportResult:
-    """Write a notebook-style ``SampleTable`` CSV from a run artifact.
+    """Write a flat SampleTable v2 CSV from a run artifact.
 
-    ``path`` accepts either the run directory or its ``manifest.json``. By default,
-    existing output CSV files are preserved and the exported rows are appended.
+    ``path`` accepts either the run directory or its ``manifest.json``. The
+    device unit is the run-creation snapshot; live device state is never read.
+    By default, existing valid v2 CSV files are preserved and the exported rows
+    are appended; any unit/table validation failure occurs before the CSV is
+    touched, so a failed export never mutates existing files.
     """
 
     manifest_path = resolve_run_manifest(path)
     manifest = load_manifest(manifest_path)
     _validate_terminal_status(manifest)
+    dev_unit = _require_manifest_flux_unit(manifest)
     events = load_journal_events(_journal_path(manifest, manifest_path))
     rows = sample_rows_from_journal(
         events,
+        dev_unit=dev_unit,
         date=_sample_date(),
     )
     output = (
@@ -158,16 +189,27 @@ def export_sample_table_from_artifact(
 def sample_rows_from_journal(
     events: Sequence[Mapping[str, Any]],
     *,
+    dev_unit: str,
     date: str | None = None,
 ) -> list[dict[str, float | str]]:
-    """Build notebook sample rows from committed flux points in journal events."""
+    """Build flat v2 sample rows from committed flux points in journal events.
 
+    ``dev_unit`` is the run-creation snapshot unit and applies unchanged to
+    every exported row; journal ``flux_value`` is written unchanged as
+    ``dev_value``. No optional ``flux``/``flux_int``/``flux_period`` columns
+    are fabricated — AutoFlux has no calibration frame.
+    """
+
+    if dev_unit not in _FLUX_UNITS:
+        raise ValueError(
+            f"sample table export requires an authoritative A/V unit, got {dev_unit!r}"
+        )
     committed_flux_points = _committed_flux_points(events)
     if not committed_flux_points:
         raise ValueError("autofluxdep run has no completed flux points to export")
 
     rows_by_flux: dict[int, dict[str, float | str]] = {
-        flux_idx: _sample_row_seed(flux_value, date)
+        flux_idx: _sample_row_seed(flux_value, dev_unit, date)
         for flux_idx, flux_value in committed_flux_points
     }
     for event in events:
@@ -242,9 +284,13 @@ def _set_sample_value(row: dict[str, float | str], column: str, value: Any) -> N
 
 def _sample_row_seed(
     flux_value: float,
+    dev_unit: str,
     date: str | None,
 ) -> dict[str, float | str]:
-    row: dict[str, float | str] = {CALIBRATED_FLUX_COLUMN: flux_value}
+    row: dict[str, float | str] = {
+        DEV_VALUE_COLUMN: flux_value,
+        DEV_UNIT_COLUMN: dev_unit,
+    }
     if date is not None:
         row[DATE_COLUMN] = date
     return row
@@ -264,14 +310,25 @@ def _write_sample_rows(
     if not columns:
         raise ValueError("autofluxdep sample export has no columns to write")
 
-    output.parent.mkdir(parents=True, exist_ok=True)
+    candidate = pd.DataFrame(columns)
+    validate_sample_table_v2(candidate, allow_empty=True)
     if output.exists():
         if not output.is_file():
             raise IsADirectoryError(f"sample table output is not a file: {output}")
-        if not append:
-            output.unlink()
+        if append:
+            validate_sample_table_v2(_load_existing_table(output), allow_empty=True)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists() and not append:
+        output.unlink()
     table = SampleTable(output)
     table.extend_samples(**columns)
+
+
+def _load_existing_table(output: Path) -> pd.DataFrame:
+    if output.stat().st_size == 0:
+        return pd.DataFrame()
+    return pd.read_csv(output)
 
 
 def _validate_terminal_status(manifest: Mapping[str, Any]) -> None:
@@ -283,6 +340,21 @@ def _validate_terminal_status(manifest: Mapping[str, Any]) -> None:
         raise ValueError(
             f"cannot export sample table from non-terminal autofluxdep run: {status}"
         )
+
+
+def _require_manifest_flux_unit(manifest: Mapping[str, Any]) -> str:
+    """Return the run-snapshot authoritative A/V unit or fail before mutation."""
+
+    workflow = _require_mapping(manifest.get("workflow"), "manifest workflow")
+    flux = _require_mapping(workflow.get("flux"), "manifest workflow.flux")
+    unit = flux.get("unit")
+    if isinstance(unit, str) and unit in _FLUX_UNITS:
+        return unit
+    raise ValueError(
+        "autofluxdep run has no authoritative A/V flux unit; bare, missing, "
+        "unsupported, or legacy empty-unit artifacts cannot export a flat-v2 "
+        "sample table"
+    )
 
 
 def _journal_path(manifest: Mapping[str, Any], manifest_path: Path) -> Path:
@@ -316,13 +388,14 @@ def _event_flux_value(event: Mapping[str, Any]) -> float:
     flux_value = _finite_number(event.get("flux_value"))
     if flux_value is None:
         raise ValueError(
-            f"autofluxdep journal event has invalid flux_value: {event.get('flux_value')!r}"
+            "autofluxdep journal event has invalid flux_value: "
+            f"{event.get('flux_value')!r}"
         )
     return flux_value
 
 
 def _finite_number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     number = float(value)
     return number if math.isfinite(number) else None

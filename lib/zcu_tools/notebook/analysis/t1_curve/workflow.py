@@ -15,19 +15,25 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.meta_tool import (
+    DeviceValueUnit,
     QubitParams,
+    SampleFluxFrame,
+    SampleFluxResolution,
     T1CurveFit,
     T1CurveFitParams,
     T1CurveFitUncertainty,
+    resolve_sample_flux,
+    validate_sample_table_v2,
 )
 from zcu_tools.notebook.analysis.fit_tools import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
-    choose_current_scale_from_f01,
+    align_flux_to_window,
     correct_flux_from_f01,
+    predict_f01_mhz,
 )
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.simulate import value2flux
+from zcu_tools.simulate import flux2value
 from zcu_tools.simulate.fluxonium import (
     calculate_eff_t1_vs_flux_fast,
     calculate_n_oper_vs_flux,
@@ -72,7 +78,7 @@ MechanismOrParamName = Literal[
 ]
 ProbeStatistic = Literal["median", "mean", "min", "max", "p10", "p90"]
 
-_REQUIRED_COLUMNS = ("calibrated mA", "Freq (MHz)", "T1 (us)")
+_REQUIRED_COLUMNS = ("Freq (MHz)", "T1 (us)")
 _MECHANISM_TO_PARAM: dict[MechanismName, NoiseParameterName] = {
     "capacitive": "Q_cap",
     "quasiparticle": "x_qp",
@@ -121,8 +127,9 @@ class T1CurveAnalysisConfig:
     analysis_flux_range: tuple[float, float] = (0.0, 1.0)
     image_dir: str | None = None
     samples_filename: str = "samples.csv"
-    current_scale_candidates: tuple[float, ...] = (1.0, 1000.0)
+    fallback_frame_unit: DeviceValueUnit = "A"
     max_abs_flux_correction: float = 0.03
+    correct_flux_from_f01_enabled: bool = True
     max_rel_t1_err: float = 0.25
     use_weighted_points_only: bool = False
     T1_error_policy: MeasurementErrorPolicy = field(
@@ -182,8 +189,8 @@ class T1CurveContext:
 @dataclass(frozen=True, slots=True)
 class T1FluxCalibration:
     context: T1CurveContext
-    current_scale: float
-    scale_report: pd.DataFrame
+    resolution: SampleFluxResolution
+    fallback_frame: SampleFluxFrame | None
     t1_df: pd.DataFrame
     freq_rows: pd.DataFrame
     summary_table: pd.DataFrame
@@ -191,16 +198,18 @@ class T1FluxCalibration:
 
 @dataclass(frozen=True, slots=True)
 class T1CurveData:
-    current_raw: NDArray[np.float64]
-    values: NDArray[np.float64]
-    raw_fluxs: NDArray[np.float64]
     fluxs: NDArray[np.float64]
+    raw_fluxs: NDArray[np.float64]
+    integer_shifts: NDArray[np.float64]
+    flux_sources: tuple[str, ...]
     f01_mhz: NDArray[np.float64]
+    f01_measured: NDArray[np.bool_]
+    f01_correction_applied: NDArray[np.bool_]
+    flux_corrections: NDArray[np.float64]
+    correction_skipped_reason: tuple[str, ...]
     T1_ns: NDArray[np.float64]
     T1err_ns: NDArray[np.float64]
     omegas: NDArray[np.float64]
-    f01_correction_accepted: NDArray[np.bool_]
-    flux_corrections: NDArray[np.float64]
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,38 +372,42 @@ def load_t1_purcell_params(
 def calibrate_t1_flux(
     context: T1CurveContext,
     *,
-    current_scale_candidates: tuple[float, ...] = (1.0, 1000.0),
+    fallback_frame_unit: DeviceValueUnit = "A",
 ) -> T1FluxCalibration:
     samples_df = context.samples_df
-    finite_t1 = np.isfinite(_float_column(samples_df, "T1 (us)"))
-    finite_freq = np.isfinite(_float_column(samples_df, "calibrated mA")) & np.isfinite(
-        _float_column(samples_df, "Freq (MHz)")
+    fallback_frame = SampleFluxFrame(
+        fallback_frame_unit, context.flux_int, context.flux_period
     )
-    t1_df = cast(pd.DataFrame, samples_df.loc[finite_t1 & finite_freq].copy())
-    freq_rows = cast(pd.DataFrame, samples_df.loc[finite_freq].copy())
-    if freq_rows.empty:
-        raise ValueError("samples.csv has no finite f01 rows for flux calibration")
-    current_scale, scale_report = choose_current_scale_from_f01(
-        _float_column(freq_rows, "calibrated mA"),
-        _float_column(freq_rows, "Freq (MHz)"),
-        params=context.params,
-        flux_half=context.flux_half,
-        flux_period=context.flux_period,
-        candidates=current_scale_candidates,
+    resolution = resolve_sample_flux(
+        samples_df,
+        fallback_frame=fallback_frame,
     )
+    t1_values = _float_column(samples_df, "T1 (us)")
+    t1_mask = np.isfinite(t1_values)
+    freq_values = _float_column(samples_df, "Freq (MHz)")
+    freq_mask = np.isfinite(freq_values)
+    t1_df = cast(pd.DataFrame, samples_df.loc[t1_mask].copy())
+    freq_rows = cast(pd.DataFrame, samples_df.loc[freq_mask].copy())
+    source_counts = {
+        source: sum(1 for item in resolution.sources if item == source)
+        for source in ("explicit", "row-frame", "fallback-frame")
+    }
     summary_table = pd.DataFrame(
         [
             ("samples.csv rows", str(len(samples_df))),
+            ("explicit flux rows", str(source_counts["explicit"])),
+            ("row-frame flux rows", str(source_counts["row-frame"])),
+            ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
+            ("fallback frame unit", fallback_frame.dev_unit),
             ("finite f01 rows", str(len(freq_rows))),
             ("finite T1 rows", str(len(t1_df))),
-            ("current scale", f"{current_scale:g}"),
         ],
         columns=["metric", "value"],
     )
     return T1FluxCalibration(
         context=context,
-        current_scale=current_scale,
-        scale_report=scale_report,
+        resolution=resolution,
+        fallback_frame=fallback_frame,
         t1_df=t1_df,
         freq_rows=freq_rows,
         summary_table=summary_table,
@@ -410,13 +423,8 @@ def prepare_t1_curve_data(
     use_weighted_points_only: bool = False,
     correct_flux_from_f01_enabled: bool = True,
 ) -> T1PreparedData:
-    context = calibration.context
     sample = _prepare_t1_data(
-        calibration.t1_df,
-        params=context.params,
-        flux_half=context.flux_half,
-        flux_period=context.flux_period,
-        current_scale=calibration.current_scale,
+        calibration,
         analysis_flux_range=analysis_flux_range,
         max_abs_flux_correction=max_abs_flux_correction,
         correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
@@ -1190,7 +1198,7 @@ def collect_t1_curve_result(
 def plot_t1_curve_data(data: T1PreparedData) -> tuple[Figure, Axes]:
     context = data.calibration.context
     return plot_sample_t1(
-        data.sample.values,
+        flux2value(data.sample.fluxs, context.flux_half, context.flux_period),
         data.sample.T1_ns,
         data.sample.T1err_ns,
         context.flux_half,
@@ -1203,29 +1211,48 @@ def plot_t1_flux_calibration(data: T1PreparedData) -> tuple[Figure, Axes]:
     if len(sample.fluxs) == 0:
         raise ValueError("No T1 samples are available for flux calibration plotting")
 
-    raw_fluxs = sample.raw_fluxs
-    corrected_fluxs = sample.fluxs
-    accepted = sample.f01_correction_accepted
+    raw_fluxs = np.asarray(sample.raw_fluxs, dtype=np.float64)
+    corrected_fluxs = raw_fluxs + np.asarray(sample.flux_corrections, dtype=np.float64)
+    aligned_fluxs = np.asarray(sample.fluxs, dtype=np.float64)
+    corrected_mask = sample.f01_correction_applied
+    sources = np.asarray(sample.flux_sources, dtype=object)
+    reasons = np.asarray(sample.correction_skipped_reason, dtype=object)
+    not_corrected = ~corrected_mask
+    explicit_mask = not_corrected & (sources == "explicit")
+    missing_mask = not_corrected & (reasons == "missing_f01") & ~sample.f01_measured
+    disabled_mask = not_corrected & (reasons == "disabled")
+    rejected_mask = not_corrected & ~explicit_mask & ~missing_mask & ~disabled_mask
     f01_mhz = sample.f01_mhz
-    fig_height = float(np.clip(1.8 + 0.18 * len(corrected_fluxs), 3.0, 8.0))
+    fig_height = float(np.clip(1.8 + 0.18 * len(aligned_fluxs), 3.0, 8.0))
     fig, ax = plt.subplots(figsize=(7.2, fig_height))
     lower, upper = data.analysis_flux_range
     ax.axvspan(lower, upper, color="tab:green", alpha=0.08, label="analysis window")
 
-    for f01_freq_mhz, raw_flux, corrected_flux, is_accepted in zip(
+    for f01_freq_mhz, raw_flux, corrected_flux, aligned_flux, is_corrected in zip(
         f01_mhz,
         raw_fluxs,
         corrected_fluxs,
-        accepted,
+        aligned_fluxs,
+        corrected_mask,
         strict=True,
     ):
-        line_color = "tab:blue" if is_accepted else "tab:gray"
+        line_color = "tab:blue" if is_corrected else "tab:gray"
+        # Stage 1: raw -> f01-corrected (pre-alignment).
         ax.plot(
             [raw_flux, corrected_flux],
             [f01_freq_mhz, f01_freq_mhz],
             color=line_color,
             alpha=0.55,
             linewidth=1.0,
+        )
+        # Stage 2: f01-corrected -> integer-aligned (final analysis flux).
+        ax.plot(
+            [corrected_flux, aligned_flux],
+            [f01_freq_mhz, f01_freq_mhz],
+            color="tab:green",
+            alpha=0.55,
+            linewidth=1.0,
+            linestyle=":",
         )
 
     ax.scatter(
@@ -1238,31 +1265,70 @@ def plot_t1_flux_calibration(data: T1PreparedData) -> tuple[Figure, Axes]:
         label="raw flux",
         zorder=3,
     )
-    if np.any(accepted):
+    if np.any(corrected_mask):
         ax.scatter(
-            corrected_fluxs[accepted],
-            f01_mhz[accepted],
+            corrected_fluxs[corrected_mask],
+            f01_mhz[corrected_mask],
             marker="o",
             color="tab:blue",
             s=20,
             label="f01 corrected flux",
             zorder=4,
         )
-    rejected = ~accepted
-    if np.any(rejected):
+    if np.any(explicit_mask):
         ax.scatter(
-            corrected_fluxs[rejected],
-            f01_mhz[rejected],
+            corrected_fluxs[explicit_mask],
+            f01_mhz[explicit_mask],
+            marker="o",
+            color="tab:purple",
+            s=20,
+            label="explicit flux (uncorrected)",
+            zorder=4,
+        )
+    if np.any(missing_mask):
+        ax.scatter(
+            corrected_fluxs[missing_mask],
+            f01_mhz[missing_mask],
+            marker="s",
+            color="tab:cyan",
+            s=24,
+            label="missing f01 (model freq)",
+            zorder=4,
+        )
+    if np.any(disabled_mask):
+        ax.scatter(
+            corrected_fluxs[disabled_mask],
+            f01_mhz[disabled_mask],
+            marker="^",
+            color="tab:brown",
+            s=30,
+            label="correction disabled",
+            zorder=4,
+        )
+    if np.any(rejected_mask):
+        ax.scatter(
+            corrected_fluxs[rejected_mask],
+            f01_mhz[rejected_mask],
             marker="x",
             color="tab:orange",
             s=38,
-            label="kept raw flux",
+            label="kept raw (rejected)",
             zorder=4,
         )
+    ax.scatter(
+        aligned_fluxs,
+        f01_mhz,
+        marker="D",
+        facecolors="none",
+        edgecolors="tab:green",
+        s=28,
+        label="integer aligned flux",
+        zorder=5,
+    )
 
     ax.set_xlabel(r"Flux quanta ($\Phi_{ext}/\Phi_0$)")
     ax.set_ylabel("f01 frequency (MHz)")
-    ax.set_title("f01 flux correction")
+    ax.set_title("f01 flux correction and branch alignment")
     ax.grid(axis="x", alpha=0.25)
     ax.legend(loc="best", fontsize="small")
     return fig, ax
@@ -1399,7 +1465,7 @@ def plot_t1_mechanism_limit(
         )
     }
     fig, ax = plot_eff_t1_with_sample(
-        data.sample.values,
+        flux2value(data.sample.fluxs, context.flux_half, context.flux_period),
         data.sample.T1_ns,
         data.sample.T1err_ns,
         display_T1s,
@@ -1426,7 +1492,7 @@ def plot_t1_channel_analysis(
     if parameter_text is None:
         parameter_text = t1_parameter_text(combined_fit.fit_result)
     fig, ax = plot_eff_t1_with_sample(
-        data.sample.values,
+        flux2value(data.sample.fluxs, context.flux_half, context.flux_period),
         data.sample.T1_ns,
         data.sample.T1err_ns,
         channel_analysis.curves.display_T1_ns,
@@ -1540,7 +1606,7 @@ def run_t1_curve_analysis(
     )
     calibration = calibrate_t1_flux(
         context,
-        current_scale_candidates=config.current_scale_candidates,
+        fallback_frame_unit=config.fallback_frame_unit,
     )
     data = prepare_t1_curve_data(
         calibration,
@@ -1548,6 +1614,7 @@ def run_t1_curve_analysis(
         max_abs_flux_correction=config.max_abs_flux_correction,
         max_rel_t1_err=config.max_rel_t1_err,
         use_weighted_points_only=config.use_weighted_points_only,
+        correct_flux_from_f01_enabled=config.correct_flux_from_f01_enabled,
     )
     cap_probe = (
         analyze_t1_capacitive_limit(
@@ -1644,6 +1711,7 @@ def run_t1_curve_analysis(
 
 
 def _validate_required_columns(samples_df: pd.DataFrame) -> None:
+    validate_sample_table_v2(samples_df, allow_empty=True)
     missing = [
         column for column in _REQUIRED_COLUMNS if column not in samples_df.columns
     ]
@@ -1659,69 +1727,91 @@ def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
 
 
 def _prepare_t1_data(
-    frame: pd.DataFrame,
+    calibration: T1FluxCalibration,
     *,
-    params: tuple[float, float, float],
-    flux_half: float,
-    flux_period: float,
-    current_scale: float,
     analysis_flux_range: tuple[float, float],
     max_abs_flux_correction: float,
     correct_flux_from_f01_enabled: bool,
 ) -> T1CurveData:
-    current_raw = _float_column(frame, "calibrated mA")
-    values = current_raw * current_scale
-    f01_mhz = _float_column(frame, "Freq (MHz)")
-    T1_ns = 1e3 * _float_column(frame, "T1 (us)")
-    T1err_ns = 1e3 * _float_column(frame, "T1err (us)")
-    finite = (
-        np.isfinite(values) & np.isfinite(f01_mhz) & np.isfinite(T1_ns) & (T1_ns > 0.0)
-    )
-    values = values[finite]
-    current_raw = current_raw[finite]
-    f01_mhz = f01_mhz[finite]
-    T1_ns = T1_ns[finite]
-    T1err_ns = T1err_ns[finite]
-    raw_fluxs = np.asarray(value2flux(values, flux_half, flux_period), dtype=np.float64)
+    context = calibration.context
+    samples_df = context.samples_df
+
+    t1_values = _float_column(samples_df, "T1 (us)")
+    eligible = np.isfinite(t1_values) & (t1_values > 0.0)
+    if not np.any(eligible):
+        raise ValueError("no finite positive T1 rows are available for analysis")
+
+    resolved_values = calibration.resolution.values
+    sources = calibration.resolution.sources
+    raw_fluxs = np.asarray(resolved_values[eligible], dtype=np.float64)
+    row_sources = tuple(sources[index] for index in np.flatnonzero(eligible))
+    f01_observed = _float_column(samples_df, "Freq (MHz)")
+    f01_observed = f01_observed[eligible]
+    f01_measured = np.isfinite(f01_observed)
+    T1_ns = 1e3 * t1_values[eligible]
+    T1err_ns = 1e3 * _float_column(samples_df, "T1err (us)")[eligible]
+
+    corrected_fluxs = np.asarray(raw_fluxs, dtype=np.float64).copy()
+    applied = np.zeros(len(raw_fluxs), dtype=bool)
+    flux_corrections = np.zeros(len(raw_fluxs), dtype=np.float64)
+    reasons: list[str] = []
     if correct_flux_from_f01_enabled:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             correction = correct_flux_from_f01(
-                values,
-                1e-3 * f01_mhz,
-                params,
-                flux_half,
-                flux_period,
+                raw_fluxs,
+                1e-3 * f01_observed,
+                context.params,
                 max_abs_flux_correction=max_abs_flux_correction,
             )
-        corrected_values = correction.corrected_dev_values
-        corrected_fluxs = correction.corrected_fluxs
+        candidate_fluxs = correction.corrected_fluxs
         accepted = correction.accepted
-        flux_corrections = correction.applied_flux_corrections
+        for index, source in enumerate(row_sources):
+            if source == "explicit":
+                reasons.append("explicit_flux")
+                continue
+            if not f01_measured[index]:
+                reasons.append("missing_f01")
+                continue
+            if accepted[index]:
+                corrected_fluxs[index] = candidate_fluxs[index]
+                flux_corrections[index] = candidate_fluxs[index] - raw_fluxs[index]
+                applied[index] = True
+                reasons.append("")
+            else:
+                reasons.append("rejected")
     else:
-        corrected_values = values
-        corrected_fluxs = raw_fluxs
-        accepted = np.ones_like(values, dtype=bool)
-        flux_corrections = np.zeros_like(values, dtype=np.float64)
-    in_window = (
-        np.isfinite(corrected_fluxs)
-        & (corrected_fluxs >= analysis_flux_range[0])
-        & (corrected_fluxs <= analysis_flux_range[1])
+        reasons.extend("disabled" for _ in row_sources)
+
+    aligned_fluxs, shifts, in_window = align_flux_to_window(
+        corrected_fluxs, analysis_flux_range
     )
-    order = np.argsort(corrected_fluxs[in_window])
+    order = np.argsort(aligned_fluxs[in_window])
+
+    def take(values_arr: NDArray[np.float64]) -> NDArray[np.float64]:
+        return np.asarray(values_arr)[in_window][order]
+
+    aligned_taken = take(aligned_fluxs)
+    measured_taken = take(f01_measured)
+    observed_taken = take(f01_observed)
+    f01_used = np.where(
+        measured_taken, observed_taken, predict_f01_mhz(context.params, aligned_taken)
+    )
     return T1CurveData(
-        current_raw=current_raw[in_window][order],
-        values=corrected_values[in_window][order],
-        raw_fluxs=raw_fluxs[in_window][order],
-        fluxs=corrected_fluxs[in_window][order],
-        f01_mhz=f01_mhz[in_window][order],
-        T1_ns=T1_ns[in_window][order],
-        T1err_ns=T1err_ns[in_window][order],
-        omegas=np.asarray(
-            freq2omega(1e-3 * f01_mhz[in_window][order]), dtype=np.float64
+        fluxs=aligned_taken,
+        raw_fluxs=take(raw_fluxs),
+        integer_shifts=take(shifts),
+        flux_sources=tuple(take(np.asarray(row_sources, dtype=object)).tolist()),
+        f01_mhz=f01_used,
+        f01_measured=measured_taken,
+        f01_correction_applied=take(applied),
+        flux_corrections=take(flux_corrections),
+        correction_skipped_reason=tuple(
+            take(np.asarray(reasons, dtype=object)).tolist()
         ),
-        f01_correction_accepted=accepted[in_window][order],
-        flux_corrections=flux_corrections[in_window][order],
+        T1_ns=take(T1_ns),
+        T1err_ns=take(T1err_ns),
+        omegas=np.asarray(freq2omega(1e-3 * f01_used), dtype=np.float64),
     )
 
 
@@ -1742,16 +1832,24 @@ def _filter_fit_data(
 
 def _take_t1_data(data: T1CurveData, mask: NDArray[np.bool_]) -> T1CurveData:
     return T1CurveData(
-        current_raw=data.current_raw[mask],
-        values=data.values[mask],
-        raw_fluxs=data.raw_fluxs[mask],
         fluxs=data.fluxs[mask],
+        raw_fluxs=data.raw_fluxs[mask],
+        integer_shifts=data.integer_shifts[mask],
+        flux_sources=tuple(
+            source for source, keep in zip(data.flux_sources, mask, strict=True) if keep
+        ),
         f01_mhz=data.f01_mhz[mask],
+        f01_measured=data.f01_measured[mask],
+        f01_correction_applied=data.f01_correction_applied[mask],
+        flux_corrections=data.flux_corrections[mask],
+        correction_skipped_reason=tuple(
+            reason
+            for reason, keep in zip(data.correction_skipped_reason, mask, strict=True)
+            if keep
+        ),
         T1_ns=data.T1_ns[mask],
         T1err_ns=data.T1err_ns[mask],
         omegas=data.omegas[mask],
-        f01_correction_accepted=data.f01_correction_accepted[mask],
-        flux_corrections=data.flux_corrections[mask],
     )
 
 
@@ -2239,6 +2337,25 @@ def _prepared_summary_table(
     use_weighted_points_only: bool,
 ) -> pd.DataFrame:
     peak_idx = int(np.nanargmax(sample.T1_ns))
+    source_counts = {
+        source: sum(1 for item in sample.flux_sources if item == source)
+        for source in ("explicit", "row-frame", "fallback-frame")
+    }
+    observed_count = int(np.count_nonzero(sample.f01_measured))
+    model_count = len(sample.fluxs) - observed_count
+    skip_reasons: dict[str, int] = {}
+    for reason in sample.correction_skipped_reason:
+        if reason:
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+    shift_counts: dict[str, int] = {}
+    for shift in sample.integer_shifts:
+        key = f"{int(round(float(shift)))}"
+        shift_counts[key] = shift_counts.get(key, 0) + 1
+    shift_summary = (
+        " ".join(f"k={k}:{count}" for k, count in sorted(shift_counts.items()))
+        if shift_counts
+        else "0"
+    )
     return pd.DataFrame(
         [
             (
@@ -2250,14 +2367,25 @@ def _prepared_summary_table(
             ("use weighted points only", str(use_weighted_points_only)),
             ("window T1 rows", f"{len(sample.fluxs)}/{len(calibration.t1_df)}"),
             ("fit rows", str(len(fit.fluxs))),
-            ("current scale", f"{calibration.current_scale:g}"),
+            (
+                "flux sources (explicit/row/fallback)",
+                f"{source_counts['explicit']}/{source_counts['row-frame']}/"
+                f"{source_counts['fallback-frame']}",
+            ),
+            ("f01 source (observed/model)", f"{observed_count}/{model_count}"),
+            (
+                "f01 correction skipped reasons",
+                " ".join(f"{reason}={count}" for reason, count in skip_reasons.items())
+                or "none",
+            ),
+            ("integer shifts", shift_summary),
             (
                 "sample peak",
                 f"flux={sample.fluxs[peak_idx]:.6f}, T1={1e-3 * sample.T1_ns[peak_idx]:.3f} us",
             ),
             (
-                "f01 corrections accepted",
-                f"{int(np.count_nonzero(sample.f01_correction_accepted))}/{len(sample.fluxs)}",
+                "f01 corrections applied",
+                f"{int(np.count_nonzero(sample.f01_correction_applied))}/{len(sample.fluxs)}",
             ),
         ],
         columns=["metric", "value"],

@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.4
   kernelspec:
-    display_name: zcu-tools (3.9.25)
+    display_name: zcu-tools
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.25
+    version: 3.13.11
 ---
 
 # Import Module
@@ -38,7 +38,13 @@ import numpy as np
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
 import zcu_tools.program.v2 as zp
-from zcu_tools.meta_tool import ExperimentManager, MetaDict, ModuleLibrary, SampleTable
+from zcu_tools.meta_tool import (
+    ExperimentManager,
+    MetaDict,
+    ModuleLibrary,
+    SampleTable,
+    validate_sample_table_v2,
+)
 from zcu_tools.notebook.utils import dump_device_info, gc_collect, make_sweep, savefig
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils.datasaver import create_datafolder, reserve_labber_filepath
@@ -96,6 +102,10 @@ md.ro_ch = 0
 import pyvisa
 from zcu_tools.device import GlobalDeviceManager
 
+resource_manager = globals().get("resource_manager")
+if resource_manager is not None:
+    GlobalDeviceManager.close_all_devices()
+    resource_manager.close()
 resource_manager = pyvisa.ResourceManager()
 ```
 
@@ -110,6 +120,7 @@ resource_manager = pyvisa.ResourceManager()
 ```python
 from zcu_tools.device.yoko import YOKOGS200
 
+GlobalDeviceManager.close_device("flux_yoko", ignore_missing=True)
 
 flux_yoko = YOKOGS200(
     address="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=resource_manager
@@ -136,6 +147,7 @@ cur_value * 1e3
 ```python
 from zcu_tools.device.yoko import YOKOGS200
 
+GlobalDeviceManager.close_device("jpa_yoko", ignore_missing=True)
 
 jpa_yoko = YOKOGS200(
     address="USB0::0x0B21::0x0039::91T810992::INSTR", rm=resource_manager
@@ -165,6 +177,8 @@ md.cur_jpa_A * 1e3
 
 ```python
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
+
+GlobalDeviceManager.close_device("jpa_sgs", ignore_missing=True)
 
 jpa_sgs = RohdeSchwarzSGS100A(
     address="TCPIP0::192.168.10.89::inst0::INSTR", rm=resource_manager
@@ -231,9 +245,7 @@ _ = lookback_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-predict_offset, fig = lookback_exp.analyze(
-    ratio=0.1, smooth=1.0, ro_cfg=cfg.modules.readout.ro_cfg
-)
+predict_offset, fig = lookback_exp.analyze(ratio=0.1, smooth=1.0)
 predict_offset
 ```
 
@@ -750,6 +762,7 @@ ml.register_waveform(
 
 ```python
 sample_table = SampleTable(os.path.join(result_dir, "samples.csv"))
+validate_sample_table_v2(sample_table.samples, allow_empty=True)
 ```
 
 ```python
@@ -2876,10 +2889,25 @@ cpmg_exp.save(
 ```python
 from datetime import datetime
 
+validate_sample_table_v2(sample_table.samples, allow_empty=True)
+
+flx_int = md.get("flx_int")
+flx_period = md.get("flx_period")
+frame_fields = {}
+if (
+    isinstance(flx_int, (int, float))
+    and isinstance(flx_period, (int, float))
+    and np.isfinite(flx_int)
+    and np.isfinite(flx_period)
+    and flx_period > 0
+):
+    frame_fields = {"flux_int": flx_int, "flux_period": flx_period}
 
 sample_table.add_sample(
     **{
-        "calibrated mA": cur_value,
+        "dev_value": cur_value,
+        "dev_unit": "A",
+        **frame_fields,
         "Freq (MHz)": md.q_f,
         "T1 (us)": md.t1,
         "T1err (us)": md.t1err,
@@ -3797,6 +3825,14 @@ lf_t1_exp.save(
 )
 ```
 
-```python
+# Disconnect
 
+```python
+from zcu_tools.device import GlobalDeviceManager
+
+resource_manager = globals().get("resource_manager")
+if resource_manager is not None:
+    GlobalDeviceManager.close_all_devices()
+    resource_manager.close()
+    resource_manager = None
 ```

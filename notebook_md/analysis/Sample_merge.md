@@ -27,13 +27,20 @@ jupyter:
 # Sample Merge
 
 Run this notebook before `T1_curve.md` / `T2_curve.md` when raw sample files come
-from mixed units or source flux frames. The curve notebooks should only read the
-canonical `samples.csv` produced here.
+from different source flux frames or device units. The curve notebooks should
+only read the canonical `samples.csv` produced here.
+
+Sources must be flat v2 CSVs (`dev_value` / `dev_unit`, optional `flux` /
+`flux_int` / `flux_period`). Legacy `calibrated mA` / `Flux` tables must be
+migrated explicitly with `script/migrate_sample_table_v2.py` first — the merge
+never guesses units or integer flux branches.
 
 # Import
 
 ```python
 %load_ext autoreload
+
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 from IPython.display import display
@@ -46,41 +53,56 @@ import zcu_tools.notebook.analysis.fit_tools as zfit
 
 ```python
 target_result_dir = "../../result/Q12_2D[7]/Q4"
-source_2dq12_result_dir = "../../result/2DQ12/Q4"
 
 samples_output = f"{target_result_dir}/samples.csv"
 report_output = f"{target_result_dir}/samples_merge_report.csv"
 figure_output = f"{target_result_dir}/samples_merge_f01_diagnostics.png"
 ```
 
+# Target frame
+
+The target frame is the single authoritative merge identity. `dev_unit` is the
+target device's A/V unit (current source -> `"A"`, voltage source -> `"V"`); the
+persisted params carry no unit metadata, so it is declared here explicitly.
+
+```python
+target_frame = zfit.FluxFrame.from_result_dir(
+    target_result_dir,
+    dev_unit="A",
+    label="Q4 target",
+)
+```
+
 # Sources
+
+Each source is a v2 CSV. `fallback_frame` resolves migrated rows that carry
+neither explicit `flux` nor a row frame. `integer_flux_offset` aligns a source
+to an equivalent integer flux branch (e.g. `-0.5` -> `+1` to match `0.5`); the
+merge never infers a branch on its own.
 
 ```python
 sources = (
     zfit.SampleSource(
         path=f"{target_result_dir}/samples1.csv",
-        unit="mA",
-        source_result_dir=target_result_dir,
         label="samples1",
-        fit_batch_flux_offset=False,
     ),
     zfit.SampleSource(
         path=f"{target_result_dir}/samples2.csv",
-        unit="A",
-        source_result_dir=source_2dq12_result_dir,
         label="samples2",
+        integer_flux_offset=1,
         fit_batch_flux_offset=True,
-        batch_flux_offset_reference="target",
         batch_flux_offset_objective="soft_l1",
         max_abs_batch_flux_offset=0.03,
     ),
     zfit.SampleSource(
         path=f"{target_result_dir}/samples3.csv",
-        unit="A",
-        source_result_dir=source_2dq12_result_dir,
         label="samples3",
+        fallback_frame=zfit.FluxFrame.from_result_dir(
+            "../../result/2DQ12/Q4",
+            dev_unit="A",
+            label="2DQ12/Q4 migrated",
+        ),
         fit_batch_flux_offset=True,
-        batch_flux_offset_reference="target",
         batch_flux_offset_objective="soft_l1",
         max_abs_batch_flux_offset=0.03,
     ),
@@ -91,7 +113,7 @@ sources = (
 
 ```python
 merge = zfit.merge_sample_sources(
-    target_result_dir=target_result_dir,
+    target_frame=target_frame,
     sources=sources,
 )
 ```
@@ -111,7 +133,15 @@ plt.show()
 
 # Write Output
 
+The output path is caller-owned and must never overwrite a source CSV; the
+write helpers refuse to do so.
+
 ```python
+source_paths = {str(Path(source.path).resolve()) for source in sources}
+assert str(Path(samples_output).resolve()) not in source_paths, (
+    "output path must not overwrite a source CSV"
+)
+
 samples_path = zfit.write_merged_samples(merge, samples_output)
 report_path = zfit.write_sample_merge_report(merge, report_output)
 

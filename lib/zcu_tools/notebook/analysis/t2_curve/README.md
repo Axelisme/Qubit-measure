@@ -1,6 +1,6 @@
 # `t2_curve` 模塊重點文檔
 
-**Last updated:** 2026-07-22 — f01 flux correction diagnostics
+**Last updated:** 2026-08-18 — T2r row-diagnostics interface
 
 Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxation bound `1/(2*T1)` 後，以 rate model 同時擬合 first-order flux noise 與 readout thermal-photon shot noise。
 
@@ -17,7 +17,6 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 ### `base.py` — notebook plotting / common analysis helpers
 
 - `predict_f01_mhz(params, fluxs)` 與 `predict_domega_dflux(params, fluxs)`：提供 notebook 用的 fluxonium f01 與 `domega/dflux` 計算，避免每份分析 notebook 重複定義。
-- `choose_current_scale(...)`：用 measured f01 對照 fluxonium model，在 mA/A 候選縮放中選擇較一致的電流單位。
 - `dispersive_chi01_over_2pi_mhz(params, fluxs, bare_rf, g, ...)`：計算 readout-state dispersive frequency separation，供 photon shot-noise model 使用。
 - `make_thermal_limit_table(...)`：建立 `n_th`、`Gamma_phi_th`、`T2_limit` 表。
 - `calculate_t2_channel_curves(...)`：用 `T2FitResult`、dense `t_fluxs`、`domega/dflux`、`chi/2pi` 與可選 `T1CurveFit` 建立 `2*T1`、pure flux-noise、pure photon-shot-noise、effective T2 四組曲線。
@@ -26,13 +25,14 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 ### `workflow.py` — staged T2 fitting workflow
 
-- 固定 notebook 使用逐步 API，而不是單一黑盒：`load_t2_curve_context(...)` → `calibrate_t2_flux(...)` → `prepare_t2_dephasing_data(...)` → 單機制 probe → `fit_t2_curve(...)` → `build_t2_channel_curves(...)`。
+- 固定 notebook 使用逐步 API，而不是單一黑盒：`load_t2_curve_context(...)` → `calibrate_t2_flux(...)` → `prepare_t2_dephasing_data(...)` → 單機制 probe → `fit_t2_curve(...)` → `build_t2_channel_curves(...)`。`calibrate_t2_flux()` 以 `resolve_sample_flux`（explicit → row-frame → caller-declared fallback）取得 normalized flux，不再猜測 current scale；同時以 positional boolean masks（`T2FluxCalibration.t2e_mask` / `t2r_mask`，長度等於 `samples_df`）記錄 T2e/T2r selection，row identity 不依賴 DataFrame index labels，duplicate labels 不會擴增 selection。
 - `plot_t2_flux_calibration(data)` 將 fit window 內每個 sample 的 raw flux 與 f01-corrected flux 畫在同一列，供檢查 half-flux 附近是否發生不合理 branch jump。
 - `analyze_flux_noise_limit(...)`：在可選 fixed `n_th` 下做 flux-noise-only probe，回傳 `A_phi_init`、`A_phi_fit`、pointwise `A_phi(flux)` 與 summary table；fit residual 可使用 `MeasurementErrorPolicy` 與 `FluxResidualWeighting`。
 - `analyze_photon_shot_noise_limit(...)`：在可選 fixed `A_phi` 下做 photon-shot-noise probe；預設用 pointwise minimum 作為 `n_th_init`，因為 photon-only fit/平均值會把 non-sweet-spot flux noise 吃進 `n_th` 而高估。`n_th_fit` 仍保留為診斷值；fit residual 使用和 combined fit 相同的 weighting 設定。
 - `make_t2_fit_init(...)`：用單機制 probe 結果組出 combined fit 初值；photon channel 使用 `n_th_init`，不是 photon-only `n_th_fit`。`active_mechanisms=("flux_noise",)` 或 `("photon_shot_noise",)` 可只納入部分機制。
 - `fit_t2_curve(...)`：只使用 fit window 內的實際 sample，不再加入人工 half-flux 點。`T2e err = NaN` 的點由 `MeasurementErrorPolicy(nan_policy="bin_median")` 補 effective error；`FluxResidualWeighting(mode="equal_flux_bin", ...)` 配合預設 `loss="linear"`，讓每個 occupied flux bin 對 least-squares loss 的總權重一致，避免 sample-dense 區域主導結果。
 - `mechanisms_to_fixed_params(...)`：把 notebook 面向使用者的 `fixed_mechanisms` 轉成 fit layer 的 `fixed=("A_phi", "n_th")` 語義；固定代表該 channel 留在模型中但不擬合。
+- `prepare_t2_dephasing_data(...)` 的 branch coverage 與 dephasing summary 對 T2e/T2r 各自記錄 resolution provenance（explicit / row-frame / fallback-frame counts）、observed/model f01 與 exact correction skipped reasons；`Freq (MHz)=null` 的 row 保留 raw coordinate，以 model f01 驗證 frequency reachability。`T2DephasingAnalysis.t2r_diagnostics`（型別 `T2RowDiagnostics`，由 `t2_curve` facade 匯出）提供逐 row 診斷：每個 resolved T2r row 依 `samples_df` positional order 一個 entry，含穩定 positional `sample_indexes`、in-window 狀態、flux source、observed/model/used f01（null-observed row 的 model f01 直接有限可查）、raw/corrected/aligned flux、integer shift、correction-applied flag 與 exact skip reason。
 - `run_t2_curve_analysis(config, display_fn=None)` 保留為薄 wrapper，供需要一鍵重跑時使用；互動式 notebook 優先用逐步 API。
 
 ### `fit.py` — joint pure-dephasing fit
@@ -46,7 +46,7 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 ## 典型使用流程
 
-1. 用和 `T1_curve.md` 相同的 f01 correction 取得 sample flux，並用 flux calibration plot 檢查 raw/corrected flux 是否只做就近校準。
+1. 用和 `T1_curve.md` 相同的 f01 correction 取得 sample flux（derived rows、observed f01 finite 才校正；missing f01 用 model 頻率），再做 analysis-local integer alignment，並用 flux calibration plot 檢查 raw/corrected flux 是否只做就近校準。
 2. 選定 T2 fit window，例如 `0.49 <= flux <= 0.53`，並設定 `MeasurementErrorPolicy` / `FluxResidualWeighting`。
 3. 對 fit sample 計算 `domega/dflux` 與 dispersive `chi/2pi`；`NaN` error 留在 fit window 中，由 fit layer 補 effective error。
 4. 先用 `analyze_flux_noise_limit(...)` 與 `analyze_photon_shot_noise_limit(...)` 分別看單機制上限/初值。

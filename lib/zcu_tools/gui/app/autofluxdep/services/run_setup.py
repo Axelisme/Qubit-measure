@@ -8,7 +8,7 @@ state machine; this module owns the setup graph.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from zcu_tools.gui.app.autofluxdep.cfg import (
@@ -119,6 +119,31 @@ def build_run_cfg_snapshots(
     return snapshots
 
 
+def resolve_flux_device_unit(
+    flux_device_name: str | None,
+    resolver: Callable[[str], str] | None,
+) -> str:
+    """Resolve the flux device's authoritative A/V unit exactly once.
+
+    Only a strict device-unit resolver may supply the authoritative unit;
+    lenient/default inference is never consulted. Bare sweeps (no device),
+    missing devices, unknown device types, and unsupported or malformed
+    resolver results all snapshot an empty unit: the run is permitted under
+    existing policy but cannot export a flat-v2 sample table.
+    """
+    if not flux_device_name:
+        return ""
+    if resolver is None:
+        return ""
+    try:
+        unit = resolver(flux_device_name)
+    except Exception:
+        return ""
+    if not isinstance(unit, str) or unit not in ("A", "V"):
+        return ""
+    return unit
+
+
 def create_run_session(
     *,
     state: AutoFluxDepState,
@@ -128,6 +153,7 @@ def create_run_session(
     notify: Notify | None,
     event_sink: RunEventSink,
     progress_label: str,
+    flux_unit_resolver: Callable[[str], str] | None = None,
 ) -> RunSession:
     """Create the sweep-lived RunSession from the current State snapshot."""
     ctx = state.exp_context
@@ -140,11 +166,13 @@ def create_run_session(
     tools = build_run_tools(state, providers)
     state.set_run_predictor(tools.predictor)
     flux_device = state.flux_device_name
+    flux_unit = resolve_flux_device_unit(flux_device, flux_unit_resolver)
     cfg_snapshots = build_run_cfg_snapshots(state, enabled_nodes, ml=run_ml)
     store = RunStore.create(
         project=project,
         flux_values=flux_values,
         flux_device_name=flux_device,
+        flux_unit=flux_unit,
         nodes=enabled_nodes,
         results=results,
         cfg_snapshots={
@@ -205,5 +233,6 @@ __all__ = [
     "build_run_providers",
     "build_run_tools",
     "create_run_session",
+    "resolve_flux_device_unit",
     "run_dry",
 ]

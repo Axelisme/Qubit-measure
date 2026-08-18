@@ -12,6 +12,7 @@
 - [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合。
 - [0025 — Cross-thread interaction channel](0025-cross-thread-interaction-channel.md)：operation/user prompt 使用單一有序 channel 傳遞 settle、message、stop。
 - [0026 — OperationRunner + scope ports](0026-operation-abstraction-runner-scope-ports.md)：OperationRunner 擁有通用生命週期；各 operation 只提供 policy 與窄 write port。
+- [0058 — Registry-owned VISA session disconnect](0058-registry-owned-visa-session-disconnect.md)：GlobalDeviceManager 以 identity claims 統一擁有 disconnect；close I/O 在 registry lock 外、失敗聚合且保留重試。
 
 ## GUI Service Architecture
 
@@ -54,6 +55,7 @@
 - [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、strict grouped dataset roles；legacy artifacts 只經 explicit migration 進入 canonical 格式。
 - [0039 — QubitParams owns params.json](0039-qubit-params-json-owner.md)：`meta_tool.QubitParams` 是 result-scope `params.json` 的 typed 讀寫權威。
 - [0040 — Autofluxdep run result artifact](0040-autofluxdep-run-result-artifact.md)：autofluxdep run output 以 run directory、journal 與 per-node streaming Labber-readable HDF5 作 canonical artifact。
+- [0057 — Flat SampleTable v2 coordinate contract](0057-flat-sampletable-v2-coordinate-contract.md)：五欄平鋪 coordinate（flux/dev_value/dev_unit/flux_int/flux_period）與 A/V base unit、explicit provenance precedence；legacy 只經 operator migration 進入。
 
 ## Experiment Runtime
 

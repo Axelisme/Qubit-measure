@@ -54,7 +54,7 @@ def render_markdown_report(
         f"- Created: {manifest.get('created_at', '')}",
         f"- Finalized: {terminal.get('finalized_at', '')}",
         f"- Project: {_project_label(manifest)}",
-        f"- Flux points: {len(flux.get('values', ()))}, device: {flux.get('device_name')}",
+        f"- Flux points: {len(flux.get('values', ()))}, device: {flux.get('device_name')}, unit: {flux.get('unit', '')}",
         f"- Workflow hash: {workflow.get('workflow_hash', '')}",
         "",
         "## Artifact Paths",

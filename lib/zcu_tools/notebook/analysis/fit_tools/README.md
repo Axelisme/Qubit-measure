@@ -1,24 +1,24 @@
 # `fit_tools` 模塊重點文檔
 
-**Last updated:** 2026-07-23 — effective temperature chain tools
+**Last updated:** 2026-08-18 — flux-first v2 SampleMerge
 
 `fit_tools` 放跨 T1/T2 分析都會用到的純計算工具。它不包含任何 T1/T2 物理機制模型；機制模型留在各自的 `t1_curve` / `t2_curve` 模塊。
 
 ## 檔案與角色
 
-### `flux.py` — f01-based flux calibration
+### `flux.py` — normalized-flux f01 correction
 
 - `predict_f01_mhz(params, fluxs)`：用 fluxonium 能階計算 f01，回傳 MHz。
 - `predict_domega_dflux(params, fluxs)`：用有限差分計算 `domega01/dflux`，回傳 rad/us/Phi0。
-- `correct_flux_from_f01(dev_values, f01_freqs, params, flux_half, flux_period, ...)`：用實測 f01 校正由 device value 換算得到的 normalized flux；`f01_freqs` 單位是 GHz。校正候選會先展開 periodic / mirror equivalent flux branch，再選離 raw flux 最近者，避免 half-flux 附近的點從 0.49 直接跳到等價但較遠的 0.51。
-- `choose_current_scale_from_f01(...)`：在候選電流縮放間用 f01 residual 選擇較一致的單位，回傳最佳 scale 與 report table。
+- `correct_flux_from_f01(raw_fluxs, f01_freqs_ghz, params, *, max_abs_flux_correction=0.03)`：以實測 f01 校正 dimensionless normalized flux；`f01_freqs_ghz` 明確以 GHz 輸入，內部先轉成 MHz 再呼叫 MHz-based predictor。校正候選會先展開 periodic / mirror equivalent flux branch，再選離 raw flux 最近者；tie 規則 deterministic（等距時 periodic 獲勝）。超過 `max_abs_flux_correction` 的行拒絕並保留 raw flux。回傳 `F01FluxCorrectionResult` 只有 raw/corrected flux、accepted mask 與 applied correction —— 不再回傳需要單一 device frame 才定義的 `corrected_dev_values`。explicit flux 視為已校準，由 caller 決定是否套用此校正。
+- `align_flux_to_window(fluxs, analysis_flux_range)`：analysis-local integer-period alignment。window 必須 finite、strictly increasing 且 width `<= 1.0`；每一 flux 選離 window midpoint 最近的 `flux + k`（`k ∈ ℤ`）branch，等距 tie 選較小的 resulting flux。回傳 aligned flux、integer shift 與 alignment 後的 in-window mask；width 超過一個 period 直接 fail。
 
-### `sample_merge.py` — samples.csv canonicalization
+### `sample_merge.py` — flux-first v2 SampleMerge
 
-- `FluxFrame.from_result_dir(result_dir)` 從 `params.json` 的 `fluxdep_fit` 讀出 `(EJ, EC, EL)`、`flux_half` 與 `flux_period`，作為一個 source/target flux frame。
-- `SampleSource(path, unit, source_result_dir=..., current_scale_to_source_frame=..., fit_batch_flux_offset=...)` 描述一個原始 sample 檔。`unit` 是報告標籤；實際數值轉換只由 `current_scale_to_source_frame` 控制，避免把 source frame 本來就是 A 的資料再次乘成 mA。
-- `merge_sample_sources(target_result_dir, sources)` 先把每個 source 的 device value 轉成 source normalized flux，再映射到 target frame 的 canonical `calibrated mA` 與 `Flux`；可選 `fit_batch_flux_offset=True` 對該 source 用 f01 擬合單一 batch `delta_flux`。`batch_flux_offset_reference="source"` 使用 source model，是既有語義；`"target"` 使用 target model，對應診斷圖上的 target `measured-model` residual。`batch_flux_offset_objective` 可選 `soft_l1`、`median_abs`、`mean_abs`、`rms`；sample3 這種 shape mismatch 明顯的 batch 需要在 report 中比較不同 objective 的結果。輸出的 `merged` 表只保留 T1/T2 workflow 需要的欄位；source label、unit、batch offset 與 residual 放在 `diagnostics` / report。
-- `write_merged_samples(...)` / `write_sample_merge_report(...)` 分別寫乾淨的 `samples.csv` 與診斷 report；`plot_sample_merge_f01_diagnostics(...)` 用 target model 檢查合併後 f01 residual。
+- `FluxFrame(params, dev_unit, flux_int, flux_period, label)`：analysis affine flux frame。construction 驗證 A/V `dev_unit`、finite `flux_int` 與 positive finite `flux_period`，f01 model `params` 必須是三個 finite float；`flux_from_dev_value()` / `dev_value_from_flux()` 提供 scalar/array round trip（`(dev_value - flux_int) / flux_period`）。`from_result_dir(result_dir, *, dev_unit, label=None)` 從 `params.json` 的 `fluxdep_fit` 讀 `(EJ, EC, EL)` 與 `flux_int` / `flux_period`；`dev_unit` 必填，因為 persisted params 沒有 unit metadata。
+- `SampleSource(path, label=..., fallback_frame=..., integer_flux_offset=0, fit_batch_flux_offset=..., batch_flux_offset_objective=..., batch_flux_offset_range=..., max_abs_batch_flux_offset=..., f01_fit_scale_mhz=...)` 只接受 v2 CSV（`validate_sample_table_v2`）。`fallback_frame` 供缺 row frame 的 migrated rows 解析 flux；`integer_flux_offset` 是 caller-declared integer branch 對齊，merge 不猜測 unit 或 integer branch。branch 對齊後的唯一非整數調整是 bounded batch fit（`max_abs_batch_flux_offset` 限定）。`unit`、`source_result_dir`、`current_scale_to_source_frame` 與 legacy `calibrated mA` / `Flux` 相容已移除。
+- `merge_sample_sources(*, target_frame, sources)`：唯一 authoritative target identity。pipeline：`resolve_sample_flux`（explicit → row frame → fallback frame，共用 provenance SSOT）→ caller `integer_flux_offset` → optional small batch offset（對 target f01 model 擬合單一 `delta_flux`；`batch_flux_offset_objective` 可選 `soft_l1`、`median_abs`、`mean_abs`、`rms`）→ target frame `dev_value`。輸出完整 flat v2 coordinate：adjusted `flux` 與 target `dev_value` / `dev_unit` / `flux_int` / `flux_period`，加上 caller-owned measurement columns（不 alias-canonicalize）。diagnostics 逐 row 記錄 resolution `sources` provenance，並明示 integer offset、batch correction 與 target frame；A-source 與 V-source 可合併到同一 target frame，不直接比較 raw device values。unresolved rows / legacy tables 在 mutation 前 fast-fail。
+- `write_merged_samples(...)` / `write_sample_merge_report(...)` 分別寫乾淨的 `samples.csv` 與診斷 report；兩者都拒絕覆寫任何 merge source CSV。`plot_sample_merge_f01_diagnostics(...)` 用 target model 檢查合併後 f01 residual。
 
 ### `weights.py` — residual weighting
 
@@ -43,4 +43,4 @@
 
 - 公共模組只處理資料軸、sample canonicalization、誤差與 residual 權重，不知道 `Q_cap`、`A_phi`、`n_th` 等物理參數。
 - T1/T2 各自負責把物理模型轉成 residual，然後呼叫這裡的 helper 做 shared weighting。
-- `samples.csv` 合併與 source frame/unit 修正屬於 `sample_merge.py`；`T1_curve.md` / `T2_curve.md` 只讀已 canonicalized 的 sample 表，再做 analysis-window 內的小範圍 point-wise f01 correction。
+- `samples.csv` 合併與 target-frame 映射屬於 `sample_merge.py`；`T1_curve.md` / `T2_curve.md` 只讀已 canonicalized 的 sample 表，再做 analysis-window 內的小範圍 point-wise f01 correction。
