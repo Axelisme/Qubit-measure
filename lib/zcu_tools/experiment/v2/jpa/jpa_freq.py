@@ -106,7 +106,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                         .build_and_acquire(
                             raw2signal_fn=lambda raw: snr_as_signal(
                                 [tracker],
-                                ge_axis=0,
+                                ge_axis=1,
                                 skew_penalty=sched.cfg.skew_penalty,
                             ),
                             trackers=[tracker],
