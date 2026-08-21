@@ -70,14 +70,16 @@ display(ctx.params_table)
 display(ctx.samples_preview)
 ```
 
-# Flux Calibration
+# Flux Resolution (v2)
 
 ```python
 cal = zt1.calibrate_t1_flux(
     ctx,
-    current_scale_candidates=(1.0, 1000.0),
+    fallback_frame_unit="A",  # params.json fluxdep_fit frame declared in A
 )
-print(f"current scale = {cal.current_scale:g}")
+print(f"explicit flux rows = {sum(s == 'explicit' for s in cal.resolution.sources)}")
+print(f"row-frame flux rows = {sum(s == 'row-frame' for s in cal.resolution.sources)}")
+print(f"fallback-frame flux rows = {sum(s == 'fallback-frame' for s in cal.resolution.sources)}")
 print(f"finite f01 rows = {len(cal.freq_rows)}")
 print(f"finite T1 rows = {len(cal.t1_df)}")
 ```
@@ -104,6 +106,10 @@ figure_paths["flux_calibration"] = zt1.save_t1_curve_figure(
 
 fig, _ = zt1.plot_t1_curve_data(data)
 figure_paths["t1_samples"] = zt1.save_t1_curve_figure(fig, ctx, "T1s.png")
+```
+
+```python
+display(data.summary_table)  # prepared frequency-source and branch-shift diagnostics
 ```
 
 # Purcell Effect

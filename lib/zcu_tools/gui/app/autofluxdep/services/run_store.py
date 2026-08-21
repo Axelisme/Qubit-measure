@@ -70,6 +70,7 @@ class RunStore:
         nodes: Sequence[PlacedNode],
         results: Mapping[str, object],
         cfg_snapshots: Mapping[str, Mapping[str, object]] | None = None,
+        flux_unit: str = "",
     ) -> None:
         # ``run_dir`` is the lightweight metadata root under result_dir.
         self.run_dir = run_dir
@@ -80,6 +81,9 @@ class RunStore:
         self._flux_values = [float(value) for value in flux_values]
         self._nodes = list(nodes)
         self._results = dict(results)
+        if flux_unit not in ("", "A", "V"):
+            raise ValueError(f"flux_unit must be '', 'A' or 'V', got {flux_unit!r}")
+        self._flux_unit = flux_unit
         self._cfg_snapshots = {
             str(name): dict(snapshot)
             for name, snapshot in (cfg_snapshots or {}).items()
@@ -111,6 +115,7 @@ class RunStore:
         nodes: Sequence[PlacedNode],
         results: Mapping[str, object],
         cfg_snapshots: Mapping[str, Mapping[str, object]] | None = None,
+        flux_unit: str = "",
     ) -> RunStore:
         """Create the run directory, manifest, journal, and node writers."""
         if project is None:
@@ -138,6 +143,7 @@ class RunStore:
             nodes=nodes,
             results=results,
             cfg_snapshots=cfg_snapshots,
+            flux_unit=flux_unit,
         )
         try:
             store._journal_path.write_text("", encoding="utf-8")
@@ -545,7 +551,7 @@ class RunStore:
             {
                 "device_name": flux_device_name,
                 "values": list(self._flux_values),
-                "unit": "",
+                "unit": self._flux_unit,
             },
             subject="workflow flux",
             nonfinite_to_none=False,

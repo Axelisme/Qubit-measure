@@ -15,6 +15,11 @@ from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
 from zcu_tools.meta_tool import QubitParams
+from zcu_tools.meta_tool.sample_schema import (
+    SampleFluxFrame,
+    resolve_sample_flux,
+    validate_sample_table_v2,
+)
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep
 from zcu_tools.simulate.fluxonium.branch.floquet import calc_ge_snr
 
@@ -422,6 +427,7 @@ def add_real_sample(
     flux: float = 0.5,
     rf_w: float = 7e-3,
     max_photon: int = 70,
+    fallback_frame: SampleFluxFrame | None = None,
 ) -> None:
 
     result_path = os.path.join(result_dir, "params.json")
@@ -436,12 +442,15 @@ def add_real_sample(
     params = fit.params
     r_f = dispersive.bare_rf
     g = dispersive.g
-    flux_half = fit.flux_half
 
-    # load freq data
+    # load freq data; the v2 table must resolve flux for every row (explicit
+    # flux, row frame or the caller-declared fallback frame), and legacy
+    # coordinate columns (e.g. "calibrated mA") fail before any comparison.
     sample_path = os.path.join(result_dir, "sample.csv")
     freq_df = pd.read_csv(sample_path)
-    idx = np.argmin(np.abs(freq_df["calibrated mA"] - flux_half))
+    validate_sample_table_v2(freq_df)
+    resolution = resolve_sample_flux(freq_df, fallback_frame=fallback_frame)
+    idx = int(np.argmin(np.abs(resolution.values - flux)))
     t1 = freq_df["T1 (us)"].iloc[idx]
 
     # calculate chi

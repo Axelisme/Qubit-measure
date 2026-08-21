@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-08-13 — JPA 校準 family 的 catalog 契約
+**Last updated:** 2026-08-17 — T1 non-uniform equal-arc contract
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -92,8 +92,9 @@ ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內
 `onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
 結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
 `twotone/time_domain/t1` 的 `uniform` 是 run-only 欄位：預設 `True` 使用線性 delay
-sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，但把 sweep
-分布交給底層 non-uniform T1 run path。
+sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
+沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
+conversion 保留點數與順序，格點 collision 直接提示擴大 span 或減少 points，而不靜默減點。
 
 跨session狀態的少數default走`value_source(key, target_type, fallback?)` Seed，於definition
 instantiate時透過`ctx.values` resolve once，成功後寫入普通direct value，不把lazy ref放進cfg
@@ -208,12 +209,24 @@ tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列�
 共同 mechanics 在 `adapters/jpa/_shared.py`：RF 選擇使用 `jpa_rf_dev` role
 （`set_freq` / `set_power` / `set_output` knob 能力檢查），flux 選擇使用
 `jpa_flux_dev` role（`set_flux` knob）；lowering 與 preflight 只作用於 cached
-device snapshot，任何硬體工作前 fast-fail。capabilities 一致：四個校準 adapter
-是 `analysis=FIT` 並提出 `MetaDictWriteback`，survey/diagnostic 兩個 adapter 不提供
-writeback。每個 adapter 的 operator guide 都以現在式說明 seeded bounds 是
-bring-up defaults 而非 certified safety limits，operator 必須先 review device 與
-sweep 再 run；`jpa/check` 特別警告 run 結束時 pump output 保持 ON。真實硬體
-acceptance 由 operator 在 device/sweep review 後執行，不屬於 adapter code。
+device snapshot，任何硬體工作前 fast-fail。六個 adapter 都顯式暴露 `reps`、
+`rounds`、`relax_delay`，fresh defaults 沿用 notebook bring-up workflow：
+`freq` / `flux` / `power` 是 `10000 / 1 / 0.5 us`，`auto_optimize` 是
+`1000 / 1 / 30.5 us`，`flux_onetone` 是 `100 / 10 / 0.1 us`，`check` 是
+`1000 / 5 / 0.5 us`；`initial_delay` 維持 GUI 隱藏並使用 core 的 `1.0 us`
+default。這些是可修改的操作 seed，不是跨 setup 的最佳 SNR 或安全保證。
+
+`auto_optimize` 的三軸 `start` / `stop` 是 search bounds；各 sweep 的 `expts`
+是會影響 phase-1 flux-grid 與 per-slice budget allocation 的 relative resolution
+hints，不是 Cartesian sample count，總 measurement budget 仍由 `num_points` 表達。
+JPA flux 在六個 adapter 一律以中性 device value／`a.u.` 語彙呈現（sweep label、
+liveplot 與 canonical persistence 一致，無 `1e3` 縮放或 physical-unit 宣稱）。
+capabilities 一致：四個校準 adapter 是 `analysis=FIT` 並提出
+`MetaDictWriteback`，survey/diagnostic 兩個 adapter 不提供 writeback。每個 adapter
+的 operator guide 都以現在式說明 seeded bounds 是 bring-up defaults 而非 certified
+safety limits，operator 必須先 review device 與 sweep 再 run；`jpa/check` 特別警告
+run 結束時 pump output 保持 ON。真實硬體 acceptance 由 operator 在 device/sweep
+review 後執行，不屬於 adapter code。
 
 ---
 

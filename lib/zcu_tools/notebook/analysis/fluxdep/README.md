@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-07-02 — InteractiveLines kernel adapter
+**Last updated:** 2026-08-18 — v2 SampleTable sample-point resolution in visualizer and design consumers
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -117,7 +117,7 @@ fluxdep/
 - `FreqFluxDependVisualizer`：追加
   - `plot_background(spectrums)`：2D 熱圖底圖（多個 spectrum 疊加）
   - `plot_simulation_lines(fluxs, energies, transitions)`：疊加擬合出的躍遷線
-  - `plot_points(fluxs, freqs, **kw)` / `plot_sample_points(sample_table, convert_fn)`：散點
+  - `plot_points(fluxs, freqs, **kw)` / `plot_sample_points(sample_table, *, fallback_frame=None)`：散點；sample points 必須是 v2 SampleTable（`validate_sample_table_v2`），flux 由 shared resolver 以 `explicit → row-frame → fallback-frame` precedence 取得，legacy coordinate（如 `calibrated mA`）與 unresolved rows 在繪圖前明確失敗
   - `plot_constant_freq(freq, name)`：水平參考線（例如 readout 頻率）
   - `auto_derive_limits()`：依所有已加入的資料自動決定 x/y 範圍
 

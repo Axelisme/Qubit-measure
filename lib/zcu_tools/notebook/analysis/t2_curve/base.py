@@ -12,9 +12,6 @@ from numpy.typing import NDArray
 
 from zcu_tools.meta_tool import T1CurveFit
 from zcu_tools.notebook.analysis.fit_tools import (
-    choose_current_scale_from_f01 as _choose_current_scale_from_f01,
-)
-from zcu_tools.notebook.analysis.fit_tools import (
     predict_domega_dflux as predict_domega_dflux,
 )
 from zcu_tools.notebook.analysis.fit_tools import (
@@ -44,25 +41,6 @@ class T2ChannelCurves:
     gamma_phi_flux: NDArray[np.float64]
     gamma_phi_photon: NDArray[np.float64]
     t1_label: str
-
-
-def choose_current_scale(
-    raw_values: NDArray[np.float64],
-    measured_freqs_mhz: NDArray[np.float64],
-    *,
-    params: tuple[float, float, float],
-    flux_half: float,
-    flux_period: float,
-    candidates: tuple[float, ...] = (1.0, 1000.0),
-) -> tuple[float, pd.DataFrame]:
-    return _choose_current_scale_from_f01(
-        raw_values,
-        measured_freqs_mhz,
-        params=params,
-        flux_half=flux_half,
-        flux_period=flux_period,
-        candidates=candidates,
-    )
 
 
 def dispersive_chi01_over_2pi_mhz(

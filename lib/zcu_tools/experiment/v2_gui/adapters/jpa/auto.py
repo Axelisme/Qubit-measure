@@ -162,23 +162,31 @@ class JpaAutoOptimizeAdapter(
             "'cur_jpa_A'."
         ),
         recommended=(
-            "The three sweep axes are SEARCH BOUNDS (min–max) for the "
-            "optimizer, not a Cartesian grid — keep them reasonably tight "
-            "around the seeded centres. 'Optimizer points' (num_points, at "
-            "least 4, default 1001) is the iteration budget: raise it for "
-            "wider bounds, lower it for a quick search. Analysis reports the "
-            "best evaluated point with no tuning knobs."
+            "For each sweep, start/stop are SEARCH BOUNDS and expts is a "
+            "RELATIVE RESOLUTION HINT — expts is not a Cartesian or exact "
+            "sample count. The optimizer compares all three hints when "
+            "allocating its phase-1 flux slices and points per slice. "
+            "'Global optimizer points' (num_points, at least 4, default "
+            "1001) remains the total evaluation budget: raise it for wider "
+            "bounds, lower it for a quick search. Analysis reports the best "
+            "evaluated point with no tuning knobs."
         ),
     )
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
-        sweep_label = "Search bounds (min–max)"
+        sweep_label = "Search bounds + relative resolution hints"
+        sweep_tooltip = (
+            "Start/stop set this axis's search bounds. Expts is a relative "
+            "resolution hint compared with the other axes when allocating "
+            "phase-1 flux slices; it is not a Cartesian or exact sample count."
+        )
         return (
             MeasureCfgBuilder()
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()
+            .relax_delay(30.5)
             .device(
                 "jpa_rf_dev",
                 label="JPA RF device",
@@ -199,6 +207,7 @@ class JpaAutoOptimizeAdapter(
                     description="jpa flux device value search bounds",
                 ),
                 section_label=sweep_label,
+                tooltip=sweep_tooltip,
             )
             .sweep(
                 "jpa_freq",
@@ -208,6 +217,7 @@ class JpaAutoOptimizeAdapter(
                     description="jpa pump frequency search bounds",
                 ),
                 section_label=sweep_label,
+                tooltip=sweep_tooltip,
             )
             .sweep(
                 "jpa_power",
@@ -217,13 +227,16 @@ class JpaAutoOptimizeAdapter(
                     description="jpa pump power search bounds",
                 ),
                 section_label=sweep_label,
+                tooltip=sweep_tooltip,
             )
             .int(
                 "num_points",
-                label="Optimizer points",
+                label="Global optimizer points",
                 default=_JPA_AUTO_NUM_POINTS_DEFAULT,
             )
             .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
+            .reps(1000)
+            .rounds(1)
             .build()
         )
 

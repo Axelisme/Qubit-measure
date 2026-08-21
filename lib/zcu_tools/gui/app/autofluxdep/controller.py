@@ -1145,6 +1145,7 @@ class Controller(SessionControllerMixin):
             notify=notify,
             event_sink=self._run_events,
             progress_label=FLUX_PROGRESS_LABEL,
+            flux_unit_resolver=self._dev_svc.get_device_unit_strict,
         )
 
     def _begin_run_segment(self, session: RunSession, *, continuing: bool) -> int:

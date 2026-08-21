@@ -1,4 +1,4 @@
-**Last updated:** 2026-08-13 — JPA 校準 family
+**Last updated:** 2026-08-13 — JPA 校準 family 的 runtime-control policy
 
 # measure experiment adapters
 
@@ -13,7 +13,11 @@
   definitions；同一實驗專用的 helper 就近放在該檔案或同群組的 `_shared.py`。
   `jpa/` 的六個 adapter（`freq` / `flux` / `power` / `auto_optimize` /
   `flux_onetone` / `check`）是單一可發現的 JPA 校準 family，依 bring-up 順序
-  註冊於 `../registry.py`，家族契約見 `../README.md`。
+  註冊於 `../registry.py`。六個 concrete adapters 各自擁有 notebook-derived
+  acquisition defaults，並共同暴露 `reps` / `rounds` / `relax_delay`；
+  `initial_delay` 維持 core-owned hidden default。auto optimizer 的 sweep `expts`
+  是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
+  契約見 `../README.md`。
 - `_support/` 是 private package，只放至少被兩個 concrete adapters 共用的 mechanics；它
   不擁有 registry order，也不 import concrete adapter。
 - `../registry.py` 是 composition root，明確列出 adapter 與 role catalog 項目。

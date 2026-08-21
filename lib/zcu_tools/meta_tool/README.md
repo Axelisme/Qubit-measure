@@ -1,6 +1,6 @@
 # `zcu_tools.meta_tool` — persistent experiment metadata
 
-**Last updated:** 2026-07-06 — SampleTable comment/date export
+**Last updated:** 2026-08-18 — SampleTable v2 flat coordinate contract（opt-in schema / flux resolution / legacy migration）
 
 這份筆記整理 `meta_tool/` 的設計，說明各類別的職責、同步機制與使用模式。
 
@@ -8,7 +8,7 @@
 
 ## 架構總覽（一句話版）
 
-`meta_tool/` 提供實驗的**持久化設定管理**：`SyncFile` 是自動讀寫同步的抽象基礎，`MetaDict` 以 JSON 儲存任意實驗參數、`ModuleLibrary` 以 YAML 管理波形與模組設定，`ExperimentManager` 把兩者綁定到以 flux 值命名的資料夾上下文，`QubitParams` 擁有每個 result scope 的 `params.json` typed handoff file，`SampleTable` 儲存樣品量測紀錄，`ArbWaveformDatabase` 管理 qubit-scoped arbitrary waveform `.npz` asset。
+`meta_tool/` 提供實驗的**持久化設定管理**：`SyncFile` 是自動讀寫同步的抽象基礎，`MetaDict` 以 JSON 儲存任意實驗參數、`ModuleLibrary` 以 YAML 管理波形與模組設定，`ExperimentManager` 把兩者綁定到以 flux 值命名的資料夾上下文，`QubitParams` 擁有每個 result scope 的 `params.json` typed handoff file，`SampleTable` 儲存樣品量測紀錄，`sample_schema` 提供 SampleTable v2 的 opt-in 欄位契約、flux 解析與 legacy 遷移，`ArbWaveformDatabase` 管理 qubit-scoped arbitrary waveform `.npz` asset。
 
 ---
 
@@ -211,6 +211,27 @@ df = st.get_samples()
 
 ---
 
+## SampleTable v2 協定（`sample_schema.py` / `script/migrate_sample_table_v2.py`）
+
+v2 是**深層 opt-in** 的 flat coordinate 契約：generic `SampleTable` 維持 schema-free，既有 CSV 的 custody 絕不自動變更；只有明確呼叫 contract API（`validate_sample_table_v2` / `resolve_sample_flux`）或執行遷移 script 的資料才受 v2 欄位規則約束。指定 runtime producer/consumer 顯式呼叫並強制 v2 contract：AutoFlux exporter（`gui/app/autofluxdep/services/sample_table_export.py`）、notebook `single_qubit` producer（`notebook_md/single_qubit.md`）、T1/T2（`notebook/analysis/t1_curve/workflow.py` / `notebook/analysis/t2_curve/workflow.py`）、SampleMerge（`notebook/analysis/fit_tools/sample_merge.py`）與 fluxdep/design（`notebook/analysis/fluxdep/utils.py` / `notebook/analysis/design/search.py`）。v2 欄位全為英文小寫 snake_case：`flux`、`dev_value`、`dev_unit`、`flux_int`、`flux_period`（`SAMPLE_COORDINATE_COLUMNS`）。
+
+**驗證（`validate_sample_table_v2`）**：`dev_value`/`dev_unit` 必填，unit 僅限 A/V；coordinate 只接受 real numeric（拒絕 datetime/timedelta、boolean、complex），required value 必須 finite；`flux` 可空、只接受有限值或 null；`flux_int`/`flux_period` 成對出現，每 row 兩者同為有限或同為 null，period 必須 > 0；拒絕 legacy 別名欄位（`calibrated mA`、`calibrated A`、`Flux`、`flux_bias`）、重複欄位與孤立 frame 欄位。
+
+**flux 解析（`resolve_sample_flux`）**：closed per-row 來源順序 `explicit → row-frame → fallback-frame`，`sources` 為每 row 的權威來源、`explicit_mask` 只由 `sources` 推導；任一 row 無法解析即 fail-fast 列出 index。fallback frame 的單位必須與該 row 的 `dev_unit` 一致。
+
+**legacy 遷移（`migrate_sample_table_v2` / script）**：單一 caller 宣告的 A/mA/V/mV 來源單位轉成 base A/V，frame 值依宣告單位縮放到 base；不推論、不 alias、不覆蓋。CLI 預設 dry-run（顯示 total/convertible row counts 與 chosen unit），`--write` 只寫入**distinct** destination，使用同目錄暫存檔做 atomic no-clobber publish（partial failure 不動 source、不留殘檔）：
+
+```bash
+.venv/bin/python script/migrate_sample_table_v2.py \
+    path/to/source.csv path/to/destination.v2.csv \
+    --dev-value-column "legacy_current" --dev-value-unit A \
+    --write
+```
+
+只有在外部稽核證據確認 trusted flux 欄位或完整 calibration frame 後，operator 才加入對應的 `--flux-column` 或 `--flux-int` / `--flux-period` / `--frame-unit` options。
+
+---
+
 ## `ArbWaveformDatabase`（`arb_waveform.py`）
 
 以單一 `.npz` 檔儲存任意波形資料的類別方法資料庫（Class-level singleton path）。GUI 與 notebook 共用這個 repository，避免 formula recipe、import、preview 與 `ArbWaveform` 使用端各自長出不同規則。
@@ -316,7 +337,7 @@ Experiment cfg materialization
 
 QubitParams          (params.json typed owner；fluxdep/dispersive/t1_curve/predictor caller 共用)
 ArbWaveformDatabase  (獨立，被 modules/waveform.py:ArbWaveform 使用)
-SampleTable          (獨立，供 notebook 記錄量測結果用)
+SampleTable          (獨立，供 notebook 記錄量測結果用；v2 協定由 sample_schema / script/migrate_sample_table_v2 提供，不改變 SampleTable 本身)
 ```
 
 ---

@@ -190,7 +190,11 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
             z=RoleZSpec(
                 field_name="params",
                 label="JPA Flux",
-                unit="A",
+                # Canonical flux unit is the neutral device-native value: the
+                # generic set_flux knob carries no physical-unit guarantee, so
+                # a.u. is the only honest cross-device contract (identity
+                # scale; legacy 'A' grouped files migrate, never load).
+                unit="a.u.",
                 dtype=np.float64,
                 index=0,
                 index_axis=1,
@@ -295,7 +299,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     "Iteration", "SNR (a.u.)", existed_axes=[[ax_iter]]
                 ),
                 flux_scatter=LivePlotScatter(
-                    "JPA Flux (mA)", "SNR (a.u.)", existed_axes=[[ax_flux]]
+                    "JPA Flux value (a.u.)", "SNR (a.u.)", existed_axes=[[ax_flux]]
                 ),
                 freq_scatter=LivePlotScatter(
                     "JPA Frequency (MHz)", "SNR (a.u.)", existed_axes=[[ax_freq]]
@@ -314,7 +318,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 cur_flux, cur_freq, cur_gain = params[idx, :]
 
                 fig.suptitle(
-                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
+                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {cur_flux:.2g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
                 )
 
                 colors = phases.astype(np.float64)
@@ -323,7 +327,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     point_indices, snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("flux_scatter").update(
-                    1e3 * params[:, 0], snrs, colors=colors, refresh=False
+                    params[:, 0], snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("freq_scatter").update(
                     params[:, 1], snrs, colors=colors, refresh=False

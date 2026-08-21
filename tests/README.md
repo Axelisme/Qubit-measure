@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-07-11 — parallel-burst orchestration contracts
+**Last updated:** 2026-08-18 — SampleTable v2 contract tests（sample_schema / migrate script）
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -131,7 +131,7 @@ tests/
 ├── experiment/v2/                  # Experiment runtime、persistence / analysis tests
 │   ├── autofluxdep/                # FluxDepInfoTracker typed context tests
 │   └── runner/                     # Schedule runtime、ResultTree 與 MultiMeasurementExecutor tests
-├── meta_tool/                      # SyncFile / QubitParams / arbitrary waveform persistence tests
+├── meta_tool/                      # SyncFile / QubitParams / arbitrary waveform persistence + SampleTable v2 contract tests
 ├── analysis/
 │   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
 ├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests

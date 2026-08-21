@@ -102,6 +102,7 @@ class JpaCheckAdapter(
                     "ro_cfg.ro_freq": 0.0,
                 },
             )
+            .relax_delay(0.5)
             .device(
                 "jpa_rf_dev",
                 label="JPA RF device",
@@ -113,6 +114,8 @@ class JpaCheckAdapter(
                 label="Freq (MHz)",
                 default=res_freq_range(expts=_JPA_CHECK_FREQ_EXPTS),
             )
+            .reps(1000)
+            .rounds(5)
             .build()
         )
 
