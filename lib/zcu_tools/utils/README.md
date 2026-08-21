@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-23 — resonance background model
+**Last updated:** 2026-08-21 — grouped Labber v2
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -17,11 +17,19 @@ import。
 - `DatasetRole`、`GroupedLabberData` 描述 grouped experiment dataset：單一
   experiment data file 內含多個 role payload，metadata 共用。
 - `save_labber_data` / `load_labber_data` 處理 single-role file。
-- `save_grouped_labber_data` / `load_grouped_labber_data` 處理 grouped file；
-  experiment loader 傳 required roles，省略 required roles 只用於 diagnostic
-  與 migration tooling。
+- `save_grouped_labber_data` / `load_grouped_labber_data` 處理 canonical one-shot
+  grouped v2。所有 roles 必須共享完全相同的 inner-first axes、shape 與
+  timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 roles 寫成
+  root Labber log 的平行 scalar channels。ordered role-to-channel attrs 保存 domain
+  identity；experiment loader 傳 required roles，省略 required roles 只用於
+  diagnostic 與 migration tooling。
+- unmarked grouped v1 是離線 migration input。runtime loader 不做 compatibility
+  load、不改寫 input，只回報 `script/migrate_experiment_data.py --experiment
+  grouped/v1` 的手動指令。
 - `StreamingLabberRoleSpec` / `open_streaming_grouped_labber_data` 處理
-  grouped Labber file 的 partial-write use case；`open_streaming_labber_data`
+  grouped Labber file 的 partial-write use case。它保留 marker-qualified grouped v1
+  root/`Log_N` layout 與 heterogeneous axes，不共用 one-shot v2 decoder。
+  `open_streaming_labber_data`
   是 single-log `save_labber_data` 的 streaming 對偶。caller 先宣告 full-shape
   schema，writer 預建 nan-filled datasets，之後以 outer row slice 寫入並
   flush。它是長掃 workflow 的 streaming primitive，不改變 one-shot save helper

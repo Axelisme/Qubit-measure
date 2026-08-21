@@ -33,8 +33,8 @@ from zcu_tools.utils.datasaver import (
     Axis,
     LabberPayload,
     StreamingGroupedLabberWriter,
+    StreamingLabberRoleSpec,
     open_streaming_grouped_labber_data,
-    save_grouped_labber_data,
 )
 
 
@@ -247,11 +247,27 @@ def test_result_progress_summary_counts_raw_rows_separately_from_fits():
     assert progress["fit_summary"]["last_fit_freq"] == pytest.approx(5000.0)
 
 
+def _save_streaming_payloads(path: str, roles: dict[str, LabberPayload]) -> str:
+    specs = [
+        StreamingLabberRoleSpec(
+            role,
+            payload.data.name,
+            payload.data.unit,
+            payload.axes,
+            np.asarray(payload.z).shape,
+        )
+        for role, payload in roles.items()
+    ]
+    with open_streaming_grouped_labber_data(path, specs):
+        pass
+    return path + ".hdf5"
+
+
 def test_load_node_result_rejects_mismatched_role_shape(tmp_path):
     flux = Axis("Flux device value", "", np.array([0.0, 1.0], dtype=float))
     detune = Axis("Detune", "MHz", np.array([-1.0, 0.0, 1.0], dtype=float))
     short_detune = Axis("Detune", "MHz", np.array([-1.0, 0.0], dtype=float))
-    path = save_grouped_labber_data(
+    path = _save_streaming_payloads(
         str(tmp_path / "bad_shape"),
         {
             ROLE_SIGNAL: LabberPayload(
@@ -278,7 +294,7 @@ def test_load_node_result_rejects_mismatched_role_axis(tmp_path):
     flux = Axis("Flux device value", "", np.array([0.0, 1.0], dtype=float))
     shifted_flux = Axis("Flux device value", "", np.array([0.0, 2.0], dtype=float))
     detune = Axis("Detune", "MHz", np.array([-1.0, 0.0, 1.0], dtype=float))
-    path = save_grouped_labber_data(
+    path = _save_streaming_payloads(
         str(tmp_path / "bad_axis"),
         {
             ROLE_SIGNAL: LabberPayload(

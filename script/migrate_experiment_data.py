@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+import h5py
 import numpy as np
 from numpy.lib.npyio import NpzFile
 from numpy.typing import NDArray
@@ -55,17 +56,20 @@ from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import (
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
 from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
 from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
+    RO_AUTO_GROUPED_ROLES,
     AutoOptResult,
     load_auto_opt_grouped_result,
     save_auto_opt_grouped_result,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
+    CPMG_GROUPED_ROLES,
     CPMG_Result,
     load_cpmg_grouped_result,
     save_cpmg_grouped_result,
 )
 from zcu_tools.utils.datasaver import (
     DatasetRole,
+    GroupedLabberData,
     LabberData,
     LabberPayload,
     format_ext,
@@ -73,6 +77,11 @@ from zcu_tools.utils.datasaver import (
     load_labber_data,
     save_grouped_labber_data,
     save_labber_data,
+)
+from zcu_tools.utils.datasaver.grouped import (
+    GROUPED_VERSION_ATTR,
+    _load_streaming_grouped_v1,
+    _read_exact_version,
 )
 
 
@@ -171,6 +180,60 @@ def _save_axes_spec_result_exact(
         raise RuntimeError(
             f"converter wrote {written_path}, expected exact path {requested_path}"
         )
+
+
+def _load_grouped_v1_for_migration(input_path: Path) -> GroupedLabberData:
+    with h5py.File(input_path, "r") as file:
+        raw_version = file.attrs.get(GROUPED_VERSION_ATTR)
+        if (
+            raw_version is None
+            or _read_exact_version(raw_version, "grouped dataset") != 1
+        ):
+            raise ValueError(
+                f"input file {input_path} is not grouped dataset version 1"
+            )
+        if "zcu_tools.streaming_grouped_dataset_version" in file.attrs:
+            raise ValueError(
+                f"input file {input_path} is a streaming grouped dataset, not a "
+                "grouped/v1 migration input"
+            )
+        return _load_streaming_grouped_v1(file, required_roles=None)
+
+
+def _select_grouped_v1_result_loader(
+    grouped: GroupedLabberData,
+) -> Callable[[str], object]:
+    role_set = frozenset(str(role) for role in grouped.roles)
+    if role_set == frozenset(CPMG_GROUPED_ROLES):
+        return load_cpmg_grouped_result
+    if role_set == frozenset(RO_AUTO_GROUPED_ROLES):
+        return load_auto_opt_grouped_result
+    if role_set == frozenset(JPA_AUTO_GROUPED_ROLES):
+        return load_jpa_auto_grouped_result
+    names = ", ".join(sorted(role_set))
+    raise ValueError(f"unsupported grouped v1 dataset role set: {names}")
+
+
+def _validate_grouped_v1_input(input_path: Path) -> None:
+    if not input_path.is_file():
+        raise FileNotFoundError(f"input file does not exist: {input_path}")
+    _select_grouped_v1_result_loader(_load_grouped_v1_for_migration(input_path))
+
+
+def _convert_grouped_v1(input_path: Path, output_path: Path) -> None:
+    grouped = _load_grouped_v1_for_migration(input_path)
+    _select_grouped_v1_result_loader(grouped)
+    save_grouped_labber_data(
+        str(output_path),
+        {str(role): payload for role, payload in grouped.roles.items()},
+        metadata=grouped.metadata,
+    )
+
+
+def _validate_grouped_v1_output(path: str) -> object:
+    grouped = load_grouped_labber_data(path)
+    result_loader = _select_grouped_v1_result_loader(grouped)
+    return result_loader(path)
 
 
 def _convert_cpmg_npz(input_path: Path, output_path: Path) -> None:
@@ -703,13 +766,31 @@ _JPA_AUTO_LEGACY_A_ROLE_UNITS: dict[str, str] = {
 }
 
 
+def _load_jpa_auto_legacy_a_grouped_input(
+    input_path: Path,
+) -> GroupedLabberData:
+    with h5py.File(input_path, "r") as file:
+        raw_version = file.attrs.get(GROUPED_VERSION_ATTR)
+        if raw_version is None:
+            raise ValueError(f"input file {input_path} is not a grouped dataset")
+        version = _read_exact_version(raw_version, "grouped dataset")
+
+    if version == 1:
+        grouped = _load_grouped_v1_for_migration(input_path)
+        actual_roles = frozenset(str(role) for role in grouped.roles)
+        if actual_roles != frozenset(JPA_AUTO_GROUPED_ROLES):
+            names = ", ".join(sorted(actual_roles))
+            raise ValueError(f"unsupported legacy-A dataset role set: {names}")
+        return grouped
+    return load_grouped_labber_data(
+        str(input_path), required_roles=JPA_AUTO_GROUPED_ROLES
+    )
+
+
 def _validate_jpa_auto_legacy_a_grouped_input(input_path: Path) -> None:
     if not input_path.is_file():
         raise FileNotFoundError(f"input file does not exist: {input_path}")
-    grouped = load_grouped_labber_data(
-        str(input_path),
-        required_roles=JPA_AUTO_GROUPED_ROLES,
-    )
+    grouped = _load_jpa_auto_legacy_a_grouped_input(input_path)
     for role in JPA_AUTO_GROUPED_ROLES:
         payload = grouped.roles[DatasetRole(role)]
         expected_unit = _JPA_AUTO_LEGACY_A_ROLE_UNITS[str(role)]
@@ -736,10 +817,7 @@ def _convert_jpa_auto_legacy_a_grouped(input_path: Path, output_path: Path) -> N
     project, user, creation_time) are preserved unchanged. The input file is
     read-only.
     """
-    grouped = load_grouped_labber_data(
-        str(input_path),
-        required_roles=JPA_AUTO_GROUPED_ROLES,
-    )
+    grouped = _load_jpa_auto_legacy_a_grouped_input(input_path)
     roles: dict[str, LabberPayload] = {}
     for role, payload in grouped.roles.items():
         if role == DatasetRole(JPA_AUTO_FLUX_ROLE):
@@ -1332,6 +1410,12 @@ def _npz_comment(data: NpzFile) -> str:
 
 CONVERTERS: dict[str, ConverterSpec] = {
     **SINGLE_FILE_CONVERTERS,
+    "grouped/v1": ConverterSpec(
+        convert=_convert_grouped_v1,
+        validate=_validate_grouped_v1_output,
+        input_paths=single_input_paths,
+        validate_input=_validate_grouped_v1_input,
+    ),
     "singleshot/ac_stark": ConverterSpec(
         convert=_convert_ac_stark_sidecars,
         validate=_validate_ac_stark_output,

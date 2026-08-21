@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 import pytest
-import zcu_tools.experiment.v2.twotone.time_domain.cpmg as cpmg_mod
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
     CPMG_GROUPED_ROLES,
     CPMG_LENGTHS_ROLE,
     CPMG_SIGNALS_ROLE,
     CPMG_Cfg,
     CPMG_Exp,
+    CPMG_ModuleCfg,
     CPMG_Result,
+    CPMG_SweepCfg,
     load_cpmg_grouped_result,
 )
+from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg
+from zcu_tools.program.v2.modules import ConstWaveformCfg
 from zcu_tools.utils.datasaver import DatasetRole, load_grouped_labber_data
 
 from script.migrate_experiment_data import main, migrate_experiment_data
@@ -38,21 +40,47 @@ def _sample_arrays() -> tuple[
     return times, lengths, signals
 
 
+def _pulse(*, ch: int, freq: float, gain: float) -> PulseCfg:
+    return PulseCfg(
+        waveform=ConstWaveformCfg(length=0.1),
+        ch=ch,
+        nqz=1,
+        freq=freq,
+        gain=gain,
+    )
+
+
+def _cfg() -> CPMG_Cfg:
+    return CPMG_Cfg(
+        reps=2,
+        rounds=3,
+        modules=CPMG_ModuleCfg(
+            reset=None,
+            pi2_pulse=_pulse(ch=1, freq=3000.0, gain=0.2),
+            pi_pulse=_pulse(ch=1, freq=3000.0, gain=0.4),
+            readout=DirectReadoutCfg(
+                ro_ch=0, ro_length=1.0, ro_freq=6000.0, trig_offset=0.1
+            ),
+        ),
+        sweep=CPMG_SweepCfg(times=[1, 2, 4]),
+        length_range=(0.1, 0.5),
+        length_expts=4,
+    )
+
+
 def _sample_result(*, with_cfg: bool = False) -> CPMG_Result:
     times, lengths, signals = _sample_arrays()
-    cfg = cast(CPMG_Cfg, object()) if with_cfg else None
-    return CPMG_Result(ns=times, delays=lengths, signals=signals, cfg_snapshot=cfg)
+    return CPMG_Result(
+        ns=times,
+        delays=lengths,
+        signals=signals,
+        cfg_snapshot=_cfg() if with_cfg else None,
+    )
 
 
 def test_cpmg_save_writes_one_grouped_hdf5_and_loads_roundtrip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        cpmg_mod,
-        "make_comment",
-        lambda _cfg, _comment: "stored comment",
-    )
-
     exp = CPMG_Exp()
     result = _sample_result(with_cfg=True)
     exp.save(str(tmp_path / "cpmg"), result=result, comment="ignored")
@@ -64,7 +92,7 @@ def test_cpmg_save_writes_one_grouped_hdf5_and_loads_roundtrip(
     assert list(tmp_path.glob("cpmg_signals*.hdf5")) == []
 
     grouped = load_grouped_labber_data(str(path), required_roles=CPMG_GROUPED_ROLES)
-    assert grouped.metadata.comment == "stored comment"
+    assert '"reps": 2' in grouped.metadata.comment
     assert grouped.metadata.tags == ["twotone/ge/cpmg"]
 
     lengths_payload = grouped.roles[DatasetRole(CPMG_LENGTHS_ROLE)]
@@ -82,8 +110,14 @@ def test_cpmg_save_writes_one_grouped_hdf5_and_loads_roundtrip(
 
     loaded = CPMG_Exp().load(str(path))
     assert np.array_equal(loaded.ns, result.ns)
+    assert loaded.ns.dtype == np.int64
     assert np.allclose(loaded.delays, result.delays)
+    assert loaded.delays.dtype == np.float64
     assert np.allclose(loaded.signals, result.signals)
+    assert loaded.signals.dtype == np.complex128
+    assert isinstance(loaded.cfg_snapshot, CPMG_Cfg)
+    assert loaded.cfg_snapshot.reps == 2
+    assert loaded.cfg_snapshot.length_expts == 4
 
 
 def test_cpmg_grouped_loader_rejects_incomplete_role_set(tmp_path: Path) -> None:

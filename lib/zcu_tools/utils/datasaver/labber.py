@@ -457,6 +457,45 @@ def _write_uniform_log_group(
     )
 
 
+def _write_uniform_multi_channel_log_group(
+    target: h5py.File | h5py.Group,
+    payloads: Sequence[LabberPayload],
+    metadata: LabberMetadata,
+    *,
+    log_name: str,
+    creation_time: float,
+) -> None:
+    """Write scalar payloads as parallel channels on one shared grid."""
+    if not payloads:
+        raise ValueError("at least one payload is required")
+
+    reference = payloads[0]
+    axis_list = [
+        (axis.name, axis.unit, np.asarray(axis.values, dtype=float).ravel())
+        for axis in reference.axes
+    ]
+    z_arrays = [np.asarray(payload.z, dtype=complex) for payload in payloads]
+    step_dims = np.array([axis[2].shape[0] for axis in axis_list], dtype=np.int64)
+    n_x = z_arrays[0].shape[-1]
+    n_entry = int(np.prod(step_dims[1:])) if len(step_dims) > 1 else 1
+    log_channels = [(payload.data.name, payload.data.unit) for payload in payloads]
+    t0, ts_rel = _resolve_timestamps(reference.timestamps, n_entry, creation_time)
+
+    _write_root_attrs(target, log_name, step_dims, metadata.comment, t0)
+    _write_config(target, axis_list, log_channels)
+    _write_tags(target, as_tag_list(metadata.tags), metadata.project, metadata.user)
+    _write_multi_channel_data_group(
+        target,
+        axis_list,
+        log_channels,
+        step_dims,
+        z_arrays,
+        n_entry,
+        n_x,
+        ts_rel,
+    )
+
+
 def _resolve_timestamps(timestamps, n_entry, creation_time: float | None = None):
     """Return ``(t0, ts_rel)`` for the file's Time stamp datasets.
 
@@ -840,53 +879,63 @@ def _write_tags(f, tags, project, user):
 
 
 def _write_data_group(f, axis_list, log_channels, step_dims, z, n_entry, n_x, ts_rel):
-    """Write Data/ group with complex log channel as the last two columns.
+    """Write ``Data/`` for one complex scalar log channel."""
+    _write_multi_channel_data_group(
+        f,
+        axis_list,
+        log_channels,
+        step_dims,
+        [z],
+        n_entry,
+        n_x,
+        ts_rel,
+    )
 
-    ``axis_list`` is inner-first: ``axis_list[0]`` is x, ``axis_list[1]`` is y,
-    ...  Each outer axis gets one column whose value at entry ``e`` is that
-    axis' coordinate for the entry.  Entries iterate with the first outer axis
-    (y) fastest -- matching Labber and ``z.reshape(n_entry, n_x)`` in C-order.
-    ``ts_rel`` holds per-entry timestamps relative to the file creation time.
-    """
+
+def _write_multi_channel_data_group(
+    f,
+    axis_list,
+    log_channels,
+    step_dims,
+    z_arrays,
+    n_entry,
+    n_x,
+    ts_rel,
+):
+    """Write scalar log channels sharing one inner-first step grid."""
+    if len(log_channels) != len(z_arrays):
+        raise ValueError("log channel count does not match data array count")
+
     g = f.create_group("Data")
-
-    # column layout: step channels (1 col each), then log channels (2 cols)
     names_info: list[tuple[str, str]] = [(name, "") for name, _u, _v in axis_list]
     for name, _u in log_channels:
-        names_info.append((name, "Real"))
-        names_info.append((name, "Imaginary"))
+        names_info.extend(((name, "Real"), (name, "Imaginary")))
     g.create_dataset(
         "Channel names", data=np.array(names_info, dtype=_DT_CHANNEL_NAMES)
     )
 
-    n_cols = len(names_info)
-    data = np.zeros((n_x, n_cols, n_entry), dtype=float)
-
-    # inner x axis (column 0): same for every entry
+    data = np.zeros((n_x, len(names_info), n_entry), dtype=float)
     data[:, 0, :] = axis_list[0][2][:, None]
 
-    # outer axes (columns 1..): coordinate per entry.
-    # z outer shape (C-order, slowest-first) is z.shape[:-1] == (Nw, ..., Ny);
-    # entry e = unravel over that shape, so y (z axis -2) varies fastest.
-    z_outer_shape = z.shape[:-1]  # (Nw, ..., Ny)
+    reference = z_arrays[0]
+    z_outer_shape = reference.shape[:-1]
     if z_outer_shape:
-        ent = np.arange(n_entry)
-        multi = np.unravel_index(ent, z_outer_shape)  # tuple, one per z-outer axis
-        # z-outer axis j (0=slowest=outermost) is step column (n_axes-1 - j).
+        multi = np.unravel_index(np.arange(n_entry), z_outer_shape)
         n_outer = len(z_outer_shape)
         for j in range(n_outer):
-            col = n_outer - j  # 1..n_outer (x is col 0)
-            coord = axis_list[col][2][multi[j]]  # (n_entry,)
+            col = n_outer - j
+            coord = axis_list[col][2][multi[j]]
             data[:, col, :] = coord[None, :]
 
-    # complex log channel -> last two columns
-    zf = z.reshape(n_entry, n_x)  # entries, y fastest
-    data[:, -2, :] = zf.real.T
-    data[:, -1, :] = zf.imag.T
+    first_log_col = len(axis_list)
+    for index, z in enumerate(z_arrays):
+        zf = z.reshape(n_entry, n_x)
+        col = first_log_col + 2 * index
+        data[:, col, :] = zf.real.T
+        data[:, col + 1, :] = zf.imag.T
 
     g.create_dataset("Data", data=data)
     g.create_dataset("Time stamp", data=np.asarray(ts_rel, dtype=float))
-
     g.attrs["Completed"] = True
     g.attrs["Step dimensions"] = step_dims
     g.attrs["Step index"] = np.arange(len(axis_list), dtype=np.int64)
@@ -1112,6 +1161,181 @@ def _read_single_log(f, log):
 
     ts_rel = _read_timestamps(log["Data"])
     return z, axes, ts_rel
+
+
+def _read_uniform_multi_channel_log(
+    f: h5py.File, log: h5py.File | h5py.Group
+) -> tuple[
+    dict[str, tuple[str, np.ndarray]],
+    list[tuple[str, str, np.ndarray]],
+    np.ndarray | None,
+]:
+    """Read one scalar multi-channel log with strict Labber bookkeeping."""
+    if "Traces" in log:
+        raise ValueError("grouped v2 does not support vector or trace log channels")
+
+    source = log if "Log list" in log else f
+    log_list = source.get("Log list")
+    if not isinstance(log_list, h5py.Dataset):
+        raise ValueError("grouped v2 log is missing Log list")
+    channel_names = [_decode(row["channel_name"]) or "" for row in log_list[()]]
+    if not channel_names or any(not name for name in channel_names):
+        raise ValueError("grouped v2 log channels must have non-empty labels")
+    if len(set(channel_names)) != len(channel_names):
+        raise ValueError("grouped v2 log channel labels must be unique")
+
+    channel_source = log if "Channels" in log else f
+    channels_dataset = channel_source.get("Channels")
+    if not isinstance(channels_dataset, h5py.Dataset):
+        raise ValueError("grouped v2 log is missing Channels")
+    configured_channels = [
+        _decode(row["name"]) or ""
+        for row in channels_dataset[()]
+        if _decode(row["instrument"]) == _INSTR_LOG
+    ]
+    if configured_channels != channel_names:
+        raise ValueError("grouped v2 Labber channel bookkeeping is inconsistent")
+
+    instrument_config = source.get("Instrument config")
+    if not isinstance(instrument_config, h5py.Group):
+        raise ValueError("grouped v2 log is missing Instrument config")
+    log_instrument = instrument_config.get(_INSTR_LOG)
+    if not isinstance(log_instrument, h5py.Group):
+        raise ValueError("grouped v2 log is missing log-channel instrument config")
+    configured_defaults = [
+        name
+        for name in log_instrument.attrs
+        if isinstance(name, str)
+        and name != "Installed options"
+        and not name.startswith("___")
+    ]
+    if set(configured_defaults) != set(channel_names):
+        raise ValueError("grouped v2 Labber channel bookkeeping is inconsistent")
+
+    data_group = log.get("Data")
+    if not isinstance(data_group, h5py.Group):
+        raise ValueError("grouped v2 log is missing Data group")
+    data_dataset = data_group.get("Data")
+    channel_names_dataset = data_group.get("Channel names")
+    if not isinstance(data_dataset, h5py.Dataset) or not isinstance(
+        channel_names_dataset, h5py.Dataset
+    ):
+        raise ValueError("grouped v2 Data group is incomplete")
+    data = np.asarray(data_dataset[()])
+    n_x, n_col, n_entry = data.shape
+    columns = [
+        (_decode(name) or "", _decode(info) or "")
+        for name, info in channel_names_dataset[()]
+    ]
+    n_axes = n_col - 2 * len(channel_names)
+    if n_axes < 1:
+        raise ValueError("grouped v2 requires at least one step axis")
+    expected_log_columns = [
+        item for name in channel_names for item in ((name, "Real"), (name, "Imaginary"))
+    ]
+    if columns[n_axes:] != expected_log_columns:
+        raise ValueError("grouped v2 data columns do not match declared log channels")
+    if any(info for _name, info in columns[:n_axes]):
+        raise ValueError("grouped v2 step-channel columns have invalid bookkeeping")
+
+    step_dims = _read_strict_v2_step_dimensions(
+        log, data_group, n_x=n_x, n_entry=n_entry, n_axes=n_axes
+    )
+    step_names = [name for name, _info in columns[:n_axes]]
+    configured_steps = [
+        _decode(row["name"]) or ""
+        for row in channels_dataset[()]
+        if _decode(row["instrument"]) == _INSTR_STEP
+    ]
+    step_list = source.get("Step list")
+    step_config = source.get("Step config")
+    step_instrument = instrument_config.get(_INSTR_STEP)
+    if (
+        configured_steps != step_names
+        or not isinstance(step_list, h5py.Dataset)
+        or [_decode(row["channel_name"]) or "" for row in step_list[()]] != step_names
+        or not isinstance(step_config, h5py.Group)
+        or set(step_config) != set(step_names)
+        or not isinstance(step_instrument, h5py.Group)
+        or {
+            name
+            for name in step_instrument.attrs
+            if isinstance(name, str) and name != "Installed options"
+        }
+        != set(step_names)
+    ):
+        raise ValueError("grouped v2 step-channel bookkeeping is inconsistent")
+
+    units = _channel_units(f, log)
+    axes: list[tuple[str, str, np.ndarray]] = []
+    for k in range(n_axes):
+        name = columns[k][0]
+        if k == 0:
+            values = data[:, 0, 0]
+        else:
+            stride = int(np.prod(step_dims[1:k])) if k > 1 else 1
+            indices = (np.arange(n_entry) // stride) % step_dims[k]
+            values = np.array(
+                [data[0, k, np.argmax(indices == j)] for j in range(step_dims[k])]
+            )
+        axes.append((name, units.get(name, ""), np.asarray(values)))
+
+    expected_steps = np.zeros((n_x, n_axes, n_entry), dtype=float)
+    expected_steps[:, 0, :] = axes[0][2][:, None]
+    outer_shape = tuple(step_dims[1:][::-1])
+    if outer_shape:
+        multi = np.unravel_index(np.arange(n_entry), outer_shape)
+        n_outer = len(outer_shape)
+        for j in range(n_outer):
+            col = n_outer - j
+            expected_steps[:, col, :] = axes[col][2][multi[j]][None, :]
+    if not np.array_equal(data[:, :n_axes, :], expected_steps, equal_nan=True):
+        raise ValueError("grouped v2 step-coordinate columns do not match the grid")
+
+    values_by_channel: dict[str, tuple[str, np.ndarray]] = {}
+    for index, name in enumerate(channel_names):
+        col = n_axes + 2 * index
+        flat = (data[:, col, :] + 1j * data[:, col + 1, :]).T
+        values = flat.reshape(outer_shape + (n_x,))
+        if not outer_shape:
+            values = values.reshape(n_x)
+        values_by_channel[name] = (units.get(name, ""), values)
+
+    return values_by_channel, axes, _read_timestamps(data_group)
+
+
+def _read_strict_v2_step_dimensions(
+    log: h5py.File | h5py.Group,
+    data_group: h5py.Group,
+    *,
+    n_x: int,
+    n_entry: int,
+    n_axes: int,
+) -> list[int]:
+    root_raw = log.attrs.get("Step dimensions")
+    data_raw = data_group.attrs.get("Step dimensions")
+    if root_raw is None or data_raw is None:
+        raise ValueError("grouped v2 is missing Step dimensions")
+    root_values = np.asarray(root_raw)
+    data_values = np.asarray(data_raw)
+    try:
+        root_dims = root_values.astype(np.int64)
+        data_dims = data_values.astype(np.int64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("grouped v2 has invalid Step dimensions") from exc
+    if (
+        root_values.ndim != 1
+        or data_values.ndim != 1
+        or len(root_dims) != n_axes
+        or not np.array_equal(root_values, root_dims)
+        or not np.array_equal(data_values, data_dims)
+        or not np.array_equal(root_dims, data_dims)
+        or np.any(root_dims <= 0)
+        or int(root_dims[0]) != n_x
+        or int(np.prod(root_dims[1:])) != n_entry
+    ):
+        raise ValueError("grouped v2 has inconsistent Step dimensions")
+    return [int(value) for value in root_dims]
 
 
 def _read_trace_log(f, log, z_name):

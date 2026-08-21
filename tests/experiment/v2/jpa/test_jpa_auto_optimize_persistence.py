@@ -48,12 +48,11 @@ def _sample_result(*, with_cfg: bool = False) -> JPAOptimizeResult:
     )
     phases = np.array([0, 1, 2, 3], dtype=np.int32)
     signals = np.array([2.0, 4.5, 6.0, 5.25], dtype=np.float64)
-    cfg = cast(JPAOptCfg, object()) if with_cfg else None
     return JPAOptimizeResult(
         params=params,
         phases=phases,
         signals=signals,
-        cfg_snapshot=cfg,
+        cfg_snapshot=_jpa_opt_cfg_for_comment() if with_cfg else None,
     )
 
 
@@ -115,10 +114,8 @@ def _write_legacy_jpa_sidecars(
 
 
 def test_jpa_auto_save_writes_one_grouped_hdf5_and_loads_roundtrip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(jpa_mod, "make_comment", lambda _cfg, _comment: "stored")
-
     result = _sample_result(with_cfg=True)
     AutoOptimizeExp().save(str(tmp_path / "jpa_auto"), result=result)
 
@@ -129,7 +126,7 @@ def test_jpa_auto_save_writes_one_grouped_hdf5_and_loads_roundtrip(
     assert list(tmp_path.glob("jpa_auto*_signals*.hdf5")) == []
 
     grouped = load_grouped_labber_data(str(path), required_roles=JPA_AUTO_GROUPED_ROLES)
-    assert grouped.metadata.comment == "stored"
+    assert '"rounds": 2' in grouped.metadata.comment
     assert grouped.metadata.tags == ["jpa/auto_optimize"]
     assert list(grouped.roles) == [DatasetRole(role) for role in JPA_AUTO_GROUPED_ROLES]
 
@@ -164,9 +161,14 @@ def test_jpa_auto_save_writes_one_grouped_hdf5_and_loads_roundtrip(
 
     loaded = AutoOptimizeExp().load(str(path))
     assert np.allclose(loaded.params, result.params)
+    assert loaded.params.dtype == np.float64
     assert np.array_equal(loaded.phases, result.phases)
     assert loaded.phases.dtype == np.int32
     assert np.allclose(loaded.signals, result.signals)
+    assert loaded.signals.dtype == np.float64
+    assert isinstance(loaded.cfg_snapshot, JPAOptCfg)
+    assert loaded.cfg_snapshot.rounds == 2
+    assert loaded.cfg_snapshot.sweep.jpa_freq.stop == 7240.0
 
 
 def test_jpa_auto_save_fast_fails_without_cfg_snapshot(tmp_path: Path) -> None:
@@ -218,7 +220,10 @@ def test_jpa_auto_grouped_loader_rejects_incomplete_or_wrong_role_set(
 
     save_grouped_labber_data(
         str(tmp_path / "wrong"),
-        {role: payload for role in (*JPA_AUTO_GROUPED_ROLES, "unexpected_role")},
+        {
+            role: LabberPayload((f"Channel {index}", "a.u.", np.ones(2)), axes=axis)
+            for index, role in enumerate((*JPA_AUTO_GROUPED_ROLES, "unexpected_role"))
+        },
     )
     with pytest.raises(ValueError, match="unknown dataset role"):
         load_jpa_auto_grouped_result(str(tmp_path / "wrong.hdf5"))

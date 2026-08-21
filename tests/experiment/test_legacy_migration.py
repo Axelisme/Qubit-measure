@@ -238,6 +238,7 @@ _SIDECAR_INPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
 }
 
 _SINGLE_FILE_EXPERIMENTS = {
+    "grouped/v1",
     "onetone/freq",
     "onetone/flux_dep",
     "twotone/freq",

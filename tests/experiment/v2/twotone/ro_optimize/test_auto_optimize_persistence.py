@@ -14,9 +14,13 @@ from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
     RO_AUTO_SNR_ROLE,
     AutoOptCfg,
     AutoOptExp,
+    AutoOptModuleCfg,
     AutoOptResult,
+    AutoOptSweepCfg,
     load_auto_opt_grouped_result,
 )
+from zcu_tools.program.v2 import DirectReadoutCfg, PulseCfg, SweepCfg
+from zcu_tools.program.v2.modules import ConstWaveformCfg
 from zcu_tools.utils.datasaver import (
     DatasetRole,
     LabberPayload,
@@ -26,6 +30,36 @@ from zcu_tools.utils.datasaver import (
 )
 
 from script.migrate_experiment_data import migrate_experiment_data
+
+
+def _pulse(*, ch: int, freq: float, gain: float) -> PulseCfg:
+    return PulseCfg(
+        waveform=ConstWaveformCfg(length=0.1),
+        ch=ch,
+        nqz=1,
+        freq=freq,
+        gain=gain,
+    )
+
+
+def _cfg() -> AutoOptCfg:
+    return AutoOptCfg(
+        reps=2,
+        rounds=3,
+        modules=AutoOptModuleCfg(
+            reset=None,
+            qub_pulse=_pulse(ch=1, freq=3000.0, gain=0.3),
+            readout=DirectReadoutCfg(
+                ro_ch=0, ro_length=1.0, ro_freq=6000.0, trig_offset=0.1
+            ),
+        ),
+        sweep=AutoOptSweepCfg(
+            freq=SweepCfg(start=6100.0, stop=6200.0, expts=3, step=50.0),
+            gain=SweepCfg(start=0.1, stop=0.5, expts=3, step=0.2),
+            length=SweepCfg(start=0.8, stop=1.6, expts=3, step=0.4),
+        ),
+        skew_penalty=0.25,
+    )
 
 
 def _sample_result(*, with_cfg: bool = False) -> AutoOptResult:
@@ -39,8 +73,11 @@ def _sample_result(*, with_cfg: bool = False) -> AutoOptResult:
         dtype=np.float64,
     )
     signals = np.array([3.0, 5.5, 4.0, 7.25], dtype=np.float64)
-    cfg = cast(AutoOptCfg, object()) if with_cfg else None
-    return AutoOptResult(params=params, signals=signals, cfg_snapshot=cfg)
+    return AutoOptResult(
+        params=params,
+        signals=signals,
+        cfg_snapshot=_cfg() if with_cfg else None,
+    )
 
 
 def _sidecar_base(base: Path, suffix: str, *, numbered: bool = False) -> Path:
@@ -90,10 +127,8 @@ def _write_legacy_ro_sidecars(
 
 
 def test_ro_auto_save_writes_one_grouped_hdf5_and_loads_roundtrip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(ro_mod, "make_comment", lambda _cfg, _comment: "stored")
-
     result = _sample_result(with_cfg=True)
     AutoOptExp().save(str(tmp_path / "ro_auto"), result=result, comment="ignored")
 
@@ -103,7 +138,7 @@ def test_ro_auto_save_writes_one_grouped_hdf5_and_loads_roundtrip(
     assert list(tmp_path.glob("ro_auto*_signals*.hdf5")) == []
 
     grouped = load_grouped_labber_data(str(path), required_roles=RO_AUTO_GROUPED_ROLES)
-    assert grouped.metadata.comment == "stored"
+    assert '"skew_penalty": 0.25' in grouped.metadata.comment
     assert grouped.metadata.tags == ["twotone/ge/ro_optimize/auto"]
     assert list(grouped.roles) == [DatasetRole(role) for role in RO_AUTO_GROUPED_ROLES]
 
@@ -134,7 +169,12 @@ def test_ro_auto_save_writes_one_grouped_hdf5_and_loads_roundtrip(
 
     loaded = AutoOptExp().load(str(path))
     assert np.allclose(loaded.params, result.params)
+    assert loaded.params.dtype == np.float64
     assert np.allclose(loaded.signals, result.signals)
+    assert loaded.signals.dtype == np.float64
+    assert isinstance(loaded.cfg_snapshot, AutoOptCfg)
+    assert loaded.cfg_snapshot.rounds == 3
+    assert loaded.cfg_snapshot.skew_penalty == 0.25
 
 
 def test_ro_auto_save_fast_fails_without_cfg_snapshot(tmp_path: Path) -> None:
@@ -178,7 +218,10 @@ def test_ro_auto_grouped_loader_rejects_incomplete_or_wrong_role_set(
 
     save_grouped_labber_data(
         str(tmp_path / "wrong"),
-        {role: payload for role in (*RO_AUTO_GROUPED_ROLES, "unexpected_role")},
+        {
+            role: LabberPayload((f"Channel {index}", "a.u.", np.ones(2)), axes=axis)
+            for index, role in enumerate((*RO_AUTO_GROUPED_ROLES, "unexpected_role"))
+        },
     )
     with pytest.raises(ValueError, match="unknown dataset role"):
         load_auto_opt_grouped_result(str(tmp_path / "wrong.hdf5"))
