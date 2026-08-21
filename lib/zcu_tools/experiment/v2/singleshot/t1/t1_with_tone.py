@@ -22,6 +22,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -210,7 +211,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                     )
                 )
             populations = buffer.array
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = T1WithToneResult(
             lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
@@ -296,7 +297,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                             ge_radius=radius,
                         )
             populations = _average_rounds(round_buffer.array)
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = T1WithToneResult(
             lengths=lengths, signals=populations, cfg_snapshot=orig_cfg

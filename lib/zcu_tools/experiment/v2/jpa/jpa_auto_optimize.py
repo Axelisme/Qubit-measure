@@ -35,8 +35,8 @@ from zcu_tools.experiment.utils import (
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot
-from zcu_tools.liveplot.backend.jupyter import instant_plot
+from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -385,7 +385,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     )
                 signals = signals_buffer.array
 
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = JPAOptimizeResult(
             params=params, phases=phases, signals=signals, cfg_snapshot=orig_cfg

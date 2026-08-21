@@ -30,6 +30,7 @@ from zcu_tools.experiment.v2.singleshot.util import (
 )
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -244,7 +245,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                         )
                     )
             signals = buffer.array
-        plt.close(fig)
+        close_figure(fig)
 
         # Cache results
         self.last_result = AcStarkResult(

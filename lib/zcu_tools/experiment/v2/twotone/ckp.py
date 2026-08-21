@@ -25,6 +25,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     Join,
@@ -221,7 +222,7 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
                     )
                 )
                 signals = signals_buffer.array
-        plt.close(fig)
+        close_figure(fig)
 
         return CKP_Result(
             res_freqs=res_freqs,

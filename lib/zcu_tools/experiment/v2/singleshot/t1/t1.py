@@ -22,6 +22,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
@@ -197,7 +198,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                     )
                 )
             populations = buffer.array
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = T1Result(
             lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
@@ -279,7 +280,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                     )
                 )
             populations = buffer.array
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = T1Result(
             lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
