@@ -63,6 +63,11 @@ from zcu_tools.experiment.v2.lookback import (
     LookbackModuleCfg,
 )
 from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Exp, GEModuleCfg
+from zcu_tools.experiment.v2.singleshot.t1 import t1 as singleshot_t1
+from zcu_tools.experiment.v2.singleshot.t1 import t1_with_tone as singleshot_t1_tone
+from zcu_tools.experiment.v2.singleshot.t1 import (
+    t1_with_tone_sweep as singleshot_t1_tone_sweep,
+)
 from zcu_tools.experiment.v2.twotone.freq import (
     FreqCfg,
     FreqExp,
@@ -87,7 +92,6 @@ from zcu_tools.experiment.v2.twotone.time_domain.t1 import (
     T1ModuleCfg,
     T1SweepCfg,
 )
-from zcu_tools.experiment.v2.twotone.time_domain.t1_axis import t1_delay_axis
 from zcu_tools.experiment.v2.twotone.time_domain.t2echo import (
     T2EchoCfg,
     T2EchoExp,
@@ -100,7 +104,7 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
     T2RamseyModuleCfg,
     T2RamseySweepCfg,
 )
-from zcu_tools.experiment.v2.utils import sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array, t1_delay_axis
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -424,6 +428,216 @@ def test_t1_nonuniform_preserves_direct_delay_list() -> None:
     np.testing.assert_array_equal(result.times, expected_times)
     assert result.signals.shape == expected_times.shape
     assert np.all(np.diff(result.times) > 0.0)
+
+
+def _singleshot_pi_pulse() -> PulseCfg:
+    return PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=_f_qubit_mhz(),
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=_SIM.pi_gain_len),
+    )
+
+
+def _singleshot_tone_pulse() -> PulseCfg:
+    return PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.05,
+        freq=_f_qubit_mhz(),
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    )
+
+
+def _singleshot_t1_cfg(
+    length: SweepCfg | list[float],
+) -> singleshot_t1.T1Cfg:
+    return singleshot_t1.T1Cfg(
+        reps=20,
+        rounds=1,
+        modules=singleshot_t1.T1ModuleCfg(
+            reset=None,
+            pi_pulse=_singleshot_pi_pulse(),
+            readout=_ge_readout(),
+        ),
+        sweep=singleshot_t1.T1SweepCfg(length=length),
+        relax_delay=_RESET_RELAX_DELAY,
+    )
+
+
+def _singleshot_t1_tone_cfg(
+    length: SweepCfg | list[float],
+) -> singleshot_t1_tone.T1WithToneCfg:
+    return singleshot_t1_tone.T1WithToneCfg(
+        reps=20,
+        rounds=1,
+        modules=singleshot_t1_tone.T1WithToneModuleCfg(
+            reset=None,
+            init_pulse=None,
+            pi_pulse=_singleshot_pi_pulse(),
+            probe_pulse=_singleshot_tone_pulse(),
+            readout=_ge_readout(),
+        ),
+        sweep=singleshot_t1_tone.T1WithToneSweepCfg(length=length),
+        relax_delay=_RESET_RELAX_DELAY,
+    )
+
+
+def _singleshot_t1_tone_sweep_cfg(
+    length: SweepCfg | list[float],
+) -> singleshot_t1_tone_sweep.T1WithToneSweepCfg:
+    return singleshot_t1_tone_sweep.T1WithToneSweepCfg(
+        reps=20,
+        rounds=1,
+        modules=singleshot_t1_tone_sweep.T1WithToneSweepModuleCfg(
+            reset=None,
+            pi_pulse=_singleshot_pi_pulse(),
+            probe_pulse=_singleshot_tone_pulse(),
+            readout=_ge_readout(),
+        ),
+        sweep=singleshot_t1_tone_sweep.T1WithToneSweepSweepCfg(
+            length=length,
+            gain=SweepCfg(start=0.05, stop=0.1, expts=2, step=0.05),
+        ),
+        relax_delay=_RESET_RELAX_DELAY,
+    )
+
+
+def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
+    cfg = _singleshot_t1_cfg(length_sweep)
+    g_center, e_center = _expected_ge_centers()
+
+    result = singleshot_t1.T1Exp().run(
+        soc,
+        soccfg,
+        cfg,
+        g_center,
+        e_center,
+        0.4 * abs(g_center - e_center),
+        uniform=False,
+    )
+
+    ideal_times = t1_delay_axis(
+        start=length_sweep.start,
+        stop=length_sweep.stop,
+        expts=length_sweep.expts,
+        uniform=False,
+        model_t1=0.2 * length_sweep.stop,
+    )
+    expected_times = _quantized_times(soccfg, ideal_times)
+    np.testing.assert_array_equal(result.lengths, expected_times)
+    assert len(result.lengths) == length_sweep.expts
+    assert result.signals.shape == (length_sweep.expts, 2, 2)
+
+
+def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _singleshot_t1_cfg([0.0, 0.0001, 1.0])
+    g_center, e_center = _expected_ge_centers()
+
+    with pytest.raises(
+        ValueError,
+        match="delay sweep collapsed after cycle quantization",
+    ):
+        singleshot_t1.T1Exp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            0.4 * abs(g_center - e_center),
+            uniform=False,
+        )
+
+
+@pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
+def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.0, stop=8.0, expts=6, step=1.6)
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    if variant == "tone":
+        cfg = _singleshot_t1_tone_cfg(length_sweep)
+        result = singleshot_t1_tone.T1WithToneExp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            radius,
+            uniform=False,
+        )
+        expected_signal_shape = (length_sweep.expts, 2, 2)
+    else:
+        cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
+        result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            radius,
+            uniform=False,
+        )
+        expected_signal_shape = (2, 2, length_sweep.expts, 2)
+
+    ideal_times = t1_delay_axis(
+        start=length_sweep.start,
+        stop=length_sweep.stop,
+        expts=length_sweep.expts,
+        uniform=False,
+        model_t1=0.2 * length_sweep.stop,
+    )
+    expected_times = sweep2array(
+        ideal_times,
+        "time",
+        {"soccfg": soccfg, "gen_ch": cfg.modules.probe_pulse.ch},
+        allow_array=True,
+    )
+    np.testing.assert_array_equal(result.lengths, expected_times)
+    assert len(result.lengths) == length_sweep.expts
+    assert result.signals.shape == expected_signal_shape
+
+
+@pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
+def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
+    variant: str,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    direct_times = [0.008, 0.009, 1.0]
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    with pytest.raises(
+        ValueError,
+        match="delay sweep collapsed after cycle quantization",
+    ):
+        if variant == "tone":
+            singleshot_t1_tone.T1WithToneExp().run(
+                soc,
+                soccfg,
+                _singleshot_t1_tone_cfg(direct_times),
+                g_center,
+                e_center,
+                radius,
+                uniform=False,
+            )
+        else:
+            singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+                soc,
+                soccfg,
+                _singleshot_t1_tone_sweep_cfg(direct_times),
+                g_center,
+                e_center,
+                radius,
+                uniform=False,
+            )
 
 
 # --------------------------------------------------------------- T2 Ramsey / echo runners

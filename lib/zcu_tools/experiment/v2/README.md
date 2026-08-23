@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-08-21 — grouped Labber v2 common grid
+**Last updated:** 2026-08-23 — shared non-uniform T1 sampling
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -141,10 +141,13 @@ circle 參數產生非等距 frequency array，再把 gen/readout raw frequency 
 位置與 QICK native `QickParam` sweep 一致。非等距模式仍先把點 round 到硬體格點，並在
 相鄰點 collapse 時 fast-fail。
 
-`twotone/time_domain/t1` 的 non-uniform mode 在硬體量化前沿 normalized T1 decay curve
-等弧長配置 delay，保留 configured window 與 point count。共同 cycle conversion 保留輸入
-順序與點數；任何 collision 或非嚴格遞增都 fast-fail，不以 sorting、`unique` 或自動減點
-掩蓋。Direct delay list 走相同 conversion contract，但不重新採樣。
+`utils/t1_sampling.py` 擁有 T1 family 的 non-uniform sampling contract，供
+`twotone/time_domain/t1` 與 singleshot `t1`、`t1_with_tone`、`t1_with_tone_sweep` 共用：
+在硬體量化前沿 normalized T1 decay curve 等弧長配置 delay，保留 configured window 與 point
+count。各路徑依 delay 或 probe-pulse 所屬的硬體 grid 量化；任何 collision 或非嚴格遞增都
+fast-fail，不以 sorting、`unique` 或自動減點掩蓋。Direct delay list 走相同 conversion
+contract，但不重新採樣。Tone variants 的 zero-length 點略過 probe pulse，避免建立硬體不
+接受的 zero-cycle pulse。
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 

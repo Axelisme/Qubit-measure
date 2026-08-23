@@ -3,8 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from scipy.integrate import quad
-from zcu_tools.experiment.v2.twotone.time_domain.t1 import quantize_t1_delays
-from zcu_tools.experiment.v2.twotone.time_domain.t1_axis import t1_delay_axis
+from zcu_tools.experiment.v2.utils import (
+    materialize_nonuniform_t1_delays,
+    t1_delay_axis,
+)
 
 
 def _arc_target_residuals(
@@ -152,10 +154,12 @@ class _CycleConfig:
 def test_delay_quantization_preserves_count_and_order(
     delays: list[float] | np.ndarray,
 ) -> None:
-    cycles, quantized = quantize_t1_delays(_CycleConfig(), delays)
+    table = materialize_nonuniform_t1_delays(delays, soccfg=_CycleConfig())
 
-    np.testing.assert_array_equal(cycles, np.asarray([0, 1, 3, 5], dtype=np.int32))
-    np.testing.assert_array_equal(quantized, np.asarray([0.0, 0.1, 0.3, 0.5]))
+    np.testing.assert_array_equal(
+        table.cycles, np.asarray([0, 1, 3, 5], dtype=np.int32)
+    )
+    np.testing.assert_array_equal(table.times_us, np.asarray([0.0, 0.1, 0.3, 0.5]))
 
 
 def test_generated_axis_collision_is_not_silently_deduplicated() -> None:
@@ -170,7 +174,7 @@ def test_generated_axis_collision_is_not_silently_deduplicated() -> None:
     with pytest.raises(
         ValueError, match="delay sweep collapsed after cycle quantization"
     ):
-        quantize_t1_delays(_CycleConfig(), generated)
+        materialize_nonuniform_t1_delays(generated, soccfg=_CycleConfig())
 
 
 @pytest.mark.parametrize(
@@ -184,7 +188,7 @@ def test_direct_delay_quantization_rejects_collisions_or_reordering(
     delays: list[float],
 ) -> None:
     with pytest.raises(ValueError) as exc_info:
-        quantize_t1_delays(_CycleConfig(), delays)
+        materialize_nonuniform_t1_delays(delays, soccfg=_CycleConfig())
 
     message = str(exc_info.value)
     assert "delay sweep collapsed after cycle quantization" in message

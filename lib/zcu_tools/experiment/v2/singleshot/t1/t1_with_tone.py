@@ -20,7 +20,10 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils import sweep2array
+from zcu_tools.experiment.v2.utils import (
+    materialize_nonuniform_t1_pulse_lengths,
+    sweep2array,
+)
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
@@ -232,24 +235,11 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        length_sweep = cfg.sweep.length
-
-        if isinstance(length_sweep, SweepCfg):
-            lengths = np.geomspace(
-                length_sweep.start,
-                length_sweep.stop,
-                length_sweep.expts,
-                dtype=np.float64,
-            )
-        else:
-            lengths = np.asarray(length_sweep, dtype=np.float64)
-        lengths = sweep2array(
-            lengths,
-            "time",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
-            allow_array=True,
+        lengths = materialize_nonuniform_t1_pulse_lengths(
+            cfg.sweep.length,
+            soccfg=soccfg,
+            gen_ch=modules.probe_pulse.ch,
         )
-        lengths = np.unique(lengths)
 
         fig, viewer = self._make_viewer_ctx()
 
@@ -283,9 +273,14 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                             Reset("reset", modules.reset),
                             Pulse("init_pulse", modules.init_pulse),
                             Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                            Pulse("probe_pulse", modules.probe_pulse),
-                            Readout("readout", modules.readout),
                         )
+                        if length > 0.0:
+                            builder = builder.add(
+                                Pulse("probe_pulse", modules.probe_pulse)
+                            )
+                        builder = builder.add(
+                            Readout("readout", modules.readout)
+                        ).declare_sweep("ge", 2)
                         length_key = float(length)
                         if length_key not in programs:
                             programs[length_key] = builder.build()

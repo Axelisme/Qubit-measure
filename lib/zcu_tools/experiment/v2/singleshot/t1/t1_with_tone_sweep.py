@@ -27,7 +27,10 @@ from zcu_tools.experiment.v2.singleshot.util import (
     correct_populations,
     raw_population_signal,
 )
-from zcu_tools.experiment.v2.utils import sweep2array
+from zcu_tools.experiment.v2.utils import (
+    materialize_nonuniform_t1_pulse_lengths,
+    sweep2array,
+)
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
@@ -58,14 +61,16 @@ def _default_population_states() -> NDArray[np.int64]:
 def _average_non_uniform_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
     values = np.asarray(data)
     valid = np.any(~np.isnan(values), axis=(3, 4))
-    completed = np.any(valid, axis=(1, 2))
+    completed = np.any(valid, axis=1)
     averaged = np.full(
         (values.shape[0], values.shape[2], values.shape[3], values.shape[4]),
         np.nan,
         dtype=np.float64,
     )
-    for idx in np.where(completed)[0]:
-        averaged[idx] = np.nanmean(values[idx], axis=0)
+    for value_idx, length_idx in np.argwhere(completed):
+        averaged[value_idx, length_idx] = np.nanmean(
+            values[value_idx, :, length_idx], axis=0
+        )
     return np.transpose(averaged, (0, 2, 1, 3))
 
 
@@ -132,16 +137,17 @@ class T1WithToneSweepExp(
     ) -> tuple[str, NDArray[np.float64]]:
         modules = cfg.modules
         sweep_dict = cfg.sweep.model_dump(exclude_none=True)
-        sweep_keys = [k for k in sweep_dict if k != "length"]
+        sweep_keys = [name for name in sweep_dict if name != "length"]
         if len(sweep_keys) != 1:
             raise ValueError(
                 f"Expected exactly one sweep key besides 'length', got {sweep_keys!r}"
             )
         sweep_name = sweep_keys[0]
-        if sweep_name not in ["gain", "freq"]:
+        if sweep_name not in ("gain", "freq"):
             raise ValueError(f"Unsupported sweep key: {sweep_name}")
-
         x_sweep = sweep_dict[sweep_name]
+        if isinstance(x_sweep, dict):
+            x_sweep = SweepCfg.model_validate(x_sweep)
         xs = sweep2array(
             x_sweep,
             sweep_name,  # type: ignore
@@ -310,25 +316,12 @@ class T1WithToneSweepExp(
         setup_devices(cfg, progress=True)
         modules = cfg.modules
 
-        length_sweep = cfg.sweep.length
         sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
-
-        if isinstance(length_sweep, SweepCfg):
-            lengths = np.geomspace(
-                length_sweep.start,
-                length_sweep.stop,
-                length_sweep.expts,
-                dtype=np.float64,
-            )
-        else:
-            lengths = np.asarray(length_sweep, dtype=np.float64)
-        lengths = sweep2array(
-            lengths,
-            "time",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
-            allow_array=True,
+        lengths = materialize_nonuniform_t1_pulse_lengths(
+            cfg.sweep.length,
+            soccfg=soccfg,
+            gen_ch=modules.probe_pulse.ch,
         )
-        lengths = np.unique(lengths)
 
         fig, viewer = self._make_viewer_ctx(sweep_name)
 
@@ -377,17 +370,27 @@ class T1WithToneSweepExp(
                         for length, step in rep.scan("length", lengths.tolist()):
                             modules = step.cfg.modules
                             modules.probe_pulse.set_param("length", length)
-                            builder = step.prog_builder(soc, soccfg).add(
-                                Reset("reset", modules.reset),
-                                Branch(
+                            if length > 0.0:
+                                ge_branch = Branch(
                                     "ge",
                                     Pulse("probe_pulse_g", modules.probe_pulse),
                                     [
                                         Pulse("pi_pulse", modules.pi_pulse),
                                         Pulse("probe_pulse", modules.probe_pulse),
                                     ],
-                                ),
-                                Readout("readout", modules.readout),
+                                )
+                            else:
+                                ge_branch = Branch(
+                                    "ge", [], Pulse("pi_pulse", modules.pi_pulse)
+                                )
+                            builder = (
+                                step.prog_builder(soc, soccfg)
+                                .add(
+                                    Reset("reset", modules.reset),
+                                    ge_branch,
+                                    Readout("readout", modules.readout),
+                                )
+                                .declare_sweep("ge", 2)
                             )
                             cache_key = (float(value), float(length))
                             if cache_key not in programs:
