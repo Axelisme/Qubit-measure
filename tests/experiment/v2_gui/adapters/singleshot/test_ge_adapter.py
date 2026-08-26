@@ -8,12 +8,11 @@ import pytest
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
-from zcu_tools.experiment.v2.singleshot.ge import GE_Result
+from zcu_tools.experiment.v2.singleshot.ge import GE_Result, GEConfusionResult
 from zcu_tools.experiment.v2_gui.adapters.singleshot import GEAdapter
 from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
     GEAnalyzeResult,
     GEPostAnalyzeParams,
-    GEPostAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -175,18 +174,27 @@ def _patched_analyze(
         init_pops: Any,
         g_center: Any,
         e_center: Any,
+        sigma: float,
         radius: Any = None,
         result: Any = None,
         consider_other: bool = True,
-    ) -> Any:
+    ) -> GEConfusionResult:
         del self, g_center, e_center, result
-        # The adapter must forward the fit's populations as init_pops, let the
-        # domain optimise the radius (None), and mirror the notebook's
+        # The adapter must forward the fit's populations and fitted sigma, let
+        # the domain optimise the radius (None), and mirror the notebook's
         # consider_other=False.
         assert np.allclose(init_pops, pops)
+        assert sigma == pytest.approx(0.3)
         assert radius is None
         assert consider_other is False
-        return confusion, 0.42, Figure()
+        return GEConfusionResult(
+            radius=0.42,
+            matrix=confusion,
+            init_matrix=np.eye(3),
+            g_classification=(0.9, 0.1, 0.0),
+            e_classification=(0.1, 0.9, 0.0),
+            condition_number=1.0,
+        )
 
     monkeypatch.setattr(GE_Exp, "analyze", fake_analyze, raising=True)
     monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fake_confusion, raising=True)
@@ -211,6 +219,7 @@ def test_ge_analyze_maps_fit_result(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out.g_center == -1.0 + 0j
     assert out.e_center == 1.0 + 0j
     assert out.ge_radius == pytest.approx(0.42)
+    assert out.init_pops == [[0.9, 0.1], [0.1, 0.9]]
     # confusion comes back as a JSON-safe nested list (domain returns ndarray).
     assert out.confusion == [
         [0.95, 0.03, 0.02],
@@ -228,101 +237,120 @@ def test_ge_analyze_maps_fit_result(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Post-analysis (multi-backend discrimination) — patches the domain fitter
-# (singleshot_ge_analysis) so only the adapter's param→domain→result mapping is
-# under test, mirroring the primary-analyze tests above.
+# Post-analysis renders a confusion diagnostic from the committed primary fit.
+# It re-runs only the radius/matrix calculation, never the GE fitter.
 # ---------------------------------------------------------------------------
 
 
-def _patch_domain_ge(
-    monkeypatch: pytest.MonkeyPatch,
-) -> dict[str, Any]:
-    """Patch the domain ``singleshot_ge_analysis`` the adapter calls; capture the
-    (angle, backend) the adapter forwards. Returns the capture dict."""
-    fig = Figure()
-    fit = _fake_fit_result()
-    captured: dict[str, Any] = {}
-
-    def fake_domain(
-        signals: Any, angle: Any = None, backend: str = "pca", **kwargs: Any
-    ) -> Any:
-        del signals, kwargs
-        captured["angle"] = angle
-        captured["backend"] = backend
-        return 0.93, np.zeros((2, 3)), fit, fig
-
-    monkeypatch.setattr(
-        "zcu_tools.experiment.v2_gui.adapters.singleshot.ge.singleshot_ge_analysis",
-        fake_domain,
-        raising=True,
+def _make_post_req() -> PostAnalyzeRequest[Any, GEAnalyzeResult, GEPostAnalyzeParams]:
+    analyze_result = GEAnalyzeResult(
+        fidelity=0.95,
+        theta=0.2,
+        threshold=0.0,
+        ge_s=0.3,
+        g_center=-1.0 + 0.0j,
+        e_center=1.0 + 0.0j,
+        init_pops=[[0.9, 0.1], [0.1, 0.9]],
+        ge_radius=0.42,
+        confusion=[[0.95, 0.05, 0.0], [0.05, 0.95, 0.0], [0.0, 0.0, 1.0]],
+        figure=Figure(),
     )
-    return captured
-
-
-def _make_post_req(
-    params: GEPostAnalyzeParams,
-) -> PostAnalyzeRequest[Any, Any, GEPostAnalyzeParams]:
     return PostAnalyzeRequest(
         run_result=_fake_result(),
-        analyze_result=MagicMock(),
-        post_analyze_params=params,
+        analyze_result=analyze_result,
+        post_analyze_params=GEPostAnalyzeParams(),
         md=MagicMock(),
         ml=_make_ml(),
         predictor=None,
     )
 
 
-def test_ge_post_analyze_pca_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = _patch_domain_ge(monkeypatch)
-    out = GEAdapter().post_analyze(_make_post_req(GEPostAnalyzeParams(backend="pca")))
-
-    assert isinstance(out, GEPostAnalyzeResult)
-    assert out.backend == "pca"
-    assert out.fidelity == pytest.approx(0.93)
-    assert out.threshold == pytest.approx(0.0)
-    assert out.ge_s == pytest.approx(0.3)
-    assert out.g_center == -1.0 + 0j
-    assert captured == {"angle": None, "backend": "pca"}
-    # complex centers skipped from JSON summary; floats survive.
-    summary = out.to_summary_dict()
-    assert "fidelity" in summary and "g_center" not in summary
-
-
-def test_ge_post_analyze_center_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = _patch_domain_ge(monkeypatch)
-    out = GEAdapter().post_analyze(
-        _make_post_req(GEPostAnalyzeParams(backend="center"))
+def test_ge_post_analyze_recalculates_confusion_without_refitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    confusion = np.array([[0.96, 0.04, 0.0], [0.04, 0.96, 0.0], [0.0, 0.0, 1.0]])
+    numeric = GEConfusionResult(
+        radius=0.37,
+        matrix=confusion,
+        init_matrix=np.eye(3),
+        g_classification=(0.9, 0.1, 0.0),
+        e_classification=(0.1, 0.9, 0.0),
+        condition_number=1.1,
     )
+    figure = Figure()
+    captured: dict[str, Any] = {}
 
-    assert out.backend == "center"
-    assert captured["backend"] == "center"
-    assert captured["angle"] is None
+    def reject_fit(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("post-analysis re-ran the GE fitter")
 
+    def fake_calc(
+        self: Any,
+        init_pops: Any,
+        g_center: complex,
+        e_center: complex,
+        sigma: float,
+        **kwargs: Any,
+    ) -> GEConfusionResult:
+        del self
+        captured.update(
+            init_pops=init_pops,
+            g_center=g_center,
+            e_center=e_center,
+            sigma=sigma,
+            kwargs=kwargs,
+        )
+        return numeric
 
-def test_ge_post_analyze_manual_angle(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = _patch_domain_ge(monkeypatch)
-    out = GEAdapter().post_analyze(
-        _make_post_req(GEPostAnalyzeParams(backend="pca", angle=0.5))
+    def fake_plot(
+        self: Any,
+        confusion_result: GEConfusionResult,
+        g_center: complex,
+        e_center: complex,
+        **kwargs: Any,
+    ) -> Figure:
+        del self
+        assert confusion_result is numeric
+        assert (g_center, e_center) == (-1.0 + 0.0j, 1.0 + 0.0j)
+        assert kwargs["result"] is req.run_result
+        return figure
+
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.adapters.singleshot.ge.singleshot_ge_analysis",
+        reject_fit,
+        raising=False,
     )
+    monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fake_calc, raising=True)
+    monkeypatch.setattr(GE_Exp, "plot_confusion_matrix", fake_plot, raising=True)
+    req = _make_post_req()
 
-    # angle set → effective backend is "manual"; angle forwarded to the domain.
-    assert out.backend == "manual"
-    assert captured["angle"] == pytest.approx(0.5)
+    out = GEAdapter().post_analyze(req)
+
+    assert out.ge_radius == pytest.approx(0.37)
+    assert out.confusion == confusion.tolist()
+    assert out.figure is figure
+    assert np.array_equal(captured["init_pops"], req.analyze_result.init_pops)
+    assert captured["g_center"] == req.analyze_result.g_center
+    assert captured["e_center"] == req.analyze_result.e_center
+    assert captured["sigma"] == pytest.approx(req.analyze_result.ge_s)
+    assert captured["kwargs"] == {
+        "radius": None,
+        "result": req.run_result,
+        "consider_other": False,
+    }
+    assert out.to_summary_dict() == {
+        "ge_radius": pytest.approx(0.37),
+        "confusion": confusion.tolist(),
+    }
 
 
-def test_ge_post_analyze_params_cls_reflects_dataclass() -> None:
+def test_ge_post_analyze_params_are_empty() -> None:
     from zcu_tools.gui.app.main.adapter import describe_analyze_params
 
     assert GEAdapter.post_analyze_params_cls() is GEPostAnalyzeParams
-    fields = {f["name"] for f in describe_analyze_params(GEPostAnalyzeParams)}
-    assert fields == {"backend", "angle"}
-
-
-def test_ge_get_post_analyze_params_defaults_to_pca() -> None:
+    assert describe_analyze_params(GEPostAnalyzeParams) == []
     params = GEAdapter().get_post_analyze_params(MagicMock(), cast(Any, _make_ctx()))
     assert isinstance(params, GEPostAnalyzeParams)
-    assert params.backend == "pca"
-    assert params.angle is None
 
 
 def test_ge_writeback_proposes_fid_ge_s_centers_and_radius(

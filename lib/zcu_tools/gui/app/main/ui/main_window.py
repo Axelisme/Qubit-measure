@@ -268,12 +268,12 @@ class MainWindow(QMainWindow):
         # params are cleared (State), so there is no instance to populate — the
         # gate (update_interaction_state) disables the empty form.
         if not current.capabilities.post_analysis:
-            tab_w.post_analyze_form.sync(None)
+            tab_w.sync_post_analyze_params(None)
             return
         if current.post_analyze_params is None:
-            tab_w.post_analyze_form.sync(None)
+            tab_w.sync_post_analyze_params(None)
             return
-        tab_w.post_analyze_form.sync(current.post_analyze_params)
+        tab_w.sync_post_analyze_params(current.post_analyze_params)
 
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None

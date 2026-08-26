@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
@@ -527,8 +528,7 @@ class ExpTabWidget(QWidget):
         self._populate_cfg(snapshot.cfg_schema, self._ctrl)
         if snapshot.analyze_params is not None and self.has_analyze_params():
             self.analyze_form.populate_values(snapshot.analyze_params)
-        if snapshot.post_analyze_params is not None and self.has_post_analyze_params():
-            self.post_analyze_form.populate_values(snapshot.post_analyze_params)
+        self.sync_post_analyze_params(snapshot.post_analyze_params)
         if snapshot.save_paths is not None:
             self.set_save_paths(
                 snapshot.save_paths.data_path, snapshot.save_paths.image_path
@@ -559,7 +559,14 @@ class ExpTabWidget(QWidget):
         return self.analyze_form.has_params()
 
     def populate_post_analyze_params(self, instance: object) -> None:
-        self.post_analyze_form.populate(instance)
+        self.sync_post_analyze_params(instance)
+
+    def sync_post_analyze_params(self, instance: object | None) -> None:
+        self.post_analyze_form.sync(instance)
+        has_fields = instance is not None and bool(
+            dataclasses.fields(cast(Any, instance))
+        )
+        self._post_analyze_section.setVisible(has_fields)
 
     def read_post_analyze_params(self) -> object:
         return self.post_analyze_form.read_params()

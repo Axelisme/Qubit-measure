@@ -3015,8 +3015,19 @@ md.g_center, md.e_center, md.ge_s
 
 ```python
 %matplotlib inline
-md.confusion_matrix, md.ge_radius, fig = sh_ge_exp.calc_confusion_matrix(
-    pops, md.g_center, md.e_center, consider_other=False
+confusion_result = sh_ge_exp.calc_confusion_matrix(
+    pops,
+    md.g_center,
+    md.e_center,
+    md.ge_s,
+    consider_other=False,
+)
+md.confusion_matrix = confusion_result.matrix
+md.ge_radius = confusion_result.radius
+fig = sh_ge_exp.plot_confusion_matrix(
+    confusion_result,
+    md.g_center,
+    md.e_center,
 )
 md.ge_radius / md.ge_s
 ```

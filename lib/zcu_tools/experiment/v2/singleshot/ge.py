@@ -120,15 +120,10 @@ def optimize_ge_radius(
     g_center: complex,
     e_center: complex,
     init_pops: NDArray[np.float64],
+    sigma: float,
     consider_other: bool = True,
 ) -> float:
     from scipy.optimize import minimize_scalar
-
-    # use pca to retrive minimum radius
-    ge_signals = np.concatenate([g_signals, e_signals])
-    cov = np.cov(ge_signals.real, ge_signals.imag)
-    eigenvalues, _ = np.linalg.eig(cov)
-    sigma = np.sqrt(np.sort(eigenvalues)[0])  # minimum eigenvalue as sigma
 
     ge_dist = abs(g_center - e_center)
     A_init = make_init_matrix(init_pops)
@@ -179,6 +174,16 @@ class GE_Result:
     shot_indices: NDArray[np.int64]
     prepared_states: NDArray[np.int64]
     cfg_snapshot: GE_Cfg | None = None
+
+
+@dataclass(frozen=True)
+class GEConfusionResult:
+    radius: float
+    matrix: NDArray[np.float64]
+    init_matrix: NDArray[np.float64]
+    g_classification: tuple[float, float, float]
+    e_classification: tuple[float, float, float]
+    condition_number: float
 
 
 class GEModuleCfg(ConfigBase):
@@ -280,16 +285,15 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         init_pops: NDArray[np.float64],
         g_center: complex,
         e_center: complex,
+        sigma: float,
         radius: float | None = None,
         result: GE_Result | None = None,
         consider_other: bool = True,
-    ) -> tuple[NDArray[np.float64], float, Figure]:
+    ) -> GEConfusionResult:
         assert result is not None, "no result found"
 
-        signals = result.signals
-        g_signals, e_signals = signals[0], signals[1]
-
-        A_init = make_init_matrix(init_pops)
+        g_signals, e_signals = result.signals
+        init_matrix = make_init_matrix(init_pops)
 
         if radius is None:
             radius = optimize_ge_radius(
@@ -298,38 +302,62 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                 g_center,
                 e_center,
                 init_pops,
+                sigma,
                 consider_other=consider_other,
             )
 
         gg_mask, ge_mask, go_mask = classify_result(
             g_signals, g_center, e_center, radius
         )
-        n_gg = gg_mask.sum() / gg_mask.shape[0]
-        n_ge = ge_mask.sum() / ge_mask.shape[0]
-        n_go = go_mask.sum() / go_mask.shape[0]
+        g_classification = (
+            float(gg_mask.mean()),
+            float(ge_mask.mean()),
+            float(go_mask.mean()),
+        )
 
         eg_mask, ee_mask, eo_mask = classify_result(
             e_signals, g_center, e_center, radius
         )
-        n_eg = eg_mask.sum() / eg_mask.shape[0]
-        n_ee = ee_mask.sum() / ee_mask.shape[0]
-        n_eo = eo_mask.sum() / eo_mask.shape[0]
+        e_classification = (
+            float(eg_mask.mean()),
+            float(ee_mask.mean()),
+            float(eo_mask.mean()),
+        )
 
-        Q = make_result_matrix(n_gg, n_ge, n_go, n_eg, n_ee, n_eo)
-        confusion_matrix = solve_confusion_matrix(A_init, Q)
+        matrix = solve_confusion_matrix(
+            init_matrix,
+            make_result_matrix(*g_classification, *e_classification),
+        )
+        return GEConfusionResult(
+            radius=radius,
+            matrix=matrix,
+            init_matrix=init_matrix,
+            g_classification=g_classification,
+            e_classification=e_classification,
+            condition_number=float(np.linalg.cond(matrix)),
+        )
 
-        cond_number = np.linalg.cond(confusion_matrix)
+    @retrieve_result
+    def plot_confusion_matrix(
+        self,
+        confusion: GEConfusionResult,
+        g_center: complex,
+        e_center: complex,
+        result: GE_Result | None = None,
+    ) -> Figure:
+        assert result is not None, "no result found"
 
-        # plot confusion matrix
+        g_signals, e_signals = result.signals
         fig, ((ax1, ax4), (ax2, ax3)) = plt.subplots(2, 2, figsize=(8, 8))
 
         g_label = r"$|0\rangle$"
         e_label = r"$|1\rangle$"
         l_label = r"$|L\rangle$"
+        plot_with_classified(ax1, g_signals, g_center, e_center, confusion.radius)
+        plot_with_classified(ax2, e_signals, g_center, e_center, confusion.radius)
 
-        plot_with_classified(ax1, g_signals, g_center, e_center, radius)
-        plot_with_classified(ax2, e_signals, g_center, e_center, radius)
-
+        n_gg, n_ge, n_go = confusion.g_classification
+        n_eg, n_ee, n_eo = confusion.e_classification
         ax1.set_title(
             f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}"
         )
@@ -338,12 +366,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         )
         ax1.set_xlabel("")
 
-        im = ax4.imshow(A_init, cmap="Blues", vmin=0, vmax=1)
+        im = ax4.imshow(confusion.init_matrix, cmap="Blues", vmin=0, vmax=1)
         fig.colorbar(im, ax=ax4)
-
-        for i in range(A_init.shape[0]):
-            for j in range(A_init.shape[1]):
-                val = A_init[i, j]
+        for i in range(confusion.init_matrix.shape[0]):
+            for j in range(confusion.init_matrix.shape[1]):
+                val = confusion.init_matrix[i, j]
                 ax4.text(
                     j,
                     i,
@@ -361,12 +388,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         ax4.set_ylabel("Prepared State")
         ax4.set_title("Initial Populations")
 
-        im = ax3.imshow(confusion_matrix, cmap="Blues", vmin=0, vmax=1)
+        im = ax3.imshow(confusion.matrix, cmap="Blues", vmin=0, vmax=1)
         fig.colorbar(im, ax=ax3)
-
-        for i in range(confusion_matrix.shape[0]):
-            for j in range(confusion_matrix.shape[1]):
-                val = confusion_matrix[i, j]
+        for i in range(confusion.matrix.shape[0]):
+            for j in range(confusion.matrix.shape[1]):
+                val = confusion.matrix[i, j]
                 ax3.text(
                     j,
                     i,
@@ -382,6 +408,6 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         ax3.set_yticklabels([g_label, e_label, l_label])
         ax3.set_xlabel("Measured State")
         ax3.set_ylabel("Actual State")
-        ax3.set_title(f"Confusion Matrix (cond: {cond_number:.1f})")
+        ax3.set_title(f"Confusion Matrix (cond: {confusion.condition_number:.1f})")
 
-        return confusion_matrix, radius, fig
+        return fig

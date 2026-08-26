@@ -38,6 +38,11 @@ class _AnalyzeParams:
     backend: str = "pca"
 
 
+@dataclass
+class _EmptyPostParams:
+    """A post-analysis params type with no operator-editable fields."""
+
+
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
@@ -127,6 +132,61 @@ def test_post_form_enabled_with_primary_analyze_result(qapp):
     assert tab.post_analyze_btn.isEnabled() is True
     # Gate open (primary result present) → hint hidden.
     assert tab._post_gate_label.isHidden() is True
+
+
+def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatch):
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    monkeypatch.setattr(tab, "_populate_cfg", MagicMock())
+    monkeypatch.setattr(tab, "_bind_to_controller", MagicMock())
+
+    tab.attach(
+        _snapshot(
+            "tab-1",
+            has_analyze_result=True,
+            post_analyze_params=_EmptyPostParams(),
+        ),
+        MagicMock(),
+    )
+
+    assert tab._post_analyze_section.isHidden() is True
+    assert tab.post_analyze_btn.isEnabled() is True
+
+
+def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
+    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab.populate_post_analyze_params(_EmptyPostParams())
+
+    tab.update_interaction_state(
+        _snapshot(
+            "tab-1",
+            has_analyze_result=False,
+            has_post_analyze_result=False,
+            post_analyze_params=_EmptyPostParams(),
+        )
+    )
+    assert tab._post_analyze_section.isHidden() is True
+    assert tab.post_analyze_btn.isHidden() is False
+    assert tab.post_analyze_btn.isEnabled() is False
+    assert tab._post_gate_label.isHidden() is False
+    assert tab.post_save_image_btn.isHidden() is False
+    assert tab.post_save_image_btn.isEnabled() is False
+
+    tab.update_interaction_state(
+        _snapshot(
+            "tab-1",
+            has_analyze_result=True,
+            has_post_analyze_result=True,
+            post_analyze_params=_EmptyPostParams(),
+        )
+    )
+    assert tab._post_analyze_section.isHidden() is True
+    assert tab.post_analyze_btn.isEnabled() is True
+    assert tab._post_gate_label.isHidden() is True
+    assert tab.post_save_image_btn.isEnabled() is True
 
 
 def test_post_run_disabled_while_tab_busy(qapp):

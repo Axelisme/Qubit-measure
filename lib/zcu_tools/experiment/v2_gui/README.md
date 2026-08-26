@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-08-17 — T1 non-uniform equal-arc contract
+**Last updated:** 2026-08-26 — singleshot GE staged analysis
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -127,6 +127,11 @@ analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default
 不更新 writeback draft，writeback 仍只由 primary `analyze()` result 經 `get_writeback_items()`
 產生。`validate_run_request` 不受 capabilities 控制：Base 提供 no-op default，Protocol/Base exact
 signature 與 registry conformance tests 共同鎖定 framework mandatory surface。
+
+`singleshot/ge` 的 primary analysis 是唯一 calibration/writeback 來源：所選 backend 擬合 centres、
+`ge_s` 與 initial populations，再以 figure-free confusion calculation 產生 `ge_radius` 和 3×3 matrix，
+右側只顯示 IQ distribution。它的零參數 post-analysis 不重新 fitting，而是使用 primary fit 資料重算
+radius/matrix 並顯示既有完整 confusion diagnostic；post result 不建立 writeback。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，
