@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-08-23 — shared non-uniform T1 sampling
+**Last updated:** 2026-08-26 — hardware-table T1 tone-length sweep
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -146,8 +146,12 @@ circle 參數產生非等距 frequency array，再把 gen/readout raw frequency 
 在硬體量化前沿 normalized T1 decay curve 等弧長配置 delay，保留 configured window 與 point
 count。各路徑依 delay 或 probe-pulse 所屬的硬體 grid 量化；任何 collision 或非嚴格遞增都
 fast-fail，不以 sorting、`unique` 或自動減點掩蓋。Direct delay list 走相同 conversion
-contract，但不重新採樣。Tone variants 的 zero-length 點略過 probe pulse，避免建立硬體不
-接受的 zero-cycle pulse。
+contract，但不重新採樣。Singleshot `t1_with_tone` 的 zero-length 點略過 probe pulse，避免
+建立硬體不接受的 zero-cycle pulse；`t1_with_tone_sweep` 則要求完整 time axis 嚴格大於
+零，並在 device setup 前 fast-fail。其 uniform 與 non-uniform time axis 都由
+`TableLengthPulse` 在板上執行：外層 gain/frequency 維持 host scan，內層 length loop 從
+dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem template，readout
+依每點真實 pulse 結束時間對齊，不把短 pulse 補到最長點。
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 

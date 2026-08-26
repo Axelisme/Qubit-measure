@@ -558,7 +558,7 @@ def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
 @pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
 def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
-    length_sweep = SweepCfg(start=0.0, stop=8.0, expts=6, step=1.6)
+    length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
     g_center, e_center = _expected_ge_centers()
     radius = 0.4 * abs(g_center - e_center)
 
@@ -603,6 +603,88 @@ def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> N
     np.testing.assert_array_equal(result.lengths, expected_times)
     assert len(result.lengths) == length_sweep.expts
     assert result.signals.shape == expected_signal_shape
+
+
+def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
+    cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
+    cfg.rounds = 2
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+    acquire_count = 0
+    next_seed = soc.next_sim_acquire_seed
+
+    def counted_next_seed():
+        nonlocal acquire_count
+        acquire_count += 1
+        return next_seed()
+
+    monkeypatch.setattr(soc, "next_sim_acquire_seed", counted_next_seed)
+
+    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+        soc,
+        soccfg,
+        cfg,
+        g_center,
+        e_center,
+        radius,
+        uniform=False,
+    )
+
+    assert cfg.sweep.gain is not None
+    assert acquire_count == cfg.sweep.gain.expts
+
+
+def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.1, stop=0.6, expts=6, step=0.1)
+    cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+        soc,
+        soccfg,
+        cfg,
+        g_center,
+        e_center,
+        radius,
+        uniform=True,
+    )
+
+    assert result.signals.shape == (2, 2, length_sweep.expts, 2)
+
+
+@pytest.mark.parametrize("uniform", [False, True])
+def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
+    uniform: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _singleshot_t1_tone_sweep_cfg(
+        SweepCfg(start=0.0, stop=0.5, expts=6, step=0.1)
+    )
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    monkeypatch.setattr(
+        singleshot_t1_tone_sweep,
+        "setup_devices",
+        lambda *_args, **_kwargs: pytest.fail("device setup must not run"),
+    )
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            radius,
+            uniform=uniform,
+        )
 
 
 @pytest.mark.parametrize("variant", ["tone", "tone_sweep"])

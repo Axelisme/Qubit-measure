@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 
 import numpy as np
@@ -80,7 +81,7 @@ from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
-from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
+from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
     DirectReadout,
@@ -997,7 +998,7 @@ def _frame_detuning(
     freqs = {
         round(_resolve_scalar(module.cfg.freq, loop_counts, point), 9)
         for module in _iter_evolution_modules(modules, point)
-        if isinstance(module, Pulse) and module.cfg is not None
+        if isinstance(module, (Pulse, TableLengthPulse)) and module.cfg is not None
     }
     if not freqs:
         return 0.0
@@ -1205,6 +1206,33 @@ def _lower_module(
         segments.extend(
             _pulse_segments(
                 module.cfg,
+                sim,
+                equilibrium_pop,
+                f_qubit_mhz,
+                frame_detuning,
+                detune_offset,
+                loop_counts,
+                point,
+            )
+        )
+        return
+    if isinstance(module, TableLengthPulse):
+        if module.idx_reg not in point:
+            raise UnsupportedModuleError(
+                f"TableLengthPulse {module.name!r} index register "
+                f"{module.idx_reg!r} is not a sweep axis at this point"
+            )
+        idx = point[module.idx_reg]
+        if not 0 <= idx < len(module.lengths):
+            raise UnsupportedModuleError(
+                f"TableLengthPulse {module.name!r} index {idx} is out of range"
+            )
+        length = module.lengths[idx]
+        cfg = deepcopy(module.cfg)
+        cfg.set_param("length", length)
+        segments.extend(
+            _pulse_segments(
+                cfg,
                 sim,
                 equilibrium_pop,
                 f_qubit_mhz,

@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-07-15 — table-backed readout frequency sweep
+**Last updated:** 2026-08-26 — table-backed pulse length sweep
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -49,6 +49,20 @@ without leaking hardware register choreography into experiment classes.
   to prepare the next point. Its dedicated templates prevent a table update from
   mutating a pulse shared through `PulseRegistry`; the rotated tables restore the
   first point before the next outer repetition.
+
+## Runtime Pulse Length
+
+- `TableLengthPulse` owns the arbitrary pulse-length hardware sweep for `const`
+  and `flat_top`. It keeps one pulse template in wmem and loads both generator
+  length cycles and total tProcessor duration from dmem on each hardware-loop
+  point.
+- A const pulse patches the template's single `w4` length field. A flat-top pulse
+  reuses its fixed ramp entries and patches only the middle flat segment; its
+  segment WPORT writes remain contiguous.
+- Length values must be finite and strictly positive; zero fails before program
+  build. Points below the generator's three-cycle minimum also fail fast. Runtime
+  duration alignment places readout immediately after the selected pulse instead
+  of padding every point to the maximum length.
 
 ## Design Boundaries
 
