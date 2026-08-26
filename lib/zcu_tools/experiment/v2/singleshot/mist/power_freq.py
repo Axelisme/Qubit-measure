@@ -134,7 +134,7 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
                     "gain (a.u.)",
                     "freq (MHz)",
                     uniform=False,
-                    existed_axes=[[axs[1][1]]],
+                    existed_axes=[[axs[2][0]]],
                 ),
             ),
         ) as viewer:

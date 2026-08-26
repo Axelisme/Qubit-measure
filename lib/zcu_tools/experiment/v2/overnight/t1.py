@@ -221,7 +221,9 @@ class T1Task(
         self,
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
-        self.lengths = sweep2array(self.lengths, "time", {"soccfg": state.env.soccfg})
+        self.lengths = sweep2array(
+            self.cfg.sweep.length, "time", {"soccfg": state.env.soccfg}
+        )
         self.last_cfg = self.cfg
 
         signals_step = state.child("signals", cfg=self.cfg)
@@ -300,7 +302,7 @@ class T1WithToneTask(
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
         self.lengths = sweep2array(
-            self.lengths,
+            self.cfg.sweep.length,
             "time",
             {
                 "soccfg": state.env.soccfg,

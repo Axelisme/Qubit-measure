@@ -347,7 +347,7 @@ class MistTask(
         state: ScheduleStep[OvernightCfg, Any, OvernightEnv],
     ) -> None:
         self.gains = sweep2array(
-            self.gains,
+            self.cfg.sweep.gain,
             "gain",
             {"soccfg": state.env.soccfg, "gen_ch": self.cfg.modules.probe_pulse.ch},
         )

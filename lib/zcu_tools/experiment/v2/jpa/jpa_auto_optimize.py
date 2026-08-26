@@ -352,8 +352,11 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     cur_params = optimizer.next_params(idx, last_snr)
 
                     if cur_params is None:
-                        sched.set_stop()
-                        break
+                        raise RuntimeError(
+                            "JPA optimizer exhausted before consuming its budget: "
+                            f"iteration={idx}, num_points={num_points}, "
+                            f"phase={optimizer.phase}"
+                        )
 
                     params[idx, :] = cur_params
                     phases[idx] = optimizer.phase
@@ -377,7 +380,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                         .build_and_acquire(
                             raw2signal_fn=lambda raw: snr_as_signal(
                                 [tracker],
-                                ge_axis=0,
+                                ge_axis=1,
                                 skew_penalty=sched.cfg.skew_penalty,
                             ),
                             trackers=[tracker],
