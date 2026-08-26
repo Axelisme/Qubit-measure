@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import WritebackItem
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.cfg.binding import CfgDraft
 
     from .guard import GuardService
     from .writeback import WritebackService
@@ -19,6 +20,8 @@ class WritebackControlPort(Protocol):
     def has_tab(self, tab_id: str) -> bool: ...
 
     def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]: ...
+
+    def get_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft: ...
 
     def set_writeback_item(
         self, tab_id: str, session_id: str, **changes: Any
@@ -50,6 +53,9 @@ class WritebackControlFacet:
 
     def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
         return list(self._writeback.get_tab_writeback_items(tab_id))
+
+    def get_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft:
+        return self._writeback.get_tab_writeback_item_draft(tab_id, session_id)
 
     def set_writeback_item(
         self, tab_id: str, session_id: str, **changes: Any

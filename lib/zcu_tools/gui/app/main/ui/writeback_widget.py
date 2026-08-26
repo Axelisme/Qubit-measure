@@ -41,9 +41,12 @@ class WritebackWidget(QWidget):
         self,
         ctrl: Controller,
         parent: QWidget | None = None,
+        *,
+        tab_id: str | None = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._tab_id = tab_id
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
 
@@ -109,8 +112,18 @@ class WritebackWidget(QWidget):
         self._refresh_apply_enabled()
 
     def _on_check_toggled(self, item: WritebackItem) -> None:
-        # The persistent item's selected flag follows the checkbox directly.
-        item.selected = self._checks[item.session_id].isChecked()
+        # Route draft-local mutation through WritebackService when this widget is
+        # attached to a tab. The direct assignment is only the temporary adapter
+        # path used by standalone callers that do not provide a tab id.
+        selected = self._checks[item.session_id].isChecked()
+        if self._tab_id is not None:
+            self._ctrl.set_writeback_item(
+                self._tab_id,
+                item.session_id,
+                selected=selected,
+            )
+        else:
+            item.selected = selected
         self._refresh_apply_enabled()
 
     def _refresh_apply_enabled(self, *_: int) -> None:
@@ -172,11 +185,20 @@ class WritebackWidget(QWidget):
         def save() -> None:
             try:
                 new_name = _require_target_name(name_edit.text())
-                item.proposed_value = _coerce_scalar_input(
+                new_value = _coerce_scalar_input(
                     value_edit.text(),
                     item.proposed_value,
                 )
-                item.target_name = new_name
+                if self._tab_id is not None:
+                    self._ctrl.set_writeback_item(
+                        self._tab_id,
+                        item.session_id,
+                        target_name=new_name,
+                        proposed_value=new_value,
+                    )
+                else:
+                    item.proposed_value = new_value
+                    item.target_name = new_name
                 cb.setText(self._make_label_text(item))
                 dialog.accept()
             except Exception as exc:
@@ -191,12 +213,26 @@ class WritebackWidget(QWidget):
         item: ModuleWriteback | WaveformWriteback,
         cb: QCheckBox,
     ) -> None:
-        # The item carries a persistent, service-owned cfg model (editor_id,
-        # ADR-0008). Attach the dialog widget to *that* model — the user's edits
-        # land on the same model the agent edits and apply reads. On close the
-        # widget detaches but the model persists (torn down only on reanalyze).
-        if item.editor_id is None:
-            return
+        # The item carries a persistent, service-owned cfg model (ADR-0008).
+        # Resolve that model through the writeback owner; the cfg editor id stays
+        # inside WritebackService. The fallback only serves the temporary caller
+        # adapter used by pre-draft tests/embedders.
+        draft = None
+        editor_id: str | None = None
+        if self._tab_id is not None:
+            try:
+                draft = self._ctrl.get_writeback_item_draft(
+                    self._tab_id, item.session_id
+                )
+            except Exception:
+                logger.exception(
+                    "failed to resolve writeback draft item %s", item.session_id
+                )
+                return
+        if draft is None:
+            editor_id = getattr(item, "editor_id", None)
+            if editor_id is None:
+                return
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit Config: {item.target_name}")
@@ -222,7 +258,14 @@ class WritebackWidget(QWidget):
             if not text:
                 name_edit.setText(item.target_name)  # revert, no blank target
                 return
-            item.target_name = text
+            if self._tab_id is not None:
+                self._ctrl.set_writeback_item(
+                    self._tab_id,
+                    item.session_id,
+                    target_name=text,
+                )
+            else:
+                item.target_name = text
 
         name_edit.editingFinished.connect(_commit_name)
 
@@ -231,7 +274,11 @@ class WritebackWidget(QWidget):
         form_widget = CfgFormWidget(
             text_input_enhancer=make_value_source_input_enhancer(self._ctrl)
         )
-        form_widget.attach(self._ctrl.get_cfg_editor_draft(item.editor_id))
+        if draft is None:
+            # Compatibility path for the pre-draft tab projection.
+            assert editor_id is not None
+            draft = self._ctrl.get_cfg_editor_draft(editor_id)
+        form_widget.attach(draft)
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 

@@ -889,6 +889,10 @@ class Controller(SessionControllerMixin):
         (see WritebackService.apply_tab_writeback)."""
         return self._writeback_control.apply_writeback(tab_id)
 
+    def get_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft:
+        """Return an item cfg draft for a viewer without exposing its editor id."""
+        return self._writeback_control.get_writeback_item_draft(tab_id, session_id)
+
     def set_writeback_item(
         self, tab_id: str, session_id: str, **changes: Any
     ) -> dict[str, object]:

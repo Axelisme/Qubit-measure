@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+from zcu_tools.gui.app.main.adapter import AnalyzeRequest, WritebackRequest
 from zcu_tools.gui.app.main.events.completion import AnalyzeFailedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
@@ -240,13 +240,33 @@ class AnalyzeService(_StagedAnalyzeService):
         )
 
     def _record(self, tab_id: str, analyze_result: Any) -> None:
-        # Tear down the previous analyze's writeback editor models before the new
-        # draft replaces them (ADR-0008: per-item gc=False models are tied to a
-        # specific analyze result). Compute the fresh persistent draft from the new
-        # result (passed in, not written to State early), then commit result +
-        # figure + items through the single mutator (which bumps the version).
+        # Tear down the previous draft before replacing it. Proposal computation
+        # belongs to the adapter/workflow boundary; Writeback only receives the
+        # resulting items and owns their opaque draft-local sessions.
         self._writeback.teardown_tab_items(tab_id)
-        items = self._writeback.compute_items_for_tab(tab_id, analyze_result)
+        tab = self._state.get_tab(tab_id)
+        run_result = tab.run_result
+        proposal_items = []
+        if run_result is not None:
+            proposal_items = list(
+                tab.adapter.get_writeback_items(
+                    WritebackRequest(
+                        run_result=run_result,
+                        analyze_result=analyze_result,
+                        ctx=self._state.exp_context,
+                    )
+                )
+            )
+        items = self._writeback.compute_items_for_tab(
+            tab_id,
+            analyze_result,
+            proposal_items=proposal_items,
+        )
+        draft = self._writeback.get_tab_writeback_draft(tab_id)
         self._state.update_tab_analyze(
-            tab_id, analyze_result, analyze_result.figure, writeback_items=items
+            tab_id,
+            analyze_result,
+            analyze_result.figure,
+            writeback_items=items,
+            writeback_draft=draft,
         )

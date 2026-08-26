@@ -328,18 +328,12 @@ class ModuleWriteback(WritebackItem):
     # not persisted by ModuleLibrary; it identifies which role template the writeback
     # proposal represents while the user/agent reviews the draft.
     role_id: str | None = None
-    # editor_id of the service-owned (gc=False) cfg model that holds this item's
-    # live draft (ADR-0008). Stamped by WritebackService at compute time; the
-    # agent edits via editor.set_field(editor_id, …), the user's Edit dialog
-    # attaches to the same model.
-    editor_id: str | None = field(default=None, init=False)
 
 
 @dataclass
 class WaveformWriteback(WritebackItem):
     edit_schema: CfgSchema | None = None
     role_id: str | None = None
-    editor_id: str | None = field(default=None, init=False)
 
 
 @dataclass

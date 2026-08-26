@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-12 — Qt UI adapter boundaries
+**Last updated:** 2026-08-27 — opaque transactional writeback drafts
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -365,6 +365,13 @@ on the concrete controller.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
 - `get_writeback_items()` returns domain writeback candidates; writeback commit is
   framework-owned.
+- `WritebackService.create_draft()` accepts those candidates and returns an opaque,
+  service-owned draft. Item-local cfg-editor sessions and their identities stay
+  inside the service; draft creation cleans every session on failure, teardown is
+  idempotent, and `apply_draft()` sends selected entries through one
+  `ContextWritePort` batch. The current tab-level `Session.writeback_items` and
+  `compute_items_for_tab()` methods are temporary A4 caller adapters, explicitly
+  scheduled for removal by ticket 06 during the state/caller migration.
 
 Import direction stays one-way: `experiment/v2_gui -> gui.app.main`, never the
 reverse.

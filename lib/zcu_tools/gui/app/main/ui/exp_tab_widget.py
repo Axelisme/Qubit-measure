@@ -248,7 +248,7 @@ class ExpTabWidget(QWidget):
         self.writeback_section = _CollapsibleSection(
             "Writeback", collapsible=True, collapsed=False
         )
-        self.writeback_widget = WritebackWidget(self._ctrl)
+        self.writeback_widget = WritebackWidget(self._ctrl, tab_id=self.tab_id)
         self.writeback_section.body_layout.addWidget(self.writeback_widget)
         self.writeback_section.setVisible(False)
         analysis_layout.addWidget(self.writeback_section)

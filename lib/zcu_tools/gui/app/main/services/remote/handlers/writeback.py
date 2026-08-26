@@ -31,8 +31,13 @@ def _writeback_item_wire(item) -> dict[str, object]:
     elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
         is_module = isinstance(item, ModuleWriteback)
         base["kind"] = "module" if is_module else "waveform"
-        base["editor_id"] = item.editor_id
-        base["has_edit_schema"] = item.editor_id is not None
+        # New opaque drafts never expose their cfg-editor identity. Keep the
+        # legacy field only when an old caller explicitly supplied one, so the
+        # temporary A4 adapter remains readable during migration.
+        legacy_editor_id = getattr(item, "editor_id", None)
+        if legacy_editor_id is not None:
+            base["editor_id"] = legacy_editor_id
+        base["has_edit_schema"] = item.edit_schema is not None
         if item.role_id is not None:
             base["role_id"] = item.role_id
     else:

@@ -1,8 +1,8 @@
 """Unit tests for WritebackService — persistent draft (ADR-0008).
 
-Items are computed once into Session.writeback_items; apply reads that draft
-as-is (no recompute) and writes md/ml directly, bumping ``context`` so
-concurrency guards detect the change.
+Items are computed once into the opaque writeback draft; apply reads the draft
+as-is (no recompute) and sends one ContextWritePort batch, bumping ``context``
+so concurrency guards detect the change.
 """
 
 from __future__ import annotations
@@ -409,3 +409,134 @@ def test_teardown_tab_items_tears_down_editor_models():
 
     svc.teardown_tab_items("t1")
     cfg_editor.teardown.assert_called_once_with("editor-7")
+
+
+# ---------------------------------------------------------------------------
+# Opaque transactional draft API
+# ---------------------------------------------------------------------------
+
+
+def test_create_draft_keeps_two_owners_independent_and_hides_editor_id():
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    cfg_editor.open_seeded.side_effect = [
+        ("editor-a", ()),
+        ("editor-b", ()),
+    ]
+    svc = WritebackService(state, cfg_editor, MagicMock())
+
+    draft_a = svc.create_draft(
+        [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
+    )
+    draft_b = svc.create_draft(
+        [ModuleWriteback(target_name="b", description="b", edit_schema=MagicMock())]
+    )
+
+    assert draft_a is not draft_b
+    assert [item.session_id for item in draft_a.preview()] == ["ml-1"]
+    assert [item.session_id for item in draft_b.preview()] == ["ml-1"]
+    assert not hasattr(draft_a.preview()[0], "editor_id")
+    draft_a.edit("ml-1", target_name="a-tuned")
+    assert draft_a.preview()[0].target_name == "a-tuned"
+    assert draft_b.preview()[0].target_name == "b"
+    assert cfg_editor.open_seeded.call_count == 2
+    assert (
+        cfg_editor.open_seeded.call_args_list[0].kwargs["owner_key"]
+        != (cfg_editor.open_seeded.call_args_list[1].kwargs["owner_key"])
+    )
+
+
+def test_create_draft_cleans_all_opened_sessions_when_a_later_item_fails():
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    cfg_editor.open_seeded.side_effect = [
+        ("editor-1", ()),
+        RuntimeError("open failed"),
+    ]
+    svc = WritebackService(state, cfg_editor, MagicMock())
+
+    proposals = [
+        ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock()),
+        WaveformWriteback(target_name="b", description="b", edit_schema=MagicMock()),
+    ]
+    with pytest.raises(RuntimeError, match="open failed"):
+        svc.create_draft(proposals)
+
+    cfg_editor.teardown.assert_called_once_with("editor-1")
+    assert not hasattr(proposals[0], "editor_id")
+
+
+def test_draft_teardown_is_idempotent_even_when_cleanup_raises():
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    cfg_editor.open_seeded.return_value = ("editor-1", ())
+    cfg_editor.teardown.side_effect = RuntimeError("close failed")
+    svc = WritebackService(state, cfg_editor, MagicMock())
+    draft = svc.create_draft(
+        [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
+    )
+
+    draft.teardown()
+    draft.teardown()
+
+    assert draft.is_active is False
+    cfg_editor.teardown.assert_called_once_with("editor-1")
+
+
+def test_draft_cfg_edits_use_private_editor_session():
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    cfg_editor.open_seeded.return_value = ("editor-1", ())
+    cfg_editor.set_fields.return_value = CfgEditResult(valid=True)
+    svc = WritebackService(state, cfg_editor, MagicMock())
+    draft = svc.create_draft(
+        [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
+    )
+
+    result = draft.edit("ml-1", edits=[{"path": "freq", "value": 5000.0}])
+
+    assert result == {"valid": True, "removed": [], "added": []}
+    cfg_editor.set_fields.assert_called_once_with("editor-1", [CfgEdit("freq", 5000.0)])
+
+
+def test_teardown_draft_detaches_state_reference():
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    cfg_editor.open_seeded.return_value = ("editor-1", ())
+    svc = WritebackService(state, cfg_editor, MagicMock())
+    draft = svc.create_draft(
+        [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
+    )
+    state.get_tab("t1").writeback_draft = draft
+    state.get_tab("t1").writeback_items = draft.preview()
+
+    draft.teardown()
+
+    assert state.get_tab("t1").writeback_draft is None
+    assert state.get_tab("t1").writeback_items == []
+
+
+def test_apply_draft_sends_one_context_batch_for_selected_items():
+    state = _make_state_with_tab()
+    cfg_editor = MagicMock()
+    write_port = MagicMock()
+    svc = WritebackService(state, cfg_editor, write_port)
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0),
+            MetaDictWriteback(target_name="skip", description="d", proposed_value=2.0),
+        ]
+    )
+    draft.edit("md-2", selected=False)
+
+    result = draft.apply()
+
+    assert result == {
+        "applied_ids": ["md-1"],
+        "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+    }
+    write_port.apply_writes.assert_called_once()
+    writes = write_port.apply_writes.call_args.args[0]
+    assert writes.md == {"r_f": 1.0}
+    assert writes.ml_modules == {}
+    assert writes.ml_waveforms == {}

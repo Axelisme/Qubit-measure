@@ -48,6 +48,8 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import WritebackItem
 
+    from .services.writeback import WritebackDraft
+
 T_Result = TypeVar("T_Result")
 T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 
@@ -76,9 +78,10 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     post_analyze_param_instance: Any = None
     save_path_overrides: SavePaths | None = None
     # Persistent writeback draft (ADR-0008): computed once when analyze finishes,
-    # read/edited in place by UI + agent, applied as-is. Module/waveform items
-    # carry a gc=False CfgEditorService model (editor_id); cleared + torn down on
-    # rerun / reanalyze.
+    # read/edited in place by UI + agent, applied as-is. The draft owns item-local
+    # cfg-editor sessions; ``writeback_items`` remains a temporary tab-level read
+    # projection for the current caller contract.
+    writeback_draft: WritebackDraft | None = None
     writeback_items: list[WritebackItem] = field(default_factory=list)
     is_analyzing: bool = False
     is_saving_data: bool = False
@@ -259,6 +262,7 @@ class State(SessionState):
         analyze_result: object,
         figure: Figure | None,
         writeback_items: list[WritebackItem] | None = None,
+        writeback_draft: WritebackDraft | None = None,
     ) -> None:
         self._assert_owner()
         logger.debug(
@@ -272,6 +276,7 @@ class State(SessionState):
         # Fresh analyze → store the freshly computed persistent writeback draft
         # (the sink computes it via WritebackService). Per-item models from a
         # previous analyze must already have been torn down by the caller.
+        tab.writeback_draft = writeback_draft
         tab.writeback_items = list(writeback_items or [])
         # A re-analyze replaces the primary result the post-analysis depends on,
         # so any existing post result is now stale (方案 A invalidation).
@@ -287,6 +292,7 @@ class State(SessionState):
         tab.analyze_result = None
         tab.figure = None
         tab.analyze_param_instance = None
+        tab.writeback_draft = None
         tab.writeback_items = []
         State._invalidate_post_analyze(tab)
 

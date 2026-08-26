@@ -16,7 +16,7 @@ infrastructure capability it has no business using.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -203,20 +203,24 @@ class TabLifecyclePort(Protocol):
 
 @runtime_checkable
 class WritebackLifecyclePort(Protocol):
-    """The writeback lifecycle surface consumed by ``RunService`` and
-    ``AnalyzeService``.
+    """Temporary tab-facing writeback lifecycle surface.
 
-    These services need to tear down per-tab writeback editor models before
-    clearing / replacing a run result, and to compute a fresh draft once an
-    analyze finishes (ADR-0008). Depending on this port instead of the concrete
-    ``WritebackService`` keeps the coupling at the interface level (ADR-0005).
+    The opaque draft API is stage-free and accepts proposal items directly. The
+    tab methods remain only while the current primary analyze/run callers migrate
+    to storing the draft handle itself in ticket 06 (ADR-0005).
     """
 
     def teardown_tab_items(self, tab_id: str) -> None: ...
 
     def compute_items_for_tab(
-        self, tab_id: str, analyze_result: Any
+        self,
+        tab_id: str,
+        analyze_result: Any,
+        *,
+        proposal_items: Iterable[WritebackItem] | None = None,
     ) -> list[WritebackItem]: ...
+
+    def get_tab_writeback_draft(self, tab_id: str) -> Any | None: ...
 
 
 @runtime_checkable
@@ -279,6 +283,7 @@ class TabAnalyzeWritePort(Protocol):
         analyze_result: object,
         figure: Figure | None,
         writeback_items: list[WritebackItem] | None = None,
+        writeback_draft: Any | None = None,
     ) -> None: ...
     def update_tab_post_analyze(
         self,
