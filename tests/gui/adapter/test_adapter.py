@@ -521,17 +521,19 @@ def test_meta_dict_writeback_valid():
     item = MetaDictWriteback(target_name="freq", description="d", proposed_value=1)
     assert item.target_name == "freq"
     assert item.proposed_value == 1
-    # session_id / editor_id are stamped by the service, not the adapter.
+    # session_id is stamped by the service, not the adapter; editor identity is
+    # private to the service-owned draft.
     assert item.session_id == ""
 
 
 def test_module_writeback_valid():
-    # target_name is the apply destination; edit_schema/editor_id default to None.
+    # target_name is the apply destination; edit_schema defaults to None and
+    # editor identity is not part of the adapter item interface.
     item = ModuleWriteback(target_name="pulse_a", description="d")
     assert item.target_name == "pulse_a"
     assert item.edit_schema is None
     assert item.role_id is None
-    assert item.editor_id is None
+    assert not hasattr(item, "editor_id")
     assert item.session_id == ""
 
 
