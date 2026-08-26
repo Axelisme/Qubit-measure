@@ -1,16 +1,10 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-08-18 — SampleTable v2 contract tests（sample_schema / migrate script）
+**Last updated:** 2026-08-26 — remove stale repo-local agent tooling tests
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
 這份筆記整理測試套件的結構、fixture 架構與新增測試時的注意事項。
-
-`tests/agents/` 驗證三套 skill tree 同步、orchestrate workflow state/merge safety，以及 Generic、Codex、
-Claude agent profiles 的平台 schema、registry 與核心派工契約；不同 runtime 格式不要求 byte-identical，
-但必須保有相同角色邊界、停止條件與短 report schema。
-`parallel-burst` contract tests另鎖定 stateless capability、wave/dependency planning、唯一 loop authority、
-bounded verify/fix、event-driven worker回報與context budget。
 
 ---
 
@@ -348,22 +342,6 @@ info 來刷新 cache/UI，但 late delivery 若已進入非 setup mutation 不�
 
 等待 async device connect 時避免裸 `QEventLoop.exec()` 只聽 success signal；測試 helper 應同時觀察
 `operation_failed`，並用 bounded `processEvents()` loop，讓 connect failure 變成 assertion failure 而非 pytest hang。
-
-### Orchestrate workflow tests
-
-`tests/agents/test_orchestrate_scripts.py` 以臨時 Git repo與linked worktree驗證三份
-orchestrate workflow script。Coverage包含queue failure provenance的closed taxonomy、queue v1對
-legacy missing/null provenance的讀取相容性、refresh conflict解決後的窄幅requeue、對legacy與
-非refresh block的拒絕、queue order與main/integration Git preconditions。Recovery測試也鎖定
-`retry-refresh`只更新queue/task狀態、不直接merge，且新target必須先validation再回到既有
-`merge run`流程；`retry-final`則只接受同一queue head、base與target均未漂移的
-`final_fast_forward_failed`，成功直接完成同一target的fast-forward。測試明確拒絕refresh、preview、
-preflight、postcondition、manual與legacy provenance，並驗證retry再次失敗仍保留原failure kind。
-
-`tests/agents/test_candidate_backlog.py` 驗證 repo-local candidate backlog 的 capture、duplicate、planned →
-resolved lifecycle、resolution evidence、UTF-8、concurrent add 與 filter contract；同時遞迴比較
-`.agents/.codex/.claude` 的 `candidate-backlog` 與 `orchestrate` skill tree bytes，並鎖定 orchestrate
-主文件仍保留 review independence、merge queue、授權、runtime model routing 與 backlog routing gates。
 
 ### Golden / characterization tests
 
