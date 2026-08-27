@@ -67,8 +67,6 @@ def _snapshot(
         AnalysisPaneSnapshot,
         PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
-        RunPaneSnapshot,
-        SavePaneSnapshot,
         TabPathsSnapshot,
     )
 

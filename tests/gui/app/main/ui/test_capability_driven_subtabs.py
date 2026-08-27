@@ -50,7 +50,69 @@ def make_snapshot(
     has_analyze_result=True,
     has_post_result=False,
     has_figure=True,
+    figure=None,
+    post_figure=None,
+    writeback_items=(),
 ):
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        RunPaneSnapshot,
+        SavePaneSnapshot,
+        TabPathsSnapshot,
+    )
+
+    # Allow explicit figure override or create based on flags
+    if figure is None and has_figure and has_analyze_result:
+        figure_obj = Figure()
+    elif figure is not None:
+        figure_obj = figure
+    else:
+        figure_obj = figure  # None or explicit
+    # post figure
+    if post_figure is None and has_post_result:
+        post_figure_obj = Figure()
+    elif post_figure is not None:
+        post_figure_obj = post_figure
+    else:
+        post_figure_obj = post_figure
+
+    # Determine actual figure for has_figure flag: keep consistency
+    # Paths
+    data_path_snap = PathResourceSnapshot(
+        override=None, path="/tmp/data.hdf5" if has_run_result else None
+    )
+    analysis_image_snap = PathResourceSnapshot(
+        override=None,
+        path="/tmp/image.png" if has_figure and has_analyze_result else None,
+    )
+    post_image_snap = PathResourceSnapshot(
+        override=None, path="/tmp/post.png" if has_post_result else None
+    )
+    run_snap = RunPaneSnapshot(
+        result=object() if has_run_result else None, source_path=None
+    )
+    analysis_snap = AnalysisPaneSnapshot(
+        params=DummyParams() if has_analyze_result else None,
+        result=object() if has_analyze_result else None,
+        figure=figure_obj,
+        writeback_items=tuple(writeback_items),
+        image_path=analysis_image_snap,
+    )
+    post_snap = PostAnalysisPaneSnapshot(
+        params=DummyPostParams() if has_post_result else None,
+        result=object() if has_post_result else None,
+        figure=post_figure_obj,
+        writeback_items=(),
+        image_path=post_image_snap,
+    )
+    save_snap = SavePaneSnapshot(data_path=data_path_snap)
+    paths_snap = TabPathsSnapshot(
+        data=data_path_snap,
+        analysis_image=analysis_image_snap,
+        post_analysis_image=post_image_snap,
+    )
     return TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
@@ -74,11 +136,15 @@ def make_snapshot(
         ),  # type: ignore[call-arg]
         analyze_params=DummyParams() if has_analyze_result else None,
         post_analyze_params=DummyPostParams() if has_post_result else None,
-        writeback_items=(),
-        figure=Figure() if has_figure and has_analyze_result else None,
+        writeback_items=tuple(writeback_items),
+        figure=figure_obj,
         save_paths=None,
-        post_figure=Figure() if has_post_result else None,
-        paths=None,
+        post_figure=post_figure_obj,
+        run=run_snap,
+        analysis=analysis_snap,
+        post_analysis=post_snap,
+        save=save_snap,
+        paths=paths_snap,
     )
 
 
@@ -259,8 +325,16 @@ def test_post_analysis_failure_restores_retained_figures_via_coordinator(
     ctrl = make_ctrl()
     bus = EventBus()
     ctrl.get_bus.return_value = bus
+    # Initial snapshot with retained figures (State still holds them)
+    fig_a_retained = Figure()
+    fig_p_retained = Figure()
     ctrl.get_tab_snapshot.return_value = make_snapshot(
-        "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
+        "tab-1",
+        analysis=AnalysisMode.FIT,
+        post=True,
+        has_post_result=True,
+        figure=fig_a_retained,
+        post_figure=fig_p_retained,
     )
     window = MainWindow(ctrl)
     tab = exp_tab_widget("tab-1", ctrl)
@@ -270,30 +344,16 @@ def test_post_analysis_failure_restores_retained_figures_via_coordinator(
     fig_p = Figure()
     tab.show_analysis_figure(fig_a)
     tab.show_post_analysis_figure(fig_p)
-    # Clear post to simulate start, then emit failure fact which should restore both
+    # Clear post to simulate start, then emit failure fact which should restore both from State
     tab.prepare_post_container()
     assert tab.get_current_figure_for_pane("post_analysis") is None
-    # Mock snapshot to return retained figures on failure
-    ctrl.get_tab_snapshot.return_value = make_snapshot(
-        "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
-    )
-    # The tab's figures are still in State, so refresh should re-attach
-    # Simulate coordinator's failure reaction: it calls refresh_tab_figure and refresh_tab_post_figure
-    # We emit the interaction fact directly via coordinator
-    from zcu_tools.gui.app.main.ui.main_window_events import MainWindowEventCoordinator
-
-    # Use the window's coordinator
-    coordinator = window._events
-    # Emit primary failure -> should refresh both figures
+    # Snapshot on failure returns retained figures (same objects as above)
+    # Emitting the domain fact exercises the subscribed coordinator reaction.
     bus.emit(
         TabInteractionChangedPayload("tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED)
     )
-    # After failure, coordinator should have refreshed figures from snapshot (which has figures)
-    # Our tab's figures should be restored via refresh (which attaches from snapshot)
-    # Since snapshot has new figures (different objects), we check that figures are not None
-    # For this test we verify that the coordinator did not crash and that tab still has analysis figure
-    # The actual figure objects are from snapshot, not the old ones, but they are present
-    assert tab.get_current_figure_for_pane("analysis") is not None
+    assert tab.get_current_figure_for_pane("analysis") is fig_a_retained
+    assert tab.get_current_figure_for_pane("post_analysis") is fig_p_retained
     tab.detach()
 
 

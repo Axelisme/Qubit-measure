@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.controller import Controller
     from zcu_tools.gui.app.main.services import TabSnapshot
+    from zcu_tools.gui.app.main.services.writeback_control import WritebackPane
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +628,9 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.start_post_analyze(tab_id, tab_w.read_post_analyze_params())
 
-    def _on_writeback_inline_apply(self, tab_id: str, pane: str = "analysis") -> None:
+    def _on_writeback_inline_apply(
+        self, tab_id: str, pane: WritebackPane = "analysis"
+    ) -> None:
         logger.info("_on_writeback_inline_apply: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
             logger.warning(

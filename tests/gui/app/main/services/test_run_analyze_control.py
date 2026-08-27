@@ -252,8 +252,10 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
         call("tab", "initialize_tab_analyze_params", "tab-1"),
         call("bus", "emit", "TabContentChangedPayload"),
     ]
-    assert isinstance(bus.payloads[0], TabContentChangedPayload)
-    assert bus.payloads[0].fact is TabContentFact.LOADED_RESULT_COMMITTED
+    payload = bus.payloads[0]
+    assert isinstance(payload, TabContentChangedPayload)
+    content_payload = cast(TabContentChangedPayload, payload)
+    assert content_payload.fact is TabContentFact.LOADED_RESULT_COMMITTED
 
 
 def test_fit_analyze_uses_worker_service_and_live_container() -> None:

@@ -30,6 +30,7 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.app.main.services.writeback_control import WritebackPane
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,12 @@ class WritebackWidget(QWidget):
         parent: QWidget | None = None,
         *,
         tab_id: str | None = None,
-        pane: str = "analysis",
+        pane: WritebackPane = "analysis",
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self._tab_id = tab_id
-        self._pane = pane
+        self._pane: WritebackPane = pane
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
 

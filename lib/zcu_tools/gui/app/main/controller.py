@@ -46,8 +46,6 @@ from .registry import Registry
 from .role_catalog import RoleCatalog
 from .services import (
     AppPersistedState,
-    ConnectDeviceRequest,
-    DisconnectDeviceRequest,
     LoadTabResultOutcome,
     PersistenceError,
     RestoreReport,
@@ -77,7 +75,7 @@ if TYPE_CHECKING:
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
-    from .services.writeback_control import WritebackControlPort
+    from .services.writeback_control import WritebackControlPort, WritebackPane
 
 
 logger = logging.getLogger(__name__)
@@ -274,15 +272,15 @@ class Controller(SessionControllerMixin):
 
             transport = QtProgressTransport()
         services = build_app_services(
-            state=state,  # type: ignore[arg-type]
+            state=state,
             bus=bus,
-            registry=registry,  # type: ignore[arg-type]
+            registry=registry,
             io_manager=io_manager,
             cfg_editor_ctrl=self,
             progress_transport=transport,
             notify_info=self._info,
             resource_versions=self.resources_versions,
-            render_host=lambda: self._render_host,  # type: ignore[arg-type]
+            render_host=lambda: self._render_host,
             project_root=self._project_root,
         )
         self._services = services
@@ -894,12 +892,12 @@ class Controller(SessionControllerMixin):
     # Writeback (TabService)
     # ------------------------------------------------------------------
 
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:  # type: ignore[override]
+    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
         """Read the tab's persistent writeback draft (read-only, no permit).
 
         Returns [] when the tab has no run/analyze result yet.
         """
-        return self._writeback_control.get_tab_writeback_items(tab_id)  # type: ignore[return-value]
+        return self._writeback_control.get_tab_writeback_items(tab_id)
 
     def apply_writeback(self, tab_id: str) -> dict[str, Any]:
         """Apply the tab's persistent writeback draft as-is (no recompute).
@@ -921,20 +919,22 @@ class Controller(SessionControllerMixin):
         return self._writeback_control.set_writeback_item(tab_id, session_id, **changes)
 
     def get_writeback_item_draft_for_pane(
-        self, tab_id: str, pane: str, session_id: str
+        self, tab_id: str, pane: WritebackPane, session_id: str
     ) -> CfgDraft:
         return self._writeback_control.get_writeback_item_draft_for_pane(
             tab_id, pane, session_id
         )
 
     def set_writeback_item_for_pane(
-        self, tab_id: str, pane: str, session_id: str, **changes: Any
+        self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
     ) -> dict[str, object]:
         return self._writeback_control.set_writeback_item_for_pane(
             tab_id, pane, session_id, **changes
         )
 
-    def apply_writeback_for_pane(self, tab_id: str, pane: str) -> dict[str, Any]:
+    def apply_writeback_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, Any]:
         return self._writeback_control.apply_writeback_for_pane(tab_id, pane)
 
     # ------------------------------------------------------------------
