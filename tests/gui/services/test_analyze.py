@@ -34,10 +34,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from tests.gui.services._completion_helpers import (
-    on_analyze_failed,
-    on_analyze_finished,
-)
+from tests.gui.services._completion_helpers import on_analyze_failed
 
 from ._progress_fakes import DirectProgressTransport
 
@@ -95,7 +92,7 @@ def _make_service(
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     writeback = MagicMock()
-    writeback.compute_items_for_tab.return_value = []
+    writeback.create_draft.return_value = None
     runner = OperationRunner(MagicMock(), handles, progress, bg, bus)  # type: ignore[arg-type]
     svc = AnalyzeService(state, runner, bus, writeback, handles)
     return svc, bg
@@ -143,8 +140,8 @@ def test_start_analyze_submit_rejection_emits_restore_fact(qapp):  # noqa: ARG00
     state = _make_state()
     old_figure = MagicMock()
     old_post_figure = MagicMock()
-    state.get_tab("tab1").figure = old_figure
-    state.get_tab("tab1").post_figure = old_post_figure
+    state.get_tab("tab1").analysis.figure = old_figure
+    state.get_tab("tab1").post_analysis.figure = old_post_figure
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
@@ -156,8 +153,8 @@ def test_start_analyze_submit_rejection_emits_restore_fact(qapp):  # noqa: ARG00
         )
 
     assert received == [TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED]
-    assert state.get_tab("tab1").figure is old_figure
-    assert state.get_tab("tab1").post_figure is old_post_figure
+    assert state.get_tab("tab1").analysis.figure is old_figure
+    assert state.get_tab("tab1").post_analysis.figure is old_post_figure
     assert state.get_tab("tab1").is_analyzing is False
 
 
@@ -215,13 +212,22 @@ def test_on_analyze_finished_updates_state(qapp):  # noqa: ARG001
     fake_result.figure = MagicMock()
 
     finished_signals: list = []
-    on_analyze_finished(svc, lambda tid, res: finished_signals.append((tid, res)))
+    bus.subscribe(
+        TabInteractionChangedPayload,
+        lambda payload: (
+            finished_signals.append(
+                (payload.tab_id, state.get_tab(payload.tab_id).analysis.result)
+            )
+            if payload.fact is TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED
+            else None
+        ),
+    )
 
     # Trigger the on_done path (runner calls on_terminal with ok=True)
     assert bg.last_on_done is not None
     bg.last_on_done(fake_result)
 
-    assert state.get_tab("tab1").analyze_result is fake_result
+    assert state.get_tab("tab1").analysis.result is fake_result
     assert state.get_tab("tab1").is_analyzing is False
     assert len(finished_signals) == 1
     assert finished_signals[0] == ("tab1", fake_result)
@@ -280,7 +286,8 @@ def test_start_interactive_rejects_busy_tab(qapp):  # noqa: ARG001
 
 def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
     state = _make_state()
-    svc, _ = _make_service(state, EventBus())
+    bus = EventBus()
+    svc, _ = _make_service(state, bus)
     svc.start_interactive(AnalyzePermit(tab_id="tab1"))
 
     fake_result = MagicMock()
@@ -289,14 +296,23 @@ def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
     session.finish.return_value = fake_result
 
     finished: list = []
-    on_analyze_finished(svc, lambda tid, res: finished.append((tid, res)))
+    bus.subscribe(
+        TabInteractionChangedPayload,
+        lambda payload: (
+            finished.append(
+                (payload.tab_id, state.get_tab(payload.tab_id).analysis.result)
+            )
+            if payload.fact is TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED
+            else None
+        ),
+    )
 
     svc.finish_interactive("tab1", session)
 
     session.finish.assert_called_once_with()
     # Same terminal effects as a FIT result: State updated, analyzing cleared,
     # lease released, analyze_finished emitted (so the agent's result-poll wakes).
-    assert state.get_tab("tab1").analyze_result is fake_result
+    assert state.get_tab("tab1").analysis.result is fake_result
     assert state.get_tab("tab1").is_analyzing is False
     assert finished == [("tab1", fake_result)]
 
@@ -540,7 +556,7 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa
     boom = RuntimeError("writeback boom")
     writeback = svc._writeback
     assert isinstance(writeback, MagicMock)
-    writeback.compute_items_for_tab.side_effect = boom
+    writeback.create_draft.side_effect = boom
 
     failed: list = []
     on_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))

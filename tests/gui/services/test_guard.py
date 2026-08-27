@@ -53,8 +53,8 @@ def _make_state(
         schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
     tab = Session(adapter_name="any", adapter=adapter, cfg_schema=schema)
-    tab.run_result = run_result
-    tab.analyze_result = analyze_result
+    tab.run.result = run_result
+    tab.analysis.result = analyze_result
     state.add_tab(tab_id, tab)
     return state, tab_id
 

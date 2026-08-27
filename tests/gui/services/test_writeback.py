@@ -94,37 +94,6 @@ def _svc(
     )
 
 
-def _put_items(state: State, *items, tab_id: str = "t1") -> None:
-    """Place persistent items on the tab (as compute would)."""
-    state.get_tab(tab_id).writeback_items = list(items)
-
-
-# ---------------------------------------------------------------------------
-# apply (reads persistent draft, writes md/ml, bumps context)
-# ---------------------------------------------------------------------------
-
-
-def test_compute_stamps_per_kind_session_ids():
-    state = _make_state_with_tab()
-    state.update_tab_result("t1", object())
-    tab = state.get_tab("t1")
-    analyze_result = MagicMock()  # passed in explicitly, not read from State
-
-    md1 = MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)
-    wf1 = WaveformWriteback(target_name="wf_a", description="d")  # no edit_schema
-    ml1 = ModuleWriteback(target_name="mod_a", description="d")  # no edit_schema
-    wf2 = WaveformWriteback(target_name="wf_b", description="d")
-    adapter: MagicMock = tab.adapter  # type: ignore[assignment]
-    adapter.get_writeback_items.return_value = [md1, wf1, ml1, wf2]
-
-    svc = _svc(state)
-    items = svc.compute_items_for_tab("t1", analyze_result)
-
-    ids = [it.session_id for it in items]
-    assert ids == ["md-1", "wf-1", "ml-1", "wf-2"]
-    assert all(it.selected for it in items)
-
-
 # ---------------------------------------------------------------------------
 # Opaque transactional draft API
 # ---------------------------------------------------------------------------

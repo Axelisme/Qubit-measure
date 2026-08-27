@@ -22,7 +22,7 @@ class RecordingState:
         self.exp_context = SimpleNamespace(md="md", ml="ml", predictor="predictor")
         self.tab = SimpleNamespace(
             adapter=RecordingAdapter(log, analysis=analysis),
-            run_result="run-result",
+            run=SimpleNamespace(result="run-result"),
         )
 
     def has_tab(self, tab_id: str) -> bool:
@@ -141,8 +141,8 @@ class RecordingTab:
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.snapshot = object()
-        self.analyze_result = object()
-        self.post_analyze_result = object()
+        self.analysis = SimpleNamespace(result=object())
+        self.post_analysis = SimpleNamespace(result=object())
 
     def get_snapshot(self, tab_id: str) -> object:
         self._log.add("tab", "get_snapshot", tab_id)
@@ -156,11 +156,11 @@ class RecordingTab:
 
     def get_tab_analyze_result(self, tab_id: str) -> object:
         self._log.add("tab", "get_tab_analyze_result", tab_id)
-        return self.analyze_result
+        return self.analysis.result
 
     def get_tab_post_analyze_result(self, tab_id: str) -> object:
         self._log.add("tab", "get_tab_post_analyze_result", tab_id)
-        return self.post_analyze_result
+        return self.post_analysis.result
 
 
 class RecordingBus:

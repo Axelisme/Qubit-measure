@@ -52,8 +52,8 @@ def test_update_post_analyze_records_result_and_figure() -> None:
     state.update_tab_post_analyze("t1", post_result, fig)
 
     tab = state.get_tab("t1")
-    assert tab.post_analyze_result is post_result
-    assert tab.post_figure is fig
+    assert tab.post_analysis.result is post_result
+    assert tab.post_analysis.figure is fig
     assert tab.has_post_analyze_result() is True
 
 
@@ -66,8 +66,8 @@ def test_post_analyze_invalidated_on_reanalyze() -> None:
     # A re-analyze replaces the primary result the post built on → post cleared.
     state.update_tab_analyze("t1", MagicMock(), Figure())
     tab = state.get_tab("t1")
-    assert tab.post_analyze_result is None
-    assert tab.post_figure is None
+    assert tab.post_analysis.result is None
+    assert tab.post_analysis.figure is None
     assert tab.has_post_analyze_result() is False
 
 
@@ -79,8 +79,8 @@ def test_post_analyze_invalidated_on_rerun() -> None:
     # A new run result clears both the primary analyze and the post-analysis.
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
-    assert tab.post_analyze_result is None
-    assert tab.post_figure is None
+    assert tab.post_analysis.result is None
+    assert tab.post_analysis.figure is None
 
 
 def test_post_analyze_invalidated_on_clear_results() -> None:
@@ -90,12 +90,12 @@ def test_post_analyze_invalidated_on_clear_results() -> None:
 
     state.clear_tab_results("t1")
     tab = state.get_tab("t1")
-    assert tab.post_analyze_result is None
-    assert tab.post_figure is None
+    assert tab.post_analysis.result is None
+    assert tab.post_analysis.figure is None
 
 
 def test_post_analyze_param_instance_round_trip() -> None:
     state = _make_state()
     sentinel = object()
     state.update_tab_post_analyze_param_instance("t1", sentinel)
-    assert state.get_tab("t1").post_analyze_param_instance is sentinel
+    assert state.get_tab("t1").post_analysis.params is sentinel
