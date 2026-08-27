@@ -362,10 +362,8 @@ class WritebackService:
 
     def _detach_draft_from_state(self, draft: WritebackDraft) -> None:
         """Ensure State never retains a draft after its editor sessions close."""
-        for tab in getattr(self._state, "tabs", {}).values():
-            if getattr(tab.analysis, "writeback_draft", None) is draft:
+        for tab in self._state.tabs.values():
+            if tab.analysis.writeback_draft is draft:
                 tab.analysis.writeback_draft = None
-            if getattr(tab, "post_analysis", None) is not None:
-                post_pane = tab.post_analysis
-                if getattr(post_pane, "writeback_draft", None) is draft:
-                    post_pane.writeback_draft = None
+            if tab.post_analysis.writeback_draft is draft:
+                tab.post_analysis.writeback_draft = None

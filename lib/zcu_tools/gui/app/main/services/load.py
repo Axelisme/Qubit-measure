@@ -10,7 +10,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from .guard import LoadPermit
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.app.main.state import RetiredPaneResources, State
 
     from .ports import WritebackLifecyclePort
 
@@ -107,8 +107,10 @@ class LoadService:
             has_analyze_params=False,
         )
 
-    def _teardown_retired(self, retired: object, *, tab_id: str | None = None) -> None:
-        for draft in getattr(retired, "writeback_drafts", ()):
+    def _teardown_retired(
+        self, retired: RetiredPaneResources, *, tab_id: str | None = None
+    ) -> None:
+        for draft in retired.writeback_drafts:
             try:
                 self._writeback.teardown_draft(draft)
             except Exception:
