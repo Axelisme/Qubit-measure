@@ -136,7 +136,13 @@ def test_snapshot_exposes_independent_panes_and_paths() -> None:
     primary_draft = MagicMock()
     post_draft = MagicMock()
     writeback = MagicMock()
-    writeback.preview_draft.side_effect = lambda d: ["primary-item"] if d is primary_draft else ["post-item"] if d is post_draft else []
+    writeback.preview_draft.side_effect = lambda d: (
+        ["primary-item"]
+        if d is primary_draft
+        else ["post-item"]
+        if d is post_draft
+        else []
+    )
     # Attach drafts to panes so snapshot can preview them.
     state.get_tab(tab_id).analysis.writeback_draft = primary_draft  # type: ignore[assignment]
     state.get_tab(tab_id).post_analysis.writeback_draft = post_draft  # type: ignore[assignment]

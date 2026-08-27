@@ -43,7 +43,9 @@ def _make_state(
     state = State(ExpContext(md=md, ml=ml, soc=soc, soccfg=soccfg, readiness=readiness))
     tab_id = "tab-1"
     adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(requires_soc=requires_soc, load_data=load_data)
+    adapter.capabilities = AdapterCapabilities(
+        requires_soc=requires_soc, load_data=load_data
+    )
 
     if lowering_raises:
         schema = CfgSchema(
