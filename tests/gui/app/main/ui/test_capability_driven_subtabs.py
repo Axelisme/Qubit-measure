@@ -311,10 +311,20 @@ def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure
     tab.detach()
 
 
-def test_post_analysis_failure_restores_retained_figures_via_coordinator(
-    qapp, exp_tab_widget, monkeypatch
+@pytest.mark.parametrize(
+    "fact_name",
+    [
+        "PRIMARY_ANALYZE_FAILED",
+        "PRIMARY_ANALYZE_CANCELLED",
+        "PRIMARY_ANALYZE_START_REJECTED",
+        "POST_ANALYZE_FAILED",
+        "POST_ANALYZE_START_REJECTED",
+    ],
+)
+def test_analysis_terminal_restores_retained_figures_via_coordinator(
+    qapp, exp_tab_widget, monkeypatch, fact_name
 ):
-    """Coordinator failure reaction restores retained primary then post figures."""
+    """Terminal reactions restore retained primary then post figures."""
     from zcu_tools.gui.app.main.events.tab import (
         TabInteractionChangedPayload,
         TabInteractionFact,
@@ -350,7 +360,7 @@ def test_post_analysis_failure_restores_retained_figures_via_coordinator(
     # Snapshot on failure returns retained figures (same objects as above)
     # Emitting the domain fact exercises the subscribed coordinator reaction.
     bus.emit(
-        TabInteractionChangedPayload("tab-1", TabInteractionFact.PRIMARY_ANALYZE_FAILED)
+        TabInteractionChangedPayload("tab-1", getattr(TabInteractionFact, fact_name))
     )
     assert tab.get_current_figure_for_pane("analysis") is fig_a_retained
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p_retained

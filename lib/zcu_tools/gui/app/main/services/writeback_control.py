@@ -119,14 +119,14 @@ class WritebackControlFacet:
         if pane != "analysis":
             raise InvalidInputError(f"unknown writeback pane: {pane!r}")
         draft = self._writeback.get_tab_writeback_draft(tab_id)
-        if draft is not None:
-            return self._writeback.edit_draft(draft, session_id, **changes)
-        return self._writeback.set_item_field(tab_id, session_id, **changes)
+        if draft is None:
+            raise FailedPreconditionError(f"No writeback draft for tab {tab_id!r}")
+        return self._writeback.edit_draft(draft, session_id, **changes)
 
     def apply_writeback_for_pane(
         self, tab_id: str, pane: WritebackPane
     ) -> dict[str, Any]:
-        permit = self._guard.acquire_writeback_permit(tab_id)
+        self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         if pane == "post_analysis":
             draft = self._writeback.get_tab_post_writeback_draft(tab_id)
@@ -138,14 +138,13 @@ class WritebackControlFacet:
         if pane != "analysis":
             raise InvalidInputError(f"unknown writeback pane: {pane!r}")
         draft = self._writeback.get_tab_writeback_draft(tab_id)
-        if draft is not None:
-            return self._writeback.apply_draft(draft)
-        return self._writeback.apply_tab_writeback(permit)
+        if draft is None:
+            raise FailedPreconditionError(f"No writeback draft for tab {tab_id!r}")
+        return self._writeback.apply_draft(draft)
 
     def _require_tab_idle(self, tab_id: str) -> None:
         """Keep edits/apply out of a same-tab lifecycle transition."""
-        busy = getattr(self._state, "is_tab_busy", None)
-        if callable(busy) and busy(tab_id):
+        if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
     def get_context_version(self) -> int:
