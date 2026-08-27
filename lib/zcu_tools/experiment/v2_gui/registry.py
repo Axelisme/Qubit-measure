@@ -60,6 +60,7 @@ from .adapters.singleshot import (
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
 )
+from .adapters.twotone.ckp import CKPAdapter
 from .adapters.twotone.flux_dep import FluxDepAdapter
 from .adapters.twotone.freq import FreqAdapter
 from .adapters.twotone.power_dep import PowerDepAdapter
@@ -100,6 +101,7 @@ ADAPTERS = {
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
     "twotone/freq": FreqAdapter,
+    "twotone/ckp": CKPAdapter,
     "twotone/power_dep": PowerDepAdapter,
     "twotone/flux_dep": FluxDepAdapter,
     "twotone/rabi/amp_rabi": AmpRabiAdapter,
