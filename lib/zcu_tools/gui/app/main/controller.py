@@ -894,32 +894,6 @@ class Controller(SessionControllerMixin):
     # Writeback (TabService)
     # ------------------------------------------------------------------
 
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        """Read the tab's persistent writeback draft (read-only, no permit).
-
-        Returns [] when the tab has no run/analyze result yet.
-        """
-        return self._writeback_control.get_tab_writeback_items(tab_id)
-
-    def apply_writeback(self, tab_id: str) -> dict[str, Any]:
-        """Apply the tab's persistent writeback draft as-is (no recompute).
-
-        Returns ``{applied_ids, written}`` echoing what was actually written
-        (see WritebackService.apply_tab_writeback)."""
-        return self._writeback_control.apply_writeback(tab_id)
-
-    def get_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft:
-        """Return an item cfg draft for a viewer without exposing its editor id."""
-        return self._writeback_control.get_writeback_item_draft(tab_id, session_id)
-
-    def set_writeback_item(
-        self, tab_id: str, session_id: str, **changes: Any
-    ) -> dict[str, object]:
-        """Edit a persistent writeback item (selected / target_name / metadict
-        value / module-waveform cfg edits). Returns the aggregated
-        ``{valid, removed, added}`` of any applied cfg edits."""
-        return self._writeback_control.set_writeback_item(tab_id, session_id, **changes)
-
     def get_writeback_item_draft_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
     ) -> CfgDraft:
@@ -953,20 +927,6 @@ class Controller(SessionControllerMixin):
 
     def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
         return self._save_control.save_post_image(tab_id, image_path)
-
-    def save_result(
-        self,
-        tab_id: str,
-        data_path: str | None = None,
-        image_path: str | None = None,
-        comment: str = "",
-    ) -> tuple[str, str]:
-        return self._save_control.save_result(
-            tab_id,
-            data_path,
-            image_path,
-            comment=comment,
-        )
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -1322,11 +1282,6 @@ class Controller(SessionControllerMixin):
                 fact=TabInteractionFact.ANALYZE_PARAMS_CHANGED,
             ),
         )
-
-    def update_tab_save_paths(
-        self, tab_id: str, data_path: str, image_path: str
-    ) -> None:
-        self._save_control.update_tab_save_paths(tab_id, data_path, image_path)
 
     def update_tab_data_path(self, tab_id: str, data_path: str | None) -> None:
         """Per-pane Save data-path override (Save pane)."""

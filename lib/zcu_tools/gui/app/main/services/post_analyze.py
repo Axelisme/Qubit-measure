@@ -68,7 +68,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        analyze_result = tab.analyze_result
+        analyze_result = tab.analysis.result
         if analyze_result is None:
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no primary analyze result to post-analyze"
@@ -76,7 +76,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
 
         ctx = self._state.exp_context
         req = PostAnalyzeRequest(
-            run_result=tab.run_result,
+            run_result=tab.run.result,
             analyze_result=analyze_result,
             post_analyze_params=post_analyze_params_instance,
             md=ctx.md,
@@ -114,18 +114,8 @@ class PostAnalyzeService(_StagedAnalyzeService):
             "post-analyze failed to start",
         )
 
-    @staticmethod
-    def _has_opaque_draft_api(writeback: Any) -> bool:
-        return writeback is not None and all(
-            callable(getattr(type(writeback), name, None))
-            for name in ("create_draft", "preview_draft", "teardown_draft")
-        )
-
     def _teardown_retired(self, retired: Any) -> None:
         if retired is None or self._writeback is None:
-            return
-        teardown = getattr(type(self._writeback), "teardown_draft", None)
-        if not callable(teardown):
             return
         for draft in retired.writeback_drafts:
             try:
@@ -147,58 +137,46 @@ class PostAnalyzeService(_StagedAnalyzeService):
         if captured_inputs is None:
             tab = self._state.get_tab(tab_id)
             run_result, analyze_result, ctx, adapter, params = (
-                tab.run_result,
-                tab.analyze_result,
+                tab.run.result,
+                tab.analysis.result,
                 self._state.exp_context,
                 tab.adapter,
-                tab.post_analyze_param_instance,
+                tab.post_analysis.params,
             )
         else:
             run_result, analyze_result, ctx, adapter, params = captured_inputs
 
         writeback = self._writeback
-        if self._has_opaque_draft_api(writeback):
-            assert writeback is not None
-            draft: Any | None = None
-            try:
-                proposal_factory = getattr(adapter, "get_post_writeback_items", None)
-                proposal_items: list[Any] = []
-                if callable(proposal_factory):
-                    factory = cast(Callable[..., Iterable[Any]], proposal_factory)
-                    proposal_items = list(
-                        factory(
-                            PostWritebackRequest(
-                                run_result=run_result,
-                                analyze_result=cast(Any, analyze_result),
-                                post_analyze_result=post_result,
-                                ctx=ctx,
-                            )
+        assert writeback is not None
+        draft: Any | None = None
+        try:
+            proposal_factory = getattr(adapter, "get_post_writeback_items", None)
+            proposal_items: list[Any] = []
+            if callable(proposal_factory):
+                factory = cast(Callable[..., Iterable[Any]], proposal_factory)
+                proposal_items = list(
+                    factory(
+                        PostWritebackRequest(
+                            run_result=run_result,
+                            analyze_result=cast(Any, analyze_result),
+                            post_analyze_result=post_result,
+                            ctx=ctx,
                         )
                     )
-                draft = writeback.create_draft(proposal_items)
-                items = list(writeback.preview_draft(draft))
-                retired = self._state.update_tab_post_analyze(
-                    tab_id,
-                    post_result,
-                    getattr(post_result, "figure", None),
-                    post_analyze_params_instance=params,
-                    writeback_draft=draft,
-                    writeback_items=items,
                 )
-            except BaseException:
-                if draft is not None:
-                    try:
-                        writeback.teardown_draft(draft)
-                    except Exception:
-                        logger.exception("new post-analysis draft teardown failed")
-                raise
-            self._teardown_retired(retired)
-            return
-
-        # Transitional service path until the post writeback caller migration.
-        self._state.update_tab_post_analyze(
-            tab_id,
-            post_result,
-            getattr(post_result, "figure", None),
-            post_analyze_params_instance=params,
-        )
+            draft = writeback.create_draft(proposal_items)
+            retired = self._state.update_tab_post_analyze(
+                tab_id,
+                post_result,
+                getattr(post_result, "figure", None),
+                post_analyze_params_instance=params,
+                writeback_draft=draft,
+            )
+        except BaseException:
+            if draft is not None:
+                try:
+                    writeback.teardown_draft(draft)
+                except Exception:
+                    logger.exception("new post-analysis draft teardown failed")
+            raise
+        self._teardown_retired(retired)

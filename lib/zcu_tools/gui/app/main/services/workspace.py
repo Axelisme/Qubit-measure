@@ -67,7 +67,6 @@ class WorkspaceService:
             PersistedTab(
                 adapter_name=tab.adapter_name,
                 cfg_raw=schema_to_raw(tab.cfg_schema),
-                save_paths_override=tab.save_path_overrides,
             )
             for _, tab in tabs
         )
@@ -103,7 +102,6 @@ class WorkspaceService:
             snapshot = TabSnapshot(
                 adapter_name=persisted_tab.adapter_name,
                 cfg_schema=restored_schema,
-                save_paths_override=persisted_tab.save_paths_override,
             )
             tab_id = self._tabs.new_tab(persisted_tab.adapter_name, from_dict=snapshot)
             restored_by_index[index] = tab_id

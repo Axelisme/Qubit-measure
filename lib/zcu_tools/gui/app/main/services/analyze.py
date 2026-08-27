@@ -278,30 +278,13 @@ class AnalyzeService(_StagedAnalyzeService):
             )
         )
 
-    @staticmethod
-    def _has_opaque_draft_api(writeback: Any) -> bool:
-        # ``MagicMock`` and other dynamic test doubles expose arbitrary
-        # attributes on the instance. Looking on the concrete type avoids
-        # mistaking the transitional tab adapter for the pane contract.
-        return all(
-            callable(getattr(type(writeback), name, None))
-            for name in ("create_draft", "preview_draft", "teardown_draft")
-        )
-
     def _teardown_retired(self, retired: Any) -> None:
-        """Teardown every detached draft after State has committed the swap."""
         if retired is None:
-            return
-        teardown = getattr(type(self._writeback), "teardown_draft", None)
-        if not callable(teardown):
             return
         for draft in retired.writeback_drafts:
             try:
                 self._writeback.teardown_draft(draft)
             except Exception:
-                # Cleanup is deliberately non-transactional. State no longer
-                # references the retired draft, and a later idempotent cleanup
-                # attempt remains safe for WritebackDraft.
                 logger.exception("retired analyze draft teardown failed")
 
     def _record(
@@ -323,10 +306,10 @@ class AnalyzeService(_StagedAnalyzeService):
         if captured_inputs is None:
             tab = self._state.get_tab(tab_id)
             run_result, ctx, adapter, analyze_params = (
-                tab.run_result,
+                tab.run.result,
                 self._state.exp_context,
                 tab.adapter,
-                tab.analyze_param_instance,
+                tab.analysis.params,
             )
         else:
             run_result, ctx, adapter, analyze_params = captured_inputs
@@ -343,47 +326,21 @@ class AnalyzeService(_StagedAnalyzeService):
                 )
             )
 
-        if self._has_opaque_draft_api(self._writeback):
-            # Build the entire new pane before touching State. If proposal or
-            # editor creation fails, the retained canonical pane remains intact.
-            draft: Any | None = None
-            try:
-                draft = self._writeback.create_draft(proposal_items)
-                items = list(self._writeback.preview_draft(draft))
-                retired = self._state.update_tab_analyze(
-                    tab_id,
-                    analyze_result,
-                    getattr(analyze_result, "figure", None),
-                    writeback_items=items,
-                    writeback_draft=draft,
-                    analyze_params_instance=analyze_params,
-                )
-            except BaseException:
-                if draft is not None:
-                    try:
-                        self._writeback.teardown_draft(draft)
-                    except Exception:
-                        logger.exception("new analyze draft teardown failed")
-                raise
-            # The state swap is complete; cleanup cannot roll it back.
-            self._teardown_retired(retired)
-            return
-
-        # Transitional tab caller until the later writeback control migration.
-        # It still receives the captured proposal inputs, rather than rereading
-        # active context at terminal time.
-        self._writeback.teardown_tab_items(tab_id)
-        items = self._writeback.compute_items_for_tab(
-            tab_id,
-            analyze_result,
-            proposal_items=proposal_items,
-        )
-        draft = self._writeback.get_tab_writeback_draft(tab_id)
-        self._state.update_tab_analyze(
-            tab_id,
-            analyze_result,
-            getattr(analyze_result, "figure", None),
-            writeback_items=items,
-            writeback_draft=draft,
-            analyze_params_instance=analyze_params,
-        )
+        draft: Any | None = None
+        try:
+            draft = self._writeback.create_draft(proposal_items)
+            retired = self._state.update_tab_analyze(
+                tab_id,
+                analyze_result,
+                getattr(analyze_result, "figure", None),
+                writeback_draft=draft,
+                analyze_params_instance=analyze_params,
+            )
+        except BaseException:
+            if draft is not None:
+                try:
+                    self._writeback.teardown_draft(draft)
+                except Exception:
+                    logger.exception("new analyze draft teardown failed")
+            raise
+        self._teardown_retired(retired)

@@ -238,9 +238,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     # the live form.
     cfg_schema: CfgSchema
 
-    # Canonical pane-owned resources. These are the new contract; the flat
-    # properties below are transitional projections for callers migrating in
-    # later tickets (run/analyze UI and remote writeback).
+    # Canonical pane-owned resources.
     run: RunPaneState[T_Result] = field(default_factory=lambda: RunPaneState[Any]())
     analysis: AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams] = field(
         default_factory=lambda: AnalysisPaneState[Any, Any]()
@@ -254,15 +252,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     is_analyzing: bool = False
     is_saving_data: bool = False
 
-    # Transitional read projection kept until ticket 06 migrates current callers.
-    # It is intentionally not used as a source of truth for any pane swap.
-    _legacy_writeback_items: list[WritebackItem] = field(
-        default_factory=list, repr=False
-    )
-    _legacy_post_writeback_items: list[WritebackItem] = field(
-        default_factory=list, repr=False
-    )
-
     def __init__(
         self,
         adapter_name: str,
@@ -273,27 +262,9 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         analysis: Any = _UNSET,
         post_analysis: Any = _UNSET,
         save: Any = _UNSET,
-        run_result: Any = _UNSET,
-        result_source_path: Any = _UNSET,
-        analyze_result: Any = _UNSET,
-        figure: Any = _UNSET,
-        analyze_param_instance: Any = _UNSET,
-        post_analyze_result: Any = _UNSET,
-        post_figure: Any = _UNSET,
-        post_analyze_param_instance: Any = _UNSET,
-        save_path_overrides: Any = _UNSET,
-        writeback_draft: Any = _UNSET,
-        writeback_items: Any = _UNSET,
-        post_writeback_items: Any = _UNSET,
         is_analyzing: bool = False,
         is_saving_data: bool = False,
     ) -> None:
-        """Construct a pane aggregate with a temporary flat-field bridge.
-
-        The keyword bridge is intentionally kept while existing UI/remote
-        callers migrate. New code should pass pane carriers or use State's
-        transition methods; both forms end in exactly one set of pane fields.
-        """
         self.adapter_name = adapter_name
         self.adapter = adapter
         self.cfg_schema = cfg_schema
@@ -309,152 +280,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         self.save = SavePaneState() if save is _UNSET or save is None else save  # type: ignore[assignment]
         self.is_analyzing = is_analyzing
         self.is_saving_data = is_saving_data
-        self._legacy_writeback_items = []
-        self._legacy_post_writeback_items = []
-
-        # Explicit legacy values override the corresponding carrier field. The
-        # sentinel distinguishes an omitted compatibility argument from a real
-        # ``None`` used to clear a resource.
-        if run_result is not _UNSET:
-            self.run.result = run_result
-        if result_source_path is not _UNSET:
-            self.run.source_path = result_source_path
-        if analyze_result is not _UNSET:
-            self.analysis.result = analyze_result
-        if figure is not _UNSET:
-            self.analysis.figure = figure
-        if analyze_param_instance is not _UNSET:
-            self.analysis.params = analyze_param_instance
-        if post_analyze_result is not _UNSET:
-            self.post_analysis.result = post_analyze_result
-        if post_figure is not _UNSET:
-            self.post_analysis.figure = post_figure
-        if post_analyze_param_instance is not _UNSET:
-            self.post_analysis.params = post_analyze_param_instance
-        if save_path_overrides is not _UNSET:
-            self.save_path_overrides = save_path_overrides
-        if writeback_draft is not _UNSET:
-            self.analysis.writeback_draft = writeback_draft
-        if writeback_items is not _UNSET:
-            self._legacy_writeback_items = list(writeback_items or [])
-        if post_writeback_items is not _UNSET:
-            self._legacy_post_writeback_items = list(post_writeback_items or [])
-
-    # -- transitional flat projections -------------------------------------
-    # These properties retain the existing in-process callers while all new
-    # lifecycle code reads/writes the pane carriers above.
-
-    @property
-    def run_result(self) -> T_Result | None:
-        return self.run.result
-
-    @run_result.setter
-    def run_result(self, value: T_Result | None) -> None:
-        self.run.result = value
-
-    @property
-    def result_source_path(self) -> str | None:
-        return self.run.source_path
-
-    @result_source_path.setter
-    def result_source_path(self, value: str | None) -> None:
-        self.run.source_path = value
-
-    @property
-    def analyze_result(self) -> T_AnalyzeResult | None:
-        return self.analysis.result
-
-    @analyze_result.setter
-    def analyze_result(self, value: T_AnalyzeResult | None) -> None:
-        self.analysis.result = value
-
-    @property
-    def figure(self) -> Figure | None:
-        return self.analysis.figure
-
-    @figure.setter
-    def figure(self, value: Figure | None) -> None:
-        self.analysis.figure = value
-
-    @property
-    def analyze_param_instance(self) -> T_AnalyzeParams | None:
-        return self.analysis.params
-
-    @analyze_param_instance.setter
-    def analyze_param_instance(self, value: T_AnalyzeParams | None) -> None:
-        self.analysis.params = value
-
-    @property
-    def post_analyze_result(self) -> Any:
-        return self.post_analysis.result
-
-    @post_analyze_result.setter
-    def post_analyze_result(self, value: Any) -> None:
-        self.post_analysis.result = value
-
-    @property
-    def post_figure(self) -> Figure | None:
-        return self.post_analysis.figure
-
-    @post_figure.setter
-    def post_figure(self, value: Figure | None) -> None:
-        self.post_analysis.figure = value
-
-    @property
-    def post_analyze_param_instance(self) -> Any:
-        return self.post_analysis.params
-
-    @post_analyze_param_instance.setter
-    def post_analyze_param_instance(self, value: Any) -> None:
-        self.post_analysis.params = value
-
-    @property
-    def writeback_draft(self) -> Any | None:
-        return self.analysis.writeback_draft
-
-    @writeback_draft.setter
-    def writeback_draft(self, value: Any | None) -> None:
-        self.analysis.writeback_draft = value
-
-    @property
-    def writeback_items(self) -> list[WritebackItem]:
-        return self._legacy_writeback_items
-
-    @writeback_items.setter
-    def writeback_items(self, value: list[WritebackItem]) -> None:
-        self._legacy_writeback_items = value
-
-    @property
-    def post_writeback_items(self) -> list[WritebackItem]:
-        return self._legacy_post_writeback_items
-
-    @post_writeback_items.setter
-    def post_writeback_items(self, value: list[WritebackItem]) -> None:
-        self._legacy_post_writeback_items = value
-
-    @property
-    def save_path_overrides(self) -> SavePaths | None:
-        """Temporary combined path projection for pre-pane callers.
-
-        New code uses ``save.data_path_override`` and the two image-pane
-        overrides independently. The legacy projection only carries the Save
-        data path plus the primary image path because that is all the old wire
-        surface can represent.
-        """
-        data_path = self.save.data_path_override
-        image_path = self.analysis.image_path_override
-        if data_path is None and image_path is None:
-            return None
-        return SavePaths(data_path=data_path or "", image_path=image_path or "")
-
-    @save_path_overrides.setter
-    def save_path_overrides(self, value: SavePaths | None) -> None:
-        if value is None:
-            self.save.data_path_override = None
-            self.analysis.image_path_override = None
-            return
-        self.save.data_path_override = value.data_path
-        self.analysis.image_path_override = value.image_path
 
     # Explicit aliases make ownership visible without exposing implementation
     # fields to the transitional callers.
@@ -537,13 +362,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
             if paths is None
             else self._with_suffix(paths.image_path, "_post_analysis")
         )
-
-    def effective_save_paths(self, ctx: ExpContext) -> SavePaths | None:
-        """Legacy combined path projection; new panes use independent paths."""
-        override = self.save_path_overrides
-        if override is not None:
-            return override
-        return self._adapter_save_paths(ctx)
 
 
 @dataclass(frozen=True)
@@ -698,8 +516,6 @@ class State(SessionState):
         tab.run = pane
         tab.analysis = self._empty_analysis_like(tab.analysis)
         tab.post_analysis = self._empty_post_analysis_like(tab.post_analysis)
-        tab.writeback_items = []
-        tab.post_writeback_items = []
         self.version.bump(f"tab:{tab_id}:result")
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
@@ -774,8 +590,6 @@ class State(SessionState):
             pane.image_path_override = tab.analysis.image_path_override
         tab.analysis = pane
         tab.post_analysis = self._empty_post_analysis_like(tab.post_analysis)
-        tab.writeback_items = []
-        tab.post_writeback_items = []
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
         return retired
@@ -788,11 +602,9 @@ class State(SessionState):
         figure: Figure | None,
         params: object | None = None,
         writeback_draft: Any | None = None,
-        writeback_items: list[WritebackItem] | None = None,
         image_path_override: str | None = None,
     ) -> RetiredPaneResources:
         """Build and commit an Analysis carrier in one State transition."""
-        legacy_items = list(writeback_items or [])
         retired = self.swap_analysis_pane(
             tab_id,
             AnalysisPaneState(
@@ -803,7 +615,6 @@ class State(SessionState):
                 image_path_override=image_path_override,
             ),
         )
-        self.tabs[tab_id].writeback_items = legacy_items
         return retired
 
     def update_tab_analyze(
@@ -811,7 +622,6 @@ class State(SessionState):
         tab_id: str,
         analyze_result: object,
         figure: Figure | None,
-        writeback_items: list[WritebackItem] | None = None,
         writeback_draft: WritebackDraft | None = None,
         analyze_params_instance: object = _UNSET,
     ) -> RetiredPaneResources:
@@ -832,7 +642,6 @@ class State(SessionState):
             result=analyze_result,
             figure=figure,
             params=params,
-            writeback_items=writeback_items,
             writeback_draft=writeback_draft,
         )
 
@@ -841,14 +650,11 @@ class State(SessionState):
         """Clear state derived from a tab's current run result."""
         tab.analysis = State._empty_analysis_like(tab.analysis)
         tab.post_analysis = State._empty_post_analysis_like(tab.post_analysis)
-        tab.writeback_items = []
-        tab.post_writeback_items = []
 
     @staticmethod
     def _invalidate_post_analyze(tab: Session[Any, Any, Any, Any]) -> None:
         """Drop Post resources while preserving its independent image path."""
         tab.post_analysis = State._empty_post_analysis_like(tab.post_analysis)
-        tab.post_writeback_items = []
 
     def swap_post_analysis_pane(
         self,
@@ -869,7 +675,6 @@ class State(SessionState):
         if pane.image_path_override is None:
             pane.image_path_override = tab.post_analysis.image_path_override
         tab.post_analysis = pane
-        tab.post_writeback_items = []
         self.version.bump(f"tab:{tab_id}:post_analyze")
         return retired
 
@@ -881,11 +686,9 @@ class State(SessionState):
         figure: Figure | None,
         params: object | None = None,
         writeback_draft: Any | None = None,
-        writeback_items: list[WritebackItem] | None = None,
         image_path_override: str | None = None,
     ) -> RetiredPaneResources:
         """Build and commit a Post carrier in one State transition."""
-        legacy_items = list(writeback_items or [])
         retired = self.swap_post_analysis_pane(
             tab_id,
             PostAnalysisPaneState(
@@ -896,7 +699,6 @@ class State(SessionState):
                 image_path_override=image_path_override,
             ),
         )
-        self.tabs[tab_id].post_writeback_items = legacy_items
         return retired
 
     def update_tab_post_analyze(
@@ -907,7 +709,6 @@ class State(SessionState):
         *,
         post_analyze_params_instance: object = _UNSET,
         writeback_draft: Any | None = None,
-        writeback_items: list[WritebackItem] | None = None,
     ) -> RetiredPaneResources:
         """Record a Post result while retaining the independent Analysis pane."""
         self._assert_owner()
@@ -928,7 +729,6 @@ class State(SessionState):
             figure=figure,
             params=params,
             writeback_draft=writeback_draft,
-            writeback_items=writeback_items,
         )
         return retired
 
@@ -941,7 +741,7 @@ class State(SessionState):
             tab_id,
             type(instance).__name__,
         )
-        self.tabs[tab_id].post_analyze_param_instance = instance
+        self.tabs[tab_id].post_analysis.params = instance
 
     def update_tab_cfg_schema(self, tab_id: str, schema: CfgSchema) -> None:
         self._assert_owner()
@@ -956,15 +756,11 @@ class State(SessionState):
             tab_id,
             type(instance).__name__,
         )
-        self.tabs[tab_id].analyze_param_instance = instance
+        self.tabs[tab_id].analysis.params = instance
 
     def _bump_path_versions(self, tab_id: str, *resources: str) -> None:
-        """Bump independent path resources plus the temporary combined key."""
         for resource in resources:
             self.version.bump(f"tab:{tab_id}:path:{resource}")
-        # Existing guards still consume this key until the save/control callers
-        # migrate to the three explicit path resources.
-        self.version.bump(f"tab:{tab_id}:save_path")
 
     def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:
         self._assert_owner()
@@ -984,34 +780,6 @@ class State(SessionState):
         self._assert_owner()
         self.tabs[tab_id].post_analysis.image_path_override = image_path
         self._bump_path_versions(tab_id, "post_analysis_image")
-
-    def update_tab_save_path_overrides(
-        self,
-        tab_id: str,
-        paths: SavePaths | None,
-    ) -> None:
-        """Temporary combined path writer for pre-pane callers."""
-        self._assert_owner()
-        logger.debug("update_tab_save_path_overrides: tab_id=%r", tab_id)
-        tab = self.tabs[tab_id]
-        if paths is None:
-            tab.save.data_path_override = None
-            tab.analysis.image_path_override = None
-        else:
-            tab.save.data_path_override = paths.data_path
-            tab.analysis.image_path_override = paths.image_path
-        self._bump_path_versions(tab_id, "data", "analysis_image")
-
-    def clear_tab_save_path_overrides(
-        self,
-        tab_id: str,
-    ) -> None:
-        self._assert_owner()
-        logger.debug("clear_tab_save_path_overrides: tab_id=%r", tab_id)
-        tab = self.tabs[tab_id]
-        tab.save.data_path_override = None
-        tab.analysis.image_path_override = None
-        self._bump_path_versions(tab_id, "data", "analysis_image")
 
     def set_tab_running(self, tab_id: str, running: bool) -> None:
         self._assert_owner()

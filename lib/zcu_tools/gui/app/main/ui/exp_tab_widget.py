@@ -578,14 +578,23 @@ class ExpTabWidget(QWidget):
         self._populate_cfg(snapshot.cfg_schema, self._ctrl)
         if (
             self._has_analysis
-            and snapshot.analyze_params is not None
+            and snapshot.analysis is not None
+            and snapshot.analysis.params is not None
             and self.has_analyze_params()
         ):
-            self.analyze_form.populate_values(snapshot.analyze_params)
+            self.analyze_form.populate_values(snapshot.analysis.params)
         if self._has_post:
-            self.sync_post_analyze_params(snapshot.post_analyze_params)
+            post_params = (
+                snapshot.post_analysis.params
+                if snapshot.post_analysis is not None
+                else None
+            )
+            self.sync_post_analyze_params(post_params)
         else:
-            if snapshot.post_analyze_params is not None:
+            if (
+                snapshot.post_analysis is not None
+                and snapshot.post_analysis.params is not None
+            ):
                 raise RuntimeError(
                     f"tab {self.tab_id!r} received post params but does not support post-analysis"
                 )
@@ -765,46 +774,6 @@ class ExpTabWidget(QWidget):
     def left_panel_width(self) -> int:
         """Return the latest expanded left-panel width for persistence."""
         return self._splitter_left_saved
-
-    def current_figure(self) -> Figure | None:
-        """Return the visible matplotlib figure, or ``None`` at placeholder.
-
-        Searches the currently visible right pane's stack for a figure.
-        """
-        from matplotlib.figure import Figure
-
-        current_right = self._right_stack.currentWidget()
-        stacks_to_check: list[QStackedWidget] = []
-        if isinstance(current_right, QStackedWidget):
-            stacks_to_check.append(current_right)
-        # Fallback scan of existing panes in priority order
-        if self._has_analysis and self._analysis_stack not in stacks_to_check:
-            stacks_to_check.append(self._analysis_stack)
-        if self._run_stack not in stacks_to_check:
-            stacks_to_check.append(self._run_stack)
-        if self._has_post and self._post_stack not in stacks_to_check:
-            stacks_to_check.append(self._post_stack)
-
-        for stack in stacks_to_check:
-            canvas = stack.currentWidget()
-            if canvas is None:
-                continue
-            # Skip placeholders
-            if canvas is self._right_placeholder:
-                continue
-            if self._has_analysis and canvas is self._analysis_placeholder:
-                continue
-            if canvas is self._run_placeholder:
-                continue
-            if self._has_post and canvas is self._post_placeholder:
-                continue
-            figure = getattr(canvas, "figure", None)
-            if not isinstance(figure, Figure):
-                raise RuntimeError(
-                    f"tab {self.tab_id!r} canvas has no matplotlib figure"
-                )
-            return figure
-        return None
 
     def get_current_figure_for_pane(self, pane: str) -> Figure | None:
         """Pane-specific figure read (run|analysis|post_analysis)."""

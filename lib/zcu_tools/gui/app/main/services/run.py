@@ -65,20 +65,7 @@ class RunService:
         self._active_token: int | None = None
 
     def _teardown_retired(self, retired: Any, *, tab_id: str | None = None) -> None:
-        """Teardown detached drafts only after the State swap has committed."""
         if retired is None:
-            return
-        teardown = getattr(type(self._writeback), "teardown_draft", None)
-        if not callable(teardown):
-            legacy = getattr(self._writeback, "teardown_tab_items", None)
-            if tab_id is not None and callable(legacy):
-                try:
-                    legacy(tab_id)
-                except Exception:
-                    # This compatibility teardown happens after the State swap;
-                    # never turn a cleanup failure into a rollback or leave the
-                    # operation unable to proceed.
-                    logger.exception("retired legacy run draft teardown failed")
             return
         for draft in retired.writeback_drafts:
             try:

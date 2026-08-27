@@ -10,7 +10,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import WritebackItem
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.cfg.binding import CfgDraft
 
@@ -22,16 +21,6 @@ class WritebackControlPort(Protocol):
     """App-facing writeback surface for driving adapters."""
 
     def has_tab(self, tab_id: str) -> bool: ...
-
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]: ...
-
-    def get_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft: ...
-
-    def set_writeback_item(
-        self, tab_id: str, session_id: str, **changes: Any
-    ) -> dict[str, object]: ...
-
-    def apply_writeback(self, tab_id: str) -> dict[str, Any]: ...
 
     def get_writeback_item_draft_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
@@ -67,41 +56,30 @@ class WritebackControlFacet:
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
 
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        return list(self._writeback.get_tab_writeback_items(tab_id))
-
-    def get_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft:
-        return self._writeback.get_tab_writeback_item_draft(tab_id, session_id)
-
-    def set_writeback_item(
-        self, tab_id: str, session_id: str, **changes: Any
-    ) -> dict[str, object]:
-        self._guard.acquire_writeback_permit(tab_id)
-        self._require_tab_idle(tab_id)
-        return self._writeback.set_item_field(tab_id, session_id, **changes)
-
-    def apply_writeback(self, tab_id: str) -> dict[str, Any]:
-        permit = self._guard.acquire_writeback_permit(tab_id)
-        self._require_tab_idle(tab_id)
-        return self._writeback.apply_tab_writeback(permit)
+    def _draft_for_pane(self, tab_id: str, pane: WritebackPane):
+        tab = self._state.get_tab(tab_id)
+        if pane == "analysis":
+            draft = tab.analysis.writeback_draft
+        elif pane == "post_analysis":
+            draft = tab.post_analysis.writeback_draft
+        else:
+            raise InvalidInputError(f"unknown writeback pane: {pane!r}")
+        if draft is None:
+            raise FailedPreconditionError(
+                f"No {'post ' if pane == 'post_analysis' else ''}writeback draft for tab {tab_id!r}"
+            )
+        if not draft.is_active:
+            raise FailedPreconditionError(
+                f"Writeback draft for tab {tab_id!r} pane {pane!r} has been torn down"
+            )
+        return draft
 
     def get_writeback_item_draft_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
     ) -> CfgDraft:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
-        if pane == "post_analysis":
-            draft = self._writeback.get_tab_post_writeback_draft(tab_id)
-            if draft is None:
-                raise FailedPreconditionError(
-                    f"No post writeback draft for tab {tab_id!r}"
-                )
-            return self._writeback.get_item_draft(draft, session_id)
-        if pane != "analysis":
-            raise InvalidInputError(f"unknown writeback pane: {pane!r}")
-        draft = self._writeback.get_tab_writeback_draft(tab_id)
-        if draft is None:
-            raise FailedPreconditionError(f"No writeback draft for tab {tab_id!r}")
+        draft = self._draft_for_pane(tab_id, pane)
         return self._writeback.get_item_draft(draft, session_id)
 
     def set_writeback_item_for_pane(
@@ -109,18 +87,7 @@ class WritebackControlFacet:
     ) -> dict[str, object]:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
-        if pane == "post_analysis":
-            draft = self._writeback.get_tab_post_writeback_draft(tab_id)
-            if draft is None:
-                raise FailedPreconditionError(
-                    f"No post writeback draft for tab {tab_id!r}"
-                )
-            return self._writeback.edit_draft(draft, session_id, **changes)
-        if pane != "analysis":
-            raise InvalidInputError(f"unknown writeback pane: {pane!r}")
-        draft = self._writeback.get_tab_writeback_draft(tab_id)
-        if draft is None:
-            raise FailedPreconditionError(f"No writeback draft for tab {tab_id!r}")
+        draft = self._draft_for_pane(tab_id, pane)
         return self._writeback.edit_draft(draft, session_id, **changes)
 
     def apply_writeback_for_pane(
@@ -128,22 +95,10 @@ class WritebackControlFacet:
     ) -> dict[str, Any]:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
-        if pane == "post_analysis":
-            draft = self._writeback.get_tab_post_writeback_draft(tab_id)
-            if draft is None:
-                raise FailedPreconditionError(
-                    f"No post writeback draft for tab {tab_id!r}"
-                )
-            return self._writeback.apply_draft(draft)
-        if pane != "analysis":
-            raise InvalidInputError(f"unknown writeback pane: {pane!r}")
-        draft = self._writeback.get_tab_writeback_draft(tab_id)
-        if draft is None:
-            raise FailedPreconditionError(f"No writeback draft for tab {tab_id!r}")
+        draft = self._draft_for_pane(tab_id, pane)
         return self._writeback.apply_draft(draft)
 
     def _require_tab_idle(self, tab_id: str) -> None:
-        """Keep edits/apply out of a same-tab lifecycle transition."""
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 

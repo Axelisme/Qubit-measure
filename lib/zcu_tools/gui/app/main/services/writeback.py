@@ -12,12 +12,10 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleWriteback,
     WaveformWriteback,
     WritebackItem,
-    WritebackRequest,
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
-from .guard import WritebackPermit
 from .ports import CfgEdit, CfgEditorPort, ContextWrites
 
 logger = logging.getLogger(__name__)
@@ -119,8 +117,7 @@ class WritebackService:
     The primary interface is ``create_draft`` → ``preview_draft`` / ``edit_draft``
     → ``apply_draft`` / ``teardown_draft``. It accepts already-computed proposal
     items and has no knowledge of analysis stages, subtabs, figures, or adapter
-    hooks. The tab-named methods at the bottom are temporary A4 adapters retained
-    for the current primary analyze/UI path until ticket 06 migrates the caller.
+    hooks.
     """
 
     def __init__(
@@ -132,10 +129,6 @@ class WritebackService:
         self._state = state
         self._cfg_editor = cfg_editor
         self._write = write_port
-        # Temporary tab caller adapter. The draft itself remains the authority;
-        # this map only lets the current tab-level services find that draft until
-        # their state contract is migrated.
-        self._tab_drafts: dict[str, WritebackDraft] = {}
 
     # ------------------------------------------------------------------
     # Opaque draft lifecycle
@@ -369,253 +362,10 @@ class WritebackService:
 
     def _detach_draft_from_state(self, draft: WritebackDraft) -> None:
         """Ensure State never retains a draft after its editor sessions close."""
-        self._tab_drafts = {
-            tab_id: candidate
-            for tab_id, candidate in self._tab_drafts.items()
-            if candidate is not draft
-        }
         for tab in getattr(self._state, "tabs", {}).values():
-            if getattr(tab, "writeback_draft", None) is draft:
-                setattr(tab, "writeback_draft", None)
-                tab.writeback_items = []
+            if getattr(tab.analysis, "writeback_draft", None) is draft:
+                tab.analysis.writeback_draft = None
             if getattr(tab, "post_analysis", None) is not None:
                 post_pane = tab.post_analysis
                 if getattr(post_pane, "writeback_draft", None) is draft:
                     post_pane.writeback_draft = None
-                    tab.post_writeback_items = []
-
-    # ------------------------------------------------------------------
-    # Temporary tab caller adapters (A4; removed by the later caller migration)
-    # ------------------------------------------------------------------
-
-    def compute_items_for_tab(
-        self,
-        tab_id: str,
-        analyze_result: Any,
-        *,
-        proposal_items: Iterable[WritebackItem] | None = None,
-    ) -> list[WritebackItem]:
-        """Temporary tab adapter around ``create_draft``.
-
-        New workflows compute proposals themselves and pass them in. The
-        no-argument proposal path remains only for the current caller contract;
-        it is deliberately isolated here so the opaque draft API never needs an
-        adapter or stage parameter.
-        """
-        tab = self._state.get_tab(tab_id)
-        run_result = tab.run_result
-        if run_result is None or analyze_result is None:
-            return []
-        if proposal_items is None:
-            proposal_items = tab.adapter.get_writeback_items(
-                WritebackRequest(
-                    run_result=run_result,
-                    analyze_result=analyze_result,
-                    ctx=self._state.exp_context,
-                )
-            )
-        draft = self.create_draft(proposal_items)
-        self._tab_drafts[tab_id] = draft
-        return draft.preview()
-
-    def get_tab_writeback_draft(self, tab_id: str) -> WritebackDraft | None:
-        """Temporary lookup for the current tab-level state adapter."""
-        draft = self._tab_drafts.get(tab_id)
-        if draft is not None and draft.is_active:
-            return draft
-        state_draft = getattr(self._state.get_tab(tab_id), "writeback_draft", None)
-        if isinstance(state_draft, WritebackDraft) and state_draft.is_active:
-            return state_draft
-        return None
-
-    def get_tab_post_writeback_draft(self, tab_id: str) -> WritebackDraft | None:
-        """Return the active draft owned by the Post-Analysis pane."""
-        tab = self._state.get_tab(tab_id)
-        draft = getattr(getattr(tab, "post_analysis", None), "writeback_draft", None)
-        if isinstance(draft, WritebackDraft) and draft.is_active:
-            return draft
-        return None
-
-    def get_tab_post_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        """Read the Post-Analysis draft without recomputing its proposals."""
-        draft = self.get_tab_post_writeback_draft(tab_id)
-        if draft is not None:
-            return draft.preview()
-        return list(getattr(self._state.get_tab(tab_id), "post_writeback_items", []))
-
-    def get_tab_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft:
-        """Viewer adapter that resolves an item model without returning its id."""
-        draft = self.get_tab_writeback_draft(tab_id)
-        if draft is not None:
-            return self.get_item_draft(draft, session_id)
-        item = self._find_item(tab_id, session_id)
-        editor_id = getattr(item, "editor_id", None)
-        if editor_id is None:
-            raise FailedPreconditionError(
-                f"{session_id!r} has no editable cfg model to attach"
-            )
-        return self._cfg_editor.get_draft(editor_id)
-
-    def teardown_tab_items(self, tab_id: str) -> None:
-        """Temporary tab teardown adapter; safe to call repeatedly."""
-        tab = self._state.get_tab(tab_id)
-        draft = self._tab_drafts.pop(tab_id, None)
-        state_draft = getattr(tab, "writeback_draft", None)
-        if draft is None and isinstance(state_draft, WritebackDraft):
-            draft = state_draft
-        if draft is not None:
-            self.teardown_draft(draft)
-            if getattr(tab, "writeback_draft", None) is draft:
-                setattr(tab, "writeback_draft", None)
-            return
-
-        # Compatibility for pre-draft state injected by the old caller/tests.
-        for item in tab.writeback_items:
-            editor_id = getattr(item, "editor_id", None)
-            if not editor_id:
-                continue
-            try:
-                self._cfg_editor.teardown(editor_id)
-            finally:
-                # Prevent a second call if this old projection is torn down
-                # again before the later state clear.
-                delattr(item, "editor_id")
-
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        """Temporary read projection of the current tab draft."""
-        draft = self.get_tab_writeback_draft(tab_id)
-        if draft is not None:
-            return draft.preview()
-        return list(self._state.get_tab(tab_id).writeback_items)
-
-    def set_item_field(
-        self,
-        tab_id: str,
-        session_id: str,
-        *,
-        selected: bool | None = None,
-        target_name: str | None = None,
-        proposed_value: Any = _UNSET,
-        edits: list[dict[str, object]] | None = None,
-    ) -> dict[str, object]:
-        """Temporary tab adapter for ``edit_draft`` (A4)."""
-        draft = self.get_tab_writeback_draft(tab_id)
-        if draft is not None:
-            return self.edit_draft(
-                draft,
-                session_id,
-                selected=selected,
-                target_name=target_name,
-                proposed_value=proposed_value,
-                edits=edits,
-            )
-
-        # Compatibility for a state list populated by the old caller/tests.
-        item = self._find_item(tab_id, session_id)
-        if selected is not None:
-            item.selected = selected
-        if target_name is not None:
-            item.target_name = target_name
-        if proposed_value is not _UNSET:
-            if not isinstance(item, MetaDictWriteback):
-                raise InvalidInputError(
-                    f"{session_id!r} is not a metadict item; proposed_value invalid"
-                )
-            item.proposed_value = proposed_value
-
-        result = None
-        if edits is not None:
-            if not isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                raise InvalidInputError(
-                    f"{session_id!r} is not a module/waveform item; edits invalid"
-                )
-            editor_id = getattr(item, "editor_id", None)
-            if editor_id is None:
-                raise FailedPreconditionError(
-                    f"{session_id!r} has no editable cfg model to apply edits to"
-                )
-            typed_edits: list[CfgEdit] = []
-            for i, edit in enumerate(edits):
-                if "path" not in edit or "value" not in edit:
-                    raise InvalidInputError(
-                        f"edits[{i}] must be an object with 'path' and 'value'"
-                    )
-                typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-            result = self._cfg_editor.set_fields(editor_id, typed_edits)
-        if result is None:
-            return {"valid": True, "removed": [], "added": []}
-        return result.to_wire()
-
-    def _find_item(self, tab_id: str, session_id: str) -> WritebackItem:
-        for item in self._state.get_tab(tab_id).writeback_items:
-            if item.session_id == session_id:
-                return item
-        raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
-
-    def apply_tab_writeback(self, permit: WritebackPermit) -> dict[str, Any]:
-        """Temporary guarded tab adapter around ``apply_draft`` (A4)."""
-        tab_id = permit.tab_id
-        draft = self.get_tab_writeback_draft(tab_id)
-        if draft is not None:
-            logger.info("writeback apply: tab_id=%r", tab_id)
-            result = self.apply_draft(draft)
-            logger.info("writeback applied: tab_id=%r", tab_id)
-            return result
-
-        # Compatibility for state lists populated by the old caller/tests.
-        logger.info("writeback apply: tab_id=%r", tab_id)
-        tab = self._state.get_tab(tab_id)
-        applied_ids: list[str] = []
-        md: dict[str, Any] = {}
-        ml_modules: dict[str, CfgSchema] = {}
-        ml_waveforms: dict[str, CfgSchema] = {}
-
-        for item in tab.writeback_items:
-            if not item.selected:
-                continue
-            if isinstance(item, MetaDictWriteback):
-                md[item.target_name] = item.proposed_value
-            elif isinstance(item, ModuleWriteback):
-                ml_modules[item.target_name] = self._legacy_item_schema(item)
-            elif isinstance(item, WaveformWriteback):
-                ml_waveforms[item.target_name] = self._legacy_item_schema(item)
-            else:
-                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
-            applied_ids.append(item.session_id)
-
-        written = {
-            "md": list(md),
-            "ml_modules": list(ml_modules),
-            "ml_waveforms": list(ml_waveforms),
-        }
-        if not (md or ml_modules or ml_waveforms):
-            return {"applied_ids": applied_ids, "written": written}
-
-        self._write.apply_writes(
-            ContextWrites(md=md, ml_modules=ml_modules, ml_waveforms=ml_waveforms)
-        )
-        logger.info(
-            "writeback applied: tab_id=%r md=%d ml_modules=%d ml_waveforms=%d",
-            tab_id,
-            len(md),
-            len(ml_modules),
-            len(ml_waveforms),
-        )
-        return {"applied_ids": applied_ids, "written": written}
-
-    def _legacy_item_schema(
-        self, item: ModuleWriteback | WaveformWriteback
-    ) -> CfgSchema:
-        editor_id = getattr(item, "editor_id", None)
-        if editor_id is not None:
-            return self._cfg_editor.get_draft(editor_id).snapshot()
-        schema = item.edit_schema
-        if schema is None:
-            raise FailedPreconditionError(
-                f"writeback '{item.session_id}' has no editable schema"
-            )
-        return schema
-
-    # Preserve the old private helper name for narrow in-repo compatibility.
-    def _item_schema(self, item: ModuleWriteback | WaveformWriteback) -> CfgSchema:
-        return self._legacy_item_schema(item)

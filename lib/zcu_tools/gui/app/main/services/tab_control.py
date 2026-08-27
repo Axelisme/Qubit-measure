@@ -36,10 +36,8 @@ class TabControlPort(Protocol):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None: ...
+
     def reset_tab_cfg(self, tab_id: str) -> CfgSchema: ...
-    def update_tab_save_paths(
-        self, tab_id: str, data_path: str, image_path: str
-    ) -> None: ...
 
 
 class TabControlFacet:
@@ -101,14 +99,3 @@ class TabControlFacet:
         schema = self._tab.make_default_cfg(adapter_name)
         self._tab.update_tab_cfg(tab_id, schema)
         return schema
-
-    def update_tab_save_paths(
-        self, tab_id: str, data_path: str, image_path: str
-    ) -> None:
-        self._tab.update_tab_save_path_overrides(tab_id, data_path, image_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
-            )
-        )

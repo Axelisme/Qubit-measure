@@ -113,18 +113,6 @@ class LoadService:
         )
 
     def _teardown_retired(self, retired: object, *, tab_id: str | None = None) -> None:
-        teardown = getattr(type(self._writeback), "teardown_draft", None)
-        if not callable(teardown):
-            # Transitional fakes/old callers still expose only the tab adapter.
-            legacy = getattr(self._writeback, "teardown_tab_items", None)
-            if tab_id is not None and callable(legacy):
-                try:
-                    legacy(tab_id)
-                except Exception:
-                    # This compatibility teardown happens after the State swap;
-                    # cleanup failures must not undo or hide the loaded result.
-                    logger.exception("retired legacy load draft teardown failed")
-            return
         for draft in getattr(retired, "writeback_drafts", ()):
             try:
                 self._writeback.teardown_draft(draft)

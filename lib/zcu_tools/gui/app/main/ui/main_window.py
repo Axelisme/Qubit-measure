@@ -253,9 +253,9 @@ class MainWindow(QMainWindow):
         if not current.interaction.has_run_result:
             tab_w.analyze_form.sync(None)
             return
-        if current.analyze_params is None:
+        if current.analysis is None or current.analysis.params is None:
             raise RuntimeError("Run result has no initialized analyze parameters")
-        tab_w.analyze_form.sync(current.analyze_params)
+        tab_w.analyze_form.sync(current.analysis.params)
 
     def refresh_tab_post_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -268,10 +268,10 @@ class MainWindow(QMainWindow):
         # Branch from capabilities; never touch absent post controls.
         if not current.capabilities.post_analysis:
             return
-        if current.post_analyze_params is None:
+        if current.post_analysis is None or current.post_analysis.params is None:
             tab_w.sync_post_analyze_params(None)
             return
-        tab_w.sync_post_analyze_params(current.post_analyze_params)
+        tab_w.sync_post_analyze_params(current.post_analysis.params)
 
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -642,15 +642,10 @@ class MainWindow(QMainWindow):
                 "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
             )
             return
-        if pane == "post_analysis":
-            result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
-            applied_ids = (
-                result.get("applied_ids", []) if isinstance(result, dict) else result
-            )
-        else:
-            applied_ids = self._ctrl.apply_writeback(tab_id)
-            if isinstance(applied_ids, dict):
-                applied_ids = applied_ids.get("applied_ids", [])
+        result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        applied_ids = (
+            result.get("applied_ids", []) if isinstance(result, dict) else result
+        )
         if applied_ids:
             self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")
 
@@ -677,17 +672,6 @@ class MainWindow(QMainWindow):
             return
         path = tab_w.get_post_image_path()
         self._ctrl.save_post_image(tab_id, path)
-
-    def _on_save_result_clicked(self, tab_id: str) -> None:
-        logger.info("_on_save_result_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_save_result_clicked")
-        if tab_w is None:
-            return
-        data_path = tab_w.get_data_path()
-        image_path = tab_w.get_image_path()
-        self._ctrl.save_result(
-            tab_id, data_path, image_path, comment=tab_w.get_comment()
-        )
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control

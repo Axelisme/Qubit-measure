@@ -208,16 +208,16 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
-    state.get_tab("t1").result_source_path = "/tmp/loaded.hdf5"
+    state.get_tab("t1").run.source_path = "/tmp/loaded.hdf5"
     state.update_tab_analyze_param_instance("t1", _AnalyzeParams(threshold=0.5))
     fig = Figure()
     state.update_tab_analyze("t1", object(), fig)
     state.update_tab_result("t1", object())
     tab = state.get_tab("t1")
-    assert tab.result_source_path is None
-    assert tab.analyze_result is None
-    assert tab.figure is None  # figure is cleared with stale analyze data
-    assert tab.analyze_param_instance is None
+    assert tab.run.source_path is None
+    assert tab.analysis.result is None
+    assert tab.analysis.figure is None  # figure is cleared with stale analyze data
+    assert tab.analysis.params is None
 
 
 def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
@@ -227,7 +227,7 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
     state.update_tab_loaded_result("t1", object(), "/tmp/loaded.hdf5")
 
     tab = state.get_tab("t1")
-    assert tab.result_source_path == "/tmp/loaded.hdf5"
+    assert tab.run.source_path == "/tmp/loaded.hdf5"
     assert state.version.get("tab:t1:result") == 1
     assert state.version.get("tab:t1:analyze") == 1
     assert state.version.get("tab:t1:post_analyze") == 1
@@ -241,8 +241,8 @@ def test_update_tab_analyze_stores_analyze_result_and_figure():
     fig = Figure()
     state.update_tab_analyze("t1", analyze_result, fig)
     tab = state.get_tab("t1")
-    assert tab.analyze_result is analyze_result
-    assert tab.figure is fig
+    assert tab.analysis.result is analyze_result
+    assert tab.analysis.figure is fig
 
 
 def test_update_tab_analyze_params_stores_instance():
@@ -251,7 +251,7 @@ def test_update_tab_analyze_params_stores_instance():
     _add_tab(state, "t1", adapter)
     params = _AnalyzeParams(threshold=0.2)
     state.update_tab_analyze_param_instance("t1", params)
-    assert state.get_tab("t1").analyze_param_instance is params
+    assert state.get_tab("t1").analysis.params is params
 
 
 def test_update_tab_analyze_bumps_analyze_version():
@@ -264,18 +264,6 @@ def test_update_tab_analyze_bumps_analyze_version():
     assert state.version.get("tab:t1:analyze") == 1
     state.update_tab_analyze("t1", object(), None)
     assert state.version.get("tab:t1:analyze") == 2
-
-
-def test_update_tab_save_path_overrides_sets_both_paths():
-    state = State(_make_ctx())
-    adapter = _make_adapter()
-    _add_tab(state, "t1", adapter)
-    state.update_tab_save_path_overrides(
-        "t1", SavePaths("/tmp/custom-data", "/tmp/custom-image")
-    )
-    assert state.get_tab("t1").save_path_overrides == SavePaths(
-        "/tmp/custom-data", "/tmp/custom-image"
-    )
 
 
 def test_set_context_replaces_exp_context():
@@ -452,5 +440,5 @@ def test_tab_state_predicates():
 
     tab.is_analyzing = True
     tab.is_analyzing = False
-    tab.run_result = object()
+    tab.run.result = object()
     assert tab.has_run_result() is True
