@@ -385,42 +385,25 @@ def test_ge_post_writeback_proposes_radius_and_matrix_from_same_result(
         raise AssertionError("post writeback must not recompute confusion")
 
     monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fail_calc, raising=True)
-    # Also guard active-context lookup: adapter must use the request's post result,
-    # not re-read State. Changing ctx must not affect proposal.
-    ctx_a = _make_ctx()
-    ctx_b = _make_ctx()
-    # Simulate context switch by passing different ctx; proposal must stay same.
-    req_a = PostWritebackRequest(
+    req = PostWritebackRequest(
         run_result=_fake_result(),
         analyze_result=analyze_result,
         post_analyze_result=post_result,
-        ctx=cast(Any, ctx_a),
-    )
-    req_b = PostWritebackRequest(
-        run_result=_fake_result(),
-        analyze_result=analyze_result,
-        post_analyze_result=post_result,
-        ctx=cast(Any, ctx_b),
+        ctx=cast(Any, _make_ctx()),
     )
 
-    items_a = adapter.get_post_writeback_items(req_a)
-    items_b = adapter.get_post_writeback_items(req_b)
+    items = adapter.get_post_writeback_items(req)
 
-    for items in (items_a, items_b):
-        assert len(items) == 2
-        for item in items:
-            assert isinstance(item, MetaDictWriteback)
-        targets = {it.target_name: it.proposed_value for it in items}  # type: ignore[attr-defined]
-        assert set(targets) == {"ge_radius", "confusion_matrix"}
-        assert targets["ge_radius"] == pytest.approx(0.37)
-        assert targets["confusion_matrix"] == post_result.confusion
-        # Reuses the same post result objects (no recompute).
-        assert targets["ge_radius"] == post_result.ge_radius
-
-    # Both proposals identical despite ctx switch.
-    targets_a = {it.target_name: it.proposed_value for it in items_a}  # type: ignore[attr-defined]
-    targets_b = {it.target_name: it.proposed_value for it in items_b}  # type: ignore[attr-defined]
-    assert targets_a == targets_b
+    assert len(items) == 2
+    for item in items:
+        assert isinstance(item, MetaDictWriteback)
+    targets = {it.target_name: it.proposed_value for it in items}  # type: ignore[attr-defined]
+    assert set(targets) == {"ge_radius", "confusion_matrix"}
+    assert targets["ge_radius"] == pytest.approx(0.37)
+    assert targets["confusion_matrix"] == post_result.confusion
+    # Reuses the already-produced GEPostAnalyzeResult (no recompute).
+    assert targets["ge_radius"] == post_result.ge_radius
+    assert targets["confusion_matrix"] is post_result.confusion
 
     # Summary and proposal share the same radius/matrix values.
     assert post_result.to_summary_dict()["ge_radius"] == pytest.approx(0.37)

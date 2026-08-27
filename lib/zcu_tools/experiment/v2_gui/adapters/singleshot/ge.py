@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -28,6 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     PostWritebackRequest,
+    T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
 )
@@ -217,11 +218,11 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             ),
         ]
 
-    def get_post_writeback_items(  # pyright: ignore[reportIncompatibleMethodOverride]
+    def get_post_writeback_items(
         self,
-        req: PostWritebackRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeResult],
+        req: PostWritebackRequest[GERunResult, GEAnalyzeResult, T_PostAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        result = req.post_analyze_result
+        result = cast(GEPostAnalyzeResult, req.post_analyze_result)
         return [
             MetaDictWriteback(
                 target_name="ge_radius",
