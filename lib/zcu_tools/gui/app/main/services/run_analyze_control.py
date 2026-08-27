@@ -154,7 +154,7 @@ class RunAnalyzeControlFacet:
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
         req = AnalyzeRequest(
-            run_result=tab.run_result,
+            run_result=tab.run.result,
             analyze_params=analyze_params_instance,
             md=ctx.md,
             ml=ctx.ml,

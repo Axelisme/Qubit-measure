@@ -132,7 +132,7 @@ def test_save_image_creates_parent_at_command_boundary(
 ) -> None:
     svc, state, _ = _make_service()
     figure = _make_figure()
-    state.get_tab("tab").figure = figure
+    state.get_tab("tab").analysis.figure = figure
     image_path = tmp_path / "images" / "plot.png"
 
     svc.save_image_sync(SavePermit(tab_id="tab"), str(image_path))
@@ -143,7 +143,7 @@ def test_save_image_creates_parent_at_command_boundary(
 
 @pytest.mark.parametrize(
     "entrypoint",
-    ("start_save_data", "start_save_result", "save_image_sync", "save_post_image_sync"),
+    ("start_save_data", "save_image_sync", "save_post_image_sync"),
 )
 def test_save_entrypoints_reject_busy_tab_before_side_effects(
     qapp,
@@ -153,8 +153,8 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
     svc, state, bg = _make_service()
     figure = _make_figure()
     tab = state.get_tab("tab")
-    tab.figure = figure
-    tab.post_figure = figure
+    tab.analysis.figure = figure
+    tab.post_analysis.figure = figure
     state.set_tab_analyzing("tab", True)
     permit = SavePermit(tab_id="tab")
     data_path = str(tmp_path / "data" / "measurement")
@@ -163,8 +163,6 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
     with pytest.raises(FailedPreconditionError, match="busy"):
         if entrypoint == "start_save_data":
             svc.start_save_data(permit, data_path)
-        elif entrypoint == "start_save_result":
-            svc.start_save_result(permit, data_path, image_path)
         elif entrypoint == "save_image_sync":
             svc.save_image_sync(permit, image_path)
         else:
@@ -174,53 +172,6 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
     figure.savefig.assert_not_called()
     assert not (tmp_path / "data").exists()
     assert not (tmp_path / "images").exists()
-
-
-# ---------------------------------------------------------------------------
-# start_save_result
-# ---------------------------------------------------------------------------
-
-
-def test_start_save_result_saves_image_and_starts_data_save(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, bg = _make_service()
-    figure = _make_figure()
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-
-    _assert_saved_fixed_size(figure, str(image_path))
-    bg.submit.assert_called_once()
-
-
-def test_start_save_result_captures_image_error_and_continues_data(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, bg = _make_service()
-    figure = _make_figure()
-    figure.savefig.side_effect = OSError("disk full")
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    # Should not raise — image error is captured, data save continues
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-
-    bg.submit.assert_called_once()
-
-
-def test_start_save_result_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
-    svc, _, _ = _make_service()
-    with pytest.raises(FailedPreconditionError, match="No figure") as exc_info:
-        svc.start_save_result(SavePermit(tab_id="tab"), "/data", "/img")
-
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert exc_info.value.reason_code == ""
 
 
 # ---------------------------------------------------------------------------
@@ -248,52 +199,6 @@ def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# _on_save_finished with pending_image (save_result flow)
-# ---------------------------------------------------------------------------
-
-
-def test_on_save_finished_with_pending_image_emits_save_result_finished(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, _ = _make_service()
-    figure = _make_figure()
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    outcomes = _record_outcomes(svc)
-
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-    svc._on_save_finished("tab")
-
-    assert len(outcomes) == 1
-    assert outcomes[0].data_error is None
-    assert outcomes[0].image_error is None
-
-
-def test_on_save_finished_with_pending_image_error_propagates(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, _ = _make_service()
-    figure = _make_figure()
-    figure.savefig.side_effect = OSError("disk full")
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    outcomes = _record_outcomes(svc)
-
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-    svc._on_save_finished("tab")
-
-    assert len(outcomes) == 1
-    assert outcomes[0].image_error == "disk full"
-    assert outcomes[0].data_error is None
-
-
-# ---------------------------------------------------------------------------
 # _on_save_failed
 # ---------------------------------------------------------------------------
 
@@ -316,24 +221,3 @@ def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
         TabInteractionFact.SAVE_STARTED,
         TabInteractionFact.SAVE_FAILED,
     ]
-
-
-def test_on_save_failed_with_pending_image_emits_save_result_finished(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, _ = _make_service()
-    figure = _make_figure()
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    outcomes = _record_outcomes(svc)
-
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-    error = OSError("data write failed")
-    svc._on_save_failed("tab", error)
-
-    assert len(outcomes) == 1
-    assert outcomes[0].data_error == str(error)
-    assert outcomes[0].image_error is None

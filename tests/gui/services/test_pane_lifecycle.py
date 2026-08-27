@@ -132,9 +132,14 @@ def test_snapshot_exposes_independent_panes_and_paths() -> None:
     state.update_tab_analysis_image_path_override(tab_id, "/custom/a.png")
     state.update_tab_post_analysis_image_path_override(tab_id, "/custom/p.png")
 
+    # Final contract: TabService composes pane-owned drafts via preview_draft.
+    primary_draft = MagicMock()
+    post_draft = MagicMock()
     writeback = MagicMock()
-    writeback.get_tab_writeback_items.return_value = ["primary-item"]
-    writeback.get_tab_post_writeback_items.return_value = ["post-item"]
+    writeback.preview_draft.side_effect = lambda d: ["primary-item"] if d is primary_draft else ["post-item"] if d is post_draft else []
+    # Attach drafts to panes so snapshot can preview them.
+    state.get_tab(tab_id).analysis.writeback_draft = primary_draft  # type: ignore[assignment]
+    state.get_tab(tab_id).post_analysis.writeback_draft = post_draft  # type: ignore[assignment]
     snapshot = TabService(state, MagicMock(), writeback).get_snapshot(tab_id)
 
     assert snapshot.run is not None and snapshot.run.result == "run"

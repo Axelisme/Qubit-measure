@@ -76,7 +76,7 @@ class AnalyzeService(_StagedAnalyzeService):
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
         req = AnalyzeRequest(
-            run_result=tab.run_result,
+            run_result=tab.run.result,
             analyze_params=analyze_params_instance,
             md=ctx.md,
             ml=ctx.ml,
@@ -133,7 +133,7 @@ class AnalyzeService(_StagedAnalyzeService):
         # operation starts. Capture that committed value alongside the run,
         # context, and adapter so the terminal path does not fall back to the
         # active tab's mutable inputs.
-        captured_inputs = (tab.run_result, ctx, adapter, tab.analyze_param_instance)
+        captured_inputs = (tab.run.result, ctx, adapter, tab.analysis.params)
         self._captured_inputs[tab_id] = captured_inputs
 
         # Open the token with a cancel_hook that executes the interactive teardown.
