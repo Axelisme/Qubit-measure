@@ -289,11 +289,7 @@ def test_ge_post_analyze_recalculates_confusion_without_refitting(
         assert kwargs["result"] is req.run_result
         return figure
 
-    monkeypatch.setattr(
-        "zcu_tools.experiment.v2_gui.adapters.singleshot.ge.singleshot_ge_analysis",
-        reject_fit,
-        raising=False,
-    )
+    monkeypatch.setattr(GE_Exp, "analyze", reject_fit, raising=True)
     monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fake_calc, raising=True)
     monkeypatch.setattr(GE_Exp, "plot_confusion_matrix", fake_plot, raising=True)
     req = _make_post_req()
