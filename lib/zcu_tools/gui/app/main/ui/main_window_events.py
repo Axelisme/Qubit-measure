@@ -168,9 +168,11 @@ _CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {
         _TabReaction.POST_ANALYZE_FORM,
         _TabReaction.WRITEBACK,
         _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
         _TabReaction.INTERACTION,
     ),
     TabContentFact.POST_ANALYSIS_COMMITTED: (
+        _TabReaction.WRITEBACK,
         _TabReaction.FIGURE,
         _TabReaction.POST_FIGURE,
         _TabReaction.INTERACTION,

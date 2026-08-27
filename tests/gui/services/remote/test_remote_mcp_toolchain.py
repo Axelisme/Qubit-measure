@@ -543,29 +543,6 @@ def test_save_image_delegates_to_save_control(fx):
     fx.service.save_control.save_image = MagicMock(  # type: ignore[method-assign]
         return_value="/tmp/image.png"
     )
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(
-            sock,
-            "tab.save_image",
-            {"tab_id": "tab1", "image_path": "/tmp/image.png"},
-        )
-        assert resp["ok"] is True
-        assert resp["result"] == {"image_path": "/tmp/image.png"}
-        fx.service.save_control.save_image.assert_called_once_with(
-            "tab1", "/tmp/image.png"
-        )
-        fx.ctrl.save_image.assert_not_called()
-    finally:
-        sock.close()
-
-
-def test_save_post_image_delegates_to_save_control(fx):
-    """tab.save_post_image mirrors tab.save_image but targets the post-analysis figure;
-    it delegates to save_control and returns the written path."""
-    fx.ctrl.save_post_image = MagicMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("tab.save_post_image must use save_control")
-    )
     fx.service.save_control.save_post_image = MagicMock(  # type: ignore[method-assign]
         return_value="/tmp/post.png"
     )
@@ -573,98 +550,68 @@ def test_save_post_image_delegates_to_save_control(fx):
     try:
         resp = call(
             sock,
-            "tab.save_post_image",
-            {"tab_id": "tab1", "image_path": "/tmp/post.png"},
+            "tab.save_image",
+            {"tab_id": "tab1", "subtab_id": "analysis", "image_path": "/tmp/image.png"},
         )
         assert resp["ok"] is True
-        assert resp["result"] == {"image_path": "/tmp/post.png"}
+        assert resp["result"]["image_path"] == "/tmp/image.png"
+        fx.service.save_control.save_image.assert_called_once_with(
+            "tab1", "/tmp/image.png"
+        )
+        fx.ctrl.save_image.assert_not_called()
+        resp2 = call(
+            sock,
+            "tab.save_image",
+            {
+                "tab_id": "tab1",
+                "subtab_id": "post_analysis",
+                "image_path": "/tmp/post.png",
+            },
+        )
+        assert resp2["ok"] is True
+        assert resp2["result"]["image_path"] == "/tmp/post.png"
         fx.service.save_control.save_post_image.assert_called_once_with(
             "tab1", "/tmp/post.png"
         )
-        fx.ctrl.save_post_image.assert_not_called()
     finally:
         sock.close()
+
+
+def test_save_post_image_delegates_to_save_control(fx):
+    """tab.save_post_image wire method is removed (clean break); save_image with subtab post_analysis routes to save_post_image internally."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+
+    assert "tab.save_post_image" not in METHOD_SPECS
+    assert "tab.save_post_image" not in [m for m in METHOD_SPECS]
 
 
 def test_save_result_delegates_to_save_control(fx):
-    fx.ctrl.save_result = MagicMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("tab.save_result must use save_control")
-    )
-    fx.service.save_control.save_result = MagicMock(  # type: ignore[method-assign]
-        return_value=("/tmp/data.hdf5", "/tmp/image.png")
-    )
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(
-            sock,
-            "tab.save_result",
-            {
-                "tab_id": "tab1",
-                "data_path": "/tmp/data.h5",
-                "image_path": "/tmp/image.png",
-                "comment": "bundle",
-            },
-        )
-        assert resp["ok"] is True
-        assert resp["result"] == {
-            "data_path": "/tmp/data.hdf5",
-            "image_path": "/tmp/image.png",
-        }
-        fx.service.save_control.save_result.assert_called_once_with(
-            "tab1", "/tmp/data.h5", "/tmp/image.png", comment="bundle"
-        )
-        fx.ctrl.save_result.assert_not_called()
-    finally:
-        sock.close()
+    """tab.save_result wire method is removed (clean break); use tab.save_data and tab.save_image separately."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+
+    assert "tab.save_result" not in METHOD_SPECS
 
 
 def test_save_set_paths_delegates_to_save_control(fx):
-    fx.ctrl.has_tab = MagicMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("tab.save_set_paths must use save_control")
-    )
-    fx.ctrl.update_tab_save_paths = MagicMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("tab.save_set_paths must use save_control")
-    )
-    fx.service.save_control.has_tab = MagicMock(return_value=True)  # type: ignore[method-assign]
-    fx.service.save_control.update_tab_save_paths = MagicMock()  # type: ignore[method-assign]
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(
-            sock,
-            "tab.save_set_paths",
-            {
-                "tab_id": "tab1",
-                "data_path": "/tmp/data.h5",
-                "image_path": "/tmp/image.png",
-            },
-        )
-        assert resp["ok"] is True
-        assert resp["result"] == {
-            "data_path": "/tmp/data.h5",
-            "image_path": "/tmp/image.png",
-        }
-        fx.service.save_control.has_tab.assert_called_once_with("tab1")
-        fx.service.save_control.update_tab_save_paths.assert_called_once_with(
-            "tab1", "/tmp/data.h5", "/tmp/image.png"
-        )
-        fx.ctrl.has_tab.assert_not_called()
-        fx.ctrl.update_tab_save_paths.assert_not_called()
-    finally:
-        sock.close()
+    """tab.save_set_paths wire method is removed (no combined setter); use separate save_data/save_image."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+
+    assert "tab.save_set_paths" not in METHOD_SPECS
 
 
 def test_mcp_tool_schemas_include_required_discovery_tools():
     # P1 renamed/merged the context + state surface: context.active + context.labels
     # fold into gui_context_list; gui_context_new/_use -> gui_context_create/_switch;
-    # gui_state_check is retired (the readiness flags live in gui_overview now). The
-    # save tools merged into the single gui_tab_save (artifact + figure selectors).
+    # gui_state_check is retired (the readiness flags live in gui_overview now). Save
+    # is now separate generated tools: gui_tab_save_data (tab-only) and gui_tab_save_image (pane-qualified).
     expected = {
         "gui_adapter_list",
         "gui_soc_connect",
         "gui_context_list",
         "gui_context_switch",
         "gui_context_create",
-        "gui_tab_save",
+        "gui_tab_save_data",
+        "gui_tab_save_image",
         "gui_device_connect",
         "gui_device_disconnect",
         # P2 renamed gui_device_setup -> gui_device_apply and
@@ -1108,7 +1055,7 @@ def test_analyze_settled_returns_summary_and_figure(monkeypatch):
         calls.append((method, params))
         if method == "tab.get_analyze_result":
             return {"summary": {"t1": 5.0}}
-        if method == "tab.get_current_figure":
+        if method == "tab.get_figure":
             return {"bytes": 9, "saved_to": params["out_path"]}
         return {}
 
@@ -1120,11 +1067,13 @@ def test_analyze_settled_returns_summary_and_figure(monkeypatch):
     assert out["status"] == "finished"
     assert out["summary"] == {"t1": 5.0}
     # MCP 46: figure is analyze's OWN visual result — folded on FINISHED FIT.
-    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_fake-freq-1.png")
+    assert out["figure"] == str(
+        Path(gettempdir()) / "measure_fig_fake-freq-1_analysis.png"
+    )
     # writeback_preview stays in gui_tab_analyze_review — never in the base tool.
     assert "writeback_preview" not in out
     assert ("tab.analyze", {"tab_id": "fake-freq-1"}) in calls
-    assert any(c[0] == "tab.get_current_figure" for c in calls)
+    assert any(c[0] == "tab.get_figure" for c in calls)
     assert not any(c[0] == "tab.writeback_preview" for c in calls)
 
 

@@ -37,7 +37,7 @@ class RabiCheckAdapter(BaseAdapter[RabiCheckCfg, RabiCheckResult]):
     ExpCfg_cls: ClassVar[Any] = RabiCheckCfg
     # No automated fit: the three-branch plot is read by eye (D5).
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=True, analysis=AnalysisMode.NONE
+        requires_soc=True, analysis=AnalysisMode.NONE, load_data=True
     )
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

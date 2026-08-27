@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.gui.app.main.adapter import NoAnalyzeParams
+from zcu_tools.gui.app.main.adapter import AdapterCapabilities, NoAnalyzeParams
 from zcu_tools.gui.app.main.services.guard import LoadPermit
 from zcu_tools.gui.app.main.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
@@ -24,10 +24,11 @@ def _empty_schema() -> CfgSchema:
     return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
 
-def _make_state() -> tuple[State, str, MagicMock]:
+def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
     state = State(ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
     tab_id = "tab-1"
     adapter = MagicMock()
+    adapter.capabilities = AdapterCapabilities(load_data=load_data)
     state.add_tab(
         tab_id,
         Session(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),
@@ -50,31 +51,33 @@ def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:
     loaded.cfg_snapshot = object()
     adapter.load.return_value = loaded
     tab = state.get_tab(tab_id)
-    tab.run_result = stale_result
-    tab.result_source_path = "/tmp/old.hdf5"
-    tab.analyze_result = object()
-    tab.figure = Figure()
-    tab.analyze_param_instance = NoAnalyzeParams()
-    tab.post_analyze_result = object()
-    tab.post_figure = Figure()
-    tab.post_analyze_param_instance = object()
-    tab.writeback_items = [MagicMock()]
+    tab.run.result = stale_result
+    tab.run.source_path = "/tmp/old.hdf5"
+    tab.analysis.result = object()
+    tab.analysis.figure = Figure()
+    tab.analysis.params = NoAnalyzeParams()
+    tab.analysis.writeback_draft = MagicMock(is_active=True)
+    tab.post_analysis.result = object()
+    tab.post_analysis.figure = Figure()
+    tab.post_analysis.params = object()
+    tab.post_analysis.writeback_draft = MagicMock(is_active=True)
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
     save_path_version = state.version.get(f"tab:{tab_id}:save_path")
     svc, emit, writeback = _service(state)
 
     outcome = svc.load_result(LoadPermit(tab_id), "/tmp/new.hdf5")
 
-    assert tab.run_result is loaded
-    assert tab.result_source_path == "/tmp/new.hdf5"
-    assert tab.analyze_result is None
-    assert tab.figure is None
-    assert tab.analyze_param_instance is None
-    assert tab.post_analyze_result is None
-    assert tab.post_figure is None
-    assert tab.post_analyze_param_instance is None
-    assert tab.writeback_items == []
-    writeback.teardown_tab_items.assert_called_once_with(tab_id)
+    assert tab.run.result is loaded
+    assert tab.run.source_path == "/tmp/new.hdf5"
+    assert tab.analysis.result is None
+    assert tab.analysis.figure is None
+    assert tab.analysis.params is None
+    assert tab.post_analysis.result is None
+    assert tab.post_analysis.figure is None
+    assert tab.post_analysis.params is None
+    assert tab.analysis.writeback_draft is None
+    assert tab.post_analysis.writeback_draft is None
+    assert writeback.teardown_draft.call_count == 2
     emit.assert_not_called()
     assert outcome.result_type == type(loaded).__name__
     assert outcome.has_cfg_snapshot is True
@@ -97,14 +100,14 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
     adapter.load.assert_not_called()
-    writeback.teardown_tab_items.assert_not_called()
-    assert state.get_tab(tab_id).run_result is None
+    writeback.teardown_draft.assert_not_called()
+    assert state.get_tab(tab_id).run.result is None
 
 
 def test_load_result_error_leaves_state_unchanged() -> None:
     state, tab_id, adapter = _make_state()
     old = object()
-    state.get_tab(tab_id).run_result = old
+    state.get_tab(tab_id).run.result = old
     adapter.load.side_effect = ValueError("bad file")
     svc, _emit, writeback = _service(state)
 
@@ -114,8 +117,8 @@ def test_load_result_error_leaves_state_unchanged() -> None:
     assert exc_info.value.reason_code == "invalid_data_file"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert "Details: bad file" in str(exc_info.value)
-    writeback.teardown_tab_items.assert_not_called()
-    assert state.get_tab(tab_id).run_result is old
+    writeback.teardown_draft.assert_not_called()
+    assert state.get_tab(tab_id).run.result is old
     assert state.version.get(f"tab:{tab_id}:result") == 0
 
 
@@ -129,4 +132,4 @@ def test_load_result_wraps_unsupported_adapter() -> None:
 
     assert exc_info.value.reason_code == "unsupported_load"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    writeback.teardown_tab_items.assert_not_called()
+    writeback.teardown_draft.assert_not_called()

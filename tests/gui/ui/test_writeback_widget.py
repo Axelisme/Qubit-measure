@@ -60,7 +60,7 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     for i, item in enumerate(items):
         item.session_id = f"id-{i}"
 
-    widget = WritebackWidget(MagicMock())
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate(items)
     selected = [it for it in items if it.selected]
     edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
@@ -83,7 +83,7 @@ def test_writeback_widget_non_scalar_item_is_read_only(qapp):
     )
     nonscalar.session_id = "md-2"
 
-    widget = WritebackWidget(MagicMock())
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([scalar, nonscalar])
 
     edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]

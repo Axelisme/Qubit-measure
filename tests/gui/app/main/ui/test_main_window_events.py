@@ -318,12 +318,14 @@ def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> Non
                 "refresh_tab_post_analyze_form",
                 "refresh_tab_writeback",
                 "refresh_tab_figure",
+                "refresh_tab_post_figure",
                 "refresh_tab_interaction",
             ],
         ),
         (
             TabContentFact.POST_ANALYSIS_COMMITTED,
             [
+                "refresh_tab_writeback",
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
                 "refresh_tab_interaction",

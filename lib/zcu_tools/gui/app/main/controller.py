@@ -34,7 +34,7 @@ from .adapter import (
     InteractiveSession,
     WritebackItem,
 )
-from .events.completion import AnalyzeFailedPayload, SaveFinishedPayload
+from .events.completion import AnalyzeFailedPayload, SaveDataFinishedPayload
 from .events.run import RunFinishedPayload
 from .events.tab import (
     TabContentChangedPayload,
@@ -46,8 +46,6 @@ from .registry import Registry
 from .role_catalog import RoleCatalog
 from .services import (
     AppPersistedState,
-    ConnectDeviceRequest,
-    DisconnectDeviceRequest,
     LoadTabResultOutcome,
     PersistenceError,
     RestoreReport,
@@ -77,7 +75,7 @@ if TYPE_CHECKING:
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_control import TabControlPort
-    from .services.writeback_control import WritebackControlPort
+    from .services.writeback_control import WritebackControlPort, WritebackPane
 
 
 logger = logging.getLogger(__name__)
@@ -121,14 +119,27 @@ class DiagnosticSink(Protocol):
 
 
 class RenderHost(Protocol):
-    """The single canvas-bearing View the Controller asks for run/analyze Qt
-    artefacts (the live figure container). Progress bars no longer come from the
-    View — they are minted by ProgressService, bound to the operation."""
+    """Canvas-bearing View for run/analyze figure routing (ADR-0017).
 
-    def make_live_container(self, tab_id: str) -> FigureContainer | None:
-        """The tab's single right-pane figure container, shared by run, analyze,
-        and post-analysis (the container always shows the most recently produced
-        figure). Headless Views may return None."""
+    Each (tab_id, subtab) pane owns a stable FigureContainer for its lifetime (S2).
+    The worker captures the pane's container at start; switching the visible pane
+    does not change the routing target. Save/Guide have no container (placeholder).
+    """
+
+    def make_run_container(self, tab_id: str) -> FigureContainer | None:
+        """Run pane FigureContainer (live plot, view-only)."""
+        ...
+
+    def make_analysis_container(self, tab_id: str) -> FigureContainer | None:
+        """Analysis pane FigureContainer (canonical)."""
+        ...
+
+    def make_post_analysis_container(self, tab_id: str) -> FigureContainer | None:
+        """Post-Analysis pane FigureContainer (canonical)."""
+        ...
+
+    def get_figure_container(self, tab_id: str, pane: str) -> FigureContainer | None:
+        """Pane-aware container access (pane in run|analysis|post_analysis)."""
         ...
 
     def mount_interactive_analysis(
@@ -161,7 +172,15 @@ class RenderView(Protocol):
     screenshot / dialog management). Held by the adapter, not the Controller."""
 
     def get_view_snapshot(self) -> dict[str, object]: ...
-    def take_figure_screenshot(self, tab_id: str) -> bytes: ...
+    def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
+        """Pane-qualified figure screenshot (run|analysis|post_analysis).
+
+        Run reads the live FigureContainer (view-only); analysis/post read
+        canonical State figures. Explicit subtab routing avoids visible-tab
+        inference.
+        """
+        ...
+
     def take_dialog_screenshot(self, dialog_name: Any) -> bytes: ...
     def take_window_screenshot(self) -> bytes: ...
     def open_dialog(self, name: DialogName) -> None: ...
@@ -320,7 +339,7 @@ class Controller(SessionControllerMixin):
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
-        bus.subscribe(SaveFinishedPayload, self._on_save_finished)
+        bus.subscribe(SaveDataFinishedPayload, self._on_save_data_finished)
         bus.subscribe(DeviceSetupFinishedPayload, self._on_device_setup_finished)
         bus.subscribe(
             DeviceOperationFinishedPayload, self._on_device_operation_finished
@@ -369,7 +388,7 @@ class Controller(SessionControllerMixin):
         tab_id = payload.tab_id
         if (
             payload.outcome == "cancelled"
-            and self._state.get_tab(tab_id).run_result is None
+            and self._state.get_tab(tab_id).run.result is None
         ):
             return
         # State is already updated in RunService. Only adapters that do
@@ -426,35 +445,11 @@ class Controller(SessionControllerMixin):
         )
         self._notify("error", title, payload.error_message)
 
-    def _on_save_finished(self, outcome: SaveFinishedPayload) -> None:
-        if outcome.image_path is None:
-            if outcome.data_error is None:
-                self._info(f"Data saved to {outcome.data_path}")
-            else:
-                self._notify("error", "Save data failed", outcome.data_error)
+    def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
+        if outcome.error is None:
+            self._info(f"Data saved to {outcome.data_path}")
             return
-        if outcome.data_error is None and outcome.image_error is None:
-            self._info(
-                f"Data saved to {outcome.data_path}; "
-                f"image saved to {outcome.image_path}"
-            )
-            return
-        if outcome.data_error is None:
-            self._info(
-                f"Data saved to {outcome.data_path}; image failed: {outcome.image_error}"
-            )
-            return
-        if outcome.image_error is None:
-            self._info(
-                f"Data failed: {outcome.data_error}; "
-                f"image saved to {outcome.image_path}"
-            )
-            return
-        self._notify(
-            "error",
-            "Save Result failed",
-            f"Data failed: {outcome.data_error}\nImage failed: {outcome.image_error}",
-        )
+        self._notify("error", "Save data failed", outcome.error)
 
     def _on_device_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
         if payload.outcome == "finished":
@@ -875,27 +870,24 @@ class Controller(SessionControllerMixin):
     # Writeback (TabService)
     # ------------------------------------------------------------------
 
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        """Read the tab's persistent writeback draft (read-only, no permit).
+    def get_writeback_item_draft_for_pane(
+        self, tab_id: str, pane: WritebackPane, session_id: str
+    ) -> CfgDraft:
+        return self._writeback_control.get_writeback_item_draft_for_pane(
+            tab_id, pane, session_id
+        )
 
-        Returns [] when the tab has no run/analyze result yet.
-        """
-        return self._writeback_control.get_tab_writeback_items(tab_id)
-
-    def apply_writeback(self, tab_id: str) -> dict[str, Any]:
-        """Apply the tab's persistent writeback draft as-is (no recompute).
-
-        Returns ``{applied_ids, written}`` echoing what was actually written
-        (see WritebackService.apply_tab_writeback)."""
-        return self._writeback_control.apply_writeback(tab_id)
-
-    def set_writeback_item(
-        self, tab_id: str, session_id: str, **changes: Any
+    def set_writeback_item_for_pane(
+        self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
     ) -> dict[str, object]:
-        """Edit a persistent writeback item (selected / target_name / metadict
-        value / module-waveform cfg edits). Returns the aggregated
-        ``{valid, removed, added}`` of any applied cfg edits."""
-        return self._writeback_control.set_writeback_item(tab_id, session_id, **changes)
+        return self._writeback_control.set_writeback_item_for_pane(
+            tab_id, pane, session_id, **changes
+        )
+
+    def apply_writeback_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, Any]:
+        return self._writeback_control.apply_writeback_for_pane(tab_id, pane)
 
     # ------------------------------------------------------------------
     # Save (TabService)
@@ -911,20 +903,6 @@ class Controller(SessionControllerMixin):
 
     def save_post_image(self, tab_id: str, image_path: str | None = None) -> str:
         return self._save_control.save_post_image(tab_id, image_path)
-
-    def save_result(
-        self,
-        tab_id: str,
-        data_path: str | None = None,
-        image_path: str | None = None,
-        comment: str = "",
-    ) -> tuple[str, str]:
-        return self._save_control.save_result(
-            tab_id,
-            data_path,
-            image_path,
-            comment=comment,
-        )
 
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
@@ -1281,10 +1259,37 @@ class Controller(SessionControllerMixin):
             ),
         )
 
-    def update_tab_save_paths(
-        self, tab_id: str, data_path: str, image_path: str
+    def update_tab_data_path(self, tab_id: str, data_path: str | None) -> None:
+        """Per-pane Save data-path override (Save pane)."""
+        self._tab_svc.update_tab_data_path_override(tab_id, data_path)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            ),
+        )
+
+    def update_tab_analysis_image_path(
+        self, tab_id: str, image_path: str | None
     ) -> None:
-        self._save_control.update_tab_save_paths(tab_id, data_path, image_path)
+        self._tab_svc.update_tab_analysis_image_path_override(tab_id, image_path)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            ),
+        )
+
+    def update_tab_post_analysis_image_path(
+        self, tab_id: str, image_path: str | None
+    ) -> None:
+        self._tab_svc.update_tab_post_analysis_image_path_override(tab_id, image_path)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            ),
+        )
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()

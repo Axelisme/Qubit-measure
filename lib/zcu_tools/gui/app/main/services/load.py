@@ -4,13 +4,13 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.adapter import LoadDataRequest
+from zcu_tools.gui.app.main.adapter import AdapterCapabilities, LoadDataRequest
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .guard import LoadPermit
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.app.main.state import RetiredPaneResources, State
 
     from .ports import WritebackLifecyclePort
 
@@ -59,12 +59,23 @@ class LoadService:
         self._state = state
         self._writeback = writeback
 
+    @staticmethod
+    def _supports_load_data(adapter: object) -> bool:
+        """Enforce the same capability gate when a service is called directly."""
+        caps = getattr(adapter, "capabilities", None)
+        return isinstance(caps, AdapterCapabilities) and caps.load_data
+
     def load_result(self, permit: LoadPermit, data_path: str) -> LoadTabResultOutcome:
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
+        if not self._supports_load_data(tab.adapter):
+            raise LoadDataError(
+                "This tab does not support loading data files.",
+                reason_code="unsupported_load",
+            )
         ctx = self._state.exp_context
         request = LoadDataRequest(data_path=data_path, md=ctx.md, ml=ctx.ml)
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
@@ -86,8 +97,8 @@ class LoadService:
                 reason_code="invalid_data_file",
             ) from exc
 
-        self._writeback.teardown_tab_items(tab_id)
-        self._state.update_tab_loaded_result(tab_id, result, data_path)
+        retired = self._state.update_tab_loaded_result(tab_id, result, data_path)
+        self._teardown_retired(retired, tab_id=tab_id)
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,
@@ -95,3 +106,12 @@ class LoadService:
             has_cfg_snapshot=getattr(result, "cfg_snapshot", None) is not None,
             has_analyze_params=False,
         )
+
+    def _teardown_retired(
+        self, retired: RetiredPaneResources, *, tab_id: str | None = None
+    ) -> None:
+        for draft in retired.writeback_drafts:
+            try:
+                self._writeback.teardown_draft(draft)
+            except Exception:
+                logger.exception("retired load draft teardown failed")

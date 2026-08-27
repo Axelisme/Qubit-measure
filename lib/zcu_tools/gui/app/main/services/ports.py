@@ -16,7 +16,7 @@ infrastructure capability it has no business using.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -54,7 +54,11 @@ if TYPE_CHECKING:
         SavePaths,
         WritebackItem,
     )
-    from zcu_tools.gui.app.main.state import Session, TabInteractionState
+    from zcu_tools.gui.app.main.state import (
+        RetiredPaneResources,
+        Session,
+        TabInteractionState,
+    )
     from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
     from zcu_tools.gui.session.types import ExpContext
@@ -62,49 +66,74 @@ if TYPE_CHECKING:
     from .persistence_types import AppPersistedState
 
 
+@dataclass(frozen=True, slots=True)
+class PathResourceSnapshot:
+    """Read model for one independently-owned path resource."""
+
+    override: str | None
+    path: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RunPaneSnapshot:
+    result: object | None
+    source_path: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisPaneSnapshot:
+    params: object | None
+    result: object | None
+    figure: Figure | None
+    writeback_items: tuple[WritebackItem, ...]
+    image_path: PathResourceSnapshot
+    has_writeback_draft: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PostAnalysisPaneSnapshot:
+    params: object | None
+    result: object | None
+    figure: Figure | None
+    writeback_items: tuple[WritebackItem, ...]
+    image_path: PathResourceSnapshot
+    has_writeback_draft: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SavePaneSnapshot:
+    data_path: PathResourceSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class TabPathsSnapshot:
+    """The three path resources projected independently by a tab snapshot."""
+
+    data: PathResourceSnapshot
+    analysis_image: PathResourceSnapshot
+    post_analysis_image: PathResourceSnapshot
+
+
 @dataclass(frozen=True)
 class TabSnapshot:
     """Immutable full-state snapshot of one tab (contract-layer DTO).
 
-    A single type for two consumers (formerly ``TabViewSnapshot`` + the on-disk
-    ``PersistedTab``):
-
-    - **render** (``TabService.get_snapshot``): every field populated, handed to
-      the View to draw one tab.
-    - **restore** (``TabService.new_tab(from_dict=...)``): only the serializable
-      head fields carry meaning; the live fields below are ``None`` / empty.
-
-    ``cfg_schema`` is always the *live* ``CfgSchema`` (resolved EvalValue), which
-    the render path uses directly. The disk codec (``SessionPersistenceService``)
-    converts ``cfg_schema`` ↔ raw at the file boundary, so the persisted form
-    never leaks into the snapshot. Lives in ``ports`` (the contract layer) so an
-    application service can pass it around without importing a sibling
-    application-service module (ADR-0005).
+    Render (``TabService.get_snapshot``) populates every field; persist/restore
+    uses only the serializable head (adapter_name + cfg_schema). Pane-owned
+    read models (run/analysis/post_analysis/save/paths) are the only
+    runtime/read-model contract — no flat projections for legacy callers.
     """
 
     adapter_name: str
     cfg_schema: CfgSchema
-    # The user's explicit override only (None = follow the adapter suggestion).
-    # This is the serializable save-path state — persist/restore round-trip it so
-    # a reload never pins an adapter-derived path.
-    save_paths_override: SavePaths | None
-    # Live render-only fields; None / empty on the persist + restore paths.
     tab_id: str | None = None
     interaction: TabInteractionState | None = None
     capabilities: AdapterCapabilities | None = None
-    analyze_params: object | None = None
-    # Post-analysis (second layer) live render fields, mirroring analyze_params /
-    # figure. None until the user has a post param instance / a post result.
-    post_analyze_params: object | None = None
-    post_figure: Figure | None = None
-    writeback_items: tuple[WritebackItem, ...] = ()
-    figure: Figure | None = None
-    # Render-computed effective paths (override, else adapter suggestion from
-    # ctx). The View shows this; it is *not* persisted (derivable on restore).
-    save_paths: SavePaths | None = None
-    # Source file for a loaded result. None for live run results and restored
-    # app-state snapshots; shares the tab:<id>:result lifetime.
-    result_source_path: str | None = None
+    run: RunPaneSnapshot | None = None
+    analysis: AnalysisPaneSnapshot | None = None
+    post_analysis: PostAnalysisPaneSnapshot | None = None
+    save: SavePaneSnapshot | None = None
+    paths: TabPathsSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -173,20 +202,6 @@ class ContextWrites:
 
 
 @runtime_checkable
-class WritebackQueryPort(Protocol):
-    """The writeback-items query as used by the tab read model.
-
-    ``TabService.get_snapshot`` is a read-model assembler; it composes a tab's
-    writeback proposals into the snapshot but must not depend on the concrete
-    ``WritebackService`` (ADR-0005 violation 2 — no app-service→app-service
-    coupling). It depends on this narrow query port instead, which prevents a
-    back-edge from ever forming. ``WritebackService`` implements it.
-    """
-
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]: ...
-
-
-@runtime_checkable
 class TabLifecyclePort(Protocol):
     """Tab create/restore/close + cfg as commanded by ``WorkspaceService``.
 
@@ -203,20 +218,15 @@ class TabLifecyclePort(Protocol):
 
 @runtime_checkable
 class WritebackLifecyclePort(Protocol):
-    """The writeback lifecycle surface consumed by ``RunService`` and
-    ``AnalyzeService``.
+    """Writeback lifecycle surface used by result-owning panes.
 
-    These services need to tear down per-tab writeback editor models before
-    clearing / replacing a run result, and to compute a fresh draft once an
-    analyze finishes (ADR-0008). Depending on this port instead of the concrete
-    ``WritebackService`` keeps the coupling at the interface level (ADR-0005).
+    The pane-owned opaque draft is the only contract; tab-level adapters are
+    removed.
     """
 
-    def teardown_tab_items(self, tab_id: str) -> None: ...
-
-    def compute_items_for_tab(
-        self, tab_id: str, analyze_result: Any
-    ) -> list[WritebackItem]: ...
+    def create_draft(self, items: Iterable[WritebackItem]) -> Any: ...
+    def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
+    def teardown_draft(self, draft: Any) -> None: ...
 
 
 @runtime_checkable
@@ -260,17 +270,19 @@ class TabResultWritePort(Protocol):
     contract, not behaviour (ADR-0005). ``State`` is the only implementer and
     satisfies it structurally (no inheritance change)."""
 
-    def clear_tab_results(self, tab_id: str) -> None: ...
+    def clear_tab_results(self, tab_id: str) -> RetiredPaneResources: ...
     def set_tab_running(self, tab_id: str, running: bool) -> None: ...
-    def update_tab_result(self, tab_id: str, result: object) -> None: ...
+    def update_tab_result(
+        self, tab_id: str, result: object
+    ) -> RetiredPaneResources: ...
 
 
 @runtime_checkable
 class TabAnalyzeWritePort(Protocol):
     """The narrow State-write contract an analyze / post-analyze policy depends
     on (ADR-0026 §3). Same rationale as ``TabResultWritePort``; ``State`` is the
-    only implementer. ``update_tab_analyze``'s ``writeback_items`` keyword
-    mirrors State exactly so the structural match holds."""
+    only implementer. Result replacement methods return detached resources for
+    post-commit draft cleanup."""
 
     def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None: ...
     def update_tab_analyze(
@@ -278,14 +290,18 @@ class TabAnalyzeWritePort(Protocol):
         tab_id: str,
         analyze_result: object,
         figure: Figure | None,
-        writeback_items: list[WritebackItem] | None = None,
-    ) -> None: ...
+        writeback_draft: object | None = None,
+        analyze_params_instance: object = ...,
+    ) -> RetiredPaneResources: ...
     def update_tab_post_analyze(
         self,
         tab_id: str,
         post_analyze_result: object,
         figure: Figure | None,
-    ) -> None: ...
+        *,
+        post_analyze_params_instance: object = ...,
+        writeback_draft: object | None = None,
+    ) -> RetiredPaneResources: ...
 
 
 @runtime_checkable

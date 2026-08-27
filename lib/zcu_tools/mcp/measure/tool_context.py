@@ -160,34 +160,43 @@ def _start_op_with_short_wait(
     return {"status": "finished", "handle": operation_id, **product()}
 
 
-def _render_tab_figure(tab_id: str, out_path: str | None = None) -> dict[str, Any]:
-    """Render ``tab_id``'s current figure to a PNG FILE (never inline base64).
+def _render_tab_figure(
+    tab_id: str, subtab_id: str, out_path: str | None = None
+) -> dict[str, Any]:
+    """Render a specific pane's figure to a PNG FILE (never inline base64).
 
-    Drives the wire in out_path mode; synthesises a per-tab temp path under
-    gettempdir() (overwriting the previous render of the same tab) when no path
-    is given. Returns the wire reply ({saved_to, bytes}).
+    Drives ``tab.get_figure`` with required (tab_id, subtab_id) in out_path mode;
+    synthesises a per-pane temp path under gettempdir() when no path is given.
+    Returns the wire reply ({saved_to, bytes}).
     """
-    resolved = out_path or str(Path(gettempdir()) / f"measure_fig_{tab_id}.png")
+    allowed = {"run", "analysis", "post_analysis"}
+    if subtab_id not in allowed:
+        raise ValueError(
+            f"subtab_id must be one of {sorted(allowed)}, got {subtab_id!r}"
+        )
+    resolved = out_path or str(
+        Path(gettempdir()) / f"measure_fig_{tab_id}_{subtab_id}.png"
+    )
     return send_gui_rpc(
-        "tab.get_current_figure", {"tab_id": tab_id, "out_path": resolved}
+        "tab.get_figure",
+        {"tab_id": tab_id, "subtab_id": subtab_id, "out_path": resolved},
     )
 
 
-def _fold_finished_figure(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
-    """Fold the tab's current figure into a FINISHED run/analyze reply, in place.
+def _fold_finished_figure(
+    tab_id: str, reply: dict[str, Any], *, subtab_id: str
+) -> dict[str, Any]:
+    """Fold a pane's figure into a FINISHED run/analyze reply, in place.
 
-    The operator looks at the plot after nearly every run/analyze, so saving the
-    figure here collapses the separate gui_tab_get_current_figure call. Only acts
-    when ``reply['status'] == 'finished'`` (a pending/cancelled/timed_out op has no
-    settled figure to render). Renders to the per-tab temp PNG and adds
-    ``figure: <saved_to>``. A render failure is swallowed (recorded as
-    ``figure: None``) so a plotting hiccup never masks an otherwise-good result —
-    the agent can still re-request the figure explicitly.
+    Only acts when ``reply['status'] == 'finished'``. Renders the requested
+    pane's figure to the per-pane temp PNG and adds ``figure: <saved_to>``.
+    A render failure is swallowed (recorded as ``figure: None``) so a plotting
+    hiccup never masks an otherwise-good result.
     """
     if reply.get("status") != "finished":
         return reply
     try:
-        reply["figure"] = _render_tab_figure(tab_id).get("saved_to")
+        reply["figure"] = _render_tab_figure(tab_id, subtab_id).get("saved_to")
     except Exception:
         reply["figure"] = None
     return reply

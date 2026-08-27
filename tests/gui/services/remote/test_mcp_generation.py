@@ -26,9 +26,9 @@ def test_canonical_cfg_contract_revisions_are_exact() -> None:
         WIRE_VERSION,
     )
 
-    assert WIRE_VERSION == 54
-    assert GUI_VERSION == 77
-    assert m.MCP_VERSION == 73
+    assert WIRE_VERSION == 55
+    assert GUI_VERSION == 78
+    assert m.MCP_VERSION == 74
 
 
 def _tool_name_for(method: str, spec) -> str:
@@ -265,15 +265,14 @@ def test_tab_new_is_a_pure_generated_forwarder():
 
 def test_writeback_apply_is_a_pure_generated_forwarder():
     """gui_tab_writeback_apply is the auto-generated tab.writeback_apply forwarder:
-    its reply is enriched in P3 ({applied_ids, written, context_version}) but the
-    save chaining still lives in gui_tab_commit. So tab.writeback_apply must
+    its reply is enriched in P3 ({applied_ids, written, context_version}) and P4 adds destination_context. So tab.writeback_apply must
     NOT be excluded from generation nor served by an override, and the agent schema
     exposes only 'tab_id'."""
     _assert_generated("tab.writeback_apply")
     assert "gui_tab_writeback_apply" not in m._OVERRIDE_NAMES
     schema = m.TOOLS["gui_tab_writeback_apply"]["inputSchema"]
-    # expected_versions is mcp_hidden; save_data is gone.
-    assert set(schema["properties"]) == {"tab_id"}
+    # expected_versions is mcp_hidden; save_data is gone; now pane-qualified
+    assert set(schema["properties"]) == {"tab_id", "subtab_id"}
 
 
 def test_load_data_is_generated_with_hidden_expected_versions():
@@ -405,50 +404,43 @@ def test_phase170a_tab_cfg_io_tools():
 
 
 def test_phase170c_save_writeback_tools():
-    """Save + writeback wire methods after P1.
+    """Save + writeback wire methods after P4.
 
-    P1 folds the four save wire methods (tab.save_{data,image,post_image,result})
-    into the single gui_tab_save override (artifact + figure selectors), so their
-    method policy is OVERRIDE and they lose their per-method agent tool. The wire
-    methods themselves stay (gui_tab_save and the gui_tab_commit bundle call them directly).
-    tab.save_set_paths is renamed to gui_tab_set_save_paths (tool_name override,
-    still generated). The writeback methods are untouched in P1 (writeback is P3) —
-    still auto-generated as gui_tab_writeback_*.
+    P4 separates save into distinct generated tools: tab.save_data -> gui_tab_save_data (tab-only)
+    and tab.save_image -> gui_tab_save_image (pane-qualified with subtab). Both are GENERATED
+    (tool_name, not override). The old gui_tab_save/gui_tab_commit bundles and the combined
+    tab.save_set_paths setter are removed. The writeback methods are auto-generated as
+    gui_tab_writeback_*.
     """
     # All save + writeback wire methods are present in the contract.
     save_wire_methods = {
         "tab.save_data",
         "tab.save_image",
-        "tab.save_post_image",
-        "tab.save_result",
     }
     other_wire_methods = {
-        "tab.save_set_paths",
         "tab.writeback_preview",
         "tab.writeback_set",
         "tab.writeback_apply",
     }
     assert (save_wire_methods | other_wire_methods).issubset(set(METHOD_SPECS))
 
-    # The four save wire methods are now excluded from generation (folded into
-    # gui_tab_save); the single merged save tool is present as an override.
+    # Save methods are now distinct GENERATED tools (not folded into a bundle).
     for method in save_wire_methods:
-        _assert_override(method, "gui_tab_save")
-    assert "gui_tab_save" in m.TOOLS
-    assert "gui_tab_save" in m._OVERRIDE_NAMES
+        _assert_generated(method)
+    assert "gui_tab_save_data" in m.TOOLS
+    assert "gui_tab_save_image" in m.TOOLS
+    assert "gui_tab_save_data" not in m._OVERRIDE_NAMES
+    assert "gui_tab_save_image" not in m._OVERRIDE_NAMES
+    assert "gui_tab_save" not in m.TOOLS
+    assert "gui_tab_commit" not in m.TOOLS
 
-    # The per-method save tools no longer exist (merged into gui_tab_save).
-    merged_away_tools = {
-        "gui_tab_save_data",
-        "gui_tab_save_image",
-        "gui_tab_save_post_image",
-        "gui_tab_save_result",
-    }
-    assert merged_away_tools.isdisjoint(set(m.TOOLS))
+    # The old per-method save bundle tools no longer exist.
+    assert {"gui_tab_save", "gui_tab_commit"}.isdisjoint(set(m.TOOLS))
 
-    # tab.save_set_paths is renamed to gui_tab_set_save_paths (still generated).
-    _assert_generated("tab.save_set_paths")
-    assert "gui_tab_set_save_paths" in m.TOOLS
+    # tab.save_set_paths is removed (no combined path setter); use separate save_data/save_image overrides.
+    assert "tab.save_set_paths" not in METHOD_SPECS
+    assert "tab.save_set_paths" not in m.TOOLS
+    assert "gui_tab_set_save_paths" not in m.TOOLS
     assert "gui_tab_save_set_paths" not in m.TOOLS
 
     # Writeback tools after P3 (E6 editing-surface unification): preview->list,
@@ -537,16 +529,16 @@ def test_phase170b_tab_run_analyze_tools():
     assert "gui_tab_post_analyze_start" in m._OVERRIDE_NAMES
 
     # Bundle tools: present under the P4 semantic names (open -> run ->
-    # analyze_review -> commit); the old gui_tab_stage{1..4} (and the even older
-    # gui_run_stage{1..4}) names are gone.
+    # analyze_review); the old gui_tab_stage{1..4} (and the even older
+    # gui_run_stage{1..4}) names are gone. gui_tab_commit bundle is removed (replaced by explicit writeback_apply + save).
     for bundle in (
         "gui_tab_open",
         "gui_tab_run",
         "gui_tab_analyze_review",
-        "gui_tab_commit",
     ):
         assert bundle in m.TOOLS, f"{bundle} missing"
         assert bundle in m._OVERRIDE_NAMES, f"{bundle} not an override"
+    assert "gui_tab_commit" not in m.TOOLS
     for stage in ("1", "2", "3", "4"):
         assert f"gui_tab_stage{stage}" not in m.TOOLS, (
             f"old gui_tab_stage{stage} leaked"

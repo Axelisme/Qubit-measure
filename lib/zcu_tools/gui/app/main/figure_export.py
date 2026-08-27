@@ -22,7 +22,7 @@ from matplotlib.figure import Figure
 SAVE_FIGSIZE: tuple[float, float] = (8.0, 5.0)  # inches
 SAVE_DPI: int = 150
 
-# Fixed export geometry for AGENT SCREENSHOTS (tab.get_current_figure). The agent
+# Fixed export geometry for AGENT SCREENSHOTS (tab.get_figure). The agent
 # only needs to eyeball the plot, so this is deliberately small to keep the
 # base64 PNG token-light (~640x480). Distinct from the save path, which must keep
 # full quality. Tune here if the screenshot is too small/large to read.
@@ -59,7 +59,7 @@ def save_figure_to_path(fig: Figure, path: str) -> None:
 def render_figure_png(fig: Figure) -> bytes:
     """Render ``fig`` to PNG bytes at the small screenshot size/dpi.
 
-    Used for agent figure screenshots (tab.get_current_figure). Replaces
+    Used for agent figure screenshots (tab.get_figure). Replaces
     ``canvas.grab()`` so the result has a fixed, window-independent geometry; it
     is intentionally smaller/lower-dpi than a saved image to stay token-light.
     """

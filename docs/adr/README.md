@@ -22,19 +22,19 @@
 - [0007 — Device state lives in State](0007-device-state-to-state-ssot.md)：Device live state 由 State 擁有，DeviceService 保持 driver/worker 邊界。
 - [0020 — Shared session core](0020-session-core-shared-layer.md)：measure 與 autofluxdep 共用 context、SoC、device、dialog、operation/session primitive。
 - [0021 — Event ownership domain modules](0021-event-ownership-domain-modules.md)：事件 enum 與 payload 由 domain module 擁有，app 只組裝 bus 與 serializer。
-- [0048 — Domain event facts and View reactions](0048-domain-event-facts-and-view-reactions.md)：producer 發布 closed domain fact；coordinator 擁有 lazy-snapshot reaction matrix與figure restore政策。
+- [0048 — Domain event facts and View reactions](0048-domain-event-facts-and-view-reactions.md)：producer發布closed domain fact；pane-owned State先commit完整resource並於commit後回收retired draft，coordinator擁有lazy-snapshot reaction matrix與figure restore政策。
 - [0037 — Value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session value source 提供少量 default / md-write escape hatch；`ValueRef` 立即 materialize。
 - [0044 — GUI process runtime](0044-gui-process-runtime.md)：GUI app 用 static runtime spec + behavior ABC 宣告 process startup contract。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：core 以 `OwnerScheduler` port 取代 Qt main-thread 隱含假設，service completion 全走 EventBus；hardware gate lease 附 origin_kind/note/since 供多前端 presence。
 
 ## Cfg / Value Model
 
-- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI widget 與 agent 共用 service-owned `CfgDraft`。
+- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI widget與agent共用service-owned `CfgDraft`；Analysis/Post各自持有不洩漏`editor_id`的opaque writeback draft。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec tree 靜態、Value tree 可變；locked literal 只在 spec 宣告。
 - [0010 — Complete value tree + None for empty](0010-value-tree-complete-none-for-empty.md)：Value tree 永遠完整；optional empty 統一用 `None`。
 - [0011 — CfgSchema validate boundary](0011-cfgschema-validate-boundary.md)：成品邊界做靜態結構驗證。
 - [0012 — Context-free measure cfg definition](0012-cfgbuilder-value-layer-fluent-assembly.md)：adapter以單一definition宣告static shape、domain verbs與deferred typed defaults。
-- [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter 顯式宣告 capabilities，import-time validation 抓宣告與 hook 不一致。
+- [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter顯式宣告capabilities，import-time validation抓宣告與hook不一致，Load所有driving paths共用`load_data` gate。
 - [0043 — Autofluxdep runtime cfg override plan](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、runtime patch enforcement、remote/artifact exposure 與 cfg form decoration。
 - [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有Qt-free core，`gui.widgets.cfg`擁有instance-registry Qt renderer，measure adapter與autoflux cfg barrel只暴露app-owned API；lowering ports見 [[0046]]。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：finished-cfg algorithm由shared core擁有，app以expression/reference/range三個窄port提供runtime policy。

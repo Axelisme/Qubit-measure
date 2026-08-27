@@ -65,14 +65,14 @@ class _RecordingTabActions:
     def apply_writeback(self, tab_id: str) -> None:
         self.calls.append(("apply_writeback", tab_id))
 
+    def apply_post_writeback(self, tab_id: str) -> None:
+        self.calls.append(("apply_post_writeback", tab_id))
+
     def save_data(self, tab_id: str) -> None:
         self.calls.append(("save_data", tab_id))
 
     def save_image(self, tab_id: str) -> None:
         self.calls.append(("save_image", tab_id))
-
-    def save_result(self, tab_id: str) -> None:
-        self.calls.append(("save_result", tab_id))
 
     def save_post_image(self, tab_id: str) -> None:
         self.calls.append(("save_post_image", tab_id))
@@ -94,9 +94,86 @@ def _snapshot(
     has_post_analyze_result: bool = False,
     supports_analysis: bool = True,
     supports_post_analysis: bool = False,
+    supports_load_data: bool = False,
     analyze_params: object = _DEFAULT_PARAMS,
     post_analyze_params: object | None = None,
+    writeback_items: tuple = (),
+    figure: object = _DEFAULT_PARAMS,
+    post_figure: object = _DEFAULT_PARAMS,
 ) -> TabSnapshot:
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        RunPaneSnapshot,
+        SavePaneSnapshot,
+        TabPathsSnapshot,
+    )
+
+    # Resolve analysis params
+    resolved_analyze_params = (
+        MagicMock() if analyze_params is _DEFAULT_PARAMS else analyze_params
+    )
+    # Resolve figures: allow explicit None or Figure override
+    if figure is _DEFAULT_PARAMS:
+        from matplotlib.figure import Figure
+
+        figure_obj = Figure() if has_figure and has_analyze_result else None
+    else:
+        figure_obj = figure
+    if post_figure is _DEFAULT_PARAMS:
+        from matplotlib.figure import Figure as _Fig2
+
+        post_figure_obj = _Fig2() if has_post_analyze_result else None
+    else:
+        post_figure_obj = post_figure
+
+    # Capabilities include load_data
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT if supports_analysis else AnalysisMode.NONE,
+        post_analysis=supports_post_analysis,
+        load_data=supports_load_data,
+    )
+
+    # Path resources per pane
+    data_path_snap = PathResourceSnapshot(
+        override=None, path="/tmp/data.hdf5" if has_run_result else None
+    )
+    analysis_image_snap = PathResourceSnapshot(
+        override=None,
+        path="/tmp/image.png" if has_figure and has_analyze_result else None,
+    )
+    post_image_snap = PathResourceSnapshot(
+        override=None,
+        path="/tmp/post.png" if has_post_analyze_result else None,
+    )
+
+    # Pane snapshots
+    run_snap = RunPaneSnapshot(
+        result=object() if has_run_result else None,
+        source_path=None,
+    )
+    analysis_snap = AnalysisPaneSnapshot(
+        params=resolved_analyze_params,
+        result=object() if has_analyze_result else None,
+        figure=figure_obj,
+        writeback_items=tuple(writeback_items),
+        image_path=analysis_image_snap,
+    )
+    post_snap = PostAnalysisPaneSnapshot(
+        params=post_analyze_params,
+        result=object() if has_post_analyze_result else None,
+        figure=post_figure_obj,
+        writeback_items=(),
+        image_path=post_image_snap,
+    )
+    save_snap = SavePaneSnapshot(data_path=data_path_snap)
+    paths_snap = TabPathsSnapshot(
+        data=data_path_snap,
+        analysis_image=analysis_image_snap,
+        post_analysis_image=post_image_snap,
+    )
+
     return TabSnapshot(
         adapter_name="fake",
         tab_id=tab_id,
@@ -114,18 +191,12 @@ def _snapshot(
             has_post_analyze_result=has_post_analyze_result,
         ),
         cfg_schema=MagicMock(),
-        save_paths_override=None,
-        capabilities=AdapterCapabilities(
-            analysis=AnalysisMode.FIT if supports_analysis else AnalysisMode.NONE,
-            post_analysis=supports_post_analysis,
-        ),
-        analyze_params=MagicMock()
-        if analyze_params is _DEFAULT_PARAMS
-        else analyze_params,
-        post_analyze_params=post_analyze_params,
-        writeback_items=(),
-        save_paths=None,
-        figure=None,
+        capabilities=caps,
+        run=run_snap,
+        analysis=analysis_snap,
+        post_analysis=post_snap,
+        save=save_snap,
+        paths=paths_snap,
     )
 
 
@@ -133,7 +204,11 @@ def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.show()
     QApplication.processEvents()
 
@@ -146,7 +221,11 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.resize(1000, 700)
     tab.show()
     QApplication.processEvents()
@@ -175,7 +254,11 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.resize(1000, 700)
     tab.show()
     QApplication.processEvents()
@@ -198,7 +281,13 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
 def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+        ),
+    )
     tab.update_writeback_items([MagicMock(selected=True)])
     tab.update_interaction_state(
         _snapshot(
@@ -213,10 +302,12 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
             has_run_result=True,
             has_analyze_result=True,
             has_figure=True,
+            supports_load_data=True,
         )
     )
 
     assert tab.analyze_btn.isEnabled() is False
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is False
     assert tab.writeback_widget.isEnabled() is False
     assert tab.save_image_btn.isEnabled() is False  # disabled because is_analyzing
@@ -225,7 +316,11 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -250,7 +345,11 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -268,7 +367,7 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     )
 
     assert tab.save_data_btn.isEnabled() is False
-    assert tab.save_result_btn.isEnabled() is False
+    assert tab.save_image_btn.isEnabled() is False
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.toolTip() == "Tab is busy"
 
@@ -276,7 +375,11 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
 def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -300,7 +403,11 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
 def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.cfg_form.first_invalid_reason = MagicMock(
         return_value="modules.readout: invalid"
     )
@@ -328,32 +435,33 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
 def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
-    tab.update_writeback_items([MagicMock(selected=True)])
-    tab.update_interaction_state(
-        _snapshot(
-            "tab-1",
-            global_run_active=False,
-            is_running=False,
-            is_analyzing=False,
-            is_saving_data=False,
-            has_context=True,
-            has_active_context=False,
-            has_soc=True,
-            has_run_result=True,
-            has_analyze_result=True,
-            has_figure=True,
-        )
+    snap = _snapshot(
+        "tab-1",
+        supports_load_data=True,
+        global_run_active=False,
+        is_running=False,
+        is_analyzing=False,
+        is_saving_data=False,
+        has_context=True,
+        has_active_context=False,
+        has_soc=True,
+        has_run_result=True,
+        has_analyze_result=True,
+        has_figure=True,
     )
+    assert snap.capabilities is not None
+    tab = ExpTabWidget("tab-1", _mock_ctrl(), snap.capabilities)
+    tab.update_writeback_items([MagicMock(selected=True)])
+    tab.update_interaction_state(snap)
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a file-backed context"
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.writeback_widget.isEnabled() is True
     assert tab.save_data_btn.isEnabled() is False
     assert tab.save_image_btn.isEnabled() is False
-    assert tab.save_result_btn.isEnabled() is False
 
 
 def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
@@ -362,7 +470,11 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
     used to be hidden, so the user could not save a 2D-sweep run at all."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -373,18 +485,15 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
         )
     )
 
-    # The second tab stays present and is labelled for what it now holds.
-    # (isHidden reflects the widget's own setVisible state independent of whether
-    # an ancestor is shown — the tab widget is never .show()n in this test.)
-    assert tab._left_tabs.isTabVisible(1) is True
-    assert tab._left_tabs.tabText(1) == "Save"
-    # Analysis widgets are hidden ...
-    assert tab._analyze_section.isHidden() is True
-    assert tab.analyze_btn.isHidden() is True
-    # Load is an Analysis-tab action, not a Save Browse button.
-    assert tab.load_data_btn.text() == "Load Data..."
-    assert tab.load_data_btn.isHidden() is True
-    assert tab.load_data_btn.isEnabled() is False
+    # Fixed order Run | Analysis? | Post? | Save | Guide: Analysis not constructed, Save always visible
+    visible = [tab._left_tabs.tabText(i) for i in range(tab._left_tabs.count())]
+    assert visible == ["Run", "Save", "Guide"]
+    # Prove Analysis page and controls were never constructed, not only hidden
+    assert not hasattr(tab, "_analysis_panel")
+    assert not hasattr(tab, "analyze_form")
+    assert not hasattr(tab, "_analyze_section")
+    # No Load Data capability means no control is constructed.
+    assert tab.load_data_btn is None
     # ... but Save stays reachable and usable (run result + active context).
     assert tab.save_data_btn.isHidden() is False
     assert tab.save_data_btn.isEnabled() is True
@@ -395,7 +504,11 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
     labelled 'Analysis' — the counterpart to the non-analysis case."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot("tab-1", has_run_result=True, supports_analysis=True)
     )
@@ -409,18 +522,20 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
 def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
-    tab.update_interaction_state(
-        _snapshot(
-            "tab-1",
-            has_context=True,
-            has_active_context=False,
-            has_soc=False,
-            has_run_result=False,
-            has_analyze_result=False,
-            has_figure=False,
-        )
+    snap1 = _snapshot(
+        "tab-1",
+        has_context=True,
+        has_active_context=False,
+        has_soc=False,
+        has_run_result=False,
+        has_analyze_result=False,
+        has_figure=False,
+        supports_load_data=True,
     )
+    assert snap1.capabilities is not None
+    tab = ExpTabWidget("tab-1", _mock_ctrl(), snap1.capabilities)
+    tab.update_interaction_state(snap1)
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is True
 
     tab.update_interaction_state(
@@ -432,6 +547,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
             has_run_result=False,
             has_analyze_result=False,
             has_figure=False,
+            supports_load_data=True,
         )
     )
     assert tab.load_data_btn.isEnabled() is False
@@ -506,27 +622,37 @@ def test_main_window_tab_actions_forward_to_private_handlers(qapp, monkeypatch):
         "_on_writeback_inline_apply": MagicMock(),
         "_on_save_data_clicked": MagicMock(),
         "_on_save_image_clicked": MagicMock(),
-        "_on_save_result_clicked": MagicMock(),
         "_on_post_save_image_clicked": MagicMock(),
     }
     for name, handler in handlers.items():
         monkeypatch.setattr(window, name, handler)
 
-    action_to_handler = [
-        ("refresh_interaction", "refresh_tab_interaction"),
-        ("run_or_stop", "_on_run_stop_clicked"),
-        ("load_data", "_on_load_data_clicked"),
-        ("analyze", "_on_analyze_clicked"),
-        ("post_analyze", "_on_post_analyze_clicked"),
-        ("apply_writeback", "_on_writeback_inline_apply"),
-        ("save_data", "_on_save_data_clicked"),
-        ("save_image", "_on_save_image_clicked"),
-        ("save_result", "_on_save_result_clicked"),
-        ("save_post_image", "_on_post_save_image_clicked"),
-    ]
-    for action_name, handler_name in action_to_handler:
-        getattr(window._tab_actions, action_name)("tab-1")
-        handlers[handler_name].assert_called_once_with("tab-1")
+    # Pane-qualified writeback: analysis -> pane="analysis", post -> pane="post_analysis"
+    window._tab_actions.refresh_interaction("tab-1")
+    handlers["refresh_tab_interaction"].assert_called_once_with("tab-1")
+    window._tab_actions.run_or_stop("tab-1")
+    handlers["_on_run_stop_clicked"].assert_called_once_with("tab-1")
+    window._tab_actions.load_data("tab-1")
+    handlers["_on_load_data_clicked"].assert_called_once_with("tab-1")
+    window._tab_actions.analyze("tab-1")
+    handlers["_on_analyze_clicked"].assert_called_once_with("tab-1")
+    window._tab_actions.post_analyze("tab-1")
+    handlers["_on_post_analyze_clicked"].assert_called_once_with("tab-1")
+    window._tab_actions.apply_writeback("tab-1")
+    handlers["_on_writeback_inline_apply"].assert_called_once_with(
+        "tab-1", pane="analysis"
+    )
+    handlers["_on_writeback_inline_apply"].reset_mock()
+    window._tab_actions.apply_post_writeback("tab-1")
+    handlers["_on_writeback_inline_apply"].assert_called_once_with(
+        "tab-1", pane="post_analysis"
+    )
+    window._tab_actions.save_data("tab-1")
+    handlers["_on_save_data_clicked"].assert_called_once_with("tab-1")
+    window._tab_actions.save_image("tab-1")
+    handlers["_on_save_image_clicked"].assert_called_once_with("tab-1")
+    window._tab_actions.save_post_image("tab-1")
+    handlers["_on_post_save_image_clicked"].assert_called_once_with("tab-1")
 
 
 def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
@@ -687,8 +813,16 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.side_effect = lambda tab_id: tab_id in {"tab-a", "tab-b"}
     window = MainWindow(ctrl)
-    tab_a = ExpTabWidget("tab-a", ctrl)
-    tab_b = ExpTabWidget("tab-b", ctrl)
+    tab_a = ExpTabWidget(
+        "tab-a",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
+    tab_b = ExpTabWidget(
+        "tab-b",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     window._tab_widgets["tab-a"] = tab_a
     window._tab_widgets["tab-b"] = tab_b
     window._tabs.addTab(tab_a, "A")
@@ -746,8 +880,6 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
 
 
 def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
-    from dataclasses import replace
-
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import (
         TabInteractionChangedPayload,
@@ -761,13 +893,11 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
     ctrl.has_tab.return_value = True
     figure = Figure()
     writeback_item = MagicMock()
-    ctrl.get_tab_snapshot.return_value = replace(
-        _snapshot(
-            "tab-1",
-            is_analyzing=False,
-            has_analyze_result=True,
-            has_figure=True,
-        ),
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1",
+        is_analyzing=False,
+        has_analyze_result=True,
+        has_figure=True,
         figure=figure,
         writeback_items=(writeback_item,),
     )
@@ -787,8 +917,6 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
 def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_start(
     qapp,
 ):
-    from dataclasses import replace
-
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import (
         TabInteractionChangedPayload,
@@ -801,13 +929,11 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
     figure = Figure()
-    ctrl.get_tab_snapshot.return_value = replace(
-        _snapshot(
-            "tab-1",
-            is_analyzing=True,
-            has_analyze_result=True,
-            has_figure=True,
-        ),
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1",
+        is_analyzing=True,
+        has_analyze_result=True,
+        has_figure=True,
         figure=figure,
     )
     window = MainWindow(ctrl)
@@ -827,8 +953,6 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
 def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     qapp,
 ):
-    from dataclasses import replace
-
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import (
         TabInteractionChangedPayload,
@@ -841,14 +965,12 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
     figure = Figure()
-    ctrl.get_tab_snapshot.return_value = replace(
-        _snapshot(
-            "tab-1",
-            is_running=True,
-            is_analyzing=False,
-            has_analyze_result=True,
-            has_figure=True,
-        ),
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1",
+        is_running=True,
+        is_analyzing=False,
+        has_analyze_result=True,
+        has_figure=True,
         figure=figure,
     )
     window = MainWindow(ctrl)
@@ -864,8 +986,6 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
 
 
 def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
-    from dataclasses import replace
-
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import (
         TabInteractionChangedPayload,
@@ -879,14 +999,13 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
     ctrl.has_tab.return_value = True
     primary = Figure()
     post = Figure()
-    ctrl.get_tab_snapshot.return_value = replace(
-        _snapshot(
-            "tab-1",
-            is_analyzing=False,
-            has_analyze_result=True,
-            has_figure=True,
-            has_post_analyze_result=True,
-        ),
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1",
+        is_analyzing=False,
+        has_analyze_result=True,
+        has_figure=True,
+        has_post_analyze_result=True,
+        supports_post_analysis=True,
         figure=primary,
         post_figure=post,
     )
@@ -900,6 +1019,8 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
 
     assert tab.show_analysis_figure.call_args_list == [
         ((primary,),),
+    ]
+    assert tab.show_post_analysis_figure.call_args_list == [
         ((post,),),
     ]
 
@@ -915,8 +1036,6 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
     ],
 )
 def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, fact):
-    from dataclasses import replace
-
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import (
         TabInteractionChangedPayload,
@@ -930,36 +1049,41 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, 
     ctrl.has_tab.return_value = True
     primary = Figure()
     post = Figure()
-    snapshot = replace(
-        _snapshot(
-            "tab-1",
-            has_analyze_result=True,
-            has_post_analyze_result=True,
-            has_figure=True,
-        ),
+    snapshot = _snapshot(
+        "tab-1",
+        has_analyze_result=True,
+        has_post_analyze_result=True,
+        has_figure=True,
+        supports_post_analysis=True,
         figure=primary,
         post_figure=post,
     )
     ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl)
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     window._tab_widgets["tab-1"] = tab
     tab.show_analysis_figure(primary)
-    tab.show_analysis_figure(post)
+    tab.show_post_analysis_figure(post)
 
-    window.make_live_container("tab-1")
-    assert tab._plot_stack.count() == 1
-    assert tab._plot_stack.currentWidget() is tab._plot_placeholder
+    # Simulate operation start clearing only its pane; here clear both figures to emulate stale state
+    tab._analysis_container.clear_dynamic_canvases()
+    tab._post_container.clear_dynamic_canvases()
+    assert tab.get_current_figure_for_pane("analysis") is None
+    assert tab.get_current_figure_for_pane("post_analysis") is None
 
     bus.emit(TabInteractionChangedPayload("tab-1", TabInteractionFact(fact)))
 
-    assert tab._plot_stack.count() == 3
-    current = tab._plot_stack.currentWidget()
-    assert current is not None and getattr(current, "figure", None) is post
+    # Coordinator failure/cancel re-renders retained figures per pane
+    assert tab.get_current_figure_for_pane("analysis") is primary
+    assert tab.get_current_figure_for_pane("post_analysis") is post
 
 
 def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(qapp):
-    from dataclasses import dataclass, replace
+    from dataclasses import dataclass
 
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import (
@@ -976,28 +1100,31 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(qapp):
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
-    snapshot = replace(
-        _snapshot(
-            "tab-1",
-            has_run_result=True,
-            has_analyze_result=False,
-            has_figure=False,
-            analyze_params=_Params(),
-        ),
+    snapshot = _snapshot(
+        "tab-1",
+        has_run_result=True,
+        has_analyze_result=False,
+        has_figure=False,
+        supports_post_analysis=True,
+        analyze_params=_Params(),
         figure=None,
         post_figure=None,
     )
     ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl)
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     window._tab_widgets["tab-1"] = tab
     tab.show_analysis_figure(Figure())
-    assert tab._plot_stack.count() == 2
+    assert tab.get_current_figure_for_pane("analysis") is not None
 
     bus.emit(TabContentChangedPayload("tab-1", TabContentFact.LOADED_RESULT_COMMITTED))
 
-    assert tab._plot_stack.count() == 1
-    assert tab._plot_stack.currentWidget() is tab._plot_placeholder
+    assert tab.get_current_figure_for_pane("analysis") is None
+    assert tab.get_current_figure_for_pane("post_analysis") is None
 
 
 def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
@@ -1141,7 +1268,11 @@ def test_exp_tab_opens_cfg_editor_on_attach(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, _RecordingTabActions())
 
@@ -1161,7 +1292,11 @@ def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, _RecordingTabActions())
     tab.detach()
@@ -1242,7 +1377,11 @@ def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp)
         _snapshot("tab-1", has_run_result=False),
         cfg_schema=schema,
     )
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
 
     class _GateRefreshingActions(_RecordingTabActions):
         def refresh_interaction(self, tab_id: str) -> None:
@@ -1269,7 +1408,13 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+        ),
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(
         _snapshot(
@@ -1279,18 +1424,19 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
             has_figure=True,
             has_post_analyze_result=True,
             supports_post_analysis=True,
+            supports_load_data=True,
         ),
         cfg_schema=_pulse_schema(),
     )
     tab.attach(snapshot, actions)
 
     assert tab.run_btn.isEnabled() is True
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.post_analyze_btn.isEnabled() is True
     assert tab.save_data_btn.isEnabled() is True
     assert tab.save_image_btn.isEnabled() is True
-    assert tab.save_result_btn.isEnabled() is True
     assert tab.post_save_image_btn.isEnabled() is True
 
     actions.calls.clear()
@@ -1299,9 +1445,9 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     tab.analyze_btn.click()
     tab.post_analyze_btn.click()
     tab.writeback_widget.apply_requested.emit()
+    tab.post_writeback_widget.apply_requested.emit()
     tab.save_data_btn.click()
     tab.save_image_btn.click()
-    tab.save_result_btn.click()
     tab.post_save_image_btn.click()
 
     assert actions.calls == [
@@ -1310,9 +1456,9 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
         ("analyze", "tab-1"),
         ("post_analyze", "tab-1"),
         ("apply_writeback", "tab-1"),
+        ("apply_post_writeback", "tab-1"),
         ("save_data", "tab-1"),
         ("save_image", "tab-1"),
-        ("save_result", "tab-1"),
         ("save_post_image", "tab-1"),
     ]
 
@@ -1339,7 +1485,12 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
     first_model = ctrl.get_cfg_editor_draft.return_value
-    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        dialog_presenter=dialogs,
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1377,7 +1528,12 @@ def test_exp_tab_reset_confirm_no_does_not_reset(qapp):
 
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        dialog_presenter=dialogs,
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1399,7 +1555,11 @@ def test_exp_tab_reset_btn_idle_only_enable(qapp):
     """reset_btn must be enabled when idle and disabled while the tab is busy."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
 
     # Idle: reset_btn should be enabled.
     tab.update_interaction_state(_snapshot("tab-1", is_running=False))
@@ -1423,7 +1583,12 @@ def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        dialog_presenter=dialogs,
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1615,7 +1780,11 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     canvas = MagicMock()
 
     monkeypatch.setattr(
@@ -1629,40 +1798,38 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
 
 
 def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
-    """The analyze figure and post figure share one container's stack; showing
-    one brings it to front without evicting the other (the post-analysis shared-
-    container regression). The most recently shown figure is current; both
-    canvases stay alive in the stack."""
+    """Analysis and Post figures live in independent containers; each pane's history
+    is distinct and showing one does not evict the other."""
     from matplotlib.figure import Figure
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.show()
     QApplication.processEvents()
 
-    fig1 = Figure()  # run/analyze figure
-    fig2 = Figure()  # post-analysis figure
-    stack = tab._figure_container._stack
+    fig_a1 = Figure()
+    fig_p1 = Figure()
+    tab.show_analysis_figure(fig_a1)
+    tab.show_post_analysis_figure(fig_p1)
 
-    tab.show_analysis_figure(fig1)
-    first_canvas = stack.currentWidget()
-    assert first_canvas is not None
+    # Each pane has its own stack with placeholder + 1 canvas
+    assert tab._analysis_stack.count() == 2
+    assert tab._post_stack.count() == 2
+    assert tab.get_current_figure_for_pane("analysis") is fig_a1
+    assert tab.get_current_figure_for_pane("post_analysis") is fig_p1
 
-    tab.show_analysis_figure(fig2)
-    second_canvas = stack.currentWidget()
-    assert second_canvas is not None
-    assert second_canvas is not first_canvas
-
-    # Both canvases coexist (placeholder + 2 canvases); fig2 is current.
-    assert stack.count() == 3
-    assert stack.indexOf(first_canvas) >= 0
-
-    # Re-showing fig1 brings it back to front without deleting fig2's canvas.
-    tab.show_analysis_figure(fig1)
-    assert stack.currentWidget() is first_canvas
-    assert stack.count() == 3
+    # Re-showing analysis does not affect post
+    fig_a2 = Figure()
+    tab.show_analysis_figure(fig_a2)
+    assert tab.get_current_figure_for_pane("analysis") is fig_a2
+    assert tab.get_current_figure_for_pane("post_analysis") is fig_p1
+    assert tab._post_stack.count() == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1701,7 +1868,11 @@ def _gate_window(
 
     tabs: dict[str, ExpTabWidget] = {}
     for tid in {t for t in (running_tab_id, active_tab_id) if t is not None}:
-        tab_w = ExpTabWidget(tid, ctrl)
+        tab_w = ExpTabWidget(
+            tid,
+            ctrl,
+            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        )
         tabs[tid] = tab_w
         window._tab_widgets[tid] = tab_w
     return window, tabs
@@ -1709,10 +1880,10 @@ def _gate_window(
 
 def _panel_docked_below_stack(window, tab_w) -> bool:
     """True iff the window's feedback panel sits at plot_layout index 1, i.e.
-    directly below the plot stack (index 0)."""
+    directly below the figure host (index 0)."""
     layout = tab_w._plot_layout
     panel = _feedback_panel(window)
-    return layout.indexOf(panel) == 1 and layout.indexOf(tab_w._plot_stack) == 0
+    return layout.indexOf(panel) == 1 and layout.indexOf(tab_w._right_stack) == 0
 
 
 def _feedback_panel(window):
@@ -1830,7 +2001,11 @@ def test_feedback_panel_remounts_on_target_tab_change(qapp):
     # Run finishes: no running tab now, active tab becomes the target.
     cast(MagicMock, window._ctrl).get_running_tab_id.return_value = None
     if "tab-b" not in tabs:
-        tab_b = ExpTabWidget("tab-b", window._ctrl)
+        tab_b = ExpTabWidget(
+            "tab-b",
+            window._ctrl,
+            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        )
         tabs["tab-b"] = tab_b
         window._tab_widgets["tab-b"] = tab_b
     window.refresh_feedback_widget()

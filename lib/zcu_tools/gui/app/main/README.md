@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-12 — Qt UI adapter boundaries
+**Last updated:** 2026-08-27 — capability-driven subtabs and pane-owned lifecycle
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -21,15 +21,29 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
-- `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators；
-  `running_tab_id` 是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
-- `ui/`：Qt widgets、MainWindow top-level façade、tab-local `ExpTabWidget`、
+- `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
+  Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。`running_tab_id`
+  是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
+- `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
-  `ExpTabWidget` owns tab-local rendering and receives tab actions through a
-  narrow `TabActions` port; `MainWindow` adapts those actions to top-level
-  handlers. Top-level orchestration invokes behavior-oriented tab methods for
-  result focus, plot hosting, interactive-widget lifecycle, figure reads, and
-  persisted panel geometry; the tab does not expose its Qt containers.
+  `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
+  Analysis | Post-Analysis | Save | Guide, with optional Analysis/Post only when
+  the adapter declares the capability) and per-pane `FigureContainer` routing
+  (stable identity per (tab, pane) for the widget lifetime; refresh never replaces
+  the container; busy tabs cannot close or rebuild, so the captured worker target
+  outlives the operation without a lease). It receives tab actions through a narrow
+  `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
+  `MainWindow` adapts those actions to top-level handlers. Each `WritebackWidget`
+  is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
+  draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
+  `WritebackService` remains stage-agnostic. `RenderHost` is pane-aware (run |
+  analysis | post_analysis) and the worker captures its pane's container at start —
+  switching the visible subtab never retargets the worker (ADR-0017). Save owns
+  data-path/comment/Load/Save Data; Analysis/Post own their image-path/Save Image;
+  Run's live figure is view-only (display + screenshot, no canonical Save). Top-level
+  orchestration invokes behavior-oriented tab methods for result focus, plot hosting,
+  interactive-widget lifecycle, figure reads, and persisted panel geometry; the tab
+  does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
@@ -88,23 +102,26 @@ this facet instead of the giant `Controller` surface. `WritebackControlPort` /
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
-`Controller` surface. Cfg-editor remains a separate domain, and `Controller`
-keeps thin compatibility forwards for UI surfaces that have not migrated yet.
+`Controller` surface. Cfg-editor remains a separate domain. Qt and remote
+writeback forwards are pane-qualified; no flat writeback forward remains.
 
-Inside the Qt view, `MainWindow` remains the top-level View / RenderHost facade
-while `MainWindowEventCoordinator` owns EventBus subscription and payload routing.
-The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
-which refresh sequence a payload requires, but the window keeps widget ownership
-and concrete rendering methods.
+Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
+while `MainWindowEventCoordinator` owns EventBus subscription and pane-specific
+payload routing (ADR-0048). The coordinator speaks to `MainWindow` through a narrow
+host protocol: it decides which refresh sequence a closed domain fact requires,
+but the window keeps widget ownership and concrete rendering methods. Producers
+emit only closed facts (run/analysis/post lifecycle or committed resources) — no
+widget refresh flags — and the coordinator owns the ordered fact-to-reaction
+matrix, fetching at most one `TabSnapshot` when a reaction needs it.
+Operation start clears only the affected pane's presentation while retaining the
+previous canonical pane for failure recovery; success shows the new pane's figure
+and draft, failure/cancel restores the retained pane (primary failure restores
+primary then post). Save/Guide show a placeholder and never borrow another pane's
+figure. Local analyze/post/save-path edits keep synchronous State commit timing
+but have no Qt reaction.
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
-Tab interaction/content payloads carry mandatory closed domain facts. Producers
-describe lifecycle outcomes or committed resources; the coordinator owns the
-ordered reaction matrix and fetches one snapshot only when a reaction needs it.
-Local analyze/post/save-path edits keep synchronous State commit timing but have
-no Qt reaction. Failed/cancelled/start-rejected analysis restores retained
-primary then post figures; successful terminals wait for the content-commit fact.
 `MainWindowToolbar` owns the top toolbar widgets and slash-grouped new-tab menu;
 it reports selected actions back through a narrow `MainWindowToolbarHost` surface
 instead of reaching into `Controller` directly.
@@ -118,7 +135,8 @@ Key ownership rules:
   （ADR-0047）。
 - `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
   contents.
-- `State` owns tab/device/result/save-path resource state and resource versions.
+- `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
+  happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns static preconditions and returns typed permits for
   run/save/analyze/writeback.
 - `OperationGate` is the app-local thin wrapper over the shared
@@ -143,11 +161,35 @@ Key ownership rules:
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /
    `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
 7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit.
+   cfg-editor machinery before commit. Primary and post workflows own proposal timing;
+   the Writeback service remains stage-free.
 
 `tab.load_data` is the analysis-only entry for canonical result files. It installs
 the loaded result into an existing adapter tab, clears stale analysis/writeback
-state, and does not backfill the Config tab.
+state, and does not backfill the Config tab. The Guard and LoadService both enforce
+the adapter's import-validated `capabilities.load_data` gate.
+
+### Pane-owned lifecycle
+
+`Session` is the aggregate root and its fixed pane carriers are the resource owners:
+Run stores only the run result/source, Analysis and Post-Analysis each store params,
+result, canonical figure and an opaque writeback draft, and Save stores the data-path
+override. Analysis and Post-Analysis image-path overrides are independent resources;
+the read model projects data, analysis-image and post-analysis-image paths separately.
+Run live figures remain view-only and are not stored in State.
+
+Analysis/Post result services prepare proposals, figures and drafts before calling one
+owner-thread State swap. The swap returns every retired pane resource; services tear
+down retired drafts only after commit and never roll back a committed pane when cleanup
+fails. A failed proposal/editor build leaves the previous canonical pane intact.
+Primary analysis replacement invalidates Post-Analysis, Post replacement leaves
+Analysis untouched, and a successful run/load clears both downstream panes.
+
+State and `TabSnapshot` expose only the explicit Run, Analysis, Post-Analysis, Save
+and path carriers; there are no flat tab result/writeback/path projections. Callers
+name the pane they consume. Operation-start request/context inputs are captured and
+reused by analysis and proposal hooks, without context-identity checks or terminal
+active-context reads.
 
 ## Tab Lifecycle And Ordering
 
@@ -363,8 +405,18 @@ on the concrete controller.
   must not touch devices or mutate cfg/state.
 - Adapter `run()` receives a concrete config and performs the experiment.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
-- `get_writeback_items()` returns domain writeback candidates; writeback commit is
-  framework-owned.
+- `get_writeback_items()` and `get_post_writeback_items()` return domain writeback
+  candidates for their owning analysis pane; the base post hook returns no candidates,
+  and writeback commit is framework-owned.
+- `WritebackService.create_draft()` accepts those candidates and returns an opaque,
+  service-owned draft. Item-local cfg-editor sessions and their identities stay
+  inside the service; draft creation cleans every session on failure, teardown is
+  idempotent, and `apply_draft()` sends selected entries through one
+  `ContextWritePort` batch. `WritebackWidget` is pane-bound and the Qt-only
+  `Controller`/`WritebackControl` pane-qualified forwarding (`*_for_pane` with
+  `pane` in `analysis|post_analysis`) resolves the pane's opaque draft before
+  calling the stage-agnostic service. Remote/MCP writeback operations use the same
+  required pane locator; no tab-level draft adapter or wire editor identity exists.
 
 Import direction stays one-way: `experiment/v2_gui -> gui.app.main`, never the
 reverse.

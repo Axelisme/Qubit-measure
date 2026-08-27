@@ -1,10 +1,13 @@
-**Last updated:** 2026-08-13 — JPA 校準 family 的 runtime-control policy
+**Last updated:** 2026-08-27 — singleshot GE primary/post writeback ownership
 
 # measure experiment adapters
 
 這個 package 是 measure-gui 實驗流程的使用者修改入口。每個 concrete adapter file
 同時擁有該實驗的 cfg definition、run/analyze/writeback policy 與 operator guide；修改一個
 實驗時，主要閱讀範圍應維持在該檔案及其直接對應的 `experiment/v2/` implementation。
+
+Post-analysis adapters 以 `get_post_writeback_items()` 提出 post-owned proposal；framework 將
+primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Writeback 實作。
 
 ## Ownership
 

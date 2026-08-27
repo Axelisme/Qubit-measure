@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot import GEAdapter
 from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
     GEAnalyzeResult,
     GEPostAnalyzeParams,
+    GEPostAnalyzeResult,
 )
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -20,6 +21,7 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     MetaDictWriteback,
     PostAnalyzeRequest,
+    PostWritebackRequest,
     RunRequest,
     WritebackRequest,
 )
@@ -149,9 +151,9 @@ def test_ge_run_without_soc_fast_fails() -> None:
 def _patched_analyze(
     adapter: GEAdapter, result: GE_Result, monkeypatch: pytest.MonkeyPatch
 ) -> GEAnalyzeResult:
-    """Run the adapter's analyze with GE_Exp.analyze and calc_confusion_matrix
-    patched to fixed returns, isolating the adapter's result mapping from the
-    domain fitter / confusion numerics."""
+    """Run the adapter's primary analyze with GE_Exp.analyze patched and
+    ``calc_confusion_matrix`` guarded to ensure primary never calculates
+    confusion (ticket 05)."""
     fig = Figure()
     fit = _fake_fit_result()
     pops = np.array([[0.9, 0.1], [0.1, 0.9]])
@@ -161,43 +163,12 @@ def _patched_analyze(
         assert backend == "pca"
         return 0.95, pops, fit, fig
 
-    confusion = np.array(
-        [
-            [0.95, 0.03, 0.02],
-            [0.03, 0.95, 0.02],
-            [0.0, 0.0, 1.0],
-        ]
-    )
-
-    def fake_confusion(
-        self: Any,
-        init_pops: Any,
-        g_center: Any,
-        e_center: Any,
-        sigma: float,
-        radius: Any = None,
-        result: Any = None,
-        consider_other: bool = True,
-    ) -> GEConfusionResult:
-        del self, g_center, e_center, result
-        # The adapter must forward the fit's populations and fitted sigma, let
-        # the domain optimise the radius (None), and mirror the notebook's
-        # consider_other=False.
-        assert np.allclose(init_pops, pops)
-        assert sigma == pytest.approx(0.3)
-        assert radius is None
-        assert consider_other is False
-        return GEConfusionResult(
-            radius=0.42,
-            matrix=confusion,
-            init_matrix=np.eye(3),
-            g_classification=(0.9, 0.1, 0.0),
-            e_classification=(0.1, 0.9, 0.0),
-            condition_number=1.0,
-        )
+    def fail_confusion(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("primary analyze must not call calc_confusion_matrix")
 
     monkeypatch.setattr(GE_Exp, "analyze", fake_analyze, raising=True)
-    monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fake_confusion, raising=True)
+    monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fail_confusion, raising=True)
     req = AnalyzeRequest(
         run_result=result,
         analyze_params=adapter.get_analyze_params(result, _make_ctx()),
@@ -218,22 +189,27 @@ def test_ge_analyze_maps_fit_result(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out.ge_s == pytest.approx(0.3)
     assert out.g_center == -1.0 + 0j
     assert out.e_center == 1.0 + 0j
-    assert out.ge_radius == pytest.approx(0.42)
     assert out.init_pops == [[0.9, 0.1], [0.1, 0.9]]
-    # confusion comes back as a JSON-safe nested list (domain returns ndarray).
-    assert out.confusion == [
-        [0.95, 0.03, 0.02],
-        [0.03, 0.95, 0.02],
-        [0.0, 0.0, 1.0],
-    ]
     assert isinstance(out.figure, Figure)
-    # complex centers are skipped from the JSON summary; floats + the nested-list
-    # confusion survive.
+    # Primary must not own radius/matrix — those fields no longer exist.
+    assert not hasattr(out, "ge_radius")
+    assert not hasattr(out, "confusion")
+    # Summary contains only JSON-safe primary fields, no radius/matrix.
     summary = out.to_summary_dict()
     assert "fidelity" in summary
     assert "g_center" not in summary
-    assert summary["ge_radius"] == pytest.approx(0.42)
-    assert summary["confusion"] == out.confusion
+    assert "ge_radius" not in summary
+    assert "confusion" not in summary
+    assert "init_pops" in summary
+
+
+def test_ge_analyze_does_not_call_calc_confusion_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = GEAdapter()
+    # _patched_analyze already asserts this via fail_confusion; just run it.
+    out = _patched_analyze(adapter, _fake_result(), monkeypatch)
+    assert isinstance(out, GEAnalyzeResult)
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +227,6 @@ def _make_post_req() -> PostAnalyzeRequest[Any, GEAnalyzeResult, GEPostAnalyzePa
         g_center=-1.0 + 0.0j,
         e_center=1.0 + 0.0j,
         init_pops=[[0.9, 0.1], [0.1, 0.9]],
-        ge_radius=0.42,
-        confusion=[[0.95, 0.05, 0.0], [0.05, 0.95, 0.0], [0.0, 0.0, 1.0]],
         figure=Figure(),
     )
     return PostAnalyzeRequest(
@@ -315,11 +289,7 @@ def test_ge_post_analyze_recalculates_confusion_without_refitting(
         assert kwargs["result"] is req.run_result
         return figure
 
-    monkeypatch.setattr(
-        "zcu_tools.experiment.v2_gui.adapters.singleshot.ge.singleshot_ge_analysis",
-        reject_fit,
-        raising=False,
-    )
+    monkeypatch.setattr(GE_Exp, "analyze", reject_fit, raising=True)
     monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fake_calc, raising=True)
     monkeypatch.setattr(GE_Exp, "plot_confusion_matrix", fake_plot, raising=True)
     req = _make_post_req()
@@ -353,7 +323,7 @@ def test_ge_post_analyze_params_are_empty() -> None:
     assert isinstance(params, GEPostAnalyzeParams)
 
 
-def test_ge_writeback_proposes_fid_ge_s_centers_and_radius(
+def test_ge_writeback_proposes_only_primary_four(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = GEAdapter()
@@ -374,25 +344,63 @@ def test_ge_writeback_proposes_fid_ge_s_centers_and_radius(
         for item in items
         if isinstance(item, MetaDictWriteback)
     }
-    assert set(targets) == {
-        "fid",
-        "ge_s",
-        "g_center",
-        "e_center",
-        "ge_radius",
-        "confusion_matrix",
-    }
+    assert set(targets) == {"fid", "ge_s", "g_center", "e_center"}
     assert targets["fid"] == pytest.approx(0.95)
     assert targets["ge_s"] == pytest.approx(0.3)
-    assert targets["ge_radius"] == pytest.approx(0.42)
     # The complex centres are proposed verbatim (default fixture: -1+0j / 1+0j).
     assert targets["g_center"] == -1.0 + 0j
     assert targets["e_center"] == 1.0 + 0j
     assert isinstance(targets["g_center"], complex)
-    # The confusion matrix is proposed as a nested list (the analyze result's
-    # JSON-safe ``confusion``) — a non-scalar md writeback applied verbatim.
-    assert targets["confusion_matrix"] == [
-        [0.95, 0.03, 0.02],
-        [0.03, 0.95, 0.02],
-        [0.0, 0.0, 1.0],
-    ]
+    # Must not propose post-owned items.
+    assert "ge_radius" not in targets
+    assert "confusion_matrix" not in targets
+
+
+def test_ge_post_writeback_proposes_radius_and_matrix_from_same_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = GEAdapter()
+    post_result = GEPostAnalyzeResult(
+        ge_radius=0.37,
+        confusion=[[0.96, 0.04, 0.0], [0.04, 0.96, 0.0], [0.0, 0.0, 1.0]],
+        figure=Figure(),
+    )
+    analyze_result = GEAnalyzeResult(
+        fidelity=0.95,
+        theta=0.2,
+        threshold=0.0,
+        ge_s=0.3,
+        g_center=-1.0 + 0j,
+        e_center=1.0 + 0j,
+        init_pops=[[0.9, 0.1], [0.1, 0.9]],
+        figure=Figure(),
+    )
+
+    def fail_calc(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("post writeback must not recompute confusion")
+
+    monkeypatch.setattr(GE_Exp, "calc_confusion_matrix", fail_calc, raising=True)
+    req = PostWritebackRequest(
+        run_result=_fake_result(),
+        analyze_result=analyze_result,
+        post_analyze_result=post_result,
+        ctx=cast(Any, _make_ctx()),
+    )
+
+    items = adapter.get_post_writeback_items(req)
+
+    assert len(items) == 2
+    for item in items:
+        assert isinstance(item, MetaDictWriteback)
+    targets = {it.target_name: it.proposed_value for it in items}  # type: ignore[attr-defined]
+    assert set(targets) == {"ge_radius", "confusion_matrix"}
+    assert targets["ge_radius"] == pytest.approx(0.37)
+    assert targets["confusion_matrix"] == post_result.confusion
+    # Reuses the already-produced GEPostAnalyzeResult (no recompute).
+    assert targets["ge_radius"] == post_result.ge_radius
+    assert targets["confusion_matrix"] is post_result.confusion
+
+    # Summary and proposal share the same radius/matrix values.
+    assert post_result.to_summary_dict()["ge_radius"] == pytest.approx(0.37)
+    assert post_result.to_summary_dict()["confusion"] == post_result.confusion

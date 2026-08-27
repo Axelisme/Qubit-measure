@@ -42,7 +42,7 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, OneToneFluxResult]):
     exp_cls = OneToneFluxExp
     ExpCfg_cls: ClassVar[Any] = OneToneFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE
+        analysis=AnalysisMode.NONE, load_data=True
     )
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

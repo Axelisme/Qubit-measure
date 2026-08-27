@@ -6,10 +6,6 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.app.main.events.tab import (
-    TabInteractionChangedPayload,
-    TabInteractionFact,
-)
 from zcu_tools.gui.app.main.services.tab_control import TabControlFacet
 
 from tests.gui._control_fakes import CallLog, call
@@ -50,17 +46,6 @@ class RecordingTab:
     def make_default_cfg(self, adapter_name: str) -> object:
         self._log.add("tab", "make_default_cfg", adapter_name)
         return self.default_schema
-
-    def update_tab_save_path_overrides(
-        self, tab_id: str, data_path: str, image_path: str
-    ) -> None:
-        self._log.add(
-            "tab",
-            "update_tab_save_path_overrides",
-            tab_id,
-            data_path,
-            image_path,
-        )
 
 
 class RecordingWorkspace:
@@ -193,25 +178,3 @@ def test_tab_control_reset_cfg_rejects_running_tab() -> None:
         facet.reset_tab_cfg("tab-1")
 
     assert log.calls == []
-
-
-def test_tab_control_update_save_paths_emits_interaction_changed() -> None:
-    facet, log, _state, _tab, _workspace, bus = _facet()
-
-    facet.update_tab_save_paths("tab-1", "data.h5", "image.png")
-
-    assert log.calls == [
-        call(
-            "tab",
-            "update_tab_save_path_overrides",
-            "tab-1",
-            "data.h5",
-            "image.png",
-        ),
-        call("bus", "emit", "TabInteractionChangedPayload"),
-    ]
-    assert len(bus.payloads) == 1
-    payload = bus.payloads[0]
-    assert isinstance(payload, TabInteractionChangedPayload)
-    assert payload.tab_id == "tab-1"
-    assert payload.fact is TabInteractionFact.SAVE_PATHS_CHANGED

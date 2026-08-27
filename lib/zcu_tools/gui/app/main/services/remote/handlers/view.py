@@ -94,22 +94,33 @@ def _h_view_screenshot(
     return {"png_b64": payload, "bytes": len(png)}
 
 
-def _h_tab_get_current_figure(
+_VALID_SUBTABS = frozenset({"run", "analysis", "post_analysis"})
+
+
+def _h_tab_get_figure(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     import base64
     from pathlib import Path
 
     tab_id = str(params["tab_id"])
+    subtab_id = str(params["subtab_id"])
+    if subtab_id not in _VALID_SUBTABS:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"invalid subtab_id {subtab_id!r}; expected one of {sorted(_VALID_SUBTABS)}",
+        )
+    if not adapter.tab_control.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     out_path_raw = params.get("out_path")
     out_path: str | None = str(out_path_raw) if out_path_raw is not None else None
-    png = render_view(adapter).take_figure_screenshot(tab_id)
+    png = render_view(adapter).take_figure_screenshot_for_subtab(tab_id, subtab_id)
     if not isinstance(png, (bytes, bytearray)):
         raise RemoteError(
             ErrorCode.INTERNAL,
             f"figure screenshot returned non-bytes {type(png).__name__}",
         )
     if out_path:
-        Path(out_path).write_bytes(png)
+        Path(out_path).write_bytes(bytes(png))
         return {"bytes": len(png), "saved_to": out_path}
     return {"png_b64": base64.b64encode(bytes(png)).decode("ascii"), "bytes": len(png)}

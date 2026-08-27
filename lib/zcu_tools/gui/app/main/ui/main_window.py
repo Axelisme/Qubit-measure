@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.controller import Controller
     from zcu_tools.gui.app.main.services import TabSnapshot
+    from zcu_tools.gui.app.main.services.writeback_control import WritebackPane
 
 
 # ---------------------------------------------------------------------------
@@ -72,16 +73,16 @@ class _MainWindowTabActions:
         self._window._on_post_analyze_clicked(tab_id)
 
     def apply_writeback(self, tab_id: str) -> None:
-        self._window._on_writeback_inline_apply(tab_id)
+        self._window._on_writeback_inline_apply(tab_id, pane="analysis")
+
+    def apply_post_writeback(self, tab_id: str) -> None:
+        self._window._on_writeback_inline_apply(tab_id, pane="post_analysis")
 
     def save_data(self, tab_id: str) -> None:
         self._window._on_save_data_clicked(tab_id)
 
     def save_image(self, tab_id: str) -> None:
         self._window._on_save_image_clicked(tab_id)
-
-    def save_result(self, tab_id: str) -> None:
-        self._window._on_save_result_clicked(tab_id)
 
     def save_post_image(self, tab_id: str) -> None:
         self._window._on_post_save_image_clicked(tab_id)
@@ -176,17 +177,22 @@ class MainWindow(QMainWindow):
             return
 
         tab_label = adapter_name
+        # Construct the tab from the same immutable capabilities snapshot used
+        # for its initial attach, so optional panes never need dynamic rebuilds.
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        caps = snapshot.capabilities
+        if caps is None:
+            raise RuntimeError(
+                f"render snapshot for tab {tab_id!r} has no capabilities"
+            )
         tab_w = ExpTabWidget(
-            tab_id, self._ctrl, dialog_presenter=self._dialog_presenter
+            tab_id, self._ctrl, caps, dialog_presenter=self._dialog_presenter
         )
         self._tab_widgets[tab_id] = tab_w
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
 
-        # Bring the whole tab widget to life from one render snapshot (seed every
-        # sub-view + wire controller signals) — the whole-tab analogue of
-        # CfgFormWidget.attach.
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        # Reuse the snapshot already fetched for capabilities (avoid second fetch).
         self._toolbar.set_new_tab_enabled(True)
         tab_w.attach(snapshot, self._tab_actions)
 
@@ -241,19 +247,15 @@ class MainWindow(QMainWindow):
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.interaction is not None  # render snapshot fills live fields
         assert current.capabilities is not None  # render snapshot fills live fields
-        # Non-analysis adapters (flux_dep / power_dep 2D sweeps) intentionally
-        # have no analyze params after a run — there is no analyze form to fill,
-        # so skip before the Fast-Fail below (which guards the *analysis* adapter
-        # contract: a run result must carry initialized params).
+        # Branch from declared capabilities and never touch absent controls.
         if current.capabilities.analysis is AnalysisMode.NONE:
-            tab_w.analyze_form.sync(None)
             return
         if not current.interaction.has_run_result:
             tab_w.analyze_form.sync(None)
             return
-        if current.analyze_params is None:
+        if current.analysis is None or current.analysis.params is None:
             raise RuntimeError("Run result has no initialized analyze parameters")
-        tab_w.analyze_form.sync(current.analyze_params)
+        tab_w.analyze_form.sync(current.analysis.params)
 
     def refresh_tab_post_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -263,17 +265,13 @@ class MainWindow(QMainWindow):
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.capabilities is not None  # render snapshot fills live fields
-        # Only post-analysis adapters have a post form; for the rest there is
-        # nothing to fill. When the primary analyze result is invalidated the post
-        # params are cleared (State), so there is no instance to populate — the
-        # gate (update_interaction_state) disables the empty form.
+        # Branch from capabilities; never touch absent post controls.
         if not current.capabilities.post_analysis:
+            return
+        if current.post_analysis is None or current.post_analysis.params is None:
             tab_w.sync_post_analyze_params(None)
             return
-        if current.post_analyze_params is None:
-            tab_w.sync_post_analyze_params(None)
-            return
-        tab_w.sync_post_analyze_params(current.post_analyze_params)
+        tab_w.sync_post_analyze_params(current.post_analysis.params)
 
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -282,7 +280,16 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        tab_w.update_writeback_items(list(current.writeback_items))
+        assert current.analysis is not None
+        assert current.post_analysis is not None
+        assert current.capabilities is not None
+        # Pane-qualified: only touch present panes.
+        if current.capabilities.analysis is not AnalysisMode.NONE:
+            tab_w.update_writeback_items(list(current.analysis.writeback_items))
+        if current.capabilities.post_analysis:
+            tab_w.update_post_writeback_items(
+                list(current.post_analysis.writeback_items)
+            )
 
     def refresh_tab_save_paths(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -291,9 +298,13 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        save_paths = current.save_paths
-        if save_paths is not None:
-            tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
+        assert current.paths is not None
+        assert current.capabilities is not None
+        tab_w.set_data_path(current.paths.data.path or "")
+        if current.capabilities.analysis is not AnalysisMode.NONE:
+            tab_w.set_analysis_image_path(current.paths.analysis_image.path or "")
+        if current.capabilities.post_analysis:
+            tab_w.set_post_image_path(current.paths.post_analysis_image.path or "")
 
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -302,7 +313,11 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        figure = current.figure
+        assert current.analysis is not None
+        assert current.capabilities is not None
+        if current.capabilities.analysis is AnalysisMode.NONE:
+            return
+        figure = current.analysis.figure
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
@@ -313,20 +328,21 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        post_figure = current.post_figure
-        if post_figure is not None:
-            # Post + analyze share one container; ``refresh_tab_figure`` runs just
-            # before this and renders ``tab.figure``, so when a post figure exists
-            # it is drawn last and the shared container shows the most recent
-            # (post) figure. On invalidation (post_figure is None) there is nothing
-            # to do: the shared container already shows the primary figure.
+        assert current.post_analysis is not None
+        assert current.capabilities is not None
+        if not current.capabilities.post_analysis:
+            return
+        post_figure = current.post_analysis.figure
+        if post_figure is None:
+            tab_w.clear_post_figure()
+        else:
             self.show_post_analysis_image(tab_id, post_figure)
 
     def clear_tab_plot(self, tab_id: str) -> None:
         """Clear stale canvases after loading content with no analysis figure."""
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is not None:
-            tab_w.reset_plot()
+            tab_w.clear_all_figures()
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
@@ -389,11 +405,35 @@ class MainWindow(QMainWindow):
             self._predictor_label.setText(f"loaded (flux_bias={flux_bias:.4g})")
             self._predictor_label.setStyleSheet("color: green;")
 
-    def make_live_container(self, tab_id: str) -> Any:
+    def make_run_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        return tab_w.prepare_live_container()
+        return tab_w.prepare_run_container()
+
+    def make_analysis_container(self, tab_id: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        return tab_w.prepare_analysis_container()
+
+    def make_post_analysis_container(self, tab_id: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        return tab_w.prepare_post_container()
+
+    def get_figure_container(self, tab_id: str, pane: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        if pane == "run":
+            return tab_w.get_run_container()
+        if pane == "analysis":
+            return tab_w.get_analysis_container()
+        if pane == "post_analysis":
+            return tab_w.get_post_container()
+        raise ValueError(f"unknown pane {pane!r}")
 
     def mount_interactive_analysis(
         self,
@@ -413,7 +453,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.reset_plot()
+        tab_w.prepare_analysis_container()
         # The Controller satisfies InteractiveHostEnv (run_background via bg's
         # pool); the widget pulls only that one capability through the port.
         widget = InteractiveAnalysisWidget(self._ctrl)
@@ -424,8 +464,8 @@ class MainWindow(QMainWindow):
     def unmount_interactive_analysis(self, tab_id: str) -> None:
         """RenderHost impl: remove the tab's mounted interactive picker (dual of
         ``mount_interactive_analysis``). The picker widget is added straight to the
-        plot stack (it is not a FigureContainer canvas), so ``reset_plot`` cannot
-        reach it — this is the only teardown path for a cancelled interactive
+        Analysis stack (it is not a FigureContainer canvas), so pane canvas cleanup
+        cannot reach it — this is the only teardown path for a cancelled interactive
         analyze. A no-op when no picker is mounted, and idempotent."""
         from zcu_tools.gui.app.main.ui.interactive_analysis import (
             InteractiveAnalysisWidget,
@@ -470,14 +510,11 @@ class MainWindow(QMainWindow):
         tab_w.show_analysis_figure(fig)
 
     def show_post_analysis_image(self, tab_id: str, fig: Any) -> None:
-        # Post figures share the primary right-pane container (the container shows
-        # the most recently produced figure), so this routes through the same
-        # render path as the analyze figure.
         logger.debug("show_post_analysis_image: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.show_analysis_figure(fig)
+        tab_w.show_post_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
@@ -598,14 +635,19 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.start_post_analyze(tab_id, tab_w.read_post_analyze_params())
 
-    def _on_writeback_inline_apply(self, tab_id: str) -> None:
-        logger.info("_on_writeback_inline_apply: tab_id=%r", tab_id)
+    def _on_writeback_inline_apply(
+        self, tab_id: str, pane: WritebackPane = "analysis"
+    ) -> None:
+        logger.info("_on_writeback_inline_apply: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
             logger.warning(
                 "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
             )
             return
-        applied_ids = self._ctrl.apply_writeback(tab_id)
+        result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        applied_ids = (
+            result.get("applied_ids", []) if isinstance(result, dict) else result
+        )
         if applied_ids:
             self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")
 
@@ -632,17 +674,6 @@ class MainWindow(QMainWindow):
             return
         path = tab_w.get_post_image_path()
         self._ctrl.save_post_image(tab_id, path)
-
-    def _on_save_result_clicked(self, tab_id: str) -> None:
-        logger.info("_on_save_result_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_save_result_clicked")
-        if tab_w is None:
-            return
-        data_path = tab_w.get_data_path()
-        image_path = tab_w.get_image_path()
-        self._ctrl.save_result(
-            tab_id, data_path, image_path, comment=tab_w.get_comment()
-        )
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control
@@ -711,22 +742,48 @@ class MainWindow(QMainWindow):
             "open_dialogs": [name.value for name in self.list_open_dialogs()],
         }
 
-    def take_figure_screenshot(self, tab_id: str) -> bytes:
-        """Render a tab's figure to PNG bytes at the fixed export size.
-
-        Renders the live figure via savefig (not ``canvas.grab()``) so the
-        screenshot has the same window-independent geometry as a saved image,
-        rather than tracking the current widget pixel size.
-        """
+    def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
+        """Pane-qualified figure PNG (run|analysis|post_analysis)."""
+        from zcu_tools.gui.app.main.adapter import AnalysisMode
         from zcu_tools.gui.app.main.figure_export import render_figure_png
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             raise FailedPreconditionError(f"unknown tab_id: {tab_id!r}")
-        figure = tab_w.current_figure()
-        if figure is None:
-            raise FailedPreconditionError(f"tab {tab_id!r} has no figure yet")
-        return render_figure_png(figure)
+        if subtab_id not in {"run", "analysis", "post_analysis"}:
+            raise FailedPreconditionError(f"invalid subtab_id {subtab_id!r}")
+        if subtab_id == "run":
+            fig = tab_w.get_current_figure_for_pane("run")
+            if fig is None:
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} run pane has no figure yet"
+                )
+            return render_figure_png(fig)
+        snap = self._ctrl.get_tab_snapshot(tab_id)
+        if snap.capabilities is None:
+            raise FailedPreconditionError("snapshot has no capabilities")
+        if subtab_id == "analysis":
+            if snap.capabilities.analysis is AnalysisMode.NONE:
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} does not support analysis"
+                )
+            fig = snap.analysis.figure if snap.analysis is not None else None
+            if fig is None:
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} analysis has no figure yet"
+                )
+            return render_figure_png(fig)  # type: ignore[arg-type]
+        # post_analysis
+        if not snap.capabilities.post_analysis:
+            raise FailedPreconditionError(
+                f"tab {tab_id!r} does not support post_analysis"
+            )
+        fig = snap.post_analysis.figure if snap.post_analysis is not None else None
+        if fig is None:
+            raise FailedPreconditionError(
+                f"tab {tab_id!r} post_analysis has no figure yet"
+            )
+        return render_figure_png(fig)  # type: ignore[arg-type]
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""

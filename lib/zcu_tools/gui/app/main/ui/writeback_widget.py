@@ -30,6 +30,7 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.app.main.services.writeback_control import WritebackPane
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,14 @@ class WritebackWidget(QWidget):
         self,
         ctrl: Controller,
         parent: QWidget | None = None,
+        *,
+        tab_id: str,
+        pane: WritebackPane = "analysis",
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._tab_id = tab_id
+        self._pane: WritebackPane = pane
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
 
@@ -109,8 +115,14 @@ class WritebackWidget(QWidget):
         self._refresh_apply_enabled()
 
     def _on_check_toggled(self, item: WritebackItem) -> None:
-        # The persistent item's selected flag follows the checkbox directly.
-        item.selected = self._checks[item.session_id].isChecked()
+        selected = self._checks[item.session_id].isChecked()
+        assert self._tab_id is not None
+        self._ctrl.set_writeback_item_for_pane(
+            self._tab_id,
+            self._pane,
+            item.session_id,
+            selected=selected,
+        )
         self._refresh_apply_enabled()
 
     def _refresh_apply_enabled(self, *_: int) -> None:
@@ -172,11 +184,20 @@ class WritebackWidget(QWidget):
         def save() -> None:
             try:
                 new_name = _require_target_name(name_edit.text())
-                item.proposed_value = _coerce_scalar_input(
+                new_value = _coerce_scalar_input(
                     value_edit.text(),
                     item.proposed_value,
                 )
+                assert self._tab_id is not None
+                self._ctrl.set_writeback_item_for_pane(
+                    self._tab_id,
+                    self._pane,
+                    item.session_id,
+                    target_name=new_name,
+                    proposed_value=new_value,
+                )
                 item.target_name = new_name
+                item.proposed_value = new_value
                 cb.setText(self._make_label_text(item))
                 dialog.accept()
             except Exception as exc:
@@ -191,11 +212,16 @@ class WritebackWidget(QWidget):
         item: ModuleWriteback | WaveformWriteback,
         cb: QCheckBox,
     ) -> None:
-        # The item carries a persistent, service-owned cfg model (editor_id,
-        # ADR-0008). Attach the dialog widget to *that* model — the user's edits
-        # land on the same model the agent edits and apply reads. On close the
-        # widget detaches but the model persists (torn down only on reanalyze).
-        if item.editor_id is None:
+        assert self._tab_id is not None
+        try:
+            draft = self._ctrl.get_writeback_item_draft_for_pane(
+                self._tab_id, self._pane, item.session_id
+            )
+        except Exception as exc:
+            logger.exception(
+                "failed to resolve writeback draft item %s", item.session_id
+            )
+            QMessageBox.critical(self, "Unable to edit writeback", str(exc))
             return
 
         dialog = QDialog(self)
@@ -222,6 +248,13 @@ class WritebackWidget(QWidget):
             if not text:
                 name_edit.setText(item.target_name)  # revert, no blank target
                 return
+            assert self._tab_id is not None
+            self._ctrl.set_writeback_item_for_pane(
+                self._tab_id,
+                self._pane,
+                item.session_id,
+                target_name=text,
+            )
             item.target_name = text
 
         name_edit.editingFinished.connect(_commit_name)
@@ -231,7 +264,7 @@ class WritebackWidget(QWidget):
         form_widget = CfgFormWidget(
             text_input_enhancer=make_value_source_input_enhancer(self._ctrl)
         )
-        form_widget.attach(self._ctrl.get_cfg_editor_draft(item.editor_id))
+        form_widget.attach(draft)
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 

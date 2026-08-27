@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEventLoop
+from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import (
@@ -21,6 +21,7 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
 )
 from zcu_tools.gui.app.main.controller import Controller
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabContentChangedPayload,
@@ -77,7 +78,7 @@ def _make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
-    view.make_live_container = MagicMock(return_value=None)
+    view.make_run_container = MagicMock(return_value=None)
 
     # The Controller fans diagnostics out via notify_diagnostic (ADR-0013);
     # mirror MainWindow's dispatch so tests can assert on show_*.
@@ -443,7 +444,7 @@ def test_run_finished_updates_tab_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    assert cf.state.get_tab(tab_id).run_result is not None
+    assert cf.state.get_tab(tab_id).run.result is not None
 
 
 def test_run_finished_emits_run_finished(cf):
@@ -453,6 +454,22 @@ def test_run_finished_emits_run_finished(cf):
     cf.bus.emit.assert_any_call(
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
     )
+
+
+def test_save_data_completion_reports_only_data_artifact(cf):
+    cf.ctrl._on_save_data_finished(
+        SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/data.hdf5")
+    )
+
+    cf.view.show_status_message.assert_called_with("Data saved to /tmp/data.hdf5")
+
+    cf.ctrl._on_save_data_finished(
+        SaveDataFinishedPayload(
+            tab_id="tab-1", data_path="/tmp/data.hdf5", error="disk full"
+        )
+    )
+
+    cf.view.show_error_dialog.assert_called_with("Save data failed", "disk full")
 
 
 def test_run_finished_calls_refresh_tab(cf):
@@ -579,8 +596,6 @@ def test_draft_context_rejects_real_run_and_save(cf):
         cf.ctrl.save_data(tab_id, "/tmp/data.h5")
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.save_image(tab_id, "/tmp/image.png")
-    with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.save_result(tab_id, "/tmp/data.h5", "/tmp/image.png")
 
 
 @dataclass
@@ -601,7 +616,11 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     )
     loaded = object()
     adapter = MagicMock()
-    adapter.capabilities = FakeAdapter.capabilities
+    # Final contract requires explicit load_data capability; FakeAdapter's
+    # default lacks it, so set load_data True for the driving path.
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities
+
+    adapter.capabilities = AdapterCapabilities(requires_soc=False, load_data=True)
     adapter.load.return_value = loaded
     adapter.get_analyze_params.return_value = _LoadedAnalyzeParams(threshold=0.7)
     cf.state.get_tab(tab_id).adapter = adapter
@@ -609,9 +628,9 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
 
     outcome = cf.ctrl.load_tab_result(tab_id, "/tmp/loaded.hdf5")
 
-    assert cf.state.get_tab(tab_id).run_result is loaded
-    assert cf.state.get_tab(tab_id).result_source_path == "/tmp/loaded.hdf5"
-    assert cf.state.get_tab(tab_id).analyze_param_instance == _LoadedAnalyzeParams(
+    assert cf.state.get_tab(tab_id).run.result is loaded
+    assert cf.state.get_tab(tab_id).run.source_path == "/tmp/loaded.hdf5"
+    assert cf.state.get_tab(tab_id).analysis.params == _LoadedAnalyzeParams(
         threshold=0.7
     )
     request = adapter.load.call_args.args[0]
@@ -670,7 +689,7 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
 
 def test_run_clears_active_figure_container_after_finish(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.view.make_live_container.return_value = _make_figure_container()
+    cf.view.make_run_container.return_value = _make_figure_container()
 
     cf.ctrl.start_run(tab_id)
 
@@ -686,7 +705,8 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
     snapshot = cf.ctrl.get_tab_snapshot(tab_id)
 
     assert snapshot.interaction.has_run_result is True
-    assert snapshot.analyze_params is not None
+    assert snapshot.analysis is not None
+    assert snapshot.analysis.params is not None
 
 
 def test_update_tab_cfg_does_not_emit_interaction_changed(cf):
@@ -857,7 +877,6 @@ def test_persist_then_restore_app_state(tmp_path):
     tab_id = cf.ctrl.new_tab("fake")
     schema = _default_fake_schema(cf.state.exp_context)
     cf.ctrl.update_tab_cfg(tab_id, schema)
-    cf.ctrl.update_tab_save_paths(tab_id, "/tmp/a.h5", "/tmp/b.png")
     resolved = cf.ctrl.apply_startup_project(
         StartupProjectRequest("chip", "qub", "res")
     )
@@ -872,10 +891,6 @@ def test_persist_then_restore_app_state(tmp_path):
     assert len(cf_restored.state.tabs) == 1
     restored_tab = next(iter(cf_restored.state.tabs.values()))
     assert restored_tab.adapter_name == "fake"
-    save_paths = restored_tab.save_path_overrides
-    assert save_paths is not None
-    assert save_paths.data_path == "/tmp/a.h5"
-    assert save_paths.image_path == "/tmp/b.png"
     # startup prefs round-tripped (prefill values; project not auto-applied).
     startup = cf_restored.ctrl.get_persisted_startup()
     assert startup.chip_name == "chip"

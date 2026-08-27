@@ -73,6 +73,9 @@ class AdapterCapabilities:
     # post-analysis to a tab whose adapter sets this True AND whose primary
     # analyze result exists.
     post_analysis: bool = False
+    # Canonical result-file loading is an explicit capability. False is the safe
+    # default; adapters that inherit BaseAdapter's canonical loader must opt in.
+    load_data: bool = False
 
 
 @dataclass(frozen=True)
@@ -301,6 +304,21 @@ class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
     ctx: ExpContext
 
 
+@dataclass(frozen=True)
+class PostWritebackRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeResult]):
+    """Inputs for the optional post-analysis proposal hook.
+
+    The workflow constructs this from the same operation-start values used by
+    ``post_analyze``. Writeback remains unaware of this type; it only receives
+    the resulting proposal items.
+    """
+
+    run_result: T_Result
+    analyze_result: T_AnalyzeResult
+    post_analyze_result: T_PostAnalyzeResult
+    ctx: ExpContext
+
+
 @dataclass
 class WritebackItem(ABC):
     # ``target_name`` is the apply destination name (md attr / ml module / ml
@@ -328,18 +346,12 @@ class ModuleWriteback(WritebackItem):
     # not persisted by ModuleLibrary; it identifies which role template the writeback
     # proposal represents while the user/agent reviews the draft.
     role_id: str | None = None
-    # editor_id of the service-owned (gc=False) cfg model that holds this item's
-    # live draft (ADR-0008). Stamped by WritebackService at compute time; the
-    # agent edits via editor.set_field(editor_id, …), the user's Edit dialog
-    # attaches to the same model.
-    editor_id: str | None = field(default=None, init=False)
 
 
 @dataclass
 class WaveformWriteback(WritebackItem):
     edit_schema: CfgSchema | None = None
     role_id: str | None = None
-    editor_id: str | None = field(default=None, init=False)
 
 
 @dataclass

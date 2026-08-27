@@ -86,7 +86,11 @@ from __future__ import annotations
 # v53: one-tone analyze params add electrical-delay mode, manual seed, and
 # adaptive maximum search radius.
 # v54: one-tone analyze params add fit_bg_phase_curvature.
-WIRE_VERSION = 54
+# v55: subtab-qualified remote contract — figure/writeback/save-image require
+# (tab_id, subtab_id) with closed values run|analysis|post_analysis (save_image
+# only analysis|post_analysis); removes tab.get_current_figure, tab.save_post_image
+# and tab.save_result; preview/apply replies project destination_context.
+WIRE_VERSION = 55
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -110,4 +114,6 @@ WIRE_VERSION = 54
 # catalog and reachable through the generic tab creation / remote listing flow.
 # v77: the JPA family exposes acquisition controls, explains auto-optimizer
 # resolution allocation, and uses one neutral flux device-value contract.
-GUI_VERSION = 77  # JPA calibration hardening
+# v78: capability-driven experiment subtabs own independent pane resources;
+# figure/writeback/save-image routing uses the v55 subtab-qualified wire contract.
+GUI_VERSION = 78

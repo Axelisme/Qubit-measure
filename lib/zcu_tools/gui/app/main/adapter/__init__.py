@@ -31,6 +31,7 @@ from .types import (
     NoAnalyzeParams,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
+    PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
     SavePaths,
