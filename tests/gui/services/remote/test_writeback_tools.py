@@ -9,6 +9,7 @@ internalized editor identity), without a full run+analyze pipeline.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -58,6 +59,7 @@ def _ctrl() -> MagicMock:
             figure=None,
             writeback_items=tuple(items),
             image_path=PathResourceSnapshot(override=None, path=None),
+            has_writeback_draft=True,
         )
         post = PostAnalysisPaneSnapshot(
             params=None,
@@ -140,6 +142,25 @@ def test_preview_serializes_metadict_and_module():
     assert "editor_id" not in mod
     assert mod["has_edit_schema"] is True
     assert mod["role_id"] == "readout"
+
+
+def test_preview_distinguishes_empty_draft_from_missing_draft():
+    ctrl = _ctrl()
+    snapshot_factory = ctrl.tab_control.get_tab_snapshot.side_effect
+    snapshot = snapshot_factory("t")
+    assert snapshot.analysis is not None
+    ctrl.tab_control.get_tab_snapshot.side_effect = None
+    ctrl.tab_control.get_tab_snapshot.return_value = replace(
+        snapshot,
+        analysis=replace(snapshot.analysis, writeback_items=()),
+    )
+
+    res = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
+
+    assert res["has_draft"] is True
+    assert res["items"] == []
 
 
 def test_apply_reads_persistent_draft():

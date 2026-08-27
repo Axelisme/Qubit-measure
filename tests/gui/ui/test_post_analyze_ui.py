@@ -334,8 +334,9 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
     assert captured.get("container") is tab_w._post_container
 
 
-def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
-    """A content event whose snapshot has no post figure must not touch any container."""
+def test_post_figure_refresh_clears_invalidated_presentation(qapp):
+    """A primary commit invalidates the canonical and displayed Post figure."""
+    from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _mock_ctrl()
@@ -355,17 +356,13 @@ def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     window._tab_widgets["tab-1"] = tab_w
+    stale_figure = Figure()
+    window.show_post_analysis_image("tab-1", stale_figure)
+    assert tab_w.get_current_figure_for_pane("post_analysis") is stale_figure
 
-    attached: list[object] = []
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.main.ui.exp_tab_widget.attach_existing_figure_to_container",
-        lambda fig, container: attached.append(container) or MagicMock(),
-    )
-
-    # The dedicated post-figure refresh is a no-op when there is no post figure.
     window.refresh_tab_post_figure("tab-1")
 
-    assert attached == []
+    assert tab_w.get_current_figure_for_pane("post_analysis") is None
 
 
 def test_pane_containers_are_independent_for_post(qapp):

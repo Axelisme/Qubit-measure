@@ -333,7 +333,9 @@ class MainWindow(QMainWindow):
         if not current.capabilities.post_analysis:
             return
         post_figure = current.post_analysis.figure
-        if post_figure is not None:
+        if post_figure is None:
+            tab_w.clear_post_figure()
+        else:
             self.show_post_analysis_image(tab_id, post_figure)
 
     def clear_tab_plot(self, tab_id: str) -> None:

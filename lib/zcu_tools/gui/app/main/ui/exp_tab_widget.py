@@ -756,9 +756,13 @@ class ExpTabWidget(QWidget):
 
     def prepare_post_container(self) -> FigureContainer:
         """Clear Post presentation and return its container."""
+        self.clear_post_figure()
+        return self._post_container
+
+    def clear_post_figure(self) -> None:
+        """Clear only the invalidated Post-Analysis presentation."""
         self._require_post()
         self._post_container.clear_dynamic_canvases()
-        return self._post_container
 
     def mount_interactive_widget(self, widget: QWidget) -> None:
         """Mount an interactive analysis widget as the visible plot content (analysis pane)."""

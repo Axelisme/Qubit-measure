@@ -120,6 +120,7 @@ class TabService:
                 figure=tab.analysis.figure,
                 writeback_items=analysis_items,
                 image_path=analysis_image_path,
+                has_writeback_draft=tab.analysis.writeback_draft is not None,
             ),
             post_analysis=PostAnalysisPaneSnapshot(
                 params=tab.post_analysis.params,
@@ -127,6 +128,7 @@ class TabService:
                 figure=tab.post_analysis.figure,
                 writeback_items=post_items,
                 image_path=post_image_path,
+                has_writeback_draft=tab.post_analysis.writeback_draft is not None,
             ),
             save=SavePaneSnapshot(data_path=data_path),
             paths=TabPathsSnapshot(

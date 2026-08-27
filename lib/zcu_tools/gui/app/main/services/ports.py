@@ -73,19 +73,6 @@ class PathResourceSnapshot:
     override: str | None
     path: str | None
 
-    def __str__(self) -> str:
-        return self.path or ""
-
-    def __fspath__(self) -> str:
-        return self.path or ""
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, str):
-            return self.path == other
-        if not isinstance(other, PathResourceSnapshot):
-            return NotImplemented
-        return (self.override, self.path) == (other.override, other.path)
-
 
 @dataclass(frozen=True, slots=True)
 class RunPaneSnapshot:
@@ -100,6 +87,7 @@ class AnalysisPaneSnapshot:
     figure: Figure | None
     writeback_items: tuple[WritebackItem, ...]
     image_path: PathResourceSnapshot
+    has_writeback_draft: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +97,7 @@ class PostAnalysisPaneSnapshot:
     figure: Figure | None
     writeback_items: tuple[WritebackItem, ...]
     image_path: PathResourceSnapshot
+    has_writeback_draft: bool = False
 
 
 @dataclass(frozen=True, slots=True)

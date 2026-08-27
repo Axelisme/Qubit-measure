@@ -184,8 +184,9 @@ class RecordingBus:
 
 
 class RecordingRenderHost:
-    def __init__(self, log: CallLog) -> None:
+    def __init__(self, log: CallLog, *, mount_error: Exception | None = None) -> None:
         self._log = log
+        self._mount_error = mount_error
 
     def make_run_container(self, tab_id: str) -> Any:
         self._log.add("host", "make_run_container", tab_id)
@@ -205,18 +206,23 @@ class RecordingRenderHost:
         self._log.add(
             "host", "mount_interactive_analysis", tab_id, session_factory, on_finish
         )
+        if self._mount_error is not None:
+            raise self._mount_error
 
     def unmount_interactive_analysis(self, tab_id: str) -> None:
         self._log.add("host", "unmount_interactive_analysis", tab_id)
 
 
 def _facet(
-    *, analysis: AnalysisMode = AnalysisMode.FIT, busy: bool = False
+    *,
+    analysis: AnalysisMode = AnalysisMode.FIT,
+    busy: bool = False,
+    mount_error: Exception | None = None,
 ) -> tuple[RunAnalyzeControlFacet, CallLog, RecordingState, RecordingBus]:
     log = CallLog()
     state = RecordingState(log, analysis=analysis, busy=busy)
     bus = RecordingBus(log)
-    host = RecordingRenderHost(log)
+    host = RecordingRenderHost(log, mount_error=mount_error)
     return (
         RunAnalyzeControlFacet(
             state=cast(Any, state),
@@ -299,6 +305,23 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "host",
     ]
     assert log.calls[5] == call("analyze", "start_interactive", "analyze-permit")
+
+
+def test_interactive_mount_failure_unmounts_and_cancels_operation() -> None:
+    error = RuntimeError("mount failed")
+    facet, log, _state, _bus = _facet(
+        analysis=AnalysisMode.INTERACTIVE, mount_error=error
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        facet.analyze("tab-1", "params")
+
+    assert exc_info.value is error
+    assert [entry.method for entry in log.calls[-3:]] == [
+        "mount_interactive_analysis",
+        "unmount_interactive_analysis",
+        "cancel_interactive",
+    ]
 
 
 def test_post_analyze_uses_shared_live_container() -> None:

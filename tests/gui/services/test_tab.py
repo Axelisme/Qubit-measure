@@ -56,6 +56,28 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert state.get_tab("tab").analysis.params is analyze_params
 
 
+def test_snapshot_projects_empty_writeback_draft_existence() -> None:
+    state = _active_state()
+    draft = object()
+    state.add_tab(
+        "tab",
+        Session(
+            adapter_name="fake",
+            adapter=MagicMock(),
+            cfg_schema=MagicMock(),
+            analysis=AnalysisPaneState(writeback_draft=draft),
+        ),
+    )
+    writeback = MagicMock()
+    writeback.preview_draft.return_value = []
+
+    snapshot = TabService(state, MagicMock(), writeback).get_snapshot("tab")
+
+    assert snapshot.analysis is not None
+    assert snapshot.analysis.has_writeback_draft is True
+    assert snapshot.analysis.writeback_items == ()
+
+
 def test_snapshot_propagates_writeback_preview_failure() -> None:
     state = _active_state()
     draft = object()

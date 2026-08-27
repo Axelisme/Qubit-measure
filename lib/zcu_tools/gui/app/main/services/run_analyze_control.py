@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
@@ -9,6 +10,8 @@ from typing import TYPE_CHECKING, Protocol
 from zcu_tools.gui.app.main.adapter import AnalysisMode, AnalyzeRequest
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
 from zcu_tools.gui.expected_error import FailedPreconditionError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import InteractiveHost, InteractiveSession
@@ -163,15 +166,33 @@ class RunAnalyzeControlFacet:
             ml=ctx.ml,
             predictor=ctx.predictor,
         )
+        host = self._render_host()
+        if host is None:
+            raise FailedPreconditionError(
+                "interactive analysis requires an attached render host"
+            )
         self._tab.update_tab_analyze_param_instance(tab_id, analyze_params_instance)
         token = self._analyze.start_interactive(permit)
-        host = self._render_host()
-        if host is not None:
+        try:
             host.mount_interactive_analysis(
                 tab_id,
                 lambda ihost: tab.adapter.setup_interactive_analysis(req, ihost),
                 lambda session: self._analyze.finish_interactive(tab_id, session),
             )
+        except Exception:
+            try:
+                host.unmount_interactive_analysis(tab_id)
+            except Exception:
+                logger.exception(
+                    "failed to unmount interactive analysis after setup failure: tab_id=%r",
+                    tab_id,
+                )
+            if not self._analyze.cancel_interactive(tab_id):
+                logger.error(
+                    "interactive analysis setup failed without an active operation: tab_id=%r",
+                    tab_id,
+                )
+            raise
         return token
 
     def start_post_analyze(

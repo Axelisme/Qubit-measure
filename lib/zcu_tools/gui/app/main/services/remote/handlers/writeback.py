@@ -85,21 +85,19 @@ def _h_tab_writeback_preview(
                 ErrorCode.PRECONDITION_FAILED,
                 f"tab {tab_id!r} does not support analysis",
             )
-        items = list(snap.analysis.writeback_items) if snap.analysis is not None else []
+        pane = snap.analysis
     else:
         if not snap.capabilities.post_analysis:
             raise RemoteError(
                 ErrorCode.PRECONDITION_FAILED,
                 f"tab {tab_id!r} does not support post_analysis",
             )
-        items = (
-            list(snap.post_analysis.writeback_items)
-            if snap.post_analysis is not None
-            else []
-        )
+        pane = snap.post_analysis
+    if pane is None:
+        raise RemoteError(ErrorCode.INTERNAL, "snapshot has no requested pane")
     return {
-        "has_draft": bool(items),
-        "items": [_writeback_item_wire(it) for it in items],
+        "has_draft": pane.has_writeback_draft,
+        "items": [_writeback_item_wire(it) for it in pane.writeback_items],
         "destination_context": _destination_context(adapter),
     }
 
