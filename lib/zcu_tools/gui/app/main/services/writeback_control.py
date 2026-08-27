@@ -31,6 +31,16 @@ class WritebackControlPort(Protocol):
 
     def apply_writeback(self, tab_id: str) -> dict[str, Any]: ...
 
+    def get_writeback_item_draft_for_pane(
+        self, tab_id: str, pane: str, session_id: str
+    ) -> CfgDraft: ...
+
+    def set_writeback_item_for_pane(
+        self, tab_id: str, pane: str, session_id: str, **changes: Any
+    ) -> dict[str, object]: ...
+
+    def apply_writeback_for_pane(self, tab_id: str, pane: str) -> dict[str, Any]: ...
+
     def get_context_version(self) -> int: ...
 
 
@@ -69,6 +79,55 @@ class WritebackControlFacet:
     def apply_writeback(self, tab_id: str) -> dict[str, Any]:
         permit = self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
+        return self._writeback.apply_tab_writeback(permit)
+
+    def get_writeback_item_draft_for_pane(
+        self, tab_id: str, pane: str, session_id: str
+    ) -> CfgDraft:
+        self._guard.acquire_writeback_permit(tab_id)
+        self._require_tab_idle(tab_id)
+        if pane == "post_analysis":
+            draft = self._writeback.get_tab_post_writeback_draft(tab_id)
+            if draft is None:
+                raise FailedPreconditionError(
+                    f"No post writeback draft for tab {tab_id!r}"
+                )
+            return self._writeback.get_item_draft(draft, session_id)
+        draft = self._writeback.get_tab_writeback_draft(tab_id)
+        if draft is None:
+            raise FailedPreconditionError(f"No writeback draft for tab {tab_id!r}")
+        return self._writeback.get_item_draft(draft, session_id)
+
+    def set_writeback_item_for_pane(
+        self, tab_id: str, pane: str, session_id: str, **changes: Any
+    ) -> dict[str, object]:
+        self._guard.acquire_writeback_permit(tab_id)
+        self._require_tab_idle(tab_id)
+        if pane == "post_analysis":
+            draft = self._writeback.get_tab_post_writeback_draft(tab_id)
+            if draft is None:
+                raise FailedPreconditionError(
+                    f"No post writeback draft for tab {tab_id!r}"
+                )
+            return self._writeback.edit_draft(draft, session_id, **changes)
+        draft = self._writeback.get_tab_writeback_draft(tab_id)
+        if draft is not None:
+            return self._writeback.edit_draft(draft, session_id, **changes)
+        return self._writeback.set_item_field(tab_id, session_id, **changes)
+
+    def apply_writeback_for_pane(self, tab_id: str, pane: str) -> dict[str, Any]:
+        permit = self._guard.acquire_writeback_permit(tab_id)
+        self._require_tab_idle(tab_id)
+        if pane == "post_analysis":
+            draft = self._writeback.get_tab_post_writeback_draft(tab_id)
+            if draft is None:
+                raise FailedPreconditionError(
+                    f"No post writeback draft for tab {tab_id!r}"
+                )
+            return self._writeback.apply_draft(draft)
+        draft = self._writeback.get_tab_writeback_draft(tab_id)
+        if draft is not None:
+            return self._writeback.apply_draft(draft)
         return self._writeback.apply_tab_writeback(permit)
 
     def _require_tab_idle(self, tab_id: str) -> None:

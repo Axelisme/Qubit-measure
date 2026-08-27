@@ -920,6 +920,23 @@ class Controller(SessionControllerMixin):
         ``{valid, removed, added}`` of any applied cfg edits."""
         return self._writeback_control.set_writeback_item(tab_id, session_id, **changes)
 
+    def get_writeback_item_draft_for_pane(
+        self, tab_id: str, pane: str, session_id: str
+    ) -> CfgDraft:
+        return self._writeback_control.get_writeback_item_draft_for_pane(
+            tab_id, pane, session_id
+        )
+
+    def set_writeback_item_for_pane(
+        self, tab_id: str, pane: str, session_id: str, **changes: Any
+    ) -> dict[str, object]:
+        return self._writeback_control.set_writeback_item_for_pane(
+            tab_id, pane, session_id, **changes
+        )
+
+    def apply_writeback_for_pane(self, tab_id: str, pane: str) -> dict[str, Any]:
+        return self._writeback_control.apply_writeback_for_pane(tab_id, pane)
+
     # ------------------------------------------------------------------
     # Save (TabService)
     # ------------------------------------------------------------------

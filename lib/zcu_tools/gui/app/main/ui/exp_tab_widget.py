@@ -53,9 +53,9 @@ class TabActions(Protocol):
     def analyze(self, tab_id: str) -> None: ...
     def post_analyze(self, tab_id: str) -> None: ...
     def apply_writeback(self, tab_id: str) -> None: ...
+    def apply_post_writeback(self, tab_id: str) -> None: ...
     def save_data(self, tab_id: str) -> None: ...
     def save_image(self, tab_id: str) -> None: ...
-    def save_result(self, tab_id: str) -> None: ...
     def save_post_image(self, tab_id: str) -> None: ...
 
 
@@ -106,7 +106,7 @@ class _PanelEdgeHandle(QToolButton):
 
 
 class ExpTabWidget(QWidget):
-    """A single experiment tab: Run | Analysis? | Post? | Save | Guide with independent figure panes."""
+    """A single experiment tab with capability-driven subtabs and independent figure panes."""
 
     def __init__(
         self,
@@ -190,7 +190,9 @@ class ExpTabWidget(QWidget):
         self.writeback_section = _CollapsibleSection(
             "Writeback", collapsible=True, collapsed=False
         )
-        self.writeback_widget = WritebackWidget(self._ctrl, tab_id=self.tab_id)
+        self.writeback_widget = WritebackWidget(
+            self._ctrl, tab_id=self.tab_id, pane="analysis"
+        )
         self.writeback_section.body_layout.addWidget(self.writeback_widget)
         self.writeback_section.setVisible(False)
         analysis_layout.addWidget(self.writeback_section)
@@ -237,7 +239,9 @@ class ExpTabWidget(QWidget):
         self.post_writeback_section = _CollapsibleSection(
             "Writeback", collapsible=True, collapsed=False
         )
-        self.post_writeback_widget = WritebackWidget(self._ctrl, tab_id=self.tab_id)
+        self.post_writeback_widget = WritebackWidget(
+            self._ctrl, tab_id=self.tab_id, pane="post_analysis"
+        )
         self.post_writeback_section.body_layout.addWidget(self.post_writeback_widget)
         self.post_writeback_section.setVisible(False)
         post_layout.addWidget(self.post_writeback_section)
@@ -286,11 +290,7 @@ class ExpTabWidget(QWidget):
         save_form.addRow("Comment:", self._comment_edit)
         btn_row = QHBoxLayout()
         self.save_data_btn = QPushButton("Save Data")
-        # Keep Save Result for transitional compatibility but hidden per S4 (data only Save)
-        self.save_result_btn = QPushButton("Save Result")
-        self.save_result_btn.setVisible(False)
         btn_row.addWidget(self.save_data_btn)
-        btn_row.addWidget(self.save_result_btn)
         save_form.addRow("", btn_row)
         save_layout.addWidget(save_section)
         save_layout.addStretch()
@@ -350,12 +350,6 @@ class ExpTabWidget(QWidget):
         self._right_stack.addWidget(self._analysis_stack)
         self._right_stack.addWidget(self._post_stack)
         self._right_stack.addWidget(self._right_placeholder)
-
-        # Legacy aliases for tests that access _plot_stack / _figure_container / _plot_placeholder
-        # Legacy shared stack is now the analysis stack (most common figure); keep for compatibility
-        self._plot_stack = self._analysis_stack
-        self._plot_placeholder = self._analysis_placeholder
-        self._figure_container = self._analysis_container
 
         self._plot_layout.addWidget(self._right_stack, stretch=1)
         splitter.addWidget(plot_panel)
@@ -506,7 +500,7 @@ class ExpTabWidget(QWidget):
             self.analyze_form.populate_values(snapshot.analyze_params)
         self.sync_post_analyze_params(snapshot.post_analyze_params)
         # Per-pane path resources (Ticket 02 pane snapshots). Prefer pane paths if present.
-        if getattr(snapshot, 'paths', None) is not None:  # type: ignore[attr-defined]
+        if getattr(snapshot, "paths", None) is not None:  # type: ignore[attr-defined]
             data_path = snapshot.paths.data.path or ""  # type: ignore[attr-defined]
             analysis_path = snapshot.paths.analysis_image.path or ""  # type: ignore[attr-defined]
             post_path = snapshot.paths.post_analysis_image.path or ""  # type: ignore[attr-defined]
@@ -1013,48 +1007,20 @@ class ExpTabWidget(QWidget):
             self._ctrl.update_tab_cfg(tab_id, schema_obj)
 
         def data_path_cb(_text: str) -> None:
-            # Per-pane data path independent; update only data override
             data_path = self.get_data_path()
-            # Use per-pane controller method if available, else fallback to combined
-            update_data = getattr(self._ctrl, "update_tab_data_path", None)
-            if callable(update_data):
-                try:
-                    update_data(tab_id, data_path if data_path else None)
-                    return
-                except Exception:
-                    pass
-            # Fallback to legacy combined (requires image path too)
-            image_path = self.get_image_path()
-            if bool(data_path) != bool(image_path):
-                return
-            self._ctrl.update_tab_save_paths(tab_id, data_path, image_path)
+            self._ctrl.update_tab_data_path(tab_id, data_path if data_path else None)
 
         def analysis_image_cb(_text: str) -> None:
             image_path = self.get_image_path()
-            update_img = getattr(self._ctrl, "update_tab_analysis_image_path", None)
-            if callable(update_img):
-                try:
-                    update_img(tab_id, image_path if image_path else None)
-                    return
-                except Exception:
-                    pass
-            # fallback
-            data_path = self.get_data_path()
-            if bool(data_path) != bool(image_path):
-                return
-            self._ctrl.update_tab_save_paths(tab_id, data_path, image_path)
+            self._ctrl.update_tab_analysis_image_path(
+                tab_id, image_path if image_path else None
+            )
 
         def post_image_cb(_text: str) -> None:
             image_path = self.get_post_image_path()
-            update_post = getattr(
-                self._ctrl, "update_tab_post_analysis_image_path", None
+            self._ctrl.update_tab_post_analysis_image_path(
+                tab_id, image_path if image_path else None
             )
-            if callable(update_post):
-                try:
-                    update_post(tab_id, image_path if image_path else None)
-                    return
-                except Exception:
-                    pass
 
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
@@ -1083,15 +1049,11 @@ class ExpTabWidget(QWidget):
         self.writeback_widget.apply_requested.connect(
             lambda: actions.apply_writeback(tab_id)
         )
-        # Post writeback apply currently uses same tab writeback apply (primary); for post we need separate?
-        # For now, post writeback apply also goes through same handler but will apply post draft via controller's pane-aware writeback?
-        # Keep as same for backward compat; future tickets will split.
         self.post_writeback_widget.apply_requested.connect(
-            lambda: actions.apply_writeback(tab_id)
+            lambda: actions.apply_post_writeback(tab_id)
         )
         self.save_data_btn.clicked.connect(lambda: actions.save_data(tab_id))
         self.save_image_btn.clicked.connect(lambda: actions.save_image(tab_id))
-        self.save_result_btn.clicked.connect(lambda: actions.save_result(tab_id))
         self.post_save_image_btn.clicked.connect(
             lambda: actions.save_post_image(tab_id)
         )

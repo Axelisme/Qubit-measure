@@ -43,10 +43,12 @@ class WritebackWidget(QWidget):
         parent: QWidget | None = None,
         *,
         tab_id: str | None = None,
+        pane: str = "analysis",
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
         self._tab_id = tab_id
+        self._pane = pane
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
 
@@ -112,13 +114,11 @@ class WritebackWidget(QWidget):
         self._refresh_apply_enabled()
 
     def _on_check_toggled(self, item: WritebackItem) -> None:
-        # Route draft-local mutation through WritebackService when this widget is
-        # attached to a tab. The direct assignment is only the temporary adapter
-        # path used by standalone callers that do not provide a tab id.
         selected = self._checks[item.session_id].isChecked()
         if self._tab_id is not None:
-            self._ctrl.set_writeback_item(
+            self._ctrl.set_writeback_item_for_pane(
                 self._tab_id,
+                self._pane,
                 item.session_id,
                 selected=selected,
             )
@@ -190,8 +190,9 @@ class WritebackWidget(QWidget):
                     item.proposed_value,
                 )
                 if self._tab_id is not None:
-                    self._ctrl.set_writeback_item(
+                    self._ctrl.set_writeback_item_for_pane(
                         self._tab_id,
+                        self._pane,
                         item.session_id,
                         target_name=new_name,
                         proposed_value=new_value,
@@ -221,8 +222,8 @@ class WritebackWidget(QWidget):
         editor_id: str | None = None
         if self._tab_id is not None:
             try:
-                draft = self._ctrl.get_writeback_item_draft(
-                    self._tab_id, item.session_id
+                draft = self._ctrl.get_writeback_item_draft_for_pane(
+                    self._tab_id, self._pane, item.session_id
                 )
             except Exception:
                 logger.exception(
@@ -259,8 +260,9 @@ class WritebackWidget(QWidget):
                 name_edit.setText(item.target_name)  # revert, no blank target
                 return
             if self._tab_id is not None:
-                self._ctrl.set_writeback_item(
+                self._ctrl.set_writeback_item_for_pane(
                     self._tab_id,
+                    self._pane,
                     item.session_id,
                     target_name=text,
                 )

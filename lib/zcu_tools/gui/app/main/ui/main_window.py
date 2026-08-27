@@ -72,16 +72,16 @@ class _MainWindowTabActions:
         self._window._on_post_analyze_clicked(tab_id)
 
     def apply_writeback(self, tab_id: str) -> None:
-        self._window._on_writeback_inline_apply(tab_id)
+        self._window._on_writeback_inline_apply(tab_id, pane="analysis")
+
+    def apply_post_writeback(self, tab_id: str) -> None:
+        self._window._on_writeback_inline_apply(tab_id, pane="post_analysis")
 
     def save_data(self, tab_id: str) -> None:
         self._window._on_save_data_clicked(tab_id)
 
     def save_image(self, tab_id: str) -> None:
         self._window._on_save_image_clicked(tab_id)
-
-    def save_result(self, tab_id: str) -> None:
-        self._window._on_save_result_clicked(tab_id)
 
     def save_post_image(self, tab_id: str) -> None:
         self._window._on_post_save_image_clicked(tab_id)
@@ -282,19 +282,10 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        # Primary pane writeback (legacy flat) - keep for backward
-        tab_w.update_writeback_items(list(current.writeback_items))
-        # Per-pane post writeback (if pane snapshot present)
-        if getattr(current, 'post_analysis', None) is not None:  # type: ignore[attr-defined, attr-defined]
-            try:
-                tab_w.update_post_writeback_items(
-                    list(current.post_analysis.writeback_items)  # type: ignore[attr-defined]
-                )
-            except AttributeError:
-                pass
-        elif hasattr(current, "post_writeback_items"):
-            # fallback for older snapshot
-            pass
+        assert current.analysis is not None
+        assert current.post_analysis is not None
+        tab_w.update_writeback_items(list(current.analysis.writeback_items))
+        tab_w.update_post_writeback_items(list(current.post_analysis.writeback_items))
 
     def refresh_tab_save_paths(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -303,29 +294,10 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        # Prefer pane paths (Ticket 02) if present
-        if getattr(current, "paths", None) is not None and current.paths is not None:  # type: ignore[attr-defined]
-            try:
-                data_path = current.paths.data.path or ""  # type: ignore[attr-defined]
-                analysis_path = current.paths.analysis_image.path or ""  # type: ignore[attr-defined]
-                post_path = current.paths.post_analysis_image.path or ""  # type: ignore[attr-defined]
-                if data_path or analysis_path or post_path:
-                    # Use per-pane setters where available
-                    if hasattr(tab_w, "set_data_path") and data_path:
-                        tab_w.set_data_path(data_path)
-                    if hasattr(tab_w, "set_analysis_image_path") and analysis_path:
-                        tab_w.set_analysis_image_path(analysis_path)
-                    if hasattr(tab_w, "set_post_image_path") and post_path:
-                        tab_w.set_post_image_path(post_path)
-                    # For legacy combined setter, also set via old if both present
-                    if data_path and analysis_path:
-                        tab_w.set_save_paths(data_path, analysis_path)
-                    return
-            except Exception:
-                pass
-        save_paths = current.save_paths
-        if save_paths is not None:
-            tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
+        assert current.paths is not None
+        tab_w.set_data_path(current.paths.data.path or "")
+        tab_w.set_analysis_image_path(current.paths.analysis_image.path or "")
+        tab_w.set_post_image_path(current.paths.post_analysis_image.path or "")
 
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -334,15 +306,8 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        # Prefer pane snapshot if available
-        figure = None
-        if (
-            getattr(current, "analysis", None) is not None  # type: ignore[attr-defined]
-            and current.analysis is not None  # type: ignore[attr-defined]
-        ):
-            figure = current.analysis.figure  # type: ignore[attr-defined]
-        else:
-            figure = current.figure
+        assert current.analysis is not None
+        figure = current.analysis.figure
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
@@ -353,14 +318,8 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        post_figure = None
-        if (
-            getattr(current, "post_analysis", None) is not None  # type: ignore[attr-defined]
-            and current.post_analysis is not None  # type: ignore[attr-defined]
-        ):
-            post_figure = current.post_analysis.figure  # type: ignore[attr-defined]
-        else:
-            post_figure = current.post_figure
+        assert current.post_analysis is not None
+        post_figure = current.post_analysis.figure
         if post_figure is not None:
             self.show_post_analysis_image(tab_id, post_figure)
 
@@ -368,11 +327,7 @@ class MainWindow(QMainWindow):
         """Clear stale canvases after loading content with no analysis figure."""
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is not None:
-            # Per-pane clear: analysis and post (run live is separate)
-            if hasattr(tab_w, "clear_all_figures"):
-                tab_w.clear_all_figures()
-            else:
-                tab_w.reset_plot()
+            tab_w.clear_all_figures()
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
@@ -436,52 +391,41 @@ class MainWindow(QMainWindow):
             self._predictor_label.setStyleSheet("color: green;")
 
     def make_live_container(self, tab_id: str) -> Any:
+        """Transitional run live container for not-yet-migrated remote screenshot (Ticket 04)."""
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        return tab_w.prepare_live_container()
+        return tab_w.prepare_run_container()
 
     def make_run_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        # New pane-aware API
-        if hasattr(tab_w, "prepare_run_container"):
-            return tab_w.prepare_run_container()
-        return tab_w.prepare_live_container()
+        return tab_w.prepare_run_container()
 
     def make_analysis_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        if hasattr(tab_w, "prepare_analysis_container"):
-            return tab_w.prepare_analysis_container()
-        return tab_w.prepare_live_container()
+        return tab_w.prepare_analysis_container()
 
     def make_post_analysis_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        if hasattr(tab_w, "prepare_post_container"):
-            return tab_w.prepare_post_container()
-        return tab_w.prepare_live_container()
+        return tab_w.prepare_post_container()
 
     def get_figure_container(self, tab_id: str, pane: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        pane_map = {
-            "run": getattr(tab_w, "get_run_container", None),
-            "analysis": getattr(tab_w, "get_analysis_container", None),
-            "post_analysis": getattr(tab_w, "get_post_container", None),
-        }
-        getter = pane_map.get(pane)
-        if callable(getter):
-            try:
-                return getter()
-            except Exception:
-                return None
-        return None
+        if pane == "run":
+            return tab_w.get_run_container()
+        if pane == "analysis":
+            return tab_w.get_analysis_container()
+        if pane == "post_analysis":
+            return tab_w.get_post_container()
+        raise ValueError(f"unknown pane {pane!r}")
 
     def mount_interactive_analysis(
         self,
@@ -501,14 +445,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        # Only clear analysis presentation for interactive pick (S3)
-        if hasattr(tab_w, "prepare_analysis_container"):
-            try:
-                tab_w.prepare_analysis_container()
-            except Exception:
-                tab_w.reset_plot()
-        else:
-            tab_w.reset_plot()
+        tab_w.prepare_analysis_container()
         # The Controller satisfies InteractiveHostEnv (run_background via bg's
         # pool); the widget pulls only that one capability through the port.
         widget = InteractiveAnalysisWidget(self._ctrl)
@@ -569,13 +506,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        # Prefer dedicated post figure method if available
-        if hasattr(tab_w, "show_post_analysis_figure"):
-            tab_w.show_post_analysis_figure(fig)
-        elif hasattr(tab_w, "show_post_figure"):
-            tab_w.show_post_figure(fig)
-        else:
-            tab_w.show_analysis_figure(fig)
+        tab_w.show_post_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
@@ -696,14 +627,22 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.start_post_analyze(tab_id, tab_w.read_post_analyze_params())
 
-    def _on_writeback_inline_apply(self, tab_id: str) -> None:
-        logger.info("_on_writeback_inline_apply: tab_id=%r", tab_id)
+    def _on_writeback_inline_apply(self, tab_id: str, pane: str = "analysis") -> None:
+        logger.info("_on_writeback_inline_apply: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
             logger.warning(
                 "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
             )
             return
-        applied_ids = self._ctrl.apply_writeback(tab_id)
+        if pane == "post_analysis":
+            result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+            applied_ids = (
+                result.get("applied_ids", []) if isinstance(result, dict) else result
+            )
+        else:
+            applied_ids = self._ctrl.apply_writeback(tab_id)
+            if isinstance(applied_ids, dict):
+                applied_ids = applied_ids.get("applied_ids", [])
         if applied_ids:
             self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")
 

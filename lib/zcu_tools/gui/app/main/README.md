@@ -26,21 +26,24 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
-  `ExpTabWidget` owns capability-driven left subtab composition (fixed order
-  Run | Analysis? | Post-Analysis? | Save | Guide, no placeholder tab when a
-  capability is absent) and per-pane `FigureContainer` routing (stable identity
-  per (tab, pane) for the widget lifetime; refresh never replaces the container;
-  busy tabs cannot close or rebuild, so the captured worker target outlives the
-  operation without a lease). It receives tab actions through a narrow
-  `TabActions` port; `MainWindow` adapts those actions to top-level handlers.
-  `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
-  captures its pane's container at start — switching the visible subtab never
-  retargets the worker (ADR-0017). Save owns data-path/comment/Load/Save Data;
-  Analysis/Post own their image-path/Save Image; Run's live figure is view-only
-  (display + screenshot, no canonical Save). Top-level orchestration invokes
-  behavior-oriented tab methods for result focus, plot hosting, interactive-widget
-  lifecycle, figure reads, and persisted panel geometry; the tab does not expose
-  its Qt containers.
+  `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
+  Analysis | Post-Analysis | Save | Guide, with optional Analysis/Post only when
+  the adapter declares the capability) and per-pane `FigureContainer` routing
+  (stable identity per (tab, pane) for the widget lifetime; refresh never replaces
+  the container; busy tabs cannot close or rebuild, so the captured worker target
+  outlives the operation without a lease). It receives tab actions through a narrow
+  `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
+  `MainWindow` adapts those actions to top-level handlers. Each `WritebackWidget`
+  is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
+  draft via `Controller`/`WritebackControl` pane-qualified forwarding (S5), while
+  `WritebackService` remains stage-agnostic. `RenderHost` is pane-aware (run |
+  analysis | post_analysis) and the worker captures its pane's container at start —
+  switching the visible subtab never retargets the worker (ADR-0017). Save owns
+  data-path/comment/Load/Save Data; Analysis/Post own their image-path/Save Image;
+  Run's live figure is view-only (display + screenshot, no canonical Save). Top-level
+  orchestration invokes behavior-oriented tab methods for result focus, plot hosting,
+  interactive-widget lifecycle, figure reads, and persisted panel geometry; the tab
+  does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
@@ -408,9 +411,13 @@ on the concrete controller.
   service-owned draft. Item-local cfg-editor sessions and their identities stay
   inside the service; draft creation cleans every session on failure, teardown is
   idempotent, and `apply_draft()` sends selected entries through one
-  `ContextWritePort` batch. The current tab-level `Session.writeback_items` and
-  `compute_items_for_tab()` methods are temporary A4 caller adapters, explicitly
-  scheduled for removal by ticket 06 during the state/caller migration.
+  `ContextWritePort` batch. `WritebackWidget` is pane-bound and the Qt-only
+  `Controller`/`WritebackControl` pane-qualified forwarding (`*_for_pane` with
+  `pane` in `analysis|post_analysis`) resolves the pane's opaque draft before
+  calling the stage-agnostic service. The current tab-level `Session.writeback_items`
+  and `compute_items_for_tab()` methods are temporary A4 caller adapters, explicitly
+  scheduled for removal by ticket 06 during the state/caller migration; remote/MCP
+  wire remains tab-level until Ticket 04.
 
 Import direction stays one-way: `experiment/v2_gui -> gui.app.main`, never the
 reverse.

@@ -63,6 +63,44 @@ def _snapshot(
     post_figure: Figure | None = None,
     figure: Figure | None = None,
 ) -> TabSnapshot:
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        RunPaneSnapshot,
+        SavePaneSnapshot,
+        TabPathsSnapshot,
+    )
+
+    analysis_pane = AnalysisPaneSnapshot(
+        params=_AnalyzeParams() if has_analyze_result else None,
+        result=object() if has_analyze_result else None,
+        figure=figure,
+        writeback_items=(),
+        image_path=PathResourceSnapshot(
+            override=None, path="/tmp/a.png" if has_analyze_result else None
+        ),
+    )
+    post_analysis_pane = PostAnalysisPaneSnapshot(
+        params=post_analyze_params,
+        result=object() if has_post_analyze_result else None,
+        figure=post_figure,
+        writeback_items=(),
+        image_path=PathResourceSnapshot(
+            override=None, path="/tmp/p.png" if has_post_analyze_result else None
+        ),
+    )
+    paths = TabPathsSnapshot(
+        data=PathResourceSnapshot(
+            override=None, path="/tmp/data.h5" if has_run_result else None
+        ),
+        analysis_image=PathResourceSnapshot(
+            override=None, path="/tmp/a.png" if has_analyze_result else None
+        ),
+        post_analysis_image=PathResourceSnapshot(
+            override=None, path="/tmp/p.png" if has_post_analyze_result else None
+        ),
+    )
     return TabSnapshot(
         adapter_name="ge",
         tab_id=tab_id,
@@ -90,6 +128,9 @@ def _snapshot(
         writeback_items=(),
         save_paths=None,
         figure=figure,
+        analysis=analysis_pane,
+        post_analysis=post_analysis_pane,
+        paths=paths,
     )
 
 
@@ -223,8 +264,7 @@ def test_post_run_click_starts_post_analyze(qapp):
 
 def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
     """A content event with a post result populates the post form and renders the
-    post figure into the *shared* right-pane container (the post figure draws into
-    the same ``_figure_container`` run/analyze use)."""
+    post figure into its independent post pane container."""
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.events.tab import (
         TabContentChangedPayload,
@@ -260,15 +300,12 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
     bus.emit(TabContentChangedPayload("tab-1", TabContentFact.POST_ANALYSIS_COMMITTED))
 
     assert tab_w.has_post_analyze_params() is True
-    # The post figure was attached to the shared primary container, not a private
-    # post container.
-    assert captured.get("container") is tab_w._figure_container
+    # The post figure was attached to its independent post container.
+    assert captured.get("container") is tab_w._post_container
 
 
 def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
-    """A content event whose snapshot has no post figure (re-run / re-analyze
-    invalidated the post result) must NOT touch the shared container — the primary
-    figure refresh (run just before) already owns what it shows."""
+    """A content event whose snapshot has no post figure must not touch any container."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _mock_ctrl()
@@ -294,9 +331,8 @@ def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
     assert attached == []
 
 
-def test_make_live_container_is_shared_by_post(qapp):
-    """Post-analysis live-plots into the SAME container as run/analyze — there is
-    no longer a separate post container."""
+def test_make_live_container_is_independent_for_post(qapp):
+    """Each pane has an independent FigureContainer with stable identity."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
     ctrl = _mock_ctrl()
@@ -306,12 +342,19 @@ def test_make_live_container_is_shared_by_post(qapp):
     tab_w = ExpTabWidget("tab-1", ctrl)
     window._tab_widgets["tab-1"] = tab_w
 
-    primary = window.make_live_container("tab-1")
+    run_c = window.make_run_container("tab-1")
+    ana_c = window.make_analysis_container("tab-1")
+    post_c = window.make_post_analysis_container("tab-1")
 
-    assert primary is tab_w._figure_container
-    # The separate post container is gone — the widget exposes no post stack/field.
-    assert not hasattr(tab_w, "_post_figure_container")
-    assert not hasattr(tab_w, "_post_plot_stack")
+    assert run_c is tab_w._run_container
+    assert ana_c is tab_w._analysis_container
+    assert post_c is tab_w._post_container
+    # Containers are distinct and stable.
+    assert run_c is not ana_c
+    assert ana_c is not post_c
+    assert run_c is not post_c
+    # Legacy alias still points to analysis container for transitional screenshot.
+    assert window.make_live_container("tab-1") is tab_w._run_container
 
 
 def test_take_figure_screenshot_captures_post_figure(qapp):

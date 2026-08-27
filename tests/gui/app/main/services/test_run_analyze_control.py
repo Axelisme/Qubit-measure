@@ -151,6 +151,9 @@ class RecordingTab:
     def initialize_tab_analyze_params(self, tab_id: str) -> None:
         self._log.add("tab", "initialize_tab_analyze_params", tab_id)
 
+    def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
+        self._log.add("tab", "update_tab_analyze_param_instance", tab_id, instance)
+
     def get_tab_analyze_result(self, tab_id: str) -> object:
         self._log.add("tab", "get_tab_analyze_result", tab_id)
         return self.analyze_result
@@ -174,8 +177,16 @@ class RecordingRenderHost:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def make_live_container(self, tab_id: str) -> Any:
-        self._log.add("host", "make_live_container", tab_id)
+    def make_run_container(self, tab_id: str) -> Any:
+        self._log.add("host", "make_run_container", tab_id)
+        return "figure-container"
+
+    def make_analysis_container(self, tab_id: str) -> Any:
+        self._log.add("host", "make_analysis_container", tab_id)
+        return "figure-container"
+
+    def make_post_analysis_container(self, tab_id: str) -> Any:
+        self._log.add("host", "make_post_analysis_container", tab_id)
         return "figure-container"
 
     def mount_interactive_analysis(
@@ -221,7 +232,7 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
 
     assert log.calls == [
         call("guard", "acquire_run_permit", "tab-1"),
-        call("host", "make_live_container", "tab-1"),
+        call("host", "make_run_container", "tab-1"),
         call("run", "start_run", "run-permit", "figure-container"),
     ]
 
@@ -254,7 +265,7 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
     assert log.calls == [
         call("guard", "acquire_analyze_permit", "tab-1"),
         call("state", "get_tab", "tab-1"),
-        call("host", "make_live_container", "tab-1"),
+        call("host", "make_analysis_container", "tab-1"),
         call("analyze", "start_analyze", "analyze-permit", params, "figure-container"),
     ]
 
@@ -268,10 +279,11 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "guard",
         "state",
         "state",
+        "tab",
         "analyze",
         "host",
     ]
-    assert log.calls[3] == call("analyze", "start_interactive", "analyze-permit")
+    assert log.calls[4] == call("analyze", "start_interactive", "analyze-permit")
 
 
 def test_post_analyze_uses_shared_live_container() -> None:
@@ -280,7 +292,7 @@ def test_post_analyze_uses_shared_live_container() -> None:
     assert facet.start_post_analyze("tab-1", "post-params") == 33
 
     assert log.calls == [
-        call("host", "make_live_container", "tab-1"),
+        call("host", "make_post_analysis_container", "tab-1"),
         call(
             "post_analyze",
             "start_post_analyze",

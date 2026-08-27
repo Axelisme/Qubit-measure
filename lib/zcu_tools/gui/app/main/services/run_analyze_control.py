@@ -25,19 +25,13 @@ if TYPE_CHECKING:
 
 
 class RunAnalyzeRenderHost(Protocol):
-    """Render surface needed by run/analyze operations (per-pane)."""
-
-    def make_live_container(self, tab_id: str) -> FigureContainer | None: ...
+    """Render surface needed by run/analyze operations (per-pane, S2)."""
 
     def make_run_container(self, tab_id: str) -> FigureContainer | None: ...
 
     def make_analysis_container(self, tab_id: str) -> FigureContainer | None: ...
 
     def make_post_analysis_container(self, tab_id: str) -> FigureContainer | None: ...
-
-    def get_figure_container(
-        self, tab_id: str, pane: str
-    ) -> FigureContainer | None: ...
 
     def mount_interactive_analysis(
         self,
@@ -108,17 +102,8 @@ class RunAnalyzeControlFacet:
     def start_run(self, tab_id: str) -> int:
         permit = self._guard.acquire_run_permit(tab_id)
         host = self._render_host()
-        live_container = None
-        if host is not None:
-            getter = getattr(host, "make_run_container", None)
-            if callable(getter):
-                live_container = getter(tab_id)  # type: ignore[no-redef]
-            else:
-                live_container = host.make_live_container(tab_id)  # type: ignore[attr-defined]
-        # Cast to satisfy pyright (host may be mock)
-        from zcu_tools.gui.plotting import FigureContainer as _FC  # type: ignore[import]
-        live_container = live_container  # type: ignore[assignment]
-        return self._run.start_run(permit, live_container)  # type: ignore[arg-type]
+        live_container = host.make_run_container(tab_id) if host is not None else None
+        return self._run.start_run(permit, live_container)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         permit = self._guard.acquire_load_permit(tab_id)
@@ -156,15 +141,11 @@ class RunAnalyzeControlFacet:
                 tab_id, permit, analyze_params_instance
             )
         host = self._render_host()
-        figure_container = None
-        if host is not None:
-            getter = getattr(host, "make_analysis_container", None)
-            if callable(getter):
-                figure_container = getter(tab_id)  # type: ignore[no-redef]
-            else:
-                figure_container = host.make_live_container(tab_id)  # type: ignore[attr-defined]
+        figure_container = (
+            host.make_analysis_container(tab_id) if host is not None else None
+        )
         return self._analyze.start_analyze(
-            permit, analyze_params_instance, figure_container  # type: ignore[arg-type]
+            permit, analyze_params_instance, figure_container
         )
 
     def _start_interactive_analyze(
@@ -179,13 +160,7 @@ class RunAnalyzeControlFacet:
             ml=ctx.ml,
             predictor=ctx.predictor,
         )
-        # Remote callers may supply a freshly reconstructed params instance
-        # without first editing the local form. Commit it before the service
-        # captures operation-start inputs; older injected test/caller ports may
-        # not expose this migration method and continue with their own state.
-        update_params = getattr(self._tab, "update_tab_analyze_param_instance", None)
-        if callable(update_params):
-            update_params(tab_id, analyze_params_instance)
+        self._tab.update_tab_analyze_param_instance(tab_id, analyze_params_instance)
         token = self._analyze.start_interactive(permit)
         host = self._render_host()
         if host is not None:
@@ -200,15 +175,11 @@ class RunAnalyzeControlFacet:
         self, tab_id: str, post_analyze_params_instance: object
     ) -> int:
         host = self._render_host()
-        figure_container = None
-        if host is not None:
-            getter = getattr(host, "make_post_analysis_container", None)
-            if callable(getter):
-                figure_container = getter(tab_id)  # type: ignore[no-redef]
-            else:
-                figure_container = host.make_live_container(tab_id)  # type: ignore[attr-defined]
+        figure_container = (
+            host.make_post_analysis_container(tab_id) if host is not None else None
+        )
         return self._post_analyze.start_post_analyze(
-            tab_id, post_analyze_params_instance, figure_container  # type: ignore[arg-type]
+            tab_id, post_analyze_params_instance, figure_container
         )
 
     def get_post_analyze_result(self, tab_id: str) -> object | None:
