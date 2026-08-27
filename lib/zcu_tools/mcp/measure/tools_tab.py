@@ -238,7 +238,7 @@ def tool_gui_tab_save(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fold_writeback_preview(
-    tab_id: str, reply: dict[str, Any], *, subtab_id: str = "analysis"
+    tab_id: str, reply: dict[str, Any], *, subtab_id: str
 ) -> dict[str, Any]:
     """Fold the pane's writeback preview into a FINISHED analyze reply, in place."""
     if reply.get("status") != "finished":
@@ -319,11 +319,10 @@ def tool_gui_tab_commit(arguments: dict[str, Any]) -> dict[str, Any]:
     """commit (step 4): apply the pane's writeback draft, optionally saving.
 
     Composes tab.writeback_apply for a specific pane (analysis|post_analysis);
-    optionally follows with a save. The pane defaults to 'analysis' for backward
-    compat but callers should pass subtab_id explicitly.
+    optionally follows with a save. Requires explicit subtab_id.
     """
     tab_id = str(arguments["tab_id"])
-    subtab_id = str(arguments.get("subtab_id", "analysis"))
+    subtab_id = str(arguments["subtab_id"])
     if subtab_id not in ("analysis", "post_analysis"):
         raise ValueError(
             f"subtab_id must be 'analysis' or 'post_analysis', got {subtab_id!r}"
@@ -368,21 +367,6 @@ def tool_gui_tab_get_figure(arguments: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"subtab_id must be one of ['run','analysis','post_analysis'], got {subtab_id!r}"
         )
-    out_path_arg = arguments.get("out_path")
-    return _render_tab_figure(
-        tab_id, subtab_id, str(out_path_arg) if out_path_arg is not None else None
-    )
-
-
-# Backward compat shim for tests that still reference the old name
-def tool_gui_tab_get_current_figure(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Legacy alias: forwards to gui_tab_get_figure with analysis as default pane.
-
-    Kept only for intra-test compatibility during migration; new code should call
-    gui_tab_get_figure with an explicit subtab_id.
-    """
-    tab_id = str(arguments["tab_id"])
-    subtab_id = str(arguments.get("subtab_id", "analysis"))
     out_path_arg = arguments.get("out_path")
     return _render_tab_figure(
         tab_id, subtab_id, str(out_path_arg) if out_path_arg is not None else None
@@ -557,11 +541,11 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "description": (
             "Step 4 of the recommended flow (open -> run -> analyze_review -> "
             "commit) — commit. = gui_tab_writeback_apply + (optionally) gui_tab_save. "
-            "Apply the pane's writeback draft (analysis by default; pass subtab_id='post_analysis' for post pane) "
+            "Apply the pane's writeback draft (requires explicit subtab_id: analysis|post_analysis) "
             "(edit it first via gui_tab_writeback_set_item). Applies the items currently selected; returns {status, applied_ids, "
             "written, context_version, destination_context, saved, save_error?}. 'save' selects the "
             "follow-up save artifacts (same vocabulary as gui_tab_save): 'none' "
-            "(default, apply-only), 'data', 'image', or 'both'. subtab_id selects the draft pane."
+            "(default, apply-only), 'data', 'image', or 'both'."
         ),
         "inputSchema": {
             "type": "object",
@@ -573,7 +557,6 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "subtab_id": {
                     "type": "string",
                     "enum": ["analysis", "post_analysis"],
-                    "default": "analysis",
                     "description": "Pane whose draft to apply (analysis|post_analysis)",
                 },
                 "save": {
@@ -587,7 +570,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                     ),
                 },
             },
-            "required": ["tab_id"],
+            "required": ["tab_id", "subtab_id"],
         },
     },
     "gui_tab_analyze_start": {
@@ -746,32 +729,6 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 },
             },
             "required": ["tab_id", "subtab_id"],
-        },
-    },
-    "gui_tab_get_current_figure": {
-        "handler": tool_gui_tab_get_current_figure,
-        "description": (
-            "DEPRECATED alias for gui_tab_get_figure — forwards to the pane-qualified figure getter. "
-            "Prefer gui_tab_get_figure with explicit subtab_id. This alias defaults subtab to analysis for backward compat and will be removed."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string"},
-                "subtab_id": {
-                    "type": "string",
-                    "enum": ["run", "analysis", "post_analysis"],
-                    "description": "Pane: run|analysis|post_analysis (default analysis for compat)",
-                },
-                "out_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional absolute path to write the PNG; omit to use a "
-                        "per-tab+subtab file under the temp dir"
-                    ),
-                },
-            },
-            "required": ["tab_id"],
         },
     },
 }

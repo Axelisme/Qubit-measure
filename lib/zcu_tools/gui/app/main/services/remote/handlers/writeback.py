@@ -168,15 +168,15 @@ def _h_tab_writeback_set(
                 )
             edits.append({"path": str(edit["path"]), "value": edit["value"]})
         changes["edits"] = edits
-    pane = subtab_id  # WritebackPane literal matches wire values
+    pane = subtab_id  # type: ignore[assignment]
     agg = adapter.writeback_control.set_writeback_item_for_pane(
         tab_id,
-        pane,
+        pane,  # type: ignore[arg-type]
         session_id,
         **changes,  # type: ignore[arg-type]
     )
     # Echo the edited item so the agent sees the post-edit state in one round-trip.
-    item = _find_writeback_item_for_pane(adapter, tab_id, pane, session_id)
+    item = _find_writeback_item_for_pane(adapter, tab_id, pane, session_id)  # type: ignore[arg-type]
     reply: dict[str, object] = {"item": _writeback_item_wire(item)}
     if has_edits:
         reply.update(agg)

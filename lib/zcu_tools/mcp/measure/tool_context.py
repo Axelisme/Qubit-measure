@@ -161,31 +161,19 @@ def _start_op_with_short_wait(
 
 
 def _render_tab_figure(
-    tab_id: str, subtab_id: str | None = None, out_path: str | None = None
+    tab_id: str, subtab_id: str, out_path: str | None = None
 ) -> dict[str, Any]:
     """Render a specific pane's figure to a PNG FILE (never inline base64).
 
     Drives ``tab.get_figure`` with required (tab_id, subtab_id) in out_path mode;
     synthesises a per-pane temp path under gettempdir() when no path is given.
     Returns the wire reply ({saved_to, bytes}).
-
-    Compat: old callers used ``_render_tab_figure(tab_id, out_path)`` with
-    subtab omitted (implicit run pane) or with out_path in the second position.
-    Detect that shape and map it to run.
     """
     allowed = {"run", "analysis", "post_analysis"}
-    # Compat: handle single-arg (tab_id) + out_path in second position
-    if subtab_id is not None and subtab_id not in allowed:
-        # Could be out_path passed as second positional arg (legacy)
-        if out_path is None and ("/" in subtab_id or subtab_id.endswith(".png")):
-            out_path = subtab_id
-            subtab_id = "run"
-        else:
-            raise ValueError(
-                f"subtab_id must be one of {sorted(allowed)}, got {subtab_id!r}"
-            )
-    if subtab_id is None:
-        subtab_id = "run"
+    if subtab_id not in allowed:
+        raise ValueError(
+            f"subtab_id must be one of {sorted(allowed)}, got {subtab_id!r}"
+        )
     resolved = out_path or str(
         Path(gettempdir()) / f"measure_fig_{tab_id}_{subtab_id}.png"
     )
@@ -195,19 +183,8 @@ def _render_tab_figure(
     )
 
 
-def _render_current_figure_compat(
-    tab_id: str, out_path: str | None = None
-) -> dict[str, Any]:
-    """Compat shim for callers that previously used run-pane screenshot semantics.
-
-    Maps legacy run-figure requests to the explicit run subtab. Prefer
-    ``_render_tab_figure`` with an explicit subtab in new code.
-    """
-    return _render_tab_figure(tab_id, "run", out_path)
-
-
 def _fold_finished_figure(
-    tab_id: str, reply: dict[str, Any], *, subtab_id: str = "run"
+    tab_id: str, reply: dict[str, Any], *, subtab_id: str
 ) -> dict[str, Any]:
     """Fold a pane's figure into a FINISHED run/analyze reply, in place.
 
@@ -223,8 +200,3 @@ def _fold_finished_figure(
     except Exception:
         reply["figure"] = None
     return reply
-
-
-# Backward compatibility aliases used by older tests / external callers
-def _fold_finished_figure_for_run(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
-    return _fold_finished_figure(tab_id, reply, subtab_id="run")

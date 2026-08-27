@@ -27,7 +27,7 @@ from zcu_tools.gui.app.main.services.remote.handlers.run_save import (
 )
 from zcu_tools.gui.app.main.services.remote.handlers.view import (
     _h_dialog_screenshot,
-    _h_tab_get_current_figure,
+    _h_tab_get_figure,
 )
 from zcu_tools.gui.app.main.services.remote.handlers.writeback import (
     _h_tab_writeback_set,
@@ -157,15 +157,47 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     arb_adapter = SimpleNamespace(ctrl=arb_ctrl)
 
     render_view = MagicMock()
-    render_view.take_figure_screenshot.side_effect = FailedPreconditionError(
+    # New pane-qualified figure handler reads via tab_control snapshot for analysis/post and via render_view for run
+    # Mock tab_control for analysis pane
+    from unittest.mock import MagicMock as Mock2
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.cfg import CfgSchema
+    tab_control = Mock2()
+    # Make analysis pane have no figure to trigger precondition
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
+    ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
+    post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
+    snap = TabSnapshot(adapter_name="fake", cfg_schema=Mock2(spec=CfgSchema), save_paths_override=None, tab_id="t1", interaction=Mock2(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+    tab_control.get_tab_snapshot.return_value = snap
+    tab_control.has_tab.return_value = True
+    render_view.take_figure_screenshot_for_subtab.side_effect = FailedPreconditionError(
         "tab 't1' has no figure yet"
     )
-    view_adapter = SimpleNamespace(render_view=render_view)
+    view_adapter = SimpleNamespace(render_view=render_view, tab_control=tab_control)
+    view_adapter.ctrl = Mock2()
+    view_adapter.ctrl.get_exp_context.return_value = Mock2(active_label="ctx", chip_name="c", qub_name="q", res_name="r", database_path="/tmp", result_dir="/tmp", is_active=lambda: True)
 
     writeback_control = MagicMock()
     writeback_control.has_tab.return_value = True
-    writeback_control.set_writeback_item.side_effect = InvalidInputError("bad facet")
-    writeback_adapter = SimpleNamespace(writeback_control=writeback_control)
+    writeback_control.set_writeback_item_for_pane.side_effect = InvalidInputError("bad facet")
+    tab_control_wb = MagicMock()
+    tab_control_wb.has_tab.return_value = True
+    # Mock snapshot for writeback pane
+    from unittest.mock import MagicMock as Mock3
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities as Caps2, AnalysisMode as AM2
+    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot as APS2, PathResourceSnapshot as PRS2, PostAnalysisPaneSnapshot as PAPS2, TabSnapshot as TS2
+    from zcu_tools.gui.cfg import CfgSchema as CS2
+    caps2 = Caps2(analysis=AM2.FIT, post_analysis=True, load_data=False, requires_soc=False)
+    ana2 = APS2(params=None, result=object(), figure=None, writeback_items=tuple(), image_path=PRS2(override=None, path=None))
+    post2 = PAPS2(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PRS2(override=None, path=None))
+    snap2 = TS2(adapter_name="fake", cfg_schema=Mock3(spec=CS2), save_paths_override=None, tab_id="t1", interaction=Mock3(), capabilities=caps2, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana2, post_analysis=post2, save=None, paths=None)
+    tab_control_wb = MagicMock()
+    tab_control_wb.get_tab_snapshot.return_value = snap2
+    tab_control_wb.has_tab.return_value = True
+    writeback_adapter = SimpleNamespace(writeback_control=writeback_control, tab_control=tab_control_wb)
+    writeback_adapter.ctrl = Mock3()
+    writeback_adapter.ctrl.get_exp_context.return_value = Mock3(active_label="ctx", chip_name="c", qub_name="q", res_name="r", database_path="/tmp", result_dir="/tmp", is_active=lambda: True)
 
     cases: list[tuple[Callable[[], object], WireTuple]] = [
         (
@@ -229,12 +261,12 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
             ),
         ),
         (
-            lambda: _h_tab_get_current_figure(
-                cast(Any, view_adapter), {"tab_id": "t1"}
+            lambda: _h_tab_get_figure(
+                cast(Any, view_adapter), {"tab_id": "t1", "subtab_id": "analysis"}
             ),
             (
                 ErrorCode.PRECONDITION_FAILED,
-                "tab 't1' has no figure yet",
+                "tab 't1' analysis has no figure yet",
                 "",
                 None,
             ),
@@ -242,7 +274,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
         (
             lambda: _h_tab_writeback_set(
                 cast(Any, writeback_adapter),
-                {"tab_id": "t1", "id": "md-0", "selected": True},
+                {"tab_id": "t1", "subtab_id": "analysis", "id": "md-0", "selected": True},
             ),
             (ErrorCode.INVALID_PARAMS, "bad facet", "", None),
         ),

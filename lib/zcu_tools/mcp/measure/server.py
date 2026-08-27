@@ -456,7 +456,6 @@ tool_gui_tab_run = tools_tab.tool_gui_tab_run
 tool_gui_tab_analyze_review = tools_tab.tool_gui_tab_analyze_review
 tool_gui_tab_commit = tools_tab.tool_gui_tab_commit
 tool_gui_tab_get_figure = tools_tab.tool_gui_tab_get_figure
-tool_gui_tab_get_current_figure = tools_tab.tool_gui_tab_get_current_figure
 
 _SOC_CONNECT_TIMEOUT_SLACK = tools_soc._SOC_CONNECT_TIMEOUT_SLACK
 _SOC_CONNECT_RECONCILE_TIMEOUT = tools_soc._SOC_CONNECT_RECONCILE_TIMEOUT

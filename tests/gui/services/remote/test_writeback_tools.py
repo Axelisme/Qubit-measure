@@ -35,18 +35,49 @@ def _items() -> list:
 
 
 def _ctrl() -> MagicMock:
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        TabSnapshot,
+    )
+    from zcu_tools.gui.cfg import CfgSchema
+
+    def _snap(tab_id: str = "t", items=None):
+        if items is None:
+            items = _items()
+        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
+        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
+        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
+        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
     ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _items()
-    # apply now echoes {applied_ids, written}; the handler folds context_version
-    # from writeback_control.get_context_version() read after apply.
     ctrl.apply_writeback.return_value = {
         "applied_ids": ["md-1"],
         "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
     ctrl.get_context_version.return_value = 7
-    # set_writeback_item echoes the aggregated {valid, removed, added} on edits.
     ctrl.set_writeback_item.return_value = {"valid": True, "removed": [], "added": []}
+    # New pane-qualified controls
+    ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snap(tab_id)
+    ctrl.get_exp_context.return_value = MagicMock(active_label="ctx001", chip_name="chip", qub_name="qubit", res_name="res", database_path="/tmp/db", result_dir="/tmp/result", is_active=lambda: True)
+    # writeback_control pane methods
+    wc = MagicMock()
+    wc.has_tab.return_value = True
+    wc.get_tab_writeback_items.side_effect = lambda tab_id: _items()
+    wc.get_context_version.return_value = 7
+    wc.set_writeback_item_for_pane.return_value = {"valid": True, "removed": [], "added": []}
+    wc.apply_writeback_for_pane.return_value = {"applied_ids": ["md-1"], "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}}
+    wc.get_tab_snapshot = ctrl.get_tab_snapshot
+    # attach to ctrl for dispatch helper fallback
+    ctrl.tab_control = MagicMock()
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap(tab_id)
+    ctrl.tab_control.has_tab.return_value = True
+    ctrl.writeback_control = wc
+    ctrl.writeback_control.has_tab.return_value = True
     return ctrl
 
 
@@ -55,7 +86,7 @@ from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 def test_preview_serializes_metadict_and_module():
     ctrl = _ctrl()
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
     item_list = list(res["items"])  # type: ignore[call-overload]
     items = {it["id"]: it for it in item_list}
 
@@ -76,37 +107,44 @@ def test_preview_serializes_metadict_and_module():
 
 def test_apply_reads_persistent_draft():
     ctrl = _ctrl()
-    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t", "subtab_id": "analysis"})
     assert res["applied_ids"] == ["md-1"]
-    # apply now enriches: written (by kind) + post-apply context version.
+    # apply now enriches: written (by kind) + post-apply context version + destination_context.
     assert res["written"] == {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}
     assert res["context_version"] == 7
-    ctrl.apply_writeback.assert_called_once_with("t")
+    assert "destination_context" in res
+    ctrl.writeback_control.apply_writeback_for_pane.assert_called_once_with("t", "analysis")
 
 
 def test_preview_delegates_to_writeback_control_without_ctrl_fallback():
     ctrl = _ctrl()
-    writeback_control = _ctrl()
+    writeback_control = _ctrl().writeback_control
+    tab_control = ctrl.tab_control
     ctrl.writeback_control = writeback_control
+    # preview now reads via tab_control snapshot (pane-qualified), not directly via writeback_control items
+    # but still requires writeback_control.has_tab for existence check
     ctrl.has_tab = MagicMock(
-        side_effect=AssertionError("tab.writeback_preview must use writeback_control")
+        side_effect=AssertionError("tab.writeback_preview must use writeback_control/tab_control")
     )
     ctrl.get_tab_writeback_items = MagicMock(
-        side_effect=AssertionError("tab.writeback_preview must use writeback_control")
+        side_effect=AssertionError("tab.writeback_preview must use writeback_control/tab_control")
     )
 
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
 
     assert res["has_draft"] is True
+    # has_tab still via writeback_control
     writeback_control.has_tab.assert_called_once_with("t")
-    writeback_control.get_tab_writeback_items.assert_called_once_with("t")
+    # snapshot via tab_control
+    tab_control.get_tab_snapshot.assert_called_with("t")
     ctrl.has_tab.assert_not_called()
     ctrl.get_tab_writeback_items.assert_not_called()
 
 
 def test_set_delegates_to_writeback_control_without_ctrl_fallback():
     ctrl = _ctrl()
-    writeback_control = _ctrl()
+    writeback_control = _ctrl().writeback_control
+    tab_control = ctrl.tab_control
     ctrl.writeback_control = writeback_control
     ctrl.has_tab = MagicMock(
         side_effect=AssertionError("tab.writeback_set must use writeback_control")
@@ -121,13 +159,13 @@ def test_set_delegates_to_writeback_control_without_ctrl_fallback():
     res = _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "md-1", "selected": False},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "selected": False},
     )
 
     assert res["item"]["id"] == "md-1"  # type: ignore[index]
     writeback_control.has_tab.assert_called_once_with("t")
-    writeback_control.set_writeback_item.assert_called_once_with(
-        "t", "md-1", selected=False
+    writeback_control.set_writeback_item_for_pane.assert_called_once_with(
+        "t", "analysis", "md-1", selected=False
     )
     ctrl.has_tab.assert_not_called()
     ctrl.set_writeback_item.assert_not_called()
@@ -136,7 +174,7 @@ def test_set_delegates_to_writeback_control_without_ctrl_fallback():
 
 def test_apply_delegates_to_writeback_control_without_ctrl_fallback():
     ctrl = _ctrl()
-    writeback_control = _ctrl()
+    writeback_control = _ctrl().writeback_control
     ctrl.writeback_control = writeback_control
     ctrl.has_tab = MagicMock(
         side_effect=AssertionError("tab.writeback_apply must use writeback_control")
@@ -148,11 +186,12 @@ def test_apply_delegates_to_writeback_control_without_ctrl_fallback():
         side_effect=AssertionError("tab.writeback_apply must use writeback_control")
     )
 
-    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t"})
+    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t", "subtab_id": "analysis"})
 
     assert res["context_version"] == 7
+    assert "destination_context" in res
     writeback_control.has_tab.assert_called_once_with("t")
-    writeback_control.apply_writeback.assert_called_once_with("t")
+    writeback_control.apply_writeback_for_pane.assert_called_once_with("t", "analysis")
     writeback_control.get_context_version.assert_called_once_with()
     ctrl.has_tab.assert_not_called()
     ctrl.apply_writeback.assert_not_called()
@@ -164,11 +203,11 @@ def test_set_edits_metadict_item():
     res = _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "md-1", "selected": False, "proposed_value": 6015.0},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "selected": False, "proposed_value": 6015.0},
     )
-    ctrl.set_writeback_item.assert_called_once()
-    args, kwargs = ctrl.set_writeback_item.call_args
-    assert args[:2] == ("t", "md-1")
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_once()
+    args, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
+    assert args[:3] == ("t", "analysis", "md-1")
     assert kwargs["selected"] is False
     assert kwargs["proposed_value"] == 6015.0
     # The reply echoes the (re-read) edited item.
@@ -185,13 +224,18 @@ def test_set_module_cfg_edits_facet():
         "removed": ["readout_rf.old"],
         "added": ["readout_rf.new"],
     }
+    ctrl.writeback_control.set_writeback_item_for_pane.return_value = {
+        "valid": True,
+        "removed": ["readout_rf.old"],
+        "added": ["readout_rf.new"],
+    }
     edits = [{"path": "readout_rf.freq", "value": 6012.3}]
     res = _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "ml-1", "edits": edits},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "ml-1", "edits": edits},
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["edits"] == edits
     assert "editor_id" not in kwargs  # internalized — never on the wire
     # The aggregate is folded into the reply alongside the echoed item.
@@ -208,14 +252,14 @@ def test_set_proposed_value_and_edits_mutually_exclusive():
             ctrl,
             "tab.writeback_set",
             {
-                "tab_id": "t",
+                "tab_id": "t", "subtab_id": "analysis",
                 "id": "md-1",
                 "proposed_value": 1.0,
                 "edits": [{"path": "p", "value": 1}],
             },
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
-    ctrl.set_writeback_item.assert_not_called()
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_not_called()
 
 
 def test_set_edits_malformed_entry_rejected():
@@ -224,7 +268,7 @@ def test_set_edits_malformed_entry_rejected():
         _dispatch(
             ctrl,
             "tab.writeback_set",
-            {"tab_id": "t", "id": "ml-1", "edits": [{"path": "p"}]},
+            {"tab_id": "t", "subtab_id": "analysis", "id": "ml-1", "edits": [{"path": "p"}]},
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -234,9 +278,9 @@ def test_set_target_name_override():
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "ml-1", "target_name": "readout_v2"},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "ml-1", "target_name": "readout_v2"},
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["target_name"] == "readout_v2"
 
 
@@ -250,9 +294,9 @@ def test_set_deselect_flows_through():
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "md-1", "selected": False},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "selected": False},
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs == {"selected": False}
 
 
@@ -268,14 +312,14 @@ def test_set_ignores_null_optionals():
         ctrl,
         "tab.writeback_set",
         {
-            "tab_id": "t",
+            "tab_id": "t", "subtab_id": "analysis",
             "id": "ml-1",
             "selected": None,
             "target_name": "readout_v2",
             "proposed_value": None,
         },
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs == {"target_name": "readout_v2"}
     assert "selected" not in kwargs
     assert "proposed_value" not in kwargs
@@ -285,7 +329,7 @@ def test_set_empty_target_name_rejected():
     ctrl = _ctrl()
     with pytest.raises(RemoteError) as exc:
         _dispatch(
-            ctrl, "tab.writeback_set", {"tab_id": "t", "id": "md-1", "target_name": ""}
+            ctrl, "tab.writeback_set", {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "target_name": ""}
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -297,7 +341,7 @@ def test_set_unknown_id_rejected():
     )
     with pytest.raises(RemoteError) as exc:
         _dispatch(
-            ctrl, "tab.writeback_set", {"tab_id": "t", "id": "md-99", "selected": True}
+            ctrl, "tab.writeback_set", {"tab_id": "t", "subtab_id": "analysis", "id": "md-99", "selected": True}
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -321,8 +365,20 @@ def _complex_items() -> list:
 
 def test_preview_serializes_complex_as_tag():
     ctrl = _ctrl()
-    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
+    # New handler reads via tab_control snapshot; mock that to return complex items
+    from unittest.mock import MagicMock
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.cfg import CfgSchema
+    def _snap_complex(tab_id="t"):
+        items = _complex_items()
+        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
+        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
+        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
+        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_complex(tab_id)
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == {"__complex__": [1.5, -2.25]}
 
@@ -333,12 +389,12 @@ def test_set_coerces_complex_tag_back_to_complex():
         ctrl,
         "tab.writeback_set",
         {
-            "tab_id": "t",
+            "tab_id": "t", "subtab_id": "analysis",
             "id": "md-1",
             "proposed_value": {"__complex__": [1.5, -2.25]},
         },
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["proposed_value"] == complex(1.5, -2.25)
     assert isinstance(kwargs["proposed_value"], complex)
 
@@ -346,16 +402,27 @@ def test_set_coerces_complex_tag_back_to_complex():
 def test_complex_preview_set_round_trip_is_lossless():
     """preview tag -> set -> the same complex the service would apply."""
     ctrl = _ctrl()
-    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
-    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
+    from unittest.mock import MagicMock
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.cfg import CfgSchema
+    def _snap_complex(tab_id="t"):
+        items = _complex_items()
+        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
+        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
+        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
+        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_complex(tab_id)
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
+    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
     wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
 
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "md-1", "proposed_value": wire_value},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "proposed_value": wire_value},
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["proposed_value"] == complex(1.5, -2.25)
 
 
@@ -381,8 +448,19 @@ def _matrix_items() -> list:
 
 def test_preview_serializes_nested_list_verbatim():
     ctrl = _ctrl()
-    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
+    from unittest.mock import MagicMock
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.cfg import CfgSchema
+    def _snap_matrix(tab_id="t"):
+        items = _matrix_items()
+        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
+        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
+        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
+        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_matrix(tab_id)
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
+    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == _CONFUSION
 
@@ -392,23 +470,34 @@ def test_set_passes_nested_list_through_untouched():
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "md-1", "proposed_value": _CONFUSION},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "proposed_value": _CONFUSION},
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["proposed_value"] == _CONFUSION
 
 
 def test_nested_list_preview_set_round_trip_is_lossless():
     """preview verbatim -> set -> the same nested list the service would apply."""
     ctrl = _ctrl()
-    ctrl.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
-    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t"})
+    from unittest.mock import MagicMock
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.cfg import CfgSchema
+    def _snap_matrix(tab_id="t"):
+        items = _matrix_items()
+        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
+        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
+        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
+        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_matrix(tab_id)
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
+    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
     wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
 
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "id": "md-1", "proposed_value": wire_value},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "proposed_value": wire_value},
     )
-    _, kwargs = ctrl.set_writeback_item.call_args
+    _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["proposed_value"] == _CONFUSION
