@@ -418,7 +418,6 @@ def test_phase170c_save_writeback_tools():
         "tab.save_image",
     }
     other_wire_methods = {
-        "tab.save_set_paths",
         "tab.writeback_preview",
         "tab.writeback_set",
         "tab.writeback_apply",
@@ -438,9 +437,10 @@ def test_phase170c_save_writeback_tools():
     # The old per-method save bundle tools no longer exist.
     assert {"gui_tab_save", "gui_tab_commit"}.isdisjoint(set(m.TOOLS))
 
-    # tab.save_set_paths is renamed to gui_tab_set_save_paths (still generated).
-    _assert_generated("tab.save_set_paths")
-    assert "gui_tab_set_save_paths" in m.TOOLS
+    # tab.save_set_paths is removed (no combined path setter); use separate save_data/save_image overrides.
+    assert "tab.save_set_paths" not in METHOD_SPECS
+    assert "tab.save_set_paths" not in m.TOOLS
+    assert "gui_tab_set_save_paths" not in m.TOOLS
     assert "gui_tab_save_set_paths" not in m.TOOLS
 
     # Writeback tools after P3 (E6 editing-surface unification): preview->list,

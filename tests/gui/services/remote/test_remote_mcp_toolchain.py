@@ -585,38 +585,9 @@ def test_save_result_delegates_to_save_control(fx):
 
 
 def test_save_set_paths_delegates_to_save_control(fx):
-    fx.ctrl.has_tab = MagicMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("tab.save_set_paths must use save_control")
-    )
-    fx.ctrl.update_tab_save_paths = MagicMock(  # type: ignore[method-assign]
-        side_effect=AssertionError("tab.save_set_paths must use save_control")
-    )
-    fx.service.save_control.has_tab = MagicMock(return_value=True)  # type: ignore[method-assign]
-    fx.service.save_control.update_tab_save_paths = MagicMock()  # type: ignore[method-assign]
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(
-            sock,
-            "tab.save_set_paths",
-            {
-                "tab_id": "tab1",
-                "data_path": "/tmp/data.h5",
-                "image_path": "/tmp/image.png",
-            },
-        )
-        assert resp["ok"] is True
-        assert resp["result"] == {
-            "data_path": "/tmp/data.h5",
-            "image_path": "/tmp/image.png",
-        }
-        fx.service.save_control.has_tab.assert_called_once_with("tab1")
-        fx.service.save_control.update_tab_save_paths.assert_called_once_with(
-            "tab1", "/tmp/data.h5", "/tmp/image.png"
-        )
-        fx.ctrl.has_tab.assert_not_called()
-        fx.ctrl.update_tab_save_paths.assert_not_called()
-    finally:
-        sock.close()
+    """tab.save_set_paths wire method is removed (no combined setter); use separate save_data/save_image."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    assert "tab.save_set_paths" not in METHOD_SPECS
 
 
 def test_mcp_tool_schemas_include_required_discovery_tools():

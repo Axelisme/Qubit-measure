@@ -93,15 +93,15 @@ def test_run_start_declares_device_set_cardinality_key(wired):
 def test_save_depends_on_result_and_save_path_not_cfg(wired):
     sent = wired["sent"]
     mcp_server._LAST_SEEN.update(
-        {"tab:t:result": 7, "tab:t:save_path": 2, "tab:t:cfg": 9}
+        {"tab:t:result": 7, "tab:t:path:data": 2, "tab:t:cfg": 9}
     )
-    wired["tab.save_data"] = {"ok": True, "result": {}}
+    wired["tab.save_data"] = {"ok": True, "result": {"data_path": "/tmp/x.h5"}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
     mcp_server.send_gui_rpc("tab.save_data", {"tab_id": "t"})
 
     params = next(p for (m, p) in sent if m == "tab.save_data")
-    assert params["expected_versions"] == {"tab:t:result": 7, "tab:t:save_path": 2}
+    assert params["expected_versions"] == {"tab:t:result": 7, "tab:t:path:data": 2}
     assert "tab:t:cfg" not in params["expected_versions"]
 
 

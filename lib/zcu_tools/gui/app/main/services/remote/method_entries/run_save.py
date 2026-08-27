@@ -97,21 +97,4 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             tool_name="gui_tab_save_image",
         ),
     ),
-    method_entry(
-        "tab.save_set_paths",
-        "run_save:_h_tab_save_set_paths",
-        MethodSpec(
-            5.0,
-            "Set the tab's default save destinations (data + image). Echoes the "
-            "applied {data_path, image_path}. Version-guarded on the tab's save_path: "
-            "rejects with precondition_failed if a concurrent edit moved it.",
-            (
-                _str("tab_id"),
-                _str("data_path"),
-                _str("image_path"),
-                _expected_versions(),
-            ),
-            tool_name="gui_tab_set_save_paths",
-        ),
-    ),
 )

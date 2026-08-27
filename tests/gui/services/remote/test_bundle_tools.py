@@ -114,7 +114,7 @@ def test_run_start_pending_has_no_figure(monkeypatch):
 def test_op_wait_finished_reports_status_only(monkeypatch):
     """The generic gui_op_wait FINISHED reply reports ONLY status (+waited_seconds) —
     NO figure fold (P2 / ADR-0026 §8). The run's visual product is read from the
-    START finished reply or gui_tab_get_current_figure, not from the wait."""
+    START finished reply or gui_tab_get_figure, not from the wait."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     rendered: list[str] = []
@@ -278,7 +278,7 @@ def test_writeback_apply_is_pure_generated_forwarder():
 
 def test_op_poll_finished_reports_status_only(monkeypatch):
     """A 'finished' gui_op_poll reply reports ONLY status — NO figure fold. The run's
-    visual product is read from the START finished reply or gui_tab_get_current_figure."""
+    visual product is read from the START finished reply or gui_tab_get_figure."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[str] = []
@@ -378,9 +378,9 @@ def test_run_configures_runs_and_stops_before_analyze(monkeypatch):
 
 
 def test_run_does_not_double_fold_figure(monkeypatch):
-    """gui_tab_run must NOT call tab.get_current_figure a second time —
+    """gui_tab_run must NOT call tab.get_figure a second time —
     the figure arrives already folded inside gui_tab_run_start's FINISHED reply (MCP 46).
-    Exactly one tab.get_current_figure call is expected."""
+    Exactly one tab.get_figure call is expected."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -660,9 +660,9 @@ def test_analyze_review_passes_updates_and_wait_seconds(monkeypatch):
 
 
 def test_analyze_review_does_not_double_fold_figure(monkeypatch):
-    """gui_tab_analyze_review must NOT call tab.get_current_figure a second time —
+    """gui_tab_analyze_review must NOT call tab.get_figure a second time —
     the figure arrives already folded inside gui_tab_analyze's FINISHED reply (MCP 46).
-    Exactly one tab.get_current_figure call is expected."""
+    Exactly one tab.get_figure call is expected."""
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []

@@ -92,7 +92,7 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "has_analyze_result": bool(interaction.has_analyze_result),
             "has_figure": bool(interaction.has_figure),
         },
-        "save_paths": _save_paths_wire(snap.save_paths),
+        "save_paths": _save_paths_wire(snap.paths),
         "result_source_path": snap.result_source_path,
     }
 
@@ -113,10 +113,15 @@ def _h_tab_snapshot(
     return {"tabs": [_tab_snapshot_wire(adapter, tid) for tid in tab_ids]}
 
 
-def _save_paths_wire(paths) -> dict[str, str] | None:
+def _save_paths_wire(paths) -> dict[str, str | None] | None:
     if paths is None:
         return None
-    return {"data_path": paths.data_path, "image_path": paths.image_path}
+    # Three independent effective path resources (no single generic image_path).
+    return {
+        "data_path": paths.data.path,
+        "analysis_image_path": paths.analysis_image.path,
+        "post_analysis_image_path": paths.post_analysis_image.path,
+    }
 
 
 def _h_tab_get_cfg(
