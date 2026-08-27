@@ -38,7 +38,7 @@ def _h_tab_load_data(
     assert interaction is not None
     result: dict[str, object] = dataclasses.asdict(outcome)
     result["has_run_result"] = bool(interaction.has_run_result)
-    ap = snap.analyze_params
+    ap = None if snap.analysis is None else snap.analysis.params
     if ap is None:
         result["analyze_params"] = None
     elif dataclasses.is_dataclass(ap) and not isinstance(ap, type):

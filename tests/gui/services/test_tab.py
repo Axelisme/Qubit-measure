@@ -32,7 +32,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             adapter=MagicMock(),
             cfg_schema=MagicMock(),
             run=RunPaneState(result=object()),
-            analysis=AnalysisPaneState(result=object(), params=analyze_params),
+            analysis=AnalysisPaneState(result=MagicMock(), params=analyze_params),
             save=SavePaneState(data_path_override="data.h5"),
         ),
     )
@@ -107,7 +107,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=MagicMock()),
             post_analysis=PostAnalysisPaneState(
-                result=object(),
+                result=MagicMock(),
                 params=post_params,
                 figure=post_fig,  # type: ignore[arg-type]
             ),

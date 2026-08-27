@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.state import State
 
-    from .ports import WritebackQueryPort
+    from .ports import WritebackLifecyclePort
 
 
 # Characters allowed verbatim in a tab-id slug; everything else (notably the
@@ -54,12 +54,12 @@ class TabService:
         self,
         state: State,
         registry: Registry,
-        writeback: WritebackQueryPort,
+        writeback: WritebackLifecyclePort,
     ) -> None:
         self._state = state
         self._registry = registry
-        # Read model composes writeback proposals via a narrow query port — no
-        # concrete sibling app-service dependency (ADR-0005 violation 2).
+        # The tab lifecycle previews pane drafts and tears them down on close via
+        # one narrow port, without depending on the concrete sibling service.
         self._writeback = writeback
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:

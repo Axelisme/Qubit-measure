@@ -209,18 +209,6 @@ class ContextWrites:
 
 
 @runtime_checkable
-class WritebackQueryPort(Protocol):
-    """The writeback-items query as used by the tab read model.
-
-    ``TabService.get_snapshot`` composes pane-owned opaque drafts into the
-    snapshot via this narrow port (ADR-0005). The port exposes only the
-    draft-preview operation; tab identity stays in State.
-    """
-
-    def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
-
-
-@runtime_checkable
 class TabLifecyclePort(Protocol):
     """Tab create/restore/close + cfg as commanded by ``WorkspaceService``.
 

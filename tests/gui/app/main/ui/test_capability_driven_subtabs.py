@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -537,15 +538,15 @@ def test_render_host_routes_to_correct_pane_container(qapp):
     log: list[str] = []
 
     class FakeHost:
-        def make_run_container(self, tab_id):  # type: ignore[no-untyped-def]
+        def make_run_container(self, tab_id: str) -> Any:
             log.append("run")
             return "run_c"
 
-        def make_analysis_container(self, tab_id):  # type: ignore[no-untyped-def]
+        def make_analysis_container(self, tab_id: str) -> Any:
             log.append("analysis")
             return "ana_c"
 
-        def make_post_analysis_container(self, tab_id):  # type: ignore[no-untyped-def]
+        def make_post_analysis_container(self, tab_id: str) -> Any:
             log.append("post")
             return "post_c"
 
