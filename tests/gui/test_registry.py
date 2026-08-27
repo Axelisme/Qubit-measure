@@ -16,6 +16,7 @@ from zcu_tools.gui.app.main.adapter import (
     LoadDataRequest,
     MetaDictWriteback,
     NoAnalyzeParams,
+    PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
     WritebackRequest,
@@ -123,6 +124,13 @@ class _DummyAdapter:
 
     def post_analyze(self, req: object) -> None:  # noqa: ARG002
         raise NotImplementedError
+
+    def get_post_writeback_items(
+        self,
+        req: PostWritebackRequest[object, _DummyAnalyzeResult, _DummyAnalyzeResult],
+    ) -> Sequence[MetaDictWriteback]:
+        del req
+        return []
 
     def save(self, req: SaveDataRequest[object]) -> None:  # noqa: ARG002
         pass

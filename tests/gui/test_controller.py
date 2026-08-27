@@ -21,6 +21,7 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
 )
 from zcu_tools.gui.app.main.controller import Controller
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabContentChangedPayload,
@@ -453,6 +454,22 @@ def test_run_finished_emits_run_finished(cf):
     cf.bus.emit.assert_any_call(
         RunFinishedPayload(tab_id=tab_id, outcome="finished"),
     )
+
+
+def test_save_data_completion_reports_only_data_artifact(cf):
+    cf.ctrl._on_save_data_finished(
+        SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/data.hdf5")
+    )
+
+    cf.view.show_status_message.assert_called_with("Data saved to /tmp/data.hdf5")
+
+    cf.ctrl._on_save_data_finished(
+        SaveDataFinishedPayload(
+            tab_id="tab-1", data_path="/tmp/data.hdf5", error="disk full"
+        )
+    )
+
+    cf.view.show_error_dialog.assert_called_with("Save data failed", "disk full")
 
 
 def test_run_finished_calls_refresh_tab(cf):

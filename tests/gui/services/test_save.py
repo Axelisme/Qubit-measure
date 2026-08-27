@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.events.completion import SaveFinishedPayload
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -58,9 +58,11 @@ def _record_facts(svc: SaveService) -> list[TabInteractionFact]:
     return facts
 
 
-def _record_outcomes(svc: SaveService) -> list[SaveFinishedPayload]:
-    outcomes: list[SaveFinishedPayload] = []
-    svc._bus.subscribe(SaveFinishedPayload, outcomes.append)  # type: ignore[attr-defined]
+def _record_outcomes(svc: SaveService) -> list[SaveDataFinishedPayload]:
+    outcomes: list[SaveDataFinishedPayload] = []
+    svc._bus.subscribe(  # type: ignore[attr-defined]
+        SaveDataFinishedPayload, outcomes.append
+    )
     return outcomes
 
 
@@ -175,11 +177,11 @@ def test_save_entrypoints_reject_busy_tab_before_side_effects(
 
 
 # ---------------------------------------------------------------------------
-# _on_save_finished without pending_image
+# Save Data completion
 # ---------------------------------------------------------------------------
 
 
-def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
+def test_on_save_data_finished_emits_completion(qapp) -> None:  # noqa: ARG001
     svc, _, _ = _make_service()
     facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
@@ -188,7 +190,7 @@ def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
 
     # Stage the active path as start_save_data would
     svc.start_save_data(permit, "/tmp/data")
-    svc._on_save_finished("tab")
+    svc._on_save_data_finished("tab")
 
     assert len(finished) == 1
     assert finished[0].tab_id == "tab"
@@ -216,7 +218,7 @@ def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
 
     assert len(failed) == 1
     assert failed[0].tab_id == "tab"
-    assert failed[0].data_error == str(error)
+    assert failed[0].error == str(error)
     assert facts == [
         TabInteractionFact.SAVE_STARTED,
         TabInteractionFact.SAVE_FAILED,

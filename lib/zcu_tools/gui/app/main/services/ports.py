@@ -54,7 +54,11 @@ if TYPE_CHECKING:
         SavePaths,
         WritebackItem,
     )
-    from zcu_tools.gui.app.main.state import Session, TabInteractionState
+    from zcu_tools.gui.app.main.state import (
+        RetiredPaneResources,
+        Session,
+        TabInteractionState,
+    )
     from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
     from zcu_tools.gui.session.types import ExpContext
@@ -295,9 +299,9 @@ class TabAnalyzeWritePort(Protocol):
         tab_id: str,
         analyze_result: object,
         figure: Figure | None,
-        writeback_draft: Any | None = None,
+        writeback_draft: object | None = None,
         analyze_params_instance: object = ...,
-    ) -> Any: ...
+    ) -> RetiredPaneResources: ...
     def update_tab_post_analyze(
         self,
         tab_id: str,
@@ -305,8 +309,8 @@ class TabAnalyzeWritePort(Protocol):
         figure: Figure | None,
         *,
         post_analyze_params_instance: object = ...,
-        writeback_draft: Any | None = None,
-    ) -> Any: ...
+        writeback_draft: object | None = None,
+    ) -> RetiredPaneResources: ...
 
 
 @runtime_checkable

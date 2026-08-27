@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest, WritebackRequest
@@ -21,10 +22,20 @@ from .staged_analyze import _StagedAnalyzeService
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import InteractiveSession
+    from zcu_tools.gui.app.main.adapter import ExpAdapterProtocol, InteractiveSession
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.types import ExpContext
 
+    from ..state import RetiredPaneResources
     from .ports import AnalyzeStatePort, WritebackLifecyclePort
+
+
+@dataclass(frozen=True, slots=True)
+class _AnalyzeCapture:
+    run_result: object | None
+    context: ExpContext
+    adapter: ExpAdapterProtocol
+    params: object | None
 
 
 class AnalyzeService(_StagedAnalyzeService):
@@ -58,7 +69,7 @@ class AnalyzeService(_StagedAnalyzeService):
         self._interactive_tabs: set[str] = set()
         # Captured at operation start so proposal generation cannot accidentally
         # consume a context or run result replaced while the worker was running.
-        self._captured_inputs: dict[str, tuple[Any, Any, Any, Any]] = {}
+        self._captured_inputs: dict[str, _AnalyzeCapture] = {}
 
     def start_analyze(
         self,
@@ -88,7 +99,12 @@ class AnalyzeService(_StagedAnalyzeService):
             type(analyze_params_instance).__name__,
         )
         adapter = tab.adapter
-        captured_inputs = (req.run_result, ctx, adapter, analyze_params_instance)
+        captured_inputs = _AnalyzeCapture(
+            run_result=req.run_result,
+            context=ctx,
+            adapter=adapter,
+            params=analyze_params_instance,
+        )
         self._captured_inputs[tab_id] = captured_inputs
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
@@ -133,7 +149,12 @@ class AnalyzeService(_StagedAnalyzeService):
         # operation starts. Capture that committed value alongside the run,
         # context, and adapter so the terminal path does not fall back to the
         # active tab's mutable inputs.
-        captured_inputs = (tab.run.result, ctx, adapter, tab.analysis.params)
+        captured_inputs = _AnalyzeCapture(
+            run_result=tab.run.result,
+            context=ctx,
+            adapter=adapter,
+            params=tab.analysis.params,
+        )
         self._captured_inputs[tab_id] = captured_inputs
 
         # Open the token with a cancel_hook that executes the interactive teardown.
@@ -238,7 +259,7 @@ class AnalyzeService(_StagedAnalyzeService):
         tab_id: str,
         analyze_result: Any,
         *,
-        captured_inputs: tuple[Any, Any, Any, Any],
+        captured_inputs: _AnalyzeCapture,
     ) -> None:
         """Terminal path used by finish_interactive (interactive → same FIT terminal).
 
@@ -282,7 +303,7 @@ class AnalyzeService(_StagedAnalyzeService):
             )
         )
 
-    def _teardown_retired(self, retired: Any) -> None:
+    def _teardown_retired(self, retired: RetiredPaneResources | None) -> None:
         if retired is None:
             return
         for draft in retired.writeback_drafts:
@@ -296,12 +317,15 @@ class AnalyzeService(_StagedAnalyzeService):
         tab_id: str,
         analyze_result: Any,
         *,
-        captured_inputs: tuple[Any, Any, Any, Any],
+        captured_inputs: _AnalyzeCapture,
     ) -> None:
         # Every terminal receives the operation-start snapshot explicitly; the
         # mutable active context and pane inputs are never terminal fallbacks.
         self._captured_inputs.pop(tab_id, None)
-        run_result, ctx, adapter, analyze_params = captured_inputs
+        run_result = captured_inputs.run_result
+        ctx = captured_inputs.context
+        adapter = captured_inputs.adapter
+        analyze_params = captured_inputs.params
 
         proposal_items: list[Any] = []
         if run_result is not None:

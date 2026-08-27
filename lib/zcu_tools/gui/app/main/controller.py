@@ -34,7 +34,7 @@ from .adapter import (
     InteractiveSession,
     WritebackItem,
 )
-from .events.completion import AnalyzeFailedPayload, SaveFinishedPayload
+from .events.completion import AnalyzeFailedPayload, SaveDataFinishedPayload
 from .events.run import RunFinishedPayload
 from .events.tab import (
     TabContentChangedPayload,
@@ -339,7 +339,7 @@ class Controller(SessionControllerMixin):
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
-        bus.subscribe(SaveFinishedPayload, self._on_save_finished)
+        bus.subscribe(SaveDataFinishedPayload, self._on_save_data_finished)
         bus.subscribe(DeviceSetupFinishedPayload, self._on_device_setup_finished)
         bus.subscribe(
             DeviceOperationFinishedPayload, self._on_device_operation_finished
@@ -445,35 +445,11 @@ class Controller(SessionControllerMixin):
         )
         self._notify("error", title, payload.error_message)
 
-    def _on_save_finished(self, outcome: SaveFinishedPayload) -> None:
-        if outcome.image_path is None:
-            if outcome.data_error is None:
-                self._info(f"Data saved to {outcome.data_path}")
-            else:
-                self._notify("error", "Save data failed", outcome.data_error)
+    def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
+        if outcome.error is None:
+            self._info(f"Data saved to {outcome.data_path}")
             return
-        if outcome.data_error is None and outcome.image_error is None:
-            self._info(
-                f"Data saved to {outcome.data_path}; "
-                f"image saved to {outcome.image_path}"
-            )
-            return
-        if outcome.data_error is None:
-            self._info(
-                f"Data saved to {outcome.data_path}; image failed: {outcome.image_error}"
-            )
-            return
-        if outcome.image_error is None:
-            self._info(
-                f"Data failed: {outcome.data_error}; "
-                f"image saved to {outcome.image_path}"
-            )
-            return
-        self._notify(
-            "error",
-            "Save Result failed",
-            f"Data failed: {outcome.data_error}\nImage failed: {outcome.image_error}",
-        )
+        self._notify("error", "Save data failed", outcome.error)
 
     def _on_device_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
         if payload.outcome == "finished":

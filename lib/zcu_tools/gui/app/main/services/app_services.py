@@ -153,7 +153,7 @@ def build_app_services(
         version_drop=cfg_editor_ctrl.drop_editor_version,
         bus=bus,
     )
-    writeback = WritebackService(state, cfg_editor, write_port=cfg_editor_ctrl)
+    writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0005).
     tab = TabService(state, registry, writeback)

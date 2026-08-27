@@ -21,7 +21,6 @@ from .ports import CfgEdit, CfgEditorPort, ContextWrites
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.cfg.binding import CfgDraft
 
     from .ports import ContextWritePort
@@ -122,11 +121,9 @@ class WritebackService:
 
     def __init__(
         self,
-        state: State,
         cfg_editor: CfgEditorPort,
         write_port: ContextWritePort,
     ) -> None:
-        self._state = state
         self._cfg_editor = cfg_editor
         self._write = write_port
 
@@ -276,7 +273,6 @@ class WritebackService:
         # Mark closed before calling driven cleanup. This makes teardown
         # idempotent even if a cfg editor's close implementation raises.
         draft._closed = True
-        self._detach_draft_from_state(draft)
         self._teardown_entries(draft._entries)
 
     # Short behavior-oriented aliases for callers that already hold the opaque
@@ -358,11 +354,3 @@ class WritebackService:
                 logger.exception(
                     "writeback draft editor teardown failed: %s", editor_id
                 )
-
-    def _detach_draft_from_state(self, draft: WritebackDraft) -> None:
-        """Ensure State never retains a draft after its editor sessions close."""
-        for tab in self._state.tabs.values():
-            if tab.analysis.writeback_draft is draft:
-                tab.analysis.writeback_draft = None
-            if tab.post_analysis.writeback_draft is draft:
-                tab.post_analysis.writeback_draft = None

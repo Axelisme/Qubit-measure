@@ -56,6 +56,7 @@ def make_snapshot(
     analysis_figure=None,
     post_analysis_figure=None,
     analysis_writeback_items=(),
+    post_writeback_items=(),
 ):
     from zcu_tools.gui.app.main.services.ports import (
         AnalysisPaneSnapshot,
@@ -107,7 +108,7 @@ def make_snapshot(
         params=DummyPostParams() if has_post_result else None,
         result=object() if has_post_result else None,
         figure=post_figure_obj,
-        writeback_items=(),
+        writeback_items=tuple(post_writeback_items),
         image_path=post_image_snap,
     )
     save_snap = SavePaneSnapshot(data_path=data_path_snap)
@@ -245,6 +246,41 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     tab_none.detach()
     tab_analysis.detach()
     tab_both.detach()
+
+
+def test_main_window_refresh_projects_post_writeback_into_post_widget(
+    qapp, exp_tab_widget
+):
+    from zcu_tools.gui.app.main.adapter import MetaDictWriteback
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = make_ctrl()
+    empty = make_snapshot(
+        "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
+    )
+    assert empty.capabilities is not None
+    tab = exp_tab_widget("tab-1", ctrl, empty.capabilities)
+    tab.attach(empty, MagicMock())
+    assert tab.post_writeback_widget._items == []
+
+    item = MetaDictWriteback(target_name="radius", description="post", proposed_value=1)
+    item.session_id = "md-1"
+    item.selected = True
+    committed = make_snapshot(
+        "tab-1",
+        analysis=AnalysisMode.FIT,
+        post=True,
+        has_post_result=True,
+        post_writeback_items=(item,),
+    )
+    host = MagicMock()
+    host._tab_widgets = {"tab-1": tab}
+    host._ctrl = ctrl
+
+    MainWindow.refresh_tab_writeback(host, "tab-1", committed)
+
+    assert tab.post_writeback_widget._items == [item]
+    tab.detach()
 
 
 def test_figure_containers_remain_stable_across_tab_switch_and_busy(

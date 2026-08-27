@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest, PostWritebackRequest
@@ -17,7 +18,20 @@ from .staged_analyze import _StagedAnalyzeService
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.main.adapter import ExpAdapterProtocol
+    from zcu_tools.gui.session.types import ExpContext
+
+    from ..state import RetiredPaneResources
     from .ports import AnalyzeStatePort, WritebackLifecyclePort
+
+
+@dataclass(frozen=True, slots=True)
+class _PostAnalyzeCapture:
+    run_result: object | None
+    analyze_result: object
+    context: ExpContext
+    adapter: ExpAdapterProtocol
+    params: object
 
 
 class PostAnalyzeService(_StagedAnalyzeService):
@@ -46,7 +60,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,
-        writeback: WritebackLifecyclePort | None = None,
+        writeback: WritebackLifecyclePort,
     ) -> None:
         super().__init__(state, runner, bus, handles)
         self._writeback = writeback
@@ -88,12 +102,12 @@ class PostAnalyzeService(_StagedAnalyzeService):
             type(post_analyze_params_instance).__name__,
         )
         adapter = tab.adapter
-        captured_inputs = (
-            req.run_result,
-            req.analyze_result,
-            ctx,
-            adapter,
-            post_analyze_params_instance,
+        captured_inputs = _PostAnalyzeCapture(
+            run_result=req.run_result,
+            analyze_result=req.analyze_result,
+            context=ctx,
+            adapter=adapter,
+            params=post_analyze_params_instance,
         )
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
@@ -113,8 +127,8 @@ class PostAnalyzeService(_StagedAnalyzeService):
             "post-analyze failed to start",
         )
 
-    def _teardown_retired(self, retired: Any) -> None:
-        if retired is None or self._writeback is None:
+    def _teardown_retired(self, retired: RetiredPaneResources | None) -> None:
+        if retired is None:
             return
         for draft in retired.writeback_drafts:
             try:
@@ -127,12 +141,14 @@ class PostAnalyzeService(_StagedAnalyzeService):
         tab_id: str,
         post_result: Any,
         *,
-        captured_inputs: tuple[Any, Any, Any, Any, Any],
+        captured_inputs: _PostAnalyzeCapture,
     ) -> None:
-        run_result, analyze_result, ctx, adapter, params = captured_inputs
-
+        run_result = captured_inputs.run_result
+        analyze_result = captured_inputs.analyze_result
+        ctx = captured_inputs.context
+        adapter = captured_inputs.adapter
+        params = captured_inputs.params
         writeback = self._writeback
-        assert writeback is not None
         draft: Any | None = None
         try:
             proposal_items = list(

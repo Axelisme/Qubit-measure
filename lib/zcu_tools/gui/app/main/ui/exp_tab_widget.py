@@ -740,8 +740,12 @@ class ExpTabWidget(QWidget):
         return self._post_container
 
     def prepare_run_container(self) -> FigureContainer:
-        """Clear Run presentation and return its container (S3: only affected pane)."""
+        """Clear Run and every downstream presentation for a new run."""
         self._run_container.clear_dynamic_canvases()
+        if self._has_analysis:
+            self._analysis_container.clear_dynamic_canvases()
+        if self._has_post:
+            self._post_container.clear_dynamic_canvases()
         return self._run_container
 
     def prepare_analysis_container(self) -> FigureContainer:

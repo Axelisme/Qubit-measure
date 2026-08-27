@@ -4,7 +4,7 @@ import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.state import (
@@ -49,8 +49,6 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import WritebackItem
 
-    from .services.writeback import WritebackDraft
-
 T_Result = TypeVar("T_Result")
 T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResultWithFigure)
 
@@ -70,7 +68,7 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     params: T_AnalyzeParams | None = None
     result: T_AnalyzeResult | None = None
     figure: Figure | None = None
-    writeback_draft: Any | None = None
+    writeback_draft: object | None = None
     image_path_override: str | None = None
 
 
@@ -79,7 +77,7 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     params: T_AnalyzeParams | None = None
     result: T_AnalyzeResult | None = None
     figure: Figure | None = None
-    writeback_draft: Any | None = None
+    writeback_draft: object | None = None
     image_path_override: str | None = None
 
 
@@ -101,7 +99,7 @@ class RetiredAnalysisResource:
     params: object | None = None
     result: object | None = None
     figure: Figure | None = None
-    writeback_draft: Any | None = None
+    writeback_draft: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,9 +118,9 @@ class RetiredPaneResources:
     )
 
     @property
-    def writeback_drafts(self) -> tuple[Any, ...]:
+    def writeback_drafts(self) -> tuple[object, ...]:
         """All detached opaque drafts, de-duplicated by identity."""
-        drafts: list[Any] = []
+        drafts: list[object] = []
         for candidate in (
             self.analysis.writeback_draft,
             self.post_analysis.writeback_draft,
@@ -132,10 +130,10 @@ class RetiredPaneResources:
         return tuple(drafts)
 
 
-_UNSET: Any = object()
+_UNSET: object = object()
 
 
-@dataclass(init=False)
+@dataclass
 class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
     adapter: ExpAdapterProtocol
@@ -146,47 +144,22 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     cfg_schema: CfgSchema
 
     # Canonical pane-owned resources.
-    run: RunPaneState[T_Result] = field(default_factory=lambda: RunPaneState[Any]())
+    run: RunPaneState[T_Result] = field(
+        default_factory=lambda: cast(RunPaneState[T_Result], RunPaneState())
+    )
     analysis: AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams] = field(
-        default_factory=lambda: AnalysisPaneState[Any, Any]()
+        default_factory=lambda: cast(
+            AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams], AnalysisPaneState()
+        )
     )
     post_analysis: PostAnalysisPaneState[Any, Any] = field(
-        default_factory=lambda: PostAnalysisPaneState[Any, Any]()
+        default_factory=PostAnalysisPaneState
     )
     save: SavePaneState = field(default_factory=SavePaneState)
 
     # State flags are tab interaction resources, not result ownership.
     is_analyzing: bool = False
     is_saving_data: bool = False
-
-    def __init__(
-        self,
-        adapter_name: str,
-        adapter: ExpAdapterProtocol,
-        cfg_schema: CfgSchema,
-        *,
-        run: Any = _UNSET,
-        analysis: Any = _UNSET,
-        post_analysis: Any = _UNSET,
-        save: Any = _UNSET,
-        is_analyzing: bool = False,
-        is_saving_data: bool = False,
-    ) -> None:
-        self.adapter_name = adapter_name
-        self.adapter = adapter
-        self.cfg_schema = cfg_schema
-        self.run = RunPaneState() if run is _UNSET or run is None else run  # type: ignore[assignment]
-        self.analysis = (
-            AnalysisPaneState() if analysis is _UNSET or analysis is None else analysis
-        )  # type: ignore[assignment]
-        self.post_analysis = (
-            PostAnalysisPaneState()
-            if post_analysis is _UNSET or post_analysis is None
-            else post_analysis
-        )  # type: ignore[assignment]
-        self.save = SavePaneState() if save is _UNSET or save is None else save  # type: ignore[assignment]
-        self.is_analyzing = is_analyzing
-        self.is_saving_data = is_saving_data
 
     # -- predicates (the entity answers questions about itself) ------------
 
@@ -474,7 +447,7 @@ class State(SessionState):
         result: object,
         figure: Figure | None,
         params: object | None = None,
-        writeback_draft: Any | None = None,
+        writeback_draft: object | None = None,
         image_path_override: str | None = None,
     ) -> RetiredPaneResources:
         """Build and commit an Analysis carrier in one State transition."""
@@ -495,7 +468,7 @@ class State(SessionState):
         tab_id: str,
         analyze_result: object,
         figure: Figure | None,
-        writeback_draft: WritebackDraft | None = None,
+        writeback_draft: object | None = None,
         analyze_params_instance: object = _UNSET,
     ) -> RetiredPaneResources:
         self._assert_owner()
@@ -558,7 +531,7 @@ class State(SessionState):
         result: object,
         figure: Figure | None,
         params: object | None = None,
-        writeback_draft: Any | None = None,
+        writeback_draft: object | None = None,
         image_path_override: str | None = None,
     ) -> RetiredPaneResources:
         """Build and commit a Post carrier in one State transition."""
@@ -581,7 +554,7 @@ class State(SessionState):
         figure: Figure | None,
         *,
         post_analyze_params_instance: object = _UNSET,
-        writeback_draft: Any | None = None,
+        writeback_draft: object | None = None,
     ) -> RetiredPaneResources:
         """Record a Post result while retaining the independent Analysis pane."""
         self._assert_owner()

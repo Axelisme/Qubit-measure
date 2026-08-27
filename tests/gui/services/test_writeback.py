@@ -89,9 +89,7 @@ def _svc(
     """Build a WritebackService with a MagicMock CfgEditorService + a write port
     that reproduces ContextService's observable effects."""
     bus = bus or EventBus()
-    return WritebackService(
-        state, cfg_editor or MagicMock(), _make_write_port(state, bus)
-    )
+    return WritebackService(cfg_editor or MagicMock(), _make_write_port(state, bus))
 
 
 # ---------------------------------------------------------------------------
@@ -100,13 +98,12 @@ def _svc(
 
 
 def test_create_draft_keeps_two_owners_independent_and_hides_editor_id():
-    state = _make_state_with_tab()
     cfg_editor = MagicMock()
     cfg_editor.open_seeded.side_effect = [
         ("editor-a", ()),
         ("editor-b", ()),
     ]
-    svc = WritebackService(state, cfg_editor, MagicMock())
+    svc = WritebackService(cfg_editor, MagicMock())
 
     draft_a = svc.create_draft(
         [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
@@ -130,13 +127,12 @@ def test_create_draft_keeps_two_owners_independent_and_hides_editor_id():
 
 
 def test_create_draft_cleans_all_opened_sessions_when_a_later_item_fails():
-    state = _make_state_with_tab()
     cfg_editor = MagicMock()
     cfg_editor.open_seeded.side_effect = [
         ("editor-1", ()),
         RuntimeError("open failed"),
     ]
-    svc = WritebackService(state, cfg_editor, MagicMock())
+    svc = WritebackService(cfg_editor, MagicMock())
 
     proposals = [
         ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock()),
@@ -150,8 +146,7 @@ def test_create_draft_cleans_all_opened_sessions_when_a_later_item_fails():
 
 
 def test_create_draft_rejects_proposal_with_dynamic_editor_identity():
-    state = _make_state_with_tab()
-    svc = WritebackService(state, MagicMock(), MagicMock())
+    svc = WritebackService(MagicMock(), MagicMock())
     proposal = ModuleWriteback(
         target_name="a", description="a", edit_schema=MagicMock()
     )
@@ -162,11 +157,10 @@ def test_create_draft_rejects_proposal_with_dynamic_editor_identity():
 
 
 def test_draft_teardown_is_idempotent_even_when_cleanup_raises():
-    state = _make_state_with_tab()
     cfg_editor = MagicMock()
     cfg_editor.open_seeded.return_value = ("editor-1", ())
     cfg_editor.teardown.side_effect = RuntimeError("close failed")
-    svc = WritebackService(state, cfg_editor, MagicMock())
+    svc = WritebackService(cfg_editor, MagicMock())
     draft = svc.create_draft(
         [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
     )
@@ -179,11 +173,10 @@ def test_draft_teardown_is_idempotent_even_when_cleanup_raises():
 
 
 def test_draft_cfg_edits_use_private_editor_session():
-    state = _make_state_with_tab()
     cfg_editor = MagicMock()
     cfg_editor.open_seeded.return_value = ("editor-1", ())
     cfg_editor.set_fields.return_value = CfgEditResult(valid=True)
-    svc = WritebackService(state, cfg_editor, MagicMock())
+    svc = WritebackService(cfg_editor, MagicMock())
     draft = svc.create_draft(
         [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
     )
@@ -194,26 +187,10 @@ def test_draft_cfg_edits_use_private_editor_session():
     cfg_editor.set_fields.assert_called_once_with("editor-1", [CfgEdit("freq", 5000.0)])
 
 
-def test_teardown_draft_detaches_state_reference():
-    state = _make_state_with_tab()
-    cfg_editor = MagicMock()
-    cfg_editor.open_seeded.return_value = ("editor-1", ())
-    svc = WritebackService(state, cfg_editor, MagicMock())
-    draft = svc.create_draft(
-        [ModuleWriteback(target_name="a", description="a", edit_schema=MagicMock())]
-    )
-    state.get_tab("t1").analysis.writeback_draft = draft
-
-    draft.teardown()
-
-    assert state.get_tab("t1").analysis.writeback_draft is None
-
-
 def test_apply_draft_sends_one_context_batch_for_selected_items():
-    state = _make_state_with_tab()
     cfg_editor = MagicMock()
     write_port = MagicMock()
-    svc = WritebackService(state, cfg_editor, write_port)
+    svc = WritebackService(cfg_editor, write_port)
     draft = svc.create_draft(
         [
             MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0),

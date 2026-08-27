@@ -31,15 +31,21 @@ def test_result_focus_and_panel_width_are_owned_by_tab(qapp) -> None:
     assert tab.left_panel_width() == 500
 
 
-def test_prepare_run_container_clears_stale_run_figure(qapp) -> None:
+def test_prepare_run_container_clears_run_and_downstream_figures(qapp) -> None:
     tab = _tab()
     tab.show_run_figure(Figure())
+    tab.show_analysis_figure(Figure())
+    tab.show_post_analysis_figure(Figure())
 
     container = tab.prepare_run_container()
 
     assert container is tab.get_run_container()
     assert tab.get_current_figure_for_pane("run") is None
+    assert tab.get_current_figure_for_pane("analysis") is None
+    assert tab.get_current_figure_for_pane("post_analysis") is None
     assert tab._run_stack.count() == 1
+    assert tab._analysis_stack.count() == 1
+    assert tab._post_stack.count() == 1
 
 
 def test_interactive_widget_lifecycle_is_owned_by_tab(qapp) -> None:

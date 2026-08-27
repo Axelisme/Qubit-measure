@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.main.adapter import SaveDataRequest
-from zcu_tools.gui.app.main.events.completion import SaveFinishedPayload
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -46,7 +46,7 @@ class SaveService:
 
         def on_done(_result: object) -> None:
             with self._bus.origin(origin):
-                self._on_save_finished(tab_id)
+                self._on_save_data_finished(tab_id)
 
         def on_error(error: Exception) -> None:
             with self._bus.origin(origin):
@@ -147,17 +147,11 @@ class SaveService:
             TabInteractionChangedPayload(tab_id=tab_id, fact=fact),
         )
 
-    def _on_save_finished(self, tab_id: str) -> None:
+    def _on_save_data_finished(self, tab_id: str) -> None:
         path = self._active_paths.pop(tab_id, "")
-        logger.info("_on_save_finished: tab_id=%r path=%r", tab_id, path)
+        logger.info("_on_save_data_finished: tab_id=%r path=%r", tab_id, path)
         self._mark_saving(tab_id, False, TabInteractionFact.SAVE_SUCCEEDED)
-        self._bus.emit(
-            SaveFinishedPayload(
-                tab_id=tab_id,
-                data_path=path,
-                image_path=None,
-            )
-        )
+        self._bus.emit(SaveDataFinishedPayload(tab_id=tab_id, data_path=path))
 
     def _on_save_failed(self, tab_id: str, error: Exception) -> None:
         path = self._active_paths.pop(tab_id, "")
@@ -166,10 +160,9 @@ class SaveService:
         )
         self._mark_saving(tab_id, False, TabInteractionFact.SAVE_FAILED)
         self._bus.emit(
-            SaveFinishedPayload(
+            SaveDataFinishedPayload(
                 tab_id=tab_id,
                 data_path=path,
-                image_path=None,
-                data_error=str(error),
+                error=str(error),
             )
         )
