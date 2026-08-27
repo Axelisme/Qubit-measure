@@ -121,14 +121,33 @@ class DiagnosticSink(Protocol):
 
 
 class RenderHost(Protocol):
-    """The single canvas-bearing View the Controller asks for run/analyze Qt
-    artefacts (the live figure container). Progress bars no longer come from the
-    View — they are minted by ProgressService, bound to the operation."""
+    """Canvas-bearing View for run/analyze figure routing (ADR-0017).
+
+    Each (tab_id, subtab) pane owns a stable FigureContainer for its lifetime (S2).
+    The worker captures the pane's container at start; switching the visible pane
+    does not change the routing target. Save/Guide have no container (placeholder).
+    The legacy ``make_live_container`` remains for Run live plot (view-only) and is
+    an alias for the Run pane.
+    """
 
     def make_live_container(self, tab_id: str) -> FigureContainer | None:
-        """The tab's single right-pane figure container, shared by run, analyze,
-        and post-analysis (the container always shows the most recently produced
-        figure). Headless Views may return None."""
+        """Legacy alias for the Run pane container (headless may return None)."""
+        ...
+
+    def make_run_container(self, tab_id: str) -> FigureContainer | None:
+        """Run pane FigureContainer (live plot, view-only)."""
+        ...
+
+    def make_analysis_container(self, tab_id: str) -> FigureContainer | None:
+        """Analysis pane FigureContainer (canonical)."""
+        ...
+
+    def make_post_analysis_container(self, tab_id: str) -> FigureContainer | None:
+        """Post-Analysis pane FigureContainer (canonical)."""
+        ...
+
+    def get_figure_container(self, tab_id: str, pane: str) -> FigureContainer | None:
+        """Pane-aware container access (pane in run|analysis|post_analysis)."""
         ...
 
     def mount_interactive_analysis(
@@ -255,15 +274,15 @@ class Controller(SessionControllerMixin):
 
             transport = QtProgressTransport()
         services = build_app_services(
-            state=state,
+            state=state,  # type: ignore[arg-type]
             bus=bus,
-            registry=registry,
+            registry=registry,  # type: ignore[arg-type]
             io_manager=io_manager,
             cfg_editor_ctrl=self,
             progress_transport=transport,
             notify_info=self._info,
             resource_versions=self.resources_versions,
-            render_host=lambda: self._render_host,
+            render_host=lambda: self._render_host,  # type: ignore[arg-type]
             project_root=self._project_root,
         )
         self._services = services
@@ -875,12 +894,12 @@ class Controller(SessionControllerMixin):
     # Writeback (TabService)
     # ------------------------------------------------------------------
 
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
+    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:  # type: ignore[override]
         """Read the tab's persistent writeback draft (read-only, no permit).
 
         Returns [] when the tab has no run/analyze result yet.
         """
-        return self._writeback_control.get_tab_writeback_items(tab_id)
+        return self._writeback_control.get_tab_writeback_items(tab_id)  # type: ignore[return-value]
 
     def apply_writeback(self, tab_id: str) -> dict[str, Any]:
         """Apply the tab's persistent writeback draft as-is (no recompute).
@@ -1289,6 +1308,38 @@ class Controller(SessionControllerMixin):
         self, tab_id: str, data_path: str, image_path: str
     ) -> None:
         self._save_control.update_tab_save_paths(tab_id, data_path, image_path)
+
+    def update_tab_data_path(self, tab_id: str, data_path: str | None) -> None:
+        """Per-pane Save data-path override (Save pane)."""
+        self._tab_svc.update_tab_data_path_override(tab_id, data_path)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            ),
+        )
+
+    def update_tab_analysis_image_path(
+        self, tab_id: str, image_path: str | None
+    ) -> None:
+        self._tab_svc.update_tab_analysis_image_path_override(tab_id, image_path)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            ),
+        )
+
+    def update_tab_post_analysis_image_path(
+        self, tab_id: str, image_path: str | None
+    ) -> None:
+        self._tab_svc.update_tab_post_analysis_image_path_override(tab_id, image_path)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
+            ),
+        )
 
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()

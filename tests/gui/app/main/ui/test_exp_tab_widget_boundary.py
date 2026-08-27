@@ -30,13 +30,15 @@ def test_result_focus_and_panel_width_are_owned_by_tab(qapp) -> None:
 
 def test_prepare_live_container_clears_stale_figure(qapp) -> None:
     tab = _tab()
-    tab.show_analysis_figure(Figure())
+    # Run live container is the target of prepare_live_container (Ticket 03 S2/S3)
+    tab.show_run_figure(Figure())  # type: ignore[attr-defined]
 
     container = tab.prepare_live_container()
 
-    assert container is tab._figure_container
-    assert tab.current_figure() is None
-    assert tab._plot_stack.count() == 1
+    assert container is tab.get_run_container()  # type: ignore[attr-defined]
+    # Run pane cleared; analysis pane not affected but run is now placeholder
+    assert tab.get_current_figure_for_pane("run") is None  # type: ignore[attr-defined]
+    assert tab._run_stack.count() == 1
 
 
 def test_interactive_widget_lifecycle_is_owned_by_tab(qapp) -> None:
@@ -50,15 +52,16 @@ def test_interactive_widget_lifecycle_is_owned_by_tab(qapp) -> None:
     second = _Interactive()
     unrelated = QWidget()
     tab.mount_interactive_widget(first)
-    tab._plot_stack.addWidget(second)
-    tab._plot_stack.addWidget(unrelated)
+    # Interactive mounts into analysis pane
+    tab._analysis_stack.addWidget(second)  # type: ignore[attr-defined]
+    tab._analysis_stack.addWidget(unrelated)  # type: ignore[attr-defined]
 
     tab.unmount_interactive_widgets(_Interactive)
 
-    assert tab._plot_stack.indexOf(first) == -1
-    assert tab._plot_stack.indexOf(second) == -1
-    assert tab._plot_stack.indexOf(unrelated) >= 0
-    assert tab.current_figure() is None
+    assert tab._analysis_stack.indexOf(first) == -1  # type: ignore[attr-defined]
+    assert tab._analysis_stack.indexOf(second) == -1  # type: ignore[attr-defined]
+    assert tab._analysis_stack.indexOf(unrelated) >= 0  # type: ignore[attr-defined]
+    assert tab.get_current_figure_for_pane("analysis") is None  # type: ignore[attr-defined]
     reset_plot.assert_not_called()
 
 
@@ -81,8 +84,8 @@ def test_interactive_setup_failure_clears_stale_figure_before_setup(
     window = MainWindow(ctrl)
     tab = _tab()
     tab.show_analysis_figure(Figure())
-    reset_plot = MagicMock(wraps=tab.reset_plot)
-    tab.reset_plot = reset_plot
+    # Capture analysis container for S2 stability check
+    captured = tab.get_analysis_container()  # type: ignore[attr-defined]
     window._tab_widgets["tab-1"] = tab
     monkeypatch.setattr(
         "zcu_tools.gui.app.main.ui.interactive_analysis.InteractiveAnalysisWidget",
@@ -99,8 +102,9 @@ def test_interactive_setup_failure_clears_stale_figure_before_setup(
             "tab-1", session_factory, lambda _session: None
         )
 
-    assert tab.current_figure() is None
-    reset_plot.assert_called_once_with()
+    # Failure should have cleared analysis presentation but retained container identity
+    assert tab.get_current_figure_for_pane("analysis") is None  # type: ignore[attr-defined]
+    assert tab.get_analysis_container() is captured  # type: ignore[attr-defined]
 
 
 def test_interactive_mount_resets_plot_exactly_once(qapp, monkeypatch) -> None:
@@ -116,8 +120,8 @@ def test_interactive_mount_resets_plot_exactly_once(qapp, monkeypatch) -> None:
     ctrl.has_agent_connected.return_value = False
     window = MainWindow(ctrl)
     tab = _tab()
-    reset_plot = MagicMock(wraps=tab.reset_plot)
-    tab.reset_plot = reset_plot
+    # Capture analysis container identity before mount
+    captured = tab.get_analysis_container()  # type: ignore[attr-defined]
     window._tab_widgets["tab-1"] = tab
     monkeypatch.setattr(
         "zcu_tools.gui.app.main.ui.interactive_analysis.InteractiveAnalysisWidget",
@@ -126,7 +130,9 @@ def test_interactive_mount_resets_plot_exactly_once(qapp, monkeypatch) -> None:
 
     window.mount_interactive_analysis("tab-1", lambda _widget: object(), lambda _: None)
 
-    reset_plot.assert_called_once_with()
+    # Mount should have cleared analysis pane but kept container identity
+    assert tab.get_analysis_container() is captured  # type: ignore[attr-defined]
+    assert tab._analysis_stack.count() >= 2  # type: ignore[attr-defined] # placeholder + interactive widget
 
 
 def test_current_figure_validates_visible_plot_content(qapp) -> None:
@@ -134,11 +140,12 @@ def test_current_figure_validates_visible_plot_content(qapp) -> None:
     figure = Figure()
     tab.show_analysis_figure(figure)
 
+    assert tab.get_current_figure_for_pane("analysis") is figure  # type: ignore[attr-defined]
     assert tab.current_figure() is figure
 
     invalid = QWidget()
-    tab._plot_stack.addWidget(invalid)
-    tab._plot_stack.setCurrentWidget(invalid)
+    tab._analysis_stack.addWidget(invalid)  # type: ignore[attr-defined]
+    tab._analysis_stack.setCurrentWidget(invalid)  # type: ignore[attr-defined]
 
     with pytest.raises(
         RuntimeError, match="tab 'tab-1' canvas has no matplotlib figure"

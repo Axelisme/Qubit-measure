@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-27 — pane-owned lifecycle and load capability
+**Last updated:** 2026-08-27 — capability-driven subtabs and pane-owned lifecycle
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -24,13 +24,23 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 - `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。`running_tab_id`
   是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
-- `ui/`：Qt widgets、MainWindow top-level façade、tab-local `ExpTabWidget`、
+- `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
-  `ExpTabWidget` owns tab-local rendering and receives tab actions through a
-  narrow `TabActions` port; `MainWindow` adapts those actions to top-level
-  handlers. Top-level orchestration invokes behavior-oriented tab methods for
-  result focus, plot hosting, interactive-widget lifecycle, figure reads, and
-  persisted panel geometry; the tab does not expose its Qt containers.
+  `ExpTabWidget` owns capability-driven left subtab composition (fixed order
+  Run | Analysis? | Post-Analysis? | Save | Guide, no placeholder tab when a
+  capability is absent) and per-pane `FigureContainer` routing (stable identity
+  per (tab, pane) for the widget lifetime; refresh never replaces the container;
+  busy tabs cannot close or rebuild, so the captured worker target outlives the
+  operation without a lease). It receives tab actions through a narrow
+  `TabActions` port; `MainWindow` adapts those actions to top-level handlers.
+  `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
+  captures its pane's container at start — switching the visible subtab never
+  retargets the worker (ADR-0017). Save owns data-path/comment/Load/Save Data;
+  Analysis/Post own their image-path/Save Image; Run's live figure is view-only
+  (display + screenshot, no canonical Save). Top-level orchestration invokes
+  behavior-oriented tab methods for result focus, plot hosting, interactive-widget
+  lifecycle, figure reads, and persisted panel geometry; the tab does not expose
+  its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
@@ -92,20 +102,23 @@ provider; remote writeback handlers use this facet instead of the giant
 `Controller` surface. Cfg-editor remains a separate domain, and `Controller`
 keeps thin compatibility forwards for UI surfaces that have not migrated yet.
 
-Inside the Qt view, `MainWindow` remains the top-level View / RenderHost facade
-while `MainWindowEventCoordinator` owns EventBus subscription and payload routing.
-The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
-which refresh sequence a payload requires, but the window keeps widget ownership
-and concrete rendering methods.
+Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
+while `MainWindowEventCoordinator` owns EventBus subscription and pane-specific
+payload routing (ADR-0048). The coordinator speaks to `MainWindow` through a narrow
+host protocol: it decides which refresh sequence a closed domain fact requires,
+but the window keeps widget ownership and concrete rendering methods. Producers
+emit only closed facts (run/analysis/post lifecycle or committed resources) — no
+widget refresh flags — and the coordinator owns the ordered fact-to-reaction
+matrix, fetching at most one `TabSnapshot` when a reaction needs it.
+Operation start clears only the affected pane's presentation while retaining the
+previous canonical pane for failure recovery; success shows the new pane's figure
+and draft, failure/cancel restores the retained pane (primary failure restores
+primary then post). Save/Guide show a placeholder and never borrow another pane's
+figure. Local analyze/post/save-path edits keep synchronous State commit timing
+but have no Qt reaction.
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
-Tab interaction/content payloads carry mandatory closed domain facts. Producers
-describe lifecycle outcomes or committed resources; the coordinator owns the
-ordered reaction matrix and fetches one snapshot only when a reaction needs it.
-Local analyze/post/save-path edits keep synchronous State commit timing but have
-no Qt reaction. Failed/cancelled/start-rejected analysis restores retained
-primary then post figures; successful terminals wait for the content-commit fact.
 `MainWindowToolbar` owns the top toolbar widgets and slash-grouped new-tab menu;
 it reports selected actions back through a narrow `MainWindowToolbarHost` surface
 instead of reaching into `Controller` directly.

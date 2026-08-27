@@ -282,7 +282,19 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        # Primary pane writeback (legacy flat) - keep for backward
         tab_w.update_writeback_items(list(current.writeback_items))
+        # Per-pane post writeback (if pane snapshot present)
+        if getattr(current, 'post_analysis', None) is not None:  # type: ignore[attr-defined, attr-defined]
+            try:
+                tab_w.update_post_writeback_items(
+                    list(current.post_analysis.writeback_items)  # type: ignore[attr-defined]
+                )
+            except AttributeError:
+                pass
+        elif hasattr(current, "post_writeback_items"):
+            # fallback for older snapshot
+            pass
 
     def refresh_tab_save_paths(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -291,6 +303,26 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        # Prefer pane paths (Ticket 02) if present
+        if getattr(current, "paths", None) is not None and current.paths is not None:  # type: ignore[attr-defined]
+            try:
+                data_path = current.paths.data.path or ""  # type: ignore[attr-defined]
+                analysis_path = current.paths.analysis_image.path or ""  # type: ignore[attr-defined]
+                post_path = current.paths.post_analysis_image.path or ""  # type: ignore[attr-defined]
+                if data_path or analysis_path or post_path:
+                    # Use per-pane setters where available
+                    if hasattr(tab_w, "set_data_path") and data_path:
+                        tab_w.set_data_path(data_path)
+                    if hasattr(tab_w, "set_analysis_image_path") and analysis_path:
+                        tab_w.set_analysis_image_path(analysis_path)
+                    if hasattr(tab_w, "set_post_image_path") and post_path:
+                        tab_w.set_post_image_path(post_path)
+                    # For legacy combined setter, also set via old if both present
+                    if data_path and analysis_path:
+                        tab_w.set_save_paths(data_path, analysis_path)
+                    return
+            except Exception:
+                pass
         save_paths = current.save_paths
         if save_paths is not None:
             tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
@@ -302,7 +334,15 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        figure = current.figure
+        # Prefer pane snapshot if available
+        figure = None
+        if (
+            getattr(current, "analysis", None) is not None  # type: ignore[attr-defined]
+            and current.analysis is not None  # type: ignore[attr-defined]
+        ):
+            figure = current.analysis.figure  # type: ignore[attr-defined]
+        else:
+            figure = current.figure
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
@@ -313,20 +353,26 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        post_figure = current.post_figure
+        post_figure = None
+        if (
+            getattr(current, "post_analysis", None) is not None  # type: ignore[attr-defined]
+            and current.post_analysis is not None  # type: ignore[attr-defined]
+        ):
+            post_figure = current.post_analysis.figure  # type: ignore[attr-defined]
+        else:
+            post_figure = current.post_figure
         if post_figure is not None:
-            # Post + analyze share one container; ``refresh_tab_figure`` runs just
-            # before this and renders ``tab.figure``, so when a post figure exists
-            # it is drawn last and the shared container shows the most recent
-            # (post) figure. On invalidation (post_figure is None) there is nothing
-            # to do: the shared container already shows the primary figure.
             self.show_post_analysis_image(tab_id, post_figure)
 
     def clear_tab_plot(self, tab_id: str) -> None:
         """Clear stale canvases after loading content with no analysis figure."""
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is not None:
-            tab_w.reset_plot()
+            # Per-pane clear: analysis and post (run live is separate)
+            if hasattr(tab_w, "clear_all_figures"):
+                tab_w.clear_all_figures()
+            else:
+                tab_w.reset_plot()
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
@@ -395,6 +441,48 @@ class MainWindow(QMainWindow):
             return None
         return tab_w.prepare_live_container()
 
+    def make_run_container(self, tab_id: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        # New pane-aware API
+        if hasattr(tab_w, "prepare_run_container"):
+            return tab_w.prepare_run_container()
+        return tab_w.prepare_live_container()
+
+    def make_analysis_container(self, tab_id: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        if hasattr(tab_w, "prepare_analysis_container"):
+            return tab_w.prepare_analysis_container()
+        return tab_w.prepare_live_container()
+
+    def make_post_analysis_container(self, tab_id: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        if hasattr(tab_w, "prepare_post_container"):
+            return tab_w.prepare_post_container()
+        return tab_w.prepare_live_container()
+
+    def get_figure_container(self, tab_id: str, pane: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        pane_map = {
+            "run": getattr(tab_w, "get_run_container", None),
+            "analysis": getattr(tab_w, "get_analysis_container", None),
+            "post_analysis": getattr(tab_w, "get_post_container", None),
+        }
+        getter = pane_map.get(pane)
+        if callable(getter):
+            try:
+                return getter()
+            except Exception:
+                return None
+        return None
+
     def mount_interactive_analysis(
         self,
         tab_id: str,
@@ -413,7 +501,14 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.reset_plot()
+        # Only clear analysis presentation for interactive pick (S3)
+        if hasattr(tab_w, "prepare_analysis_container"):
+            try:
+                tab_w.prepare_analysis_container()
+            except Exception:
+                tab_w.reset_plot()
+        else:
+            tab_w.reset_plot()
         # The Controller satisfies InteractiveHostEnv (run_background via bg's
         # pool); the widget pulls only that one capability through the port.
         widget = InteractiveAnalysisWidget(self._ctrl)
@@ -470,14 +565,17 @@ class MainWindow(QMainWindow):
         tab_w.show_analysis_figure(fig)
 
     def show_post_analysis_image(self, tab_id: str, fig: Any) -> None:
-        # Post figures share the primary right-pane container (the container shows
-        # the most recently produced figure), so this routes through the same
-        # render path as the analyze figure.
         logger.debug("show_post_analysis_image: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.show_analysis_figure(fig)
+        # Prefer dedicated post figure method if available
+        if hasattr(tab_w, "show_post_analysis_figure"):
+            tab_w.show_post_analysis_figure(fig)
+        elif hasattr(tab_w, "show_post_figure"):
+            tab_w.show_post_figure(fig)
+        else:
+            tab_w.show_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
