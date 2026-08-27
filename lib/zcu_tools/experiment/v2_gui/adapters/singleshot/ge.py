@@ -27,6 +27,7 @@ from zcu_tools.gui.app.main.adapter import (
     ParamMeta,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
+    PostWritebackRequest,
     WritebackItem,
     WritebackRequest,
 )
@@ -52,15 +53,7 @@ class GEAnalyzeResult(AnalyzeResultBase):
     ge_s: float
     g_center: complex
     e_center: complex
-    # ``ge_radius`` is the optimised classification radius (writeback-safe float;
-    # the per-qubit calibration downstream single-shot experiments consume).
-    # ``confusion`` is the 3×3 prepared→measured confusion matrix as a nested
-    # ``list[list[float]]`` so ``to_summary_dict`` carries it JSON-safe (the
-    # domain returns a numpy array). Both come from
-    # ``GE_Exp.calc_confusion_matrix`` over the primary fit's populations.
     init_pops: list[list[float]]
-    ge_radius: float
-    confusion: list[list[float]]
     figure: Figure
 
 
@@ -108,11 +101,12 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             "exists."
         ),
         typical_writeback=(
-            "Proposes the fitted assignment fidelity into MetaDict 'fid', the "
-            "cluster width into 'ge_s', the complex discrimination centres into "
-            "'g_center' / 'e_center', the optimised classification radius into "
-            "'ge_radius', and the 3x3 confusion matrix (nested list) into "
-            "'confusion_matrix' (a non-scalar, read-only writeback item)."
+            "Primary proposes the fitted assignment fidelity into MetaDict 'fid', the "
+            "cluster width into 'ge_s', and the complex discrimination centres into "
+            "'g_center' / 'e_center'. Post-Analysis proposes the optimised "
+            "classification radius into 'ge_radius' and the 3x3 confusion matrix "
+            "(nested list) into 'confusion_matrix' (a non-scalar, read-only "
+            "writeback item)."
         ),
         recommended=(
             "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
@@ -147,31 +141,14 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         fidelity, pops, fit_result, fig = exp.analyze(
             req.run_result, backend=params.backend
         )
-        g_center = fit_result["g_center"]
-        e_center = fit_result["e_center"]
-        # ``pops`` has fixed order [[p0_gg, p0_ge], [p0_eg, p0_ee]]. The
-        # figure-free confusion calculation keeps the primary distribution figure
-        # visible while preserving the existing complete writeback.
-        ge_s = fit_result["s"]
-        confusion = exp.calc_confusion_matrix(
-            pops,
-            g_center,
-            e_center,
-            ge_s,
-            radius=None,
-            result=req.run_result,
-            consider_other=False,
-        )
         return GEAnalyzeResult(
             fidelity=fidelity,
             theta=fit_result["theta"],
             threshold=fit_result["threshold"],
-            ge_s=ge_s,
-            g_center=g_center,
-            e_center=e_center,
+            ge_s=fit_result["s"],
+            g_center=fit_result["g_center"],
+            e_center=fit_result["e_center"],
             init_pops=pops.tolist(),
-            ge_radius=confusion.radius,
-            confusion=confusion.matrix.tolist(),
             figure=fig,
         )
 
@@ -238,20 +215,19 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
                 description="Single-shot |e> IQ cluster centre (complex)",
                 proposed_value=result.e_center,
             ),
-            # ``ge_radius`` is the per-qubit classification radius downstream
-            # single-shot experiments consume — a clean scalar, mirrors the
-            # notebook's md.ge_radius.
+        ]
+
+    def get_post_writeback_items(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self,
+        req: PostWritebackRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeResult],
+    ) -> Sequence[WritebackItem]:
+        result = req.post_analyze_result
+        return [
             MetaDictWriteback(
                 target_name="ge_radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
             ),
-            # ``confusion_matrix`` is the 3×3 prepared→measured confusion matrix
-            # as a nested ``list[list[float]]`` (md key mirrors the notebook's
-            # md.confusion_matrix). It is a non-scalar md value: MetaDict already
-            # stores nested lists (it cannot hold ndarray — dumps tolist(), loads
-            # raw), the value is JSON-safe so the wire carries it as-is, and the
-            # writeback UI renders it read-only (derived value, applied verbatim).
             MetaDictWriteback(
                 target_name="confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",

@@ -1,4 +1,6 @@
-**Last updated:** 2026-08-13 — JPA 校準 family 的 runtime-control policy
+**Last updated:** 2026-08-27 — singleshot GE primary/post writeback ownership
+
+Post-analysis adapters 以 `get_post_writeback_items()` 提出 post-owned proposal；framework 將 primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Writeback 實作。
 
 # measure experiment adapters
 

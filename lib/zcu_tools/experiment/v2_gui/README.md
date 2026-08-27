@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-08-26 — singleshot GE staged analysis
+**Last updated:** 2026-08-27 — singleshot GE primary/post writeback ownership
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -124,14 +124,16 @@ analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default
 時才必須覆寫；params 每欄位都有 default（含 `NoAnalyzeParams`、及把常數折進欄位 default 的 adapter）時
 沿用 base default（回 `params_cls()`）。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作
 `get_post_analyze_params()` / `post_analyze()`；post-analysis 是第二層 CPU-only 探索/比較視圖，
-不更新 writeback draft，writeback 仍只由 primary `analyze()` result 經 `get_writeback_items()`
-產生。`validate_run_request` 不受 capabilities 控制：Base 提供 no-op default，Protocol/Base exact
-signature 與 registry conformance tests 共同鎖定 framework mandatory surface。
+可選地透過 `get_post_writeback_items()` 提出獨立 writeback。`validate_run_request` 不受
+capabilities 控制：Base 提供 no-op default，Protocol/Base exact signature 與 registry
+conformance tests 共同鎖定 framework mandatory surface。
 
-`singleshot/ge` 的 primary analysis 是唯一 calibration/writeback 來源：所選 backend 擬合 centres、
-`ge_s` 與 initial populations，再以 figure-free confusion calculation 產生 `ge_radius` 和 3×3 matrix，
-右側只顯示 IQ distribution。它的零參數 post-analysis 不重新 fitting，而是使用 primary fit 資料重算
-radius/matrix 並顯示既有完整 confusion diagnostic；post result 不建立 writeback。
+`singleshot/ge` 的 primary analysis 只產生 fit 產物：所選 backend 擬合 centres、`ge_s` 與
+initial populations，右側顯示 IQ distribution，並經 `get_writeback_items()` 提出 `fid`、`ge_s`、
+`g_center`、`e_center`。它的零參數 post-analysis 是 sole confusion 路徑：使用 primary fit 資料
+計算 `ge_radius` 與 3×3 confusion matrix，顯示完整 confusion diagnostic，並經
+`get_post_writeback_items()` 提出 `ge_radius`、`confusion_matrix`；兩組 proposal 分屬不同 pane
+的 opaque draft，adapter 不接觸 Writeback implementation。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，
