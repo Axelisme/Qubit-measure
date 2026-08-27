@@ -141,6 +141,41 @@ def test_save_image_creates_parent_at_command_boundary(
     _assert_saved_fixed_size(figure, str(image_path))
 
 
+@pytest.mark.parametrize(
+    "entrypoint",
+    ("start_save_data", "start_save_result", "save_image_sync", "save_post_image_sync"),
+)
+def test_save_entrypoints_reject_busy_tab_before_side_effects(
+    qapp,
+    tmp_path: Path,
+    entrypoint: str,
+) -> None:
+    svc, state, bg = _make_service()
+    figure = _make_figure()
+    tab = state.get_tab("tab")
+    tab.figure = figure
+    tab.post_figure = figure
+    state.set_tab_analyzing("tab", True)
+    permit = SavePermit(tab_id="tab")
+    data_path = str(tmp_path / "data" / "measurement")
+    image_path = str(tmp_path / "images" / "plot.png")
+
+    with pytest.raises(FailedPreconditionError, match="busy"):
+        if entrypoint == "start_save_data":
+            svc.start_save_data(permit, data_path)
+        elif entrypoint == "start_save_result":
+            svc.start_save_result(permit, data_path, image_path)
+        elif entrypoint == "save_image_sync":
+            svc.save_image_sync(permit, image_path)
+        else:
+            svc.save_post_image_sync(permit, image_path)
+
+    bg.submit.assert_not_called()
+    figure.savefig.assert_not_called()
+    assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "images").exists()
+
+
 # ---------------------------------------------------------------------------
 # start_save_result
 # ---------------------------------------------------------------------------

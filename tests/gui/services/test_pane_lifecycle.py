@@ -248,6 +248,33 @@ def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
     assert writeback.created == []
 
 
+def test_retired_teardown_failure_does_not_roll_back_committed_pane() -> None:
+    state, tab_id, adapter, _ctx = _state()
+    old_primary_draft = _Draft(())
+    old_post_draft = _Draft(())
+    state.replace_analysis_pane(
+        tab_id, result="old-primary", figure=None, writeback_draft=old_primary_draft
+    )
+    state.replace_post_analysis_pane(
+        tab_id, result="old-post", figure=None, writeback_draft=old_post_draft
+    )
+    adapter.get_writeback_items.return_value = []
+    writeback = _Writeback()
+    writeback.fail_teardown = True
+    service, bg = _analyze_service(state, writeback)
+    service.start_analyze(AnalyzePermit(tab_id), "params")
+    new_result = MagicMock(figure=None)
+
+    bg.on_done(new_result)
+
+    tab = state.get_tab(tab_id)
+    assert tab.analysis.result is new_result
+    assert tab.analysis.writeback_draft is writeback.created[-1]
+    assert tab.post_analysis.result is None
+    assert tab.post_analysis.writeback_draft is None
+    assert writeback.torn_down == [old_primary_draft, old_post_draft]
+
+
 def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
     state, tab_id, _adapter, _ctx = _state()
 
