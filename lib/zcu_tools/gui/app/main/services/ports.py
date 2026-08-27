@@ -69,10 +69,6 @@ class PathResourceSnapshot:
     override: str | None
     path: str | None
 
-    @property
-    def effective(self) -> str | None:
-        return self.path
-
     def __str__(self) -> str:
         return self.path or ""
 
@@ -101,10 +97,6 @@ class AnalysisPaneSnapshot:
     writeback_items: tuple[WritebackItem, ...]
     image_path: PathResourceSnapshot
 
-    @property
-    def image_path_override(self) -> str | None:
-        return self.image_path.override
-
 
 @dataclass(frozen=True, slots=True)
 class PostAnalysisPaneSnapshot:
@@ -114,18 +106,10 @@ class PostAnalysisPaneSnapshot:
     writeback_items: tuple[WritebackItem, ...]
     image_path: PathResourceSnapshot
 
-    @property
-    def image_path_override(self) -> str | None:
-        return self.image_path.override
-
 
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
     data_path: PathResourceSnapshot
-
-    @property
-    def data_path_override(self) -> str | None:
-        return self.data_path.override
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,18 +119,6 @@ class TabPathsSnapshot:
     data: PathResourceSnapshot
     analysis_image: PathResourceSnapshot
     post_analysis_image: PathResourceSnapshot
-
-    @property
-    def data_path(self) -> PathResourceSnapshot:
-        return self.data
-
-    @property
-    def analysis_image_path(self) -> PathResourceSnapshot:
-        return self.analysis_image
-
-    @property
-    def post_image_path(self) -> PathResourceSnapshot:
-        return self.post_analysis_image
 
 
 @dataclass(frozen=True)
@@ -169,38 +141,6 @@ class TabSnapshot:
     post_analysis: PostAnalysisPaneSnapshot | None = None
     save: SavePaneSnapshot | None = None
     paths: TabPathsSnapshot | None = None
-
-    @property
-    def run_pane(self) -> RunPaneSnapshot | None:
-        return self.run
-
-    @property
-    def analysis_pane(self) -> AnalysisPaneSnapshot | None:
-        return self.analysis
-
-    @property
-    def post_analysis_pane(self) -> PostAnalysisPaneSnapshot | None:
-        return self.post_analysis
-
-    @property
-    def save_pane(self) -> SavePaneSnapshot | None:
-        return self.save
-
-    @property
-    def data_path(self) -> str | None:
-        return None if self.paths is None else self.paths.data.path
-
-    @property
-    def analysis_image_path(self) -> str | None:
-        return None if self.paths is None else self.paths.analysis_image.path
-
-    @property
-    def post_analysis_image_path(self) -> str | None:
-        return None if self.paths is None else self.paths.post_analysis_image.path
-
-    @property
-    def path_resources(self) -> TabPathsSnapshot | None:
-        return self.paths
 
 
 @dataclass(frozen=True)

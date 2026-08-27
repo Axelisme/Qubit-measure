@@ -51,7 +51,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert snapshot.interaction.has_active_context is True  # ctx.readiness=ACTIVE
     assert snapshot.analysis is not None
     assert snapshot.analysis.params is analyze_params
-    assert snapshot.data_path == "data.h5"
+    assert snapshot.paths is not None and snapshot.paths.data.path == "data.h5"
     assert state.get_tab("tab").analysis.params is analyze_params
 
 

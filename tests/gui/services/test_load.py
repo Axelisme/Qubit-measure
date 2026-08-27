@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.gui.app.main.adapter import NoAnalyzeParams
+from zcu_tools.gui.app.main.adapter import AdapterCapabilities, NoAnalyzeParams
 from zcu_tools.gui.app.main.services.guard import LoadPermit
 from zcu_tools.gui.app.main.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
@@ -24,10 +24,11 @@ def _empty_schema() -> CfgSchema:
     return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
 
-def _make_state() -> tuple[State, str, MagicMock]:
+def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
     state = State(ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
     tab_id = "tab-1"
     adapter = MagicMock()
+    adapter.capabilities = AdapterCapabilities(load_data=load_data)
     state.add_tab(
         tab_id,
         Session(adapter_name="any", adapter=adapter, cfg_schema=_empty_schema()),

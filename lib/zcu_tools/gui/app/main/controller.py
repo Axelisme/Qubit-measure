@@ -388,7 +388,7 @@ class Controller(SessionControllerMixin):
         tab_id = payload.tab_id
         if (
             payload.outcome == "cancelled"
-            and self._state.get_tab(tab_id).run_result is None
+            and self._state.get_tab(tab_id).run.result is None
         ):
             return
         # State is already updated in RunService. Only adapters that do

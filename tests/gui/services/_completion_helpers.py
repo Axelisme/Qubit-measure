@@ -102,7 +102,7 @@ def on_analyze_finished(
         TabInteractionChangedPayload,
         lambda payload: (
             callback(
-                payload.tab_id, service._state.get_tab(payload.tab_id).analyze_result
+                payload.tab_id, service._state.get_tab(payload.tab_id).analysis.result
             )
             if payload.fact is TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED
             else None
@@ -118,7 +118,7 @@ def on_post_analyze_finished(
         lambda payload: (
             callback(
                 payload.tab_id,
-                service._state.get_tab(payload.tab_id).post_analyze_result,
+                service._state.get_tab(payload.tab_id).post_analysis.result,
             )
             if payload.fact is TabInteractionFact.POST_ANALYZE_SUCCEEDED
             else None

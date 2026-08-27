@@ -62,11 +62,6 @@ class LoadService:
     @staticmethod
     def _supports_load_data(adapter: object) -> bool:
         """Enforce the same capability gate when a service is called directly."""
-        # Keep the same concrete capability contract as GuardService. The only
-        # compatibility escape hatch is for old unittest.mock structural fakes;
-        # a real adapter without an import-validated declaration is unsupported.
-        if type(adapter).__module__ == "unittest.mock":
-            return True
         caps = getattr(adapter, "capabilities", None)
         return isinstance(caps, AdapterCapabilities) and caps.load_data
 

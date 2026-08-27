@@ -599,7 +599,10 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     )
     loaded = object()
     adapter = MagicMock()
-    adapter.capabilities = FakeAdapter.capabilities
+    # Final contract requires explicit load_data capability; FakeAdapter's
+    # default lacks it, so set load_data True for the driving path.
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities
+    adapter.capabilities = AdapterCapabilities(requires_soc=False, load_data=True)
     adapter.load.return_value = loaded
     adapter.get_analyze_params.return_value = _LoadedAnalyzeParams(threshold=0.7)
     cf.state.get_tab(tab_id).adapter = adapter

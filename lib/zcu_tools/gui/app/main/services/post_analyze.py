@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, cast
 
 from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest, PostWritebackRequest
@@ -128,42 +127,24 @@ class PostAnalyzeService(_StagedAnalyzeService):
         tab_id: str,
         post_result: Any,
         *,
-        captured_inputs: tuple[Any, Any, Any, Any, Any] | None = None,
+        captured_inputs: tuple[Any, Any, Any, Any, Any],
     ) -> None:
-        # The worker terminal uses operation-start values rather than rereading
-        # the active context or the current primary result. The compatibility
-        # direct-call branch below is not used by production terminals:
-        # ``_submit_with_runner`` always closes over this tuple.
-        if captured_inputs is None:
-            tab = self._state.get_tab(tab_id)
-            run_result, analyze_result, ctx, adapter, params = (
-                tab.run.result,
-                tab.analysis.result,
-                self._state.exp_context,
-                tab.adapter,
-                tab.post_analysis.params,
-            )
-        else:
-            run_result, analyze_result, ctx, adapter, params = captured_inputs
+        run_result, analyze_result, ctx, adapter, params = captured_inputs
 
         writeback = self._writeback
         assert writeback is not None
         draft: Any | None = None
         try:
-            proposal_factory = getattr(adapter, "get_post_writeback_items", None)
-            proposal_items: list[Any] = []
-            if callable(proposal_factory):
-                factory = cast(Callable[..., Iterable[Any]], proposal_factory)
-                proposal_items = list(
-                    factory(
-                        PostWritebackRequest(
-                            run_result=run_result,
-                            analyze_result=cast(Any, analyze_result),
-                            post_analyze_result=post_result,
-                            ctx=ctx,
-                        )
+            proposal_items = list(
+                adapter.get_post_writeback_items(
+                    PostWritebackRequest(
+                        run_result=run_result,
+                        analyze_result=cast(Any, analyze_result),
+                        post_analyze_result=post_result,
+                        ctx=ctx,
                     )
                 )
+            )
             draft = writeback.create_draft(proposal_items)
             retired = self._state.update_tab_post_analyze(
                 tab_id,

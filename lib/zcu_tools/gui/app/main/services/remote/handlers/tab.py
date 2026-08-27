@@ -73,6 +73,7 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
     # Render snapshot always fills the live fields (persist/restore form is the
     # only one that leaves them None, and it never hits the wire).
     assert interaction is not None
+    assert snap.run is not None
     return {
         "tab_id": tab_id,
         "adapter_name": adapter.tab_control.get_tab_adapter_name(tab_id),
@@ -93,7 +94,7 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
             "has_figure": bool(interaction.has_figure),
         },
         "save_paths": _save_paths_wire(snap.paths),
-        "result_source_path": snap.result_source_path,
+        "result_source_path": snap.run.source_path,
     }
 
 

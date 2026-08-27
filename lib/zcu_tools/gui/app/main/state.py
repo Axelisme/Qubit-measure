@@ -64,14 +64,6 @@ class RunPaneState(Generic[T_Result]):
     result: T_Result | None = None
     source_path: str | None = None
 
-    @property
-    def run_result(self) -> T_Result | None:
-        return self.result
-
-    @property
-    def result_source_path(self) -> str | None:
-        return self.source_path
-
 
 @dataclass
 class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
@@ -80,26 +72,6 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     figure: Figure | None = None
     writeback_draft: Any | None = None
     image_path_override: str | None = None
-
-    @property
-    def analyze_result(self) -> T_AnalyzeResult | None:
-        return self.result
-
-    @property
-    def analyze_params(self) -> T_AnalyzeParams | None:
-        return self.params
-
-    @property
-    def draft(self) -> Any | None:
-        return self.writeback_draft
-
-    @property
-    def image_path(self) -> str | None:
-        return self.image_path_override
-
-    @image_path.setter
-    def image_path(self, value: str | None) -> None:
-        self.image_path_override = value
 
 
 @dataclass
@@ -110,44 +82,12 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     writeback_draft: Any | None = None
     image_path_override: str | None = None
 
-    @property
-    def post_analyze_result(self) -> T_AnalyzeResult | None:
-        return self.result
-
-    @property
-    def post_analyze_params(self) -> T_AnalyzeParams | None:
-        return self.params
-
-    @property
-    def draft(self) -> Any | None:
-        return self.writeback_draft
-
-    @property
-    def image_path(self) -> str | None:
-        return self.image_path_override
-
-    @image_path.setter
-    def image_path(self, value: str | None) -> None:
-        self.image_path_override = value
-
 
 @dataclass
 class SavePaneState:
     """Save owns only the data-path override; image paths belong to image panes."""
 
     data_path_override: str | None = None
-
-    @property
-    def path_override(self) -> str | None:
-        return self.data_path_override
-
-    @property
-    def data_path(self) -> str | None:
-        return self.data_path_override
-
-    @data_path.setter
-    def data_path(self, value: str | None) -> None:
-        self.data_path_override = value
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,10 +102,6 @@ class RetiredAnalysisResource:
     result: object | None = None
     figure: Figure | None = None
     writeback_draft: Any | None = None
-
-    @property
-    def draft(self) -> Any | None:
-        return self.writeback_draft
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,35 +130,6 @@ class RetiredPaneResources:
             if candidate is not None and all(candidate is not old for old in drafts):
                 drafts.append(candidate)
         return tuple(drafts)
-
-    # Short aliases keep the transition result readable at service call sites and
-    # make it explicit that this is the complete retired-resource list.
-    @property
-    def drafts(self) -> tuple[Any, ...]:
-        return self.writeback_drafts
-
-    @property
-    def retired_drafts(self) -> tuple[Any, ...]:
-        return self.writeback_drafts
-
-    @property
-    def post(self) -> RetiredAnalysisResource:
-        return self.post_analysis
-
-
-# Names used by callers that describe the carrier rather than its mutable State
-# role.  Keep one implementation and expose the vocabulary at the contract edge.
-RunPane = RunPaneState
-AnalysisPane = AnalysisPaneState
-PostAnalysisPane = PostAnalysisPaneState
-SavePane = SavePaneState
-# Readable aliases for callers that use ``*State`` rather than ``*Pane``
-# terminology; all aliases still refer to the same fixed owner carriers.
-RunState = RunPaneState
-AnalysisState = AnalysisPaneState
-PostAnalysisState = PostAnalysisPaneState
-SaveState = SavePaneState
-RetiredResources = RetiredPaneResources
 
 
 _UNSET: Any = object()
@@ -280,40 +187,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         self.save = SavePaneState() if save is _UNSET or save is None else save  # type: ignore[assignment]
         self.is_analyzing = is_analyzing
         self.is_saving_data = is_saving_data
-
-    # Explicit aliases make ownership visible without exposing implementation
-    # fields to the transitional callers.
-    @property
-    def run_state(self) -> RunPaneState[T_Result]:
-        return self.run
-
-    @property
-    def analysis_state(self) -> AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams]:
-        return self.analysis
-
-    @property
-    def post_analysis_state(self) -> PostAnalysisPaneState[Any, Any]:
-        return self.post_analysis
-
-    @property
-    def save_state(self) -> SavePaneState:
-        return self.save
-
-    @property
-    def run_pane(self) -> RunPaneState[T_Result]:
-        return self.run
-
-    @property
-    def analysis_pane(self) -> AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams]:
-        return self.analysis
-
-    @property
-    def post_analysis_pane(self) -> PostAnalysisPaneState[Any, Any]:
-        return self.post_analysis
-
-    @property
-    def save_pane(self) -> SavePaneState:
-        return self.save
 
     # -- predicates (the entity answers questions about itself) ------------
 

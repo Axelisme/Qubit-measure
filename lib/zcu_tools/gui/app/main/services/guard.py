@@ -176,18 +176,7 @@ class GuardService:
 
     @staticmethod
     def _supports_load_data(adapter: Any) -> bool:
-        """Read the import-validated load capability without probing a worker.
-
-        Dynamic test doubles are kept on the old path until their callers
-        migrate. Concrete adapters (and other class-based structural adapters)
-        have their explicit capability enforced here and by LoadService.
-        """
-        # The import-validated production contract always has a concrete
-        # AdapterCapabilities declaration. Keep only the existing unittest.mock
-        # compatibility escape hatch for old structural fakes; a real object
-        # without the declaration is not load-capable.
-        if type(adapter).__module__ == "unittest.mock":
-            return True
+        """Read the import-validated load capability without probing a worker."""
         caps = getattr(adapter, "capabilities", None)
         return isinstance(caps, AdapterCapabilities) and caps.load_data
 

@@ -34,6 +34,7 @@ def _make_state(
     lowering_raises: bool = False,
     run_result: object = object(),
     analyze_result: object = object(),
+    load_data: bool = True,
 ) -> tuple[State, str]:
     md = MagicMock()
     ml = MagicMock()
@@ -42,7 +43,7 @@ def _make_state(
     state = State(ExpContext(md=md, ml=ml, soc=soc, soccfg=soccfg, readiness=readiness))
     tab_id = "tab-1"
     adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(requires_soc=requires_soc)
+    adapter.capabilities = AdapterCapabilities(requires_soc=requires_soc, load_data=load_data)
 
     if lowering_raises:
         schema = CfgSchema(
