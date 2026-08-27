@@ -240,8 +240,8 @@ def test_fold_writeback_preview_swallows_failure(monkeypatch):
 
 def test_writeback_apply_is_pure_generated_forwarder():
     """gui_tab_writeback_apply forwards tab.writeback_apply and returns ONLY its result
-    ({applied_ids, written, context_version}) — it no longer takes save_data nor chains
-    tab.save_data (that moved to gui_tab_commit).
+    ({applied_ids, written, context_version}) — it neither accepts save options nor
+    chains a save; callers invoke gui_tab_save_data/gui_tab_save_image explicitly.
 
     Generated forwarder captures send_gui_rpc as a closure at import time, so a
     module-attr monkeypatch does not reach it — re-generate with a recording

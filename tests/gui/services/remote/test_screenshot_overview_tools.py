@@ -23,12 +23,12 @@ def _clear_mcp_policy_state():
 
 
 # ---------------------------------------------------------------------------
-# Figure/screenshot consolidation (WIRE 24) — run/analyze replies NO LONGER fold
-# figure_path; looking at a plot is a separate gui_tab_get_current_figure call.
+# Figure/screenshot consolidation — each plot is retrieved explicitly from its
+# pane with gui_tab_get_figure(tab_id, subtab_id).
 # ---------------------------------------------------------------------------
 
 
-def test_get_current_figure_omitted_out_path_writes_temp_file(monkeypatch):
+def test_get_figure_omitted_out_path_writes_temp_file(monkeypatch):
     """Omitting out_path must drive the wire in out_path mode (synthesised temp
     path) and return {saved_to, bytes} with NO inline base64."""
     from tempfile import gettempdir
@@ -64,7 +64,7 @@ def test_get_current_figure_omitted_out_path_writes_temp_file(monkeypatch):
     ]
 
 
-def test_get_current_figure_explicit_out_path_is_forwarded(monkeypatch):
+def test_get_figure_explicit_out_path_is_forwarded(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
