@@ -64,6 +64,28 @@ class RunService:
         # controller can cancel_run() and await the outcome (ADR-0019).
         self._active_token: int | None = None
 
+    def _teardown_retired(self, retired: Any, *, tab_id: str | None = None) -> None:
+        """Teardown detached drafts only after the State swap has committed."""
+        if retired is None:
+            return
+        teardown = getattr(type(self._writeback), "teardown_draft", None)
+        if not callable(teardown):
+            legacy = getattr(self._writeback, "teardown_tab_items", None)
+            if tab_id is not None and callable(legacy):
+                try:
+                    legacy(tab_id)
+                except Exception:
+                    # This compatibility teardown happens after the State swap;
+                    # never turn a cleanup failure into a rollback or leave the
+                    # operation unable to proceed.
+                    logger.exception("retired legacy run draft teardown failed")
+            return
+        for draft in retired.writeback_drafts:
+            try:
+                self._writeback.teardown_draft(draft)
+            except Exception:
+                logger.exception("retired run draft teardown failed")
+
     def start_run(
         self,
         permit: RunPermit,
@@ -79,11 +101,10 @@ class RunService:
         logger.info("start_run: tab_id=%r", tab_id)
 
         # PRE-OPEN: Starting a run invalidates the previous run/analyze/writeback
-        # result. Drop them before begin() so the tab honestly has "no result this
-        # run" while it is in flight (and if it fails/cancels). Tear down the per-
-        # item writeback editor models first (State requires it).
-        self._writeback.teardown_tab_items(tab_id)
-        self._state.clear_tab_results(tab_id)
+        # result. State performs one owner-thread swap and returns every detached
+        # draft; cleanup happens only after the new empty panes are committed.
+        retired = self._state.clear_tab_results(tab_id)
+        self._teardown_retired(retired, tab_id=tab_id)
 
         # A single StopSignal owns the Schedule-visible stop flag for this run.
         # ``cancel_requested`` is separate: Schedule failures also set the stop
@@ -134,10 +155,8 @@ class RunService:
                 tab_id,
                 type(result).__name__,
             )
-            # New run invalidates the previous analyze's writeback draft: tear down
-            # before update_tab_result clears the list.
-            self._writeback.teardown_tab_items(tab_id)
-            self._state.update_tab_result(tab_id, result)
+            retired = self._state.update_tab_result(tab_id, result)
+            self._teardown_retired(retired, tab_id=tab_id)
             self._state.set_tab_running(tab_id, False)
             self._active_token = None
             # STATE is observable before settle (ADR-0017 / stage2c invariant 1).
@@ -149,8 +168,8 @@ class RunService:
             # A cancelled run may still carry a partial result (the worker returned
             # before the stop_event tripped a hard interrupt); keep it if present.
             if result is not NO_RESULT:
-                self._writeback.teardown_tab_items(tab_id)
-                self._state.update_tab_result(tab_id, result)
+                retired = self._state.update_tab_result(tab_id, result)
+                self._teardown_retired(retired, tab_id=tab_id)
             self._state.set_tab_running(tab_id, False)
             self._active_token = None
             # STATE is observable before settle.

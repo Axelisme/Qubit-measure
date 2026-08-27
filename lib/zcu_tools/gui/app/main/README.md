@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-27 — opaque transactional writeback drafts
+**Last updated:** 2026-08-27 — pane-owned lifecycle and load capability
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -21,8 +21,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
-- `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators；
-  `running_tab_id` 是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
+- `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
+  Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。`running_tab_id`
+  是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
 - `ui/`：Qt widgets、MainWindow top-level façade、tab-local `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns tab-local rendering and receives tab actions through a
@@ -118,7 +119,8 @@ Key ownership rules:
   （ADR-0047）。
 - `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
   contents.
-- `State` owns tab/device/result/save-path resource state and resource versions.
+- `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
+  happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns static preconditions and returns typed permits for
   run/save/analyze/writeback.
 - `OperationGate` is the app-local thin wrapper over the shared
@@ -143,11 +145,34 @@ Key ownership rules:
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /
    `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
 7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit.
+   cfg-editor machinery before commit. Primary and post workflows own proposal timing;
+   the Writeback service remains stage-free.
 
 `tab.load_data` is the analysis-only entry for canonical result files. It installs
 the loaded result into an existing adapter tab, clears stale analysis/writeback
-state, and does not backfill the Config tab.
+state, and does not backfill the Config tab. The Guard and LoadService both enforce
+the adapter's import-validated `capabilities.load_data` gate.
+
+### Pane-owned lifecycle
+
+`Session` is the aggregate root and its fixed pane carriers are the resource owners:
+Run stores only the run result/source, Analysis and Post-Analysis each store params,
+result, canonical figure and an opaque writeback draft, and Save stores the data-path
+override. Analysis and Post-Analysis image-path overrides are independent resources;
+the read model projects data, analysis-image and post-analysis-image paths separately.
+Run live figures remain view-only and are not stored in State.
+
+Analysis/Post result services prepare proposals, figures and drafts before calling one
+owner-thread State swap. The swap returns every retired pane resource; services tear
+down retired drafts only after commit and never roll back a committed pane when cleanup
+fails. A failed proposal/editor build leaves the previous canonical pane intact.
+Primary analysis replacement invalidates Post-Analysis, Post replacement leaves
+Analysis untouched, and a successful run/load clears both downstream panes.
+
+Current flat tab result/writeback/path accessors remain transitional projections for
+callers migrating in later lifecycle/UI tickets; they are not new resource ownership
+contracts. Operation-start request/context inputs are captured and reused by analysis
+and proposal hooks, without context-identity checks or terminal active-context reads.
 
 ## Tab Lifecycle And Ordering
 
@@ -363,7 +388,8 @@ on the concrete controller.
   must not touch devices or mutate cfg/state.
 - Adapter `run()` receives a concrete config and performs the experiment.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
-- `get_writeback_items()` returns domain writeback candidates; writeback commit is
+- `get_writeback_items()` and the optional `get_post_writeback_items()` return
+  domain writeback candidates for their owning analysis pane; writeback commit is
   framework-owned.
 - `WritebackService.create_draft()` accepts those candidates and returns an opaque,
   service-owned draft. Item-local cfg-editor sessions and their identities stay

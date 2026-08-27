@@ -73,6 +73,9 @@ class AdapterCapabilities:
     # post-analysis to a tab whose adapter sets this True AND whose primary
     # analyze result exists.
     post_analysis: bool = False
+    # Canonical result-file loading is an explicit capability. False is the safe
+    # default; adapters that inherit BaseAdapter's canonical loader must opt in.
+    load_data: bool = False
 
 
 @dataclass(frozen=True)
@@ -298,6 +301,21 @@ class SaveDataRequest(Generic[T_Result]):
 class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
     run_result: T_Result
     analyze_result: T_AnalyzeResult
+    ctx: ExpContext
+
+
+@dataclass(frozen=True)
+class PostWritebackRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeResult]):
+    """Inputs for the optional post-analysis proposal hook.
+
+    The workflow constructs this from the same operation-start values used by
+    ``post_analyze``. Writeback remains unaware of this type; it only receives
+    the resulting proposal items.
+    """
+
+    run_result: T_Result
+    analyze_result: T_AnalyzeResult
+    post_analyze_result: T_PostAnalyzeResult
     ctx: ExpContext
 
 

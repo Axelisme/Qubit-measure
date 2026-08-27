@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any, cast
 
-from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest
+from zcu_tools.gui.app.main.adapter import PostAnalyzeRequest, PostWritebackRequest
 from zcu_tools.gui.app.main.events.tab import TabInteractionFact
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
 
 from .scopes import figure_ambient
 from .staged_analyze import _StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from .ports import AnalyzeStatePort, WritebackLifecyclePort
 
 
 class PostAnalyzeService(_StagedAnalyzeService):
@@ -33,6 +40,17 @@ class PostAnalyzeService(_StagedAnalyzeService):
     FAILED_FACT = TabInteractionFact.POST_ANALYZE_FAILED
     START_REJECTED_FACT = TabInteractionFact.POST_ANALYZE_START_REJECTED
     FAILURE_STAGE = "post"
+
+    def __init__(
+        self,
+        state: AnalyzeStatePort,
+        runner: OperationRunner,
+        bus: EventBus,
+        handles: OperationHandles,
+        writeback: WritebackLifecyclePort | None = None,
+    ) -> None:
+        super().__init__(state, runner, bus, handles)
+        self._writeback = writeback
 
     def start_post_analyze(
         self,
@@ -71,6 +89,13 @@ class PostAnalyzeService(_StagedAnalyzeService):
             type(post_analyze_params_instance).__name__,
         )
         adapter = tab.adapter
+        captured_inputs = (
+            req.run_result,
+            req.analyze_result,
+            ctx,
+            adapter,
+            post_analyze_params_instance,
+        )
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
             # Post-analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0026 §2).
@@ -83,12 +108,97 @@ class PostAnalyzeService(_StagedAnalyzeService):
         return self._submit_with_runner(
             tab_id,
             work,
-            self._record,
+            lambda record_tab_id, result: self._record(
+                record_tab_id, result, captured_inputs=captured_inputs
+            ),
             "post-analyze failed to start",
         )
 
-    def _record(self, tab_id: str, post_result: Any) -> None:
-        # Record result + figure through the single State mutator (bumps the
-        # post_analyze version); it fast-fails if the primary result vanished
-        # mid-flight (invalidated by a concurrent re-run/re-analyze).
-        self._state.update_tab_post_analyze(tab_id, post_result, post_result.figure)
+    @staticmethod
+    def _has_opaque_draft_api(writeback: Any) -> bool:
+        return writeback is not None and all(
+            callable(getattr(type(writeback), name, None))
+            for name in ("create_draft", "preview_draft", "teardown_draft")
+        )
+
+    def _teardown_retired(self, retired: Any) -> None:
+        if retired is None or self._writeback is None:
+            return
+        teardown = getattr(type(self._writeback), "teardown_draft", None)
+        if not callable(teardown):
+            return
+        for draft in retired.writeback_drafts:
+            try:
+                self._writeback.teardown_draft(draft)
+            except Exception:
+                logger.exception("retired post-analysis draft teardown failed")
+
+    def _record(
+        self,
+        tab_id: str,
+        post_result: Any,
+        *,
+        captured_inputs: tuple[Any, Any, Any, Any, Any] | None = None,
+    ) -> None:
+        # The worker terminal uses operation-start values rather than rereading
+        # the active context or the current primary result. The compatibility
+        # direct-call branch below is not used by production terminals:
+        # ``_submit_with_runner`` always closes over this tuple.
+        if captured_inputs is None:
+            tab = self._state.get_tab(tab_id)
+            run_result, analyze_result, ctx, adapter, params = (
+                tab.run_result,
+                tab.analyze_result,
+                self._state.exp_context,
+                tab.adapter,
+                tab.post_analyze_param_instance,
+            )
+        else:
+            run_result, analyze_result, ctx, adapter, params = captured_inputs
+
+        writeback = self._writeback
+        if self._has_opaque_draft_api(writeback):
+            assert writeback is not None
+            draft: Any | None = None
+            try:
+                proposal_factory = getattr(adapter, "get_post_writeback_items", None)
+                proposal_items: list[Any] = []
+                if callable(proposal_factory):
+                    factory = cast(Callable[..., Iterable[Any]], proposal_factory)
+                    proposal_items = list(
+                        factory(
+                            PostWritebackRequest(
+                                run_result=run_result,
+                                analyze_result=cast(Any, analyze_result),
+                                post_analyze_result=post_result,
+                                ctx=ctx,
+                            )
+                        )
+                    )
+                draft = writeback.create_draft(proposal_items)
+                items = list(writeback.preview_draft(draft))
+                retired = self._state.update_tab_post_analyze(
+                    tab_id,
+                    post_result,
+                    getattr(post_result, "figure", None),
+                    post_analyze_params_instance=params,
+                    writeback_draft=draft,
+                    writeback_items=items,
+                )
+            except BaseException:
+                if draft is not None:
+                    try:
+                        writeback.teardown_draft(draft)
+                    except Exception:
+                        logger.exception("new post-analysis draft teardown failed")
+                raise
+            self._teardown_retired(retired)
+            return
+
+        # Transitional service path until the post writeback caller migration.
+        self._state.update_tab_post_analyze(
+            tab_id,
+            post_result,
+            getattr(post_result, "figure", None),
+            post_analyze_params_instance=params,
+        )

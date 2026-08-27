@@ -168,7 +168,7 @@ def build_app_services(
     load = LoadService(state, writeback)
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
-    post_analyze = PostAnalyzeService(state, runner, bus, handles)
+    post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
     save = SaveService(state, background, bus)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,

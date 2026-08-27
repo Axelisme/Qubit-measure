@@ -65,6 +65,7 @@ class SaveService:
         self, permit: SavePermit, data_path: str, comment: str = ""
     ) -> str:
         tab_id = permit.tab_id
+        self._require_tab_idle(tab_id)
         # Reserve the final data path in the GUI orchestration layer so the
         # worker receives the exact file it must write.
         data_path = reserve_labber_filepath(data_path)
@@ -84,6 +85,7 @@ class SaveService:
         Returns the resolved data path the worker will write (``.hdf5`` +
         uniqueness suffix), known synchronously up front."""
         tab_id = permit.tab_id
+        self._require_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
             raise FailedPreconditionError("No figure available to save")
@@ -120,6 +122,7 @@ class SaveService:
 
     def save_image_sync(self, permit: SavePermit, image_path: str) -> None:
         tab_id = permit.tab_id
+        self._require_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         if tab.figure is None:
             raise FailedPreconditionError("No figure available to save")
@@ -133,12 +136,23 @@ class SaveService:
         post layer's figure, which is distinct from the primary ``tab.figure``
         (the two are separate State fields though they share one container)."""
         tab_id = permit.tab_id
+        self._require_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         if tab.post_figure is None:
             raise FailedPreconditionError("No post-analysis figure available to save")
         logger.info("save_post_image_sync: tab_id=%r path=%r", tab_id, image_path)
         self._ensure_parent_directory(image_path)
         save_figure_to_path(tab.post_figure, image_path)
+
+    def _require_tab_idle(self, tab_id: str) -> None:
+        """Reject every save entry point while another tab operation owns it.
+
+        ``GuardService`` owns static preconditions; the tab's busy state is a
+        dynamic resource check and must happen before path reservation or image
+        export so a Save permit cannot bypass same-tab operation exclusion.
+        """
+        if self._state.is_tab_busy(tab_id):
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
     @staticmethod
     def _ensure_parent_directory(path: str) -> None:

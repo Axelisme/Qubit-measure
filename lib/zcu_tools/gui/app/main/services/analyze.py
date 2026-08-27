@@ -56,6 +56,9 @@ class AnalyzeService(_StagedAnalyzeService):
         # analyze (which would settle the handle while the worker callback is still
         # in flight). Entries are removed by every interactive terminal path.
         self._interactive_tabs: set[str] = set()
+        # Captured at operation start so proposal generation cannot accidentally
+        # consume a context or run result replaced while the worker was running.
+        self._captured_inputs: dict[str, tuple[Any, Any, Any, Any]] = {}
 
     def start_analyze(
         self,
@@ -85,18 +88,26 @@ class AnalyzeService(_StagedAnalyzeService):
             type(analyze_params_instance).__name__,
         )
         adapter = tab.adapter
+        captured_inputs = (req.run_result, ctx, adapter, analyze_params_instance)
+        self._captured_inputs[tab_id] = captured_inputs
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
             # Analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0026 §2).
             with figure_ambient(figure_container):
                 return adapter.analyze(req)
 
-        return self._submit_with_runner(
-            tab_id,
-            work,
-            self._record,
-            "analyze failed to start",
-        )
+        try:
+            return self._submit_with_runner(
+                tab_id,
+                work,
+                lambda record_tab_id, result: self._record(
+                    record_tab_id, result, captured_inputs=captured_inputs
+                ),
+                "analyze failed to start",
+            )
+        except Exception:
+            self._captured_inputs.pop(tab_id, None)
+            raise
 
     def start_interactive(self, permit: AnalyzePermit) -> int:
         """Begin an INTERACTIVE analysis: open the async handle and mark the tab
@@ -115,6 +126,16 @@ class AnalyzeService(_StagedAnalyzeService):
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
+        tab = self._state.get_tab(tab_id)
+        ctx = self._state.exp_context
+        adapter = tab.adapter
+        # The interactive control commits the user/agent's params before this
+        # operation starts. Capture that committed value alongside the run,
+        # context, and adapter so the terminal path does not fall back to the
+        # active tab's mutable inputs.
+        captured_inputs = (tab.run_result, ctx, adapter, tab.analyze_param_instance)
+        self._captured_inputs[tab_id] = captured_inputs
+
         # Open the token with a cancel_hook that executes the interactive teardown.
         # The hook runs *after* Stop is enqueued, so Settled(cancelled) from the
         # hook's _release lands after Stop — the consumer folds reason correctly.
@@ -127,6 +148,7 @@ class AnalyzeService(_StagedAnalyzeService):
         try:
             token = self._open_token(tab_id, cancel_hook=_hook)
         except Exception:
+            self._captured_inputs.pop(tab_id, None)
             self._bus.emit(
                 TabInteractionChangedPayload(
                     tab_id=tab_id,
@@ -143,13 +165,23 @@ class AnalyzeService(_StagedAnalyzeService):
         the SAME terminal path as a FIT analyze (writeback compute + State update +
         lease release + events), so the agent's analyze-result poll resolves."""
         token = self._active_tokens.get(tab_id)
+        captured_inputs = self._captured_inputs.pop(tab_id, None)
         if token is None:
             self._interactive_tabs.discard(tab_id)
-            self._on_analyze_finished(tab_id, session.finish())
+            # A late Done after cancellation has no operation-start inputs and
+            # must not resurrect a result by rereading the active context.
+            if captured_inputs is None:
+                session.finish()
+                return
+            self._on_analyze_finished(
+                tab_id, session.finish(), captured_inputs=captured_inputs
+            )
             return
         with self._bus.origin(self._handles.event_origin(token)):
             self._interactive_tabs.discard(tab_id)
-            self._on_analyze_finished(tab_id, session.finish())
+            self._on_analyze_finished(
+                tab_id, session.finish(), captured_inputs=captured_inputs
+            )
 
     def is_interactive_active(self, tab_id: str) -> bool:
         """Whether ``tab_id`` currently holds an in-flight INTERACTIVE picker
@@ -185,6 +217,7 @@ class AnalyzeService(_StagedAnalyzeService):
         token = self._active_tokens[tab_id]
         with self._bus.origin(self._handles.event_origin(token)):
             self._interactive_tabs.discard(tab_id)
+            self._captured_inputs.pop(tab_id, None)
             logger.info("cancel_interactive: tab_id=%r", tab_id)
             self._state.set_tab_analyzing(tab_id, False)
             self._release(tab_id, OperationOutcome("cancelled"))
@@ -196,7 +229,13 @@ class AnalyzeService(_StagedAnalyzeService):
             )
         return True
 
-    def _on_analyze_finished(self, tab_id: str, analyze_result: Any) -> None:
+    def _on_analyze_finished(
+        self,
+        tab_id: str,
+        analyze_result: Any,
+        *,
+        captured_inputs: tuple[Any, Any, Any, Any] | None = None,
+    ) -> None:
         """Terminal path used by finish_interactive (interactive → same FIT terminal).
 
         FIT analyze uses _submit_with_runner's internal _finish directly.
@@ -211,7 +250,7 @@ class AnalyzeService(_StagedAnalyzeService):
         # Interactive uses _release (not runner settle) — the token is in
         # _active_tokens from _open_token.
         try:
-            self._record(tab_id, analyze_result)
+            self._record(tab_id, analyze_result, captured_inputs=captured_inputs)
         except Exception as exc:
             logger.exception("%s finished post-processing failed: %r", tab_id, exc)
             self._state.set_tab_analyzing(tab_id, False)
@@ -239,24 +278,101 @@ class AnalyzeService(_StagedAnalyzeService):
             )
         )
 
-    def _record(self, tab_id: str, analyze_result: Any) -> None:
-        # Tear down the previous draft before replacing it. Proposal computation
-        # belongs to the adapter/workflow boundary; Writeback only receives the
-        # resulting items and owns their opaque draft-local sessions.
-        self._writeback.teardown_tab_items(tab_id)
-        tab = self._state.get_tab(tab_id)
-        run_result = tab.run_result
-        proposal_items = []
+    @staticmethod
+    def _has_opaque_draft_api(writeback: Any) -> bool:
+        # ``MagicMock`` and other dynamic test doubles expose arbitrary
+        # attributes on the instance. Looking on the concrete type avoids
+        # mistaking the transitional tab adapter for the pane contract.
+        return all(
+            callable(getattr(type(writeback), name, None))
+            for name in ("create_draft", "preview_draft", "teardown_draft")
+        )
+
+    def _teardown_retired(self, retired: Any) -> None:
+        """Teardown every detached draft after State has committed the swap."""
+        if retired is None:
+            return
+        teardown = getattr(type(self._writeback), "teardown_draft", None)
+        if not callable(teardown):
+            return
+        for draft in retired.writeback_drafts:
+            try:
+                self._writeback.teardown_draft(draft)
+            except Exception:
+                # Cleanup is deliberately non-transactional. State no longer
+                # references the retired draft, and a later idempotent cleanup
+                # attempt remains safe for WritebackDraft.
+                logger.exception("retired analyze draft teardown failed")
+
+    def _record(
+        self,
+        tab_id: str,
+        analyze_result: Any,
+        *,
+        captured_inputs: tuple[Any, Any, Any, Any] | None = None,
+    ) -> None:
+        # The worker terminal must use operation-start inputs. A private direct
+        # call without captured inputs is retained only for old tests/callers;
+        # production FIT terminals close over the tuple above, and the
+        # post-cancel interactive path returns before this method.
+        if captured_inputs is None:
+            captured_inputs = self._captured_inputs.pop(tab_id, None)
+        else:
+            self._captured_inputs.pop(tab_id, None)
+
+        if captured_inputs is None:
+            tab = self._state.get_tab(tab_id)
+            run_result, ctx, adapter, analyze_params = (
+                tab.run_result,
+                self._state.exp_context,
+                tab.adapter,
+                tab.analyze_param_instance,
+            )
+        else:
+            run_result, ctx, adapter, analyze_params = captured_inputs
+
+        proposal_items: list[Any] = []
         if run_result is not None:
             proposal_items = list(
-                tab.adapter.get_writeback_items(
+                adapter.get_writeback_items(
                     WritebackRequest(
                         run_result=run_result,
                         analyze_result=analyze_result,
-                        ctx=self._state.exp_context,
+                        ctx=ctx,
                     )
                 )
             )
+
+        if self._has_opaque_draft_api(self._writeback):
+            # Build the entire new pane before touching State. If proposal or
+            # editor creation fails, the retained canonical pane remains intact.
+            draft: Any | None = None
+            try:
+                draft = self._writeback.create_draft(proposal_items)
+                items = list(self._writeback.preview_draft(draft))
+                retired = self._state.update_tab_analyze(
+                    tab_id,
+                    analyze_result,
+                    getattr(analyze_result, "figure", None),
+                    writeback_items=items,
+                    writeback_draft=draft,
+                    analyze_params_instance=analyze_params,
+                )
+            except BaseException:
+                if draft is not None:
+                    try:
+                        self._writeback.teardown_draft(draft)
+                    except Exception:
+                        logger.exception("new analyze draft teardown failed")
+                raise
+            # The state swap is complete; cleanup cannot roll it back.
+            self._teardown_retired(retired)
+            return
+
+        # Transitional tab caller until the later writeback control migration.
+        # It still receives the captured proposal inputs, rather than rereading
+        # active context at terminal time.
+        self._writeback.teardown_tab_items(tab_id)
         items = self._writeback.compute_items_for_tab(
             tab_id,
             analyze_result,
@@ -266,7 +382,8 @@ class AnalyzeService(_StagedAnalyzeService):
         self._state.update_tab_analyze(
             tab_id,
             analyze_result,
-            analyze_result.figure,
+            getattr(analyze_result, "figure", None),
             writeback_items=items,
             writeback_draft=draft,
+            analyze_params_instance=analyze_params,
         )

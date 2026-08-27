@@ -17,7 +17,9 @@ be shown again.
 
 `TabInteractionChangedPayload` and `TabContentChangedPayload` each carry a
 mandatory closed domain fact. Producers describe the lifecycle outcome or
-committed resource; they do not describe widgets, refresh flags, or masks.
+committed resource; they do not describe widgets, refresh flags, or masks. A content
+fact observes a pane-owned State swap after the complete pane (result, figure and
+opaque draft) is ready; retired draft teardown is a post-commit service action.
 
 `MainWindowEventCoordinator` owns the ordered fact-to-reaction matrices. It reads
 at most one tab snapshot when a reaction needs State and reads none for local
@@ -43,6 +45,10 @@ revision changes; the wire contract version does not.
 - View cost is visible in one coordinator-owned matrix and payloads remain
   domain-semantic value objects.
 - Retained State plus an explicit terminal fact is the figure restore contract.
+- Primary content commits replace the Analysis pane and invalidate Post-Analysis;
+  Post content commits replace only its own pane. Run/load content facts observe the
+  dependency-clearing transition without making figure or draft cleanup part of View
+  reaction.
 - Operation terminal and content commit remain separate facts, preventing
   success-path double drawing.
 

@@ -81,7 +81,7 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     ExpCfg_cls: ClassVar[Any] = GE_Cfg
     # FIT primary analysis + a confusion-diagnostic post-analysis layer.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
     )
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

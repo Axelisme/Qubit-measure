@@ -378,6 +378,11 @@ class WritebackService:
             if getattr(tab, "writeback_draft", None) is draft:
                 setattr(tab, "writeback_draft", None)
                 tab.writeback_items = []
+            if getattr(tab, "post_analysis", None) is not None:
+                post_pane = tab.post_analysis
+                if getattr(post_pane, "writeback_draft", None) is draft:
+                    post_pane.writeback_draft = None
+                    tab.post_writeback_items = []
 
     # ------------------------------------------------------------------
     # Temporary tab caller adapters (A4; removed by the later caller migration)
@@ -422,6 +427,21 @@ class WritebackService:
         if isinstance(state_draft, WritebackDraft) and state_draft.is_active:
             return state_draft
         return None
+
+    def get_tab_post_writeback_draft(self, tab_id: str) -> WritebackDraft | None:
+        """Return the active draft owned by the Post-Analysis pane."""
+        tab = self._state.get_tab(tab_id)
+        draft = getattr(getattr(tab, "post_analysis", None), "writeback_draft", None)
+        if isinstance(draft, WritebackDraft) and draft.is_active:
+            return draft
+        return None
+
+    def get_tab_post_writeback_items(self, tab_id: str) -> list[WritebackItem]:
+        """Read the Post-Analysis draft without recomputing its proposals."""
+        draft = self.get_tab_post_writeback_draft(tab_id)
+        if draft is not None:
+            return draft.preview()
+        return list(getattr(self._state.get_tab(tab_id), "post_writeback_items", []))
 
     def get_tab_writeback_item_draft(self, tab_id: str, session_id: str) -> CfgDraft:
         """Viewer adapter that resolves an item model without returning its id."""

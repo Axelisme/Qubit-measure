@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
+from zcu_tools.gui.expected_error import FailedPreconditionError
+
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import WritebackItem
     from zcu_tools.gui.app.main.state import State
@@ -61,11 +63,19 @@ class WritebackControlFacet:
         self, tab_id: str, session_id: str, **changes: Any
     ) -> dict[str, object]:
         self._guard.acquire_writeback_permit(tab_id)
+        self._require_tab_idle(tab_id)
         return self._writeback.set_item_field(tab_id, session_id, **changes)
 
     def apply_writeback(self, tab_id: str) -> dict[str, Any]:
         permit = self._guard.acquire_writeback_permit(tab_id)
+        self._require_tab_idle(tab_id)
         return self._writeback.apply_tab_writeback(permit)
+
+    def _require_tab_idle(self, tab_id: str) -> None:
+        """Keep edits/apply out of a same-tab lifecycle transition."""
+        busy = getattr(self._state, "is_tab_busy", None)
+        if callable(busy) and busy(tab_id):
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
     def get_context_version(self) -> int:
         return self._resource_versions().get("context", 0)

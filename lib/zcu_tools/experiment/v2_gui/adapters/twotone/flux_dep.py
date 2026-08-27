@@ -42,7 +42,7 @@ class FluxDepAdapter(
     exp_cls = FreqFluxExp
     legacy_migration_experiment: ClassVar[str | None] = "twotone/flux_dep"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.INTERACTIVE
+        analysis=AnalysisMode.INTERACTIVE, load_data=True
     )
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

@@ -156,6 +156,13 @@ class RunAnalyzeControlFacet:
             ml=ctx.ml,
             predictor=ctx.predictor,
         )
+        # Remote callers may supply a freshly reconstructed params instance
+        # without first editing the local form. Commit it before the service
+        # captures operation-start inputs; older injected test/caller ports may
+        # not expose this migration method and continue with their own state.
+        update_params = getattr(self._tab, "update_tab_analyze_param_instance", None)
+        if callable(update_params):
+            update_params(tab_id, analyze_params_instance)
         token = self._analyze.start_interactive(permit)
         host = self._render_host()
         if host is not None:

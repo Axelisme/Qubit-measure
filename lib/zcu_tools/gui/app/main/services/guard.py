@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import (
+    AdapterCapabilities,
     ExpAdapterProtocol,
     RunRequest,
     require_soc_handles,
@@ -173,9 +174,31 @@ class GuardService:
         logger.debug("acquire_save_permit: tab_id=%r", tab_id)
         return SavePermit(tab_id=tab_id)
 
+    @staticmethod
+    def _supports_load_data(adapter: Any) -> bool:
+        """Read the import-validated load capability without probing a worker.
+
+        Dynamic test doubles are kept on the old path until their callers
+        migrate. Concrete adapters (and other class-based structural adapters)
+        have their explicit capability enforced here and by LoadService.
+        """
+        # The import-validated production contract always has a concrete
+        # AdapterCapabilities declaration. Keep only the existing unittest.mock
+        # compatibility escape hatch for old structural fakes; a real object
+        # without the declaration is not load-capable.
+        if type(adapter).__module__ == "unittest.mock":
+            return True
+        caps = getattr(adapter, "capabilities", None)
+        return isinstance(caps, AdapterCapabilities) and caps.load_data
+
     def acquire_load_permit(self, tab_id: str) -> LoadPermit:
-        self._require_tab(tab_id)
+        tab = self._require_tab(tab_id)
         self._require_context("load data")
+        if not self._supports_load_data(tab.adapter):
+            raise GuardError(
+                "This tab does not support loading data files.",
+                reason_code="unsupported_load",
+            )
         logger.debug("acquire_load_permit: tab_id=%r", tab_id)
         return LoadPermit(tab_id=tab_id)
 

@@ -62,6 +62,93 @@ if TYPE_CHECKING:
     from .persistence_types import AppPersistedState
 
 
+@dataclass(frozen=True, slots=True)
+class PathResourceSnapshot:
+    """Read model for one independently-owned path resource."""
+
+    override: str | None
+    path: str | None
+
+    @property
+    def effective(self) -> str | None:
+        return self.path
+
+    def __str__(self) -> str:
+        return self.path or ""
+
+    def __fspath__(self) -> str:
+        return self.path or ""
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return self.path == other
+        if not isinstance(other, PathResourceSnapshot):
+            return NotImplemented
+        return (self.override, self.path) == (other.override, other.path)
+
+
+@dataclass(frozen=True, slots=True)
+class RunPaneSnapshot:
+    result: object | None
+    source_path: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisPaneSnapshot:
+    params: object | None
+    result: object | None
+    figure: Figure | None
+    writeback_items: tuple[WritebackItem, ...]
+    image_path: PathResourceSnapshot
+
+    @property
+    def image_path_override(self) -> str | None:
+        return self.image_path.override
+
+
+@dataclass(frozen=True, slots=True)
+class PostAnalysisPaneSnapshot:
+    params: object | None
+    result: object | None
+    figure: Figure | None
+    writeback_items: tuple[WritebackItem, ...]
+    image_path: PathResourceSnapshot
+
+    @property
+    def image_path_override(self) -> str | None:
+        return self.image_path.override
+
+
+@dataclass(frozen=True, slots=True)
+class SavePaneSnapshot:
+    data_path: PathResourceSnapshot
+
+    @property
+    def data_path_override(self) -> str | None:
+        return self.data_path.override
+
+
+@dataclass(frozen=True, slots=True)
+class TabPathsSnapshot:
+    """The three path resources projected independently by a tab snapshot."""
+
+    data: PathResourceSnapshot
+    analysis_image: PathResourceSnapshot
+    post_analysis_image: PathResourceSnapshot
+
+    @property
+    def data_path(self) -> PathResourceSnapshot:
+        return self.data
+
+    @property
+    def analysis_image_path(self) -> PathResourceSnapshot:
+        return self.analysis_image
+
+    @property
+    def post_image_path(self) -> PathResourceSnapshot:
+        return self.post_analysis_image
+
+
 @dataclass(frozen=True)
 class TabSnapshot:
     """Immutable full-state snapshot of one tab (contract-layer DTO).
@@ -105,6 +192,46 @@ class TabSnapshot:
     # Source file for a loaded result. None for live run results and restored
     # app-state snapshots; shares the tab:<id>:result lifetime.
     result_source_path: str | None = None
+
+    # Pane-owned read models. They are populated for render snapshots and left
+    # empty on persistence/restore snapshots, matching the legacy live fields.
+    run: RunPaneSnapshot | None = None
+    analysis: AnalysisPaneSnapshot | None = None
+    post_analysis: PostAnalysisPaneSnapshot | None = None
+    save: SavePaneSnapshot | None = None
+    paths: TabPathsSnapshot | None = None
+
+    @property
+    def run_pane(self) -> RunPaneSnapshot | None:
+        return self.run
+
+    @property
+    def analysis_pane(self) -> AnalysisPaneSnapshot | None:
+        return self.analysis
+
+    @property
+    def post_analysis_pane(self) -> PostAnalysisPaneSnapshot | None:
+        return self.post_analysis
+
+    @property
+    def save_pane(self) -> SavePaneSnapshot | None:
+        return self.save
+
+    @property
+    def data_path(self) -> str | None:
+        return None if self.paths is None else self.paths.data.path
+
+    @property
+    def analysis_image_path(self) -> str | None:
+        return None if self.paths is None else self.paths.analysis_image.path
+
+    @property
+    def post_analysis_image_path(self) -> str | None:
+        return None if self.paths is None else self.paths.post_analysis_image.path
+
+    @property
+    def path_resources(self) -> TabPathsSnapshot | None:
+        return self.paths
 
 
 @dataclass(frozen=True)
@@ -184,6 +311,7 @@ class WritebackQueryPort(Protocol):
     """
 
     def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]: ...
+    def get_tab_post_writeback_items(self, tab_id: str) -> list[WritebackItem]: ...
 
 
 @runtime_checkable
@@ -203,12 +331,16 @@ class TabLifecyclePort(Protocol):
 
 @runtime_checkable
 class WritebackLifecyclePort(Protocol):
-    """Temporary tab-facing writeback lifecycle surface.
+    """Writeback lifecycle surface used by result-owning panes.
 
-    The opaque draft API is stage-free and accepts proposal items directly. The
-    tab methods remain only while the current primary analyze/run callers migrate
-    to storing the draft handle itself in ticket 06 (ADR-0005).
+    ``create_draft`` / ``preview_draft`` / ``teardown_draft`` are the pane-owned
+    contract. The tab methods remain transitional adapters for callers migrating
+    in later tickets; they do not change the opaque draft's stage-free API.
     """
+
+    def create_draft(self, items: Iterable[WritebackItem]) -> Any: ...
+    def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
+    def teardown_draft(self, draft: Any) -> None: ...
 
     def teardown_tab_items(self, tab_id: str) -> None: ...
 
@@ -264,9 +396,9 @@ class TabResultWritePort(Protocol):
     contract, not behaviour (ADR-0005). ``State`` is the only implementer and
     satisfies it structurally (no inheritance change)."""
 
-    def clear_tab_results(self, tab_id: str) -> None: ...
+    def clear_tab_results(self, tab_id: str) -> Any: ...
     def set_tab_running(self, tab_id: str, running: bool) -> None: ...
-    def update_tab_result(self, tab_id: str, result: object) -> None: ...
+    def update_tab_result(self, tab_id: str, result: object) -> Any: ...
 
 
 @runtime_checkable
@@ -274,7 +406,8 @@ class TabAnalyzeWritePort(Protocol):
     """The narrow State-write contract an analyze / post-analyze policy depends
     on (ADR-0026 §3). Same rationale as ``TabResultWritePort``; ``State`` is the
     only implementer. ``update_tab_analyze``'s ``writeback_items`` keyword
-    mirrors State exactly so the structural match holds."""
+    mirrors State exactly so the structural match holds. Result replacement
+    methods return detached resources for post-commit draft cleanup."""
 
     def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None: ...
     def update_tab_analyze(
@@ -284,13 +417,18 @@ class TabAnalyzeWritePort(Protocol):
         figure: Figure | None,
         writeback_items: list[WritebackItem] | None = None,
         writeback_draft: Any | None = None,
-    ) -> None: ...
+        analyze_params_instance: object = ...,
+    ) -> Any: ...
     def update_tab_post_analyze(
         self,
         tab_id: str,
         post_analyze_result: object,
         figure: Figure | None,
-    ) -> None: ...
+        *,
+        post_analyze_params_instance: object = ...,
+        writeback_draft: Any | None = None,
+        writeback_items: list[WritebackItem] | None = None,
+    ) -> Any: ...
 
 
 @runtime_checkable

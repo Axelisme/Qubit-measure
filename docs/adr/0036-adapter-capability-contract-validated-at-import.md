@@ -18,8 +18,10 @@ adapter 要對框架宣告自己支援哪些 lifecycle：要不要 SoC、analyze
 ### 1. 單一顯式宣告 `AdapterCapabilities`
 
 每個 concrete adapter 宣告 class 屬性
-`capabilities = AdapterCapabilities(analysis=AnalysisMode.{NONE|FIT|INTERACTIVE}, requires_soc=…, post_analysis=…)`。
-框架契約 `ExpAdapterProtocol`（generic-free Protocol）只認這個屬性 + 必備 method，不認 decorator 或約定俗成的 method-presence。
+`capabilities = AdapterCapabilities(analysis=AnalysisMode.{NONE|FIT|INTERACTIVE}, requires_soc=…, post_analysis=…, load_data=…)`。
+`load_data` 是 canonical result-file load 的明確 capability；一般
+`AdapterCapabilities` 預設為 `False`，使用 BaseAdapter canonical loader 的 concrete
+adapter 宣告／繼承已驗證的 `True`。框架契約 `ExpAdapterProtocol`（generic-free Protocol）只認這個屬性 + 必備 method，不認 decorator 或約定俗成的 method-presence。
 
 **被否決**：class-body capability 物件（DEC-1）、`@fit` decorator（DEC-3）、ii-a 單一 typed 屬性（DEC-4）。`AnalysisMode` enum 已表達互斥、import-time validation 已抓 desync，額外 machinery 是 YAGNI，且會逼 40 個 adapter 改寫。
 
@@ -42,7 +44,17 @@ adapter 要對框架宣告自己支援哪些 lifecycle：要不要 SoC、analyze
 
 兩半是同一條規則的鏡像：**base 能產生 params ⟺ `params_cls` 全 default 可建構 ⟺ override 非必須**。靜態取型的 `analyze_params_cls()`：adapter 有覆寫 `get_analyze_params` 時讀其 return annotation；否則（多數 adapter 把常數折進欄位 default、不覆寫）落到 class 的第 4 個 generic arg `BaseAdapter[..., <Params>]`。
 
-### 5. Framework-called hook 明列為 mandatory Protocol surface
+### 5. Load capability 與 import-time canonical loader validation
+
+`load_data=True` 必須對應兩種可驗證路徑之一：adapter concrete override
+`load()`，或 `exp_cls` 能以無參數建立且具有 callable canonical `load()`。這項檢查在
+`BaseAdapter.__init_subclass__` 執行，不等待 UI、Guard 或 worker 第一次嘗試。
+`load_data=False` 禁止 concrete `load()` override，避免 capability 與實作分歧。
+Guard 與 LoadService 都檢查同一 flag；LoadService 仍保留 adapter loader 回報的資料檔錯誤
+分類。沒有 capability 的舊 structural test double 不代表 production adapter，僅由遷移中的
+caller compatibility path 通過。
+
+### 6. Framework-called hook 明列為 mandatory Protocol surface
 
 framework 實際呼叫的 adapter hook 都在 generic-free `ExpAdapterProtocol` 明列。
 `validate_run_request(req, raw_cfg)` 是 mandatory surface、optional override：`BaseAdapter` 提供純
@@ -56,7 +68,8 @@ no-op default；本契約不宣稱能辨識這種實作者意圖。
 
 ## 後果
 
-- adapter 作者只填 `capabilities` + 對應 hooks；裝錯／忘記在 **import 時**就炸，不到 runtime。
+- adapter 作者只填 `capabilities` + 對應 hooks；裝錯／忘記在 **import 時**就炸，不到 runtime。`load_data`
+  讓 UI、Guard、LoadService 使用同一個 canonical-loader gate。
 - 常數 analyze-params 不再需要樣板 override——值折進 params dataclass 欄位 default，base default 直接 `params_cls()`。
 - 驗證是泛型的（getattr-identity），不隨新增中間 base 或 helper 檔失效。
 - Guard 不保留 optional `getattr` compatibility branch；mandatory preflight 缺失由 structural contract
@@ -71,3 +84,4 @@ no-op default；本契約不宣稱能辨識這種實作者意圖。
 | 宣告↔實作 同步 | `__init_subclass__` Fast-Fail（getattr-identity） | runtime 才發現 / hardcode 中間 base 白名單 |
 | analyze-params override | 只在 params 無法全 default 建構時必須 | 凡非 `NoAnalyzeParams` 都強制 override（樣板） |
 | framework mandatory hook | Protocol 明列 + Base default + direct call | optional `getattr` / broad hook-name registry |
+| canonical load capability | `load_data` + import-time loader validation | runtime probing / capability-less override |
