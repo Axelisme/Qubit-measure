@@ -757,11 +757,10 @@ class MainWindow(QMainWindow):
         }
 
     def take_figure_screenshot(self, tab_id: str) -> bytes:
-        """Render a tab's figure to PNG bytes at the fixed export size.
+        """Render a tab's CURRENT visible figure to PNG bytes (legacy path).
 
-        Renders the live figure via savefig (not ``canvas.grab()``) so the
-        screenshot has the same window-independent geometry as a saved image,
-        rather than tracking the current widget pixel size.
+        Kept for internal callers that still use visible-pane inference. Remote
+        callers must use the pane-qualified variant below.
         """
         from zcu_tools.gui.app.main.figure_export import render_figure_png
 
@@ -772,6 +771,39 @@ class MainWindow(QMainWindow):
         if figure is None:
             raise FailedPreconditionError(f"tab {tab_id!r} has no figure yet")
         return render_figure_png(figure)
+
+    def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
+        """Pane-qualified figure PNG (run|analysis|post_analysis)."""
+        from zcu_tools.gui.app.main.adapter import AnalysisMode
+        from zcu_tools.gui.app.main.figure_export import render_figure_png
+
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            raise FailedPreconditionError(f"unknown tab_id: {tab_id!r}")
+        if subtab_id not in {"run", "analysis", "post_analysis"}:
+            raise FailedPreconditionError(f"invalid subtab_id {subtab_id!r}")
+        if subtab_id == "run":
+            fig = tab_w.get_current_figure_for_pane("run")
+            if fig is None:
+                raise FailedPreconditionError(f"tab {tab_id!r} run pane has no figure yet")
+            return render_figure_png(fig)
+        snap = self._ctrl.get_tab_snapshot(tab_id)
+        if snap.capabilities is None:
+            raise FailedPreconditionError("snapshot has no capabilities")
+        if subtab_id == "analysis":
+            if snap.capabilities.analysis is AnalysisMode.NONE:
+                raise FailedPreconditionError(f"tab {tab_id!r} does not support analysis")
+            fig = snap.analysis.figure if snap.analysis is not None else None
+            if fig is None:
+                raise FailedPreconditionError(f"tab {tab_id!r} analysis has no figure yet")
+            return render_figure_png(fig)  # type: ignore[arg-type]
+        # post_analysis
+        if not snap.capabilities.post_analysis:
+            raise FailedPreconditionError(f"tab {tab_id!r} does not support post_analysis")
+        fig = snap.post_analysis.figure if snap.post_analysis is not None else None
+        if fig is None:
+            raise FailedPreconditionError(f"tab {tab_id!r} post_analysis has no figure yet")
+        return render_figure_png(fig)  # type: ignore[arg-type]
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""

@@ -26,7 +26,7 @@ def test_canonical_cfg_contract_revisions_are_exact() -> None:
         WIRE_VERSION,
     )
 
-    assert WIRE_VERSION == 54
+    assert WIRE_VERSION == 55
     assert GUI_VERSION == 77
     assert m.MCP_VERSION == 73
 
@@ -272,8 +272,8 @@ def test_writeback_apply_is_a_pure_generated_forwarder():
     _assert_generated("tab.writeback_apply")
     assert "gui_tab_writeback_apply" not in m._OVERRIDE_NAMES
     schema = m.TOOLS["gui_tab_writeback_apply"]["inputSchema"]
-    # expected_versions is mcp_hidden; save_data is gone.
-    assert set(schema["properties"]) == {"tab_id"}
+    # expected_versions is mcp_hidden; save_data is gone; now pane-qualified
+    assert set(schema["properties"]) == {"tab_id", "subtab_id"}
 
 
 def test_load_data_is_generated_with_hidden_expected_versions():
@@ -419,8 +419,6 @@ def test_phase170c_save_writeback_tools():
     save_wire_methods = {
         "tab.save_data",
         "tab.save_image",
-        "tab.save_post_image",
-        "tab.save_result",
     }
     other_wire_methods = {
         "tab.save_set_paths",
@@ -441,8 +439,6 @@ def test_phase170c_save_writeback_tools():
     merged_away_tools = {
         "gui_tab_save_data",
         "gui_tab_save_image",
-        "gui_tab_save_post_image",
-        "gui_tab_save_result",
     }
     assert merged_away_tools.isdisjoint(set(m.TOOLS))
 

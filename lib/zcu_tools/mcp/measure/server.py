@@ -151,12 +151,12 @@ ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
     gui_tab_analyze_start, gui_tab_post_analyze_start. gui_tab_load_data is
     synchronous; run/analyze/post-analyze each waits briefly then degrades to a
     handle. A FINISHED run/analyze reply (settled in the short wait) already
-    carries 'figure' — the plot rendered to a temp PNG. After a
+    carries 'figure' — the plot rendered to a temp PNG via explicit pane (run pane live, analysis/post canonical). After a
     pending->finished op, read the figure with
-    gui_tab_get_current_figure and the fit summary with gui_tab_get_analyze_result /
+    gui_tab_get_figure(tab_id, subtab_id) (run|analysis|post_analysis) and the fit summary with gui_tab_get_analyze_result /
     gui_tab_get_post_analyze_result (the generic wait/poll report only status).
-    gui_tab_save (artifact + figure selectors) persists data and/or the figure and
-    returns the resolved destinations; gui_tab_writeback_apply commits the draft.
+    gui_tab_save (artifact + figure selectors) persists data (tab-only) and/or the pane's figure (analysis/post via subtab) and
+    returns the resolved destinations; gui_tab_writeback_apply(subtab_id) commits the pane's draft with destination_context.
   - Async handles: every degrading op returns a 'handle' in its START reply; drive
     it with the generic gui_op_poll(handle) / gui_op_wait(handle).
   - Devices / context / predictor / adapters: gui_device_*, gui_context_*,
@@ -211,7 +211,7 @@ Completion is detected by wait/poll on a handle, not by best-effort events:
   - gui_op_poll / gui_op_wait report ONLY status (+progress / feedback / cancel
     reason): they do NOT fold the figure / summary / snapshot. After a
     pending->finished op, read the product via its typed getter
-    (gui_tab_get_current_figure, gui_tab_get_analyze_result,
+    (gui_tab_get_figure, gui_tab_get_analyze_result,
     gui_tab_get_post_analyze_result, gui_device_snapshot).
   - CANCEL stays op-specific (no generic cancel): gui_tab_run_cancel (the running
     run), gui_tab_analyze_cancel(tab_id) (an interactive analyze), gui_device_cancel
@@ -455,6 +455,7 @@ tool_gui_tab_open = tools_tab.tool_gui_tab_open
 tool_gui_tab_run = tools_tab.tool_gui_tab_run
 tool_gui_tab_analyze_review = tools_tab.tool_gui_tab_analyze_review
 tool_gui_tab_commit = tools_tab.tool_gui_tab_commit
+tool_gui_tab_get_figure = tools_tab.tool_gui_tab_get_figure
 tool_gui_tab_get_current_figure = tools_tab.tool_gui_tab_get_current_figure
 
 _SOC_CONNECT_TIMEOUT_SLACK = tools_soc._SOC_CONNECT_TIMEOUT_SLACK

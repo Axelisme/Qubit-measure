@@ -85,41 +85,19 @@ def _h_tab_save_image(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
+    subtab_id = str(params["subtab_id"])
+    if subtab_id not in ("analysis", "post_analysis"):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"invalid subtab_id {subtab_id!r}; save_image only accepts analysis|post_analysis",
+        )
     image_path = params["image_path"]
-    written = adapter.save_control.save_image(
-        tab_id, str(image_path) if image_path is not None else None
-    )
+    path_str = str(image_path) if image_path is not None else None
+    if subtab_id == "analysis":
+        written = adapter.save_control.save_image(tab_id, path_str)
+    else:
+        written = adapter.save_control.save_post_image(tab_id, path_str)
     return {"image_path": written}
-
-
-def _h_tab_save_post_image(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    image_path = params["image_path"]
-    written = adapter.save_control.save_post_image(
-        tab_id, str(image_path) if image_path is not None else None
-    )
-    return {"image_path": written}
-
-
-def _h_tab_save_result(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    data_path = params["data_path"]
-    image_path = params["image_path"]
-    comment = str(params["comment"])
-    written_data, written_image = adapter.save_control.save_result(
-        tab_id,
-        str(data_path) if data_path is not None else None,
-        str(image_path) if image_path is not None else None,
-        comment=comment,
-    )
-    # The data save runs async, but both resolved paths (the data path's .hdf5 +
-    # uniqueness suffix included) are known synchronously — return them so the
-    # caller need not recover them from a later diagnostic.
-    return {"data_path": written_data, "image_path": written_image}
 
 
 def _h_tab_save_set_paths(

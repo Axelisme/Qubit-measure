@@ -160,34 +160,71 @@ def _start_op_with_short_wait(
     return {"status": "finished", "handle": operation_id, **product()}
 
 
-def _render_tab_figure(tab_id: str, out_path: str | None = None) -> dict[str, Any]:
-    """Render ``tab_id``'s current figure to a PNG FILE (never inline base64).
+def _render_tab_figure(
+    tab_id: str, subtab_id: str | None = None, out_path: str | None = None
+) -> dict[str, Any]:
+    """Render a specific pane's figure to a PNG FILE (never inline base64).
 
-    Drives the wire in out_path mode; synthesises a per-tab temp path under
-    gettempdir() (overwriting the previous render of the same tab) when no path
-    is given. Returns the wire reply ({saved_to, bytes}).
+    Drives ``tab.get_figure`` with required (tab_id, subtab_id) in out_path mode;
+    synthesises a per-pane temp path under gettempdir() when no path is given.
+    Returns the wire reply ({saved_to, bytes}).
+
+    Compat: old callers used ``_render_tab_figure(tab_id, out_path)`` with
+    subtab omitted (implicit run pane) or with out_path in the second position.
+    Detect that shape and map it to run.
     """
-    resolved = out_path or str(Path(gettempdir()) / f"measure_fig_{tab_id}.png")
+    allowed = {"run", "analysis", "post_analysis"}
+    # Compat: handle single-arg (tab_id) + out_path in second position
+    if subtab_id is not None and subtab_id not in allowed:
+        # Could be out_path passed as second positional arg (legacy)
+        if out_path is None and ("/" in subtab_id or subtab_id.endswith(".png")):
+            out_path = subtab_id
+            subtab_id = "run"
+        else:
+            raise ValueError(
+                f"subtab_id must be one of {sorted(allowed)}, got {subtab_id!r}"
+            )
+    if subtab_id is None:
+        subtab_id = "run"
+    resolved = out_path or str(
+        Path(gettempdir()) / f"measure_fig_{tab_id}_{subtab_id}.png"
+    )
     return send_gui_rpc(
-        "tab.get_current_figure", {"tab_id": tab_id, "out_path": resolved}
+        "tab.get_figure",
+        {"tab_id": tab_id, "subtab_id": subtab_id, "out_path": resolved},
     )
 
 
-def _fold_finished_figure(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
-    """Fold the tab's current figure into a FINISHED run/analyze reply, in place.
+def _render_current_figure_compat(
+    tab_id: str, out_path: str | None = None
+) -> dict[str, Any]:
+    """Compat shim for callers that previously used run-pane screenshot semantics.
 
-    The operator looks at the plot after nearly every run/analyze, so saving the
-    figure here collapses the separate gui_tab_get_current_figure call. Only acts
-    when ``reply['status'] == 'finished'`` (a pending/cancelled/timed_out op has no
-    settled figure to render). Renders to the per-tab temp PNG and adds
-    ``figure: <saved_to>``. A render failure is swallowed (recorded as
-    ``figure: None``) so a plotting hiccup never masks an otherwise-good result —
-    the agent can still re-request the figure explicitly.
+    Maps legacy run-figure requests to the explicit run subtab. Prefer
+    ``_render_tab_figure`` with an explicit subtab in new code.
+    """
+    return _render_tab_figure(tab_id, "run", out_path)
+
+
+def _fold_finished_figure(
+    tab_id: str, reply: dict[str, Any], *, subtab_id: str = "run"
+) -> dict[str, Any]:
+    """Fold a pane's figure into a FINISHED run/analyze reply, in place.
+
+    Only acts when ``reply['status'] == 'finished'``. Renders the requested
+    pane's figure to the per-pane temp PNG and adds ``figure: <saved_to>``.
+    A render failure is swallowed (recorded as ``figure: None``) so a plotting
+    hiccup never masks an otherwise-good result.
     """
     if reply.get("status") != "finished":
         return reply
     try:
-        reply["figure"] = _render_tab_figure(tab_id).get("saved_to")
+        reply["figure"] = _render_tab_figure(tab_id, subtab_id).get("saved_to")
     except Exception:
         reply["figure"] = None
     return reply
+
+
+# Backward compatibility aliases used by older tests / external callers
+def _fold_finished_figure_for_run(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
+    return _fold_finished_figure(tab_id, reply, subtab_id="run")

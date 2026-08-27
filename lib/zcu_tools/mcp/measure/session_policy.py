@@ -34,9 +34,11 @@ _GUARD_DEPS_DATA: dict[str, tuple[str, ...]] = {
         "context",
     ),
     "tab.save_data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "tab.save_image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "tab.save_post_image": ("tab:{tab_id}:post_analyze", "tab:{tab_id}:save_path"),
-    "tab.save_result": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
+    "tab.save_image": (
+        "tab:{tab_id}:result",
+        "tab:{tab_id}:post_analyze",
+        "tab:{tab_id}:save_path",
+    ),
     "tab.save_set_paths": ("tab:{tab_id}:save_path",),
     "tab.writeback_set": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
     "tab.writeback_apply": (
