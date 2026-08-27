@@ -58,9 +58,9 @@ def _snapshot(
     has_analyze_result: bool = True,
     has_post_analyze_result: bool = False,
     post_analysis: bool = True,
-    post_analyze_params: object | None = None,
-    post_figure: Figure | None = None,
-    figure: Figure | None = None,
+    post_params: object | None = None,
+    post_analysis_figure: Figure | None = None,
+    analysis_figure: Figure | None = None,
 ) -> TabSnapshot:
     from zcu_tools.gui.app.main.services.ports import (
         AnalysisPaneSnapshot,
@@ -72,16 +72,16 @@ def _snapshot(
     analysis_pane = AnalysisPaneSnapshot(
         params=_AnalyzeParams() if has_analyze_result else None,
         result=object() if has_analyze_result else None,
-        figure=figure,
+        figure=analysis_figure,
         writeback_items=(),
         image_path=PathResourceSnapshot(
             override=None, path="/tmp/a.png" if has_analyze_result else None
         ),
     )
     post_analysis_pane = PostAnalysisPaneSnapshot(
-        params=post_analyze_params,
+        params=post_params,
         result=object() if has_post_analyze_result else None,
-        figure=post_figure,
+        figure=post_analysis_figure,
         writeback_items=(),
         image_path=PathResourceSnapshot(
             override=None, path="/tmp/p.png" if has_post_analyze_result else None
@@ -115,16 +115,9 @@ def _snapshot(
             has_post_analyze_result=has_post_analyze_result,
         ),
         cfg_schema=MagicMock(),
-        save_paths_override=None,
         capabilities=AdapterCapabilities(
             analysis=AnalysisMode.FIT, post_analysis=post_analysis
         ),
-        analyze_params=_AnalyzeParams(),
-        post_analyze_params=post_analyze_params,
-        post_figure=post_figure,
-        writeback_items=(),
-        save_paths=None,
-        figure=figure,
         analysis=analysis_pane,
         post_analysis=post_analysis_pane,
         paths=paths,
@@ -211,7 +204,7 @@ def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatc
         _snapshot(
             "tab-1",
             has_analyze_result=True,
-            post_analyze_params=_EmptyPostParams(),
+            post_params=_EmptyPostParams(),
         ),
         MagicMock(),
     )
@@ -235,7 +228,7 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
             "tab-1",
             has_analyze_result=False,
             has_post_analyze_result=False,
-            post_analyze_params=_EmptyPostParams(),
+            post_params=_EmptyPostParams(),
         )
     )
     assert tab._post_analyze_section.isHidden() is True
@@ -250,7 +243,7 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
             "tab-1",
             has_analyze_result=True,
             has_post_analyze_result=True,
-            post_analyze_params=_EmptyPostParams(),
+            post_params=_EmptyPostParams(),
         )
     )
     assert tab._post_analyze_section.isHidden() is True
@@ -312,8 +305,8 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
     ctrl.get_tab_snapshot.return_value = _snapshot(
         "tab-1",
         has_post_analyze_result=True,
-        post_analyze_params=_PostParams(backend="pca"),
-        post_figure=post_fig,
+        post_params=_PostParams(backend="pca"),
+        post_analysis_figure=post_fig,
     )
 
     window = MainWindow(ctrl)
@@ -349,7 +342,10 @@ def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_tab_snapshot.return_value = _snapshot(
-        "tab-1", has_post_analyze_result=False, post_figure=None, figure=None
+        "tab-1",
+        has_post_analyze_result=False,
+        post_analysis_figure=None,
+        analysis_figure=None,
     )
 
     window = MainWindow(ctrl)
@@ -422,7 +418,10 @@ def test_take_figure_screenshot_captures_post_figure(qapp):
     window.show_post_analysis_image("tab-1", post_fig)
     # Mock snapshot to return canonical post figure for pane-qualified screenshot
     ctrl.get_tab_snapshot.return_value = _snapshot(
-        "tab-1", has_post_analyze_result=True, post_figure=post_fig, figure=Figure()
+        "tab-1",
+        has_post_analyze_result=True,
+        post_analysis_figure=post_fig,
+        analysis_figure=Figure(),
     )
 
     png = window.take_figure_screenshot_for_subtab("tab-1", "post_analysis")
@@ -476,7 +475,8 @@ def test_post_save_image_button_disabled_without_active_context(qapp):
 
 def test_post_save_image_click_saves_post_figure(qapp):
     """Clicking the post Save Image reads the post image path and dispatches
-    through the controller's ``save_post_image`` (which saves ``tab.post_figure``)."""
+    through the controller's ``save_post_image`` (which saves the post-analysis
+    pane's figure)."""
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _mock_ctrl()

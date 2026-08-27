@@ -52,9 +52,9 @@ def make_snapshot(
     has_analyze_result=True,
     has_post_result=False,
     has_figure=True,
-    figure=None,
-    post_figure=None,
-    writeback_items=(),
+    analysis_figure=None,
+    post_analysis_figure=None,
+    analysis_writeback_items=(),
 ):
     from zcu_tools.gui.app.main.services.ports import (
         AnalysisPaneSnapshot,
@@ -65,20 +65,20 @@ def make_snapshot(
         TabPathsSnapshot,
     )
 
-    # Allow explicit figure override or create based on flags
-    if figure is None and has_figure and has_analyze_result:
+    # Allow explicit pane figure override or create based on flags
+    if analysis_figure is None and has_figure and has_analyze_result:
         figure_obj = Figure()
-    elif figure is not None:
-        figure_obj = figure
+    elif analysis_figure is not None:
+        figure_obj = analysis_figure
     else:
-        figure_obj = figure  # None or explicit
-    # post figure
-    if post_figure is None and has_post_result:
+        figure_obj = analysis_figure  # None or explicit
+    # Post-analysis figure
+    if post_analysis_figure is None and has_post_result:
         post_figure_obj = Figure()
-    elif post_figure is not None:
-        post_figure_obj = post_figure
+    elif post_analysis_figure is not None:
+        post_figure_obj = post_analysis_figure
     else:
-        post_figure_obj = post_figure
+        post_figure_obj = post_analysis_figure
 
     # Determine actual figure for has_figure flag: keep consistency
     # Paths
@@ -99,7 +99,7 @@ def make_snapshot(
         params=DummyParams() if has_analyze_result else None,
         result=object() if has_analyze_result else None,
         figure=figure_obj,
-        writeback_items=tuple(writeback_items),
+        writeback_items=tuple(analysis_writeback_items),
         image_path=analysis_image_snap,
     )
     post_snap = PostAnalysisPaneSnapshot(
@@ -118,7 +118,6 @@ def make_snapshot(
     return TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
-        save_paths_override=None,
         tab_id=tab_id,
         interaction=TabInteractionState(
             global_run_active=False,
@@ -136,12 +135,6 @@ def make_snapshot(
         capabilities=AdapterCapabilities(
             analysis=analysis, post_analysis=post, load_data=load
         ),  # type: ignore[call-arg]
-        analyze_params=DummyParams() if has_analyze_result else None,
-        post_analyze_params=DummyPostParams() if has_post_result else None,
-        writeback_items=tuple(writeback_items),
-        figure=figure_obj,
-        save_paths=None,
-        post_figure=post_figure_obj,
         run=run_snap,
         analysis=analysis_snap,
         post_analysis=post_snap,
@@ -374,8 +367,8 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
         analysis=AnalysisMode.FIT,
         post=True,
         has_post_result=True,
-        figure=fig_a_retained,
-        post_figure=fig_p_retained,
+        analysis_figure=fig_a_retained,
+        post_analysis_figure=fig_p_retained,
     )
     window = MainWindow(ctrl)
     # Tab must be constructed with the same capabilities as the snapshot the window will fetch
@@ -385,8 +378,8 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
         analysis=AnalysisMode.FIT,
         post=True,
         has_post_result=True,
-        figure=Figure(),
-        post_figure=Figure(),
+        analysis_figure=Figure(),
+        post_analysis_figure=Figure(),
     )
     tab = exp_tab_widget("tab-1", ctrl, _tmp_snap.capabilities)
     tab.attach(ctrl.get_tab_snapshot.return_value, MagicMock())

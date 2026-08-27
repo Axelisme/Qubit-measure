@@ -32,7 +32,7 @@ def test_edit_md_item_can_change_target_name(qapp):
     )
     item.session_id = "md-1"
 
-    widget = WritebackWidget(MagicMock())
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])
 
     cb = QCheckBox()
@@ -65,7 +65,7 @@ def test_edit_md_item_rejects_blank_target_name(qapp):
     )
     item.session_id = "md-1"
 
-    widget = WritebackWidget(MagicMock())
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])
 
     cb = QCheckBox()
@@ -95,7 +95,7 @@ def test_edit_md_item_parses_complex_value(qapp):
     )
     item.session_id = "md-1"
 
-    widget = WritebackWidget(MagicMock())
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])
 
     cb = QCheckBox()
@@ -122,7 +122,7 @@ def test_edit_md_item_rejects_unparseable_complex(qapp):
     )
     item.session_id = "md-1"
 
-    widget = WritebackWidget(MagicMock())
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])
 
     cb = QCheckBox()
@@ -150,16 +150,17 @@ def test_edit_cfg_item_can_change_target_name(qapp):
         target_name="readout_rf", description="A module", edit_schema=MagicMock()
     )
     item.session_id = "ml-1"
-    item.editor_id = "editor-9"
 
     ctrl = MagicMock()
-    ctrl.get_cfg_editor_draft.return_value = MeasureCfgBindings(ctrl).new_draft(
+    ctrl.get_writeback_item_draft_for_pane.return_value = MeasureCfgBindings(
+        ctrl
+    ).new_draft(
         CfgSchema(
             spec=CfgSectionSpec(fields={}),
             value=CfgSectionValue(fields={}),
         )
     )
-    widget = WritebackWidget(ctrl)
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
     widget.populate([item])
 
     cb = QCheckBox()
