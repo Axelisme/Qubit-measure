@@ -362,6 +362,13 @@ def test_run_start_then_running_tab_then_finishes(fx):
         snap = _recv_response(sock)
         assert snap["ok"] is True
         # tab.snapshot always returns {tabs: [...]} (a single tab_id → a one-element list).
-        assert snap["result"]["tabs"][0]["interaction"]["has_run_result"] is True
+        tab_snapshot = snap["result"]["tabs"][0]
+        assert tab_snapshot["interaction"]["has_run_result"] is True
+        assert set(tab_snapshot["save_paths"]) == {
+            "data_path",
+            "analysis_image_path",
+            "post_analysis_image_path",
+        }
+        assert "image_path" not in tab_snapshot["save_paths"]
     finally:
         sock.close()

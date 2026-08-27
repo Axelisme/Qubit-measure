@@ -156,7 +156,9 @@ def test_fold_finished_figure_finished_folds_pending_does_not(monkeypatch):
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
 
     # FINISHED -> renders + folds the figure path.
-    finished = mcp_server._fold_finished_figure("az-1", {"status": "finished"}, subtab_id="run")
+    finished = mcp_server._fold_finished_figure(
+        "az-1", {"status": "finished"}, subtab_id="run"
+    )
     assert finished["figure"] == str(Path(gettempdir()) / "measure_fig_az-1_run.png")
     assert len(rendered) == 1
 
@@ -180,7 +182,9 @@ def test_fold_finished_figure_swallows_render_error(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server._fold_finished_figure("x-1", {"status": "finished"}, subtab_id="run")
+    out = mcp_server._fold_finished_figure(
+        "x-1", {"status": "finished"}, subtab_id="run"
+    )
     assert out["status"] == "finished"
     assert out["figure"] is None
 
@@ -222,7 +226,9 @@ def test_fold_writeback_preview_swallows_failure(monkeypatch):
         return {}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server._fold_writeback_preview("az-1", {"status": "finished"}, subtab_id="analysis")
+    out = mcp_server._fold_writeback_preview(
+        "az-1", {"status": "finished"}, subtab_id="analysis"
+    )
     assert out["status"] == "finished"
     assert "writeback_preview" not in out
 
@@ -265,7 +271,9 @@ def test_writeback_apply_is_pure_generated_forwarder():
         mcp_server._MCP_EXPOSURE.non_generated_methods,
         fake_send,
     )
-    out = tools["gui_tab_writeback_apply"]["handler"]({"tab_id": "t1", "subtab_id": "analysis"})
+    out = tools["gui_tab_writeback_apply"]["handler"](
+        {"tab_id": "t1", "subtab_id": "analysis"}
+    )
 
     assert out == {"applied_ids": ["md-0", "ml-1"]}
     assert calls == [("tab.writeback_apply", {"tab_id": "t1", "subtab_id": "analysis"})]
@@ -721,8 +729,8 @@ def test_analyze_review_pending_interactive_owes_and_omits_folds(monkeypatch):
 
 def test_commit_tool_removed_and_separate_save_tools_exist(monkeypatch):
     """gui_tab_commit bundle is removed; separate generated save tools exist."""
-    from zcu_tools.mcp.measure import server as mcp_server
     from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.mcp.measure import server as mcp_server
 
     assert "gui_tab_commit" not in mcp_server.TOOLS
     assert "gui_tab_save" not in mcp_server.TOOLS
@@ -732,10 +740,24 @@ def test_commit_tool_removed_and_separate_save_tools_exist(monkeypatch):
     assert "tab.save_data" in METHOD_SPECS
     assert "tab.save_image" in METHOD_SPECS
     # Verify schemas: save_data is tab-only, save_image requires subtab
-    assert set(mcp_server.TOOLS["gui_tab_save_data"]["inputSchema"]["properties"]) == {"tab_id", "data_path", "comment"}
-    assert set(mcp_server.TOOLS["gui_tab_save_image"]["inputSchema"]["properties"]) == {"tab_id", "subtab_id", "image_path"}
-    assert "subtab_id" not in mcp_server.TOOLS["gui_tab_save_data"]["inputSchema"]["properties"]
-    assert mcp_server.TOOLS["gui_tab_save_image"]["inputSchema"]["required"] == ["tab_id", "subtab_id"]
+    assert set(mcp_server.TOOLS["gui_tab_save_data"]["inputSchema"]["properties"]) == {
+        "tab_id",
+        "data_path",
+        "comment",
+    }
+    assert set(mcp_server.TOOLS["gui_tab_save_image"]["inputSchema"]["properties"]) == {
+        "tab_id",
+        "subtab_id",
+        "image_path",
+    }
+    assert (
+        "subtab_id"
+        not in mcp_server.TOOLS["gui_tab_save_data"]["inputSchema"]["properties"]
+    )
+    assert mcp_server.TOOLS["gui_tab_save_image"]["inputSchema"]["required"] == [
+        "tab_id",
+        "subtab_id",
+    ]
 
 
 def test_save_data_and_save_image_are_separate_generated_tools(monkeypatch):
@@ -762,12 +784,16 @@ def test_save_data_and_save_image_are_separate_generated_tools(monkeypatch):
         mcp_server._MCP_EXPOSURE.non_generated_methods,
         fake_send,
     )
-    out_data = tools["gui_tab_save_data"]["handler"]({"tab_id": "t1", "data_path": "/tmp/data.hdf5"})
+    out_data = tools["gui_tab_save_data"]["handler"](
+        {"tab_id": "t1", "data_path": "/tmp/data.hdf5"}
+    )
     assert out_data["data_path"] == "/tmp/data.hdf5"
     assert calls[0][0] == "tab.save_data"
     assert "subtab_id" not in calls[0][1]
 
-    out_img = tools["gui_tab_save_image"]["handler"]({"tab_id": "t1", "subtab_id": "analysis", "image_path": "/tmp/img.png"})
+    out_img = tools["gui_tab_save_image"]["handler"](
+        {"tab_id": "t1", "subtab_id": "analysis", "image_path": "/tmp/img.png"}
+    )
     assert out_img["image_path"] == "/tmp/img.png"
     assert calls[1][0] == "tab.save_image"
     assert calls[1][1]["subtab_id"] == "analysis"

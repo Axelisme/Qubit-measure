@@ -154,20 +154,65 @@ def test_figure_runtime_error_escapes_handler_unchanged() -> None:
     render_view.take_figure_screenshot_for_subtab.side_effect = error
     # Mock tab_control for analysis pane (needs snapshot)
     from unittest.mock import MagicMock as Mock2
+
     from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        TabSnapshot,
+    )
     from zcu_tools.gui.cfg import CfgSchema
+
     tab_control = Mock2()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT,
+        post_analysis=True,
+        load_data=False,
+        requires_soc=False,
+    )
     # For run pane, figure is live via render_view, not snapshot; snapshot can be empty
-    ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
-    post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
-    snap = TabSnapshot(adapter_name="fake", cfg_schema=Mock2(spec=CfgSchema), save_paths_override=None, tab_id="t1", interaction=Mock2(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+    ana = AnalysisPaneSnapshot(
+        params=None,
+        result=object(),
+        figure=None,
+        writeback_items=tuple(),
+        image_path=PathResourceSnapshot(override=None, path=None),
+    )
+    post = PostAnalysisPaneSnapshot(
+        params=None,
+        result=None,
+        figure=None,
+        writeback_items=tuple(),
+        image_path=PathResourceSnapshot(override=None, path=None),
+    )
+    snap = TabSnapshot(
+        adapter_name="fake",
+        cfg_schema=Mock2(spec=CfgSchema),
+        save_paths_override=None,
+        tab_id="t1",
+        interaction=Mock2(),
+        capabilities=caps,
+        analyze_params=None,
+        post_analyze_params=None,
+        post_figure=None,
+        writeback_items=tuple(),
+        figure=None,
+        save_paths=None,
+        result_source_path=None,
+        run=None,
+        analysis=ana,
+        post_analysis=post,
+        save=None,
+        paths=None,
+    )
     tab_control.get_tab_snapshot.return_value = snap
     tab_control.has_tab.return_value = True
     _assert_escapes_unchanged(
         lambda: _h_tab_get_figure(
-            cast(Any, SimpleNamespace(render_view=render_view, tab_control=tab_control)),
+            cast(
+                Any, SimpleNamespace(render_view=render_view, tab_control=tab_control)
+            ),
             {"tab_id": "t1", "subtab_id": "run", "out_path": None},
         ),
         error,
@@ -183,22 +228,74 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
     control.has_tab.return_value = True
     # Mock tab_control snapshot for pane
     from unittest.mock import MagicMock as Mock3
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities as Caps3, AnalysisMode as AM3
-    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot as APS3, PathResourceSnapshot as PRS3, PostAnalysisPaneSnapshot as PAPS3, TabSnapshot as TS3
+
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities as Caps3
+    from zcu_tools.gui.app.main.adapter import AnalysisMode as AM3
+    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot as APS3
+    from zcu_tools.gui.app.main.services.ports import PathResourceSnapshot as PRS3
+    from zcu_tools.gui.app.main.services.ports import PostAnalysisPaneSnapshot as PAPS3
+    from zcu_tools.gui.app.main.services.ports import TabSnapshot as TS3
     from zcu_tools.gui.cfg import CfgSchema as CS3
-    caps3 = Caps3(analysis=AM3.FIT, post_analysis=True, load_data=False, requires_soc=False)
-    ana3 = APS3(params=None, result=object(), figure=None, writeback_items=tuple(), image_path=PRS3(override=None, path=None))
-    post3 = PAPS3(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PRS3(override=None, path=None))
-    snap3 = TS3(adapter_name="fake", cfg_schema=Mock3(spec=CS3), save_paths_override=None, tab_id="t1", interaction=Mock3(), capabilities=caps3, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana3, post_analysis=post3, save=None, paths=None)
+
+    caps3 = Caps3(
+        analysis=AM3.FIT, post_analysis=True, load_data=False, requires_soc=False
+    )
+    ana3 = APS3(
+        params=None,
+        result=object(),
+        figure=None,
+        writeback_items=tuple(),
+        image_path=PRS3(override=None, path=None),
+    )
+    post3 = PAPS3(
+        params=None,
+        result=None,
+        figure=None,
+        writeback_items=tuple(),
+        image_path=PRS3(override=None, path=None),
+    )
+    snap3 = TS3(
+        adapter_name="fake",
+        cfg_schema=Mock3(spec=CS3),
+        save_paths_override=None,
+        tab_id="t1",
+        interaction=Mock3(),
+        capabilities=caps3,
+        analyze_params=None,
+        post_analyze_params=None,
+        post_figure=None,
+        writeback_items=tuple(),
+        figure=None,
+        save_paths=None,
+        result_source_path=None,
+        run=None,
+        analysis=ana3,
+        post_analysis=post3,
+        save=None,
+        paths=None,
+    )
     tab_control = Mock3()
     tab_control.get_tab_snapshot.return_value = snap3
     tab_control.has_tab.return_value = True
     ctrl_mock = Mock3()
-    ctrl_mock.get_exp_context.return_value = Mock3(active_label="ctx", chip_name="c", qub_name="q", res_name="r", database_path="/tmp", result_dir="/tmp", is_active=lambda: True)
+    ctrl_mock.get_exp_context.return_value = Mock3(
+        active_label="ctx",
+        chip_name="c",
+        qub_name="q",
+        res_name="r",
+        database_path="/tmp",
+        result_dir="/tmp",
+        is_active=lambda: True,
+    )
     if handler_name == "set":
         control.set_writeback_item_for_pane.side_effect = error
         call = lambda: _h_tab_writeback_set(
-            cast(Any, SimpleNamespace(writeback_control=control, tab_control=tab_control, ctrl=ctrl_mock)),
+            cast(
+                Any,
+                SimpleNamespace(
+                    writeback_control=control, tab_control=tab_control, ctrl=ctrl_mock
+                ),
+            ),
             {
                 "tab_id": "t1",
                 "subtab_id": "analysis",
@@ -212,7 +309,12 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
     else:
         control.apply_writeback_for_pane.side_effect = error
         call = lambda: _h_tab_writeback_apply(
-            cast(Any, SimpleNamespace(writeback_control=control, tab_control=tab_control, ctrl=ctrl_mock)),
+            cast(
+                Any,
+                SimpleNamespace(
+                    writeback_control=control, tab_control=tab_control, ctrl=ctrl_mock
+                ),
+            ),
             {"tab_id": "t1", "subtab_id": "analysis"},
         )
     _assert_escapes_unchanged(call, error)

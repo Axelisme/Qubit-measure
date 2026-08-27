@@ -562,11 +562,17 @@ def test_save_image_delegates_to_save_control(fx):
         resp2 = call(
             sock,
             "tab.save_image",
-            {"tab_id": "tab1", "subtab_id": "post_analysis", "image_path": "/tmp/post.png"},
+            {
+                "tab_id": "tab1",
+                "subtab_id": "post_analysis",
+                "image_path": "/tmp/post.png",
+            },
         )
         assert resp2["ok"] is True
         assert resp2["result"]["image_path"] == "/tmp/post.png"
-        fx.service.save_control.save_post_image.assert_called_once_with("tab1", "/tmp/post.png")
+        fx.service.save_control.save_post_image.assert_called_once_with(
+            "tab1", "/tmp/post.png"
+        )
     finally:
         sock.close()
 
@@ -574,6 +580,7 @@ def test_save_image_delegates_to_save_control(fx):
 def test_save_post_image_delegates_to_save_control(fx):
     """tab.save_post_image wire method is removed (clean break); save_image with subtab post_analysis routes to save_post_image internally."""
     from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+
     assert "tab.save_post_image" not in METHOD_SPECS
     assert "tab.save_post_image" not in [m for m in METHOD_SPECS]
 
@@ -581,12 +588,14 @@ def test_save_post_image_delegates_to_save_control(fx):
 def test_save_result_delegates_to_save_control(fx):
     """tab.save_result wire method is removed (clean break); use tab.save_data and tab.save_image separately."""
     from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+
     assert "tab.save_result" not in METHOD_SPECS
 
 
 def test_save_set_paths_delegates_to_save_control(fx):
     """tab.save_set_paths wire method is removed (no combined setter); use separate save_data/save_image."""
     from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+
     assert "tab.save_set_paths" not in METHOD_SPECS
 
 
@@ -1058,7 +1067,9 @@ def test_analyze_settled_returns_summary_and_figure(monkeypatch):
     assert out["status"] == "finished"
     assert out["summary"] == {"t1": 5.0}
     # MCP 46: figure is analyze's OWN visual result — folded on FINISHED FIT.
-    assert out["figure"] == str(Path(gettempdir()) / "measure_fig_fake-freq-1_analysis.png")
+    assert out["figure"] == str(
+        Path(gettempdir()) / "measure_fig_fake-freq-1_analysis.png"
+    )
     # writeback_preview stays in gui_tab_analyze_review — never in the base tool.
     assert "writeback_preview" not in out
     assert ("tab.analyze", {"tab_id": "fake-freq-1"}) in calls

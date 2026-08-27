@@ -53,7 +53,14 @@ def test_get_current_figure_omitted_out_path_writes_temp_file(monkeypatch):
     assert "png_b64" not in out
     # The convenience layer forwarded an out_path so the wire never returns base64.
     assert calls == [
-        ("tab.get_figure", {"tab_id": "fake-freq-1", "subtab_id": "analysis", "out_path": expected_path})
+        (
+            "tab.get_figure",
+            {
+                "tab_id": "fake-freq-1",
+                "subtab_id": "analysis",
+                "out_path": expected_path,
+            },
+        )
     ]
 
 
@@ -74,7 +81,10 @@ def test_get_current_figure_explicit_out_path_is_forwarded(monkeypatch):
 
     assert out == {"bytes": 1234, "saved_to": "/tmp/custom.png"}
     assert calls == [
-        ("tab.get_figure", {"tab_id": "t1", "subtab_id": "run", "out_path": "/tmp/custom.png"})
+        (
+            "tab.get_figure",
+            {"tab_id": "t1", "subtab_id": "run", "out_path": "/tmp/custom.png"},
+        )
     ]
 
 

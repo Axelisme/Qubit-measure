@@ -26,10 +26,7 @@ def _destination_context(adapter: RemoteControlAdapter) -> dict[str, object]:
 
     Does not compare or store source identity; draft source is opaque.
     """
-    try:
-        ctx = adapter.ctrl.get_exp_context()
-    except Exception:
-        return {"active_label": None}
+    ctx = adapter.ctrl.get_exp_context()
     return {
         "active_label": ctx.active_label,
         "chip_name": ctx.chip_name,

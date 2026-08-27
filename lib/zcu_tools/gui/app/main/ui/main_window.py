@@ -769,24 +769,34 @@ class MainWindow(QMainWindow):
         if subtab_id == "run":
             fig = tab_w.get_current_figure_for_pane("run")
             if fig is None:
-                raise FailedPreconditionError(f"tab {tab_id!r} run pane has no figure yet")
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} run pane has no figure yet"
+                )
             return render_figure_png(fig)
         snap = self._ctrl.get_tab_snapshot(tab_id)
         if snap.capabilities is None:
             raise FailedPreconditionError("snapshot has no capabilities")
         if subtab_id == "analysis":
             if snap.capabilities.analysis is AnalysisMode.NONE:
-                raise FailedPreconditionError(f"tab {tab_id!r} does not support analysis")
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} does not support analysis"
+                )
             fig = snap.analysis.figure if snap.analysis is not None else None
             if fig is None:
-                raise FailedPreconditionError(f"tab {tab_id!r} analysis has no figure yet")
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} analysis has no figure yet"
+                )
             return render_figure_png(fig)  # type: ignore[arg-type]
         # post_analysis
         if not snap.capabilities.post_analysis:
-            raise FailedPreconditionError(f"tab {tab_id!r} does not support post_analysis")
+            raise FailedPreconditionError(
+                f"tab {tab_id!r} does not support post_analysis"
+            )
         fig = snap.post_analysis.figure if snap.post_analysis is not None else None
         if fig is None:
-            raise FailedPreconditionError(f"tab {tab_id!r} post_analysis has no figure yet")
+            raise FailedPreconditionError(
+                f"tab {tab_id!r} post_analysis has no figure yet"
+            )
         return render_figure_png(fig)  # type: ignore[arg-type]
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:

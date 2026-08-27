@@ -30,7 +30,7 @@ def _items() -> list:
         role_id="readout",
     )
     mod.session_id = "ml-1"
-    mod.editor_id = "editor-9"
+    setattr(mod, "editor_id", "editor-9")
     return [md, mod]
 
 
@@ -47,10 +47,46 @@ def _ctrl() -> MagicMock:
     def _snap(tab_id: str = "t", items=None):
         if items is None:
             items = _items()
-        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
-        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
-        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
-        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+        caps = AdapterCapabilities(
+            analysis=AnalysisMode.FIT,
+            post_analysis=True,
+            load_data=False,
+            requires_soc=False,
+        )
+        ana = AnalysisPaneSnapshot(
+            params=None,
+            result=object(),
+            figure=None,
+            writeback_items=tuple(items),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        post = PostAnalysisPaneSnapshot(
+            params=None,
+            result=None,
+            figure=None,
+            writeback_items=tuple(),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        return TabSnapshot(
+            adapter_name="fake",
+            cfg_schema=MagicMock(spec=CfgSchema),
+            save_paths_override=None,
+            tab_id=tab_id,
+            interaction=MagicMock(),
+            capabilities=caps,
+            analyze_params=None,
+            post_analyze_params=None,
+            post_figure=None,
+            writeback_items=tuple(items),
+            figure=None,
+            save_paths=None,
+            result_source_path=None,
+            run=None,
+            analysis=ana,
+            post_analysis=post,
+            save=None,
+            paths=None,
+        )
 
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
@@ -63,14 +99,29 @@ def _ctrl() -> MagicMock:
     ctrl.set_writeback_item.return_value = {"valid": True, "removed": [], "added": []}
     # New pane-qualified controls
     ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snap(tab_id)
-    ctrl.get_exp_context.return_value = MagicMock(active_label="ctx001", chip_name="chip", qub_name="qubit", res_name="res", database_path="/tmp/db", result_dir="/tmp/result", is_active=lambda: True)
+    ctrl.get_exp_context.return_value = MagicMock(
+        active_label="ctx001",
+        chip_name="chip",
+        qub_name="qubit",
+        res_name="res",
+        database_path="/tmp/db",
+        result_dir="/tmp/result",
+        is_active=lambda: True,
+    )
     # writeback_control pane methods
     wc = MagicMock()
     wc.has_tab.return_value = True
     wc.get_tab_writeback_items.side_effect = lambda tab_id: _items()
     wc.get_context_version.return_value = 7
-    wc.set_writeback_item_for_pane.return_value = {"valid": True, "removed": [], "added": []}
-    wc.apply_writeback_for_pane.return_value = {"applied_ids": ["md-1"], "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}}
+    wc.set_writeback_item_for_pane.return_value = {
+        "valid": True,
+        "removed": [],
+        "added": [],
+    }
+    wc.apply_writeback_for_pane.return_value = {
+        "applied_ids": ["md-1"],
+        "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+    }
     wc.get_tab_snapshot = ctrl.get_tab_snapshot
     # attach to ctrl for dispatch helper fallback
     ctrl.tab_control = MagicMock()
@@ -86,7 +137,9 @@ from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 def test_preview_serializes_metadict_and_module():
     ctrl = _ctrl()
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
+    res = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
     item_list = list(res["items"])  # type: ignore[call-overload]
     items = {it["id"]: it for it in item_list}
 
@@ -107,13 +160,30 @@ def test_preview_serializes_metadict_and_module():
 
 def test_apply_reads_persistent_draft():
     ctrl = _ctrl()
-    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t", "subtab_id": "analysis"})
+    res = _dispatch(
+        ctrl, "tab.writeback_apply", {"tab_id": "t", "subtab_id": "analysis"}
+    )
     assert res["applied_ids"] == ["md-1"]
     # apply now enriches: written (by kind) + post-apply context version + destination_context.
     assert res["written"] == {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}
     assert res["context_version"] == 7
     assert "destination_context" in res
-    ctrl.writeback_control.apply_writeback_for_pane.assert_called_once_with("t", "analysis")
+    ctrl.writeback_control.apply_writeback_for_pane.assert_called_once_with(
+        "t", "analysis"
+    )
+
+
+def test_destination_context_projection_does_not_hide_programmer_errors():
+    ctrl = _ctrl()
+    error = RuntimeError("context projection bug")
+    ctrl.get_exp_context.side_effect = error
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _dispatch(
+            ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+        )
+
+    assert exc_info.value is error
 
 
 def test_preview_delegates_to_writeback_control_without_ctrl_fallback():
@@ -124,13 +194,19 @@ def test_preview_delegates_to_writeback_control_without_ctrl_fallback():
     # preview now reads via tab_control snapshot (pane-qualified), not directly via writeback_control items
     # but still requires writeback_control.has_tab for existence check
     ctrl.has_tab = MagicMock(
-        side_effect=AssertionError("tab.writeback_preview must use writeback_control/tab_control")
+        side_effect=AssertionError(
+            "tab.writeback_preview must use writeback_control/tab_control"
+        )
     )
     ctrl.get_tab_writeback_items = MagicMock(
-        side_effect=AssertionError("tab.writeback_preview must use writeback_control/tab_control")
+        side_effect=AssertionError(
+            "tab.writeback_preview must use writeback_control/tab_control"
+        )
     )
 
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
+    res = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
 
     assert res["has_draft"] is True
     # has_tab still via writeback_control
@@ -186,7 +262,9 @@ def test_apply_delegates_to_writeback_control_without_ctrl_fallback():
         side_effect=AssertionError("tab.writeback_apply must use writeback_control")
     )
 
-    res = _dispatch(ctrl, "tab.writeback_apply", {"tab_id": "t", "subtab_id": "analysis"})
+    res = _dispatch(
+        ctrl, "tab.writeback_apply", {"tab_id": "t", "subtab_id": "analysis"}
+    )
 
     assert res["context_version"] == 7
     assert "destination_context" in res
@@ -203,7 +281,13 @@ def test_set_edits_metadict_item():
     res = _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "selected": False, "proposed_value": 6015.0},
+        {
+            "tab_id": "t",
+            "subtab_id": "analysis",
+            "id": "md-1",
+            "selected": False,
+            "proposed_value": 6015.0,
+        },
     )
     ctrl.writeback_control.set_writeback_item_for_pane.assert_called_once()
     args, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
@@ -252,7 +336,8 @@ def test_set_proposed_value_and_edits_mutually_exclusive():
             ctrl,
             "tab.writeback_set",
             {
-                "tab_id": "t", "subtab_id": "analysis",
+                "tab_id": "t",
+                "subtab_id": "analysis",
                 "id": "md-1",
                 "proposed_value": 1.0,
                 "edits": [{"path": "p", "value": 1}],
@@ -268,7 +353,12 @@ def test_set_edits_malformed_entry_rejected():
         _dispatch(
             ctrl,
             "tab.writeback_set",
-            {"tab_id": "t", "subtab_id": "analysis", "id": "ml-1", "edits": [{"path": "p"}]},
+            {
+                "tab_id": "t",
+                "subtab_id": "analysis",
+                "id": "ml-1",
+                "edits": [{"path": "p"}],
+            },
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -278,7 +368,12 @@ def test_set_target_name_override():
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "ml-1", "target_name": "readout_v2"},
+        {
+            "tab_id": "t",
+            "subtab_id": "analysis",
+            "id": "ml-1",
+            "target_name": "readout_v2",
+        },
     )
     _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["target_name"] == "readout_v2"
@@ -312,7 +407,8 @@ def test_set_ignores_null_optionals():
         ctrl,
         "tab.writeback_set",
         {
-            "tab_id": "t", "subtab_id": "analysis",
+            "tab_id": "t",
+            "subtab_id": "analysis",
             "id": "ml-1",
             "selected": None,
             "target_name": "readout_v2",
@@ -329,7 +425,9 @@ def test_set_empty_target_name_rejected():
     ctrl = _ctrl()
     with pytest.raises(RemoteError) as exc:
         _dispatch(
-            ctrl, "tab.writeback_set", {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "target_name": ""}
+            ctrl,
+            "tab.writeback_set",
+            {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "target_name": ""},
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -341,7 +439,9 @@ def test_set_unknown_id_rejected():
     )
     with pytest.raises(RemoteError) as exc:
         _dispatch(
-            ctrl, "tab.writeback_set", {"tab_id": "t", "subtab_id": "analysis", "id": "md-99", "selected": True}
+            ctrl,
+            "tab.writeback_set",
+            {"tab_id": "t", "subtab_id": "analysis", "id": "md-99", "selected": True},
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -367,18 +467,66 @@ def test_preview_serializes_complex_as_tag():
     ctrl = _ctrl()
     # New handler reads via tab_control snapshot; mock that to return complex items
     from unittest.mock import MagicMock
+
     from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        TabSnapshot,
+    )
     from zcu_tools.gui.cfg import CfgSchema
+
     def _snap_complex(tab_id="t"):
         items = _complex_items()
-        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
-        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
-        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
-        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+        caps = AdapterCapabilities(
+            analysis=AnalysisMode.FIT,
+            post_analysis=True,
+            load_data=False,
+            requires_soc=False,
+        )
+        ana = AnalysisPaneSnapshot(
+            params=None,
+            result=object(),
+            figure=None,
+            writeback_items=tuple(items),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        post = PostAnalysisPaneSnapshot(
+            params=None,
+            result=None,
+            figure=None,
+            writeback_items=tuple(),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        return TabSnapshot(
+            adapter_name="fake",
+            cfg_schema=MagicMock(spec=CfgSchema),
+            save_paths_override=None,
+            tab_id=tab_id,
+            interaction=MagicMock(),
+            capabilities=caps,
+            analyze_params=None,
+            post_analyze_params=None,
+            post_figure=None,
+            writeback_items=tuple(items),
+            figure=None,
+            save_paths=None,
+            result_source_path=None,
+            run=None,
+            analysis=ana,
+            post_analysis=post,
+            save=None,
+            paths=None,
+        )
+
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_complex(tab_id)
-    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: (
+        _complex_items()
+    )
+    res = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == {"__complex__": [1.5, -2.25]}
 
@@ -389,7 +537,8 @@ def test_set_coerces_complex_tag_back_to_complex():
         ctrl,
         "tab.writeback_set",
         {
-            "tab_id": "t", "subtab_id": "analysis",
+            "tab_id": "t",
+            "subtab_id": "analysis",
             "id": "md-1",
             "proposed_value": {"__complex__": [1.5, -2.25]},
         },
@@ -403,24 +552,77 @@ def test_complex_preview_set_round_trip_is_lossless():
     """preview tag -> set -> the same complex the service would apply."""
     ctrl = _ctrl()
     from unittest.mock import MagicMock
+
     from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        TabSnapshot,
+    )
     from zcu_tools.gui.cfg import CfgSchema
+
     def _snap_complex(tab_id="t"):
         items = _complex_items()
-        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
-        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
-        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
-        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+        caps = AdapterCapabilities(
+            analysis=AnalysisMode.FIT,
+            post_analysis=True,
+            load_data=False,
+            requires_soc=False,
+        )
+        ana = AnalysisPaneSnapshot(
+            params=None,
+            result=object(),
+            figure=None,
+            writeback_items=tuple(items),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        post = PostAnalysisPaneSnapshot(
+            params=None,
+            result=None,
+            figure=None,
+            writeback_items=tuple(),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        return TabSnapshot(
+            adapter_name="fake",
+            cfg_schema=MagicMock(spec=CfgSchema),
+            save_paths_override=None,
+            tab_id=tab_id,
+            interaction=MagicMock(),
+            capabilities=caps,
+            analyze_params=None,
+            post_analyze_params=None,
+            post_figure=None,
+            writeback_items=tuple(items),
+            figure=None,
+            save_paths=None,
+            result_source_path=None,
+            run=None,
+            analysis=ana,
+            post_analysis=post,
+            save=None,
+            paths=None,
+        )
+
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_complex(tab_id)
-    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _complex_items()
-    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: (
+        _complex_items()
+    )
+    preview = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
     wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
 
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "proposed_value": wire_value},
+        {
+            "tab_id": "t",
+            "subtab_id": "analysis",
+            "id": "md-1",
+            "proposed_value": wire_value,
+        },
     )
     _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["proposed_value"] == complex(1.5, -2.25)
@@ -449,18 +651,66 @@ def _matrix_items() -> list:
 def test_preview_serializes_nested_list_verbatim():
     ctrl = _ctrl()
     from unittest.mock import MagicMock
+
     from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        TabSnapshot,
+    )
     from zcu_tools.gui.cfg import CfgSchema
+
     def _snap_matrix(tab_id="t"):
         items = _matrix_items()
-        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
-        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
-        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
-        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+        caps = AdapterCapabilities(
+            analysis=AnalysisMode.FIT,
+            post_analysis=True,
+            load_data=False,
+            requires_soc=False,
+        )
+        ana = AnalysisPaneSnapshot(
+            params=None,
+            result=object(),
+            figure=None,
+            writeback_items=tuple(items),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        post = PostAnalysisPaneSnapshot(
+            params=None,
+            result=None,
+            figure=None,
+            writeback_items=tuple(),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        return TabSnapshot(
+            adapter_name="fake",
+            cfg_schema=MagicMock(spec=CfgSchema),
+            save_paths_override=None,
+            tab_id=tab_id,
+            interaction=MagicMock(),
+            capabilities=caps,
+            analyze_params=None,
+            post_analyze_params=None,
+            post_figure=None,
+            writeback_items=tuple(items),
+            figure=None,
+            save_paths=None,
+            result_source_path=None,
+            run=None,
+            analysis=ana,
+            post_analysis=post,
+            save=None,
+            paths=None,
+        )
+
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_matrix(tab_id)
-    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
-    res = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: (
+        _matrix_items()
+    )
+    res = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
     item = list(res["items"])[0]  # type: ignore[call-overload]
     assert item["proposed_value"] == _CONFUSION
 
@@ -470,7 +720,12 @@ def test_set_passes_nested_list_through_untouched():
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "proposed_value": _CONFUSION},
+        {
+            "tab_id": "t",
+            "subtab_id": "analysis",
+            "id": "md-1",
+            "proposed_value": _CONFUSION,
+        },
     )
     _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["proposed_value"] == _CONFUSION
@@ -480,24 +735,77 @@ def test_nested_list_preview_set_round_trip_is_lossless():
     """preview verbatim -> set -> the same nested list the service would apply."""
     ctrl = _ctrl()
     from unittest.mock import MagicMock
+
     from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import AnalysisPaneSnapshot, PathResourceSnapshot, PostAnalysisPaneSnapshot, TabSnapshot
+    from zcu_tools.gui.app.main.services.ports import (
+        AnalysisPaneSnapshot,
+        PathResourceSnapshot,
+        PostAnalysisPaneSnapshot,
+        TabSnapshot,
+    )
     from zcu_tools.gui.cfg import CfgSchema
+
     def _snap_matrix(tab_id="t"):
         items = _matrix_items()
-        caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True, load_data=False, requires_soc=False)
-        ana = AnalysisPaneSnapshot(params=None, result=object(), figure=None, writeback_items=tuple(items), image_path=PathResourceSnapshot(override=None, path=None))
-        post = PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=tuple(), image_path=PathResourceSnapshot(override=None, path=None))
-        return TabSnapshot(adapter_name="fake", cfg_schema=MagicMock(spec=CfgSchema), save_paths_override=None, tab_id=tab_id, interaction=MagicMock(), capabilities=caps, analyze_params=None, post_analyze_params=None, post_figure=None, writeback_items=tuple(items), figure=None, save_paths=None, result_source_path=None, run=None, analysis=ana, post_analysis=post, save=None, paths=None)
+        caps = AdapterCapabilities(
+            analysis=AnalysisMode.FIT,
+            post_analysis=True,
+            load_data=False,
+            requires_soc=False,
+        )
+        ana = AnalysisPaneSnapshot(
+            params=None,
+            result=object(),
+            figure=None,
+            writeback_items=tuple(items),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        post = PostAnalysisPaneSnapshot(
+            params=None,
+            result=None,
+            figure=None,
+            writeback_items=tuple(),
+            image_path=PathResourceSnapshot(override=None, path=None),
+        )
+        return TabSnapshot(
+            adapter_name="fake",
+            cfg_schema=MagicMock(spec=CfgSchema),
+            save_paths_override=None,
+            tab_id=tab_id,
+            interaction=MagicMock(),
+            capabilities=caps,
+            analyze_params=None,
+            post_analyze_params=None,
+            post_figure=None,
+            writeback_items=tuple(items),
+            figure=None,
+            save_paths=None,
+            result_source_path=None,
+            run=None,
+            analysis=ana,
+            post_analysis=post,
+            save=None,
+            paths=None,
+        )
+
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_matrix(tab_id)
-    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: _matrix_items()
-    preview = _dispatch(ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"})
+    ctrl.writeback_control.get_tab_writeback_items.side_effect = lambda tab_id: (
+        _matrix_items()
+    )
+    preview = _dispatch(
+        ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
+    )
     wire_value = list(preview["items"])[0]["proposed_value"]  # type: ignore[call-overload]
 
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "proposed_value": wire_value},
+        {
+            "tab_id": "t",
+            "subtab_id": "analysis",
+            "id": "md-1",
+            "proposed_value": wire_value,
+        },
     )
     _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs["proposed_value"] == _CONFUSION

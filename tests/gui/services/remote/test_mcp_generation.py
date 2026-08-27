@@ -408,9 +408,9 @@ def test_phase170c_save_writeback_tools():
 
     P4 separates save into distinct generated tools: tab.save_data -> gui_tab_save_data (tab-only)
     and tab.save_image -> gui_tab_save_image (pane-qualified with subtab). Both are GENERATED
-    (tool_name, not override). The old single gui_tab_save bundle and gui_tab_commit are removed.
-    tab.save_set_paths is renamed to gui_tab_set_save_paths (tool_name override,
-    still generated). The writeback methods are auto-generated as gui_tab_writeback_*.
+    (tool_name, not override). The old gui_tab_save/gui_tab_commit bundles and the combined
+    tab.save_set_paths setter are removed. The writeback methods are auto-generated as
+    gui_tab_writeback_*.
     """
     # All save + writeback wire methods are present in the contract.
     save_wire_methods = {
