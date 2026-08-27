@@ -50,9 +50,7 @@ adapter 宣告／繼承已驗證的 `True`。框架契約 `ExpAdapterProtocol`�
 `load()`，或 `exp_cls` 能以無參數建立且具有 callable canonical `load()`。這項檢查在
 `BaseAdapter.__init_subclass__` 執行，不等待 UI、Guard 或 worker 第一次嘗試。
 `load_data=False` 禁止 concrete `load()` override，避免 capability 與實作分歧。
-Guard 與 LoadService 都檢查同一 flag；LoadService 仍保留 adapter loader 回報的資料檔錯誤
-分類。沒有 capability 的舊 structural test double 不代表 production adapter，僅由遷移中的
-caller compatibility path 通過。
+Guard、LoadService、UI與remote driving path都檢查同一 flag；LoadService仍保留adapter loader回報的資料檔錯誤分類。沒有有效`AdapterCapabilities(load_data=True)`的object一律拒絕，不以method probing、mock identity或caller fallback繞過contract。
 
 ### 6. Framework-called hook 明列為 mandatory Protocol surface
 

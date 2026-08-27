@@ -31,11 +31,11 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 
 ## writeback opaque draft（建立在 service-owned 上）
 
-analysis workflow一次算出adapter proposal items，再交給`WritebackService.create_draft()`建立opaque、service-owned draft。每個module/waveform proposal在draft-private entry中配對一棵`gc=False` headless model（種子 = item的`edit_schema`）；adapter item、workflow與wire projection都不持有`editor_id`。目前tab-level caller以`Session.writeback_draft`保存draft，`Session.writeback_items`只是在subtab-owned state遷移完成前的暫時read projection。user點開Edit dialog時，Writeback以draft與item session id解析並回傳同一棵`CfgDraft`供widget attach（WYSIWYG）。
+analysis workflow一次算出adapter proposal items，再交給`WritebackService.create_draft()`建立opaque、service-owned draft。每個module/waveform proposal在draft-private entry中配對一棵`gc=False` headless model（種子 = item的`edit_schema`）；adapter item、workflow與wire projection都不持有`editor_id`。Analysis與Post-Analysis pane各自保存自己的opaque draft；read model只投影該pane可見的writeback items。user點開Edit dialog時，Writeback以draft與item session id解析並回傳同一棵`CfgDraft`供widget attach（WYSIWYG）。
 
 Draft建立具有strong exception guarantee：任何editor open失敗時，Writeback在拋出原始錯誤前清理該draft已開啟的所有sessions，不把未成功回傳的cleanup責任交給workflow。Teardown先封閉draft再逐一清理，因此可重複呼叫；單一session cleanup失敗不會造成其他session被略過或讓已封閉draft再次close。Apply snapshot各item model並只把selected items組成一個`ContextWrites`交給ContextService（見[[0006]]），不直接修改md/ml。
 
-**agent編writeback草稿的入口統一在writeback面：** 現行tab adapter以`tab.writeback_set`和`(tab_id, session_id)`定址；Writeback再解析opaque draft的private entry並透過`CfgEditorPort.set_fields`套用ordered、fail-fast edits。`editor_id`不上wire，agent不先取得editor handle。metadict item仍走同一面的value facet。這個封裝只涵蓋writeback draft；`editor.*` RPC對ModuleLibrary ml-entry的直接編輯仍使用`editor_id`，不受影響。
+**agent編writeback草稿的入口統一在writeback面：** remote/MCP以required `(tab_id, subtab_id)`定址Analysis或Post-Analysis draft，再以item session id選取draft-private entry；Writeback透過`CfgEditorPort.set_fields`套用ordered、fail-fast edits。`editor_id`不上writeback wire，agent不先取得editor handle。metadict item仍走同一面的value facet。這個封裝只涵蓋writeback draft；`editor.*` RPC對ModuleLibrary ml-entry的直接編輯仍使用`editor_id`，不受影響。
 
 `CfgEditorPort`包含open、teardown、draft read與field edit所需的窄介面，使`WritebackService`依賴port而非concrete service（[[0005]]）。底層仍是同一個service-owned `CfgDraft`，因此user dialog與agent共享同一份可見草稿。
 

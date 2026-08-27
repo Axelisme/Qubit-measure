@@ -185,10 +185,11 @@ fails. A failed proposal/editor build leaves the previous canonical pane intact.
 Primary analysis replacement invalidates Post-Analysis, Post replacement leaves
 Analysis untouched, and a successful run/load clears both downstream panes.
 
-Current flat tab result/writeback/path accessors remain transitional projections for
-callers migrating in later lifecycle/UI tickets; they are not new resource ownership
-contracts. Operation-start request/context inputs are captured and reused by analysis
-and proposal hooks, without context-identity checks or terminal active-context reads.
+State and `TabSnapshot` expose only the explicit Run, Analysis, Post-Analysis, Save
+and path carriers; there are no flat tab result/writeback/path projections. Callers
+name the pane they consume. Operation-start request/context inputs are captured and
+reused by analysis and proposal hooks, without context-identity checks or terminal
+active-context reads.
 
 ## Tab Lifecycle And Ordering
 
@@ -404,9 +405,9 @@ on the concrete controller.
   must not touch devices or mutate cfg/state.
 - Adapter `run()` receives a concrete config and performs the experiment.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
-- `get_writeback_items()` and the optional `get_post_writeback_items()` return
-  domain writeback candidates for their owning analysis pane; writeback commit is
-  framework-owned.
+- `get_writeback_items()` and `get_post_writeback_items()` return domain writeback
+  candidates for their owning analysis pane; the base post hook returns no candidates,
+  and writeback commit is framework-owned.
 - `WritebackService.create_draft()` accepts those candidates and returns an opaque,
   service-owned draft. Item-local cfg-editor sessions and their identities stay
   inside the service; draft creation cleans every session on failure, teardown is
@@ -414,10 +415,8 @@ on the concrete controller.
   `ContextWritePort` batch. `WritebackWidget` is pane-bound and the Qt-only
   `Controller`/`WritebackControl` pane-qualified forwarding (`*_for_pane` with
   `pane` in `analysis|post_analysis`) resolves the pane's opaque draft before
-  calling the stage-agnostic service. The current tab-level `Session.writeback_items`
-  and `compute_items_for_tab()` methods are temporary A4 caller adapters, explicitly
-  scheduled for removal by ticket 06 during the state/caller migration; remote/MCP
-  wire remains tab-level until Ticket 04.
+  calling the stage-agnostic service. Remote/MCP writeback operations use the same
+  required pane locator; no tab-level draft adapter or wire editor identity exists.
 
 Import direction stays one-way: `experiment/v2_gui -> gui.app.main`, never the
 reverse.
