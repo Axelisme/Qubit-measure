@@ -21,11 +21,10 @@ from ._helpers import dispatch_handler as _dispatch
 
 
 def _snapshot(*, has_analyze_result: bool, post_params: object) -> SimpleNamespace:
-    """A minimal TabSnapshot stand-in carrying the two fields the post handlers
-    read: interaction.has_analyze_result and post_analyze_params."""
+    """Minimal pane-qualified snapshot consumed by the post handlers."""
     return SimpleNamespace(
         interaction=SimpleNamespace(has_analyze_result=has_analyze_result),
-        post_analyze_params=post_params,
+        post_analysis=SimpleNamespace(params=post_params),
     )
 
 
