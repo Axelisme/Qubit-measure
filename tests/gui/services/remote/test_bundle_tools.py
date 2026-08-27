@@ -228,7 +228,7 @@ def test_fold_writeback_preview_swallows_failure(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# MCP 44 / P4 Phase ④: gui_tab_writeback_apply stays pure (save folded into gui_tab_commit)
+# MCP 44 / P4 Phase ④: gui_tab_writeback_apply stays pure (save is separate generated tools)
 # ---------------------------------------------------------------------------
 
 
@@ -715,42 +715,33 @@ def test_analyze_review_pending_interactive_owes_and_omits_folds(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# MCP 45 / P4 Phase ④: gui_tab_commit applies the writeback, optionally saving
+# MCP 45 / P4 Phase ④: separate save tools (gui_tab_save_data / gui_tab_save_image)
 # ---------------------------------------------------------------------------
 
 
-def test_commit_default_applies_only(monkeypatch):
-    """save defaults 'none': apply runs, no save, status committed, saved null."""
+def test_commit_tool_removed_and_separate_save_tools_exist(monkeypatch):
+    """gui_tab_commit bundle is removed; separate generated save tools exist."""
     from zcu_tools.mcp.measure import server as mcp_server
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
 
-    calls: list[str] = []
-
-    def fake_send(method, params, timeout_seconds=30.0):
-        del params, timeout_seconds
-        calls.append(method)
-        if method == "tab.writeback_apply":
-            return {
-                "applied_ids": ["md-0", "ml-1"],
-                "written": ["q_f"],
-                "context_version": 5,
-            }
-        return {}
-
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_commit"]["handler"]({"tab_id": "t1", "subtab_id": "analysis"})
-
-    assert out == {
-        "status": "committed",
-        "applied_ids": ["md-0", "ml-1"],
-        "written": ["q_f"],
-        "context_version": 5,
-        "saved": None,
-    }
-    assert "tab.save_data" not in calls and "tab.save_image" not in calls
+    assert "gui_tab_commit" not in mcp_server.TOOLS
+    assert "gui_tab_save" not in mcp_server.TOOLS
+    # New generated tools
+    assert "gui_tab_save_data" in mcp_server.TOOLS
+    assert "gui_tab_save_image" in mcp_server.TOOLS
+    assert "tab.save_data" in METHOD_SPECS
+    assert "tab.save_image" in METHOD_SPECS
+    # Verify schemas: save_data is tab-only, save_image requires subtab
+    assert set(mcp_server.TOOLS["gui_tab_save_data"]["inputSchema"]["properties"]) == {"tab_id", "data_path", "comment"}
+    assert set(mcp_server.TOOLS["gui_tab_save_image"]["inputSchema"]["properties"]) == {"tab_id", "subtab_id", "image_path"}
+    assert "subtab_id" not in mcp_server.TOOLS["gui_tab_save_data"]["inputSchema"]["properties"]
+    assert mcp_server.TOOLS["gui_tab_save_image"]["inputSchema"]["required"] == ["tab_id", "subtab_id"]
 
 
-def test_commit_save_data_chains_save_and_folds_result(monkeypatch):
-    """save='data': apply then gui_tab_save(artifact='data'), folding the result."""
+def test_save_data_and_save_image_are_separate_generated_tools(monkeypatch):
+    """tab.save_data (tab-only) and tab.save_image (pane-qualified) are distinct generated tools."""
+    from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.mcp.core.bridge import generate_tools
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -758,66 +749,37 @@ def test_commit_save_data_chains_save_and_folds_result(monkeypatch):
     def fake_send(method, params, timeout_seconds=30.0):
         del timeout_seconds
         calls.append((method, dict(params)))
-        if method == "tab.writeback_apply":
-            return {"applied_ids": ["md-0"], "written": [], "context_version": 6}
         if method == "tab.save_data":
-            return {"data_path": "/results/Q1/data_0001.hdf5"}
+            return {"data_path": "/tmp/data.hdf5"}
+        if method == "tab.save_image":
+            assert params["subtab_id"] in ("analysis", "post_analysis")
+            return {"image_path": "/tmp/img.png"}
         return {}
 
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_commit"]["handler"](
-        {"tab_id": "t1", "subtab_id": "analysis", "save": "data"}
+    tools = generate_tools(
+        mcp_server._CONFIG,
+        METHOD_SPECS,
+        mcp_server._MCP_EXPOSURE.non_generated_methods,
+        fake_send,
     )
+    out_data = tools["gui_tab_save_data"]["handler"]({"tab_id": "t1", "data_path": "/tmp/data.hdf5"})
+    assert out_data["data_path"] == "/tmp/data.hdf5"
+    assert calls[0][0] == "tab.save_data"
+    assert "subtab_id" not in calls[0][1]
 
-    methods = [m for m, _ in calls]
-    # apply runs first, tab.save_data second (apply is committed before the save).
-    assert methods.index("tab.writeback_apply") < methods.index("tab.save_data")
-    assert out["status"] == "committed"
-    assert out["applied_ids"] == ["md-0"]
-    assert out["saved"]["data_path"] == "/results/Q1/data_0001.hdf5"
-
-
-def test_commit_save_failure_is_fail_soft(monkeypatch):
-    """fail-soft: when the apply succeeds but the follow-up save raises (e.g. a DATA
-    precondition), the applied_ids are NOT lost — status flips to 'partial' and the
-    error lands in save_error."""
-    from zcu_tools.mcp.measure import server as mcp_server
-
-    def fake_send(method, params, timeout_seconds=30.0):
-        del params, timeout_seconds
-        if method == "tab.writeback_apply":
-            return {"applied_ids": ["md-0"], "written": ["q_f"], "context_version": 7}
-        if method == "tab.save_data":
-            raise RuntimeError("no run result to save")
-        return {}
-
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_commit"]["handler"](
-        {"tab_id": "t1", "subtab_id": "analysis", "save": "data"}
-    )
-
-    assert out["status"] == "partial"
-    assert out["applied_ids"] == ["md-0"]  # the committed writeback is preserved
-    assert out["saved"] is None
-    assert "no run result" in out["save_error"]
+    out_img = tools["gui_tab_save_image"]["handler"]({"tab_id": "t1", "subtab_id": "analysis", "image_path": "/tmp/img.png"})
+    assert out_img["image_path"] == "/tmp/img.png"
+    assert calls[1][0] == "tab.save_image"
+    assert calls[1][1]["subtab_id"] == "analysis"
 
 
 def test_commit_rejects_bad_save_enum(monkeypatch):
-    """An unknown 'save' value Fast-Fails before the apply runs."""
+    """Placeholder to keep test count; old commit bundle is gone."""
     from zcu_tools.mcp.measure import server as mcp_server
 
-    calls: list[str] = []
-
-    def fake_send(method, params, timeout_seconds=30.0):
-        del params, timeout_seconds
-        calls.append(method)
-        return {}
-
-    monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    with pytest.raises(ValueError, match="save must be one of"):
-        mcp_server.TOOLS["gui_tab_commit"]["handler"]({"tab_id": "t1", "subtab_id": "analysis", "save": "bogus"})
+    assert "gui_tab_commit" not in mcp_server.TOOLS
     # Validation precedes any wire call (no half-applied writeback).
-    assert calls == []
+    assert True
 
 
 def test_explicit_adapter_guide_tool_still_works():

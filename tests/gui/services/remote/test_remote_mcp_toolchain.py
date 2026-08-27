@@ -622,15 +622,16 @@ def test_save_set_paths_delegates_to_save_control(fx):
 def test_mcp_tool_schemas_include_required_discovery_tools():
     # P1 renamed/merged the context + state surface: context.active + context.labels
     # fold into gui_context_list; gui_context_new/_use -> gui_context_create/_switch;
-    # gui_state_check is retired (the readiness flags live in gui_overview now). The
-    # save tools merged into the single gui_tab_save (artifact + figure selectors).
+    # gui_state_check is retired (the readiness flags live in gui_overview now). Save
+    # is now separate generated tools: gui_tab_save_data (tab-only) and gui_tab_save_image (pane-qualified).
     expected = {
         "gui_adapter_list",
         "gui_soc_connect",
         "gui_context_list",
         "gui_context_switch",
         "gui_context_create",
-        "gui_tab_save",
+        "gui_tab_save_data",
+        "gui_tab_save_image",
         "gui_device_connect",
         "gui_device_disconnect",
         # P2 renamed gui_device_setup -> gui_device_apply and

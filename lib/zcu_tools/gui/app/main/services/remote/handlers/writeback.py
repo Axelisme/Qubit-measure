@@ -54,12 +54,6 @@ def _writeback_item_wire(item) -> dict[str, object]:
     elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
         is_module = isinstance(item, ModuleWriteback)
         base["kind"] = "module" if is_module else "waveform"
-        # New opaque drafts never expose their cfg-editor identity. Keep the
-        # legacy field only when an old caller explicitly supplied one, so the
-        # temporary A4 adapter remains readable during migration.
-        legacy_editor_id = getattr(item, "editor_id", None)
-        if legacy_editor_id is not None:
-            base["editor_id"] = legacy_editor_id
         base["has_edit_schema"] = item.edit_schema is not None
         if item.role_id is not None:
             base["role_id"] = item.role_id
@@ -183,12 +177,6 @@ def _h_tab_writeback_set(
     return reply
 
 
-def _find_writeback_item(adapter: RemoteControlAdapter, tab_id: str, session_id: str):
-    # Legacy helper retained for internal tests that call it directly; delegate to pane-aware
-    # analysis pane by default.
-    return _find_writeback_item_for_pane(adapter, tab_id, "analysis", session_id)
-
-
 def _find_writeback_item_for_pane(
     adapter: RemoteControlAdapter, tab_id: str, pane: str, session_id: str
 ):
@@ -199,18 +187,6 @@ def _find_writeback_item_for_pane(
     elif pane == "post_analysis" and snap.post_analysis is not None:
         items = list(snap.post_analysis.writeback_items)
     for item in items:
-        if item.session_id == session_id:
-            return item
-    # Fallback to writeback_control direct query for completeness
-    try:
-        fallback = (
-            adapter.writeback_control.get_tab_writeback_items(tab_id)
-            if pane == "analysis"
-            else []
-        )
-    except Exception:
-        fallback = []
-    for item in fallback:
         if item.session_id == session_id:
             return item
     raise RemoteError(

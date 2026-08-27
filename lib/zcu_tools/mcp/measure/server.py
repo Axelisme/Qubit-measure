@@ -109,7 +109,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # tracked separately by WIRE_VERSION (see ``wire_version.py``); the two are
 # independent. (Git history holds the per-version evolution.)
 # MeasureMcpSession owns measure-only MCP policy state.
-MCP_VERSION = 73
+MCP_VERSION = 74
 
 # ---------------------------------------------------------------------------
 # Server usage instructions (returned in the MCP `initialize` result)
@@ -131,10 +131,10 @@ Tools are tiered: prefer RECOMMENDED; reach for ON-DEMAND when the bundles don't
 fit; DEV tools are for debugging the GUI/MCP itself, not for measuring.
 
 RECOMMENDED — the primary flow:
-  - The recommended bundle flow (breadcrumb open -> run -> analyze_review -> commit):
+  - The recommended bundle flow (breadcrumb open -> run -> analyze_review -> writeback apply -> save):
     gui_tab_open (new tab + adapter guide) -> gui_tab_run (configure + run) ->
-    gui_tab_analyze_review (analyze + writeback preview) -> gui_tab_commit
-    (writeback + optional save). Each folds the cross-tool reads you would
+    gui_tab_analyze_review (analyze + writeback preview) -> gui_tab_writeback_apply
+    (apply pane draft with destination_context) -> gui_tab_save_data / gui_tab_save_image when wanted. Each folds the cross-tool reads you would
     otherwise chain by hand.
   - Lifecycle / startup the bundles depend on: gui_overview (orient — its 'state'
     field has the four readiness flags has_project / has_context /
@@ -155,8 +155,8 @@ ON-DEMAND — the fine-grained base tools, when a bundle doesn't fit:
     pending->finished op, read the figure with
     gui_tab_get_figure(tab_id, subtab_id) (run|analysis|post_analysis) and the fit summary with gui_tab_get_analyze_result /
     gui_tab_get_post_analyze_result (the generic wait/poll report only status).
-    gui_tab_save (artifact + figure selectors) persists data (tab-only) and/or the pane's figure (analysis/post via subtab) and
-    returns the resolved destinations; gui_tab_writeback_apply(subtab_id) commits the pane's draft with destination_context.
+    gui_tab_save_data persists data (tab-only); gui_tab_save_image(subtab_id) persists the pane's canonical image (analysis|post_analysis).
+    gui_tab_writeback_apply(subtab_id) commits the pane's draft with destination_context.
   - Async handles: every degrading op returns a 'handle' in its START reply; drive
     it with the generic gui_op_poll(handle) / gui_op_wait(handle).
   - Devices / context / predictor / adapters: gui_device_*, gui_context_*,
@@ -243,7 +243,7 @@ Call contract — read before issuing defensive/duplicate calls:
     duplicate within one.
   - Mutating tools have side effects and must be sent exactly once: gui_tab_run_start
     (a duplicate starts a SECOND run), gui_editor_set, gui_tab_new /
-    gui_tab_close, gui_tab_save, gui_device_connect / _disconnect / _apply,
+    gui_tab_close, gui_tab_save_data, gui_tab_save_image, gui_device_connect / _disconnect / _apply,
     gui_context_md_write / _md_delete / _ml_delete_* / _ml_rename_*,
     gui_editor_save, set_arb_waveform.
 
@@ -444,17 +444,13 @@ tool_gui_device_setup = tools_device.tool_gui_device_setup
 _run_tab_summary = tools_tab._run_tab_summary
 _fold_analyze_params = tools_tab._fold_analyze_params
 _analyze_summary_product = tools_tab._analyze_summary_product
-_SAVE_ARTIFACTS = tools_tab._SAVE_ARTIFACTS
-_SAVE_FIGURES = tools_tab._SAVE_FIGURES
 _fold_writeback_preview = tools_tab._fold_writeback_preview
 tool_gui_tab_run_start = tools_tab.tool_gui_tab_run_start
 tool_gui_tab_analyze = tools_tab.tool_gui_tab_analyze
 tool_gui_tab_post_analyze = tools_tab.tool_gui_tab_post_analyze
-tool_gui_tab_save = tools_tab.tool_gui_tab_save
 tool_gui_tab_open = tools_tab.tool_gui_tab_open
 tool_gui_tab_run = tools_tab.tool_gui_tab_run
 tool_gui_tab_analyze_review = tools_tab.tool_gui_tab_analyze_review
-tool_gui_tab_commit = tools_tab.tool_gui_tab_commit
 tool_gui_tab_get_figure = tools_tab.tool_gui_tab_get_figure
 
 _SOC_CONNECT_TIMEOUT_SLACK = tools_soc._SOC_CONNECT_TIMEOUT_SLACK

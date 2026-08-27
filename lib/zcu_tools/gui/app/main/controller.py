@@ -172,7 +172,6 @@ class RenderView(Protocol):
     screenshot / dialog management). Held by the adapter, not the Controller."""
 
     def get_view_snapshot(self) -> dict[str, object]: ...
-    def take_figure_screenshot(self, tab_id: str) -> bytes: ...
     def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
         """Pane-qualified figure screenshot (run|analysis|post_analysis).
 

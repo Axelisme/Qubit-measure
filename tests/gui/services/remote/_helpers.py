@@ -49,7 +49,7 @@ def make_view() -> MagicMock:
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
     view.make_run_container = MagicMock(return_value=None)
-    # shaped View surface so Controller.open_dialog / take_figure_screenshot
+    # shaped View surface so Controller.open_dialog / take_figure_screenshot_for_subtab
     # / get_view_snapshot have somewhere to land in tests.
     view._open_dialogs = []
 
@@ -81,7 +81,7 @@ def make_view() -> MagicMock:
         b"\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cb"
         b"\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
-    view.take_figure_screenshot = MagicMock(return_value=_PNG)
+    view.take_figure_screenshot_for_subtab = MagicMock(return_value=_PNG)
     view.take_dialog_screenshot = MagicMock(return_value=_PNG)
     view.take_window_screenshot = MagicMock(return_value=_PNG)
     return view

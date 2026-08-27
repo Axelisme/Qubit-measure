@@ -401,7 +401,7 @@ def test_pane_containers_are_independent_for_post(qapp):
 
 
 def test_take_figure_screenshot_captures_post_figure(qapp):
-    """The tab's visible-figure boundary exposes a post figure for screenshots."""
+    """The tab's pane-qualified screenshot boundary exposes a post figure."""
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
@@ -420,8 +420,12 @@ def test_take_figure_screenshot_captures_post_figure(qapp):
     post_fig.add_subplot(111).plot([0, 1], [0, 1])
     # Render the post figure through the real shared-container path.
     window.show_post_analysis_image("tab-1", post_fig)
+    # Mock snapshot to return canonical post figure for pane-qualified screenshot
+    ctrl.get_tab_snapshot.return_value = _snapshot(
+        "tab-1", has_post_analyze_result=True, post_figure=post_fig, figure=Figure()
+    )
 
-    png = window.take_figure_screenshot("tab-1")
+    png = window.take_figure_screenshot_for_subtab("tab-1", "post_analysis")
 
     assert isinstance(png, bytes)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"

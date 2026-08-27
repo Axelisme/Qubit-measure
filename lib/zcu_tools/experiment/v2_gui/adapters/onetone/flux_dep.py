@@ -116,7 +116,7 @@ class OneToneFluxDepAdapter(
             "For consecutive flux sweeps, reverse the sweep direction (swap "
             "start/stop) on the next run so the current source need not ramp "
             "all the way back across the full range first. Inspect the 2D map "
-            "with gui_tab_get_current_figure to judge window / SNR / shift. "
+            "with gui_tab_get_figure (subtab_id='run') to judge window / SNR / shift. "
             "After accepting 'flx_int', move the flux device there and re-run "
             "onetone/freq at that flux before twotone/freq."
         ),

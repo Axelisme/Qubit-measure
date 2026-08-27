@@ -150,8 +150,6 @@ EXPECTED_OVERRIDE_MCP_METHODS = {
     "tab.get_figure": ("gui_tab_get_figure",),
     "tab.post_analyze": ("gui_tab_post_analyze_start",),
     "tab.run_start": ("gui_tab_run_start",),
-    "tab.save_data": ("gui_tab_save",),
-    "tab.save_image": ("gui_tab_save",),
     "tab.set_cfg": ("gui_tab_set_cfg",),
     "view.screenshot": ("gui_screenshot",),
 }

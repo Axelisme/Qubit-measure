@@ -756,22 +756,6 @@ class MainWindow(QMainWindow):
             "open_dialogs": [name.value for name in self.list_open_dialogs()],
         }
 
-    def take_figure_screenshot(self, tab_id: str) -> bytes:
-        """Render a tab's CURRENT visible figure to PNG bytes (legacy path).
-
-        Kept for internal callers that still use visible-pane inference. Remote
-        callers must use the pane-qualified variant below.
-        """
-        from zcu_tools.gui.app.main.figure_export import render_figure_png
-
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            raise FailedPreconditionError(f"unknown tab_id: {tab_id!r}")
-        figure = tab_w.current_figure()
-        if figure is None:
-            raise FailedPreconditionError(f"tab {tab_id!r} has no figure yet")
-        return render_figure_png(figure)
-
     def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
         """Pane-qualified figure PNG (run|analysis|post_analysis)."""
         from zcu_tools.gui.app.main.adapter import AnalysisMode

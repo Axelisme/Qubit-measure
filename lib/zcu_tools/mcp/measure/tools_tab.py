@@ -157,86 +157,6 @@ def tool_gui_tab_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     return _fold_finished_figure(tab_id, reply, subtab_id="post_analysis")
 
 
-_SAVE_ARTIFACTS = frozenset({"data", "image", "both"})
-_SAVE_FIGURES = frozenset({"primary", "post"})
-
-
-def tool_gui_tab_save(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Save a tab's result data and/or figure; return the resolved destinations.
-
-    Two orthogonal selectors:
-      - artifact='data'|'image'|'both' (default 'both'): which artifacts to save.
-      - figure='primary'|'post' (default 'primary'): which figure the 'image'
-        artifact targets — the analysis pane or the post-analysis pane (mapped to
-        subtab analysis|post_analysis for tab.save_image).
-
-    Collision policy (NOT uniform across artifacts, by design — it mirrors the
-    underlying savers):
-      - DATA is written async with a uniqueness suffix: the resolved path is
-        ``<stem>.hdf5`` with ``_N`` appended on collision, so a data save NEVER
-        overwrites an existing file. The write itself runs async (data_async=true)
-        — only the resolved path is known synchronously here.
-      - IMAGE is written synchronously and OVERWRITES the destination if it exists
-        (no uniqueness suffix).
-
-    Returns {data_path, image_path, data_async, image_error} (all four keys always
-    present, null when not applicable):
-      - data_path: resolved data path when artifact included 'data', else null.
-      - image_path: written image path when the image save succeeded, else null.
-      - data_async: true when a data save was started (it completes off-turn).
-      - image_error: the image-save error message when the image save FAILED, else
-        null.
-    """
-    tab_id = str(arguments["tab_id"])
-    artifact = str(arguments.get("artifact", "both"))
-    figure = str(arguments.get("figure", "primary"))
-    if artifact not in _SAVE_ARTIFACTS:
-        raise ValueError(
-            f"artifact must be one of {sorted(_SAVE_ARTIFACTS)}, got {artifact!r}"
-        )
-    if figure not in _SAVE_FIGURES:
-        raise ValueError(
-            f"figure must be one of {sorted(_SAVE_FIGURES)}, got {figure!r}"
-        )
-
-    comment = arguments.get("comment")
-    data_path_arg = arguments.get("data_path")
-    image_path_arg = arguments.get("image_path")
-
-    out: dict[str, Any] = {
-        "data_path": None,
-        "image_path": None,
-        "data_async": False,
-        "image_error": None,
-    }
-
-    if artifact in ("data", "both"):
-        data_params: dict[str, Any] = {"tab_id": tab_id}
-        if data_path_arg is not None:
-            data_params["data_path"] = str(data_path_arg)
-        if comment is not None:
-            data_params["comment"] = str(comment)
-        out["data_path"] = send_gui_rpc("tab.save_data", data_params).get("data_path")
-        out["data_async"] = True
-
-    if artifact in ("image", "both"):
-        subtab_id = "analysis" if figure == "primary" else "post_analysis"
-        image_params: dict[str, Any] = {"tab_id": tab_id, "subtab_id": subtab_id}
-        if image_path_arg is not None:
-            image_params["image_path"] = str(image_path_arg)
-        data_was_saved = artifact == "both"
-        try:
-            out["image_path"] = send_gui_rpc("tab.save_image", image_params).get(
-                "image_path"
-            )
-        except Exception as exc:
-            if not data_was_saved:
-                raise
-            out["image_error"] = str(exc)
-
-    return out
-
-
 def _fold_writeback_preview(
     tab_id: str, reply: dict[str, Any], *, subtab_id: str
 ) -> dict[str, Any]:
@@ -313,43 +233,6 @@ def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
         )
         return reply
     return _fold_writeback_preview(tab_id, reply, subtab_id="analysis")
-
-
-def tool_gui_tab_commit(arguments: dict[str, Any]) -> dict[str, Any]:
-    """commit (step 4): apply the pane's writeback draft, optionally saving.
-
-    Composes tab.writeback_apply for a specific pane (analysis|post_analysis);
-    optionally follows with a save. Requires explicit subtab_id.
-    """
-    tab_id = str(arguments["tab_id"])
-    subtab_id = str(arguments["subtab_id"])
-    if subtab_id not in ("analysis", "post_analysis"):
-        raise ValueError(
-            f"subtab_id must be 'analysis' or 'post_analysis', got {subtab_id!r}"
-        )
-    save = str(arguments.get("save", "none"))
-    if save not in ("none", "data", "image", "both"):
-        raise ValueError(
-            f"save must be one of ['none', 'data', 'image', 'both'], got {save!r}"
-        )
-    apply_reply = dict(
-        send_gui_rpc("tab.writeback_apply", {"tab_id": tab_id, "subtab_id": subtab_id})
-    )
-    out: dict[str, Any] = {"status": "committed", **apply_reply, "saved": None}
-    if save == "none":
-        return out
-    try:
-        out["saved"] = tool_gui_tab_save(
-            {
-                "tab_id": tab_id,
-                "artifact": save,
-                "figure": "post" if subtab_id == "post_analysis" else "primary",
-            }
-        )
-    except Exception as exc:
-        out["status"] = "partial"
-        out["save_error"] = str(exc)
-    return out
 
 
 def tool_gui_tab_get_figure(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -509,7 +392,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "temp PNG via analysis pane), and 'writeback_preview' is the stage-specific fold "
             "({has_draft, items, destination_context} — the proposed writeback values/targets + active destination) — so you "
             "review the fit + the proposed writeback in one call before "
-            "gui_tab_commit. 'updates' optionally overrides the analyze params; "
+            "gui_tab_writeback_apply. 'updates' optionally overrides the analyze params; "
             "'wait_seconds' (default 1.0) bounds the short wait. An INTERACTIVE "
             "analysis (e.g. flux_dep) degrades to {status:'pending', handle, owed} "
             "(no folds; 'owed' names the pending reads) — prompt the user, then "
@@ -534,43 +417,6 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 },
             },
             "required": ["tab_id"],
-        },
-    },
-    "gui_tab_commit": {
-        "handler": tool_gui_tab_commit,
-        "description": (
-            "Step 4 of the recommended flow (open -> run -> analyze_review -> "
-            "commit) — commit. = gui_tab_writeback_apply + (optionally) gui_tab_save. "
-            "Apply the pane's writeback draft (requires explicit subtab_id: analysis|post_analysis) "
-            "(edit it first via gui_tab_writeback_set_item). Applies the items currently selected; returns {status, applied_ids, "
-            "written, context_version, destination_context, saved, save_error?}. 'save' selects the "
-            "follow-up save artifacts (same vocabulary as gui_tab_save): 'none' "
-            "(default, apply-only), 'data', 'image', or 'both'."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {
-                    "type": "string",
-                    "description": "Tab whose writeback draft to apply (from gui_tab_analyze_review)",
-                },
-                "subtab_id": {
-                    "type": "string",
-                    "enum": ["analysis", "post_analysis"],
-                    "description": "Pane whose draft to apply (analysis|post_analysis)",
-                },
-                "save": {
-                    "type": "string",
-                    "enum": ["none", "data", "image", "both"],
-                    "default": "none",
-                    "description": (
-                        "Optional follow-up save after applying (same artifacts as "
-                        "gui_tab_save): 'none' (default, apply only), 'data', "
-                        "'image', or 'both'."
-                    ),
-                },
-            },
-            "required": ["tab_id", "subtab_id"],
         },
     },
     "gui_tab_analyze_start": {
@@ -622,7 +468,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "when the tab has no primary analyze result yet — run "
             "gui_tab_analyze_start first. 'updates' optionally overrides post params "
             "(see gui_tab_get_post_analyze_params). The post figure is pane-specific; see it with gui_tab_get_figure subtab_id='post_analysis' and persist it "
-            "with gui_tab_save."
+            "with gui_tab_save_image (subtab_id='post_analysis') or gui_tab_save_data."
         ),
         "inputSchema": {
             "type": "object",
@@ -635,65 +481,6 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
                 "wait_seconds": {
                     "type": "number",
                     "description": "Seconds to wait before degrading to a handle (default 1.0)",
-                },
-            },
-            "required": ["tab_id"],
-        },
-    },
-    "gui_tab_save": {
-        "handler": tool_gui_tab_save,
-        "description": (
-            "Save a tab's result data and/or figure; return the resolved "
-            "destinations. Two orthogonal selectors:\n"
-            "  - artifact='data'|'image'|'both' (default 'both'): which artifacts.\n"
-            "  - figure='primary'|'post' (default 'primary'): which figure the "
-            "'image' artifact targets (the analysis vs post_analysis pane, mapped to subtab analysis|post_analysis for tab.save_image).\n"
-            "Collision policy (NOT uniform — it mirrors the savers): DATA is "
-            "written ASYNC with a uniqueness suffix (<stem>.hdf5, '_N' on "
-            "collision) so it NEVER overwrites; IMAGE is written SYNC and "
-            "OVERWRITES an existing destination.\n"
-            "Returns {data_path, image_path, data_async, image_error} (all keys "
-            "always present, null when N/A): data_path is the resolved data path; "
-            "image_path is the written image path (null if the image save failed); "
-            "data_async is true when a data save was started (it finishes off-turn); "
-            "image_error carries the image-save error message when it FAILED.\n"
-            "Error boundary: with artifact='both' a data save ran first, so EVERY "
-            "image failure (wire GuiRpcError AND stale-version RuntimeError) folds "
-            "into image_error and is NOT raised — the resolved data_path is never "
-            "lost. With artifact='image' (nothing to protect) an image failure "
-            "RAISES (Fast-Fail). A precondition failure on the DATA save always "
-            "raises (no data_error field). Optional data_path / image_path override "
-            "the tab's configured destinations; comment annotates the data file."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "tab_id": {"type": "string", "description": "Tab id"},
-                "artifact": {
-                    "type": "string",
-                    "enum": ["data", "image", "both"],
-                    "default": "both",
-                    "description": "Which artifacts to save (default 'both')",
-                },
-                "figure": {
-                    "type": "string",
-                    "enum": ["primary", "post"],
-                    "default": "primary",
-                    "description": (
-                        "Which figure the 'image' artifact targets (default 'primary' -> analysis pane; 'post' -> post_analysis pane)"
-                    ),
-                },
-                "data_path": {
-                    "type": "string",
-                    "description": "Override the data destination path",
-                },
-                "image_path": {
-                    "type": "string",
-                    "description": "Override the image destination path",
-                },
-                "comment": {
-                    "type": "string",
-                    "description": "Optional comment annotating the data file",
                 },
             },
             "required": ["tab_id"],

@@ -70,17 +70,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:_h_tab_save_data",
         MethodSpec(
             30.0,
-            "Save data file",
+            "Save data file (tab-only).",
             (
                 _str("tab_id"),
                 _str_opt("data_path", "Override data path"),
                 _comment(),
                 _expected_versions(),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_save",
-                reason="manual MCP tool merges data/image save selectors",
-            ),
+            tool_name="gui_tab_save_data",
         ),
     ),
     method_entry(
@@ -97,10 +94,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str_opt("image_path", "Override image path"),
                 _expected_versions(),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_save",
-                reason="manual MCP tool merges data/image save selectors",
-            ),
+            tool_name="gui_tab_save_image",
         ),
     ),
     method_entry(

@@ -98,7 +98,7 @@ class FluxDepAdapter(
             "For consecutive flux sweeps, reverse the sweep direction (swap "
             "start/stop) on the next run so the flux source need not ramp "
             "back across the full range first. Inspect the 2D map with "
-            "gui_tab_get_current_figure. Confirm 'flux_dev' points at a "
+            "gui_tab_get_figure (subtab_id='run'). Confirm 'flux_dev' points at a "
             "connected device before running."
         ),
     )

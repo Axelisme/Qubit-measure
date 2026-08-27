@@ -119,7 +119,7 @@ The launch/connect note reports three numbers:
   owned here.
 
 Current measure-gui values are `WIRE_VERSION = 55`, `GUI_VERSION = 77`, and
-`MCP_VERSION = 73`（defined in `zcu_tools.mcp.measure.server`）。WIRE 55發布subtab-qualified contract：figure/writeback/save-image要求必填`(tab_id, subtab_id)`且wire值固定為`run|analysis|post_analysis`（save_image僅`analysis|post_analysis`），移除舊`tab.get_current_figure`、`tab.save_post_image`與`tab.save_result`及其MCP/tool/bundle fallback，preview/apply回傳當下`destination_context`投影；GUI 77維持不變；MCP 73維持不變。
+`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 55發布subtab-qualified contract：figure/writeback/save-image要求必填`(tab_id, subtab_id)`且wire值固定為`run|analysis|post_analysis`（save_image僅`analysis|post_analysis`），移除舊`tab.get_current_figure`、`tab.save_post_image`與`tab.save_result`及其MCP/tool/bundle fallback，preview/apply回傳當下`destination_context`投影；GUI 77維持不變；MCP 74分離save為`gui_tab_save_data`（tab-only）與`gui_tab_save_image`（pane-qualified），移除`gui_tab_save`/`gui_tab_commit` bundle。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -170,7 +170,7 @@ The wire surface is grouped by ownership:
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
-Subtab locator is required and closed (`run|analysis|post_analysis`); save_image only `analysis|post_analysis`; legacy `tab.get_current_figure`, `tab.save_post_image`, `tab.save_result` and omitted-subtab fallback are removed (clean break, no alias). MCP convenience bundles (`gui_tab_run`→`run`, `gui_tab_analyze`/`gui_tab_analyze_review`→`analysis`, `gui_tab_post_analyze_start`→`post_analysis`) query the pane they just operated on, and `gui_tab_get_figure`/`gui_tab_save`/`gui_tab_writeback_*` use the same qualified wire forms.
+Subtab locator is required and closed (`run|analysis|post_analysis`); save_image only `analysis|post_analysis`; legacy `tab.get_current_figure`, `tab.save_post_image`, `tab.save_result` and omitted-subtab fallback are removed (clean break, no alias). MCP convenience bundles (`gui_tab_run`→`run`, `gui_tab_analyze`/`gui_tab_analyze_review`→`analysis`, `gui_tab_post_analyze_start`→`post_analysis`) query the pane they just operated on, and `gui_tab_get_figure`/`gui_tab_save_data`+`gui_tab_save_image`/`gui_tab_writeback_*` use the same qualified wire forms (no `gui_tab_save` bundle, no `gui_tab_commit`).
 
 `method_entries/` is the registration SSOT. Adding an agent-visible method
 requires one entry containing the wire method name, handler ref, method spec, MCP

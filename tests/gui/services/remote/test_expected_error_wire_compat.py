@@ -172,7 +172,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     tab_control.get_tab_snapshot.return_value = snap
     tab_control.has_tab.return_value = True
     render_view.take_figure_screenshot_for_subtab.side_effect = FailedPreconditionError(
-        "tab 't1' has no figure yet"
+        "tab 't1' analysis has no figure yet"
     )
     view_adapter = SimpleNamespace(render_view=render_view, tab_control=tab_control)
     view_adapter.ctrl = Mock2()

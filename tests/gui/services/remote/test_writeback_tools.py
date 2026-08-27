@@ -100,7 +100,7 @@ def test_preview_serializes_metadict_and_module():
     mod = items["ml-1"]
     assert mod["kind"] == "module"
     assert mod["target_name"] == "readout_rf"
-    assert mod["editor_id"] == "editor-9"
+    assert "editor_id" not in mod
     assert mod["has_edit_schema"] is True
     assert mod["role_id"] == "readout"
 
