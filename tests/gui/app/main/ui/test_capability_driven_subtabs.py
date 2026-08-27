@@ -371,10 +371,19 @@ def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
     assert contains(tab._analysis_panel, tab._image_path_edit)
     assert contains(tab._post_panel, tab._post_image_path_edit)
     assert contains(tab._save_panel, tab._data_path_edit)
+    tab.set_data_path("/tmp/data.hdf5")
     tab.set_analysis_image_path("/tmp/a.png")
     tab.set_post_image_path("/tmp/p.png")
+    assert tab.get_data_path() == "/tmp/data.hdf5"
     assert tab.get_image_path() == "/tmp/a.png"
     assert tab.get_post_image_path() == "/tmp/p.png"
+
+    tab.set_data_path("")
+    tab.set_analysis_image_path("")
+    tab.set_post_image_path("")
+    assert tab.get_data_path() == ""
+    assert tab.get_image_path() == ""
+    assert tab.get_post_image_path() == ""
     tab._left_tabs.setCurrentWidget(tab._save_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     assert tab._right_stack.currentWidget() is tab._right_placeholder

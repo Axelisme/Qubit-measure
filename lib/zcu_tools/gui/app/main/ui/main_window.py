@@ -391,13 +391,6 @@ class MainWindow(QMainWindow):
             self._predictor_label.setText(f"loaded (flux_bias={flux_bias:.4g})")
             self._predictor_label.setStyleSheet("color: green;")
 
-    def make_live_container(self, tab_id: str) -> Any:
-        """Transitional run live container for not-yet-migrated remote screenshot (Ticket 04)."""
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return None
-        return tab_w.prepare_run_container()
-
     def make_run_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
@@ -457,8 +450,8 @@ class MainWindow(QMainWindow):
     def unmount_interactive_analysis(self, tab_id: str) -> None:
         """RenderHost impl: remove the tab's mounted interactive picker (dual of
         ``mount_interactive_analysis``). The picker widget is added straight to the
-        plot stack (it is not a FigureContainer canvas), so ``reset_plot`` cannot
-        reach it — this is the only teardown path for a cancelled interactive
+        Analysis stack (it is not a FigureContainer canvas), so pane canvas cleanup
+        cannot reach it — this is the only teardown path for a cancelled interactive
         analyze. A no-op when no picker is mounted, and idempotent."""
         from zcu_tools.gui.app.main.ui.interactive_analysis import (
             InteractiveAnalysisWidget,

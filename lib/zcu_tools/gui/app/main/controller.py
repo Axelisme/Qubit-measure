@@ -124,13 +124,7 @@ class RenderHost(Protocol):
     Each (tab_id, subtab) pane owns a stable FigureContainer for its lifetime (S2).
     The worker captures the pane's container at start; switching the visible pane
     does not change the routing target. Save/Guide have no container (placeholder).
-    The legacy ``make_live_container`` remains for Run live plot (view-only) and is
-    an alias for the Run pane.
     """
-
-    def make_live_container(self, tab_id: str) -> FigureContainer | None:
-        """Legacy alias for the Run pane container (headless may return None)."""
-        ...
 
     def make_run_container(self, tab_id: str) -> FigureContainer | None:
         """Run pane FigureContainer (live plot, view-only)."""

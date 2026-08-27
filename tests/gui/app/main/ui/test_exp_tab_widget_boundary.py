@@ -28,16 +28,14 @@ def test_result_focus_and_panel_width_are_owned_by_tab(qapp) -> None:
     assert tab.left_panel_width() == 500
 
 
-def test_prepare_live_container_clears_stale_figure(qapp) -> None:
+def test_prepare_run_container_clears_stale_run_figure(qapp) -> None:
     tab = _tab()
-    # Run live container is the target of prepare_live_container (Ticket 03 S2/S3)
-    tab.show_run_figure(Figure())  # type: ignore[attr-defined]
+    tab.show_run_figure(Figure())
 
-    container = tab.prepare_live_container()
+    container = tab.prepare_run_container()
 
-    assert container is tab.get_run_container()  # type: ignore[attr-defined]
-    # Run pane cleared; analysis pane not affected but run is now placeholder
-    assert tab.get_current_figure_for_pane("run") is None  # type: ignore[attr-defined]
+    assert container is tab.get_run_container()
+    assert tab.get_current_figure_for_pane("run") is None
     assert tab._run_stack.count() == 1
 
 
@@ -46,8 +44,6 @@ def test_interactive_widget_lifecycle_is_owned_by_tab(qapp) -> None:
         pass
 
     tab = _tab()
-    reset_plot = MagicMock(wraps=tab.reset_plot)
-    tab.reset_plot = reset_plot
     first = _Interactive()
     second = _Interactive()
     unrelated = QWidget()
@@ -61,8 +57,7 @@ def test_interactive_widget_lifecycle_is_owned_by_tab(qapp) -> None:
     assert tab._analysis_stack.indexOf(first) == -1  # type: ignore[attr-defined]
     assert tab._analysis_stack.indexOf(second) == -1  # type: ignore[attr-defined]
     assert tab._analysis_stack.indexOf(unrelated) >= 0  # type: ignore[attr-defined]
-    assert tab.get_current_figure_for_pane("analysis") is None  # type: ignore[attr-defined]
-    reset_plot.assert_not_called()
+    assert tab.get_current_figure_for_pane("analysis") is None
 
 
 @pytest.mark.parametrize("failure_stage", ["session_factory", "bind"])

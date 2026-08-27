@@ -53,7 +53,7 @@ def _make_ctx() -> ExpContext:
 def _make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
-    view.make_live_container = MagicMock(return_value=None)
+    view.make_run_container = MagicMock(return_value=None)
     # tab.list_all / overview read active_tab_id off the render view; return a real
     # (JSON-serializable) snapshot so the wire reply encodes cleanly.
     view.get_view_snapshot = MagicMock(

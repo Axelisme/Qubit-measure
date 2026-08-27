@@ -48,7 +48,7 @@ def make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
-    view.make_live_container = MagicMock(return_value=None)
+    view.make_run_container = MagicMock(return_value=None)
     # shaped View surface so Controller.open_dialog / take_figure_screenshot
     # / get_view_snapshot have somewhere to land in tests.
     view._open_dialogs = []

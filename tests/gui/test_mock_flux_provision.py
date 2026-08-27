@@ -57,7 +57,7 @@ class _Fixture:
         io_manager = IOManager()
         io_manager._em = MagicMock()
         self.view = MagicMock()
-        self.view.make_live_container = MagicMock(return_value=None)
+        self.view.make_run_container = MagicMock(return_value=None)
         self.view.notify_diagnostic = MagicMock()
         self.ctrl = Controller(
             state=self.state,

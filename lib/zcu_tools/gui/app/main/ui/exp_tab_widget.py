@@ -499,31 +499,10 @@ class ExpTabWidget(QWidget):
         if snapshot.analyze_params is not None and self.has_analyze_params():
             self.analyze_form.populate_values(snapshot.analyze_params)
         self.sync_post_analyze_params(snapshot.post_analyze_params)
-        # Per-pane path resources (Ticket 02 pane snapshots). Prefer pane paths if present.
-        if getattr(snapshot, "paths", None) is not None:  # type: ignore[attr-defined]
-            data_path = snapshot.paths.data.path or ""  # type: ignore[attr-defined]
-            analysis_path = snapshot.paths.analysis_image.path or ""  # type: ignore[attr-defined]
-            post_path = snapshot.paths.post_analysis_image.path or ""  # type: ignore[attr-defined]
-            # Use per-pane setters without triggering intermediate combined updates
-            if data_path:
-                self._data_path_edit.blockSignals(True)
-                self._data_path_edit.setText(data_path)
-                self._data_path_edit.blockSignals(False)
-            if analysis_path:
-                self._image_path_edit.blockSignals(True)
-                self._image_path_edit.setText(analysis_path)
-                self._image_path_edit.blockSignals(False)
-            if post_path:
-                self._post_image_path_edit.blockSignals(True)
-                self._post_image_path_edit.setText(post_path)
-                self._post_image_path_edit.blockSignals(False)
-            # Seed post from analysis if empty (legacy behavior for initial suggestion)
-            if not self._post_image_path_edit.text() and analysis_path:
-                self._post_image_path_edit.setText(analysis_path)
-        elif snapshot.save_paths is not None:
-            self.set_save_paths(
-                snapshot.save_paths.data_path, snapshot.save_paths.image_path
-            )
+        assert snapshot.paths is not None
+        self.set_data_path(snapshot.paths.data.path or "")
+        self.set_analysis_image_path(snapshot.paths.analysis_image.path or "")
+        self.set_post_image_path(snapshot.paths.post_analysis_image.path or "")
         self.update_interaction_state(snapshot)
         self._bind_to_controller(actions)
 
@@ -599,40 +578,20 @@ class ExpTabWidget(QWidget):
         if path:
             self._post_image_path_edit.setText(path)
 
-    def set_save_paths(self, data_path: str, image_path: str) -> None:
-        if data_path:
-            self._data_path_edit.blockSignals(True)
-            self._data_path_edit.setText(data_path)
-            self._data_path_edit.blockSignals(False)
-        if image_path:
-            self._image_path_edit.blockSignals(True)
-            self._image_path_edit.setText(image_path)
-            self._image_path_edit.blockSignals(False)
-            # Seed the post image path from the same suggestion when the user has
-            # not typed their own — the post layer saves to its own field, which
-            # follows the tab's image path until overridden.
-            if not self._post_image_path_edit.text():
-                self._post_image_path_edit.setText(image_path)
-
     def set_data_path(self, data_path: str) -> None:
-        if data_path:
-            self._data_path_edit.blockSignals(True)
-            self._data_path_edit.setText(data_path)
-            self._data_path_edit.blockSignals(False)
+        self._data_path_edit.blockSignals(True)
+        self._data_path_edit.setText(data_path)
+        self._data_path_edit.blockSignals(False)
 
     def set_analysis_image_path(self, image_path: str) -> None:
-        if image_path:
-            self._image_path_edit.blockSignals(True)
-            self._image_path_edit.setText(image_path)
-            self._image_path_edit.blockSignals(False)
-            if not self._post_image_path_edit.text():
-                self._post_image_path_edit.setText(image_path)
+        self._image_path_edit.blockSignals(True)
+        self._image_path_edit.setText(image_path)
+        self._image_path_edit.blockSignals(False)
 
     def set_post_image_path(self, image_path: str) -> None:
-        if image_path:
-            self._post_image_path_edit.blockSignals(True)
-            self._post_image_path_edit.setText(image_path)
-            self._post_image_path_edit.blockSignals(False)
+        self._post_image_path_edit.blockSignals(True)
+        self._post_image_path_edit.setText(image_path)
+        self._post_image_path_edit.blockSignals(False)
 
     def get_data_path(self) -> str:
         return self._data_path_edit.text()
@@ -647,16 +606,10 @@ class ExpTabWidget(QWidget):
         return self._comment_edit.toPlainText()
 
     def focus_result_panel(self) -> None:
-        """Show the Analysis/Save panel for this tab."""
-        # Post ticket 03, focus the Analysis pane if available, else Save.
-        try:
-            # Try analysis tab if visible
-            if self._left_tabs.isTabVisible(self._analysis_tab_index):
-                self._left_tabs.setCurrentWidget(self._analysis_panel)
-                return
-        except Exception:
-            pass
-        # Fallback to Save if analysis not available
+        """Focus Analysis when supported, otherwise focus Save."""
+        if self._left_tabs.isTabVisible(self._analysis_tab_index):
+            self._left_tabs.setCurrentWidget(self._analysis_panel)
+            return
         self._left_tabs.setCurrentWidget(self._save_panel)
 
     # ── Figure container helpers (stable per-subtab identity S2) ──────────
@@ -687,15 +640,6 @@ class ExpTabWidget(QWidget):
         self._post_container.clear_dynamic_canvases()
         return self._post_container
 
-    def prepare_live_container(self) -> FigureContainer:
-        """Legacy entry for Run live plot (kept for transitional callers).
-
-        Clears the Run pane's container and returns it. Transitional callers that
-        still use the shared alias will clear analysis via legacy reset, but new
-        pane-aware callers use prepare_run_container directly.
-        """
-        return self.prepare_run_container()
-
     def mount_interactive_widget(self, widget: QWidget) -> None:
         """Mount an interactive analysis widget as the visible plot content (analysis pane)."""
         self._analysis_stack.addWidget(widget)
@@ -711,8 +655,6 @@ class ExpTabWidget(QWidget):
                 self._analysis_stack.removeWidget(widget)
                 widget.deleteLater()
         self._analysis_stack.setCurrentWidget(self._analysis_placeholder)
-        # Also handle legacy _plot_stack alias (same object)
-        # No need to touch run/post stacks.
 
     def left_panel_width(self) -> int:
         """Return the latest expanded left-panel width for persistence."""
@@ -781,18 +723,6 @@ class ExpTabWidget(QWidget):
             raise RuntimeError(f"tab {self.tab_id!r} canvas has no matplotlib figure")
         return figure
 
-    def reset_plot(self) -> None:
-        """Legacy reset: clear the analysis pane (most common) and also run/post for test compatibility.
-
-        Real invalidation now clears all figure panes before a new run (Ticket 02 matrix),
-        but per-pane clearing is available via prepare_* methods for operation start.
-        """
-        # Clear all figure panes to satisfy legacy tests that expect single call clears stale figure regardless of pane
-        self._run_container.clear_dynamic_canvases()
-        self._analysis_container.clear_dynamic_canvases()
-        self._post_container.clear_dynamic_canvases()
-        # Legacy aliases already point to analysis, so extra clear is harmless
-
     def clear_all_figures(self) -> None:
         """Clear all figure panes (used for LoadData and Run start invalidation)."""
         self._run_container.clear_dynamic_canvases()
@@ -829,10 +759,6 @@ class ExpTabWidget(QWidget):
             raise RuntimeError("Attached post canvas does not support draw()")
         draw()
         logger.debug("show_post_analysis_figure: tab_id=%r canvas set", self.tab_id)
-
-    def show_post_figure(self, fig: Figure) -> None:
-        """Alias for show_post_analysis_figure (legacy)."""
-        self.show_post_analysis_figure(fig)
 
     def _on_reset_cfg_clicked(self) -> None:
         # Guard: ask before discarding — Reset is destructive (drops entire cfg).
@@ -939,8 +865,7 @@ class ExpTabWidget(QWidget):
         # Capability-driven left tab visibility (S1)
         has_analysis = capabilities.analysis is not AnalysisMode.NONE
         has_post = capabilities.post_analysis
-        # load_data capability controls Load Data button; default to False if missing
-        has_load = bool(getattr(capabilities, "load_data", False))
+        has_load = capabilities.load_data
         self._left_tabs.setTabVisible(self._analysis_tab_index, has_analysis)
         self._left_tabs.setTabVisible(self._post_tab_index, has_post)
         # If current tab is now hidden, switch to Run

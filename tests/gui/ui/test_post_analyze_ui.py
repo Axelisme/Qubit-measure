@@ -329,7 +329,7 @@ def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
     assert attached == []
 
 
-def test_make_live_container_is_independent_for_post(qapp):
+def test_pane_containers_are_independent_for_post(qapp):
     """Each pane has an independent FigureContainer with stable identity."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget, MainWindow
 
@@ -351,8 +351,6 @@ def test_make_live_container_is_independent_for_post(qapp):
     assert run_c is not ana_c
     assert ana_c is not post_c
     assert run_c is not post_c
-    # Legacy alias still points to analysis container for transitional screenshot.
-    assert window.make_live_container("tab-1") is tab_w._run_container
 
 
 def test_take_figure_screenshot_captures_post_figure(qapp):

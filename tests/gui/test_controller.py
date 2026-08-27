@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEventLoop
+from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import (
@@ -77,7 +77,7 @@ def _make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
-    view.make_live_container = MagicMock(return_value=None)
+    view.make_run_container = MagicMock(return_value=None)
 
     # The Controller fans diagnostics out via notify_diagnostic (ADR-0013);
     # mirror MainWindow's dispatch so tests can assert on show_*.
@@ -670,7 +670,7 @@ def test_device_connect_handler_is_ui_only_no_persistence_coordination(cf):
 
 def test_run_clears_active_figure_container_after_finish(cf):
     tab_id = cf.ctrl.new_tab("fake")
-    cf.view.make_live_container.return_value = _make_figure_container()
+    cf.view.make_run_container.return_value = _make_figure_container()
 
     cf.ctrl.start_run(tab_id)
 
