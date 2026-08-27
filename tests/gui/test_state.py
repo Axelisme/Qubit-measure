@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.device.base import BaseDeviceInfo
-from zcu_tools.gui.app.main.adapter import SavePaths
 from zcu_tools.gui.app.main.state import (
     DeviceState,
     DeviceStatus,

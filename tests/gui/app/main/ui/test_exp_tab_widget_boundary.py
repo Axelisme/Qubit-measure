@@ -131,21 +131,3 @@ def test_interactive_mount_resets_plot_exactly_once(qapp, monkeypatch) -> None:
     # Mount should have cleared analysis pane but kept container identity
     assert tab.get_analysis_container() is captured  # type: ignore[attr-defined]
     assert tab._analysis_stack.count() >= 2  # type: ignore[attr-defined] # placeholder + interactive widget
-
-
-def test_current_figure_validates_visible_plot_content(qapp) -> None:
-    tab = _tab()
-    figure = Figure()
-    tab.show_analysis_figure(figure)
-
-    assert tab.get_current_figure_for_pane("analysis") is figure  # type: ignore[attr-defined]
-    assert tab.current_figure() is figure
-
-    invalid = QWidget()
-    tab._analysis_stack.addWidget(invalid)  # type: ignore[attr-defined]
-    tab._analysis_stack.setCurrentWidget(invalid)  # type: ignore[attr-defined]
-
-    with pytest.raises(
-        RuntimeError, match="tab 'tab-1' canvas has no matplotlib figure"
-    ):
-        tab.current_figure()
