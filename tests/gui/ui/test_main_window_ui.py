@@ -284,7 +284,9 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     tab = ExpTabWidget(
         "tab-1",
         _mock_ctrl(),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+        ),
     )
     tab.update_writeback_items([MagicMock(selected=True)])
     tab.update_interaction_state(
@@ -300,10 +302,12 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
             has_run_result=True,
             has_analyze_result=True,
             has_figure=True,
+            supports_load_data=True,
         )
     )
 
     assert tab.analyze_btn.isEnabled() is False
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is False
     assert tab.writeback_widget.isEnabled() is False
     assert tab.save_image_btn.isEnabled() is False  # disabled because is_analyzing
@@ -452,6 +456,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a file-backed context"
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.writeback_widget.isEnabled() is True
@@ -487,10 +492,8 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
     assert not hasattr(tab, "_analysis_panel")
     assert not hasattr(tab, "analyze_form")
     assert not hasattr(tab, "_analyze_section")
-    # Load Data visibility is driven by load_data capability (not analysis)
-    assert tab.load_data_btn.text() == "Load Data..."
-    assert tab.load_data_btn.isHidden() is True
-    assert tab.load_data_btn.isEnabled() is False
+    # No Load Data capability means no control is constructed.
+    assert tab.load_data_btn is None
     # ... but Save stays reachable and usable (run result + active context).
     assert tab.save_data_btn.isHidden() is False
     assert tab.save_data_btn.isEnabled() is True
@@ -532,6 +535,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     assert snap1.capabilities is not None
     tab = ExpTabWidget("tab-1", _mock_ctrl(), snap1.capabilities)
     tab.update_interaction_state(snap1)
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is True
 
     tab.update_interaction_state(
@@ -1427,6 +1431,7 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     tab.attach(snapshot, actions)
 
     assert tab.run_btn.isEnabled() is True
+    assert tab.load_data_btn is not None
     assert tab.load_data_btn.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.post_analyze_btn.isEnabled() is True

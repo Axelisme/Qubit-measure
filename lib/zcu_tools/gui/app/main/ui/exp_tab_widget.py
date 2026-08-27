@@ -340,8 +340,10 @@ class ExpTabWidget(QWidget):
         save_inner = QWidget()
         save_layout = QVBoxLayout(save_inner)
         save_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
-        self.load_data_btn = QPushButton("Load Data...")
-        save_layout.addWidget(self.load_data_btn)
+        self.load_data_btn: QPushButton | None = None
+        if capabilities.load_data:
+            self.load_data_btn = QPushButton("Load Data...")
+            save_layout.addWidget(self.load_data_btn)
         save_section = _CollapsibleSection("Save", collapsible=True, collapsed=False)
         save_form = save_section.form
         data_path_row = QHBoxLayout()
@@ -946,10 +948,9 @@ class ExpTabWidget(QWidget):
             self.save_image_btn.setEnabled(
                 idle and state.has_active_context and state.has_figure
             )
-        # Load Data button lives in Save pane, visibility driven by load_data
-        has_load = capabilities.load_data
-        self.load_data_btn.setVisible(has_load)
-        self.load_data_btn.setEnabled(idle and has_load and state.has_context)
+        # Load Data control exists only for adapters declaring the capability.
+        if self.load_data_btn is not None:
+            self.load_data_btn.setEnabled(idle and state.has_context)
         # Save pane data controls
         self.save_data_btn.setEnabled(
             idle and state.has_active_context and state.has_run_result
@@ -1014,7 +1015,8 @@ class ExpTabWidget(QWidget):
 
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
-        self.load_data_btn.clicked.connect(lambda: actions.load_data(tab_id))
+        if self.load_data_btn is not None:
+            self.load_data_btn.clicked.connect(lambda: actions.load_data(tab_id))
         if self._has_analysis:
             self.analyze_btn.clicked.connect(lambda: actions.analyze(tab_id))
             self.writeback_widget.apply_requested.connect(

@@ -118,8 +118,8 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 55`, `GUI_VERSION = 77`, and
-`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 55發布subtab-qualified contract：figure/writeback/save-image要求必填`(tab_id, subtab_id)`且wire值固定為`run|analysis|post_analysis`（save_image僅`analysis|post_analysis`），移除舊`tab.get_current_figure`、`tab.save_post_image`與`tab.save_result`及其MCP/tool/bundle fallback，preview/apply回傳當下`destination_context`投影；GUI 77維持不變；MCP 74分離save為`gui_tab_save_data`（tab-only）與`gui_tab_save_image`（pane-qualified），移除`gui_tab_save`/`gui_tab_commit` bundle。
+Current measure-gui values are `WIRE_VERSION = 55`, `GUI_VERSION = 78`, and
+`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 55發布subtab-qualified contract：figure/writeback/save-image要求必填`(tab_id, subtab_id)`且wire值固定為`run|analysis|post_analysis`（save_image僅`analysis|post_analysis`），移除舊`tab.get_current_figure`、`tab.save_post_image`與`tab.save_result`及其MCP/tool/bundle fallback，preview/apply回傳當下`destination_context`投影；GUI 78提供capability-driven subtabs與pane-owned resources；MCP 74分離save為`gui_tab_save_data`（tab-only）與`gui_tab_save_image`（pane-qualified），移除`gui_tab_save`/`gui_tab_commit` bundle。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump

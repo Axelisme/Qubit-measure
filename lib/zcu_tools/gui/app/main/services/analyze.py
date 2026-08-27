@@ -177,6 +177,10 @@ class AnalyzeService(_StagedAnalyzeService):
                 tab_id, session.finish(), captured_inputs=captured_inputs
             )
             return
+        if captured_inputs is None:
+            raise RuntimeError(
+                f"interactive analysis {tab_id!r} lost its operation-start inputs"
+            )
         with self._bus.origin(self._handles.event_origin(token)):
             self._interactive_tabs.discard(tab_id)
             self._on_analyze_finished(
@@ -234,7 +238,7 @@ class AnalyzeService(_StagedAnalyzeService):
         tab_id: str,
         analyze_result: Any,
         *,
-        captured_inputs: tuple[Any, Any, Any, Any] | None = None,
+        captured_inputs: tuple[Any, Any, Any, Any],
     ) -> None:
         """Terminal path used by finish_interactive (interactive → same FIT terminal).
 
@@ -292,27 +296,12 @@ class AnalyzeService(_StagedAnalyzeService):
         tab_id: str,
         analyze_result: Any,
         *,
-        captured_inputs: tuple[Any, Any, Any, Any] | None = None,
+        captured_inputs: tuple[Any, Any, Any, Any],
     ) -> None:
-        # The worker terminal must use operation-start inputs. A private direct
-        # call without captured inputs is retained only for old tests/callers;
-        # production FIT terminals close over the tuple above, and the
-        # post-cancel interactive path returns before this method.
-        if captured_inputs is None:
-            captured_inputs = self._captured_inputs.pop(tab_id, None)
-        else:
-            self._captured_inputs.pop(tab_id, None)
-
-        if captured_inputs is None:
-            tab = self._state.get_tab(tab_id)
-            run_result, ctx, adapter, analyze_params = (
-                tab.run.result,
-                self._state.exp_context,
-                tab.adapter,
-                tab.analysis.params,
-            )
-        else:
-            run_result, ctx, adapter, analyze_params = captured_inputs
+        # Every terminal receives the operation-start snapshot explicitly; the
+        # mutable active context and pane inputs are never terminal fallbacks.
+        self._captured_inputs.pop(tab_id, None)
+        run_result, ctx, adapter, analyze_params = captured_inputs
 
         proposal_items: list[Any] = []
         if run_result is not None:

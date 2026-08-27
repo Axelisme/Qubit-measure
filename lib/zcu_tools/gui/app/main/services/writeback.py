@@ -306,15 +306,14 @@ class WritebackService:
     @staticmethod
     def _copy_item(item: WritebackItem) -> WritebackItem:
         copied = copy.copy(item)
-        # A proposal is not allowed to carry a handle from another draft. This
-        # also keeps the temporary pre-refactor dynamic attribute from leaking
-        # into a new opaque draft when old callers reuse an item instance.
+        # Proposal items never carry cfg-editor identity. Treat a dynamic
+        # attribute as an invalid caller contract instead of silently lowering it.
+        if "editor_id" in vars(item):
+            raise InvalidInputError("writeback proposal must not expose editor_id")
         copied.session_id = ""
         copied.selected = True
         if isinstance(copied, MetaDictWriteback):
             copied.proposed_value = copy.deepcopy(copied.proposed_value)
-        if "editor_id" in vars(copied):
-            delattr(copied, "editor_id")
         return copied
 
     @staticmethod

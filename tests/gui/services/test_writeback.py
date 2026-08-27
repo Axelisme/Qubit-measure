@@ -149,6 +149,18 @@ def test_create_draft_cleans_all_opened_sessions_when_a_later_item_fails():
     assert not hasattr(proposals[0], "editor_id")
 
 
+def test_create_draft_rejects_proposal_with_dynamic_editor_identity():
+    state = _make_state_with_tab()
+    svc = WritebackService(state, MagicMock(), MagicMock())
+    proposal = ModuleWriteback(
+        target_name="a", description="a", edit_schema=MagicMock()
+    )
+    setattr(proposal, "editor_id", "legacy-editor")
+
+    with pytest.raises(InvalidInputError, match="must not expose editor_id"):
+        svc.create_draft([proposal])
+
+
 def test_draft_teardown_is_idempotent_even_when_cleanup_raises():
     state = _make_state_with_tab()
     cfg_editor = MagicMock()

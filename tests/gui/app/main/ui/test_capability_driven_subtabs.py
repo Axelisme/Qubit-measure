@@ -238,7 +238,8 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     assert hasattr(tab_both, "analyze_form")
     assert hasattr(tab_both, "post_analyze_form")
 
-    assert tab_none.load_data_btn.isHidden() is True
+    assert tab_none.load_data_btn is None
+    assert tab_analysis.load_data_btn is not None
     assert tab_analysis.load_data_btn.isHidden() is False
 
     tab_none.detach()

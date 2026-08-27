@@ -114,4 +114,6 @@ WIRE_VERSION = 55
 # catalog and reachable through the generic tab creation / remote listing flow.
 # v77: the JPA family exposes acquisition controls, explains auto-optimizer
 # resolution allocation, and uses one neutral flux device-value contract.
-GUI_VERSION = 77  # JPA calibration hardening
+# v78: capability-driven experiment subtabs own independent pane resources;
+# figure/writeback/save-image routing uses the v55 subtab-qualified wire contract.
+GUI_VERSION = 78

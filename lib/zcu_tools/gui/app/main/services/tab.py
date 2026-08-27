@@ -100,10 +100,7 @@ class TabService:
             draft = pane.writeback_draft
             if draft is None:
                 return ()
-            try:
-                return tuple(self._writeback.preview_draft(draft))
-            except Exception:
-                return ()
+            return tuple(self._writeback.preview_draft(draft))
 
         analysis_items = _items_for_pane(tab.analysis)
         post_items = _items_for_pane(tab.post_analysis)

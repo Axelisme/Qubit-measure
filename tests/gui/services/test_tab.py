@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
 from zcu_tools.gui.app.main.services.tab import TabService
 from zcu_tools.gui.app.main.state import (
@@ -53,6 +54,25 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert snapshot.analysis.params is analyze_params
     assert snapshot.paths is not None and snapshot.paths.data.path == "data.h5"
     assert state.get_tab("tab").analysis.params is analyze_params
+
+
+def test_snapshot_propagates_writeback_preview_failure() -> None:
+    state = _active_state()
+    draft = object()
+    state.add_tab(
+        "tab",
+        Session(
+            adapter_name="fake",
+            adapter=MagicMock(),
+            cfg_schema=MagicMock(),
+            analysis=AnalysisPaneState(writeback_draft=draft),
+        ),
+    )
+    writeback = MagicMock()
+    writeback.preview_draft.side_effect = RuntimeError("broken draft")
+
+    with pytest.raises(RuntimeError, match="broken draft"):
+        TabService(state, MagicMock(), writeback).get_snapshot("tab")
 
 
 def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
