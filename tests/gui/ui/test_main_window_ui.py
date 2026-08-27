@@ -211,7 +211,11 @@ def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.show()
     QApplication.processEvents()
 
@@ -224,7 +228,11 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.resize(1000, 700)
     tab.show()
     QApplication.processEvents()
@@ -253,7 +261,11 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.resize(1000, 700)
     tab.show()
     QApplication.processEvents()
@@ -276,7 +288,11 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
 def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_writeback_items([MagicMock(selected=True)])
     tab.update_interaction_state(
         _snapshot(
@@ -303,7 +319,11 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -328,7 +348,11 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -354,7 +378,11 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
 def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -378,7 +406,11 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
 def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.cfg_form.first_invalid_reason = MagicMock(
         return_value="modules.readout: invalid"
     )
@@ -406,24 +438,24 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
 def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
-    tab.update_writeback_items([MagicMock(selected=True)])
-    tab.update_interaction_state(
-        _snapshot(
-            "tab-1",
-            supports_load_data=True,
-            global_run_active=False,
-            is_running=False,
-            is_analyzing=False,
-            is_saving_data=False,
-            has_context=True,
-            has_active_context=False,
-            has_soc=True,
-            has_run_result=True,
-            has_analyze_result=True,
-            has_figure=True,
-        )
+    snap = _snapshot(
+        "tab-1",
+        supports_load_data=True,
+        global_run_active=False,
+        is_running=False,
+        is_analyzing=False,
+        is_saving_data=False,
+        has_context=True,
+        has_active_context=False,
+        has_soc=True,
+        has_run_result=True,
+        has_analyze_result=True,
+        has_figure=True,
     )
+    assert snap.capabilities is not None
+    tab = ExpTabWidget("tab-1", _mock_ctrl(), snap.capabilities)
+    tab.update_writeback_items([MagicMock(selected=True)])
+    tab.update_interaction_state(snap)
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a file-backed context"
@@ -440,7 +472,11 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
     used to be hidden, so the user could not save a 2D-sweep run at all."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -451,17 +487,13 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
         )
     )
 
-    # Fixed order Run | Analysis? | Post? | Save | Guide: Analysis hidden, Save always visible
-    visible = [
-        tab._left_tabs.tabText(i)
-        for i in range(tab._left_tabs.count())
-        if tab._left_tabs.isTabVisible(i)
-    ]
+    # Fixed order Run | Analysis? | Post? | Save | Guide: Analysis not constructed, Save always visible
+    visible = [tab._left_tabs.tabText(i) for i in range(tab._left_tabs.count())]
     assert visible == ["Run", "Save", "Guide"]
-    assert tab._left_tabs.tabText(tab._analysis_tab_index) == "Analysis"
-    # Analysis widgets are hidden ...
-    assert tab._analyze_section.isHidden() is True
-    assert tab.analyze_btn.isHidden() is True
+    # Prove Analysis page and controls were never constructed, not only hidden
+    assert not hasattr(tab, "_analysis_panel")
+    assert not hasattr(tab, "analyze_form")
+    assert not hasattr(tab, "_analyze_section")
     # Load Data visibility is driven by load_data capability (not analysis)
     assert tab.load_data_btn.text() == "Load Data..."
     assert tab.load_data_btn.isHidden() is True
@@ -476,7 +508,11 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
     labelled 'Analysis' — the counterpart to the non-analysis case."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     tab.update_interaction_state(
         _snapshot("tab-1", has_run_result=True, supports_analysis=True)
     )
@@ -490,19 +526,19 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
 def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
-    tab.update_interaction_state(
-        _snapshot(
-            "tab-1",
-            has_context=True,
-            has_active_context=False,
-            has_soc=False,
-            has_run_result=False,
-            has_analyze_result=False,
-            has_figure=False,
-            supports_load_data=True,
-        )
+    snap1 = _snapshot(
+        "tab-1",
+        has_context=True,
+        has_active_context=False,
+        has_soc=False,
+        has_run_result=False,
+        has_analyze_result=False,
+        has_figure=False,
+        supports_load_data=True,
     )
+    assert snap1.capabilities is not None
+    tab = ExpTabWidget("tab-1", _mock_ctrl(), snap1.capabilities)
+    tab.update_interaction_state(snap1)
     assert tab.load_data_btn.isEnabled() is True
 
     tab.update_interaction_state(
@@ -780,8 +816,16 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.side_effect = lambda tab_id: tab_id in {"tab-a", "tab-b"}
     window = MainWindow(ctrl)
-    tab_a = ExpTabWidget("tab-a", ctrl)
-    tab_b = ExpTabWidget("tab-b", ctrl)
+    tab_a = ExpTabWidget(
+        "tab-a",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
+    tab_b = ExpTabWidget(
+        "tab-b",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     window._tab_widgets["tab-a"] = tab_a
     window._tab_widgets["tab-b"] = tab_b
     window._tabs.addTab(tab_a, "A")
@@ -964,6 +1008,7 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
         has_analyze_result=True,
         has_figure=True,
         has_post_analyze_result=True,
+        supports_post_analysis=True,
         figure=primary,
         post_figure=post,
     )
@@ -1012,12 +1057,17 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, 
         has_analyze_result=True,
         has_post_analyze_result=True,
         has_figure=True,
+        supports_post_analysis=True,
         figure=primary,
         post_figure=post,
     )
     ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl)
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     window._tab_widgets["tab-1"] = tab
     tab.show_analysis_figure(primary)
     tab.show_post_analysis_figure(post)
@@ -1058,13 +1108,18 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(qapp):
         has_run_result=True,
         has_analyze_result=False,
         has_figure=False,
+        supports_post_analysis=True,
         analyze_params=_Params(),
         figure=None,
         post_figure=None,
     )
     ctrl.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl)
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     window._tab_widgets["tab-1"] = tab
     tab.show_analysis_figure(Figure())
     assert tab.get_current_figure_for_pane("analysis") is not None
@@ -1216,7 +1271,11 @@ def test_exp_tab_opens_cfg_editor_on_attach(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, _RecordingTabActions())
 
@@ -1236,7 +1295,11 @@ def test_exp_tab_tears_down_cfg_editor_on_detach(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, _RecordingTabActions())
     tab.detach()
@@ -1317,7 +1380,11 @@ def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp)
         _snapshot("tab-1", has_run_result=False),
         cfg_schema=schema,
     )
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
 
     class _GateRefreshingActions(_RecordingTabActions):
         def refresh_interaction(self, tab_id: str) -> None:
@@ -1344,7 +1411,13 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+        ),
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(
         _snapshot(
@@ -1414,7 +1487,12 @@ def test_exp_tab_reset_reseeds_cfg_editor_session(qapp):
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
     first_model = ctrl.get_cfg_editor_draft.return_value
-    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        dialog_presenter=dialogs,
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1452,7 +1530,12 @@ def test_exp_tab_reset_confirm_no_does_not_reset(qapp):
 
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        dialog_presenter=dialogs,
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1474,7 +1557,11 @@ def test_exp_tab_reset_btn_idle_only_enable(qapp):
     """reset_btn must be enabled when idle and disabled while the tab is busy."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
 
     # Idle: reset_btn should be enabled.
     tab.update_interaction_state(_snapshot("tab-1", is_running=False))
@@ -1498,7 +1585,12 @@ def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget("tab-1", ctrl, dialog_presenter=dialogs)
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        dialog_presenter=dialogs,
+    )
     actions = _RecordingTabActions()
     snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
     tab.attach(snapshot, actions)
@@ -1690,7 +1782,11 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
     canvas = MagicMock()
 
     monkeypatch.setattr(
@@ -1711,7 +1807,11 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
     del qapp
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.show()
     QApplication.processEvents()
 
@@ -1770,7 +1870,11 @@ def _gate_window(
 
     tabs: dict[str, ExpTabWidget] = {}
     for tid in {t for t in (running_tab_id, active_tab_id) if t is not None}:
-        tab_w = ExpTabWidget(tid, ctrl)
+        tab_w = ExpTabWidget(
+            tid,
+            ctrl,
+            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        )
         tabs[tid] = tab_w
         window._tab_widgets[tid] = tab_w
     return window, tabs
@@ -1899,7 +2003,11 @@ def test_feedback_panel_remounts_on_target_tab_change(qapp):
     # Run finishes: no running tab now, active tab becomes the target.
     cast(MagicMock, window._ctrl).get_running_tab_id.return_value = None
     if "tab-b" not in tabs:
-        tab_b = ExpTabWidget("tab-b", window._ctrl)
+        tab_b = ExpTabWidget(
+            "tab-b",
+            window._ctrl,
+            AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        )
         tabs["tab-b"] = tab_b
         window._tab_widgets["tab-b"] = tab_b
     window.refresh_feedback_widget()

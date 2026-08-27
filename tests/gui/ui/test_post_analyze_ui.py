@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import pytest
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
@@ -135,13 +136,29 @@ def _snapshot(
 def test_post_tab_visible_only_for_post_analysis_adapter(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
-
-    tab.update_interaction_state(_snapshot("tab-1", post_analysis=True))
-    assert tab._left_tabs.isTabVisible(tab._post_tab_index) is True
-
-    tab.update_interaction_state(_snapshot("tab-1", post_analysis=False))
-    assert tab._left_tabs.isTabVisible(tab._post_tab_index) is False
+    tab_with = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    snap_with = _snapshot("tab-1", post_analysis=True)
+    assert snap_with.capabilities is not None
+    # Post tab is constructed when post_analysis True
+    assert tab_with._left_tabs.count() == 5
+    assert tab_with._left_tabs.tabText(2) == "Post-Analysis"
+    assert hasattr(tab_with, "_post_panel")
+    assert hasattr(tab_with, "post_analyze_form")
+    # Post tab not constructed when capability absent
+    tab_without = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
+    assert tab_without._left_tabs.count() == 4
+    assert not hasattr(tab_without, "_post_panel")
+    assert not hasattr(tab_without, "post_analyze_form")
+    with pytest.raises(RuntimeError, match="does not support post-analysis"):
+        tab_without.get_post_container()
 
 
 def test_post_form_disabled_without_primary_analyze_result(qapp):
@@ -149,7 +166,11 @@ def test_post_form_disabled_without_primary_analyze_result(qapp):
     hint is shown."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.update_interaction_state(_snapshot("tab-1", has_analyze_result=False))
 
     assert tab.post_analyze_form.isEnabled() is False
@@ -162,7 +183,11 @@ def test_post_form_disabled_without_primary_analyze_result(qapp):
 def test_post_form_enabled_with_primary_analyze_result(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.show()
     qapp.processEvents()
     tab.update_interaction_state(_snapshot("tab-1", has_analyze_result=True))
@@ -176,7 +201,11 @@ def test_post_form_enabled_with_primary_analyze_result(qapp):
 def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatch):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     monkeypatch.setattr(tab, "_populate_cfg", MagicMock())
     monkeypatch.setattr(tab, "_bind_to_controller", MagicMock())
 
@@ -196,7 +225,11 @@ def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatc
 def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.populate_post_analyze_params(_EmptyPostParams())
 
     tab.update_interaction_state(
@@ -232,7 +265,11 @@ def test_post_run_disabled_while_tab_busy(qapp):
     """A busy tab (analyzing) disables the post Run even with a primary result."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.update_interaction_state(
         _snapshot("tab-1", has_analyze_result=True, is_analyzing=True)
     )
@@ -282,7 +319,11 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch):
     )
 
     window = MainWindow(ctrl)
-    tab_w = ExpTabWidget("tab-1", ctrl)
+    tab_w = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     # Seed the post form so populate_values has a matching cls.
     tab_w.populate_post_analyze_params(_PostParams(backend="pca"))
     window._tab_widgets["tab-1"] = tab_w
@@ -314,7 +355,11 @@ def test_post_figure_refresh_is_noop_on_invalidation(qapp, monkeypatch):
     )
 
     window = MainWindow(ctrl)
-    tab_w = ExpTabWidget("tab-1", ctrl)
+    tab_w = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     window._tab_widgets["tab-1"] = tab_w
 
     attached: list[object] = []
@@ -337,7 +382,11 @@ def test_pane_containers_are_independent_for_post(qapp):
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
 
-    tab_w = ExpTabWidget("tab-1", ctrl)
+    tab_w = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     window._tab_widgets["tab-1"] = tab_w
 
     run_c = window.make_run_container("tab-1")
@@ -362,7 +411,11 @@ def test_take_figure_screenshot_captures_post_figure(qapp):
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
 
-    tab_w = ExpTabWidget("tab-1", ctrl)
+    tab_w = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     window._tab_widgets["tab-1"] = tab_w
 
     post_fig = Figure()
@@ -381,7 +434,11 @@ def test_post_save_image_button_gated_on_post_result(qapp):
     result (its figure is the thing it saves)."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.show()
     qapp.processEvents()
 
@@ -399,7 +456,11 @@ def test_post_save_image_button_gated_on_post_result(qapp):
 def test_post_save_image_button_disabled_without_active_context(qapp):
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -432,7 +493,11 @@ def test_post_tab_uses_separate_qt_tab_index(qapp):
     """The Post sub-tab is a distinct QTabWidget tab (not Analysis at index 1)."""
     from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
 
-    tab = ExpTabWidget("tab-1", _mock_ctrl())
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
 
     assert tab._post_tab_index != 1
     assert tab._left_tabs.tabText(tab._post_tab_index) == "Post-Analysis"

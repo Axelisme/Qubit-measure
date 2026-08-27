@@ -181,39 +181,66 @@ def exp_tab_widget(qapp, monkeypatch):
 
 def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
     ctrl = make_ctrl()
-    tab_none = exp_tab_widget("tab-1", ctrl)
     snap_none = make_snapshot(
         "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
     )
+    assert snap_none.capabilities is not None
+    tab_none = exp_tab_widget("tab-1", ctrl, snap_none.capabilities)
     tab_none.attach(snap_none, MagicMock())
+    # Fixed order Run | Save | Guide — Analysis/Post not constructed
     visible_none = [
-        tab_none._left_tabs.tabText(i)
-        for i in range(tab_none._left_tabs.count())
-        if tab_none._left_tabs.isTabVisible(i)
+        tab_none._left_tabs.tabText(i) for i in range(tab_none._left_tabs.count())
     ]
     assert visible_none == ["Run", "Save", "Guide"]
+    # Prove absent Analysis/Post pages and controls/containers were never constructed, not only hidden
+    assert not hasattr(tab_none, "analyze_form")
+    assert not hasattr(tab_none, "writeback_widget")
+    assert not hasattr(tab_none, "_image_path_edit")
+    assert not hasattr(tab_none, "_analysis_panel")
+    assert not hasattr(tab_none, "_analysis_container")
+    assert not hasattr(tab_none, "post_analyze_form")
+    assert not hasattr(tab_none, "post_writeback_widget")
+    assert not hasattr(tab_none, "_post_image_path_edit")
+    assert not hasattr(tab_none, "_post_panel")
+    assert not hasattr(tab_none, "_post_container")
+    with pytest.raises(RuntimeError, match="does not support analysis"):
+        tab_none.get_analysis_container()
+    with pytest.raises(RuntimeError, match="does not support post-analysis"):
+        tab_none.get_post_container()
+    with pytest.raises(RuntimeError, match="does not support analysis"):
+        tab_none.get_image_path()
+    # Mismatch must be rejected
+    bad_snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
+    with pytest.raises(RuntimeError, match="capability mismatch"):
+        tab_none.attach(bad_snap, MagicMock())
 
-    tab_analysis = exp_tab_widget("tab-2", ctrl)
     snap_analysis = make_snapshot(
         "tab-2", analysis=AnalysisMode.FIT, post=False, load=True
     )
+    assert snap_analysis.capabilities is not None
+    tab_analysis = exp_tab_widget("tab-2", ctrl, snap_analysis.capabilities)
     tab_analysis.attach(snap_analysis, MagicMock())
     visible_analysis = [
         tab_analysis._left_tabs.tabText(i)
         for i in range(tab_analysis._left_tabs.count())
-        if tab_analysis._left_tabs.isTabVisible(i)
     ]
     assert visible_analysis == ["Run", "Analysis", "Save", "Guide"]
+    assert hasattr(tab_analysis, "analyze_form")
+    assert hasattr(tab_analysis, "_image_path_edit")
+    assert not hasattr(tab_analysis, "post_analyze_form")
+    with pytest.raises(RuntimeError, match="does not support post-analysis"):
+        tab_analysis.get_post_container()
 
-    tab_both = exp_tab_widget("tab-3", ctrl)
     snap_both = make_snapshot("tab-3", analysis=AnalysisMode.FIT, post=True, load=True)
+    assert snap_both.capabilities is not None
+    tab_both = exp_tab_widget("tab-3", ctrl, snap_both.capabilities)
     tab_both.attach(snap_both, MagicMock())
     visible_both = [
-        tab_both._left_tabs.tabText(i)
-        for i in range(tab_both._left_tabs.count())
-        if tab_both._left_tabs.isTabVisible(i)
+        tab_both._left_tabs.tabText(i) for i in range(tab_both._left_tabs.count())
     ]
     assert visible_both == ["Run", "Analysis", "Post-Analysis", "Save", "Guide"]
+    assert hasattr(tab_both, "analyze_form")
+    assert hasattr(tab_both, "post_analyze_form")
 
     assert tab_none.load_data_btn.isHidden() is True
     assert tab_analysis.load_data_btn.isHidden() is False
@@ -227,8 +254,9 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     qapp, exp_tab_widget
 ):
     ctrl = make_ctrl()
-    tab = exp_tab_widget("tab-1", ctrl)
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=True)
+    assert snap.capabilities is not None
+    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
     run_c = tab.get_run_container()
     ana_c = tab.get_analysis_container()
@@ -282,10 +310,11 @@ def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure
     qapp, exp_tab_widget
 ):
     ctrl = make_ctrl()
-    tab = exp_tab_widget("tab-1", ctrl)
     snap = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
     )
+    assert snap.capabilities is not None
+    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
     fig_a_old = Figure()
     fig_p_old = Figure()
@@ -347,7 +376,17 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
         post_figure=fig_p_retained,
     )
     window = MainWindow(ctrl)
-    tab = exp_tab_widget("tab-1", ctrl)
+    # Tab must be constructed with the same capabilities as the snapshot the window will fetch
+    # The mock's get_tab_snapshot returns a FIT+post snapshot; reuse those caps
+    _tmp_snap = make_snapshot(
+        "tab-1",
+        analysis=AnalysisMode.FIT,
+        post=True,
+        has_post_result=True,
+        figure=Figure(),
+        post_figure=Figure(),
+    )
+    tab = exp_tab_widget("tab-1", ctrl, _tmp_snap.capabilities)
     window._tab_widgets["tab-1"] = tab
     # Seed figures
     fig_a = Figure()
@@ -369,8 +408,9 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
 
 def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
     ctrl = make_ctrl()
-    tab = exp_tab_widget("tab-1", ctrl)
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=True, load=True)
+    assert snap.capabilities is not None
+    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
 
     # Run pane does not contain image edits
@@ -417,7 +457,6 @@ def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
 
 def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget):
     ctrl = make_ctrl()
-    tab = exp_tab_widget("tab-1", ctrl)
     snap_idle = make_snapshot(
         "tab-1",
         analysis=AnalysisMode.FIT,
@@ -426,6 +465,8 @@ def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget):
         has_analyze_result=True,
         has_post_result=True,
     )
+    assert snap_idle.capabilities is not None
+    tab = exp_tab_widget("tab-1", ctrl, snap_idle.capabilities)
     tab.attach(snap_idle, MagicMock())
     assert tab.analyze_form.isEnabled() is True
     assert tab.post_analyze_form.isEnabled() is True
@@ -454,10 +495,11 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget):
     # Setup controller mock to track pane-qualified calls
     ctrl.set_writeback_item_for_pane = MagicMock(return_value={"valid": True})
     ctrl.get_writeback_item_draft_for_pane = MagicMock(return_value=MagicMock())
-    tab = exp_tab_widget("tab-1", ctrl)
     snap = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
     )
+    assert snap.capabilities is not None
+    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
     # Populate post writeback with a dummy item
     from zcu_tools.gui.app.main.adapter import MetaDictWriteback

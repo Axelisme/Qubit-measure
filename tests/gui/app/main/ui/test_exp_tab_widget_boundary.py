@@ -13,9 +13,12 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 
 def _tab() -> ExpTabWidget:
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+
     ctrl = MagicMock()
     ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
-    return ExpTabWidget("tab-1", ctrl)
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
+    return ExpTabWidget("tab-1", ctrl, caps)
 
 
 def test_result_focus_and_panel_width_are_owned_by_tab(qapp) -> None:

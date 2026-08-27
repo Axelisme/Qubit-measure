@@ -177,17 +177,21 @@ class MainWindow(QMainWindow):
             return
 
         tab_label = adapter_name
+        # Obtain the render snapshot before construction so the immutable
+        # AdapterCapabilities can be passed into ExpTabWidget and reused for
+        # attach without a second fetch (S1). Caps is always present on a
+        # render snapshot.
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        caps = snapshot.capabilities
+        assert caps is not None, "render snapshot must carry capabilities"
         tab_w = ExpTabWidget(
-            tab_id, self._ctrl, dialog_presenter=self._dialog_presenter
+            tab_id, self._ctrl, caps, dialog_presenter=self._dialog_presenter
         )
         self._tab_widgets[tab_id] = tab_w
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
 
-        # Bring the whole tab widget to life from one render snapshot (seed every
-        # sub-view + wire controller signals) — the whole-tab analogue of
-        # CfgFormWidget.attach.
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        # Reuse the snapshot already fetched for capabilities (avoid second fetch).
         self._toolbar.set_new_tab_enabled(True)
         tab_w.attach(snapshot, self._tab_actions)
 
@@ -242,12 +246,8 @@ class MainWindow(QMainWindow):
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.interaction is not None  # render snapshot fills live fields
         assert current.capabilities is not None  # render snapshot fills live fields
-        # Non-analysis adapters (flux_dep / power_dep 2D sweeps) intentionally
-        # have no analyze params after a run — there is no analyze form to fill,
-        # so skip before the Fast-Fail below (which guards the *analysis* adapter
-        # contract: a run result must carry initialized params).
+        # Branch from declared capabilities and never touch absent controls (S1).
         if current.capabilities.analysis is AnalysisMode.NONE:
-            tab_w.analyze_form.sync(None)
             return
         if not current.interaction.has_run_result:
             tab_w.analyze_form.sync(None)
@@ -264,12 +264,8 @@ class MainWindow(QMainWindow):
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.capabilities is not None  # render snapshot fills live fields
-        # Only post-analysis adapters have a post form; for the rest there is
-        # nothing to fill. When the primary analyze result is invalidated the post
-        # params are cleared (State), so there is no instance to populate — the
-        # gate (update_interaction_state) disables the empty form.
+        # Branch from capabilities; never touch absent post controls.
         if not current.capabilities.post_analysis:
-            tab_w.sync_post_analyze_params(None)
             return
         if current.post_analyze_params is None:
             tab_w.sync_post_analyze_params(None)
@@ -285,8 +281,14 @@ class MainWindow(QMainWindow):
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.analysis is not None
         assert current.post_analysis is not None
-        tab_w.update_writeback_items(list(current.analysis.writeback_items))
-        tab_w.update_post_writeback_items(list(current.post_analysis.writeback_items))
+        assert current.capabilities is not None
+        # Pane-qualified: only touch present panes (S1).
+        if current.capabilities.analysis is not AnalysisMode.NONE:
+            tab_w.update_writeback_items(list(current.analysis.writeback_items))
+        if current.capabilities.post_analysis:
+            tab_w.update_post_writeback_items(
+                list(current.post_analysis.writeback_items)
+            )
 
     def refresh_tab_save_paths(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -296,9 +298,12 @@ class MainWindow(QMainWindow):
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.paths is not None
+        assert current.capabilities is not None
         tab_w.set_data_path(current.paths.data.path or "")
-        tab_w.set_analysis_image_path(current.paths.analysis_image.path or "")
-        tab_w.set_post_image_path(current.paths.post_analysis_image.path or "")
+        if current.capabilities.analysis is not AnalysisMode.NONE:
+            tab_w.set_analysis_image_path(current.paths.analysis_image.path or "")
+        if current.capabilities.post_analysis:
+            tab_w.set_post_image_path(current.paths.post_analysis_image.path or "")
 
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -308,6 +313,9 @@ class MainWindow(QMainWindow):
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.analysis is not None
+        assert current.capabilities is not None
+        if current.capabilities.analysis is AnalysisMode.NONE:
+            return
         figure = current.analysis.figure
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
@@ -320,6 +328,9 @@ class MainWindow(QMainWindow):
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.post_analysis is not None
+        assert current.capabilities is not None
+        if not current.capabilities.post_analysis:
+            return
         post_figure = current.post_analysis.figure
         if post_figure is not None:
             self.show_post_analysis_image(tab_id, post_figure)
