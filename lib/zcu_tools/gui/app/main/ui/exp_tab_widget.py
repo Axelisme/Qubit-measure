@@ -566,7 +566,10 @@ class ExpTabWidget(QWidget):
 
     def attach(self, snapshot: TabSnapshot, actions: TabActions) -> None:
         """Bring this tab widget to life from one snapshot."""
-        assert snapshot.capabilities is not None
+        if snapshot.capabilities is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no capabilities"
+            )
         if snapshot.capabilities != self._capabilities:
             raise RuntimeError(
                 f"capability mismatch for tab {self.tab_id!r}: "
@@ -907,7 +910,10 @@ class ExpTabWidget(QWidget):
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         assert snapshot.interaction is not None
-        assert snapshot.capabilities is not None
+        if snapshot.capabilities is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no capabilities"
+            )
         if snapshot.capabilities != self._capabilities:
             raise RuntimeError(
                 f"capability mismatch for tab {self.tab_id!r}: "
@@ -1021,17 +1027,14 @@ class ExpTabWidget(QWidget):
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
 
+        self._data_path_edit.textChanged.connect(data_path_cb)
         if self._has_analysis:
             self.analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
                     tab_id, instance
                 )
             )
-            self._data_path_edit.textChanged.connect(data_path_cb)
             self._image_path_edit.textChanged.connect(analysis_image_cb)
-        else:
-            # No analysis pane → only data path signal (Save pane) needs wiring.
-            self._data_path_edit.textChanged.connect(data_path_cb)
         if self._has_post:
             self.post_analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
@@ -1074,27 +1077,18 @@ class ExpTabWidget(QWidget):
 
     def detach(self) -> None:
         """Tear this tab widget down."""
-        if hasattr(self, "_validity_cb"):
-            self.cfg_form.validity_changed.disconnect(self._validity_cb)
-        if hasattr(self, "_schema_cb"):
-            self.cfg_form.schema_changed.disconnect(self._schema_cb)
-        if hasattr(self, "_data_path_cb"):
-            try:
-                self._data_path_edit.textChanged.disconnect(self._data_path_cb)
-            except Exception:
-                pass
-        if hasattr(self, "_analysis_image_cb"):
-            try:
-                self._image_path_edit.textChanged.disconnect(self._analysis_image_cb)
-            except Exception:
-                pass
-        if hasattr(self, "_post_image_cb"):
-            try:
-                self._post_image_path_edit.textChanged.disconnect(self._post_image_cb)
-            except Exception:
-                pass
+        if self._actions is None:
+            raise RuntimeError(f"tab {self.tab_id!r} is not attached")
+        self.cfg_form.validity_changed.disconnect(self._validity_cb)
+        self.cfg_form.schema_changed.disconnect(self._schema_cb)
+        self._data_path_edit.textChanged.disconnect(self._data_path_cb)
+        if self._has_analysis:
+            self._image_path_edit.textChanged.disconnect(self._analysis_image_cb)
+        if self._has_post:
+            self._post_image_path_edit.textChanged.disconnect(self._post_image_cb)
         self._progress_unsub()
         self.cfg_form.detach()
         if self._cfg_editor_id is not None:
             self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
             self._cfg_editor_id = None
+        self._actions = None

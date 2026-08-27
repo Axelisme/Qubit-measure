@@ -35,7 +35,7 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
   `MainWindow` adapts those actions to top-level handlers. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
-  draft via `Controller`/`WritebackControl` pane-qualified forwarding (S5), while
+  draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
   `WritebackService` remains stage-agnostic. `RenderHost` is pane-aware (run |
   analysis | post_analysis) and the worker captures its pane's container at start —
   switching the visible subtab never retargets the worker (ADR-0017). Save owns
@@ -102,8 +102,8 @@ this facet instead of the giant `Controller` surface. `WritebackControlPort` /
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
-`Controller` surface. Cfg-editor remains a separate domain, and `Controller`
-keeps thin compatibility forwards for UI surfaces that have not migrated yet.
+`Controller` surface. Cfg-editor remains a separate domain. Qt writeback uses
+pane-qualified forwards; flat forwards belong only to the current remote contract.
 
 Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
 while `MainWindowEventCoordinator` owns EventBus subscription and pane-specific

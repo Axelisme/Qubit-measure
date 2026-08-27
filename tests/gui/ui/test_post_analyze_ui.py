@@ -1,11 +1,9 @@
-"""UI tests for the post-analysis (second-layer) sub-tab.
+"""UI tests for the post-analysis experiment subtab.
 
-Mirrors the primary-analyze UI tests (``test_main_window_ui.py``): the Post
-sub-tab only appears for adapters declaring ``post_analysis``, its form/Run gate
-on a primary analyze result, Run dispatches through the controller. The post
-figure renders into the *shared* right-pane container (run/analyze/post all show
-the most recent figure); the post sub-tab has its own Save Image button gated on
-a post result.
+The Post-Analysis page and controls exist only for adapters declaring the
+capability. Its operation gate depends on the primary analysis result, and its
+figure, writeback draft, and Save Image controls remain independent from the
+primary Analysis pane.
 """
 
 from __future__ import annotations

@@ -36,6 +36,8 @@ def make_ctrl():
     ctrl.update_tab_save_paths = MagicMock()
     ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
     ctrl.get_cfg_editor_draft.return_value = MagicMock()
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
     return ctrl
 
 
@@ -387,6 +389,7 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
         post_figure=Figure(),
     )
     tab = exp_tab_widget("tab-1", ctrl, _tmp_snap.capabilities)
+    tab.attach(ctrl.get_tab_snapshot.return_value, MagicMock())
     window._tab_widgets["tab-1"] = tab
     # Seed figures
     fig_a = Figure()

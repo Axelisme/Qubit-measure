@@ -177,13 +177,14 @@ class MainWindow(QMainWindow):
             return
 
         tab_label = adapter_name
-        # Obtain the render snapshot before construction so the immutable
-        # AdapterCapabilities can be passed into ExpTabWidget and reused for
-        # attach without a second fetch (S1). Caps is always present on a
-        # render snapshot.
+        # Construct the tab from the same immutable capabilities snapshot used
+        # for its initial attach, so optional panes never need dynamic rebuilds.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         caps = snapshot.capabilities
-        assert caps is not None, "render snapshot must carry capabilities"
+        if caps is None:
+            raise RuntimeError(
+                f"render snapshot for tab {tab_id!r} has no capabilities"
+            )
         tab_w = ExpTabWidget(
             tab_id, self._ctrl, caps, dialog_presenter=self._dialog_presenter
         )
@@ -246,7 +247,7 @@ class MainWindow(QMainWindow):
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.interaction is not None  # render snapshot fills live fields
         assert current.capabilities is not None  # render snapshot fills live fields
-        # Branch from declared capabilities and never touch absent controls (S1).
+        # Branch from declared capabilities and never touch absent controls.
         if current.capabilities.analysis is AnalysisMode.NONE:
             return
         if not current.interaction.has_run_result:
@@ -282,7 +283,7 @@ class MainWindow(QMainWindow):
         assert current.analysis is not None
         assert current.post_analysis is not None
         assert current.capabilities is not None
-        # Pane-qualified: only touch present panes (S1).
+        # Pane-qualified: only touch present panes.
         if current.capabilities.analysis is not AnalysisMode.NONE:
             tab_w.update_writeback_items(list(current.analysis.writeback_items))
         if current.capabilities.post_analysis:
