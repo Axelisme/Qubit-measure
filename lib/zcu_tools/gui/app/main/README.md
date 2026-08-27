@@ -102,8 +102,8 @@ this facet instead of the giant `Controller` surface. `WritebackControlPort` /
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
-`Controller` surface. Cfg-editor remains a separate domain. Qt writeback uses
-pane-qualified forwards; flat forwards belong only to the current remote contract.
+`Controller` surface. Cfg-editor remains a separate domain. Qt and remote
+writeback forwards are pane-qualified; no flat writeback forward remains.
 
 Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
 while `MainWindowEventCoordinator` owns EventBus subscription and pane-specific
