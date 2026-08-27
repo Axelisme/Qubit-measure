@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, AnalyzeRequest
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
+from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import InteractiveHost, InteractiveSession
@@ -101,6 +102,7 @@ class RunAnalyzeControlFacet:
 
     def start_run(self, tab_id: str) -> int:
         permit = self._guard.acquire_run_permit(tab_id)
+        self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
         return self._run.start_run(permit, live_container)
@@ -135,6 +137,7 @@ class RunAnalyzeControlFacet:
 
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
         permit = self._guard.acquire_analyze_permit(tab_id)
+        self._ensure_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         if tab.adapter.capabilities.analysis is AnalysisMode.INTERACTIVE:
             return self._start_interactive_analyze(
@@ -174,6 +177,7 @@ class RunAnalyzeControlFacet:
     def start_post_analyze(
         self, tab_id: str, post_analyze_params_instance: object
     ) -> int:
+        self._ensure_tab_idle(tab_id)
         host = self._render_host()
         figure_container = (
             host.make_post_analysis_container(tab_id) if host is not None else None
@@ -181,6 +185,10 @@ class RunAnalyzeControlFacet:
         return self._post_analyze.start_post_analyze(
             tab_id, post_analyze_params_instance, figure_container
         )
+
+    def _ensure_tab_idle(self, tab_id: str) -> None:
+        if self._state.is_tab_busy(tab_id):
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
     def get_post_analyze_result(self, tab_id: str) -> object | None:
         return self._tab.get_tab_post_analyze_result(tab_id)

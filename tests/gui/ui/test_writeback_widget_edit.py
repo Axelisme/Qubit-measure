@@ -143,6 +143,23 @@ def test_edit_md_item_rejects_unparseable_complex(qapp):
         dialog.close()
 
 
+def test_edit_cfg_item_reports_draft_resolution_failure(qapp):
+    item = ModuleWriteback(
+        target_name="readout_rf", description="A module", edit_schema=MagicMock()
+    )
+    item.session_id = "ml-1"
+    ctrl = MagicMock()
+    ctrl.get_writeback_item_draft_for_pane.side_effect = RuntimeError("draft closed")
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
+
+    with patch(
+        "zcu_tools.gui.app.main.ui.writeback_widget.QMessageBox.critical"
+    ) as critical:
+        widget._edit_cfg_item(item, QCheckBox())
+
+    critical.assert_called_once_with(widget, "Unable to edit writeback", "draft closed")
+
+
 def test_edit_cfg_item_can_change_target_name(qapp):
     """The module/waveform Edit dialog exposes an editable apply-as that commits
     on editingFinished."""

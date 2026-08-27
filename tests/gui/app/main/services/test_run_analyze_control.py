@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
 from zcu_tools.gui.app.main.services.load import LoadTabResultOutcome
@@ -15,9 +16,14 @@ from tests.gui._control_fakes import CallLog, call
 
 class RecordingState:
     def __init__(
-        self, log: CallLog, *, analysis: AnalysisMode = AnalysisMode.FIT
+        self,
+        log: CallLog,
+        *,
+        analysis: AnalysisMode = AnalysisMode.FIT,
+        busy: bool = False,
     ) -> None:
         self._log = log
+        self._busy = busy
         self.running_tab_id: str | None = "running-tab"
         self.exp_context = SimpleNamespace(md="md", ml="ml", predictor="predictor")
         self.tab = SimpleNamespace(
@@ -32,6 +38,10 @@ class RecordingState:
     def get_tab(self, tab_id: str) -> object:
         self._log.add("state", "get_tab", tab_id)
         return self.tab
+
+    def is_tab_busy(self, tab_id: str) -> bool:
+        self._log.add("state", "is_tab_busy", tab_id)
+        return self._busy
 
 
 class RecordingAdapter:
@@ -201,10 +211,10 @@ class RecordingRenderHost:
 
 
 def _facet(
-    *, analysis: AnalysisMode = AnalysisMode.FIT
+    *, analysis: AnalysisMode = AnalysisMode.FIT, busy: bool = False
 ) -> tuple[RunAnalyzeControlFacet, CallLog, RecordingState, RecordingBus]:
     log = CallLog()
-    state = RecordingState(log, analysis=analysis)
+    state = RecordingState(log, analysis=analysis, busy=busy)
     bus = RecordingBus(log)
     host = RecordingRenderHost(log)
     return (
@@ -232,6 +242,7 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
 
     assert log.calls == [
         call("guard", "acquire_run_permit", "tab-1"),
+        call("state", "is_tab_busy", "tab-1"),
         call("host", "make_run_container", "tab-1"),
         call("run", "start_run", "run-permit", "figure-container"),
     ]
@@ -266,6 +277,7 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
 
     assert log.calls == [
         call("guard", "acquire_analyze_permit", "tab-1"),
+        call("state", "is_tab_busy", "tab-1"),
         call("state", "get_tab", "tab-1"),
         call("host", "make_analysis_container", "tab-1"),
         call("analyze", "start_analyze", "analyze-permit", params, "figure-container"),
@@ -281,11 +293,12 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "guard",
         "state",
         "state",
+        "state",
         "tab",
         "analyze",
         "host",
     ]
-    assert log.calls[4] == call("analyze", "start_interactive", "analyze-permit")
+    assert log.calls[5] == call("analyze", "start_interactive", "analyze-permit")
 
 
 def test_post_analyze_uses_shared_live_container() -> None:
@@ -294,6 +307,7 @@ def test_post_analyze_uses_shared_live_container() -> None:
     assert facet.start_post_analyze("tab-1", "post-params") == 33
 
     assert log.calls == [
+        call("state", "is_tab_busy", "tab-1"),
         call("host", "make_post_analysis_container", "tab-1"),
         call(
             "post_analyze",
@@ -303,3 +317,25 @@ def test_post_analyze_uses_shared_live_container() -> None:
             "figure-container",
         ),
     ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "forbidden_host_call"),
+    [
+        (lambda facet: facet.start_run("tab-1"), "make_run_container"),
+        (lambda facet: facet.analyze("tab-1", object()), "make_analysis_container"),
+        (
+            lambda facet: facet.start_post_analyze("tab-1", object()),
+            "make_post_analysis_container",
+        ),
+    ],
+)
+def test_busy_invocation_rejects_before_clearing_presentation(
+    operation, forbidden_host_call: str
+) -> None:
+    facet, log, _state, _bus = _facet(busy=True)
+
+    with pytest.raises(RuntimeError, match="busy"):
+        operation(facet)
+
+    assert all(entry.method != forbidden_host_call for entry in log.calls)

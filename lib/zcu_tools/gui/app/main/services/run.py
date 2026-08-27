@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
+    from ..state import RetiredPaneResources
     from .ports import RunStatePort, WritebackLifecyclePort
 
 
@@ -64,7 +65,7 @@ class RunService:
         # controller can cancel_run() and await the outcome (ADR-0019).
         self._active_token: int | None = None
 
-    def _teardown_retired(self, retired: Any, *, tab_id: str | None = None) -> None:
+    def _teardown_retired(self, retired: RetiredPaneResources) -> None:
         if retired is None:
             return
         for draft in retired.writeback_drafts:
@@ -91,7 +92,7 @@ class RunService:
         # result. State performs one owner-thread swap and returns every detached
         # draft; cleanup happens only after the new empty panes are committed.
         retired = self._state.clear_tab_results(tab_id)
-        self._teardown_retired(retired, tab_id=tab_id)
+        self._teardown_retired(retired)
 
         # A single StopSignal owns the Schedule-visible stop flag for this run.
         # ``cancel_requested`` is separate: Schedule failures also set the stop
@@ -143,7 +144,7 @@ class RunService:
                 type(result).__name__,
             )
             retired = self._state.update_tab_result(tab_id, result)
-            self._teardown_retired(retired, tab_id=tab_id)
+            self._teardown_retired(retired)
             self._state.set_tab_running(tab_id, False)
             self._active_token = None
             # STATE is observable before settle (ADR-0017 / stage2c invariant 1).
@@ -156,7 +157,7 @@ class RunService:
             # before the stop_event tripped a hard interrupt); keep it if present.
             if result is not NO_RESULT:
                 retired = self._state.update_tab_result(tab_id, result)
-                self._teardown_retired(retired, tab_id=tab_id)
+                self._teardown_retired(retired)
             self._state.set_tab_running(tab_id, False)
             self._active_token = None
             # STATE is observable before settle.

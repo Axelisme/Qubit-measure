@@ -192,7 +192,7 @@ Completion is detected by wait/poll on a handle, not by best-effort events:
     gui_tab_post_analyze_start, gui_device_*) waits up to wait_seconds (default
     1.0): settles in time -> {status:'finished', handle, <product>}
     (gui_tab_run_start -> {tab, figure}; gui_tab_analyze_start -> {summary, figure};
-    gui_tab_post_analyze_start -> {summary}; gui_device_* -> {snapshot}); a slow one
+    gui_tab_post_analyze_start -> {summary, figure}; gui_device_* -> {snapshot}); a slow one
     degrades to {status:'pending', handle}. EITHER way the reply carries 'handle' —
     an opaque token you feed to the two generic drains below.
   - gui_op_poll(handle) returns immediately, NEVER raises: 'finished' | 'running' |

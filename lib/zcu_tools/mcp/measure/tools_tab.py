@@ -284,7 +284,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_tab_open,
         "description": (
             "Step 1 of the recommended flow (open -> run -> analyze_review -> "
-            "commit) — open. = tab.new + tab.snapshot + tab.get_cfg + adapter.guide. "
+            "writeback_apply -> save) — open. = tab.new + tab.snapshot + tab.get_cfg + adapter.guide. "
             "Create a tab for 'adapter_name' (see gui_adapter_list) and fold its "
             "editing context (tab.snapshot for editor_id, tab.get_cfg for the "
             "settable cfg tree) + the adapter guide into ONE reply. The guide is "
@@ -330,7 +330,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_tab_run,
         "description": (
             "Step 2 of the recommended flow (open -> run -> analyze_review -> "
-            "commit) — run. = gui_tab_set_cfg + gui_tab_run_start. Apply 'edits' "
+            "writeback_apply -> save) — run. = gui_tab_set_cfg + gui_tab_run_start. Apply 'edits' "
             "then run the already-created 'tab_id' (from gui_tab_open), then STOP "
             "before analyze. 'edits' is an OPTIONAL ORDERED list of {path, value} "
             "(dotted paths, see gui_tab_get_cfg; numbers stay numbers). The order is "
@@ -383,7 +383,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
         "handler": tool_gui_tab_analyze_review,
         "description": (
             "Step 3 of the recommended flow (open -> run -> analyze_review -> "
-            "commit) — analyze_review. = gui_tab_analyze_start + "
+            "writeback_apply -> save) — analyze_review. = gui_tab_analyze_start + "
             "gui_tab_writeback_list. Analyze 'tab_id' and fold the writeback "
             "review into ONE reply. A finished FIT returns {status:'finished', "
             "handle, summary, figure, writeback_preview} — 'summary' is the fit "

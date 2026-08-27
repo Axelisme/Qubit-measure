@@ -217,10 +217,11 @@ class WritebackWidget(QWidget):
             draft = self._ctrl.get_writeback_item_draft_for_pane(
                 self._tab_id, self._pane, item.session_id
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "failed to resolve writeback draft item %s", item.session_id
             )
+            QMessageBox.critical(self, "Unable to edit writeback", str(exc))
             return
 
         dialog = QDialog(self)
