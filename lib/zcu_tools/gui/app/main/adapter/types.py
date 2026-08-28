@@ -243,7 +243,7 @@ class ButtonControl:
     on_trigger: Callable[[], None]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.key, str) or not self.key:
+        if not isinstance(self.key, str) or not self.key.strip():
             raise ValueError("ButtonControl key must be a non-empty string")
         if not isinstance(self.label, str) or not self.label.strip():
             raise ValueError("ButtonControl label must be a non-empty string")
@@ -261,7 +261,7 @@ class ToggleControl:
     on_change: Callable[[bool], None]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.key, str) or not self.key:
+        if not isinstance(self.key, str) or not self.key.strip():
             raise ValueError("ToggleControl key must be a non-empty string")
         if not isinstance(self.label, str) or not self.label.strip():
             raise ValueError("ToggleControl label must be a non-empty string")

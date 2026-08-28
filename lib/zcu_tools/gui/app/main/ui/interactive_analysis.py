@@ -124,7 +124,7 @@ class InteractiveAnalysisWidget(QWidget):
                 # ButtonControl.__post_init__ already validates key/label/callable,
                 # but re-validate for the host seam to ensure Fast Fail even if
                 # the declaration bypassed the dataclass constructor.
-                if not isinstance(ctrl.key, str) or not ctrl.key:
+                if not isinstance(ctrl.key, str) or not ctrl.key.strip():
                     raise ValueError("ButtonControl key must be a non-empty string")
                 if not isinstance(ctrl.label, str) or not ctrl.label.strip():
                     raise ValueError("ButtonControl label must be a non-empty string")
@@ -134,7 +134,7 @@ class InteractiveAnalysisWidget(QWidget):
                     raise ValueError(f"duplicate control key {ctrl.key!r}")
                 seen_keys.add(ctrl.key)
             elif isinstance(ctrl, ToggleControl):
-                if not isinstance(ctrl.key, str) or not ctrl.key:
+                if not isinstance(ctrl.key, str) or not ctrl.key.strip():
                     raise ValueError("ToggleControl key must be a non-empty string")
                 if not isinstance(ctrl.label, str) or not ctrl.label.strip():
                     raise ValueError("ToggleControl label must be a non-empty string")
