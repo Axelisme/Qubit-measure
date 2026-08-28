@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-27 — capability-driven subtabs and pane-owned lifecycle
+**Last updated:** 2026-08-28 — typed interactive controls seam
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -394,6 +394,37 @@ longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the
 shared dialog can refresh cached device values on every reopen without depending
 on the concrete controller.
+
+## Interactive Analysis Seam
+
+`adapter.types` owns the Qt-free closed control vocabulary
+`InteractiveControl = ButtonControl | ToggleControl` (`ControlKey` as stable
+identity, `label`, typed callback, and for toggles an exact `bool initial`)
+and the `InteractiveSession` Protocol (`controls() -> tuple[InteractiveControl, ...]`,
+pointer hooks, `info_text()` and `finish()`). Concrete sessions such as
+`FluxPickSession` own the domain callback mapping (`Conjugate Line` toggle →
+`TwoLinePicker.set_conjugate`, `Auto Align` → background alignment,
+`Swap Lines` → swap+redraw) in declaration order; they cache the terminal
+`finish()` result and ignore subsequent domain input and late background
+completions. `InteractiveAnalysisWidget` is the generic host: it validates the
+declaration and lowers it to Qt (`ButtonControl` → `QPushButton`,
+`ToggleControl` → `QCheckBox`) without comparing domain keys, applies a
+toggle's `initial` before connecting its signal so construction never fires the
+callback, and reads the surface only once at bind.
+
+Ordering: control surface is bound once; toggle `initial` is set before signal
+connection. Errors: bind validates the whole surface before mounting — empty or
+whitespace-only `key`/`label`, duplicate `key`, unsupported variant,
+non-callable callback, or non-`bool` toggle `initial` Fast Fail with no partial
+mount; construction-time `ButtonControl`/`ToggleControl` invariants also Fast
+Fail; repeat `bind()` Fast Fails. Lifecycle: `Done` closes the input gate
+first — it disables the checkbox, all buttons, the Done button itself and canvas
+pointer forwarding, then invokes `on_done` exactly once; subsequent control or
+pointer events are ignored, and a finished session's late background completion
+does not mutate the picker or result. Variation is closed: new kinds are added
+only for a real need, as a new `InteractiveControl` union member with an
+exhaustive renderer; no generic widget factory, registry, dynamic surface or
+cross-process/serialization representation exists.
 
 ## Adapter-Facing Rules
 

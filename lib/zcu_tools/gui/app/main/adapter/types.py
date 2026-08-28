@@ -8,7 +8,9 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
+    NewType,
     Protocol,
+    TypeAlias,
 )
 
 from typing_extensions import TypeVar
@@ -229,6 +231,48 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
 
 _T_Bg = TypeVar("_T_Bg")
 
+ControlKey = NewType("ControlKey", str)
+
+
+@dataclass(frozen=True, slots=True)
+class ButtonControl:
+    """A stateless command button — Qt-free."""
+
+    key: ControlKey
+    label: str
+    on_trigger: Callable[[], None]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, str) or not self.key.strip():
+            raise ValueError("ButtonControl key must be a non-empty string")
+        if not isinstance(self.label, str) or not self.label.strip():
+            raise ValueError("ButtonControl label must be a non-empty string")
+        if not callable(self.on_trigger):
+            raise TypeError("ButtonControl on_trigger must be callable")
+
+
+@dataclass(frozen=True, slots=True)
+class ToggleControl:
+    """A boolean toggle (checkbox) — Qt-free."""
+
+    key: ControlKey
+    label: str
+    initial: bool
+    on_change: Callable[[bool], None]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, str) or not self.key.strip():
+            raise ValueError("ToggleControl key must be a non-empty string")
+        if not isinstance(self.label, str) or not self.label.strip():
+            raise ValueError("ToggleControl label must be a non-empty string")
+        if type(self.initial) is not bool:  # noqa: E721 — exact bool required
+            raise TypeError("ToggleControl initial must be bool")
+        if not callable(self.on_change):
+            raise TypeError("ToggleControl on_change must be callable")
+
+
+InteractiveControl: TypeAlias = ButtonControl | ToggleControl
+
 
 class InteractiveHost(Protocol):
     """Host-side capabilities an interactive analysis ``InteractiveSession`` draws
@@ -259,20 +303,34 @@ class InteractiveHost(Protocol):
 class InteractiveSession(Protocol):
     """An in-progress interactive analysis the user drives on the plot. Created by
     ``adapter.setup_interactive_analysis(req, host)``; the GUI host forwards
-    pointer events + action-button clicks to it and, on Done, calls ``finish()``.
-    Qt-free: it deals in matplotlib coordinates + a host port, never Qt widgets."""
+    pointer + typed-control events to it and, on Done, calls ``finish()``.
+    Qt-free: it deals in matplotlib coordinates + a host port + typed
+    ``InteractiveControl`` declarations, never Qt widgets.
+
+    Durable seam (see ``gui/app/main/README.md``):
+    - ``adapter.types`` owns the Qt-free closed vocabulary
+      ``InteractiveControl`` (``ButtonControl | ToggleControl``) and this
+      Protocol; concrete sessions own the domain callback mapping.
+    - ``InteractiveAnalysisWidget`` validates and lowers the declaration to Qt
+      widgets without comparing domain keys.
+    - Control surface is read once at bind; ``ToggleControl.initial`` is
+      applied before signal connection so construction never fires the callback.
+    - ``Done`` closes the input gate before submitting; a finished session
+      ignores subsequent pointer/control input and late background completions.
+    - Variation is closed: new kinds only when a real need appears, with an
+      exhaustive renderer and no widget factory / registry / dynamic surface /
+      serialization.
+    """
 
     def on_press(self, x: float | None) -> None: ...
     def on_move(self, x: float | None) -> None: ...
     def on_release(self, x: float | None, y: float | None) -> None: ...
 
-    def actions(self) -> list[tuple[str, str]]:
-        """``[(action_id, label)]`` — generic toolbar buttons the host renders; on
-        click the host calls ``invoke_action(action_id)``. The host never learns
-        what an action does."""
+    def controls(self) -> tuple[InteractiveControl, ...]:
+        """Ordered immutable control declarations the host lowers to Qt
+        widgets. The host reads this once at bind and never learns what a
+        control does — each declaration carries its own typed callback."""
         ...
-
-    def invoke_action(self, action_id: str) -> None: ...
 
     def info_text(self) -> str:
         """A status line the host displays verbatim (it does not interpret it)."""
@@ -280,7 +338,9 @@ class InteractiveSession(Protocol):
 
     def finish(self) -> AnalyzeResultBase:
         """Build the analysis result from the user's current selection (called on
-        Done). The result flows through the same path as a FIT analyze result."""
+        Done). The result flows through the same path as a FIT analyze result.
+        A finished session caches the terminal result and ignores subsequent
+        domain input and late background completions."""
         ...
 
 
