@@ -51,18 +51,23 @@ class FieldRenderContext:
     field_label_max_width: int | None = None
     decoration_for_path: FieldDecorationResolver | None = None
     text_input_enhancer: TextInputEnhancer | None = None
+    render_reference_children: bool = True
 
     def derive(
         self,
         *,
         path: str | None = None,
         top_level: bool | None = None,
+        render_reference_children: bool | None = None,
     ) -> FieldRenderContext:
         """Return a child context while retaining the same frozen registry."""
         return replace(
             self,
             path=self.path if path is None else path,
             top_level=self.top_level if top_level is None else top_level,
+            render_reference_children=self.render_reference_children
+            if render_reference_children is None
+            else render_reference_children,
         )
 
 

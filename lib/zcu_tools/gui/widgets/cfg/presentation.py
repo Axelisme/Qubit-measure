@@ -22,7 +22,9 @@ from zcu_tools.gui.cfg import ChoiceSectionSpec, DirectValue, LiteralSpec
 from zcu_tools.gui.cfg.binding import CfgField, SectionField
 
 from .decoration import FieldDecorationProtocol
-from .fields._decoration import (
+from .fields._decoration import (  # single decoration projection (tone/enabled/tooltip)
+    _TONE_STYLES,
+    _decoration_widget_state,
     apply_decoration,
     apply_widget_decoration,
     decorated_label_text,
@@ -31,12 +33,15 @@ from .registry import FieldRenderContext
 
 logger = logging.getLogger(__name__)
 
-_TONE_QCOLOR = {
-    "muted": QColor("#6b7280"),
-    "info": QColor("#2563eb"),
-    "warning": QColor("#8a5a00"),
-    "error": QColor("#b00020"),
-}
+# Derive QColor map from the single _TONE_STYLES source to keep tone interpretation once.
+_TONE_QCOLOR: dict[str, QColor] = {}
+for _tone, _style in _TONE_STYLES.items():  # type: ignore[attr-defined]
+    # style is "color: #...;" – extract hex
+    try:
+        _hex = _style.split(":")[1].strip().rstrip(";")
+        _TONE_QCOLOR[_tone] = QColor(_hex)
+    except Exception:
+        continue
 
 
 def choice_visible_keys(field: SectionField) -> set[str] | None:
@@ -108,7 +113,17 @@ def apply_form_widget_decoration(
 ) -> None:
     if decoration is None:
         return
-    apply_widget_decoration(value_widget, decoration)
+    # Use single decoration state (enabled/tooltip/tone) so form and tree share projection
+    enabled, tooltip, style = _decoration_widget_state(decoration)  # type: ignore[arg-type]
+    value_widget.setEnabled(enabled)
+    if tooltip:
+        value_widget.setToolTip(tooltip)
+    if style:
+        # For SectionWidget, this tints the header label/button via stylesheet inheritance
+        try:
+            value_widget.setStyleSheet(style)
+        except Exception:
+            pass
 
 
 def apply_tree_item_decoration(
@@ -119,10 +134,8 @@ def apply_tree_item_decoration(
     """Apply full decoration contract to a tree row (section/reference/leaf)."""
     if decoration is None:
         return
-    enabled = bool(getattr(decoration, "enabled", True))
-    tooltip = str(getattr(decoration, "tooltip", "") or "")
-    tone = str(getattr(decoration, "tone", "") or "normal")
-    # enabled: disable control and mark item as disabled (affects child interactions)
+    # Use single decoration state (enabled/tooltip/tone) from _decoration projection
+    enabled, tooltip, style = _decoration_widget_state(decoration)  # type: ignore[arg-type]
     if not enabled:
         if control is not None:
             control.setEnabled(False)
@@ -135,11 +148,15 @@ def apply_tree_item_decoration(
         item.setToolTip(1, tooltip)
         if control is not None:
             control.setToolTip(tooltip)
-    # tone: for tree, map to foreground color on the label column.
-    # Use muted/info/warning/error mapping; normal = no override.
+    # tone: map style "color: #...;" to QColor via shared _TONE_QCOLOR (single source)
+    # Derive tone from decoration.tone directly to reuse _TONE_QCOLOR
+    tone = str(getattr(decoration, "tone", "") or "normal")
     color = _TONE_QCOLOR.get(tone)
     if color is not None:
         brush = QBrush(color)
-        # Apply to both columns for consistency with form's label styling.
         item.setForeground(0, brush)
         item.setForeground(1, brush)
+    elif style:
+        # Fallback: if style is non-empty but tone not in map, still apply via foreground
+        # (should not happen as style derived from same tone)
+        pass

@@ -30,13 +30,14 @@ from zcu_tools.gui.cfg.binding import (
 )
 
 from ..decoration import FieldDecorationProtocol
-from ..presentation import choice_visible_keys, decorated_label, is_hidden
-from ..registry import FieldRenderContext, FieldWidgetProtocol
-from ._decoration import (
-    apply_decoration,
-    apply_widget_decoration,
-    decorated_label_text,
+from ..presentation import (
+    apply_form_row_decoration,
+    apply_form_widget_decoration,
+    choice_visible_keys,
+    decorated_label,
+    is_hidden,
 )
+from ..registry import FieldRenderContext, FieldWidgetProtocol
 from .common import (
     BaseLiveWidget,
     ElidedLabel,
@@ -257,10 +258,11 @@ class SectionWidget(BaseLiveWidget):
             decoration = self._decoration_for_path(path, child_field)
         if decoration is not None and decoration.hidden:
             return
-        label = decorated_label_text(child_field.spec.label or key, decoration)
+        # Use shared presentation policy for label/decoration
+        label = decorated_label(child_field, key, path, self._context)
         widget = cast(QWidget, w)
         if isinstance(child_field, SectionField):
-            apply_widget_decoration(widget, decoration)
+            apply_form_widget_decoration(widget, decoration)
             form.addRow(widget)
             return
         if isinstance(child_field, (SweepField, CenteredSweepField)):
@@ -269,7 +271,7 @@ class SectionWidget(BaseLiveWidget):
                 f"{label}:",
                 max_width=self._field_label_max_width,
             )
-            apply_decoration(label_widget, widget, decoration)
+            apply_form_row_decoration(label_widget, widget, decoration)
             form.addRow(label_widget)
             form.addRow(widget)
         else:
@@ -277,7 +279,7 @@ class SectionWidget(BaseLiveWidget):
                 f"{label}:",
                 max_width=self._field_label_max_width,
             )
-            apply_decoration(label_widget, widget, decoration)
+            apply_form_row_decoration(label_widget, widget, decoration)
             form.addRow(label_widget, widget)
 
     def teardown(self) -> None:
@@ -303,12 +305,15 @@ class ReferenceWidget(BaseLiveWidget):
         super().__init__(field, parent)
         self._context = context
         self._path = context.path
+        self._render_children = bool(
+            getattr(context, "render_reference_children", True)
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # Header: Checkbox + Combo
+        # Header: optional expand button + Combo (shared header authority)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(4)
@@ -325,7 +330,12 @@ class ReferenceWidget(BaseLiveWidget):
         self._expand_btn.setChecked(self._should_expand_by_default())
         self._expand_btn.setArrowType(Qt.DownArrow)  # type: ignore[attr-defined]
         self._expand_btn.clicked.connect(self._on_toggle_subsection)
-        header.addWidget(self._expand_btn)
+        if self._render_children:
+            header.addWidget(self._expand_btn)
+        else:
+            # In tree, expansion is handled by QTreeWidget; hide the form's toggle
+            self._expand_btn.setVisible(False)
+            self._expand_btn.setEnabled(False)
 
         self._combo = QComboBox()
         self._refresh_combo_items()
@@ -340,9 +350,15 @@ class ReferenceWidget(BaseLiveWidget):
         self._missing_ref_hint.setVisible(False)
         layout.addWidget(self._missing_ref_hint)
 
-        layout.addWidget(self._sub_container)
-        self._refresh_missing_ref_hint()
-        self._refresh_sub_widget()
+        if self._render_children:
+            layout.addWidget(self._sub_container)
+            self._refresh_missing_ref_hint()
+            self._refresh_sub_widget()
+        else:
+            # Tree handles children as QTreeWidgetItems; keep hint but no sub container
+            self._refresh_missing_ref_hint()
+            # No sub widget in tree header mode
+            self._sub_container.setVisible(False)
 
         # Reactive sync
         field.on_change.connect(self._on_model_changed)
@@ -381,6 +397,8 @@ class ReferenceWidget(BaseLiveWidget):
         else:
             self._combo.setCurrentIndex(0)  # None option
         self._combo.blockSignals(False)
+        if not self._render_children:
+            return
         self._sub_container.setEnabled(enabled)
         self._sync_expand_btn()
 
@@ -393,12 +411,16 @@ class ReferenceWidget(BaseLiveWidget):
         refresh_missing_hint(self._missing_ref_hint, cast(ReferenceField, self._field))
 
     def _on_toggle_subsection(self, expanded: bool) -> None:
+        if not self._render_children:
+            return
         self._sub_container.setVisible(expanded)
         self._expand_btn.setArrowType(  # type: ignore[attr-defined]
             Qt.DownArrow if expanded else Qt.RightArrow  # type: ignore[attr-defined]
         )
 
     def _sync_expand_btn(self) -> None:
+        if not self._render_children:
+            return
         field = cast(ReferenceField, self._field)
         has_subsection = self._sub_widget is not None
         visible = has_subsection and (not field.spec.optional or field.is_enabled)
@@ -414,6 +436,8 @@ class ReferenceWidget(BaseLiveWidget):
         )
 
     def _refresh_sub_widget(self) -> None:
+        if not self._render_children:
+            return
         field = cast(ReferenceField, self._field)
         sub_field = field.sub_field
 

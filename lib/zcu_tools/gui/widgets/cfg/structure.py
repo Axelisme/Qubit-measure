@@ -15,10 +15,7 @@ from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QBrush, QColor, QPainter, QPen  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractItemView,
-    QComboBox,
-    QHBoxLayout,
     QHeaderView,
-    QLabel,
     QProxyStyle,
     QStyle,
     QStyleOption,
@@ -38,12 +35,6 @@ from zcu_tools.gui.cfg.binding import (
     SweepField,
 )
 
-from .fields.reference_shared import (
-    apply_reference_validity,
-    handle_reference_combo_change,
-    refresh_missing_hint,
-    refresh_reference_combo,
-)
 from .presentation import (
     apply_tree_item_decoration,
     choice_visible_keys,
@@ -104,71 +95,6 @@ class _TreeBranchStyle(QProxyStyle):
 # choice_visible_keys, is_hidden, decorated_label now imported from presentation (single source)
 
 
-class _TreeReferenceHeader(QWidget):
-    """Reference header for the tree (shares exact editor authority with form)."""
-
-    def __init__(self, field: ReferenceField, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._field = field
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(2)
-        header_row = QHBoxLayout()
-        header_row.setContentsMargins(0, 0, 0, 0)
-        header_row.setSpacing(4)
-        self._combo = QComboBox()
-        self._combo.setMinimumWidth(20)
-        header_row.addWidget(self._combo, stretch=1)
-        layout.addLayout(header_row)
-        self._missing_hint = QLabel()
-        self._missing_hint.setObjectName("missingRefHint")
-        self._missing_hint.setStyleSheet("color: #b00020; font-size: 11px;")
-        self._missing_hint.setVisible(False)
-        layout.addWidget(self._missing_hint)
-        # Use shared helpers for combo population / hint / validity
-        refresh_reference_combo(self._combo, field)
-        self._combo.currentIndexChanged.connect(self._on_combo_changed)
-        field.on_change.connect(self._on_model_changed)
-        field.on_validity_changed.connect(self._on_validity_changed)  # type: ignore[attr-defined]
-        if field.spec.optional:
-            field.on_enabled_changed.connect(self._on_enabled_changed)  # type: ignore[attr-defined]
-        self._on_validity_changed(field.is_valid())
-        refresh_missing_hint(self._missing_hint, field)
-
-    def _refresh_combo_items(self) -> None:
-        refresh_reference_combo(self._combo, self._field)
-
-    def _on_combo_changed(self, index: int) -> None:
-        handle_reference_combo_change(self._field, self._combo.itemData(index))
-
-    def _on_model_changed(self, *_: object) -> None:
-        self._refresh_combo_items()
-        refresh_missing_hint(self._missing_hint, self._field)
-
-    def _on_enabled_changed(self, *_: object) -> None:
-        self._refresh_combo_items()
-
-    def _on_validity_changed(self, valid: bool) -> None:
-        apply_reference_validity(self._combo, None, self._field, valid)
-        refresh_missing_hint(self._missing_hint, self._field)
-
-    def teardown(self) -> None:
-        field = self._field
-        try:
-            field.on_change.disconnect(self._on_model_changed)
-        except Exception:
-            pass
-        try:
-            field.on_validity_changed.disconnect(self._on_validity_changed)  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        if field.spec.optional:
-            try:
-                field.on_enabled_changed.disconnect(self._on_enabled_changed)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-
-
 @final
 class TreeCfgWidget(QWidget):
     """Dense QTreeWidget presentation for a ``CfgDraft`` section.
@@ -219,8 +145,9 @@ class TreeCfgWidget(QWidget):
         self._item_depth: dict[int, int] = {}  # id(item) -> depth
         self._leaf_widgets: list[FieldWidgetProtocol] = []
         self._leaf_path_to_widget: dict[str, FieldWidgetProtocol] = {}
-        self._ref_headers: list[_TreeReferenceHeader] = []
+        self._ref_headers: list[FieldWidgetProtocol] = []
         self._ref_connections: list[tuple[ReferenceField, object]] = []
+        self._ref_enabled_connections: list[tuple[ReferenceField, object]] = []
         self._ref_prev_state: dict[str, tuple[str, int | None, str | None]] = {}
         self._expanded_state: dict[str, bool] = {}
 
@@ -247,7 +174,10 @@ class TreeCfgWidget(QWidget):
             pass
         self._disconnect_refs()
         for header in self._ref_headers:
-            header.teardown()
+            try:
+                header.teardown()
+            except Exception:
+                pass
         self._ref_headers.clear()
         for widget in self._leaf_widgets:
             try:
@@ -349,12 +279,21 @@ class TreeCfgWidget(QWidget):
             except Exception:
                 pass
         self._ref_connections.clear()
+        for field, callback in self._ref_enabled_connections:
+            try:
+                field.on_enabled_changed.disconnect(callback)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        self._ref_enabled_connections.clear()
 
     def _rebuild_tree(self) -> None:
         # Preserve expanded state before clear via internal map (already tracked).
         self._disconnect_refs()
         for header in self._ref_headers:
-            header.teardown()
+            try:
+                header.teardown()
+            except Exception:
+                pass
         self._ref_headers.clear()
         for widget in self._leaf_widgets:
             try:
@@ -610,11 +549,16 @@ class TreeCfgWidget(QWidget):
             self._path_to_item[child_path] = item
             self._item_depth[id(item)] = depth
             item.setExpanded(self._expanded_state.get(child_path, True))
-            header = _TreeReferenceHeader(child_field)
-            header.setFont(self._tree.font())
-            self._ref_headers.append(header)
-            self._tree.setItemWidget(item, 1, header)
-            apply_tree_item_decoration(item, header, dec)
+            # Use exact renderer authority: obtain reference header via registry
+            # (shared ReferenceWidget with render_reference_children=False)
+            ref_context = self._context.derive(
+                path=child_path, top_level=False, render_reference_children=False
+            )
+            header_widget = self._context.registry.render(child_field, ref_context)
+            cast(QWidget, header_widget).setFont(self._tree.font())
+            self._ref_headers.append(header_widget)
+            self._tree.setItemWidget(item, 1, cast(QWidget, header_widget))
+            apply_tree_item_decoration(item, cast(QWidget, header_widget), dec)
             # Propagate disabled from parent (ignore invisible root)
             if (
                 isinstance(parent_item, QTreeWidgetItem)
@@ -622,12 +566,27 @@ class TreeCfgWidget(QWidget):
                 and parent_item.isDisabled()
             ):
                 item.setDisabled(True)
-                header.setEnabled(False)
+                cast(QWidget, header_widget).setEnabled(False)
             # Elide guaranteed single materialized shape row: render shape fields directly under reference.
             sub = child_field.sub_field
             if sub is not None:
                 # Shape elision: children depth advances only by one, not two.
                 self._add_section_children(item, sub, child_path, depth + 1)
+                # If reference is optional and currently disabled, disable its subtree
+                # (header itself remains enabled so combo can re-enable)
+                if child_field.spec.optional and not child_field.is_enabled:
+                    stack = [item]
+                    while stack:
+                        cur = stack.pop()
+                        for idx in range(cur.childCount()):
+                            ch = cur.child(idx)
+                            if ch is None:
+                                continue
+                            ch.setDisabled(True)
+                            w = self._tree.itemWidget(ch, 1)
+                            if w is not None:
+                                w.setEnabled(False)
+                            stack.append(ch)
             # Keep reference children in sync only when structural identity changes
             # (chosen key, materialized shape, or sub_field identity). Value edits
             # must preserve leaf editors/focus.
@@ -653,6 +612,35 @@ class TreeCfgWidget(QWidget):
 
             child_field.on_change.connect(_on_ref_change)  # type: ignore[attr-defined]
             self._ref_connections.append((child_field, _on_ref_change))
+
+            def _on_ref_enabled_changed(
+                enabled: bool,
+                path: str = child_path,
+                field: ReferenceField = child_field,
+            ) -> None:
+                # When optional reference is disabled (None), disable its subtree
+                # but keep header enabled so user can re-select. Enabled True re-enables.
+                ref_item = self._path_to_item.get(path)
+                if ref_item is None:
+                    return
+                stack = [ref_item]
+                while stack:
+                    cur = stack.pop()
+                    for idx in range(cur.childCount()):
+                        ch = cur.child(idx)
+                        if ch is None:
+                            continue
+                        ch.setDisabled(not enabled)
+                        w = self._tree.itemWidget(ch, 1)
+                        if w is not None:
+                            w.setEnabled(enabled)
+                        stack.append(ch)
+
+            if child_field.spec.optional:
+                child_field.on_enabled_changed.connect(_on_ref_enabled_changed)  # type: ignore[attr-defined]
+                self._ref_enabled_connections.append(
+                    (child_field, _on_ref_enabled_changed)
+                )
             return
         # Sweep / CenteredSweep / Scalar / Literal leaf
         leaf_label = decorated_label(child_field, key, child_path, self._context)

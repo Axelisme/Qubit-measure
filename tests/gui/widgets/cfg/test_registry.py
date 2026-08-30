@@ -140,6 +140,7 @@ def test_render_context_is_immutable_presentation_state() -> None:
         "field_label_max_width",
         "decoration_for_path",
         "text_input_enhancer",
+        "render_reference_children",
     }
     with pytest.raises(FrozenInstanceError):
         context.path = "mutated"  # type: ignore[misc]
