@@ -832,3 +832,64 @@ def test_load_data_gates(exp_tab_factory):
     tab2.attach(snap2, MagicMock())
     assert tab2._save_center.load_button.isHidden()
     assert not tab2._save_center.save_all_button.isHidden()
+
+
+def test_unmatched_remote_save_completion_does_not_mark_gui_sig_as_saved(
+    exp_tab_factory, qapp
+):
+    """Regression for S2/S3 attempt-signature: remote/MCP save success without local pending must not make GUI's current sig SAVED."""
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    window = MainWindow(ctrl)
+
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
+    )
+    # GUI has result, path /gui.h5 and comment gui, never saved from Data pane
+    snap = _snapshot(
+        "tab-1",
+        has_run=True,
+        has_analysis=False,
+        analysis_mode=AnalysisMode.FIT,
+        post_cap=False,
+        load_cap=False,
+        has_active_context=True,
+        data_path="/gui.h5",
+    )
+    tab_ctrl = _mock_ctrl()
+    tab = exp_tab_factory("tab-1", tab_ctrl, caps)
+    # Attach snapshot that has /tmp default paths, then override GUI path/comment to /gui.h5/gui
+    tab.attach(snap, MagicMock())
+    # Ensure GUI shows /gui.h5/gui and is NOT SAVED
+    tab._save_center.set_data_path("/gui.h5")
+    tab._save_center.set_comment_text("gui")
+    # Re-sync status after path/comment override
+    tab.update_interaction_state(snap)
+    center = tab._save_center
+    assert "NOT SAVED" in center.status_text("data")
+    assert center.get_data_path() == "/gui.h5"
+    assert center.get_comment() == "gui"
+    # No local pending has been started
+
+    # Simulate remote/MCP entry point that saves with /remote.h5/remote directly via SaveControl
+    # That will emit SaveDataFinishedPayload with data_path /remote.h5 and success
+    ctrl.get_tab_snapshot.return_value = snap
+    ctrl.has_tab.return_value = True
+    window._tab_widgets["tab-1"] = tab
+
+    # Payload mimics remote save success (different path/comment than GUI)
+    payload = SaveDataFinishedPayload(
+        tab_id="tab-1", data_path="/remote.h5", error=None
+    )
+    window.handle_save_data_finished(payload)
+
+    # GUI's current sig (/gui.h5/gui) must remain NOT SAVED, not incorrectly SAVED via fallback
+    assert center.status_text("data") == "○ NOT SAVED"
+    # Also ensure that a subsequent local save still requires pending
+    center.notify_save_started("data")
+    center.handle_data_finished(None)
+    assert center.status_text("data") == "✓ SAVED"

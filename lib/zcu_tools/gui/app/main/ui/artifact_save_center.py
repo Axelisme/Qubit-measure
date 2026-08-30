@@ -129,12 +129,9 @@ class _StatusTracker:
 
     def handle_data_finished(self, error: str | None) -> None:
         rec = self._records["data"]
-        if error is None:
-            # Success: promote pending if present.
-            if rec.pending_sig is not None:
-                rec.saved_sig = rec.pending_sig
-            elif rec.current_sig is not None:
-                rec.saved_sig = rec.current_sig
+        if error is None and rec.pending_sig is not None:
+            rec.saved_sig = rec.pending_sig
+        # No pending -> ignore status transition (remote/MCP or unmatched completion).
         # Failure: keep saved unchanged.
         rec.pending_sig = None
 
