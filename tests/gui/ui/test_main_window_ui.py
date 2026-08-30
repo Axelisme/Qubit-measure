@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import Qt
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -77,6 +78,9 @@ class _RecordingTabActions:
     def save_post_image(self, tab_id: str) -> None:
         self.calls.append(("save_post_image", tab_id))
 
+    def save_all(self, tab_id: str) -> None:
+        self.calls.append(("save_all", tab_id))
+
 
 def _snapshot(
     tab_id: str,
@@ -118,15 +122,17 @@ def _snapshot(
     if figure is _DEFAULT_PARAMS:
         from matplotlib.figure import Figure
 
-        figure_obj = Figure() if has_figure and has_analyze_result else None
+        figure_obj: Figure | None = (
+            Figure() if has_figure and has_analyze_result else None
+        )
     else:
-        figure_obj = figure
+        figure_obj = figure  # type: ignore[assignment]
     if post_figure is _DEFAULT_PARAMS:
         from matplotlib.figure import Figure as _Fig2
 
-        post_figure_obj = _Fig2() if has_post_analyze_result else None
+        post_figure_obj: Figure | None = _Fig2() if has_post_analyze_result else None
     else:
-        post_figure_obj = post_figure
+        post_figure_obj = post_figure  # type: ignore[assignment]
 
     # Capabilities include load_data
     caps = AdapterCapabilities(
@@ -307,10 +313,10 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     )
 
     assert tab.analyze_btn.isEnabled() is False
-    assert tab.load_data_btn is not None
-    assert tab.load_data_btn.isEnabled() is False
+    assert tab._save_center.is_load_visible()
+    assert tab._save_center.is_load_enabled() is False
     assert tab.writeback_widget.isEnabled() is False
-    assert tab.save_image_btn.isEnabled() is False  # disabled because is_analyzing
+    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False  # disabled because is_analyzing
 
 
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
@@ -339,7 +345,7 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 
     assert tab.run_btn.isEnabled() is False
     assert tab.analyze_btn.isEnabled() is True
-    assert tab.save_data_btn.isEnabled() is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
 
 
 def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
@@ -366,8 +372,8 @@ def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
         )
     )
 
-    assert tab.save_data_btn.isEnabled() is False
-    assert tab.save_image_btn.isEnabled() is False
+    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is False
+    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.toolTip() == "Tab is busy"
 
@@ -456,12 +462,12 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a file-backed context"
-    assert tab.load_data_btn is not None
-    assert tab.load_data_btn.isEnabled() is True
+    assert tab._save_center.is_load_visible()
+    assert tab._save_center.is_load_enabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.writeback_widget.isEnabled() is True
-    assert tab.save_data_btn.isEnabled() is False
-    assert tab.save_image_btn.isEnabled() is False
+    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is False
+    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
 
 
 def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
@@ -485,18 +491,18 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
         )
     )
 
-    # Fixed order Run | Analysis? | Post? | Save | Guide: Analysis not constructed, Save always visible
+    # Fixed order Run | Analysis? | Post? | Data | Guide: Analysis not constructed, Data always visible
     visible = [tab._left_tabs.tabText(i) for i in range(tab._left_tabs.count())]
-    assert visible == ["Run", "Save", "Guide"]
+    assert visible == ["Run", "Data", "Guide"]
     # Prove Analysis page and controls were never constructed, not only hidden
     assert not hasattr(tab, "_analysis_panel")
     assert not hasattr(tab, "analyze_form")
     assert not hasattr(tab, "_analyze_section")
     # No Load Data capability means no control is constructed.
-    assert tab.load_data_btn is None
+    assert not tab._save_center.is_load_visible()
     # ... but Save stays reachable and usable (run result + active context).
-    assert tab.save_data_btn.isHidden() is False
-    assert tab.save_data_btn.isEnabled() is True
+    assert tab._save_center.has_artifact(ArtifactKind.DATA)
+    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
 
 
 def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
@@ -516,7 +522,7 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
     assert tab._left_tabs.tabText(1) == "Analysis"
     assert tab._analyze_section.isHidden() is False
     assert tab.analyze_btn.isHidden() is False
-    assert tab.save_data_btn.isHidden() is False
+    assert tab._save_center.has_artifact(ArtifactKind.DATA)
 
 
 def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
@@ -535,8 +541,8 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     assert snap1.capabilities is not None
     tab = ExpTabWidget("tab-1", _mock_ctrl(), snap1.capabilities)
     tab.update_interaction_state(snap1)
-    assert tab.load_data_btn is not None
-    assert tab.load_data_btn.isEnabled() is True
+    assert tab._save_center.is_load_visible()
+    assert tab._save_center.is_load_enabled() is True
 
     tab.update_interaction_state(
         _snapshot(
@@ -550,7 +556,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
             supports_load_data=True,
         )
     )
-    assert tab.load_data_btn.isEnabled() is False
+    assert tab._save_center.is_load_enabled() is False
 
 
 def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_path):
@@ -1431,24 +1437,24 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     tab.attach(snapshot, actions)
 
     assert tab.run_btn.isEnabled() is True
-    assert tab.load_data_btn is not None
-    assert tab.load_data_btn.isEnabled() is True
+    assert tab._save_center.is_load_visible()
+    assert tab._save_center.is_load_enabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.post_analyze_btn.isEnabled() is True
-    assert tab.save_data_btn.isEnabled() is True
-    assert tab.save_image_btn.isEnabled() is True
-    assert tab.post_save_image_btn.isEnabled() is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is True
 
     actions.calls.clear()
     tab.run_btn.click()
-    tab.load_data_btn.click()
+    tab._save_center.load_button.click()
     tab.analyze_btn.click()
     tab.post_analyze_btn.click()
     tab.writeback_widget.apply_requested.emit()
     tab.post_writeback_widget.apply_requested.emit()
-    tab.save_data_btn.click()
-    tab.save_image_btn.click()
-    tab.post_save_image_btn.click()
+    tab._save_center.save_button(ArtifactKind.DATA).click()
+    tab._save_center.save_button(ArtifactKind.ANALYSIS).click()
+    tab._save_center.save_button(ArtifactKind.POST_ANALYSIS).click()
 
     assert actions.calls == [
         ("run_or_stop", "tab-1"),

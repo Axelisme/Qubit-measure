@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-28 — typed interactive controls seam
+**Last updated:** 2026-08-30 — Data save center corrections (module-altitude, owned saveability, Fast Fail)
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -27,7 +27,7 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
-  Analysis | Post-Analysis | Save | Guide, with optional Analysis/Post only when
+  Analysis | Post-Analysis | Data | Guide, with optional Analysis/Post only when
   the adapter declares the capability) and per-pane `FigureContainer` routing
   (stable identity per (tab, pane) for the widget lifetime; refresh never replaces
   the container; busy tabs cannot close or rebuild, so the captured worker target
@@ -38,12 +38,20 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
   `WritebackService` remains stage-agnostic. `RenderHost` is pane-aware (run |
   analysis | post_analysis) and the worker captures its pane's container at start —
-  switching the visible subtab never retargets the worker (ADR-0017). Save owns
-  data-path/comment/Load/Save Data; Analysis/Post own their image-path/Save Image;
-  Run's live figure is view-only (display + screenshot, no canonical Save). Top-level
-  orchestration invokes behavior-oriented tab methods for result focus, plot hosting,
-  interactive-widget lifecycle, figure reads, and persisted panel geometry; the tab
-  does not expose its Qt containers.
+  switching the visible subtab never retargets the worker (ADR-0017). `ExpTabWidget`
+  delegates the Data pane to an internal `ArtifactSaveCenter` which owns
+  capability-driven artifact rows, high-contrast status rendering and the tab-local
+  status lifecycle derived from result availability, path/comment edits and true
+  terminal save outcomes (not persisted across process), with figure-gated save
+  enablement while status still tracks result lifecycle. The center owns the
+  saveability decision and the ordered Save All sequence (analysis→post→data with
+  Fast Fail, never rolling back prior successes); tracker/invariant failures Fast
+  Fail and operational failures are presented centrally, and async data completion
+  is routed to the center. Analysis/Post panes no longer own image-path/Save Image;
+  Run's live figure remains view-only (display + screenshot, no canonical Save).
+  Top-level orchestration invokes behavior-oriented tab methods for result focus,
+  plot hosting, interactive-widget lifecycle, figure reads, and persisted panel
+  geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。

@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
@@ -66,6 +67,8 @@ class MainWindowEventHost(Protocol):
     def refresh_context_panel(self) -> None: ...
     def refresh_predictor_panel(self) -> None: ...
     def refresh_feedback_widget(self) -> None: ...
+
+    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None: ...
 
 
 class _TabReaction(Enum):
@@ -250,6 +253,7 @@ class MainWindowEventCoordinator:
             bus, DeviceSetupFinishedPayload, self._on_device_setup_finished
         )
         self._subs.subscribe(bus, DeviceChangedPayload, self._on_device_changed)
+        self._subs.subscribe(bus, SaveDataFinishedPayload, self._on_save_data_finished)
 
     def close(self) -> None:
         """Unsubscribe every main-window bus handler."""
@@ -341,6 +345,9 @@ class MainWindowEventCoordinator:
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         del payload
         self._host.refresh_feedback_widget()
+
+    def _on_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
+        self._host.handle_save_data_finished(payload)
 
 
 __all__ = ["MainWindowEventCoordinator", "MainWindowEventHost"]

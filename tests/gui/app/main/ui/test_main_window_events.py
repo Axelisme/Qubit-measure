@@ -132,6 +132,9 @@ class RecordingHost:
     def refresh_feedback_widget(self) -> None:
         self._log.add("host", "refresh_feedback_widget")
 
+    def handle_save_data_finished(self, payload: object) -> None:
+        self._log.add("host", "handle_save_data_finished", payload)
+
 
 def _coordinator(
     snapshot: object | None = None,
@@ -445,3 +448,21 @@ def test_ml_changed_has_no_main_window_reaction() -> None:
     bus.emit(MlChangedPayload(cast(Any, None)))
 
     assert log.calls == []
+
+
+def test_save_data_finished_payload_is_routed_with_exact_payload() -> None:
+    from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+
+    coordinator, log, _ctrl, _host = _coordinator()
+    bus = BaseEventBus()
+    coordinator.bind(bus)
+    payload = SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/a.h5", error=None)
+    bus.emit(payload)
+    assert log.calls == [call("host", "handle_save_data_finished", payload)]
+    # Verify error propagation is routed unchanged
+    log.calls.clear()
+    payload_failed = SaveDataFinishedPayload(
+        tab_id="tab-1", data_path="/tmp/b.h5", error="disk full"
+    )
+    bus.emit(payload_failed)
+    assert log.calls == [call("host", "handle_save_data_finished", payload_failed)]

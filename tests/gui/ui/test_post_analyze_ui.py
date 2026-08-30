@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+from matplotlib.figure import Figure
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -235,8 +237,8 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
     assert tab.post_analyze_btn.isHidden() is False
     assert tab.post_analyze_btn.isEnabled() is False
     assert tab._post_gate_label.isHidden() is False
-    assert tab.post_save_image_btn.isHidden() is False
-    assert tab.post_save_image_btn.isEnabled() is False
+    assert tab._save_center.has_artifact(ArtifactKind.POST_ANALYSIS)
+    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is False
 
     tab.update_interaction_state(
         _snapshot(
@@ -244,12 +246,13 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
             has_analyze_result=True,
             has_post_analyze_result=True,
             post_params=_EmptyPostParams(),
+            post_analysis_figure=Figure(),
         )
     )
     assert tab._post_analyze_section.isHidden() is True
     assert tab.post_analyze_btn.isEnabled() is True
     assert tab._post_gate_label.isHidden() is True
-    assert tab.post_save_image_btn.isEnabled() is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is True
 
 
 def test_post_run_disabled_while_tab_busy(qapp):
@@ -443,12 +446,12 @@ def test_post_save_image_button_gated_on_post_result(qapp):
     tab.update_interaction_state(
         _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=False)
     )
-    assert tab.post_save_image_btn.isEnabled() is False
+    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is False
 
     tab.update_interaction_state(
-        _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=True)
+        _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=True, post_analysis_figure=Figure())
     )
-    assert tab.post_save_image_btn.isEnabled() is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is True
 
 
 def test_post_save_image_button_disabled_without_active_context(qapp):
@@ -467,7 +470,7 @@ def test_post_save_image_button_disabled_without_active_context(qapp):
             has_active_context=False,
         )
     )
-    assert tab.post_save_image_btn.isEnabled() is False
+    assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is False
 
 
 def test_post_save_image_click_saves_post_figure(qapp):

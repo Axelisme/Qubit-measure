@@ -7,6 +7,11 @@ import logging
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.ui.artifact_save_center import (
+    ArtifactKind,
+    ArtifactSaveCenter,
+)
 from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
@@ -25,16 +30,13 @@ from qtpy.QtGui import (  # type: ignore[attr-defined]
     QPen,
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QSplitter,
     QStackedWidget,
     QTabWidget,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import WritebackItem
     from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
     from zcu_tools.gui.app.main.services import TabSnapshot
 
 
@@ -73,6 +76,8 @@ class TabActions(Protocol):
     def save_image(self, tab_id: str) -> None: ...
 
     def save_post_image(self, tab_id: str) -> None: ...
+
+    def save_all(self, tab_id: str) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -254,22 +259,6 @@ class ExpTabWidget(QWidget):
             self.writeback_section.setVisible(False)
             analysis_layout.addWidget(self.writeback_section)
 
-            # Image path for analysis
-            analysis_save_section = _CollapsibleSection(
-                "Save", collapsible=True, collapsed=False
-            )
-            analysis_save_layout = analysis_save_section.form
-            image_path_row = QHBoxLayout()
-            self._image_path_edit = QLineEdit()
-            self._image_path_edit.setPlaceholderText("/tmp/image.png")
-            image_path_row.addWidget(self._image_path_edit)
-            browse_image_btn = QPushButton("Browse…")
-            browse_image_btn.clicked.connect(self._on_browse_image_path)
-            image_path_row.addWidget(browse_image_btn)
-            analysis_save_layout.addRow("Image path:", image_path_row)
-            self.save_image_btn = QPushButton("Save Image")
-            analysis_save_layout.addRow("", self.save_image_btn)
-            analysis_layout.addWidget(analysis_save_section)
             analysis_layout.addStretch()
             analysis_scroll.setWidget(analysis_inner)
             self._analysis_panel = analysis_scroll
@@ -313,60 +302,18 @@ class ExpTabWidget(QWidget):
             self.post_writeback_section.setVisible(False)
             post_layout.addWidget(self.post_writeback_section)
 
-            # Post image save
-            post_save_section = _CollapsibleSection(
-                "Save", collapsible=True, collapsed=False
-            )
-            post_save_layout = post_save_section.form
-            post_image_path_row = QHBoxLayout()
-            self._post_image_path_edit = QLineEdit()
-            self._post_image_path_edit.setPlaceholderText("/tmp/post_image.png")
-            post_image_path_row.addWidget(self._post_image_path_edit)
-            browse_post_image_btn = QPushButton("Browse…")
-            browse_post_image_btn.clicked.connect(self._on_browse_post_image_path)
-            post_image_path_row.addWidget(browse_post_image_btn)
-            post_save_layout.addRow("Image path:", post_image_path_row)
-            self.post_save_image_btn = QPushButton("Save Image")
-            post_save_layout.addRow("", self.post_save_image_btn)
-            post_layout.addWidget(post_save_section)
             post_layout.addStretch()
             post_scroll.setWidget(post_inner)
             self._post_panel = post_scroll
             self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
 
-        # ── Tab: Save (always) ───────────────────────────────────
+        # ── Tab: Data (always) — save center ──────────────────────
+        self._save_center = ArtifactSaveCenter(self.tab_id, capabilities)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
-        save_inner = QWidget()
-        save_layout = QVBoxLayout(save_inner)
-        save_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
-        self.load_data_btn: QPushButton | None = None
-        if capabilities.load_data:
-            self.load_data_btn = QPushButton("Load Data...")
-            save_layout.addWidget(self.load_data_btn)
-        save_section = _CollapsibleSection("Save", collapsible=True, collapsed=False)
-        save_form = save_section.form
-        data_path_row = QHBoxLayout()
-        self._data_path_edit = QLineEdit()
-        self._data_path_edit.setPlaceholderText("/tmp/data")
-        data_path_row.addWidget(self._data_path_edit)
-        browse_data_btn = QPushButton("Browse…")
-        browse_data_btn.clicked.connect(self._on_browse_data_path)
-        data_path_row.addWidget(browse_data_btn)
-        save_form.addRow("Data path:", data_path_row)
-        self._comment_edit = QTextEdit()
-        self._comment_edit.setPlaceholderText("Optional comment…")
-        self._comment_edit.setFixedHeight(60)
-        save_form.addRow("Comment:", self._comment_edit)
-        btn_row = QHBoxLayout()
-        self.save_data_btn = QPushButton("Save Data")
-        btn_row.addWidget(self.save_data_btn)
-        save_form.addRow("", btn_row)
-        save_layout.addWidget(save_section)
-        save_layout.addStretch()
-        save_scroll.setWidget(save_inner)
+        save_scroll.setWidget(self._save_center)
         self._save_panel = save_scroll
-        self._left_tabs.addTab(save_scroll, "Save")
+        self._left_tabs.addTab(save_scroll, "Data")
 
         # ── Tab: Guide (always) ──────────────────────────────────
         guide_scroll = QScrollArea()
@@ -662,62 +609,50 @@ class ExpTabWidget(QWidget):
         self.post_writeback_widget.populate(items)
         self.post_writeback_section.setVisible(len(items) > 0)
 
-    def _on_browse_data_path(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save data file", "", "HDF5 files (*.hdf5);;All files (*)"
-        )
-        if path:
-            self._data_path_edit.setText(path)
-
-    def _on_browse_image_path(self) -> None:
-        self._require_analysis()
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save image file", "", "PNG files (*.png);;All files (*)"
-        )
-        if path:
-            self._image_path_edit.setText(path)
-
-    def _on_browse_post_image_path(self) -> None:
-        self._require_post()
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save post-analysis image file",
-            "",
-            "PNG files (*.png);;All files (*)",
-        )
-        if path:
-            self._post_image_path_edit.setText(path)
-
     def set_data_path(self, data_path: str) -> None:
-        self._data_path_edit.blockSignals(True)
-        self._data_path_edit.setText(data_path)
-        self._data_path_edit.blockSignals(False)
+        self._save_center.set_data_path(data_path)
 
     def set_analysis_image_path(self, image_path: str) -> None:
         self._require_analysis()
-        self._image_path_edit.blockSignals(True)
-        self._image_path_edit.setText(image_path)
-        self._image_path_edit.blockSignals(False)
+        self._save_center.set_analysis_path(image_path)
 
     def set_post_image_path(self, image_path: str) -> None:
         self._require_post()
-        self._post_image_path_edit.blockSignals(True)
-        self._post_image_path_edit.setText(image_path)
-        self._post_image_path_edit.blockSignals(False)
+        self._save_center.set_post_analysis_path(image_path)
 
     def get_data_path(self) -> str:
-        return self._data_path_edit.text()
+        return self._save_center.get_data_path()
 
     def get_image_path(self) -> str:
         self._require_analysis()
-        return self._image_path_edit.text()
+        return self._save_center.get_analysis_path()
 
     def get_post_image_path(self) -> str:
         self._require_post()
-        return self._post_image_path_edit.text()
+        return self._save_center.get_post_analysis_path()
 
     def get_comment(self) -> str:
-        return self._comment_edit.toPlainText()
+        return self._save_center.get_comment()
+
+    # -- Data save center status delegation (S3) ------------------
+
+    def notify_save_started(self, kind: ArtifactKind) -> None:
+        """Capture pending signature for ``kind``."""
+        self._save_center.notify_save_started(kind)
+
+    def notify_save_succeeded(self, kind: ArtifactKind) -> None:
+        self._save_center.notify_save_succeeded(kind)
+
+    def notify_save_failed(self, kind: ArtifactKind) -> None:
+        self._save_center.notify_save_failed(kind)
+
+    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
+        """Apply async data terminal outcome (error None => success)."""
+        self._save_center.handle_data_finished(payload.error)
+
+    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
+        """Ordered saveable artifacts for Save All (snapshot single-fetch)."""
+        return self._save_center.ordered_saveable_kinds(snapshot)
 
     def focus_result_panel(self) -> None:
         """Focus Analysis when supported, otherwise focus Save."""
@@ -953,28 +888,17 @@ class ExpTabWidget(QWidget):
             self.writeback_widget.setEnabled(
                 idle and state.has_context and state.has_analyze_result
             )
-            self.save_image_btn.setEnabled(
-                idle and state.has_active_context and state.has_figure
-            )
-        # Load Data control exists only for adapters declaring the capability.
-        if self.load_data_btn is not None:
-            self.load_data_btn.setEnabled(idle and state.has_context)
-        # Save pane data controls
-        self.save_data_btn.setEnabled(
-            idle and state.has_active_context and state.has_run_result
-        )
         # Post pane controls (only if present)
         if self._has_post:
             post_enabled = idle and state.has_analyze_result
             self.post_analyze_form.setEnabled(post_enabled)
             self.post_analyze_btn.setEnabled(post_enabled)
             self._post_gate_label.setVisible(not state.has_analyze_result)
-            self.post_save_image_btn.setEnabled(
-                idle and state.has_active_context and state.has_post_analyze_result
-            )
             self.post_writeback_widget.setEnabled(
                 idle and state.has_context and state.has_post_analyze_result
             )
+        # Data save center owns all save-row enablement and status.
+        self._save_center.update_interaction(snapshot)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id
@@ -1005,42 +929,46 @@ class ExpTabWidget(QWidget):
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
 
-        self._data_path_edit.textChanged.connect(data_path_cb)
+        self._save_center.bind_data_path_changed(data_path_cb)
         if self._has_analysis:
             self.analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
                     tab_id, instance
                 )
             )
-            self._image_path_edit.textChanged.connect(analysis_image_cb)
+            self._save_center.bind_analysis_path_changed(analysis_image_cb)
         if self._has_post:
             self.post_analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
                     tab_id, instance
                 )
             )
-            self._post_image_path_edit.textChanged.connect(post_image_cb)
+            self._save_center.bind_post_path_changed(post_image_cb)
 
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
-        if self.load_data_btn is not None:
-            self.load_data_btn.clicked.connect(lambda: actions.load_data(tab_id))
+        if self._capabilities.load_data:
+            self._save_center.bind_load(lambda: actions.load_data(tab_id))
+        self._save_center.bind_save_all(lambda: actions.save_all(tab_id))
         if self._has_analysis:
             self.analyze_btn.clicked.connect(lambda: actions.analyze(tab_id))
             self.writeback_widget.apply_requested.connect(
                 lambda: actions.apply_writeback(tab_id)
             )
-            self.save_image_btn.clicked.connect(lambda: actions.save_image(tab_id))
+            self._save_center.bind_save(
+                ArtifactKind.ANALYSIS, lambda: actions.save_image(tab_id)
+            )
         if self._has_post:
             self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
             self.post_writeback_widget.apply_requested.connect(
                 lambda: actions.apply_post_writeback(tab_id)
             )
-            self.post_save_image_btn.clicked.connect(
-                lambda: actions.save_post_image(tab_id)
+            self._save_center.bind_save(
+                ArtifactKind.POST_ANALYSIS, lambda: actions.save_post_image(tab_id)
             )
-        # Save Data is always present (Save pane)
-        self.save_data_btn.clicked.connect(lambda: actions.save_data(tab_id))
+        self._save_center.bind_save(
+            ArtifactKind.DATA, lambda: actions.save_data(tab_id)
+        )
 
         self._validity_cb = validity_cb
         self._schema_cb = schema_cb
@@ -1060,11 +988,11 @@ class ExpTabWidget(QWidget):
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)
         self.cfg_form.schema_changed.disconnect(self._schema_cb)
-        self._data_path_edit.textChanged.disconnect(self._data_path_cb)
+        self._save_center.unbind_data_path_changed(self._data_path_cb)
         if self._has_analysis:
-            self._image_path_edit.textChanged.disconnect(self._analysis_image_cb)
+            self._save_center.unbind_analysis_path_changed(self._analysis_image_cb)
         if self._has_post:
-            self._post_image_path_edit.textChanged.disconnect(self._post_image_cb)
+            self._save_center.unbind_post_path_changed(self._post_image_cb)
         self._progress_unsub()
         self.cfg_form.detach()
         if self._cfg_editor_id is not None:
