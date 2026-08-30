@@ -24,6 +24,12 @@ class _DummyParams:
     x: int = 1
 
 
+def _require_qapp() -> QApplication:
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    return app
+
+
 def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
@@ -225,7 +231,7 @@ def test_data_subtab_contains_save_center_and_order(exp_tab_factory):
     assert "/tmp/image.png" in placeholders
     assert "/tmp/post_image.png" in placeholders
     tab.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_measurement_always_post_conditional(exp_tab_factory):
@@ -287,7 +293,7 @@ def test_measurement_always_post_conditional(exp_tab_factory):
     tab_none.deleteLater()
     tab_a.deleteLater()
     tab_both.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory):
@@ -345,7 +351,7 @@ def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory)
     # ---------------------------------------------------------------------------
     tab.deleteLater()
     tab2.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_status_no_result_and_not_saved(exp_tab_factory):
@@ -397,7 +403,7 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
     assert center.is_save_enabled(ArtifactKind.ANALYSIS) is True
     assert center.status_text(ArtifactKind.POST_ANALYSIS) == "— NO RESULT"
     tab.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_status_transitions_path_comment_and_result(exp_tab_factory):
@@ -443,7 +449,7 @@ def test_status_transitions_path_comment_and_result(exp_tab_factory):
     tab.update_interaction_state(snap2)
     assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     tab.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_status_not_only_color(exp_tab_factory):
@@ -478,7 +484,7 @@ def test_status_not_only_color(exp_tab_factory):
     tab.update_interaction_state(snap_none)
     assert "—" in center.status_text(ArtifactKind.DATA)
     tab.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_individual_image_save_success_and_failure(exp_tab_factory):
@@ -521,7 +527,7 @@ def test_individual_image_save_success_and_failure(exp_tab_factory):
     assert c2.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     tab.deleteLater()
     tab2.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_data_async_success_failure_and_drift(exp_tab_factory):
@@ -562,7 +568,7 @@ def test_data_async_success_failure_and_drift(exp_tab_factory):
     # ---------------------------------------------------------------------------
     tab.deleteLater()
     tab2.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_save_all_dispatch_only_result_present_and_order(qapp, monkeypatch):
@@ -734,7 +740,7 @@ def test_save_all_disabled_when_no_result(exp_tab_factory):
     # A5 Load Data gates
     # ---------------------------------------------------------------------------
     tab.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_load_data_gates(exp_tab_factory):
@@ -792,7 +798,7 @@ def test_load_data_gates(exp_tab_factory):
     assert not tab2._save_center.save_all_button.isHidden()
     tab.deleteLater()
     tab2.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_unmatched_remote_save_completion_does_not_mark_gui_sig_as_saved(
@@ -876,11 +882,11 @@ def test_comment_edit_does_not_trigger_data_path_update(exp_tab_factory, qapp):
     ctrl.update_tab_post_analysis_image_path.assert_not_called()
     ctrl.update_tab_data_path.reset_mock()
     center._comment_edit.setPlainText("another")
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
     assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     ctrl.update_tab_data_path.assert_not_called()
     tab.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 # ---------------------------------------------------------------------------
@@ -938,7 +944,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     assert center.is_save_enabled(ArtifactKind.DATA) is True
     assert center.is_save_all_enabled() is True
     tab.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
 
 
 def test_save_all_skips_analysis_without_figure(qapp, monkeypatch):
@@ -1057,6 +1063,8 @@ def test_replaced_result_invalidates_saved_via_monotonic_token(exp_tab_factory):
         post_cap=False,
         load_cap=False,
     )
+    assert snap1.run is not None
+    assert snap2.run is not None
     assert snap1.run.result is not snap2.run.result
     tab.update_interaction_state(snap2)
     assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
@@ -1074,6 +1082,7 @@ def test_replaced_result_invalidates_saved_via_monotonic_token(exp_tab_factory):
     assert c2.status_text(ArtifactKind.DATA) == "✓ SAVED"
     # Updating with same snapshot (same object identity) should keep SAVED
     # We need to keep same result object; create snapshot that reuses same object
+    assert snap_a.run is not None
     same_obj = snap_a.run.result
     # Build snapshot manually reusing same_obj
     from zcu_tools.gui.app.main.services.ports import (
@@ -1101,4 +1110,4 @@ def test_replaced_result_invalidates_saved_via_monotonic_token(exp_tab_factory):
     assert c2.status_text(ArtifactKind.DATA) == "✓ SAVED"
     tab.deleteLater()
     tab2.deleteLater()
-    QApplication.instance().processEvents()
+    _require_qapp().processEvents()
