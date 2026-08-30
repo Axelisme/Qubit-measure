@@ -7,10 +7,14 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import Qt
-from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
+from zcu_tools.gui.app.main.adapter import (
+    AdapterCapabilities,
+    AnalysisMode,
+    MetaDictWriteback,
+)
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import ExpContext
@@ -294,7 +298,9 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
             analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
         ),
     )
-    tab.update_writeback_items([MagicMock(selected=True)])
+    tab.update_writeback_items(
+        [MetaDictWriteback("r_f", "freq", proposed_value=6100.0)]
+    )
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -316,7 +322,9 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     assert tab._save_center.is_load_visible()
     assert tab._save_center.is_load_enabled() is False
     assert tab.writeback_widget.isEnabled() is False
-    assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False  # disabled because is_analyzing
+    assert (
+        tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
+    )  # disabled because is_analyzing
 
 
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
@@ -457,7 +465,9 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     )
     assert snap.capabilities is not None
     tab = ExpTabWidget("tab-1", _mock_ctrl(), snap.capabilities)
-    tab.update_writeback_items([MagicMock(selected=True)])
+    tab.update_writeback_items(
+        [MetaDictWriteback("r_f", "freq", proposed_value=6100.0)]
+    )
     tab.update_interaction_state(snap)
 
     assert tab.run_btn.isEnabled() is False
