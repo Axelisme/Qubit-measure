@@ -383,27 +383,16 @@ class ExpTabWidget(QWidget):
             )
         # ── Tab: Post-Analysis (only when post capability true) ────
         if self._has_post:
-            post_container = QWidget()
-            post_outer = QVBoxLayout(post_container)
-            post_outer.setContentsMargins(0, 0, 0, 0)
-            post_outer.setSpacing(0)
-
             post_scroll = QScrollArea()
             post_scroll.setWidgetResizable(True)
-            post_scroll.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
             post_inner = QWidget()
             post_layout = QVBoxLayout(post_inner)
-            post_layout.setContentsMargins(4, 4, 4, 4)
-            post_layout.setSpacing(4)
             post_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
-            self._post_analyze_section = _LedgerSection(
-                "Post-Analysis", collapsed=False
+            self._post_analyze_section = _CollapsibleSection(
+                "Post-Analysis", collapsible=True, collapsed=False
             )
             self.post_analyze_form = AnalyzeFormWidget()
-            font_p = self.post_analyze_form.font()
-            font_p.setPixelSize(13)
-            self.post_analyze_form.setFont(font_p)
             self._post_analyze_section.body_layout.addWidget(self.post_analyze_form)
             post_layout.addWidget(self._post_analyze_section)
 
@@ -413,9 +402,12 @@ class ExpTabWidget(QWidget):
             self._post_gate_label.setStyleSheet("color: gray;")
             post_layout.addWidget(self._post_gate_label)
 
+            self.post_analyze_btn = QPushButton("Run Post-Analysis")
+            post_layout.addWidget(self.post_analyze_btn)
+
             # Post writeback
-            self.post_writeback_section = _LedgerSection(
-                "Writeback preview", collapsed=False
+            self.post_writeback_section = _CollapsibleSection(
+                "Writeback", collapsible=True, collapsed=False
             )
             self.post_writeback_widget = WritebackWidget(
                 self._ctrl, tab_id=self.tab_id, pane="post_analysis"
@@ -428,25 +420,8 @@ class ExpTabWidget(QWidget):
 
             post_layout.addStretch()
             post_scroll.setWidget(post_inner)
-            post_outer.addWidget(post_scroll, stretch=1)
-
-            # Fixed action bar for Post
-            self._post_action_bar = QFrame()
-            self._post_action_bar.setObjectName("postActionBar")
-            self._post_action_bar.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
-            post_bar = QHBoxLayout(self._post_action_bar)
-            post_bar.setContentsMargins(8, 6, 8, 6)
-            post_bar.addStretch()
-            self.post_analyze_btn = QPushButton("Run Post-Analysis")
-            self.post_analyze_btn.setFixedHeight(30)
-            self.post_analyze_btn.setMinimumWidth(120)
-            post_bar.addWidget(self.post_analyze_btn)
-            post_outer.addWidget(self._post_action_bar)
-
-            self._post_panel = post_container
-            self._post_tab_index = self._left_tabs.addTab(
-                post_container, "Post-Analysis"
-            )
+            self._post_panel = post_scroll
+            self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
 
         # ── Tab: Data (always) — save center ──────────────────────
         self._save_center = ArtifactSaveCenter(self.tab_id, capabilities)

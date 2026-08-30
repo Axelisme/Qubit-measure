@@ -1,8 +1,9 @@
 """Hardware-free fake-adapter production-path launch preparation (A6 non-claim).
 
 Reproducible entry point for Orchestrator A6 observation: launch the shipped
-measure-gui composition with a fake adapter (requires_soc=False) and verify the
-approved Run tree and Analysis ledger are mounted without hardware.
+measure-gui composition with a fake adapter (requires_soc=False) via the normal
+Controller/MainWindow composition path and verify the approved Run tree and
+Analysis ledger are mounted without hardware.
 
 Run with:
   PYTHONPATH=lib QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/gui/app/main/test_hardware_free_fake_adapter_launch.py -xvs
@@ -12,149 +13,149 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from qtpy.QtWidgets import QCheckBox, QLabel
-from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.services import PersistedStartup
-from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
+import pytest
+from qtpy.QtWidgets import QApplication, QLabel, QCheckBox
+from zcu_tools.gui.app.main.adapter import AnalysisMode
 
 
-def _ctrl():
-    from zcu_tools.gui.app.main.services import PersistedStartup
+@pytest.fixture
+def hw_fixture(qapp, tmp_path):
+    """Real Controller + MainWindow via shipped composition, no hardware."""
+    from tests.gui.test_controller import ControllerFixture
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
-    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
-    ctrl.get_tab_adapter_name.return_value = "fake/freq"
-    ctrl.get_adapter_guide.return_value = {}
-    ctrl.progress_control.attach_progress.return_value = lambda: None
-    ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_exp_context.return_value = MagicMock()
-    ctrl.open_seeded_cfg_editor.return_value = ("editor-1", ())
-    ctrl.get_cfg_editor_draft.return_value = MagicMock()
-    return ctrl
+    fixture = ControllerFixture(cache_dir=tmp_path)
+    window = MainWindow(fixture.ctrl)
+    # ControllerFixture's view is a MagicMock; add the real MainWindow as well.
+    # MainWindow already bound its event coordinator to fixture.ctrl's bus.
+    yield fixture, window
+    # Teardown: close window and quiesce background
+    try:
+        window.close()
+        window.deleteLater()
+        QApplication.processEvents()
+    except Exception:
+        pass
+    fixture.quiesce()
 
 
-def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(qapp, monkeypatch):
+def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     """Shipped composition path: fake/freq opens without SoC and shows validated layouts."""
-    import zcu_tools.gui.app.main.ui.exp_tab_widget as mod
+    fixture, window = hw_fixture
+    ctrl = fixture.ctrl
 
-    orig = mod.ExpTabWidget._populate_cfg
-
-    def stub(self, schema, ctrl):
-        self._cfg_editor_id = "probe-editor"
-        self.cfg_form.is_valid = lambda: True
-        self.cfg_form.first_invalid_reason = lambda: None
-
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
-    orig_attach = mod.attach_existing_figure_to_container
-
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        w.figure = fig  # type: ignore[attr-defined]
-        container.attach_canvas(w)
-        w.draw = lambda: None  # type: ignore[attr-defined]
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
-
-    # Use the real FakeFreqAdapter capabilities (requires_soc=False)
+    # Verify fake/freq is available and hardware-free
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
 
     caps = FakeFreqAdapter.capabilities
     assert caps.requires_soc is False
     assert caps.analysis is not AnalysisMode.NONE
+    assert "fake/freq" in ctrl.get_adapter_names()
 
-    ctrl = _ctrl()
-    # Build minimal snapshot matching FakeFreqAdapter's capabilities
-    from zcu_tools.gui.app.main.services.ports import (
-        AnalysisPaneSnapshot,
-        PathResourceSnapshot,
-        PostAnalysisPaneSnapshot,
-        RunPaneSnapshot,
-        SavePaneSnapshot,
-        TabPathsSnapshot,
-        TabSnapshot,
+    # Open tab via normal Controller path (not direct ExpTabWidget instantiation)
+    tab_id = ctrl.new_tab("fake/freq")
+    QApplication.processEvents()
+    QApplication.processEvents()
+
+    # MainWindow should have created the ExpTabWidget via TabAddedPayload
+    assert tab_id in window._tab_widgets
+    tab = window._tab_widgets[tab_id]
+
+    # A1: Run tree selected (shared adapter)
+    from zcu_tools.gui.widgets.cfg import tree_structure
+
+    assert tab.cfg_form._structure is tree_structure
+
+    # Verify tree visuals via direct CfgFormWidget check (shared tree tests cover depth etc.)
+    from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS
+
+    assert len(TREE_DEPTH_COLORS) == 5
+    # Tree should have been attached via real CfgDraft (not stubbed)
+    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+
+    assert tab.cfg_form._root_widget is not None
+    assert isinstance(tab.cfg_form._root_widget, TreeCfgWidget)
+    tree = tab.cfg_form._root_widget._tree
+    assert tree.isHeaderHidden()
+    assert tree.indentation() == 10
+    assert tree.font().pixelSize() == 13
+
+    # A2: ledger + fixed bar (Primary Analysis)
+    from zcu_tools.gui.app.main.ui.exp_tab_widget import _LedgerSection
+
+    assert isinstance(tab._analyze_section, _LedgerSection)
+    assert hasattr(tab, "_analysis_action_bar")
+    assert tab.analyze_btn.parent() is tab._analysis_action_bar
+    assert tab.analyze_form.font().pixelSize() == 13
+    # Post-Analysis should remain baseline _CollapsibleSection (not ledger)
+    from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
+
+    # fake/freq does not have post_analysis, so post widgets should not exist
+    assert not hasattr(tab, "post_writeback_widget") or tab._has_post is False
+
+    # Populate writeback via service projection (S2) and verify ledger columns
+    # Trigger an analyze to get a real draft with baseline summaries, then check widget
+    # For hardware-free we can run a fake analyze via controller
+    # Use the adapter's analyze path directly via service to avoid hardware
+    # Instead, manually create a draft via service to test display
+    from zcu_tools.gui.app.main.adapter import MetaDictWriteback
+    from zcu_tools.gui.app.main.services.writeback import WritebackService
+
+    # Create a draft with a real context snapshot to get summaries
+    # Use the controller's writeback service
+    writeback_svc = (
+        ctrl._writeback_svc if hasattr(ctrl, "_writeback_svc") else ctrl._writeback
     )
-    from zcu_tools.gui.app.main.state import TabInteractionState
-    from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+    # The WritebackService is available as ctrl._writeback (check fixture)
+    # In ControllerFixture, ctrl._writeback is the service
+    svc = getattr(ctrl, "_writeback", None) or getattr(ctrl, "_writeback_svc", None)
+    # Fallback: get via app_services
+    if svc is None:
+        svc = ctrl._writeback  # type: ignore[attr-defined]
 
-    snap = TabSnapshot(
-        adapter_name="fake/freq",
-        cfg_schema=CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue()),
-        tab_id="tab-1",
-        interaction=TabInteractionState(
-            global_run_active=False,
-            is_running=False,
-            is_analyzing=False,
-            is_saving_data=False,
-            has_context=True,
-            has_active_context=True,
-            has_soc=False,
-            has_run_result=False,
-            has_analyze_result=False,
-            has_figure=False,
-            has_post_analyze_result=False,
-        ),
-        capabilities=caps,
-        run=RunPaneSnapshot(result=None, source_path=None),
-        analysis=AnalysisPaneSnapshot(
-            params=FakeFreqAdapter().get_analyze_params(MagicMock(), MagicMock()),  # type: ignore
-            result=None,
-            figure=None,
-            writeback_items=(),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        ),
-        post_analysis=PostAnalysisPaneSnapshot(
-            params=None,
-            result=None,
-            figure=None,
-            writeback_items=(),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        ),
-        save=SavePaneSnapshot(data_path=PathResourceSnapshot(override=None, path=None)),
-        paths=TabPathsSnapshot(
-            data=PathResourceSnapshot(override=None, path=None),
-            analysis_image=PathResourceSnapshot(override=None, path=None),
-            post_analysis_image=PathResourceSnapshot(override=None, path=None),
-        ),
+    # Create a simple MetaDict item and get summaries via service
+    md_item = MetaDictWriteback(
+        target_name="r_f", description="freq", proposed_value=6100.0
     )
-    # Ensure params is dataclass for ledger
-    try:
-        tab = ExpTabWidget("tab-1", ctrl, caps)
-        tab.attach(snap, MagicMock())
-        # A1: Run tree
-        from zcu_tools.gui.widgets.cfg import tree_structure
+    # Use the service to create draft so summaries are captured in service-owned model
+    draft = svc.create_draft([md_item])
+    # The draft's item should be available via preview, but summaries are in service
+    items = svc.preview_draft(draft)
+    assert len(items) == 1
+    session_id = items[0].session_id
+    cur, prop = svc.get_summaries(draft, session_id)
+    assert cur is not None
+    assert prop is not None
+    # Now set this draft as the tab's analysis draft (simulate analyze completion)
+    # Use State to set writeback draft
+    from zcu_tools.gui.app.main.state import State
 
-        assert tab.cfg_form._structure is tree_structure
-        # A2: ledger + fixed bar
-        from zcu_tools.gui.app.main.ui.exp_tab_widget import _LedgerSection
+    # Directly update tab's analysis pane with the draft (simulate service record)
+    # Use controller's state
+    ctrl._state.update_tab_analyze(
+        tab_id,
+        object(),
+        None,
+        writeback_draft=draft,
+        analyze_params_instance=tab.analyze_form.read_params()
+        if tab.has_analyze_params()
+        else object(),
+    )
+    # Refresh the tab's writeback widget via MainWindow path
+    snapshot = ctrl.get_tab_snapshot(tab_id)
+    window.refresh_tab_writeback(tab_id, snapshot)
+    QApplication.processEvents()
+    # Now widget should show current/proposed via service projection
+    cur_labels = tab.writeback_widget.findChildren(QLabel, "writebackCurrent")
+    prop_labels = tab.writeback_widget.findChildren(QLabel, "writebackProposed")
+    assert len(cur_labels) >= 1
+    assert len(prop_labels) >= 1
+    assert any(cur in lbl.text() for lbl in cur_labels)  # type: ignore[arg-type]
+    assert any(prop in lbl.text() for lbl in prop_labels)  # type: ignore[arg-type]
+    checks = tab.writeback_widget.findChildren(QCheckBox)
+    assert len(checks) >= 1
 
-        assert isinstance(tab._analyze_section, _LedgerSection)
-        assert hasattr(tab, "_analysis_action_bar")
-        assert tab.analyze_btn.parent() is tab._analysis_action_bar
-        # 13 px
-        assert tab.analyze_form.font().pixelSize() == 13
-        # Writeback ledger shows current/proposed columns (even when empty, widget exists)
-        assert tab.writeback_widget is not None
-        # Populate with fake writeback items and verify current/proposed appear
-        from zcu_tools.gui.app.main.adapter import MetaDictWriteback
-
-        item = MetaDictWriteback(
-            target_name="r_f", description="freq", proposed_value=6100.0
-        )
-        item.session_id = "md-1"
-        item.current_summary = "6000.0"
-        item.proposed_summary = "6100.0"
-        tab.writeback_widget.populate([item])
-        cur = tab.writeback_widget.findChildren(QLabel, "writebackCurrent")
-        prop = tab.writeback_widget.findChildren(QLabel, "writebackProposed")
-        assert any("6000" in c.text() for c in cur)
-        assert any("6100" in p.text() for p in prop)
-        # Selection + Edit present
-        checks = tab.writeback_widget.findChildren(QCheckBox)
-        assert len(checks) == 1
-        tab.detach()
-    finally:
-        monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig)
-        monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
+    # Cleanup: teardown draft via state removal will be handled by fixture quiesce
+    # Remove tab to avoid leaking
+    ctrl.close_tab(tab_id)
+    QApplication.processEvents()

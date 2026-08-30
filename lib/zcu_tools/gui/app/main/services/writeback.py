@@ -42,12 +42,16 @@ class _DraftEntry:
     """Writeback's private item/session association.
 
     ``WritebackItem`` is an adapter proposal and intentionally does not carry a
-    cfg-editor handle. The handle stays here, behind ``WritebackDraft`` and
-    ``WritebackService``.
+    cfg-editor handle or presentation summaries. Handles and S2 display-only
+    baseline summaries stay here, behind ``WritebackDraft`` and
+    ``WritebackService`` (app/service-owned read model, not adapter contract).
     """
 
     item: WritebackItem
     editor_id: str | None = None
+    # S2 display-only baseline — not on WritebackItem, not persisted/wire.
+    current_summary: str | None = None
+    proposed_summary: str | None = None
 
 
 class WritebackDraft:
@@ -147,7 +151,9 @@ class WritebackService:
         """
         identity = uuid.uuid4().hex
         entries: list[_DraftEntry] = []
-        # Snapshot the destination context once at draft creation (read-only).
+        # Snapshot the destination context once at draft creation (read-only,
+        # S2). Summaries are stored in the service-owned _DraftEntry, not on
+        # the public WritebackItem (adapter contract unchanged).
         ctx = self._snapshot_context()
         try:
             for raw_item in items:
@@ -155,9 +161,9 @@ class WritebackService:
                 prefix = self._kind_prefix(item)
                 item.session_id = self._next_session_id(entries, prefix)
                 item.selected = True
-                # Baseline capture — display-only.
-                self._capture_baseline(item, ctx)
                 entry = _DraftEntry(item)
+                # Baseline capture — display-only, app/service-owned.
+                self._capture_baseline(entry, ctx)
                 entries.append(entry)
                 if isinstance(item, (ModuleWriteback, WaveformWriteback)):
                     if item.edit_schema is None:
@@ -198,12 +204,25 @@ class WritebackService:
             item.selected = selected
         if target_name is not None:
             item.target_name = target_name
+            # Keep proposed summary in sync for module/waveform retarget (bounded)
+            if isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                # Preserve original current_summary; recompute proposed_summary
+                # from new target (still bounded, not full cfg).
+                base_current = entry.current_summary
+                is_update = base_current == "present"
+                action = "update" if is_update else "create"
+                role = getattr(item, "role_id", None)
+                if role:
+                    entry.proposed_summary = f"{action} {role}"
+                else:
+                    entry.proposed_summary = f"{action} → {item.target_name}"
         if proposed_value is not _UNSET:
             if not isinstance(item, MetaDictWriteback):
                 raise InvalidInputError(
                     f"{session_id!r} is not a metadict item; proposed_value invalid"
                 )
             item.proposed_value = proposed_value
+            entry.proposed_summary = self._format_scalar(proposed_value)
 
         result = None
         if edits is not None:
@@ -384,13 +403,15 @@ class WritebackService:
             return f"{value.real:.4g}{value.imag:+.4g}j"
         return repr(value)
 
-    def _capture_baseline(self, item: WritebackItem, ctx: Any | None) -> None:
-        """Populate ``item.current_summary`` / ``proposed_summary``.
+    def _capture_baseline(self, entry: _DraftEntry, ctx: Any | None) -> None:
+        """Populate entry.current_summary / entry.proposed_summary.
 
+        Stored in service-owned _DraftEntry, not on public WritebackItem.
         When ``ctx`` is unavailable (tests or early init), fall back to a
         neutral placeholder so the draft remains displayable. The summaries are
         display-only and never alter persistence/wire/MCP/adapter contracts.
         """
+        item = entry.item
         try:
             if isinstance(item, MetaDictWriteback):
                 # Current from live md
@@ -404,10 +425,10 @@ class WritebackService:
                         has_current = False
                         current = None
                 if has_current:
-                    item.current_summary = self._format_scalar(current)
+                    entry.current_summary = self._format_scalar(current)
                 else:
-                    item.current_summary = "—"
-                item.proposed_summary = self._format_scalar(item.proposed_value)
+                    entry.current_summary = "—"
+                entry.proposed_summary = self._format_scalar(item.proposed_value)
             elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
                 exists = False
                 if ctx is not None:
@@ -418,22 +439,41 @@ class WritebackService:
                             exists = item.target_name in ctx.ml.waveforms  # type: ignore[attr-defined]
                     except Exception:
                         exists = False
-                item.current_summary = "present" if exists else "— not present"
+                entry.current_summary = "present" if exists else "— not present"
                 action = "update" if exists else "create"
                 role = getattr(item, "role_id", None)
                 if role:
-                    item.proposed_summary = f"{action} {role}"
+                    entry.proposed_summary = f"{action} {role}"
                 else:
-                    item.proposed_summary = f"{action} → {item.target_name}"
+                    entry.proposed_summary = f"{action} → {item.target_name}"
             else:
-                item.current_summary = None
-                item.proposed_summary = None
+                entry.current_summary = None
+                entry.proposed_summary = None
         except Exception:
             logger.debug(
                 "baseline capture failed for %r", item.target_name, exc_info=True
             )
-            item.current_summary = None
-            item.proposed_summary = None
+            entry.current_summary = None
+            entry.proposed_summary = None
+
+    # App-local Qt presentation projection (S2) — not wire/persistence.
+    def get_summaries(
+        self, draft: WritebackDraft, session_id: str
+    ) -> tuple[str | None, str | None]:
+        """Return (current_summary, proposed_summary) for one item."""
+        self._require_draft(draft)
+        entry = self._find_draft_entry(draft, session_id)
+        return entry.current_summary, entry.proposed_summary
+
+    def get_all_summaries(
+        self, draft: WritebackDraft
+    ) -> dict[str, tuple[str | None, str | None]]:
+        """Return mapping session_id -> (current, proposed) for the draft."""
+        self._require_draft(draft)
+        return {
+            e.item.session_id: (e.current_summary, e.proposed_summary)
+            for e in draft._entries
+        }
 
     def _teardown_entries(self, entries: Iterable[_DraftEntry]) -> None:
         for entry in reversed(list(entries)):

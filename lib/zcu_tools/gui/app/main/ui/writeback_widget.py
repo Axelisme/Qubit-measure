@@ -188,19 +188,32 @@ class WritebackWidget(QWidget):
             return item.edit_schema is not None
         return False
 
+    def _get_service_summaries(self, session_id: str) -> tuple[str | None, str | None]:
+        """Fetch S2 summaries from the service-owned draft (app-local)."""
+        try:
+            getter = getattr(self._ctrl, "get_writeback_summaries_for_pane", None)
+            if getter is None or not callable(getter):
+                return (None, None)
+            result = getter(self._tab_id, self._pane)  # type: ignore[call-arg]
+            if isinstance(result, dict) and session_id in result:
+                cur, prop = result[session_id]
+                return cur, prop
+        except Exception:
+            pass
+        return (None, None)
+
     def _display_current(self, item: WritebackItem) -> str:
-        # Prefer captured baseline (S2); fallback to placeholder.
-        summary = getattr(item, "current_summary", None)
-        if summary is not None:
-            return str(summary)
+        cur, _ = self._get_service_summaries(item.session_id)
+        if cur is not None:
+            return str(cur)
         if isinstance(item, MetaDictWriteback):
             return "—"
         return "—"
 
     def _display_proposed(self, item: WritebackItem) -> str:
-        summary = getattr(item, "proposed_summary", None)
-        if summary is not None:
-            return str(summary)
+        _, prop = self._get_service_summaries(item.session_id)
+        if prop is not None:
+            return str(prop)
         if isinstance(item, MetaDictWriteback):
             return repr(item.proposed_value)
         if isinstance(item, (ModuleWriteback, WaveformWriteback)):
@@ -266,13 +279,8 @@ class WritebackWidget(QWidget):
                 )
                 item.target_name = new_name
                 item.proposed_value = new_value
-                # Keep display summaries in sync (proposed may have changed)
-                try:
-                    item.proposed_summary = repr(new_value)  # scalar
-                except Exception:
-                    pass
                 cb.setText(self._make_label_text(item))
-                # Update ledger row
+                # Update ledger row from service-owned summary (S2)
                 row_tuple_md = self._row_widgets.get(item.session_id)
                 if row_tuple_md is not None:
                     _cur_md, proposed_label_md, _cb_md = row_tuple_md

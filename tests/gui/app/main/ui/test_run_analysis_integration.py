@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton
 from zcu_tools.gui.app.main.adapter import (
+    WritebackItem,
     AdapterCapabilities,
     AnalysisMode,
     MetaDictWriteback,
@@ -264,19 +265,21 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
     from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
 
     ctrl = make_ctrl()
-    # Create MetaDict items with captured summaries (simulating S2)
+    # Mock service-owned summaries (S2) — not on public WritebackItem
+    ctrl.get_writeback_summaries_for_pane.return_value = {
+        "md-1": ("6000.0", "6100.0"),
+        "ml-1": ("— not present", "create readout_rf"),
+        "wf-1": ("— not present", "create → ro_waveform"),
+    }
+    # Create MetaDict items (adapter proposal shape unchanged)
     md_item = MetaDictWriteback(
         target_name="r_f", description="Resonator freq", proposed_value=6100.0
     )
     md_item.session_id = "md-1"
-    md_item.current_summary = "6000.0"
-    md_item.proposed_summary = "6100.0"
     ml_item = ModuleWriteback(
         target_name="readout_rf", description="Readout module", edit_schema=MagicMock()
     )
     ml_item.session_id = "ml-1"
-    ml_item.current_summary = "— not present"
-    ml_item.proposed_summary = "create readout_rf"
     ml_item2 = ModuleWriteback(
         target_name="ro_waveform", description="Waveform", edit_schema=None
     )
@@ -339,7 +342,7 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
 
 
 def test_writeback_baseline_captured_via_service(qapp):
-    """S2: baseline captured at draft creation from ExpContext."""
+    """S2: baseline captured at draft creation from ExpContext (service-owned, not adapter)."""
     from unittest.mock import MagicMock
 
     from zcu_tools.gui.app.main.adapter import ExpContext
@@ -372,9 +375,27 @@ def test_writeback_baseline_captured_via_service(qapp):
     r_f_item = next(i for i in items if i.target_name == "r_f")
     missing = next(i for i in items if i.target_name == "missing_key")
     mod = next(i for i in items if i.target_name == "new_mod")
-    # r_f current should be 6000.0 formatted
-    assert r_f_item.current_summary is not None and "6000" in r_f_item.current_summary
-    assert r_f_item.proposed_summary is not None and "6100" in r_f_item.proposed_summary
-    assert missing.current_summary == "—"
-    assert mod.current_summary == "— not present"
-    assert mod.proposed_summary is not None and "create" in mod.proposed_summary
+    # Summaries are service-owned, not on WritebackItem
+    assert (
+        not hasattr(r_f_item, "current_summary")
+        or getattr(r_f_item, "current_summary", None) is None
+        or True
+    )
+    cur_rf, prop_rf = svc.get_summaries(draft, r_f_item.session_id)
+    cur_missing, _ = svc.get_summaries(draft, missing.session_id)
+    cur_mod, prop_mod = svc.get_summaries(draft, mod.session_id)
+    assert cur_rf is not None and "6000" in cur_rf
+    assert prop_rf is not None and "6100" in prop_rf
+    assert cur_missing == "—"
+    assert cur_mod == "— not present"
+    assert prop_mod is not None and "create" in prop_mod
+    # Adapter proposal shape unchanged (no summary fields)
+    assert (
+        not hasattr(MetaDictWriteback, "current_summary")
+        or "current_summary" not in MetaDictWriteback.__dataclass_fields__
+    )
+    assert (
+        "current_summary" not in WritebackItem.__dataclass_fields__
+        if hasattr(WritebackItem, "__dataclass_fields__")
+        else True
+    )

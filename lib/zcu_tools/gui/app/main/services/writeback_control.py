@@ -34,6 +34,10 @@ class WritebackControlPort(Protocol):
         self, tab_id: str, pane: WritebackPane
     ) -> dict[str, Any]: ...
 
+    def get_writeback_summaries_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, tuple[str | None, str | None]]: ...
+
     def get_context_version(self) -> int: ...
 
 
@@ -68,11 +72,11 @@ class WritebackControlFacet:
             raise FailedPreconditionError(
                 f"No {'post ' if pane == 'post_analysis' else ''}writeback draft for tab {tab_id!r}"
             )
-        if not draft.is_active:
+        if not getattr(draft, "is_active", False):  # type: ignore[attr-defined]
             raise FailedPreconditionError(
                 f"Writeback draft for tab {tab_id!r} pane {pane!r} has been torn down"
             )
-        return draft
+        return draft  # type: ignore[return-value]
 
     def get_writeback_item_draft_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
@@ -80,7 +84,7 @@ class WritebackControlFacet:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.get_item_draft(draft, session_id)
+        return self._writeback.get_item_draft(draft, session_id)  # type: ignore[arg-type]
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
@@ -88,7 +92,7 @@ class WritebackControlFacet:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.edit_draft(draft, session_id, **changes)
+        return self._writeback.edit_draft(draft, session_id, **changes)  # type: ignore[arg-type]
 
     def apply_writeback_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -96,7 +100,18 @@ class WritebackControlFacet:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.apply_draft(draft)
+        return self._writeback.apply_draft(draft)  # type: ignore[arg-type]
+
+    def get_writeback_summaries_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, tuple[str | None, str | None]]:
+        # Summaries are display-only, read through the service-owned draft;
+        # no guard needed beyond existence check (read-only).
+        try:
+            draft = self._draft_for_pane(tab_id, pane)
+        except Exception:
+            return {}
+        return self._writeback.get_all_summaries(draft)  # type: ignore[arg-type]
 
     def _require_tab_idle(self, tab_id: str) -> None:
         if self._state.is_tab_busy(tab_id):

@@ -392,11 +392,6 @@ class WritebackItem(ABC):
     # retargeting does not change the id.
     session_id: str = field(default="", init=False)
     selected: bool = field(default=True, init=False)
-    # Display-only baseline captured at draft creation (S2) — read-only,
-    # app-local, not persisted/wire. Scalar MetaDict items show concrete
-    # values; module/waveform items show bounded target/change summaries.
-    current_summary: str | None = field(default=None, init=False)
-    proposed_summary: str | None = field(default=None, init=False)
 
 
 @dataclass
