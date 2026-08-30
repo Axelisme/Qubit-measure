@@ -15,6 +15,12 @@ from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+
+_SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
+    ArtifactKind.DATA: "Save data failed",
+    ArtifactKind.ANALYSIS: "Save image failed",
+    ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
+}
 from zcu_tools.gui.plotting import set_shutting_down
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
@@ -659,13 +665,9 @@ class MainWindow(QMainWindow):
     # -- centralized save dispatch (S2) --------------------------
 
     def _present_save_error(self, kind: ArtifactKind, exc: Exception) -> None:
-        title = "Save All failed"
-        if kind == ArtifactKind.ANALYSIS:
-            title = "Save image failed"
-        elif kind == ArtifactKind.POST_ANALYSIS:
-            title = "Save post-analysis image failed"
-        elif kind == ArtifactKind.DATA:
-            title = "Save data failed"
+        title = _SAVE_ERROR_TITLES.get(kind)
+        if title is None:
+            raise RuntimeError(f"unknown artifact {kind!r}")
         self.show_error_dialog(title, str(exc))
 
     def _dispatch_artifact_save(
@@ -678,28 +680,11 @@ class MainWindow(QMainWindow):
         For image artifacts, sync success is promoted immediately; data async
         success arrives via :meth:`handle_save_data_finished`.
         """
-        # Capture pending signature; invariant — let exception propagate
         tab_w.notify_save_started(kind)
         try:
             save_call()
-        except (FailedPreconditionError, ExpectedError, OSError, IOError) as exc:
-            # Expected operational or file failure
-            try:
-                tab_w.notify_save_failed(kind)
-            except Exception:
-                logger.exception("notify_save_failed failed for %r", kind)
-                raise
-            self._present_save_error(kind, exc)
-            return False
-        except Exception as exc:
-            # Documented UI boundary: broad catch preserves existing behavior for
-            # unexpected save failures; never silently suppressed.
-            try:
-                tab_w.notify_save_failed(kind)
-            except Exception:
-                logger.exception("notify_save_failed failed for %r", kind)
-                raise
-            logger.exception("unexpected save failure for %r", kind)
+        except (ExpectedError, OSError, ValueError) as exc:
+            tab_w.notify_save_failed(kind)
             self._present_save_error(kind, exc)
             return False
         else:
@@ -748,39 +733,12 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "_on_save_all_clicked")
         if tab_w is None:
             return
-        # Single snapshot fetch for fact/action.
-        try:
-            snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        except Exception as exc:
-            logger.warning("_on_save_all_clicked snapshot failed: %r", exc)
-            return
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
         if snapshot.capabilities is None:
             raise RuntimeError(
                 f"render snapshot for tab {tab_id!r} has no capabilities"
             )
-        from zcu_tools.gui.app.main.adapter import AnalysisMode as _AM
-
-        artifacts: list[ArtifactKind] = []
-        # Image artifacts require figure, not result alone (preserve operation gates)
-        has_analysis = (
-            snapshot.capabilities.analysis is not _AM.NONE
-            and snapshot.analysis is not None
-            and snapshot.analysis.result is not None
-            and snapshot.analysis.figure is not None
-        )
-        has_post = (
-            bool(snapshot.capabilities.post_analysis)
-            and snapshot.post_analysis is not None
-            and snapshot.post_analysis.result is not None
-            and snapshot.post_analysis.figure is not None
-        )
-        has_data = snapshot.run is not None and snapshot.run.result is not None
-        if has_analysis:
-            artifacts.append(ArtifactKind.ANALYSIS)
-        if has_post:
-            artifacts.append(ArtifactKind.POST_ANALYSIS)
-        if has_data:
-            artifacts.append(ArtifactKind.DATA)
+        artifacts = tab_w.ordered_saveable_kinds(snapshot)
         if not artifacts:
             return
         for kind in artifacts:
@@ -805,20 +763,16 @@ class MainWindow(QMainWindow):
                     tab_w, kind, lambda p=path: self._ctrl.save_post_image(tab_id, p)
                 )
             else:
-                ok = False
+                raise RuntimeError(f"unknown artifact {kind!r}")
             if not ok:
                 break
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
-        """Route SaveDataFinishedPayload terminal outcome to the tab's center."""
         tab_id = payload.tab_id
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        try:
-            tab_w.handle_save_data_finished(payload)
-        except Exception:
-            logger.exception("handle_save_data_finished failed for %r", tab_id)
+        tab_w.handle_save_data_finished(payload)
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control

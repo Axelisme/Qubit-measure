@@ -650,6 +650,10 @@ class ExpTabWidget(QWidget):
         """Apply async data terminal outcome (error None => success)."""
         self._save_center.handle_data_finished(payload.error)
 
+    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
+        """Ordered saveable artifacts for Save All (snapshot single-fetch)."""
+        return self._save_center.ordered_saveable_kinds(snapshot)
+
     def focus_result_panel(self) -> None:
         """Focus Analysis when supported, otherwise focus Save."""
         if self._has_analysis:

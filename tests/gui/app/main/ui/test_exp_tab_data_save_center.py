@@ -6,7 +6,6 @@ Validates S1-S3 acceptance via production ExpTabWidget / MainWindow seams.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -64,8 +63,8 @@ def _snapshot(
     data_path: str | None = None,
     analysis_path: str | None = None,
     post_path: str | None = None,
-    analysis_figure: Any | None = None,
-    post_figure: Any | None = None,
+    analysis_has_figure: bool | None = None,
+    post_has_figure: bool | None = None,
 ) -> TabSnapshot:
     from zcu_tools.gui.app.main.services.ports import (
         AnalysisPaneSnapshot,
@@ -82,29 +81,17 @@ def _snapshot(
     run_result = object() if has_run else None
     ana_result = object() if has_analysis else None
     post_result = object() if has_post else None
-    # figure handling: if explicit figure provided use it; otherwise create when has_analysis/has_post
-    if analysis_figure is None and has_analysis:
-        # Use explicit None to simulate no figure case when caller passes has_analysis True but figure None intentionally
-        # If caller wants no figure, they should pass analysis_figure=False sentinel; we treat None as "auto"
-        # So auto-create
+    if analysis_has_figure is None:
+        fig = Figure() if has_analysis else None
+    elif analysis_has_figure:
         fig = Figure()
-    elif analysis_figure is not None:
-        fig = analysis_figure
     else:
         fig = None
-    # For post, similar
-    if post_figure is None and has_post:
+    if post_has_figure is None:
+        post_fig = Figure() if has_post else None
+    elif post_has_figure:
         post_fig = Figure()
-    elif post_figure is not None:
-        post_fig = post_figure
     else:
-        post_fig = None
-    # If caller explicitly wants no figure despite has_analysis, they can pass analysis_figure = Figure()?? Actually to get no figure, pass analysis_figure = None and has_analysis True but we auto-create above, so need sentinel
-    # Use a sentinel object to distinguish
-    # Instead, if analysis_figure is explicitly set to False, treat as no figure
-    if analysis_figure is False:  # type: ignore
-        fig = None
-    if post_figure is False:  # type: ignore
         post_fig = None
 
     data_ps = PathResourceSnapshot(
@@ -212,7 +199,11 @@ def test_data_subtab_contains_save_center_and_order(exp_tab_factory):
     assert labels == ["Run", "Analysis", "Post-Analysis", "Data", "Guide"]
     heading = tab._save_center.findChildren(QLabel)
     assert any(lbl.text() == "Save results" for lbl in heading)
-    assert tab._save_center.artifact_kinds == [ArtifactKind.DATA, ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS]
+    assert tab._save_center.artifact_kinds == [
+        ArtifactKind.DATA,
+        ArtifactKind.ANALYSIS,
+        ArtifactKind.POST_ANALYSIS,
+    ]
     # Analysis/Post panels no longer own image save controls
     assert not any(
         isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/image.png"
@@ -227,13 +218,14 @@ def test_data_subtab_contains_save_center_and_order(exp_tab_factory):
     assert tab._save_center.has_artifact(ArtifactKind.ANALYSIS)
     assert tab._save_center.has_artifact(ArtifactKind.POST_ANALYSIS)
     # Verify placeholder via findChildren on center
-    placeholders = {c.placeholderText() for c in tab._save_center.findChildren(QLineEdit)}
+    placeholders = {
+        c.placeholderText() for c in tab._save_center.findChildren(QLineEdit)
+    }
     assert "/tmp/data.hdf5" in placeholders
     assert "/tmp/image.png" in placeholders
     assert "/tmp/post_image.png" in placeholders
     tab.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_measurement_always_post_conditional(exp_tab_factory):
@@ -265,7 +257,10 @@ def test_measurement_always_post_conditional(exp_tab_factory):
         load_cap=False,
     )
     tab_a.attach(snap_a, MagicMock())
-    assert tab_a._save_center.artifact_kinds == [ArtifactKind.DATA, ArtifactKind.ANALYSIS]
+    assert tab_a._save_center.artifact_kinds == [
+        ArtifactKind.DATA,
+        ArtifactKind.ANALYSIS,
+    ]
     caps_both = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=False
     )
@@ -280,17 +275,19 @@ def test_measurement_always_post_conditional(exp_tab_factory):
         load_cap=False,
     )
     tab_both.attach(snap_both, MagicMock())
-    assert tab_both._save_center.artifact_kinds == [ArtifactKind.DATA, ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS]
+    assert tab_both._save_center.artifact_kinds == [
+        ArtifactKind.DATA,
+        ArtifactKind.ANALYSIS,
+        ArtifactKind.POST_ANALYSIS,
+    ]
 
-
-# ---------------------------------------------------------------------------
-# A2 row composition and bottom layout
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # A2 row composition and bottom layout
+    # ---------------------------------------------------------------------------
     tab_none.deleteLater()
     tab_a.deleteLater()
     tab_both.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory):
@@ -343,14 +340,12 @@ def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory)
     assert not tab2._save_center.save_all_button.isHidden()
     assert tab2._save_center.is_save_all_enabled() is True
 
-
-# ---------------------------------------------------------------------------
-# A3 status lifecycle
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # A3 status lifecycle
+    # ---------------------------------------------------------------------------
     tab.deleteLater()
     tab2.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_status_no_result_and_not_saved(exp_tab_factory):
@@ -405,7 +400,6 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
     QApplication.instance().processEvents()
 
 
-
 def test_status_transitions_path_comment_and_result(exp_tab_factory):
     ctrl = _mock_ctrl()
     caps = AdapterCapabilities(
@@ -452,7 +446,6 @@ def test_status_transitions_path_comment_and_result(exp_tab_factory):
     QApplication.instance().processEvents()
 
 
-
 def test_status_not_only_color(exp_tab_factory):
     ctrl = _mock_ctrl()
     caps = AdapterCapabilities(
@@ -486,7 +479,6 @@ def test_status_not_only_color(exp_tab_factory):
     assert "—" in center.status_text(ArtifactKind.DATA)
     tab.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_individual_image_save_success_and_failure(exp_tab_factory):
@@ -532,7 +524,6 @@ def test_individual_image_save_success_and_failure(exp_tab_factory):
     QApplication.instance().processEvents()
 
 
-
 def test_data_async_success_failure_and_drift(exp_tab_factory):
     ctrl = _mock_ctrl()
     caps = AdapterCapabilities(
@@ -566,14 +557,12 @@ def test_data_async_success_failure_and_drift(exp_tab_factory):
     c2.handle_data_finished("disk full")
     assert c2.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
 
-
-# ---------------------------------------------------------------------------
-# A4 Save All ordering / Fast Fail
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # A4 Save All ordering / Fast Fail
+    # ---------------------------------------------------------------------------
     tab.deleteLater()
     tab2.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_save_all_dispatch_only_result_present_and_order(qapp, monkeypatch):
@@ -655,7 +644,6 @@ def test_save_all_dispatch_only_result_present_and_order(qapp, monkeypatch):
     qapp.processEvents()
 
 
-
 def test_save_all_fast_fail_and_no_rollback(qapp, monkeypatch):
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
@@ -686,7 +674,7 @@ def test_save_all_fast_fail_and_no_rollback(qapp, monkeypatch):
     ctrl.has_tab.return_value = True
     window._tab_widgets["tab-1"] = tab
     ctrl.save_image = MagicMock(return_value="/tmp/a.png")
-    ctrl.save_post_image = MagicMock(side_effect=RuntimeError("disk full"))
+    ctrl.save_post_image = MagicMock(side_effect=OSError("disk full"))
     ctrl.save_data = MagicMock(return_value="/tmp/d.h5")
     assert tab._save_center.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     window._on_save_all_clicked("tab-1")
@@ -710,7 +698,6 @@ def test_save_all_fast_fail_and_no_rollback(qapp, monkeypatch):
     window.deleteLater()
     tab.deleteLater()
     qapp.processEvents()
-
 
 
 def test_save_all_disabled_when_no_result(exp_tab_factory):
@@ -743,13 +730,11 @@ def test_save_all_disabled_when_no_result(exp_tab_factory):
     tab.update_interaction_state(snap_some)
     assert tab._save_center.is_save_all_enabled() is True
 
-
-# ---------------------------------------------------------------------------
-# A5 Load Data gates
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # A5 Load Data gates
+    # ---------------------------------------------------------------------------
     tab.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_load_data_gates(exp_tab_factory):
@@ -808,7 +793,6 @@ def test_load_data_gates(exp_tab_factory):
     tab.deleteLater()
     tab2.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_unmatched_remote_save_completion_does_not_mark_gui_sig_as_saved(
@@ -904,7 +888,6 @@ def test_comment_edit_does_not_trigger_data_path_update(exp_tab_factory, qapp):
 # ---------------------------------------------------------------------------
 
 
-
 def test_analysis_save_requires_figure(exp_tab_factory):
     ctrl = _mock_ctrl()
     caps = AdapterCapabilities(
@@ -918,7 +901,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
         analysis_mode=AnalysisMode.FIT,
         post_cap=False,
         load_cap=False,
-        analysis_figure=False,  # sentinel for no figure
+        analysis_has_figure=False,
     )
     tab = exp_tab_factory("tab-1", ctrl, caps)
     tab.attach(snap_no_fig, MagicMock())
@@ -935,7 +918,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
         analysis_mode=AnalysisMode.FIT,
         post_cap=False,
         load_cap=False,
-        analysis_figure=Figure(),
+        analysis_has_figure=True,
     )
     tab.update_interaction_state(snap_with_fig)
     assert center.is_save_enabled(ArtifactKind.ANALYSIS) is True
@@ -948,7 +931,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
         analysis_mode=AnalysisMode.FIT,
         post_cap=False,
         load_cap=False,
-        analysis_figure=False,
+        analysis_has_figure=False,
     )
     tab.update_interaction_state(snap_mixed)
     assert center.is_save_enabled(ArtifactKind.ANALYSIS) is False
@@ -956,7 +939,6 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     assert center.is_save_all_enabled() is True
     tab.deleteLater()
     QApplication.instance().processEvents()
-
 
 
 def test_save_all_skips_analysis_without_figure(qapp, monkeypatch):
@@ -983,7 +965,7 @@ def test_save_all_skips_analysis_without_figure(qapp, monkeypatch):
         post_cap=False,
         load_cap=False,
         has_active_context=True,
-        analysis_figure=False,
+        analysis_has_figure=False,
     )
     from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
 
@@ -1001,7 +983,6 @@ def test_save_all_skips_analysis_without_figure(qapp, monkeypatch):
     window.deleteLater()
     tab.deleteLater()
     qapp.processEvents()
-
 
 
 def test_individual_image_save_dispatch_requires_figure(qapp):
@@ -1023,7 +1004,7 @@ def test_individual_image_save_dispatch_requires_figure(qapp):
         post_cap=False,
         load_cap=False,
         has_active_context=True,
-        analysis_figure=False,
+        analysis_has_figure=False,
     )
     from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
 
@@ -1041,14 +1022,12 @@ def test_individual_image_save_dispatch_requires_figure(qapp):
     ctrl.save_image.assert_not_called()
     ctrl.save_data.assert_not_called()
 
-
-# ---------------------------------------------------------------------------
-# Monotonic revision regression (correction 1)
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
+    # Monotonic revision regression (correction 1)
+    # ---------------------------------------------------------------------------
     window.deleteLater()
     tab.deleteLater()
     qapp.processEvents()
-
 
 
 def test_replaced_result_invalidates_saved_via_monotonic_token(exp_tab_factory):
@@ -1082,7 +1061,13 @@ def test_replaced_result_invalidates_saved_via_monotonic_token(exp_tab_factory):
     tab.update_interaction_state(snap2)
     assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     tab2 = exp_tab_factory("tab-2", ctrl, caps)
-    snap_a = _snapshot("tab-2", has_run=True, analysis_mode=AnalysisMode.FIT, post_cap=False, load_cap=False)
+    snap_a = _snapshot(
+        "tab-2",
+        has_run=True,
+        analysis_mode=AnalysisMode.FIT,
+        post_cap=False,
+        load_cap=False,
+    )
     tab2.attach(snap_a, MagicMock())
     c2 = tab2._save_center
     c2.notify_save_succeeded(ArtifactKind.DATA)

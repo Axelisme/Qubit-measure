@@ -182,9 +182,6 @@ class _StatusTracker:
             return bool(rec.has_result)
         return bool(rec.has_result and rec.has_figure)
 
-    def has_result(self, kind: ArtifactKind) -> bool:
-        return self._records[kind].has_result
-
     def result_rev(self, kind: ArtifactKind) -> int:
         return self._records[kind].result_rev
 
@@ -213,7 +210,6 @@ class ArtifactSaveCenter(QWidget):
     ) -> None:
         super().__init__(parent)
         self._tab_id = tab_id
-        self._capabilities = capabilities
         self._has_analysis = capabilities.analysis is not AnalysisMode.NONE
         self._has_post = bool(capabilities.post_analysis)
         self._has_load = bool(capabilities.load_data)
@@ -245,7 +241,6 @@ class ArtifactSaveCenter(QWidget):
         self._status_labels: dict[ArtifactKind, QLabel] = {}
         self._path_edits: dict[ArtifactKind, QLineEdit] = {}
         self._save_btns: dict[ArtifactKind, QPushButton] = {}
-        self._row_widgets: dict[ArtifactKind, QWidget] = {}
 
         data_row = self._build_row(
             kind=ArtifactKind.DATA,
@@ -375,7 +370,6 @@ class ArtifactSaveCenter(QWidget):
             layout.addWidget(comment)
             self._comment_edit = comment
 
-        self._row_widgets[kind] = container
         return container
 
     def _wire_internal_status_updates(self) -> None:
@@ -476,10 +470,6 @@ class ArtifactSaveCenter(QWidget):
         if ArtifactKind.POST_ANALYSIS in self._path_edits:
             self._path_edits[ArtifactKind.POST_ANALYSIS].textChanged.connect(handler)
 
-    def bind_comment_changed(self, handler: Callable[[], None]) -> None:
-        if hasattr(self, "_comment_edit"):
-            self._comment_edit.textChanged.connect(handler)
-
     def bind_save(self, kind: ArtifactKind, handler: Callable[[], None]) -> None:
         btn = self._save_btns.get(kind)
         if btn is None:
@@ -522,6 +512,27 @@ class ArtifactSaveCenter(QWidget):
     def is_path_enabled(self, kind: ArtifactKind) -> bool:
         edit = self._path_edits.get(kind)
         return bool(edit is not None and edit.isEnabled())
+
+    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
+        """Ordered saveable artifacts for Save All (analysis→post→data)."""
+        kinds: list[ArtifactKind] = []
+        if self._has_analysis:
+            if (
+                snapshot.analysis is not None
+                and snapshot.analysis.result is not None
+                and snapshot.analysis.figure is not None
+            ):
+                kinds.append(ArtifactKind.ANALYSIS)
+        if self._has_post:
+            if (
+                snapshot.post_analysis is not None
+                and snapshot.post_analysis.result is not None
+                and snapshot.post_analysis.figure is not None
+            ):
+                kinds.append(ArtifactKind.POST_ANALYSIS)
+        if snapshot.run is not None and snapshot.run.result is not None:
+            kinds.append(ArtifactKind.DATA)
+        return kinds
 
     # -- tracker helpers ----------------------------------------------
 
@@ -668,12 +679,6 @@ class ArtifactSaveCenter(QWidget):
         try:
             self._path_edits[ArtifactKind.POST_ANALYSIS].textChanged.disconnect(handler)
         except (TypeError, RuntimeError, KeyError):
-            pass
-
-    def unbind_comment_changed(self, handler: Callable[[], None]) -> None:
-        try:
-            self._comment_edit.textChanged.disconnect(handler)
-        except (TypeError, RuntimeError, AttributeError):
             pass
 
     def save_button(self, kind: ArtifactKind) -> QPushButton:
