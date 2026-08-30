@@ -77,6 +77,9 @@ class _RecordingTabActions:
     def save_post_image(self, tab_id: str) -> None:
         self.calls.append(("save_post_image", tab_id))
 
+    def save_all(self, tab_id: str) -> None:
+        self.calls.append(("save_all", tab_id))
+
 
 def _snapshot(
     tab_id: str,
@@ -118,15 +121,17 @@ def _snapshot(
     if figure is _DEFAULT_PARAMS:
         from matplotlib.figure import Figure
 
-        figure_obj = Figure() if has_figure and has_analyze_result else None
+        figure_obj: Figure | None = (
+            Figure() if has_figure and has_analyze_result else None
+        )
     else:
-        figure_obj = figure
+        figure_obj = figure  # type: ignore[assignment]
     if post_figure is _DEFAULT_PARAMS:
         from matplotlib.figure import Figure as _Fig2
 
-        post_figure_obj = _Fig2() if has_post_analyze_result else None
+        post_figure_obj: Figure | None = _Fig2() if has_post_analyze_result else None
     else:
-        post_figure_obj = post_figure
+        post_figure_obj = post_figure  # type: ignore[assignment]
 
     # Capabilities include load_data
     caps = AdapterCapabilities(
@@ -485,9 +490,9 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
         )
     )
 
-    # Fixed order Run | Analysis? | Post? | Save | Guide: Analysis not constructed, Save always visible
+    # Fixed order Run | Analysis? | Post? | Data | Guide: Analysis not constructed, Data always visible
     visible = [tab._left_tabs.tabText(i) for i in range(tab._left_tabs.count())]
-    assert visible == ["Run", "Save", "Guide"]
+    assert visible == ["Run", "Data", "Guide"]
     # Prove Analysis page and controls were never constructed, not only hidden
     assert not hasattr(tab, "_analysis_panel")
     assert not hasattr(tab, "analyze_form")

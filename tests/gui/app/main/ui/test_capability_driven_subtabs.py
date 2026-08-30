@@ -184,11 +184,11 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     assert snap_none.capabilities is not None
     tab_none = exp_tab_widget("tab-1", ctrl, snap_none.capabilities)
     tab_none.attach(snap_none, MagicMock())
-    # Fixed order Run | Save | Guide — Analysis/Post not constructed
+    # Fixed order Run | Data | Guide — Analysis/Post not constructed
     visible_none = [
         tab_none._left_tabs.tabText(i) for i in range(tab_none._left_tabs.count())
     ]
-    assert visible_none == ["Run", "Save", "Guide"]
+    assert visible_none == ["Run", "Data", "Guide"]
     # Prove absent Analysis/Post pages and controls/containers were never constructed, not only hidden
     assert not hasattr(tab_none, "analyze_form")
     assert not hasattr(tab_none, "writeback_widget")
@@ -221,7 +221,7 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
         tab_analysis._left_tabs.tabText(i)
         for i in range(tab_analysis._left_tabs.count())
     ]
-    assert visible_analysis == ["Run", "Analysis", "Save", "Guide"]
+    assert visible_analysis == ["Run", "Analysis", "Data", "Guide"]
     assert hasattr(tab_analysis, "analyze_form")
     assert hasattr(tab_analysis, "_image_path_edit")
     assert not hasattr(tab_analysis, "post_analyze_form")
@@ -235,7 +235,7 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     visible_both = [
         tab_both._left_tabs.tabText(i) for i in range(tab_both._left_tabs.count())
     ]
-    assert visible_both == ["Run", "Analysis", "Post-Analysis", "Save", "Guide"]
+    assert visible_both == ["Run", "Analysis", "Post-Analysis", "Data", "Guide"]
     assert hasattr(tab_both, "analyze_form")
     assert hasattr(tab_both, "post_analyze_form")
 
@@ -452,9 +452,11 @@ def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
         return any(child is target for child in widget.findChildren(type(target)))
 
     assert not contains(tab._run_panel, tab._image_path_edit)
-    assert contains(tab._analysis_panel, tab._image_path_edit)
-    assert contains(tab._post_panel, tab._post_image_path_edit)
+    assert not contains(tab._analysis_panel, tab._image_path_edit)
+    assert not contains(tab._post_panel, tab._post_image_path_edit)
     assert contains(tab._save_panel, tab._data_path_edit)
+    assert contains(tab._save_panel, tab._image_path_edit)
+    assert contains(tab._save_panel, tab._post_image_path_edit)
     tab.set_data_path("/tmp/data.hdf5")
     tab.set_analysis_image_path("/tmp/a.png")
     tab.set_post_image_path("/tmp/p.png")
@@ -597,6 +599,7 @@ def test_render_host_routes_to_correct_pane_container(qapp):
     state = MagicMock()
     state.running_tab_id = None
     state.has_tab.return_value = True
+    state.is_tab_busy.return_value = False
     state.get_tab.return_value = MagicMock(
         adapter=MagicMock(capabilities=MagicMock(analysis=AnalysisMode.FIT))
     )

@@ -132,6 +132,9 @@ class RecordingHost:
     def refresh_feedback_widget(self) -> None:
         self._log.add("host", "refresh_feedback_widget")
 
+    def handle_save_data_finished(self, payload: object) -> None:
+        self._log.add("host", "handle_save_data_finished", payload)
+
 
 def _coordinator(
     snapshot: object | None = None,

@@ -87,6 +87,9 @@ class _MainWindowTabActions:
     def save_post_image(self, tab_id: str) -> None:
         self._window._on_post_save_image_clicked(tab_id)
 
+    def save_all(self, tab_id: str) -> None:
+        self._window._on_save_all_clicked(tab_id)
+
 
 class MainWindow(QMainWindow):
     """Top-level window; implements ViewProtocol for Controller callbacks."""
@@ -657,7 +660,21 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_data_path()
-        self._ctrl.save_data(tab_id, path, comment=tab_w.get_comment())
+        comment = tab_w.get_comment()
+        # Capture pending before dispatch so terminal outcome can compare.
+        try:
+            tab_w.notify_save_started("data")
+        except Exception:
+            logger.exception("notify_save_started failed for data")
+        try:
+            self._ctrl.save_data(tab_id, path, comment=comment)
+        except Exception as exc:
+            logger.warning("_on_save_data_clicked failed: %r", exc)
+            try:
+                tab_w.notify_save_failed("data")
+            except Exception:
+                pass
+            self.show_error_dialog("Save data failed", str(exc))
 
     def _on_save_image_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_image_clicked: tab_id=%r", tab_id)
@@ -665,7 +682,24 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_image_path()
-        self._ctrl.save_image(tab_id, path)
+        try:
+            tab_w.notify_save_started("analysis")
+        except Exception:
+            pass
+        try:
+            self._ctrl.save_image(tab_id, path)
+        except Exception as exc:
+            logger.warning("_on_save_image_clicked failed: %r", exc)
+            try:
+                tab_w.notify_save_failed("analysis")
+            except Exception:
+                pass
+            self.show_error_dialog("Save image failed", str(exc))
+            return
+        try:
+            tab_w.notify_save_succeeded("analysis")
+        except Exception:
+            pass
 
     def _on_post_save_image_clicked(self, tab_id: str) -> None:
         logger.info("_on_post_save_image_clicked: tab_id=%r", tab_id)
@@ -673,7 +707,124 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_post_image_path()
-        self._ctrl.save_post_image(tab_id, path)
+        try:
+            tab_w.notify_save_started("post_analysis")
+        except Exception:
+            pass
+        try:
+            self._ctrl.save_post_image(tab_id, path)
+        except Exception as exc:
+            logger.warning("_on_post_save_image_clicked failed: %r", exc)
+            try:
+                tab_w.notify_save_failed("post_analysis")
+            except Exception:
+                pass
+            self.show_error_dialog("Save post-analysis image failed", str(exc))
+            return
+        try:
+            tab_w.notify_save_succeeded("post_analysis")
+        except Exception:
+            pass
+
+    def _on_save_all_clicked(self, tab_id: str) -> None:
+        logger.info("_on_save_all_clicked: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_save_all_clicked")
+        if tab_w is None:
+            return
+        # Single snapshot fetch for fact/action.
+        try:
+            snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        except Exception as exc:
+            logger.warning("_on_save_all_clicked snapshot failed: %r", exc)
+            return
+        caps = snapshot.capabilities
+        if caps is None:
+            return
+        from zcu_tools.gui.app.main.adapter import AnalysisMode as _AM
+
+        artifacts: list[str] = []
+        # Order: analysis, post_analysis, data (data async last)
+        has_analysis = (
+            caps.analysis is not _AM.NONE
+            and snapshot.analysis is not None
+            and snapshot.analysis.result is not None
+        )
+        has_post = (
+            bool(caps.post_analysis)
+            and snapshot.post_analysis is not None
+            and snapshot.post_analysis.result is not None
+        )
+        has_data = snapshot.run is not None and snapshot.run.result is not None
+        if has_analysis:
+            artifacts.append("analysis")
+        if has_post:
+            artifacts.append("post_analysis")
+        if has_data:
+            artifacts.append("data")
+        if not artifacts:
+            return
+        for kind in artifacts:
+            try:
+                if kind == "data":
+                    path = tab_w.get_data_path()
+                    comment = tab_w.get_comment()
+                    try:
+                        tab_w.notify_save_started("data")
+                    except Exception:
+                        pass
+                    self._ctrl.save_data(tab_id, path, comment=comment)
+                elif kind == "analysis":
+                    path = tab_w.get_image_path()
+                    try:
+                        tab_w.notify_save_started("analysis")
+                    except Exception:
+                        pass
+                    self._ctrl.save_image(tab_id, path)
+                    try:
+                        tab_w.notify_save_succeeded("analysis")
+                    except Exception:
+                        pass
+                elif kind == "post_analysis":
+                    path = tab_w.get_post_image_path()
+                    try:
+                        tab_w.notify_save_started("post_analysis")
+                    except Exception:
+                        pass
+                    self._ctrl.save_post_image(tab_id, path)
+                    try:
+                        tab_w.notify_save_succeeded("post_analysis")
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.warning("_on_save_all_clicked %s failed: %r", kind, exc)
+                # Mark failed and Fast Fail — stop subsequent dispatches.
+                try:
+                    tab_w.notify_save_failed(kind)
+                except Exception:
+                    pass
+                # Show dialog for the failing artifact (keep prior successes).
+                title = "Save All failed"
+                if kind == "analysis":
+                    title = "Save image failed"
+                elif kind == "post_analysis":
+                    title = "Save post-analysis image failed"
+                elif kind == "data":
+                    title = "Save data failed"
+                self.show_error_dialog(title, str(exc))
+                break
+
+    def handle_save_data_finished(self, payload) -> None:  # type: ignore[no-untyped-def]
+        """Route SaveDataFinishedPayload terminal outcome to the tab's center."""
+        tab_id = getattr(payload, "tab_id", None)
+        if not isinstance(tab_id, str):
+            return
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        try:
+            tab_w.handle_save_data_finished(payload)
+        except Exception:
+            logger.exception("handle_save_data_finished failed for %r", tab_id)
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control
