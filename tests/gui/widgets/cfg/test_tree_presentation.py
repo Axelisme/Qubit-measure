@@ -6,11 +6,17 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QCheckBox, QComboBox, QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QCheckBox,
+    QComboBox,
+    QLineEdit,
+    QTreeWidgetItem,  # type: ignore[attr-defined]
+)
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
+    CfgNodeSpec,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -179,50 +185,60 @@ def test_tree_renders_and_edits_same_observable_behavior(qapp, ctrl):
         qapp.processEvents()
         # read back
         out = w.read_values()
-        assert out.fields["reps"].value == 42  # type: ignore[union-attr]
+        reps_val = out.fields["reps"]
+        assert isinstance(reps_val, DirectValue)
+        assert reps_val.value == 42
         nested = out.fields["nested"]
         assert isinstance(nested, CfgSectionValue)
-        assert isinstance(nested.fields["freq"], EvalValue)
-        assert nested.fields["freq"].resolved == 6000.0  # type: ignore[union-attr]
+        freq_val = nested.fields["freq"]
+        assert isinstance(freq_val, EvalValue)
+        assert freq_val.resolved == 6000.0
         assert isinstance(nested.fields["sweep"], SweepValue)
         # edit via draft leaf should reflect in read_values
         reps_field = draft.root.fields["reps"]
         assert isinstance(reps_field, ScalarField)
         reps_field.set_value(999)
         qapp.processEvents()
-        assert w.read_values().fields["reps"].value == 999  # type: ignore[union-attr]
+        reps_val2 = w.read_values().fields["reps"]
+        assert isinstance(reps_val2, DirectValue)
+        assert reps_val2.value == 999
         # dropdown edit
         choice_field = cast(SectionField, draft.root.fields["nested"]).fields["choice"]
         assert isinstance(choice_field, ScalarField)
         choice_field.set_value(DirectValue("c"))
         qapp.processEvents()
-        assert (
-            cast(
-                ScalarField,
-                cast(SectionField, draft.root.fields["nested"]).fields["choice"],
-            )
-            .get_value()
-            .value
-            == "c"
-        )  # type: ignore[union-attr]
+        choice_val = cast(
+            ScalarField,
+            cast(SectionField, draft.root.fields["nested"]).fields["choice"],
+        ).get_value()
+        assert isinstance(choice_val, DirectValue)
+        assert choice_val.value == "c"
         # boolean
         flag_field = cast(SectionField, draft.root.fields["nested"]).fields["flag"]
         assert isinstance(flag_field, ScalarField)
         flag_field.set_value(False)
         qapp.processEvents()
-        assert w.read_values().fields["nested"].fields["flag"].value is False  # type: ignore[union-attr]
+        nested_flag = w.read_values().fields["nested"]
+        assert isinstance(nested_flag, CfgSectionValue)
+        flag_val = nested_flag.fields["flag"]
+        assert isinstance(flag_val, DirectValue)
+        assert flag_val.value is False
         # sweep
         sweep_field = cast(SectionField, draft.root.fields["nested"]).fields["sweep"]
         sweep_field.update_expts(5)  # type: ignore[union-attr]
         qapp.processEvents()
-        sv = w.read_values().fields["nested"].fields["sweep"]
+        nested_sweep = w.read_values().fields["nested"]
+        assert isinstance(nested_sweep, CfgSectionValue)
+        sv = nested_sweep.fields["sweep"]
         assert isinstance(sv, SweepValue)
         assert sv.expts == 5
         # centered sweep span
         cs_field = cast(SectionField, draft.root.fields["nested"]).fields["csweep"]
         cs_field.update_span(2.0)  # type: ignore[union-attr]
         qapp.processEvents()
-        csv = w.read_values().fields["nested"].fields["csweep"]
+        nested_cs = w.read_values().fields["nested"]
+        assert isinstance(nested_cs, CfgSectionValue)
+        csv = nested_cs.fields["csweep"]
         assert isinstance(csv, CenteredSweepValue)
         assert csv.span == pytest.approx(2.0)
         # reference elided but still editable
@@ -261,18 +277,21 @@ def test_tree_whole_row_folding_is_view_only(qapp, ctrl):
     assert before == after
     # leaf items should not toggle
     # find leaf Reps
-    reps_item = None
+    reps_item: QTreeWidgetItem | None = None
     for i in range(tree.topLevelItemCount()):
         t = tree.topLevelItem(i)
+        assert t is not None
         # search
-        stack = [t]
+        stack: list[QTreeWidgetItem] = [t]
         while stack:
             cur = stack.pop()
             if "Reps" in cur.text(0):
                 reps_item = cur
                 break
             for j in range(cur.childCount()):
-                stack.append(cur.child(j))
+                child = cur.child(j)
+                assert child is not None
+                stack.append(child)
         if reps_item:
             break
     assert reps_item is not None
@@ -357,12 +376,14 @@ def test_tree_depth_color_cycling_and_own_depth(qapp, ctrl):
     # Its child L1 at depth 1 => TREE_DEPTH_COLORS[1], etc.
     expected = list(TREE_DEPTH_COLORS)  # 0..4
     # collect items in order of nesting
-    items = []
+    items: list[QTreeWidgetItem] = []
     cur = tree.topLevelItem(0)
     assert cur is not None
     items.append(cur)
     while cur.childCount() > 0:
-        cur = cur.child(0)
+        nxt = cur.child(0)
+        assert nxt is not None
+        cur = nxt
         items.append(cur)
     # items should be Root, L1, L2, L3, L4, L5, L6, leaf
     # background for each foldable node row at its displayed depth, leaves at their depth
@@ -404,12 +425,14 @@ def test_tree_reference_shape_elision(qapp, ctrl):
     _attach(w, schema, ctrl)
     tree = cast(TreeCfgWidget, w._root_widget)._tree
     # find ref item
-    ref_item = None
+    ref_item: QTreeWidgetItem | None = None
     for i in range(tree.topLevelItemCount()):
         top = tree.topLevelItem(i)
+        assert top is not None
         # top is Root
         for j in range(top.childCount()):
             child = top.child(j)
+            assert child is not None
             if "Waveform" in child.text(0):
                 ref_item = child
                 break
@@ -417,7 +440,11 @@ def test_tree_reference_shape_elision(qapp, ctrl):
             break
     assert ref_item is not None
     # Elision: ref's children should be sigma directly, not an intermediate Gauss wrapper
-    child_texts = [ref_item.child(k).text(0) for k in range(ref_item.childCount())]
+    child_texts: list[str] = []
+    for k in range(ref_item.childCount()):
+        ch = ref_item.child(k)
+        assert ch is not None
+        child_texts.append(ch.text(0))
     assert "Sigma" in child_texts
     assert "Gauss" not in child_texts
     # guaranteed single shape row elided => childCount == number of fields in shape (1)
@@ -443,25 +470,30 @@ def test_tree_editing_lock_disables_editors(qapp, ctrl):
     # child editor also disabled via parent
     tree = cast(TreeCfgWidget, w._root_widget)._tree
     # find leaf widget
-    leaf = None
+    leaf: QTreeWidgetItem | None = None
     for i in range(tree.topLevelItemCount()):
         top = tree.topLevelItem(i)
+        assert top is not None
         if top.childCount() == 0 and "Reps" in top.text(0):
             leaf = top
             break
         for j in range(top.childCount()):
             child = top.child(j)
+            assert child is not None
             if "Reps" in child.text(0):
                 leaf = child
                 break
     # leaf widget may be under root; fallback search exhaustive
     if leaf is None:
         # search all
-        stack = [tree.invisibleRootItem()]
+        root_item = tree.invisibleRootItem()
+        assert root_item is not None
+        stack: list[QTreeWidgetItem] = [root_item]
         while stack:
             cur = stack.pop()
             for j in range(cur.childCount()):
                 ch = cur.child(j)
+                assert ch is not None
                 if "Reps" in ch.text(0):
                     leaf = ch
                     break
@@ -494,7 +526,9 @@ def test_tree_detach_attach_preserves_draft(qapp, ctrl):
     w.attach(draft)
     assert draft.on_change._callbacks
     # draft not closed
-    assert w.read_values().fields["reps"].value == 10  # type: ignore[union-attr]
+    reps_check = w.read_values().fields["reps"]
+    assert isinstance(reps_check, DirectValue)
+    assert reps_check.value == 10
     w.detach()
     draft.close()
 
@@ -525,7 +559,7 @@ def test_tree_validation_propagation(qapp, ctrl):
 
 
 def test_tree_section_local_refresh_choice(qapp, ctrl):
-    fields = {
+    fields: dict[str, CfgNodeSpec] = {
         "mode": ScalarSpec(label="Mode", type=str, choices=["auto", "fixed"]),
         "half": ScalarSpec(label="Half", type=float),
         "manual": ScalarSpec(label="Manual", type=float),
@@ -611,14 +645,18 @@ def test_tree_shares_same_draft_binding_ref_identity(qapp, ctrl):
     # set via draft path should be visible in both widgets' read_values after reattach
     draft.set_target("ref.sigma", 0.99)
     qapp.processEvents()
-    assert w_tree.read_values().fields["ref"].value.fields[
-        "sigma"
-    ].value == pytest.approx(0.99)  # type: ignore[union-attr]
+    ref_val_tree = w_tree.read_values().fields["ref"]
+    assert isinstance(ref_val_tree, ReferenceValue)
+    sigma_val_tree = ref_val_tree.value.fields["sigma"]
+    assert isinstance(sigma_val_tree, DirectValue)
+    assert sigma_val_tree.value == pytest.approx(0.99)
     w_tree.detach()
     w_form.attach(draft)
-    assert w_form.read_values().fields["ref"].value.fields[
-        "sigma"
-    ].value == pytest.approx(0.99)  # type: ignore[union-attr]
+    ref_val_form = w_form.read_values().fields["ref"]
+    assert isinstance(ref_val_form, ReferenceValue)
+    sigma_val_form = ref_val_form.value.fields["sigma"]
+    assert isinstance(sigma_val_form, DirectValue)
+    assert sigma_val_form.value == pytest.approx(0.99)
     w_form.detach()
     draft.close()
 
@@ -678,7 +716,11 @@ def test_tree_outer_reenable_preserves_nested_reference_and_decoration_parity(
     tree = cast(TreeCfgWidget, w._root_widget)._tree
     outer_field = cast(ReferenceField, draft.root.fields["outer"])
     assert outer_field.is_enabled is True
-    inner_field = cast(ReferenceField, outer_field.sub_field.fields["inner_ref"])  # type: ignore[union-attr]
+    outer_sub = outer_field.sub_field
+    assert outer_sub is not None
+    inner_raw = outer_sub.fields["inner_ref"]
+    assert isinstance(inner_raw, ReferenceField)
+    inner_field = inner_raw
     assert inner_field.is_enabled is False
 
     def find_item(path: str):
@@ -748,7 +790,11 @@ def test_tree_outer_reenable_preserves_nested_reference_and_decoration_parity(
     w_form.attach(draft2)
     qapp.processEvents()
     outer2 = cast(ReferenceField, draft2.root.fields["outer"])
-    inner2 = cast(ReferenceField, outer2.sub_field.fields["inner_ref"])  # type: ignore[union-attr]
+    outer2_sub = outer2.sub_field
+    assert outer2_sub is not None
+    inner2_raw = outer2_sub.fields["inner_ref"]
+    assert isinstance(inner2_raw, ReferenceField)
+    inner2 = inner2_raw
     assert inner2.is_enabled is False
     outer2.set_enabled(False)
     qapp.processEvents()
