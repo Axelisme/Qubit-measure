@@ -941,12 +941,6 @@ class ExpTabWidget(QWidget):
             )
             self._save_center.bind_post_path_changed(post_image_cb)
 
-        def _comment_cb() -> None:
-            data_path_cb("")
-
-        self._comment_cb = _comment_cb  # type: ignore[attr-defined]
-        self._save_center.bind_comment_changed(_comment_cb)
-
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
         if self._capabilities.load_data:
@@ -995,9 +989,6 @@ class ExpTabWidget(QWidget):
             self._save_center.unbind_analysis_path_changed(self._analysis_image_cb)
         if self._has_post:
             self._save_center.unbind_post_path_changed(self._post_image_cb)
-        # Comment was bound via a dedicated wrapper
-        if hasattr(self, "_comment_cb"):
-            self._save_center.unbind_comment_changed(self._comment_cb)
         self._progress_unsub()
         self.cfg_form.detach()
         if self._cfg_editor_id is not None:

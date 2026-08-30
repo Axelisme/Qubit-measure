@@ -316,8 +316,7 @@ def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory)
         ss = center.status_color(kind)
         assert ss  # high contrast color
         assert center.has_artifact(kind)
-        # Browse/Save existence via findChildren and query
-        assert center.is_path_enabled(kind) or True  # path always enabled when present
+        assert center.is_path_enabled(kind) is True
     # Measurement comment
     assert center.get_comment() == ""
     # Set comment and verify
@@ -448,9 +447,7 @@ def test_status_transitions_path_comment_and_result(exp_tab_factory):
         load_cap=False,
     )
     tab.update_interaction_state(snap2)
-    assert "UNSAVED CHANGES" in center.status_text(
-        ArtifactKind.DATA
-    ) or "NOT SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     tab.deleteLater()
     QApplication.instance().processEvents()
 
@@ -869,12 +866,47 @@ def test_unmatched_remote_save_completion_does_not_mark_gui_sig_as_saved(
     assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
 
 
+def test_comment_edit_does_not_trigger_data_path_update(exp_tab_factory, qapp):
+    ctrl = _mock_ctrl()
+    # Make update_tab_data_path observable
+    ctrl.update_tab_data_path = MagicMock()
+    ctrl.update_tab_analysis_image_path = MagicMock()
+    ctrl.update_tab_post_analysis_image_path = MagicMock()
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
+    )
+    snap = _snapshot(
+        "tab-1",
+        has_run=True,
+        has_analysis=False,
+        analysis_mode=AnalysisMode.FIT,
+        post_cap=False,
+        load_cap=False,
+        has_active_context=True,
+    )
+    tab = exp_tab_factory("tab-1", ctrl, caps)
+    tab.attach(snap, MagicMock())
+    # Clear any calls from attach (path sync)
+    ctrl.update_tab_data_path.reset_mock()
+    center = tab._save_center
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    center.set_comment_text("new comment")
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    ctrl.update_tab_data_path.assert_not_called()
+    ctrl.update_tab_analysis_image_path.assert_not_called()
+    ctrl.update_tab_post_analysis_image_path.assert_not_called()
+    ctrl.update_tab_data_path.reset_mock()
+    center._comment_edit.setPlainText("another")
+    QApplication.instance().processEvents()
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    ctrl.update_tab_data_path.assert_not_called()
+    tab.deleteLater()
+    QApplication.instance().processEvents()
+
+
 # ---------------------------------------------------------------------------
 # Figure gating (correction 2)
 # ---------------------------------------------------------------------------
-    window.deleteLater()
-    tab.deleteLater()
-    qapp.processEvents()
 
 
 
@@ -1007,10 +1039,12 @@ def test_individual_image_save_dispatch_requires_figure(qapp):
     ctrl.has_tab.return_value = True
     window._tab_widgets["tab-1"] = tab
     tab.update_interaction_state(snap_no_fig)
-    # Button disabled
     assert tab._save_center.is_save_enabled(ArtifactKind.ANALYSIS) is False
-    # Even if clicked programmatically, dispatch should still be guarded? MainWindow individual handler will still dispatch but service will fail; UI should have prevented.
-    # We verify Save All already gates; individual button gating is sufficient per spec.
+    btn = tab._save_center.save_button(ArtifactKind.ANALYSIS)
+    assert not btn.isEnabled()
+    btn.click()
+    ctrl.save_image.assert_not_called()
+    ctrl.save_data.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1051,13 +1085,7 @@ def test_replaced_result_invalidates_saved_via_monotonic_token(exp_tab_factory):
     )
     assert snap1.run.result is not snap2.run.result
     tab.update_interaction_state(snap2)
-    assert center.status_text(ArtifactKind.DATA) != "✓ SAVED"
-    assert "UNSAVED" in center.status_text(ArtifactKind.DATA) or "NOT SAVED" in center.status_text(ArtifactKind.DATA)
-    # Same object retains SAVED
-    tab.update_interaction_state(snap1)
-    # Re-attach same result identity: need to restore snap1's result object
-    # Since tracker retains rev, going back to old object is considered new replacement too (is not previous B), so it will be UNSAVED again
-    # To test same-object retention, we keep same snapshot without change: staying on snap1 after SAVED should remain SAVED
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     tab2 = exp_tab_factory("tab-2", ctrl, caps)
     snap_a = _snapshot("tab-2", has_run=True, analysis_mode=AnalysisMode.FIT, post_cap=False, load_cap=False)
     tab2.attach(snap_a, MagicMock())
