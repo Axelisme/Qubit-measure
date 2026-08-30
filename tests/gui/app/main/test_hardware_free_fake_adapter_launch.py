@@ -11,38 +11,60 @@ Run with:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
-from qtpy.QtWidgets import QApplication, QLabel, QCheckBox
+from qtpy.QtWidgets import QApplication, QCheckBox, QLabel
 from zcu_tools.gui.app.main.adapter import AnalysisMode
 
 
 @pytest.fixture
 def hw_fixture(qapp, tmp_path):
     """Real Controller + MainWindow via shipped composition, no hardware."""
-    from tests.gui.test_controller import ControllerFixture
-    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+    from unittest.mock import MagicMock
 
-    fixture = ControllerFixture(cache_dir=tmp_path)
-    window = MainWindow(fixture.ctrl)
-    # ControllerFixture's view is a MagicMock; add the real MainWindow as well.
-    # MainWindow already bound its event coordinator to fixture.ctrl's bus.
-    yield fixture, window
+    from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
+    from zcu_tools.gui.app.main.app import _build_window, _make_empty_ctx
+    from zcu_tools.gui.app.main.registry import Registry
+    from zcu_tools.gui.app.main.role_catalog import RoleCatalog
+    from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.session.services.io_manager import IOManager
+
+    state = State(_make_empty_ctx())  # soc=None, no hardware
+    registry = Registry()
+    register_all(registry)
+    role_catalog = RoleCatalog()
+    register_all_roles(role_catalog)
+    io_manager = IOManager()
+    ctrl, window = _build_window(
+        state, registry, role_catalog, io_manager, project_root=str(tmp_path)
+    )
+    # Attach a no-op caretaker so MainWindow close does not assert (production
+    # attaches it in MeasureGuiBehavior.before_show, which we do not run here).
+    ctrl._caretaker = MagicMock()  # type: ignore[attr-defined]
+    ctrl._caretaker.flush = MagicMock()  # type: ignore[attr-defined]
+    window.show()
+    QApplication.processEvents()
+    QApplication.processEvents()
+    yield ctrl, window
     # Teardown: close window and quiesce background
     try:
-        window.close()
+        # Avoid triggering persist path that expects a real caretaker; just delete.
         window.deleteLater()
+        QApplication.processEvents()
         QApplication.processEvents()
     except Exception:
         pass
-    fixture.quiesce()
+    try:
+        ctrl._background_svc.quiesce()  # type: ignore[attr-defined]
+    except Exception:
+        try:
+            ctrl._app_services.background.quiesce()  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
 
 def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     """Shipped composition path: fake/freq opens without SoC and shows validated layouts."""
-    fixture, window = hw_fixture
-    ctrl = fixture.ctrl
+    ctrl, window = hw_fixture
 
     # Verify fake/freq is available and hardware-free
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
@@ -53,6 +75,9 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert "fake/freq" in ctrl.get_adapter_names()
 
     # Open tab via normal Controller path (not direct ExpTabWidget instantiation)
+    # This goes through the production TabAddedPayload -> MainWindow.add_tab_widget path,
+    # with MainWindow as the RenderHost (via ctrl.add_view(window) done in _build_window).
+    assert ctrl.get_exp_context().soc is None
     tab_id = ctrl.new_tab("fake/freq")
     QApplication.processEvents()
     QApplication.processEvents()
@@ -60,6 +85,9 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     # MainWindow should have created the ExpTabWidget via TabAddedPayload
     assert tab_id in window._tab_widgets
     tab = window._tab_widgets[tab_id]
+    # Controller's RenderHost should be the MainWindow, not a MagicMock
+    assert ctrl._render_host is window  # type: ignore[attr-defined]
+    assert window in ctrl._diag_sinks  # type: ignore[attr-defined]
 
     # A1: Run tree selected (shared adapter)
     from zcu_tools.gui.widgets.cfg import tree_structure
@@ -88,38 +116,20 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert tab.analyze_btn.parent() is tab._analysis_action_bar
     assert tab.analyze_form.font().pixelSize() == 13
     # Post-Analysis should remain baseline _CollapsibleSection (not ledger)
-    from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
-
     # fake/freq does not have post_analysis, so post widgets should not exist
     assert not hasattr(tab, "post_writeback_widget") or tab._has_post is False
 
     # Populate writeback via service projection (S2) and verify ledger columns
-    # Trigger an analyze to get a real draft with baseline summaries, then check widget
-    # For hardware-free we can run a fake analyze via controller
-    # Use the adapter's analyze path directly via service to avoid hardware
-    # Instead, manually create a draft via service to test display
     from zcu_tools.gui.app.main.adapter import MetaDictWriteback
-    from zcu_tools.gui.app.main.services.writeback import WritebackService
 
-    # Create a draft with a real context snapshot to get summaries
-    # Use the controller's writeback service
-    writeback_svc = (
-        ctrl._writeback_svc if hasattr(ctrl, "_writeback_svc") else ctrl._writeback
-    )
-    # The WritebackService is available as ctrl._writeback (check fixture)
-    # In ControllerFixture, ctrl._writeback is the service
-    svc = getattr(ctrl, "_writeback", None) or getattr(ctrl, "_writeback_svc", None)
-    # Fallback: get via app_services
-    if svc is None:
-        svc = ctrl._writeback  # type: ignore[attr-defined]
+    # Use the controller's writeback service to create a draft so summaries are
+    # captured in the service-owned model (not on the public WritebackItem).
+    svc = ctrl._writeback_svc  # type: ignore[attr-defined]
 
-    # Create a simple MetaDict item and get summaries via service
     md_item = MetaDictWriteback(
         target_name="r_f", description="freq", proposed_value=6100.0
     )
-    # Use the service to create draft so summaries are captured in service-owned model
     draft = svc.create_draft([md_item])
-    # The draft's item should be available via preview, but summaries are in service
     items = svc.preview_draft(draft)
     assert len(items) == 1
     session_id = items[0].session_id
@@ -127,12 +137,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert cur is not None
     assert prop is not None
     # Now set this draft as the tab's analysis draft (simulate analyze completion)
-    # Use State to set writeback draft
-    from zcu_tools.gui.app.main.state import State
-
-    # Directly update tab's analysis pane with the draft (simulate service record)
-    # Use controller's state
-    ctrl._state.update_tab_analyze(
+    ctrl._state.update_tab_analyze(  # type: ignore[attr-defined]
         tab_id,
         object(),
         None,
@@ -156,6 +161,5 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert len(checks) >= 1
 
     # Cleanup: teardown draft via state removal will be handled by fixture quiesce
-    # Remove tab to avoid leaking
     ctrl.close_tab(tab_id)
     QApplication.processEvents()
