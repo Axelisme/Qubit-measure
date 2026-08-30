@@ -621,3 +621,144 @@ def test_tree_shares_same_draft_binding_ref_identity(qapp, ctrl):
     ].value == pytest.approx(0.99)  # type: ignore[union-attr]
     w_form.detach()
     draft.close()
+
+
+def test_tree_outer_reenable_preserves_nested_reference_and_decoration_parity(
+    qapp, ctrl
+):
+    """Parity regression: re-enabling outer optional ref must not overwrite
+    nested optional (still disabled) or decoration-disabled child (S1/A4, form/tree A2 parity)."""
+    from zcu_tools.gui.widgets.cfg import FieldDecorationPatch
+
+    inner_shape = CfgSectionSpec(
+        label="InnerShape",
+        fields={"inner_leaf": ScalarSpec(label="InnerLeaf", type=int)},
+    )
+    inner_optional = ReferenceSpec(
+        kind="module", label="Inner", allowed=[inner_shape], optional=True
+    )
+    outer_shape = CfgSectionSpec(
+        label="OuterShape",
+        fields={
+            "inner_ref": inner_optional,
+            "deco_leaf": ScalarSpec(label="Deco", type=int),
+            "normal_leaf": ScalarSpec(label="Normal", type=int),
+        },
+    )
+    outer_optional = ReferenceSpec(
+        kind="module", label="Outer", allowed=[outer_shape], optional=True
+    )
+    root_spec = CfgSectionSpec(fields={"outer": outer_optional})
+    outer_shape_val = CfgSectionValue(
+        fields={
+            "deco_leaf": DirectValue(10),
+            "normal_leaf": DirectValue(20),
+        }
+    )
+    root_val = CfgSectionValue(
+        fields={
+            "outer": ReferenceValue(
+                chosen_key="<Custom:OuterShape>", value=outer_shape_val
+            ),
+        }
+    )
+    schema = CfgSchema(spec=root_spec, value=root_val)
+
+    class DecoProvider:
+        def decoration_for(self, path: str, spec: object, value: object):
+            del spec, value
+            if path == "outer.deco_leaf":
+                return FieldDecorationPatch(enabled=False, badge="deco")
+            return None
+
+    w = CfgFormWidget(structure=tree_structure, decoration_provider=DecoProvider())
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    w.attach(draft)
+    qapp.processEvents()
+    tree = cast(TreeCfgWidget, w._root_widget)._tree
+    outer_field = cast(ReferenceField, draft.root.fields["outer"])
+    assert outer_field.is_enabled is True
+    inner_field = cast(ReferenceField, outer_field.sub_field.fields["inner_ref"])  # type: ignore[union-attr]
+    assert inner_field.is_enabled is False
+
+    def find_item(path: str):
+        # Leaves are not in _path_to_item; search via UserRole data.
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+
+        stack = [tree.invisibleRootItem()]
+        while stack:
+            cur = stack.pop()
+            if cur is None:
+                continue
+            for idx in range(cur.childCount()):
+                ch = cur.child(idx)
+                if ch is None:
+                    continue
+                data = ch.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+                if data == path:
+                    return ch
+                stack.append(ch)
+        return None
+
+    def is_enabled(path: str) -> bool:
+        item = find_item(path)
+        assert item is not None, f"missing item {path!r}"
+        wg = tree.itemWidget(item, 1)
+        # item disabled mirrors decoration + ancestor gating; widget enabled same.
+        if wg is not None:
+            return not item.isDisabled() and wg.isEnabled()  # type: ignore[attr-defined]
+        return not item.isDisabled()  # type: ignore[attr-defined]
+
+    # Initial: inner leaf disabled (nested ref), deco leaf disabled (decoration), normal enabled, inner header enabled.
+    assert (
+        is_enabled("outer.inner_ref") is True
+    )  # header stays enabled so combo can re-select
+    assert is_enabled("outer.inner_ref.inner_leaf") is False
+    assert is_enabled("outer.deco_leaf") is False
+    assert is_enabled("outer.normal_leaf") is True
+
+    # Disable outer -> all descendants disabled.
+    outer_field.set_enabled(False)
+    qapp.processEvents()
+    assert outer_field.is_enabled is False
+    assert is_enabled("outer.inner_ref") is False
+    assert is_enabled("outer.inner_ref.inner_leaf") is False
+    assert is_enabled("outer.deco_leaf") is False
+    assert is_enabled("outer.normal_leaf") is False
+
+    # Re-enable outer -> inner leaf must stay disabled (nested optional still disabled),
+    # deco leaf must stay disabled (decoration), normal leaf must become enabled,
+    # and inner header must be re-enabled.
+    outer_field.set_enabled(True)
+    qapp.processEvents()
+    assert outer_field.is_enabled is True
+    assert inner_field.is_enabled is False  # still disabled
+    assert is_enabled("outer.inner_ref") is True
+    assert is_enabled("outer.inner_ref.inner_leaf") is False, (
+        "nested optional child was incorrectly re-enabled"
+    )
+    assert is_enabled("outer.deco_leaf") is False, (
+        "decoration-disabled child was incorrectly re-enabled"
+    )
+    assert is_enabled("outer.normal_leaf") is True
+
+    # Form parity: same draft sequence on form presentation keeps identical effective enabled.
+    w_form = CfgFormWidget(decoration_provider=DecoProvider())
+    draft2 = MeasureCfgBindings(ctrl).new_draft(schema)
+    w_form.attach(draft2)
+    qapp.processEvents()
+    outer2 = cast(ReferenceField, draft2.root.fields["outer"])
+    inner2 = cast(ReferenceField, outer2.sub_field.fields["inner_ref"])  # type: ignore[union-attr]
+    assert inner2.is_enabled is False
+    outer2.set_enabled(False)
+    qapp.processEvents()
+    outer2.set_enabled(True)
+    qapp.processEvents()
+    assert inner2.is_enabled is False
+    # decoration for deco leaf stays disabled, inner leaf effectively disabled via ancestor
+    assert w_form.decoration_for_path("outer.deco_leaf").enabled is False
+    assert w_form.decoration_for_path("outer.normal_leaf").enabled is True
+    w.detach()
+    draft.close()
+    w_form.detach()
+    draft2.close()
