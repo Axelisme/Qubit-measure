@@ -762,3 +762,146 @@ def test_tree_outer_reenable_preserves_nested_reference_and_decoration_parity(
     draft.close()
     w_form.detach()
     draft2.close()
+
+
+def test_tree_outer_reenable_preserves_decoration_disabled_container_parity(qapp, ctrl):
+    """Parity for decoration-disabled ancestor containers (Section/Reference).
+    Outer disable/re-enable must not re-enable children of a decoration-disabled
+    Section or non-optional Reference inside the outer shape."""
+    from zcu_tools.gui.widgets.cfg import FieldDecorationPatch
+
+    inner_section = CfgSectionSpec(
+        label="InnerSection", fields={"sec_leaf": ScalarSpec(label="SecLeaf", type=int)}
+    )
+    inner_ref_shape = CfgSectionSpec(
+        label="InnerRefShape",
+        fields={"ref_leaf": ScalarSpec(label="RefLeaf", type=int)},
+    )
+    inner_ref = ReferenceSpec(
+        kind="module", label="InnerRef", allowed=[inner_ref_shape], optional=False
+    )
+    outer_shape = CfgSectionSpec(
+        label="OuterShape",
+        fields={
+            "inner_section": inner_section,
+            "inner_ref": inner_ref,
+            "normal_leaf": ScalarSpec(label="Normal", type=int),
+        },
+    )
+    outer_optional = ReferenceSpec(
+        kind="module", label="Outer", allowed=[outer_shape], optional=True
+    )
+    root_spec = CfgSectionSpec(fields={"outer": outer_optional})
+    outer_shape_val = CfgSectionValue(
+        fields={
+            "inner_section": CfgSectionValue(fields={"sec_leaf": DirectValue(7)}),
+            "inner_ref": ReferenceValue(
+                chosen_key="<Custom:InnerRefShape>",
+                value=CfgSectionValue(fields={"ref_leaf": DirectValue(5)}),
+            ),
+            "normal_leaf": DirectValue(1),
+        }
+    )
+    root_val = CfgSectionValue(
+        fields={
+            "outer": ReferenceValue(
+                chosen_key="<Custom:OuterShape>", value=outer_shape_val
+            )
+        }
+    )
+    schema = CfgSchema(spec=root_spec, value=root_val)
+
+    class ContainerDecoProvider:
+        def decoration_for(self, path: str, spec: object, value: object):
+            del spec, value
+            if path in ("outer.inner_section", "outer.inner_ref"):
+                return FieldDecorationPatch(enabled=False, badge="disabled")
+            return None
+
+    w = CfgFormWidget(
+        structure=tree_structure, decoration_provider=ContainerDecoProvider()
+    )
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    w.attach(draft)
+    qapp.processEvents()
+    tree = cast(TreeCfgWidget, w._root_widget)._tree
+    outer_field = cast(ReferenceField, draft.root.fields["outer"])
+
+    def find_item(path: str):
+        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+
+        stack = [tree.invisibleRootItem()]
+        while stack:
+            cur = stack.pop()
+            if cur is None:
+                continue
+            for idx in range(cur.childCount()):
+                ch = cur.child(idx)
+                if ch is None:
+                    continue
+                data = ch.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+                if data == path:
+                    return ch
+                stack.append(ch)
+        return None
+
+    def is_enabled(path: str) -> bool:
+        item = find_item(path)
+        assert item is not None, f"missing item {path!r}"
+        wg = tree.itemWidget(item, 1)
+        if wg is not None:
+            return not item.isDisabled() and wg.isEnabled()  # type: ignore[attr-defined]
+        return not item.isDisabled()  # type: ignore[attr-defined]
+
+    # Initially the decoration-disabled containers and their children must be disabled.
+    assert is_enabled("outer.inner_section") is False
+    assert is_enabled("outer.inner_section.sec_leaf") is False
+    assert is_enabled("outer.inner_ref") is False
+    assert is_enabled("outer.inner_ref.ref_leaf") is False
+    assert is_enabled("outer.normal_leaf") is True
+
+    outer_field.set_enabled(False)
+    qapp.processEvents()
+    assert is_enabled("outer.inner_section") is False
+    assert is_enabled("outer.inner_section.sec_leaf") is False
+    assert is_enabled("outer.inner_ref") is False
+    assert is_enabled("outer.inner_ref.ref_leaf") is False
+    assert is_enabled("outer.normal_leaf") is False
+
+    outer_field.set_enabled(True)
+    qapp.processEvents()
+    # Re-enabling outer must NOT re-enable children of decoration-disabled containers.
+    assert is_enabled("outer.inner_section") is False, (
+        "decoration-disabled Section was incorrectly re-enabled"
+    )
+    assert is_enabled("outer.inner_section.sec_leaf") is False, (
+        "child of decoration-disabled Section was incorrectly re-enabled"
+    )
+    assert is_enabled("outer.inner_ref") is False, (
+        "decoration-disabled Reference was incorrectly re-enabled"
+    )
+    assert is_enabled("outer.inner_ref.ref_leaf") is False, (
+        "child of decoration-disabled Reference was incorrectly re-enabled"
+    )
+    assert is_enabled("outer.normal_leaf") is True
+
+    # Form parity: same provider keeps containers disabled after same sequence.
+    w_form = CfgFormWidget(decoration_provider=ContainerDecoProvider())
+    draft2 = MeasureCfgBindings(ctrl).new_draft(schema)
+    w_form.attach(draft2)
+    qapp.processEvents()
+    assert w_form.decoration_for_path("outer.inner_section").enabled is False
+    assert w_form.decoration_for_path("outer.inner_ref").enabled is False
+    assert w_form.decoration_for_path("outer.inner_section.sec_leaf").enabled is True
+    assert w_form.decoration_for_path("outer.inner_ref.ref_leaf").enabled is True
+    outer2 = cast(ReferenceField, draft2.root.fields["outer"])
+    outer2.set_enabled(False)
+    qapp.processEvents()
+    outer2.set_enabled(True)
+    qapp.processEvents()
+    assert w_form.decoration_for_path("outer.inner_section").enabled is False
+    assert w_form.decoration_for_path("outer.inner_ref").enabled is False
+    w.detach()
+    draft.close()
+    w_form.detach()
+    draft2.close()

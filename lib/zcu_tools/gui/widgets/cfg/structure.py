@@ -653,9 +653,11 @@ class TreeCfgWidget(QWidget):
             ) -> None:
                 # Re-enable must not overwrite descendant local authorities:
                 # nested optional references that remain disabled and
-                # decoration-disabled children stay disabled (S1/A4, form/tree A2 parity).
-                # Compute effective enabled per descendant from decoration projection
-                # plus ancestor optional-reference gating (strict ancestors; keep nested header enabled).
+                # decoration-disabled containers/children stay disabled
+                # (S1/A4, form/tree A2 parity). Compute inherited
+                # effective-enabled from decoration projection plus
+                # ancestor optional-reference gating, keeping the
+                # nested optional header itself enabled for re-selection.
                 ref_item = self._path_to_item.get(path)
                 if ref_item is None:
                     return
@@ -671,8 +673,12 @@ class TreeCfgWidget(QWidget):
                         desc_path = (
                             desc_path_obj if isinstance(desc_path_obj, str) else ""
                         )
-                        # decoration projection for this path
-                        decoration_enabled = True
+                        # Compute inherited effective-enabled for this descendant:
+                        # own decoration plus every strict ancestor's decoration
+                        # and optional-reference gating. The descendant's own
+                        # optional is_enabled does NOT disable its header.
+                        effective = True
+                        # Own decoration
                         if desc_path:
                             desc_field = self._find_field_for_path(desc_path)
                             if desc_field is not None:
@@ -685,25 +691,37 @@ class TreeCfgWidget(QWidget):
                                     except Exception:
                                         dec = None
                                 if dec is not None and not dec.enabled:
-                                    decoration_enabled = False
-                        else:
-                            # group synthetic or no path: no decoration gating
-                            decoration_enabled = True
-                        # ancestor optional-reference gating (strict ancestors only)
-                        ancestor_disabled = False
-                        if desc_path and "." in desc_path:
+                                    effective = False
+                        # Strict ancestors: decoration gate + optional-reference gate
+                        if effective and desc_path and "." in desc_path:
                             parts = desc_path.split(".")
                             for i in range(1, len(parts)):
                                 anc = ".".join(parts[:i])
-                                anc_field = self._find_reference_field(anc)
+                                anc_field = self._find_field_for_path(anc)
+                                if anc_field is None:
+                                    # Synthetic group header has no field; its
+                                    # ancestors are still checked in other iterations.
+                                    continue
+                                # Decoration gate for ancestor container (Section/Reference)
+                                anc_dec = None
+                                if self._context.decoration_for_path is not None:
+                                    try:
+                                        anc_dec = self._context.decoration_for_path(
+                                            anc, anc_field
+                                        )  # type: ignore[arg-type]
+                                    except Exception:
+                                        anc_dec = None
+                                if anc_dec is not None and not anc_dec.enabled:
+                                    effective = False
+                                    break
+                                # Optional-reference gate for ancestors only
                                 if (
-                                    anc_field is not None
+                                    isinstance(anc_field, ReferenceField)
                                     and anc_field.spec.optional
                                     and not anc_field.is_enabled
                                 ):
-                                    ancestor_disabled = True
+                                    effective = False
                                     break
-                        effective = decoration_enabled and not ancestor_disabled
                         ch.setDisabled(not effective)
                         w = self._tree.itemWidget(ch, 1)
                         if w is not None:
