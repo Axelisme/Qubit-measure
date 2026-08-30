@@ -300,8 +300,8 @@ class ArtifactSaveCenter(QWidget):
             bottom_layout.addWidget(self.save_all_button, stretch=1)
             self.load_button.hide()
 
-        outer.addWidget(bottom)
         outer.addStretch()
+        outer.addWidget(bottom)
 
         # Internal comment edit is created in _build_row for DATA
         self._comment_edit: QTextEdit  # assigned in row construction
@@ -367,6 +367,10 @@ class ArtifactSaveCenter(QWidget):
             comment = QTextEdit()
             comment.setPlaceholderText("Optional comment…")
             comment.setFixedHeight(60)
+            comment.setSizePolicy(
+                QSizePolicy.Expanding,  # type: ignore[attr-defined]
+                QSizePolicy.Fixed,  # type: ignore[attr-defined]
+            )
             layout.addWidget(comment)
             self._comment_edit = comment
 
