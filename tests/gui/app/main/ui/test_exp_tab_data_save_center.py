@@ -371,7 +371,7 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
     tab.attach(snap_none, MagicMock())
     center = tab._save_center
     for kind in center.artifact_kinds:
-        assert "NO RESULT" in center.status_text(kind)
+        assert center.status_text(kind) == "— NO RESULT"
         assert center.is_save_enabled(kind) is False
         assert center.is_path_enabled(kind) is True
     snap_run = _snapshot(
@@ -384,9 +384,9 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
         load_cap=False,
     )
     tab.update_interaction_state(snap_run)
-    assert "NOT SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     assert center.is_save_enabled(ArtifactKind.DATA) is True
-    assert "NO RESULT" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "— NO RESULT"
     assert center.is_save_enabled(ArtifactKind.ANALYSIS) is False
     snap_ana = _snapshot(
         "tab-1",
@@ -398,9 +398,9 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
         load_cap=False,
     )
     tab.update_interaction_state(snap_ana)
-    assert "NOT SAVED" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     assert center.is_save_enabled(ArtifactKind.ANALYSIS) is True
-    assert "NO RESULT" in center.status_text(ArtifactKind.POST_ANALYSIS)
+    assert center.status_text(ArtifactKind.POST_ANALYSIS) == "— NO RESULT"
     tab.deleteLater()
     QApplication.instance().processEvents()
 
@@ -422,22 +422,22 @@ def test_status_transitions_path_comment_and_result(exp_tab_factory):
     )
     tab.attach(snap, MagicMock())
     center = tab._save_center
-    assert "NOT SAVED" in center.status_text(ArtifactKind.DATA)
-    assert "NOT SAVED" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    assert center.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     center.notify_save_succeeded(ArtifactKind.ANALYSIS)
-    assert "SAVED" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "✓ SAVED"
     center.set_analysis_path("/tmp/new.png")
-    assert "UNSAVED CHANGES" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "● UNSAVED CHANGES"
     center.notify_save_succeeded(ArtifactKind.ANALYSIS)
-    assert "SAVED" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "✓ SAVED"
     center.notify_save_succeeded(ArtifactKind.DATA)
-    assert "SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
     center.set_data_path("/tmp/other.h5")
-    assert "UNSAVED CHANGES" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     center.notify_save_succeeded(ArtifactKind.DATA)
-    assert "SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
     center.set_comment_text("new comment")
-    assert "UNSAVED CHANGES" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     snap2 = _snapshot(
         "tab-1",
         has_run=True,
@@ -506,13 +506,13 @@ def test_individual_image_save_success_and_failure(exp_tab_factory):
     tab.attach(snap, MagicMock())
     center = tab._save_center
     center.notify_save_succeeded(ArtifactKind.ANALYSIS)
-    assert "SAVED" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "✓ SAVED"
     center.notify_save_failed(ArtifactKind.ANALYSIS)
-    assert "SAVED" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "✓ SAVED"
     center.set_analysis_path("/tmp/unsaved.png")
-    assert "UNSAVED CHANGES" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "● UNSAVED CHANGES"
     center.notify_save_failed(ArtifactKind.ANALYSIS)
-    assert "UNSAVED CHANGES" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "● UNSAVED CHANGES"
     tab2 = exp_tab_factory("tab-2", ctrl, caps)
     snap2 = _snapshot(
         "tab-2",
@@ -524,9 +524,9 @@ def test_individual_image_save_success_and_failure(exp_tab_factory):
     )
     tab2.attach(snap2, MagicMock())
     c2 = tab2._save_center
-    assert "NOT SAVED" in c2.status_text(ArtifactKind.ANALYSIS)
+    assert c2.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     c2.notify_save_failed(ArtifactKind.ANALYSIS)
-    assert "NOT SAVED" in c2.status_text(ArtifactKind.ANALYSIS)
+    assert c2.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     tab.deleteLater()
     tab2.deleteLater()
     QApplication.instance().processEvents()
@@ -549,22 +549,22 @@ def test_data_async_success_failure_and_drift(exp_tab_factory):
     )
     tab.attach(snap, MagicMock())
     center = tab._save_center
-    assert "NOT SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     center.notify_save_started(ArtifactKind.DATA)
-    assert "NOT SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     center.handle_data_finished(None)
-    assert "SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
     center.notify_save_started(ArtifactKind.DATA)
     center.set_data_path("/tmp/drift.h5")
-    assert "UNSAVED CHANGES" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     center.handle_data_finished(None)
-    assert "UNSAVED CHANGES" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
     tab2 = exp_tab_factory("tab-2", ctrl, caps)
     tab2.attach(snap, MagicMock())
     c2 = tab2._save_center
     c2.notify_save_started(ArtifactKind.DATA)
     c2.handle_data_finished("disk full")
-    assert "NOT SAVED" in c2.status_text(ArtifactKind.DATA)
+    assert c2.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
 
 
 # ---------------------------------------------------------------------------
@@ -688,30 +688,25 @@ def test_save_all_fast_fail_and_no_rollback(qapp, monkeypatch):
     ctrl.save_image = MagicMock(return_value="/tmp/a.png")
     ctrl.save_post_image = MagicMock(side_effect=RuntimeError("disk full"))
     ctrl.save_data = MagicMock(return_value="/tmp/d.h5")
-    assert "NOT SAVED" in tab._save_center.status_text(ArtifactKind.ANALYSIS)
+    assert tab._save_center.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     window._on_save_all_clicked("tab-1")
-    assert "SAVED" in tab._save_center.status_text(ArtifactKind.ANALYSIS)
-    assert "NOT SAVED" in tab._save_center.status_text(ArtifactKind.POST_ANALYSIS)
-    assert "NOT SAVED" in tab._save_center.status_text(ArtifactKind.DATA)
+    assert tab._save_center.status_text(ArtifactKind.ANALYSIS) == "✓ SAVED"
+    assert tab._save_center.status_text(ArtifactKind.POST_ANALYSIS) == "○ NOT SAVED"
+    assert tab._save_center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     assert ctrl.save_data.call_count == 0
 
     ctrl.save_post_image.side_effect = None
     ctrl.save_post_image.return_value = "/tmp/p.png"
     ctrl.save_data.return_value = "/tmp/d.h5"
-    tab._save_center.notify_save_succeeded(ArtifactKind.ANALYSIS)
     window._on_save_all_clicked("tab-1")
-    assert (
-        "NOT SAVED" in tab._save_center.status_text(ArtifactKind.DATA)
-        or "UNSAVED" in tab._save_center.status_text(ArtifactKind.DATA)
-        or "SAVED" not in tab._save_center.status_text(ArtifactKind.DATA)
-    )
+    assert tab._save_center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     payload_fail = SaveDataFinishedPayload(
         tab_id="tab-1", data_path="/tmp/d.h5", error="fail"
     )
     window.handle_save_data_finished(payload_fail)
-    assert "SAVED" in tab._save_center.status_text(ArtifactKind.ANALYSIS)
-    assert "SAVED" in tab._save_center.status_text(ArtifactKind.POST_ANALYSIS)
-    assert "NOT SAVED" in tab._save_center.status_text(ArtifactKind.DATA)
+    assert tab._save_center.status_text(ArtifactKind.ANALYSIS) == "✓ SAVED"
+    assert tab._save_center.status_text(ArtifactKind.POST_ANALYSIS) == "✓ SAVED"
+    assert tab._save_center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     window.deleteLater()
     tab.deleteLater()
     qapp.processEvents()
@@ -847,7 +842,7 @@ def test_unmatched_remote_save_completion_does_not_mark_gui_sig_as_saved(
     tab._save_center.set_comment_text("gui")
     tab.update_interaction_state(snap)
     center = tab._save_center
-    assert "NOT SAVED" in center.status_text(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
     assert center.get_data_path() == "/gui.h5"
     assert center.get_comment() == "gui"
 
@@ -929,7 +924,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     tab.attach(snap_no_fig, MagicMock())
     center = tab._save_center
     # Status still reflects result lifecycle (NOT SAVED), but save disabled
-    assert "NOT SAVED" in center.status_text(ArtifactKind.ANALYSIS)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
     assert center.is_save_enabled(ArtifactKind.ANALYSIS) is False
     assert center.is_save_all_enabled() is False
     # With figure, enabled
