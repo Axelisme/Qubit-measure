@@ -16,6 +16,15 @@ from .registry import (
     TextInputEnhancer,
     default_cfg_renderers,
 )
+from .structure import (
+    TREE_DEPTH_COLORS,
+    FormStructure,
+    StructuralAdapter,
+    TreeCfgWidget,
+    TreeStructure,
+    form_structure,
+    tree_structure,
+)
 
 __all__ = [
     "CfgFormWidget",
@@ -25,9 +34,16 @@ __all__ = [
     "FieldRenderContext",
     "FieldRenderer",
     "FieldRendererRegistry",
+    "FormStructure",
     "FrozenFieldRendererRegistry",
+    "StructuralAdapter",
+    "TREE_DEPTH_COLORS",
     "Tone",
     "TextInputEnhancer",
+    "TreeCfgWidget",
+    "TreeStructure",
     "default_cfg_renderers",
     "default_decoration_for_spec",
+    "form_structure",
+    "tree_structure",
 ]

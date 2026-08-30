@@ -51,6 +51,13 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue
 
+    from .structure import StructuralAdapter
+else:
+    try:
+        from .structure import StructuralAdapter  # type: ignore[no-redef, assignment]
+    except Exception:  # pragma: no cover - import cycle guard
+        StructuralAdapter = object  # type: ignore[misc, assignment]
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,6 +81,7 @@ class CfgFormWidget(QWidget):
         decoration_provider: FieldDecorationProvider | None = None,
         text_input_enhancer: TextInputEnhancer | None = None,
         renderers: FrozenFieldRendererRegistry | None = None,
+        structure: StructuralAdapter | None = None,
     ) -> None:
         super().__init__(parent)
         self._draft: CfgDraft | None = None
@@ -82,6 +90,7 @@ class CfgFormWidget(QWidget):
         self._decoration_provider = decoration_provider
         self._text_input_enhancer = text_input_enhancer
         self._renderers = default_cfg_renderers() if renderers is None else renderers
+        self._structure: StructuralAdapter | None = structure
         self._field_decorations: dict[str, FieldDecoration] = {}
         self._choice_state: tuple[tuple[str, str], ...] = ()
         self._schema_snapshot_pending = False
@@ -121,7 +130,10 @@ class CfgFormWidget(QWidget):
             text_input_enhancer=self._text_input_enhancer,
         )
         try:
-            root = self._renderers.render(draft.root, context)
+            if self._structure is None:
+                root = self._renderers.render(draft.root, context)
+            else:
+                root = self._structure.create_root(draft.root, context)
         except Exception:
             self._field_decorations = {}
             self._choice_state = ()

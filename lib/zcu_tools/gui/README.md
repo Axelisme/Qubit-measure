@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-12（owner-loop execution and Qt UI adapters）
+**Last updated:** 2026-08-31（shared cfg tree presentation — structural adapter, depth/connectors/elision）
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -196,6 +196,25 @@ generated Default cfg fields from its `OverridePlan`。measure則以generic
 
 Normal `LiteralSpec` rows remain hidden, but a decoration may explicitly unhide a
 literal when an app needs to show a generated read-only value in the form.
+
+`CfgFormWidget` accepts an optional `structure: StructuralAdapter` that selects
+structural presentation (S1). `FormStructure` (the `None` default) renders the
+existing validated form; `TreeStructure` renders the dense tree per
+`spec/spec.md` (S2). Both adapters attach the same caller-owned `CfgDraft`;
+tree folding, depth presentation, root alignment, connectors, and reference
+shape-row elision are view-only and do not alter cfg paths, reference
+identity, validation, persistence, or lowering. The tree hides `Property` /
+`Value` headers, uses 13 px field text, shows the root row at indentation 0
+and descendants at 10 px with classic vertical/horizontal connectors without
+triangles via a `QProxyStyle`, supports whole-row folding (click any row that
+has children), cycles five depth background colors `#e2ebf6`, `#e3f0e6`,
+`#f4e9d2`, `#eadff1`, `#dceeee` (repeating after the fifth), colors each
+foldable node row at its displayed depth (only its children advance), and
+elides the guaranteed single materialized reference-shape row. Editor behavior
+remains owned by the six exact `FieldRenderer` factories via the same frozen
+`FrozenFieldRendererRegistry`; the tree varies only structural node
+composition. The seam's executable owner is `zcu_tools.gui.widgets.cfg` and its
+durable declaration owner is this section.
 
 ## EventBus Lifecycle
 
