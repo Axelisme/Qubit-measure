@@ -28,13 +28,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    ChoiceSectionSpec,
-    DirectValue,
-    LiteralSpec,
-    ReferenceSpec,
-)
+from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceSpec
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
     CfgField,
@@ -43,8 +37,19 @@ from zcu_tools.gui.cfg.binding import (
     SectionField,
     SweepField,
 )
-from zcu_tools.gui.cfg.reference_key import make_custom_reference_key
 
+from .fields.reference_shared import (
+    apply_reference_validity,
+    handle_reference_combo_change,
+    refresh_missing_hint,
+    refresh_reference_combo,
+)
+from .presentation import (
+    apply_tree_item_decoration,
+    choice_visible_keys,
+    decorated_label,
+    is_hidden,
+)
 from .registry import FieldRenderContext, FieldWidgetProtocol
 
 logger = logging.getLogger(__name__)
@@ -96,133 +101,65 @@ class _TreeBranchStyle(QProxyStyle):
         painter.restore()
 
 
-def _choice_visible_keys(field: SectionField) -> set[str] | None:
-    spec = field.spec
-    if not isinstance(spec, ChoiceSectionSpec):
-        return None
-    visible = set(spec.fields)
-    for binding in spec.bindings:
-        selector = field.fields.get(binding.selector_key)
-        value = selector.get_value() if selector is not None else None
-        choice = str(value.value) if isinstance(value, DirectValue) else ""
-        try:
-            active_spec = binding.choices[choice]
-        except KeyError as exc:
-            expected = ", ".join(sorted(binding.choices))
-            raise ValueError(
-                f"ChoiceSectionSpec selector {binding.selector_key!r} has unknown "
-                f"value {choice!r}; expected one of: {expected}"
-            ) from exc
-        active = set(active_spec.fields)
-        visible -= binding.controlled_field_keys() - active
-    return visible
-
-
-def _decorated_label(label: str, decoration: object | None) -> str:
-    # decoration is FieldDecorationProtocol | None; avoid tight import.
-    if decoration is None:
-        return label
-    badge = getattr(decoration, "badge", "") or ""
-    suffix = getattr(decoration, "label_suffix", "") or ""
-    text = f"{label}{suffix}"
-    if badge:
-        return f"{text} [{badge}]"
-    return text
-
-
-def _is_hidden(field: CfgField, path: str, context: FieldRenderContext) -> bool:
-    decoration = None
-    resolver = context.decoration_for_path
-    if resolver is not None:
-        try:
-            decoration = resolver(path, field)
-        except Exception:
-            logger.debug("decoration resolver failed for %r", path, exc_info=True)
-            decoration = None
-    if isinstance(field.spec, LiteralSpec):
-        # Literal rows are hidden by default unless decoration explicitly unhides.
-        if decoration is None:
-            return True
-        return bool(getattr(decoration, "hidden", False))
-    if decoration is not None:
-        return bool(getattr(decoration, "hidden", False))
-    return False
+# choice_visible_keys, is_hidden, decorated_label now imported from presentation (single source)
 
 
 class _TreeReferenceHeader(QWidget):
-    """Combo header for a reference row in the tree."""
-
-    _NONE_KEY = "<None>"
+    """Reference header for the tree (shares exact editor authority with form)."""
 
     def __init__(self, field: ReferenceField, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._field = field
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(4)
-
+        layout.setSpacing(2)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(4)
         self._combo = QComboBox()
-        self._refresh_combo_items()
         self._combo.setMinimumWidth(20)
+        header_row.addWidget(self._combo, stretch=1)
+        layout.addLayout(header_row)
+        self._missing_hint = QLabel()
+        self._missing_hint.setObjectName("missingRefHint")
+        self._missing_hint.setStyleSheet("color: #b00020; font-size: 11px;")
+        self._missing_hint.setVisible(False)
+        layout.addWidget(self._missing_hint)
+        # Use shared helpers for combo population / hint / validity
+        refresh_reference_combo(self._combo, field)
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
-        layout.addWidget(self._combo, stretch=1)
-
         field.on_change.connect(self._on_model_changed)
+        field.on_validity_changed.connect(self._on_validity_changed)  # type: ignore[attr-defined]
         if field.spec.optional:
             field.on_enabled_changed.connect(self._on_enabled_changed)  # type: ignore[attr-defined]
+        self._on_validity_changed(field.is_valid())
+        refresh_missing_hint(self._missing_hint, field)
 
     def _refresh_combo_items(self) -> None:
-        self._combo.blockSignals(True)
-        self._combo.clear()
-        field = self._field
-        current = field.get_chosen_key()
-        if field.spec.optional:
-            self._combo.addItem("None", self._NONE_KEY)
-            self._combo.insertSeparator(self._combo.count())
-        for spec in field.spec.allowed:
-            label = spec.label or "Custom"
-            key = make_custom_reference_key(label)
-            self._combo.addItem(label, key)
-        compatible = field.available_keys()
-        if compatible:
-            self._combo.insertSeparator(self._combo.count())
-            for name in compatible:
-                if name == current and field.is_modified():  # type: ignore[attr-defined]
-                    self._combo.addItem(f"Lib: {name} (modified)", name)
-                    self._combo.addItem(f"Revert to Lib: {name}", name)
-                else:
-                    self._combo.addItem(f"Lib: {name}", name)
-        if field.spec.optional and not field.is_enabled:  # type: ignore[attr-defined]
-            self._combo.setCurrentIndex(0)
-        else:
-            idx = self._combo.findData(current)
-            if idx < 0 and field.has_missing_library_ref():  # type: ignore[attr-defined]
-                self._combo.addItem(f"Missing: {current}", current)
-                idx = self._combo.findData(current)
-            if idx >= 0:
-                self._combo.setCurrentIndex(idx)
-        self._combo.blockSignals(False)
+        refresh_reference_combo(self._combo, self._field)
 
     def _on_combo_changed(self, index: int) -> None:
-        key = self._combo.itemData(index)
-        field = self._field
-        if key == self._NONE_KEY:
-            field.set_enabled(False)  # type: ignore[attr-defined]
-            return
-        if field.spec.optional and not field.is_enabled:  # type: ignore[attr-defined]
-            field.set_enabled(True)  # type: ignore[attr-defined]
-        field.set_chosen_key(key)
+        handle_reference_combo_change(self._field, self._combo.itemData(index))
 
     def _on_model_changed(self, *_: object) -> None:
         self._refresh_combo_items()
+        refresh_missing_hint(self._missing_hint, self._field)
 
     def _on_enabled_changed(self, *_: object) -> None:
         self._refresh_combo_items()
+
+    def _on_validity_changed(self, valid: bool) -> None:
+        apply_reference_validity(self._combo, None, self._field, valid)
+        refresh_missing_hint(self._missing_hint, self._field)
 
     def teardown(self) -> None:
         field = self._field
         try:
             field.on_change.disconnect(self._on_model_changed)
+        except Exception:
+            pass
+        try:
+            field.on_validity_changed.disconnect(self._on_validity_changed)  # type: ignore[attr-defined]
         except Exception:
             pass
         if field.spec.optional:
@@ -281,8 +218,10 @@ class TreeCfgWidget(QWidget):
         self._path_to_item: dict[str, QTreeWidgetItem] = {}
         self._item_depth: dict[int, int] = {}  # id(item) -> depth
         self._leaf_widgets: list[FieldWidgetProtocol] = []
+        self._leaf_path_to_widget: dict[str, FieldWidgetProtocol] = {}
         self._ref_headers: list[_TreeReferenceHeader] = []
         self._ref_connections: list[tuple[ReferenceField, object]] = []
+        self._ref_prev_state: dict[str, tuple[str, int | None, str | None]] = {}
         self._expanded_state: dict[str, bool] = {}
 
         self._tree.itemClicked.connect(self._on_item_clicked)
@@ -316,7 +255,9 @@ class TreeCfgWidget(QWidget):
             except Exception:
                 pass
         self._leaf_widgets.clear()
+        self._leaf_path_to_widget.clear()
         self._tree.clear()
+        self._ref_prev_state.clear()
 
     def refresh_section(self, path: str) -> bool:
         # Normalize dotted path handling similar to SectionWidget.
@@ -421,8 +362,10 @@ class TreeCfgWidget(QWidget):
             except Exception:
                 pass
         self._leaf_widgets.clear()
+        self._leaf_path_to_widget.clear()
         self._path_to_item.clear()
         self._item_depth.clear()
+        self._ref_prev_state.clear()
         self._tree.clear()
 
         # Decide if root header should be shown.
@@ -460,6 +403,100 @@ class TreeCfgWidget(QWidget):
                 self._path,
                 depth=0,
             )
+        # Re-populate ref prev state for all references after full rebuild
+        # (handled incrementally in _create_item_for_field for new refs)
+
+    def _rebuild_reference_children(self, path: str) -> None:
+        item = self._path_to_item.get(path)
+        if item is None:
+            self._rebuild_tree()
+            return
+        # Preserve expanded state of the reference itself
+        depth = self._item_depth.get(id(item), 0)
+        # Find the ReferenceField for this path
+        field = self._find_reference_field(path)
+        if field is None or field.sub_field is None:
+            # No shape – clear children and teardown leaf widgets under this reference
+            to_remove_empty = [
+                p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
+            ]
+            for p in to_remove_empty:
+                widget = self._leaf_path_to_widget.pop(p, None)
+                if widget is not None:
+                    try:
+                        widget.teardown()
+                    except Exception:
+                        pass
+                    try:
+                        self._leaf_widgets.remove(widget)
+                    except ValueError:
+                        pass
+                    cast(QWidget, widget).deleteLater()
+                self._path_to_item.pop(p, None)
+            while item.childCount():
+                item.takeChild(0)
+            return
+        # Tear down existing children widgets under this reference
+        to_remove = [
+            p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
+        ]
+        # Teardown leaf widgets whose path is under this reference
+        for p in to_remove:
+            widget = self._leaf_path_to_widget.pop(p, None)
+            if widget is not None:
+                try:
+                    widget.teardown()
+                except Exception:
+                    pass
+                try:
+                    self._leaf_widgets.remove(widget)
+                except ValueError:
+                    pass
+                cast(QWidget, widget).deleteLater()
+            self._path_to_item.pop(p, None)
+        # Clean up item depth entries for removed paths (best effort)
+        # Remove all children from the reference item
+        while item.childCount():
+            item.takeChild(0)
+        # Re-add children for the new shape
+        self._add_section_children(item, field.sub_field, path, depth + 1)
+
+    def _find_reference_field(self, path: str) -> ReferenceField | None:
+        # Walk from root to locate ReferenceField at ``path``
+        if not path:
+            return None
+        parts = path.split(".") if path else []
+        cur: CfgField = self._field
+        # Strip root prefix if needed
+        remaining = path
+        if self._path:
+            if not path.startswith(self._path):
+                return None
+            if path == self._path:
+                return None
+            remaining = path.removeprefix(self._path + ".")
+            parts = remaining.split(".") if remaining else []
+        for i, part in enumerate(parts):
+            if isinstance(cur, SectionField):
+                nxt = cur.fields.get(part)
+                if nxt is None:
+                    return None
+                if i == len(parts) - 1:
+                    return nxt if isinstance(nxt, ReferenceField) else None
+                cur = nxt
+            elif isinstance(cur, ReferenceField):
+                sub = cur.sub_field
+                if sub is None:
+                    return None
+                nxt = sub.fields.get(part)
+                if nxt is None:
+                    return None
+                if i == len(parts) - 1:
+                    return nxt if isinstance(nxt, ReferenceField) else None
+                cur = nxt
+            else:
+                return None
+        return None
 
     def _add_section_children(
         self,
@@ -468,7 +505,7 @@ class TreeCfgWidget(QWidget):
         path_prefix: str,
         depth: int,
     ) -> None:
-        visible = _choice_visible_keys(section_field)
+        visible = choice_visible_keys(section_field)
         # Group handling: collect grouped field entries to render under a collapsible group item.
         grouped: dict[str, list[tuple[str, str, CfgField]]] = {}
         # First pass: gather hidden/visible without creating items for hidden.
@@ -480,7 +517,7 @@ class TreeCfgWidget(QWidget):
             if visible is not None and key not in visible:
                 continue
             child_path = f"{path_prefix}.{key}" if path_prefix else key
-            if _is_hidden(child_field, child_path, self._context):
+            if is_hidden(child_path, child_field, self._context):
                 continue
             group = getattr(child_field.spec, "group", "") or ""
             entries.append((key, child_path, child_field, group))
@@ -505,6 +542,13 @@ class TreeCfgWidget(QWidget):
             font.setPixelSize(_TREE_FONT_SIZE_PX)
             group_item.setFont(0, font)
             self._set_depth_background(group_item, depth)
+            # Propagate disabled from parent section if any (ignore invisible root)
+            if (
+                isinstance(parent_item, QTreeWidgetItem)
+                and parent_item is not self._tree.invisibleRootItem()
+                and parent_item.isDisabled()
+            ):
+                group_item.setDisabled(True)
             # Collapsed by default per spec (Advanced group).
             group_item.setExpanded(self._expanded_state.get(group_path, False))
             self._path_to_item[group_path] = group_item
@@ -522,12 +566,16 @@ class TreeCfgWidget(QWidget):
         child_path: str,
         depth: int,
     ) -> None:
+        # Resolve decoration once for this path/field
+        dec = None
+        if self._context.decoration_for_path is not None:
+            try:
+                dec = self._context.decoration_for_path(child_path, child_field)  # type: ignore[arg-type]
+            except Exception:
+                dec = None
         # Section
         if isinstance(child_field, SectionField):
-            label = _decorated_label(
-                child_field.spec.label or key,
-                self._resolve_decoration(child_path, child_field),
-            )
+            label = decorated_label(child_field, key, child_path, self._context)
             item = QTreeWidgetItem(parent_item, (label, ""))  # type: ignore[arg-type]
             item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
             font = item.font(0)
@@ -535,6 +583,14 @@ class TreeCfgWidget(QWidget):
             font.setPixelSize(_TREE_FONT_SIZE_PX)
             item.setFont(0, font)
             self._set_depth_background(item, depth)
+            apply_tree_item_decoration(item, None, dec)
+            # Propagate disabled from parent (ignore invisible root)
+            if (
+                isinstance(parent_item, QTreeWidgetItem)
+                and parent_item is not self._tree.invisibleRootItem()
+                and parent_item.isDisabled()
+            ):
+                item.setDisabled(True)
             self._path_to_item[child_path] = item
             self._item_depth[id(item)] = depth
             item.setExpanded(self._expanded_state.get(child_path, True))
@@ -543,9 +599,7 @@ class TreeCfgWidget(QWidget):
         # Reference
         if isinstance(child_field, ReferenceField):
             spec = child_field.spec  # type: ignore[attr-defined]
-            label = _decorated_label(
-                spec.label or key, self._resolve_decoration(child_path, child_field)
-            )
+            label = decorated_label(child_field, key, child_path, self._context)
             item = QTreeWidgetItem(parent_item, (label, ""))  # type: ignore[arg-type]
             item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
             font = item.font(0)
@@ -560,24 +614,48 @@ class TreeCfgWidget(QWidget):
             header.setFont(self._tree.font())
             self._ref_headers.append(header)
             self._tree.setItemWidget(item, 1, header)
+            apply_tree_item_decoration(item, header, dec)
+            # Propagate disabled from parent (ignore invisible root)
+            if (
+                isinstance(parent_item, QTreeWidgetItem)
+                and parent_item is not self._tree.invisibleRootItem()
+                and parent_item.isDisabled()
+            ):
+                item.setDisabled(True)
+                header.setEnabled(False)
             # Elide guaranteed single materialized shape row: render shape fields directly under reference.
             sub = child_field.sub_field
             if sub is not None:
                 # Shape elision: children depth advances only by one, not two.
                 self._add_section_children(item, sub, child_path, depth + 1)
+            # Keep reference children in sync only when structural identity changes
+            # (chosen key, materialized shape, or sub_field identity). Value edits
+            # must preserve leaf editors/focus.
+            prev_key = child_field.get_chosen_key()
+            prev_sub_id = id(sub) if sub is not None else None
+            prev_label = sub.spec.label if sub is not None else None  # type: ignore[attr-defined]
+            self._ref_prev_state[child_path] = (prev_key, prev_sub_id, prev_label)
 
-            # Keep reference children in sync when chosen key changes.
             def _on_ref_change(
                 *_: object, path: str = child_path, field: ReferenceField = child_field
             ) -> None:
-                # Full rebuild preserves consistency; expanded state kept.
-                self._rebuild_tree()
+                prev = self._ref_prev_state.get(path)
+                cur_key = field.get_chosen_key()
+                cur_sub = field.sub_field
+                cur_id = id(cur_sub) if cur_sub is not None else None
+                cur_label = cur_sub.spec.label if cur_sub is not None else None  # type: ignore[attr-defined]
+                cur_state = (cur_key, cur_id, cur_label)
+                if prev == cur_state:
+                    # Only value edits inside the shape – keep editors.
+                    return
+                self._ref_prev_state[path] = cur_state
+                self._rebuild_reference_children(path)
 
             child_field.on_change.connect(_on_ref_change)  # type: ignore[attr-defined]
             self._ref_connections.append((child_field, _on_ref_change))
             return
         # Sweep / CenteredSweep / Scalar / Literal leaf
-        leaf_label = self._leaf_label(key, child_field, child_path)
+        leaf_label = decorated_label(child_field, key, child_path, self._context)
         item = QTreeWidgetItem(parent_item, (leaf_label, ""))  # type: ignore[arg-type]
         item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
         self._set_depth_background(item, depth)
@@ -587,26 +665,19 @@ class TreeCfgWidget(QWidget):
         cast(QWidget, widget).setFont(self._tree.font())
         # Track for teardown.
         self._leaf_widgets.append(widget)
+        self._leaf_path_to_widget[child_path] = widget
         self._tree.setItemWidget(item, 1, cast(QWidget, widget))
-        # Apply enabled decoration via widget enablement if needed (registry widgets already handle decoration enabled?).
-        # Respect decoration enabled.
-        dec = self._resolve_decoration(child_path, child_field)
-        if dec is not None and not bool(getattr(dec, "enabled", True)):
+        apply_tree_item_decoration(item, cast(QWidget, widget), dec)
+        # Propagate disabled from parent (ignore invisible root)
+        if (
+            isinstance(parent_item, QTreeWidgetItem)
+            and parent_item is not self._tree.invisibleRootItem()
+            and parent_item.isDisabled()
+        ):
+            item.setDisabled(True)
             cast(QWidget, widget).setEnabled(False)
 
-    def _leaf_label(self, key: str, field: CfgField, path: str) -> str:
-        spec_label = getattr(field.spec, "label", "") or key
-        dec = self._resolve_decoration(path, field)
-        return _decorated_label(spec_label, dec)
-
-    def _resolve_decoration(self, path: str, field: CfgField) -> object | None:
-        resolver = self._context.decoration_for_path
-        if resolver is None:
-            return None
-        try:
-            return resolver(path, field)
-        except Exception:
-            return None
+    # _leaf_label and _resolve_decoration removed; use presentation.decorated_label and apply_tree_item_decoration directly
 
 
 class StructuralAdapter(Protocol):

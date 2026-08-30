@@ -213,8 +213,12 @@ foldable node row at its displayed depth (only its children advance), and
 elides the guaranteed single materialized reference-shape row. Editor behavior
 remains owned by the six exact `FieldRenderer` factories via the same frozen
 `FrozenFieldRendererRegistry`; the tree varies only structural node
-composition. The seam's executable owner is `zcu_tools.gui.widgets.cfg` and its
-durable declaration owner is this section.
+composition. Choice visibility, literal hiding, decorated labels, and full
+decoration (hidden/enabled/tooltip/tone/badge/suffix) are implemented once in
+the shared presentation policy and used by both adapters; reference editing
+(combo population, selection, missing hint, validity) is also single-sourced
+and reused by both. The seam's executable owner is `zcu_tools.gui.widgets.cfg`
+and its durable declaration owner is this section.
 
 ## EventBus Lifecycle
 

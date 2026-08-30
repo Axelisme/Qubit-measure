@@ -20,11 +20,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.cfg import (
-    ChoiceSectionSpec,
-    DirectValue,
-    LiteralSpec,
     is_custom_reference_key,
-    make_custom_reference_key,
 )
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
@@ -34,6 +30,7 @@ from zcu_tools.gui.cfg.binding import (
 )
 
 from ..decoration import FieldDecorationProtocol
+from ..presentation import choice_visible_keys, decorated_label, is_hidden
 from ..registry import FieldRenderContext, FieldWidgetProtocol
 from ._decoration import (
     apply_decoration,
@@ -43,6 +40,12 @@ from ._decoration import (
 from .common import (
     BaseLiveWidget,
     ElidedLabel,
+)
+from .reference_shared import (
+    apply_reference_validity,
+    handle_reference_combo_change,
+    refresh_missing_hint,
+    refresh_reference_combo,
 )
 
 
@@ -150,7 +153,7 @@ class SectionWidget(BaseLiveWidget):
 
     def _build_children(self) -> None:
         field = cast(SectionField, self._field)
-        visible_keys = _choice_visible_keys(field)
+        visible_keys = choice_visible_keys(field)
         # Fields carrying a non-empty ScalarSpec.group render together under a
         # collapsed sub-header (e.g. "Advanced"), AFTER the ungrouped fields.
         # This is presentation-only: the value tree is unchanged — a grouped
@@ -163,20 +166,14 @@ class SectionWidget(BaseLiveWidget):
             if visible_keys is not None and key not in visible_keys:
                 continue
             child_path = f"{self._path}.{key}" if self._path else key
+            if is_hidden(child_path, child_field, self._context):
+                continue
             spec = child_field.spec
             decoration = (
                 None
                 if self._decoration_for_path is None
                 else self._decoration_for_path(child_path, child_field)
             )
-            # LiteralSpec is a fixed value with no editing degree of freedom, so
-            # it has no widget — the GUI decides not to render it (the spec does
-            # not carry any "visible" flag). This covers discriminators
-            # (type/style) and adapter lock_literal'd fields uniformly.
-            if isinstance(spec, LiteralSpec) and (
-                decoration is None or decoration.hidden
-            ):
-                continue
 
             child_context = self._context.derive(path=child_path, top_level=False)
             w = self._context.registry.render(child_field, child_context)
@@ -292,26 +289,7 @@ class SectionWidget(BaseLiveWidget):
         self._container.set_invalid(not valid)
 
 
-def _choice_visible_keys(field: SectionField) -> set[str] | None:
-    spec = field.spec
-    if not isinstance(spec, ChoiceSectionSpec):
-        return None
-    visible = set(spec.fields)
-    for binding in spec.bindings:
-        selector = field.fields.get(binding.selector_key)
-        value = selector.get_value() if selector is not None else None
-        choice = str(value.value) if isinstance(value, DirectValue) else ""
-        try:
-            active_spec = binding.choices[choice]
-        except KeyError as exc:
-            expected = ", ".join(sorted(binding.choices))
-            raise ValueError(
-                f"ChoiceSectionSpec selector {binding.selector_key!r} has unknown "
-                f"value {choice!r}; expected one of: {expected}"
-            ) from exc
-        active = set(active_spec.fields)
-        visible -= binding.controlled_field_keys() - active
-    return visible
+# _choice_visible_keys moved to shared presentation policy (presentation.choice_visible_keys)
 
 
 class ReferenceWidget(BaseLiveWidget):
@@ -378,57 +356,16 @@ class ReferenceWidget(BaseLiveWidget):
     _NONE_KEY = "<None>"
 
     def _refresh_combo_items(self) -> None:
-        self._combo.blockSignals(True)
-        self._combo.clear()
-
-        field = cast(ReferenceField, self._field)
-        current = field.get_chosen_key()
-
-        # 0. None option for optional fields
-        if field.spec.optional:
-            self._combo.addItem("None", self._NONE_KEY)
-            self._combo.insertSeparator(self._combo.count())
-
-        # 1. Custom specs from 'allowed'
-        for spec in field.spec.allowed:
-            label = spec.label or "Custom"
-            key = make_custom_reference_key(label)
-            self._combo.addItem(label, key)
-
-        # 2. App-local catalog keys, already filtered to compatible labels.
-        compatible = field.available_keys()
-        if compatible:
-            self._combo.insertSeparator(self._combo.count())
-            for name in compatible:
-                if name == current and field.is_modified():
-                    self._combo.addItem(f"Lib: {name} (modified)", name)
-                    self._combo.addItem(f"Revert to Lib: {name}", name)
-                else:
-                    self._combo.addItem(f"Lib: {name}", name)
-
-        if field.spec.optional and not field.is_enabled:
-            self._combo.setCurrentIndex(0)  # None option
-        else:
-            idx = self._combo.findData(current)
-            if idx < 0 and field.has_missing_library_ref():
-                self._combo.addItem(f"Missing: {current}", current)
-                idx = self._combo.findData(current)
-            if idx >= 0:
-                self._combo.setCurrentIndex(idx)
-        self._combo.blockSignals(False)
+        refresh_reference_combo(self._combo, cast(ReferenceField, self._field))
         self._sync_expand_btn()
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
         field = cast(ReferenceField, self._field)
-        if key == self._NONE_KEY:
-            field.set_enabled(False)
-        else:
-            if field.spec.optional and not field.is_enabled:
-                field.set_enabled(True)
-            field.set_chosen_key(key)
-            self._expand_btn.setChecked(is_custom_reference_key(str(key)))
-            self._on_toggle_subsection(self._expand_btn.isChecked())
+        handle_reference_combo_change(field, key)
+        # Keep existing expand-button UX: custom keys auto-expand
+        self._expand_btn.setChecked(is_custom_reference_key(str(key)))
+        self._on_toggle_subsection(self._expand_btn.isChecked())
 
     def _should_expand_by_default(self) -> bool:
         field = cast(ReferenceField, self._field)
@@ -453,16 +390,7 @@ class ReferenceWidget(BaseLiveWidget):
         self._refresh_sub_widget()
 
     def _refresh_missing_ref_hint(self) -> None:
-        field = cast(ReferenceField, self._field)
-        if field.has_missing_library_ref():
-            key = field.get_chosen_key()
-            self._missing_ref_hint.setText(
-                f"Missing library reference: {key}. "
-                "Switch key, or re-add an entry of that name to re-link."
-            )
-            self._missing_ref_hint.setVisible(True)
-            return
-        self._missing_ref_hint.setVisible(False)
+        refresh_missing_hint(self._missing_ref_hint, cast(ReferenceField, self._field))
 
     def _on_toggle_subsection(self, expanded: bool) -> None:
         self._sub_container.setVisible(expanded)
@@ -522,12 +450,5 @@ class ReferenceWidget(BaseLiveWidget):
 
     def _on_validity_changed(self, valid: bool) -> None:
         field = cast(ReferenceField, self._field)
-        logger.debug(
-            "ReferenceWidget.validity_changed: key=%r valid=%r",
-            field.get_chosen_key(),
-            valid,
-        )
-        style = "" if valid else "border: 1px solid red;"
-        self._combo.setStyleSheet(style)
-        self._expand_btn.setStyleSheet("" if valid else "color: red;")
+        apply_reference_validity(self._combo, self._expand_btn, field, valid)
         self._refresh_missing_ref_hint()
