@@ -43,6 +43,11 @@ class AnalyzeFormWidget(QWidget):
         self._widgets: dict[str, QWidget] = {}
         self._hydrating = False
 
+        # 13 px single-column aligned ledger per spec.
+        font = self.font()
+        font.setPixelSize(13)
+        self.setFont(font)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)

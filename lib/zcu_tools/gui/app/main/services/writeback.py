@@ -139,15 +139,24 @@ class WritebackService:
         edits cannot mutate the adapter's proposal objects. If any editor session
         fails to open, every session opened for this draft is torn down before the
         original exception is re-raised; no partially-created draft escapes.
+
+        S2 — captures a display-only baseline from the destination context at
+        creation time (read-only, one owner, not persisted/wire). Scalar
+        MetaDict items show concrete current vs proposed values; module/waveform
+        items show bounded target/change summaries.
         """
         identity = uuid.uuid4().hex
         entries: list[_DraftEntry] = []
+        # Snapshot the destination context once at draft creation (read-only).
+        ctx = self._snapshot_context()
         try:
             for raw_item in items:
                 item = self._copy_item(raw_item)
                 prefix = self._kind_prefix(item)
                 item.session_id = self._next_session_id(entries, prefix)
                 item.selected = True
+                # Baseline capture — display-only.
+                self._capture_baseline(item, ctx)
                 entry = _DraftEntry(item)
                 entries.append(entry)
                 if isinstance(item, (ModuleWriteback, WaveformWriteback)):
@@ -341,6 +350,90 @@ class WritebackService:
                 f"writeback '{entry.item.session_id}' has no editable schema"
             )
         return schema
+
+    # ------------------------------------------------------------------
+    # S2 — display-only baseline capture (read-only, single owner)
+    # ------------------------------------------------------------------
+
+    def _snapshot_context(self) -> Any | None:
+        """Best-effort read of the live destination ExpContext.
+
+        In production ``_write`` is the Controller, which exposes
+        ``get_exp_context``. In tests it is a MagicMock, so we probe
+        defensively and return None when unavailable — the draft remains
+        usable with fallback summaries.
+        """
+        for attr in ("get_exp_context",):
+            if hasattr(self._write, attr):
+                try:
+                    getter = getattr(self._write, attr)
+                    ctx = getter() if callable(getter) else getter
+                    if ctx is not None and hasattr(ctx, "md") and hasattr(ctx, "ml"):
+                        return ctx
+                except Exception:
+                    continue
+        return None
+
+    @staticmethod
+    def _format_scalar(value: Any) -> str:
+        if value is None:
+            return "—"
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        if isinstance(value, complex):
+            return f"{value.real:.4g}{value.imag:+.4g}j"
+        return repr(value)
+
+    def _capture_baseline(self, item: WritebackItem, ctx: Any | None) -> None:
+        """Populate ``item.current_summary`` / ``proposed_summary``.
+
+        When ``ctx`` is unavailable (tests or early init), fall back to a
+        neutral placeholder so the draft remains displayable. The summaries are
+        display-only and never alter persistence/wire/MCP/adapter contracts.
+        """
+        try:
+            if isinstance(item, MetaDictWriteback):
+                # Current from live md
+                has_current = False
+                current: Any = None
+                if ctx is not None:
+                    try:
+                        has_current = item.target_name in ctx.md.keys()  # type: ignore[attr-defined]
+                        current = ctx.md.get(item.target_name, None)  # type: ignore[attr-defined]
+                    except Exception:
+                        has_current = False
+                        current = None
+                if has_current:
+                    item.current_summary = self._format_scalar(current)
+                else:
+                    item.current_summary = "—"
+                item.proposed_summary = self._format_scalar(item.proposed_value)
+            elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                exists = False
+                if ctx is not None:
+                    try:
+                        if isinstance(item, ModuleWriteback):
+                            exists = item.target_name in ctx.ml.modules  # type: ignore[attr-defined]
+                        else:
+                            exists = item.target_name in ctx.ml.waveforms  # type: ignore[attr-defined]
+                    except Exception:
+                        exists = False
+                item.current_summary = "present" if exists else "— not present"
+                action = "update" if exists else "create"
+                role = getattr(item, "role_id", None)
+                if role:
+                    item.proposed_summary = f"{action} {role}"
+                else:
+                    item.proposed_summary = f"{action} → {item.target_name}"
+            else:
+                item.current_summary = None
+                item.proposed_summary = None
+        except Exception:
+            logger.debug(
+                "baseline capture failed for %r", item.target_name, exc_info=True
+            )
+            item.current_summary = None
+            item.proposed_summary = None
 
     def _teardown_entries(self, entries: Iterable[_DraftEntry]) -> None:
         for entry in reversed(list(entries)):

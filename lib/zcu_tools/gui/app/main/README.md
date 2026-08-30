@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-30 — Data save center corrections (module-altitude, owned saveability, Fast Fail)
+**Last updated:** 2026-08-31 — Run tree + Analysis ledger + writeback baseline (S1/S2)
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -33,24 +33,35 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   the container; busy tabs cannot close or rebuild, so the captured worker target
   outlives the operation without a lease). It receives tab actions through a narrow
   `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
-  `MainWindow` adapts those actions to top-level handlers. Each `WritebackWidget`
+  `MainWindow` adapts those actions to top-level handlers. Run selects the shared
+  `tree_structure` adapter (dense tree per `spec/spec.md`: 13 px, root at 0,
+  descendants at 10 px with connectors, five-color depth cycling, whole-row
+  folding, reference shape elision); Analysis uses an app-local single-column
+  13 px ledger with whole-header folding for `Analysis parameters` and
+  `Writeback preview` and a fixed bottom `Analyze` action bar (S1). Presentation
+  Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
-  `WritebackService` remains stage-agnostic. `RenderHost` is pane-aware (run |
-  analysis | post_analysis) and the worker captures its pane's container at start —
-  switching the visible subtab never retargets the worker (ADR-0017). `ExpTabWidget`
-  delegates the Data pane to an internal `ArtifactSaveCenter` which owns
-  capability-driven artifact rows, high-contrast status rendering and the tab-local
-  status lifecycle derived from result availability, path/comment edits and true
-  terminal save outcomes (not persisted across process), with figure-gated save
-  enablement while status still tracks result lifecycle. The center owns the
-  saveability decision and the ordered Save All sequence (analysis→post→data with
-  Fast Fail, never rolling back prior successes); tracker/invariant failures Fast
-  Fail and operational failures are presented centrally, and async data completion
-  is routed to the center. Analysis/Post panes no longer own image-path/Save Image;
-  Run's live figure remains view-only (display + screenshot, no canonical Save).
-  Top-level orchestration invokes behavior-oriented tab methods for result focus,
-  plot hosting, interactive-widget lifecycle, figure reads, and persisted panel
+  `WritebackService` remains stage-agnostic and owns the display-only baseline
+  capture (S2): at draft creation it snapshots the destination `ExpContext` and
+  exposes per-item `current_summary` / `proposed_summary` to Qt; scalar MetaDict
+  items show concrete values, module/waveform items show bounded
+  target/change summaries and keep full cfg editing in `Edit` (Save/Cancel).
+  `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
+  captures its pane's container at start — switching the visible subtab never
+  retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an
+  internal `ArtifactSaveCenter` which owns capability-driven artifact rows,
+  high-contrast status rendering and the tab-local status lifecycle derived from
+  result availability, path/comment edits and true terminal save outcomes (not
+  persisted across process), with figure-gated save enablement while status still
+  tracks result lifecycle. The center owns the saveability decision and the ordered
+  Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
+  successes); tracker/invariant failures Fast Fail and operational failures are
+  presented centrally, and async data completion is routed to the center.
+  Analysis/Post panes no longer own image-path/Save Image; Run's live figure
+  remains view-only (display + screenshot, no canonical Save). Top-level
+  orchestration invokes behavior-oriented tab methods for result focus, plot
+  hosting, interactive-widget lifecycle, figure reads, and persisted panel
   geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
@@ -161,6 +172,9 @@ Key ownership rules:
 
 1. A tab is created from a registered experiment adapter.
 2. The tab owns a service-managed cfg editor session backed by `CfgDraft`.
+   Run renders that draft through the shared `tree_structure` (S1); Analysis
+   renders its params through the app-local 13 px ledger with whole-header
+   folding and a fixed `Analyze` bar.
 3. `GuardService` validates static preconditions and materializes a permit.
 4. The operation policy builds worker thunks with the needed ambient scopes:
    plotting, progress, `Schedule` cancellation, and device setup cancellation.
@@ -169,7 +183,11 @@ Key ownership rules:
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /
    `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
 7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit. Primary and post workflows own proposal timing;
+   cfg-editor machinery before commit; `WritebackService.create_draft` snapshots
+   the destination `ExpContext` at creation and the ledger shows
+   `current_summary` → `proposed_summary` per item (S2). Scalar MetaDict items
+   show concrete values; module/waveform items show bounded change summaries and
+   keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
    the Writeback service remains stage-free.
 
 `tab.load_data` is the analysis-only entry for canonical result files. It installs
@@ -181,10 +199,12 @@ the adapter's import-validated `capabilities.load_data` gate.
 
 `Session` is the aggregate root and its fixed pane carriers are the resource owners:
 Run stores only the run result/source, Analysis and Post-Analysis each store params,
-result, canonical figure and an opaque writeback draft, and Save stores the data-path
-override. Analysis and Post-Analysis image-path overrides are independent resources;
-the read model projects data, analysis-image and post-analysis-image paths separately.
-Run live figures remain view-only and are not stored in State.
+result, canonical figure and an opaque writeback draft (with S2 baseline snapshot),
+and Save stores the data-path override. Analysis and Post-Analysis image-path
+overserides are independent resources; the read model projects data, analysis-image
+and post-analysis-image paths separately. Run live figures remain view-only and
+are not stored in State. Writeback baseline is a display-only draft-creation
+snapshot; no concurrent-write detection or apply-conflict policy is provided.
 
 Analysis/Post result services prepare proposals, figures and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear
