@@ -177,6 +177,8 @@ def exp_tab_widget(qapp, monkeypatch):
 
 
 def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
+    from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
+
     ctrl = make_ctrl()
     snap_none = make_snapshot(
         "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
@@ -192,12 +194,12 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     # Prove absent Analysis/Post pages and controls/containers were never constructed, not only hidden
     assert not hasattr(tab_none, "analyze_form")
     assert not hasattr(tab_none, "writeback_widget")
-    assert not hasattr(tab_none, "_image_path_edit")
+    assert not tab_none._save_center.has_artifact(ArtifactKind.ANALYSIS)
     assert not hasattr(tab_none, "_analysis_panel")
     assert not hasattr(tab_none, "_analysis_container")
     assert not hasattr(tab_none, "post_analyze_form")
     assert not hasattr(tab_none, "post_writeback_widget")
-    assert not hasattr(tab_none, "_post_image_path_edit")
+    assert not tab_none._save_center.has_artifact(ArtifactKind.POST_ANALYSIS)
     assert not hasattr(tab_none, "_post_panel")
     assert not hasattr(tab_none, "_post_container")
     with pytest.raises(RuntimeError, match="does not support analysis"):
@@ -223,7 +225,7 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     ]
     assert visible_analysis == ["Run", "Analysis", "Data", "Guide"]
     assert hasattr(tab_analysis, "analyze_form")
-    assert hasattr(tab_analysis, "_image_path_edit")
+    assert tab_analysis._save_center.has_artifact(ArtifactKind.ANALYSIS)
     assert not hasattr(tab_analysis, "post_analyze_form")
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
         tab_analysis.get_post_container()
@@ -239,9 +241,8 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     assert hasattr(tab_both, "analyze_form")
     assert hasattr(tab_both, "post_analyze_form")
 
-    assert tab_none.load_data_btn is None
-    assert tab_analysis.load_data_btn is not None
-    assert tab_analysis.load_data_btn.isHidden() is False
+    assert not tab_none._save_center.is_load_visible()
+    assert tab_analysis._save_center.is_load_visible()
 
     tab_none.detach()
     tab_analysis.detach()
@@ -447,16 +448,33 @@ def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
 
-    # Run pane does not contain image edits
-    def contains(widget, target):
-        return any(child is target for child in widget.findChildren(type(target)))
+    # Run/Analysis/Post panels no longer own image path edits (S1) — they live in Data center
+    from qtpy.QtWidgets import QLineEdit
 
-    assert not contains(tab._run_panel, tab._image_path_edit)
-    assert not contains(tab._analysis_panel, tab._image_path_edit)
-    assert not contains(tab._post_panel, tab._post_image_path_edit)
-    assert contains(tab._save_panel, tab._data_path_edit)
-    assert contains(tab._save_panel, tab._image_path_edit)
-    assert contains(tab._save_panel, tab._post_image_path_edit)
+    assert not any(
+        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/image.png"
+        for c in tab._analysis_panel.findChildren(QLineEdit)
+    )
+    assert not any(
+        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/post_image.png"
+        for c in tab._post_panel.findChildren(QLineEdit)
+    )
+    assert not any(
+        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/data.hdf5"
+        for c in tab._run_panel.findChildren(QLineEdit)
+    )
+    assert any(
+        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/data.hdf5"
+        for c in tab._save_panel.findChildren(QLineEdit)
+    )
+    assert any(
+        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/image.png"
+        for c in tab._save_panel.findChildren(QLineEdit)
+    )
+    assert any(
+        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/post_image.png"
+        for c in tab._save_panel.findChildren(QLineEdit)
+    )
     tab.set_data_path("/tmp/data.hdf5")
     tab.set_analysis_image_path("/tmp/a.png")
     tab.set_post_image_path("/tmp/p.png")

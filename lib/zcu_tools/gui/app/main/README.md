@@ -42,11 +42,18 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   delegates the Data pane to an internal `ArtifactSaveCenter` which owns
   capability-driven artifact rows, high-contrast status rendering and the tab-local
   status lifecycle (`— NO RESULT` / `○ NOT SAVED` / `● UNSAVED CHANGES` / `✓ SAVED`
-  derived from result revision, path/comment and true terminal save outcomes; not
-  persisted across process). `TabActions`/`MainWindow` share one artifact dispatch
-  (individual Save keeps existing data/analysis/post semantics; Save All dispatches
-  only result-present artifacts in analysis→post→data order with Fast Fail, never
-  rolling back prior successes) and `MainWindowEventCoordinator` routes
+  derived from a monotonic result-revision token (tracker-retained object identity on
+  `is not` replacement, not raw `id`), path/comment and true terminal save outcomes;
+  not persisted across process). The center exposes a closed `ArtifactKind`
+  (`DATA`|`ANALYSIS`|`POST_ANALYSIS`) identity, a narrow behavior-oriented
+  binding/query interface for path updates, action wiring and enablement/status
+  observables, and figure-gated save enablement (analysis/post require figure, not
+  result alone) while status still tracks result lifecycle. `TabActions`/`MainWindow`
+  share one centralized artifact dispatch helper owning
+  notify/start/controller/sync-success/error presentation (Save All supplies
+  analysis→post→data order with Fast Fail, never rolling back prior successes;
+  tracker/invariant failures Fast Fail, operational/file failures are presented
+  centrally) and `MainWindowEventCoordinator` routes typed
   `SaveDataFinishedPayload` terminal outcomes to the center. Analysis/Post panes
   no longer own image-path/Save Image; Run's live figure remains view-only
   (display + screenshot, no canonical Save). Top-level orchestration invokes

@@ -7,7 +7,11 @@ import logging
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactSaveCenter
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.ui.artifact_save_center import (
+    ArtifactKind,
+    ArtifactSaveCenter,
+)
 from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
@@ -26,16 +30,13 @@ from qtpy.QtGui import (  # type: ignore[attr-defined]
     QPen,
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QSplitter,
     QStackedWidget,
     QTabWidget,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import WritebackItem
     from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
     from zcu_tools.gui.app.main.services import TabSnapshot
 
 
@@ -312,31 +314,6 @@ class ExpTabWidget(QWidget):
         save_scroll.setWidget(self._save_center)
         self._save_panel = save_scroll
         self._left_tabs.addTab(save_scroll, "Data")
-        # Compatibility aliases (old attribute names now owned by save center)
-        self._data_path_edit = self._save_center.data_path_edit
-        self._comment_edit = self._save_center._comment_edit
-        self.save_data_btn: QPushButton = self._save_center._save_btns["data"]
-        # Load Data button is owned by center; expose via property.
-        self.save_all_button: QPushButton = self._save_center.save_all_button
-        if capabilities.load_data:
-            self.load_data_btn: QPushButton | None = self._save_center.load_button
-        else:
-            self.load_data_btn = None
-        if self._has_analysis:
-            # Alias for compatibility; points into save center's analysis row
-            ape = self._save_center.analysis_path_edit
-            assert ape is not None
-            self._image_path_edit: QLineEdit = ape
-            asb = self._save_center._analysis_save_btn
-            assert asb is not None
-            self.save_image_btn: QPushButton = asb
-        if self._has_post:
-            ppe = self._save_center.post_analysis_path_edit
-            assert ppe is not None
-            self._post_image_path_edit: QLineEdit = ppe
-            psb = self._save_center._post_save_btn
-            assert psb is not None
-            self.post_save_image_btn: QPushButton = psb
 
         # ── Tab: Guide (always) ──────────────────────────────────
         guide_scroll = QScrollArea()
@@ -632,33 +609,6 @@ class ExpTabWidget(QWidget):
         self.post_writeback_widget.populate(items)
         self.post_writeback_section.setVisible(len(items) > 0)
 
-    def _on_browse_data_path(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save data file", "", "HDF5 files (*.hdf5);;All files (*)"
-        )
-        if path:
-            self._data_path_edit.setText(path)
-
-    def _on_browse_image_path(self) -> None:
-        self._require_analysis()
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save image file", "", "PNG files (*.png);;All files (*)"
-        )
-        if path:
-            assert self._image_path_edit is not None
-            self._image_path_edit.setText(path)
-
-    def _on_browse_post_image_path(self) -> None:
-        self._require_post()
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save post-analysis image file",
-            "",
-            "PNG files (*.png);;All files (*)",
-        )
-        if path:
-            self._post_image_path_edit.setText(path)
-
     def set_data_path(self, data_path: str) -> None:
         self._save_center.set_data_path(data_path)
 
@@ -686,19 +636,19 @@ class ExpTabWidget(QWidget):
 
     # -- Data save center status delegation (S3) ------------------
 
-    def notify_save_started(self, kind: str) -> None:
-        """Capture pending signature for ``kind`` (data|analysis|post_analysis)."""
+    def notify_save_started(self, kind: ArtifactKind) -> None:
+        """Capture pending signature for ``kind``."""
         self._save_center.notify_save_started(kind)
 
-    def notify_save_succeeded(self, kind: str) -> None:
+    def notify_save_succeeded(self, kind: ArtifactKind) -> None:
         self._save_center.notify_save_succeeded(kind)
 
-    def notify_save_failed(self, kind: str) -> None:
+    def notify_save_failed(self, kind: ArtifactKind) -> None:
         self._save_center.notify_save_failed(kind)
 
-    def handle_save_data_finished(self, payload) -> None:  # type: ignore[no-untyped-def]
+    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         """Apply async data terminal outcome (error None => success)."""
-        self._save_center.handle_data_finished(getattr(payload, "error", None))
+        self._save_center.handle_data_finished(payload.error)
 
     def focus_result_panel(self) -> None:
         """Focus Analysis when supported, otherwise focus Save."""
@@ -975,50 +925,52 @@ class ExpTabWidget(QWidget):
         self.cfg_form.validity_changed.connect(validity_cb)
         self.cfg_form.schema_changed.connect(schema_cb)
 
-        self._data_path_edit.textChanged.connect(data_path_cb)
+        self._save_center.bind_data_path_changed(data_path_cb)
         if self._has_analysis:
             self.analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
                     tab_id, instance
                 )
             )
-            assert self._image_path_edit is not None
-            self._image_path_edit.textChanged.connect(analysis_image_cb)  # type: ignore[union-attr]
+            self._save_center.bind_analysis_path_changed(analysis_image_cb)
         if self._has_post:
             self.post_analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
                     tab_id, instance
                 )
             )
-            assert self._post_image_path_edit is not None
-            self._post_image_path_edit.textChanged.connect(post_image_cb)  # type: ignore[union-attr]
+            self._save_center.bind_post_path_changed(post_image_cb)
+
+        def _comment_cb() -> None:
+            data_path_cb("")
+
+        self._comment_cb = _comment_cb  # type: ignore[attr-defined]
+        self._save_center.bind_comment_changed(_comment_cb)
 
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
-        if self.load_data_btn is not None:
-            self.load_data_btn.clicked.connect(lambda: actions.load_data(tab_id))
-        # Data save center bottom Save All
-        self._save_center.save_all_button.clicked.connect(
-            lambda: actions.save_all(tab_id)
-        )
+        if self._capabilities.load_data:
+            self._save_center.bind_load(lambda: actions.load_data(tab_id))
+        self._save_center.bind_save_all(lambda: actions.save_all(tab_id))
         if self._has_analysis:
             self.analyze_btn.clicked.connect(lambda: actions.analyze(tab_id))
             self.writeback_widget.apply_requested.connect(
                 lambda: actions.apply_writeback(tab_id)
             )
-            assert self.save_image_btn is not None
-            self.save_image_btn.clicked.connect(lambda: actions.save_image(tab_id))  # type: ignore[union-attr]
+            self._save_center.bind_save(
+                ArtifactKind.ANALYSIS, lambda: actions.save_image(tab_id)
+            )
         if self._has_post:
             self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
             self.post_writeback_widget.apply_requested.connect(
                 lambda: actions.apply_post_writeback(tab_id)
             )
-            assert self.post_save_image_btn is not None
-            self.post_save_image_btn.clicked.connect(  # type: ignore[union-attr]
-                lambda: actions.save_post_image(tab_id)
+            self._save_center.bind_save(
+                ArtifactKind.POST_ANALYSIS, lambda: actions.save_post_image(tab_id)
             )
-        # Save Data is always present (Data center)
-        self.save_data_btn.clicked.connect(lambda: actions.save_data(tab_id))
+        self._save_center.bind_save(
+            ArtifactKind.DATA, lambda: actions.save_data(tab_id)
+        )
 
         self._validity_cb = validity_cb
         self._schema_cb = schema_cb
@@ -1038,13 +990,14 @@ class ExpTabWidget(QWidget):
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)
         self.cfg_form.schema_changed.disconnect(self._schema_cb)
-        self._data_path_edit.textChanged.disconnect(self._data_path_cb)
+        self._save_center.unbind_data_path_changed(self._data_path_cb)
         if self._has_analysis:
-            assert self._image_path_edit is not None
-            self._image_path_edit.textChanged.disconnect(self._analysis_image_cb)  # type: ignore[union-attr]
+            self._save_center.unbind_analysis_path_changed(self._analysis_image_cb)
         if self._has_post:
-            assert self._post_image_path_edit is not None
-            self._post_image_path_edit.textChanged.disconnect(self._post_image_cb)  # type: ignore[union-attr]
+            self._save_center.unbind_post_path_changed(self._post_image_cb)
+        # Comment was bound via a dedicated wrapper
+        if hasattr(self, "_comment_cb"):
+            self._save_center.unbind_comment_changed(self._comment_cb)
         self._progress_unsub()
         self.cfg_form.detach()
         if self._cfg_editor_id is not None:
