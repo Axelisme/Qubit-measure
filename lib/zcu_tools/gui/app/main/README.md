@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-31 — visual corrections (Run/Analysis placement, guide-line colors)
+**Last updated:** 2026-08-31 — universal cfg tree (sole presentation, dark guide lines, 20/80 Run, full-width Analyze)
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -33,18 +33,18 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   the container; busy tabs cannot close or rebuild, so the captured worker target
   outlives the operation without a lease). It receives tab actions through a narrow
   `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
-  `MainWindow` adapts those actions to top-level handlers. Run selects the shared
-  `tree_structure` adapter (dense tree per `spec/spec.md` as corrected in
-  run-analysis-visual-corrections: 13 px, root at 0, descendants at 10 px with
-  connectors, five depth colors cycle on guide lines (rows no longer use depth
-  backgrounds), whole-row folding, reference shape elision, viewport follows
+  `MainWindow` adapts those actions to top-level handlers. Run uses the sole
+  shared cfg tree (S1 corrected: 13 px, root at 0, descendants at 10 px with
+  connectors, five depth colors `#5b8dc6`/`#6aae8a`/`#b8942f`/`#8a6bc9`/`#4fb3a8`
+  cycle on guide lines stable under horizontal scroll, rows no longer use depth
+  backgrounds, whole-row folding, reference shape elision, viewport follows
   available panel height with scrolling only when content exceeds viewport);
-  Run controls use the prototype action treatment: readiness/status at left and
-  Reset followed by Run/Stop right-aligned, Reset neutral secondary and Run blue
-  primary with Stop retaining red active semantics; Analysis uses an app-local
-  single-column 13 px ledger with whole-header folding for `Analysis parameters`
-  and `Writeback preview` and `Analyze` immediately after the parameters
-  section and before the Writeback preview (not fixed at the pane bottom) (S1). Presentation
+  Run action row is status-free with Reset 20% / Run 80% of available width,
+  Reset neutral secondary and Run blue primary with Stop retaining red active
+  semantics (A5); Analysis uses an app-local single-column 13 px ledger with
+  whole-header folding for `Analysis parameters` and `Writeback preview` and a
+  full-width `Analyze` immediately after parameters and before Writeback preview
+  (A6). Presentation
   Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
@@ -178,9 +178,10 @@ Key ownership rules:
 
 1. A tab is created from a registered experiment adapter.
 2. The tab owns a service-managed cfg editor session backed by `CfgDraft`.
-   Run renders that draft through the shared `tree_structure` (S1); Analysis
+   Run renders that draft through the sole shared cfg tree (S1); Analysis
    renders its params through the app-local 13 px ledger with whole-header
-   folding and a fixed `Analyze` bar.
+   folding and a full-width `Analyze` immediately below parameters.
+
 3. `GuardService` validates static preconditions and materializes a permit.
 4. The operation policy builds worker thunks with the needed ambient scopes:
    plotting, progress, `Schedule` cancellation, and device setup cancellation.

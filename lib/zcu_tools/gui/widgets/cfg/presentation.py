@@ -22,26 +22,28 @@ from zcu_tools.gui.cfg import ChoiceSectionSpec, DirectValue, LiteralSpec
 from zcu_tools.gui.cfg.binding import CfgField, SectionField
 
 from .decoration import FieldDecorationProtocol
-from .fields._decoration import (  # single decoration projection (tone/enabled/tooltip)
-    _TONE_STYLES,
-    _decoration_widget_state,
-    apply_decoration,
-    apply_widget_decoration,
-    decorated_label_text,
-)
 from .registry import FieldRenderContext
 
 logger = logging.getLogger(__name__)
 
-# Derive QColor map from the single _TONE_STYLES source to keep tone interpretation once.
+# Tone -> QColor map derived from single _TONE_STYLES source in fields._decoration.
+# Built lazily to avoid circular import (presentation -> fields -> containers -> presentation).
 _TONE_QCOLOR: dict[str, QColor] = {}
-for _tone, _style in _TONE_STYLES.items():  # type: ignore[attr-defined]
-    # style is "color: #...;" – extract hex
+
+
+def _ensure_tone_colors() -> None:
+    if _TONE_QCOLOR:
+        return
     try:
-        _hex = _style.split(":")[1].strip().rstrip(";")
-        _TONE_QCOLOR[_tone] = QColor(_hex)
+        from .fields._decoration import _TONE_STYLES  # type: ignore[import-not-found]
     except Exception:
-        continue
+        return
+    for _tone, _style in _TONE_STYLES.items():  # type: ignore[attr-defined]
+        try:
+            _hex = _style.split(":")[1].strip().rstrip(";")
+            _TONE_QCOLOR[_tone] = QColor(_hex)
+        except Exception:
+            continue
 
 
 def choice_visible_keys(field: SectionField) -> set[str] | None:
@@ -93,6 +95,10 @@ def is_hidden(path: str, field: CfgField, context: FieldRenderContext) -> bool:
 def decorated_label(
     field: CfgField, key: str, path: str, context: FieldRenderContext
 ) -> str:
+    from .fields._decoration import (
+        decorated_label_text,  # type: ignore[import-not-found]
+    )
+
     label = getattr(field.spec, "label", "") or key
     decoration = resolve_decoration(path, field, context)
     return decorated_label_text(label, decoration)
@@ -105,6 +111,8 @@ def apply_form_row_decoration(
 ) -> None:
     if decoration is None:
         return
+    from .fields._decoration import apply_decoration  # type: ignore[import-not-found]
+
     apply_decoration(label_widget, value_widget, decoration)
 
 
@@ -113,6 +121,10 @@ def apply_form_widget_decoration(
 ) -> None:
     if decoration is None:
         return
+    from .fields._decoration import (
+        _decoration_widget_state,  # type: ignore[import-not-found]
+    )
+
     # Use single decoration state (enabled/tooltip/tone) so form and tree share projection
     enabled, tooltip, style = _decoration_widget_state(decoration)  # type: ignore[arg-type]
     value_widget.setEnabled(enabled)
@@ -134,6 +146,11 @@ def apply_tree_item_decoration(
     """Apply full decoration contract to a tree row (section/reference/leaf)."""
     if decoration is None:
         return
+    from .fields._decoration import (
+        _decoration_widget_state,  # type: ignore[import-not-found]
+    )
+
+    _ensure_tone_colors()
     # Use single decoration state (enabled/tooltip/tone) from _decoration projection
     enabled, tooltip, style = _decoration_widget_state(decoration)  # type: ignore[arg-type]
     if not enabled:

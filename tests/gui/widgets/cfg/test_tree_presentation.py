@@ -1,4 +1,4 @@
-"""Focused cfg tree presentation tests (A1–A3, A5) for cfg-tree-presentation slice."""
+"""Focused cfg tree presentation tests — sole tree (S1) and behavior parity."""
 
 from __future__ import annotations
 
@@ -42,11 +42,7 @@ from zcu_tools.gui.widgets.cfg import (
     CfgFormWidget,
     FieldRenderContext,
     TreeCfgWidget,
-    TreeStructure,
-    form_structure,
-    tree_structure,
 )
-from zcu_tools.gui.widgets.cfg.fields import SectionWidget
 from zcu_tools.meta_tool import MetaDict
 
 
@@ -77,23 +73,35 @@ def _simple_schema() -> CfgSchema:
 
 
 # ---------------------------------------------------------------------------
-# A1 — default is form
+# A2 — sole tree: no structure selector, default is dense tree
 # ---------------------------------------------------------------------------
 
 
-def test_default_is_form_preserves_existing_behavior(qapp, ctrl):
+def test_default_is_tree_and_no_structure_selector(qapp, ctrl):
+    # CfgFormWidget has no public structure selector — passing ``structure`` is a contract error.
+    with pytest.raises(TypeError):
+        CfgFormWidget(structure=object())  # type: ignore[call-arg]
     w = CfgFormWidget()
     schema = _simple_schema()
     _attach(w, schema, ctrl)
-    assert isinstance(w._root_widget, SectionWidget)
-    # form uses QFormLayout style containers, not tree
-    assert w._root_widget is not None
-    # no tree
-    assert not isinstance(w._root_widget, TreeCfgWidget)
+    assert isinstance(w._root_widget, TreeCfgWidget)
+    tree = cast(TreeCfgWidget, w._root_widget)._tree
+    assert tree.isHeaderHidden() is True
+    assert tree.rootIsDecorated() is False
+    assert tree.indentation() == 10
+    assert tree.columnCount() == 2
+    assert tree.font().pixelSize() == 13
+    assert w._root_widget.font().pixelSize() == 13
+    # Public exports no longer promise a form fallback.
+    import zcu_tools.gui.widgets.cfg as cfg_pkg
+
+    assert not hasattr(cfg_pkg, "form_structure")
+    assert not hasattr(cfg_pkg, "FormStructure")
 
 
-def test_tree_structure_creates_tree(qapp, ctrl):
-    w = CfgFormWidget(structure=tree_structure)
+def test_tree_creates_tree(qapp, ctrl):
+    # Compatibility: sole tree is now the default — explicit structure arg no longer exists.
+    w = CfgFormWidget()
     schema = _simple_schema()
     _attach(w, schema, ctrl)
     assert isinstance(w._root_widget, TreeCfgWidget)
@@ -178,82 +186,80 @@ def test_tree_renders_and_edits_same_observable_behavior(qapp, ctrl):
     md.r_f = 6000.0
     ctrl.get_current_md.return_value = md
     schema = _complex_schema()
-    for struct in (None, tree_structure):
-        w = CfgFormWidget(structure=struct)
-        draft = MeasureCfgBindings(ctrl).new_draft(schema)
-        w.attach(draft)
-        qapp.processEvents()
-        # read back
-        out = w.read_values()
-        reps_val = out.fields["reps"]
-        assert isinstance(reps_val, DirectValue)
-        assert reps_val.value == 42
-        nested = out.fields["nested"]
-        assert isinstance(nested, CfgSectionValue)
-        freq_val = nested.fields["freq"]
-        assert isinstance(freq_val, EvalValue)
-        assert freq_val.resolved == 6000.0
-        assert isinstance(nested.fields["sweep"], SweepValue)
-        # edit via draft leaf should reflect in read_values
-        reps_field = draft.root.fields["reps"]
-        assert isinstance(reps_field, ScalarField)
-        reps_field.set_value(999)
-        qapp.processEvents()
-        reps_val2 = w.read_values().fields["reps"]
-        assert isinstance(reps_val2, DirectValue)
-        assert reps_val2.value == 999
-        # dropdown edit
-        choice_field = cast(SectionField, draft.root.fields["nested"]).fields["choice"]
-        assert isinstance(choice_field, ScalarField)
-        choice_field.set_value(DirectValue("c"))
-        qapp.processEvents()
-        choice_val = cast(
-            ScalarField,
-            cast(SectionField, draft.root.fields["nested"]).fields["choice"],
-        ).get_value()
-        assert isinstance(choice_val, DirectValue)
-        assert choice_val.value == "c"
-        # boolean
-        flag_field = cast(SectionField, draft.root.fields["nested"]).fields["flag"]
-        assert isinstance(flag_field, ScalarField)
-        flag_field.set_value(False)
-        qapp.processEvents()
-        nested_flag = w.read_values().fields["nested"]
-        assert isinstance(nested_flag, CfgSectionValue)
-        flag_val = nested_flag.fields["flag"]
-        assert isinstance(flag_val, DirectValue)
-        assert flag_val.value is False
-        # sweep
-        sweep_field = cast(SectionField, draft.root.fields["nested"]).fields["sweep"]
-        sweep_field.update_expts(5)  # type: ignore[union-attr]
-        qapp.processEvents()
-        nested_sweep = w.read_values().fields["nested"]
-        assert isinstance(nested_sweep, CfgSectionValue)
-        sv = nested_sweep.fields["sweep"]
-        assert isinstance(sv, SweepValue)
-        assert sv.expts == 5
-        # centered sweep span
-        cs_field = cast(SectionField, draft.root.fields["nested"]).fields["csweep"]
-        cs_field.update_span(2.0)  # type: ignore[union-attr]
-        qapp.processEvents()
-        nested_cs = w.read_values().fields["nested"]
-        assert isinstance(nested_cs, CfgSectionValue)
-        csv = nested_cs.fields["csweep"]
-        assert isinstance(csv, CenteredSweepValue)
-        assert csv.span == pytest.approx(2.0)
-        # reference elided but still editable
-        ref_field = draft.root.fields["ref"]
-        assert isinstance(ref_field, ReferenceField)
-        before = w.read_values().fields["ref"]
-        assert isinstance(before, ReferenceValue)
-        # detach to clean
-        w.detach()
-        draft.close()
-
+    w = CfgFormWidget()
+    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    w.attach(draft)
+    qapp.processEvents()
+    # read back
+    out = w.read_values()
+    reps_val = out.fields["reps"]
+    assert isinstance(reps_val, DirectValue)
+    assert reps_val.value == 42
+    nested = out.fields["nested"]
+    assert isinstance(nested, CfgSectionValue)
+    freq_val = nested.fields["freq"]
+    assert isinstance(freq_val, EvalValue)
+    assert freq_val.resolved == 6000.0
+    assert isinstance(nested.fields["sweep"], SweepValue)
+    # edit via draft leaf should reflect in read_values
+    reps_field = draft.root.fields["reps"]
+    assert isinstance(reps_field, ScalarField)
+    reps_field.set_value(999)
+    qapp.processEvents()
+    reps_val2 = w.read_values().fields["reps"]
+    assert isinstance(reps_val2, DirectValue)
+    assert reps_val2.value == 999
+    # dropdown edit
+    choice_field = cast(SectionField, draft.root.fields["nested"]).fields["choice"]
+    assert isinstance(choice_field, ScalarField)
+    choice_field.set_value(DirectValue("c"))
+    qapp.processEvents()
+    choice_val = cast(
+        ScalarField,
+        cast(SectionField, draft.root.fields["nested"]).fields["choice"],
+    ).get_value()
+    assert isinstance(choice_val, DirectValue)
+    assert choice_val.value == "c"
+    # boolean
+    flag_field = cast(SectionField, draft.root.fields["nested"]).fields["flag"]
+    assert isinstance(flag_field, ScalarField)
+    flag_field.set_value(False)
+    qapp.processEvents()
+    nested_flag = w.read_values().fields["nested"]
+    assert isinstance(nested_flag, CfgSectionValue)
+    flag_val = nested_flag.fields["flag"]
+    assert isinstance(flag_val, DirectValue)
+    assert flag_val.value is False
+    # sweep
+    sweep_field = cast(SectionField, draft.root.fields["nested"]).fields["sweep"]
+    sweep_field.update_expts(5)  # type: ignore[union-attr]
+    qapp.processEvents()
+    nested_sweep = w.read_values().fields["nested"]
+    assert isinstance(nested_sweep, CfgSectionValue)
+    sv = nested_sweep.fields["sweep"]
+    assert isinstance(sv, SweepValue)
+    assert sv.expts == 5
+    # centered sweep span
+    cs_field = cast(SectionField, draft.root.fields["nested"]).fields["csweep"]
+    cs_field.update_span(2.0)  # type: ignore[union-attr]
+    qapp.processEvents()
+    nested_cs = w.read_values().fields["nested"]
+    assert isinstance(nested_cs, CfgSectionValue)
+    csv = nested_cs.fields["csweep"]
+    assert isinstance(csv, CenteredSweepValue)
+    assert csv.span == pytest.approx(2.0)
+    # reference elided but still editable
+    ref_field = draft.root.fields["ref"]
+    assert isinstance(ref_field, ReferenceField)
+    before = w.read_values().fields["ref"]
+    assert isinstance(before, ReferenceValue)
+    # detach to clean
+    w.detach()
+    draft.close()
 
 def test_tree_whole_row_folding_is_view_only(qapp, ctrl):
     schema = _complex_schema()
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w.attach(draft)
     qapp.processEvents()
@@ -311,7 +317,7 @@ def test_tree_whole_row_folding_is_view_only(qapp, ctrl):
 def test_tree_indentation_and_header_and_connectors(qapp, ctrl):
     from qtpy.QtWidgets import QProxyStyle  # type: ignore[attr-defined]
 
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     schema = _simple_schema()
     _attach(w, schema, ctrl)
     tree = cast(TreeCfgWidget, w._root_widget)._tree
@@ -371,7 +377,7 @@ def test_tree_depth_color_cycling_and_own_depth(qapp, ctrl):
     root_val = CfgSectionValue(fields={"c": v1})
     schema = CfgSchema(spec=root_spec, value=root_val)
 
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     _attach(w, schema, ctrl)
     tree = cast(TreeCfgWidget, w._root_widget)._tree
     # Walk depth chain and verify guide-line colors cycle via helper, and row backgrounds are NOT depth colors
@@ -428,7 +434,7 @@ def test_tree_reference_shape_elision(qapp, ctrl):
         }
     )
     schema = CfgSchema(spec=root_spec, value=root_val)
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     _attach(w, schema, ctrl)
     tree = cast(TreeCfgWidget, w._root_widget)._tree
     # find ref item
@@ -465,7 +471,7 @@ def test_tree_reference_shape_elision(qapp, ctrl):
 
 def test_tree_editing_lock_disables_editors(qapp, ctrl):
     schema = _simple_schema()
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w.attach(draft)
     qapp.processEvents()
@@ -520,7 +526,7 @@ def test_tree_editing_lock_disables_editors(qapp, ctrl):
 
 def test_tree_detach_attach_preserves_draft(qapp, ctrl):
     schema = _simple_schema()
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w.attach(draft)
     # draft callbacks should be subscribed
@@ -544,7 +550,7 @@ def test_tree_validation_propagation(qapp, ctrl):
     spec = CfgSectionSpec(fields={"v": ScalarSpec(label="V", type=int, required=True)})
     val = CfgSectionValue(fields={"v": DirectValue(1)})
     schema = CfgSchema(spec=spec, value=val)
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     events: list[bool] = []
     w.validity_changed.connect(events.append)
@@ -600,7 +606,7 @@ def test_tree_section_local_refresh_choice(qapp, ctrl):
         }
     )
     schema = CfgSchema(spec=root_spec, value=root_val)
-    w = CfgFormWidget(structure=tree_structure)
+    w = CfgFormWidget()
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w.attach(draft)
     qapp.processEvents()
@@ -638,7 +644,7 @@ def test_tree_shares_same_draft_binding_ref_identity(qapp, ctrl):
     schema = CfgSchema(spec=root_spec, value=root_val)
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w_form = CfgFormWidget()
-    w_tree = CfgFormWidget(structure=tree_structure)
+    w_tree = CfgFormWidget()
     w_form.attach(draft)
     w_tree.attach(
         draft
@@ -716,7 +722,7 @@ def test_tree_outer_reenable_preserves_nested_reference_and_decoration_parity(
                 return FieldDecorationPatch(enabled=False, badge="deco")
             return None
 
-    w = CfgFormWidget(structure=tree_structure, decoration_provider=DecoProvider())
+    w = CfgFormWidget(decoration_provider=DecoProvider())
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w.attach(draft)
     qapp.processEvents()
@@ -871,9 +877,7 @@ def test_tree_outer_reenable_preserves_decoration_disabled_container_parity(qapp
                 return FieldDecorationPatch(enabled=False, badge="disabled")
             return None
 
-    w = CfgFormWidget(
-        structure=tree_structure, decoration_provider=ContainerDecoProvider()
-    )
+    w = CfgFormWidget(decoration_provider=ContainerDecoProvider())
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
     w.attach(draft)
     qapp.processEvents()

@@ -1,15 +1,14 @@
-"""Shared structural presentation adapters for cfg Qt widgets.
+"""Dense tree presentation for cfg Qt widgets.
 
-Provides the explicit structural presentation seam (S1) and the dense tree adapter
-(S2 view-only folding/depth/connectors/elision). The form adapter remains the
-default and reuses the exact field-renderer registry; the tree adapter varies
-only structural node composition.
+``CfgFormWidget``'s sole structural presentation is the dense tree (S1). The
+tree reuses the exact field-renderer registry; folding, depth connectors,
+and reference-shape elision are view-only (S2).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Protocol, cast, final
+from typing import cast, final
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QBrush, QColor, QPainter, QPen  # type: ignore[attr-defined]
@@ -47,11 +46,11 @@ from .registry import FieldRenderContext, FieldWidgetProtocol
 logger = logging.getLogger(__name__)
 
 TREE_DEPTH_COLORS: tuple[str, ...] = (
-    "#e2ebf6",
-    "#e3f0e6",
-    "#f4e9d2",
-    "#eadff1",
-    "#dceeee",
+    "#5b8dc6",
+    "#6aae8a",
+    "#b8942f",
+    "#8a6bc9",
+    "#4fb3a8",
 )
 
 _INDENTATION_PX = 10
@@ -330,10 +329,26 @@ class TreeCfgWidget(QWidget):
                 header.teardown()
             except Exception:
                 pass
+            try:
+                cast(QWidget, header).setParent(None)
+            except Exception:
+                pass
+            try:
+                cast(QWidget, header).deleteLater()
+            except Exception:
+                pass
         self._ref_headers.clear()
         for widget in self._leaf_widgets:
             try:
                 widget.teardown()
+            except Exception:
+                pass
+            try:
+                cast(QWidget, widget).setParent(None)
+            except Exception:
+                pass
+            try:
+                cast(QWidget, widget).deleteLater()
             except Exception:
                 pass
         self._leaf_widgets.clear()
@@ -791,51 +806,7 @@ class TreeCfgWidget(QWidget):
     # _leaf_label and _resolve_decoration removed; use presentation.decorated_label and apply_tree_item_decoration directly
 
 
-class StructuralAdapter(Protocol):
-    """View-only structural composition over a ``SectionField``."""
-
-    def create_root(
-        self,
-        field: SectionField,
-        context: FieldRenderContext,
-    ) -> FieldWidgetProtocol: ...
-
-
-@final
-class FormStructure:
-    """Default form composition (existing QFormLayout presentation)."""
-
-    def create_root(
-        self,
-        field: SectionField,
-        context: FieldRenderContext,
-    ) -> FieldWidgetProtocol:
-        return context.registry.render(field, context)
-
-
-@final
-class TreeStructure:
-    """Dense tree composition per spec.md (S1/S2)."""
-
-    def create_root(
-        self,
-        field: SectionField,
-        context: FieldRenderContext,
-    ) -> FieldWidgetProtocol:
-        return TreeCfgWidget(field, context)
-
-
-# Convenience singletons
-form_structure = FormStructure()
-tree_structure = TreeStructure()
-
-
 __all__ = [
-    "FormStructure",
-    "StructuralAdapter",
     "TREE_DEPTH_COLORS",
     "TreeCfgWidget",
-    "TreeStructure",
-    "form_structure",
-    "tree_structure",
 ]

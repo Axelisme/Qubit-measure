@@ -1,7 +1,8 @@
-"""CfgFormWidget — renders a CfgSchema as an interactive reactive Qt form.
+"""CfgFormWidget — dense tree renderer over a caller-owned ``CfgDraft``.
 
-Uses CfgDraft as the active data layer and delegates field rendering to the
-shared cfg field widgets.
+The dense tree is the sole structural presentation (S1); there is no
+form fallback or structure selector. The widget attaches a caller-owned
+``CfgDraft`` and renders ``draft.root`` via the shared exact field renderers.
 """
 
 from __future__ import annotations
@@ -52,13 +53,6 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.cfg import CfgSchema, CfgSectionValue
 
-    from .structure import StructuralAdapter
-else:
-    try:
-        from .structure import StructuralAdapter  # type: ignore[no-redef, assignment]
-    except Exception:  # pragma: no cover - import cycle guard
-        StructuralAdapter = object  # type: ignore[misc, assignment]
-
 logger = logging.getLogger(__name__)
 
 
@@ -82,7 +76,6 @@ class CfgFormWidget(QWidget):
         decoration_provider: FieldDecorationProvider | None = None,
         text_input_enhancer: TextInputEnhancer | None = None,
         renderers: FrozenFieldRendererRegistry | None = None,
-        structure: StructuralAdapter | None = None,
     ) -> None:
         super().__init__(parent)
         self._draft: CfgDraft | None = None
@@ -91,7 +84,6 @@ class CfgFormWidget(QWidget):
         self._decoration_provider = decoration_provider
         self._text_input_enhancer = text_input_enhancer
         self._renderers = default_cfg_renderers() if renderers is None else renderers
-        self._structure: StructuralAdapter | None = structure
         self._field_decorations: dict[str, FieldDecoration] = {}
         self._choice_state: tuple[tuple[str, str], ...] = ()
         self._schema_snapshot_pending = False
@@ -134,10 +126,10 @@ class CfgFormWidget(QWidget):
             text_input_enhancer=self._text_input_enhancer,
         )
         try:
-            if self._structure is None:
-                root = self._renderers.render(draft.root, context)
-            else:
-                root = self._structure.create_root(draft.root, context)
+            # Sole presentation: dense tree (S1) — no form fallback.
+            from .structure import TreeCfgWidget
+
+            root = TreeCfgWidget(draft.root, context)
         except Exception:
             self._field_decorations = {}
             self._choice_state = ()
@@ -155,31 +147,22 @@ class CfgFormWidget(QWidget):
                 self._inner_layout.count() - 1,
                 root_widget,
             )
-            # A2: Run cfg tree viewport follows panel height — tree handles its own scrolling
-            # For tree structure, outer scroll should not introduce fixed-height threshold;
-            # let tree expand with panel height and scroll internally.
-            is_tree = self._structure is not None
-            if is_tree:
-                # Hide outer scroll's bars; tree's own scroll appears when content exceeds viewport
-                self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-                self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-                # Ensure outer scroll still expands with panel height
-                self._scroll.setSizePolicy(
-                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-                )  # type: ignore[attr-defined]
-                self._inner.setSizePolicy(
-                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-                )  # type: ignore[attr-defined]
-                # Make root_widget expanding inside inner layout and disable trailing stretch
-                root_widget.setSizePolicy(
-                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-                )  # type: ignore[attr-defined]
-                self._inner_layout.setStretchFactor(root_widget, 1)
-                # Trailing spacer (addStretch) should not take space in tree mode
-                self._inner_layout.setStretch(self._inner_layout.count() - 1, 0)
-            else:
-                self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-                self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+            # Tree viewport follows available panel height; outer scroll is
+            # chrome-free and tree handles its own scrolling only when content
+            # exceeds viewport (A4).
+            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+            self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+            self._scroll.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )  # type: ignore[attr-defined]
+            self._inner.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )  # type: ignore[attr-defined]
+            root_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )  # type: ignore[attr-defined]
+            self._inner_layout.setStretchFactor(root_widget, 1)
+            self._inner_layout.setStretch(self._inner_layout.count() - 1, 0)
         except Exception:
             draft.on_change.disconnect(self._on_draft_changed)
             draft.on_validity_changed.disconnect(self._on_draft_validity_changed)
@@ -214,10 +197,10 @@ class CfgFormWidget(QWidget):
             cast(FieldWidgetProtocol, root).teardown()
             self._inner_layout.removeWidget(root)
             root.deleteLater()
-        # Reset scroll policies for next attach (form vs tree)
+        # Reset for next attach — sole tree keeps outer chrome-free.
         try:
-            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-            self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+            self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
         except Exception:
             pass
         self._field_decorations = {}

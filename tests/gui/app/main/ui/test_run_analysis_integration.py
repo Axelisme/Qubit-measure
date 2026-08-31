@@ -160,10 +160,15 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget):
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
-    # Tree structure selected
-    from zcu_tools.gui.widgets.cfg import tree_structure
-
-    assert tab.cfg_form._structure is tree_structure
+    # Sole tree — no structure selector, always tree
+    import zcu_tools.gui.widgets.cfg as cfg_pkg
+    assert not hasattr(cfg_pkg, "form_structure")
+    try:
+        from zcu_tools.gui.widgets.cfg import CfgFormWidget
+        CfgFormWidget(structure=object())  # type: ignore[call-arg]
+        assert False
+    except TypeError:
+        pass
     # Visual: tree adapter selected; deeper visuals are covered by shared widget tests
     from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS, TreeCfgWidget
 
@@ -180,7 +185,6 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget):
     )
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg import tree_structure as ts
 
     ctrl2 = MagicMock()
     ctrl2.get_bus.return_value = EventBus()
@@ -188,7 +192,7 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget):
         "zcu_tools.meta_tool", fromlist=["MetaDict"]
     ).MetaDict()
     ctrl2.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    w = CfgFormWidget(structure=ts, text_input_enhancer=None)
+    w = CfgFormWidget(text_input_enhancer=None)
     schema = CfgSchema(
         spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
         value=CfgSectionValue(fields={"reps": DirectValue(10)}),

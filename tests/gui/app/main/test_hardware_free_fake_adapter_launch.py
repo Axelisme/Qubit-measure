@@ -89,10 +89,17 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert ctrl._render_host is window  # type: ignore[attr-defined]
     assert window in ctrl._diag_sinks  # type: ignore[attr-defined]
 
-    # A1: Run tree selected (shared adapter)
-    from zcu_tools.gui.widgets.cfg import tree_structure
+    # A1/A2: sole tree — CfgFormWidget has no structure selector, always tree
+    import zcu_tools.gui.widgets.cfg as cfg_pkg
 
-    assert tab.cfg_form._structure is tree_structure
+    assert not hasattr(cfg_pkg, "form_structure")
+    # CfgFormWidget should reject a structure kwarg
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+    try:
+        CfgFormWidget(structure=object())  # type: ignore[call-arg]
+        assert False, "structure selector should be removed"
+    except TypeError:
+        pass
 
     # Verify tree visuals via direct CfgFormWidget check (shared tree tests cover depth etc.)
     from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS
