@@ -133,10 +133,28 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
             ):
                 assert lbl.alignment() & Qt.AlignmentFlag.AlignHCenter
                 assert lbl.alignment() & Qt.AlignmentFlag.AlignVCenter
-        # shared backgrounds / continuous borders via stylesheet
-        ss = widget.styleSheet()
-        assert "writebackPanel" in ss and "white" in ss
-        assert "writebackRow" in ss and "border-bottom" in ss
+        # shared backgrounds / continuous borders — observed via palette and geometry
+        panel = widget._rows_container
+        rows = widget._rows
+        assert panel.objectName() == "writebackPanel"
+        # rendered white background shared between panel and rows (palette)
+        panel_bg = panel.palette().color(panel.backgroundRole()).name().lower()
+        assert panel_bg == "#ffffff", f"panel bg {panel_bg}"
+        assert rows, "no rows rendered"
+        first_bg = rows[0].palette().color(rows[0].backgroundRole()).name().lower()
+        assert first_bg == "#ffffff", f"row bg {first_bg}"
+        assert panel_bg == first_bg
+        # container has no extra spacing, rows stack continuously with 1px border gap
+        assert widget._rows_layout.spacing() == 0
+        cm = widget._rows_layout.contentsMargins()
+        assert cm.left() == 0 and cm.top() == 0 and cm.right() == 0 and cm.bottom() == 0
+        if len(rows) > 1:
+            # second row directly follows first (allow 1px border)
+            assert abs(rows[1].geometry().top() - (rows[0].geometry().bottom() + 1)) <= 1
+        # row internal margins per spec 8,4,8,4
+        lm = rows[0].layout().contentsMargins() if rows[0].layout() is not None else None
+        assert lm is not None
+        assert lm.left() == 8 and lm.top() == 4 and lm.right() == 8 and lm.bottom() == 4
         # identical Edit/Copy geometry
         edit_btns = [b for b in widget.findChildren(QPushButton) if b.text() == "Edit"]
         copy_btns = [b for b in widget.findChildren(QPushButton) if b.text() == "Copy"]
