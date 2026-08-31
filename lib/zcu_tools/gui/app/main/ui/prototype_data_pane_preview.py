@@ -34,7 +34,7 @@ from __future__ import annotations
 import math
 from typing import Callable
 
-from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, Qt, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
     QCheckBox,
@@ -892,6 +892,13 @@ class PrototypeMainWindow(QMainWindow):
             "Prototype ready — compare A/B/C. All Save/Load actions are inert (no persistence)."
         )
 
+        # Global key filter: intercept Left/Right at application level so inner
+        # QTabWidgets (e.g. Variant C _tabbed_viewer) do not consume them.
+        # Only QLineEdit/QTextEdit are excluded per A2.
+        _app = QApplication.instance()
+        if _app is not None:
+            _app.installEventFilter(self)
+
     # -- panel builders ------------------------------------------------
 
     def _build_run_panel(self) -> QWidget:
@@ -1302,20 +1309,34 @@ class PrototypeMainWindow(QMainWindow):
         )
 
     # -- safe arrow-key handling ----------------------------------------
+    # A2 requires Left/Right to cycle layout variant from any focus except
+    # text inputs. QTabWidgets (especially Variant C _tabbed_viewer) consume
+    # Left/Right for tab switching, so QMainWindow.keyPressEvent never fires.
+    # We therefore intercept at the application level via eventFilter and
+    # exclude only QLineEdit/QTextEdit.
+
+    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+        if event is not None and event.type() == QEvent.KeyPress:  # type: ignore[attr-defined]
+            key = event.key()  # type: ignore[attr-defined]
+            if key in (Qt.Key_Left, Qt.Key_Right):  # type: ignore[attr-defined]
+                focus = QApplication.focusWidget()
+                if isinstance(focus, (QLineEdit, QTextEdit)):
+                    return False
+                if key == Qt.Key_Left:  # type: ignore[attr-defined]
+                    self._prev_variant()
+                else:
+                    self._next_variant()
+                return True
+        return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        # Fallback for cases where eventFilter is not installed (e.g. tests
+        # without QApplication) or focus is the window itself. Text inputs
+        # are still excluded.
         focus = QApplication.focusWidget()
         if isinstance(focus, (QLineEdit, QTextEdit)):
-            # do not steal arrow keys while typing
             super().keyPressEvent(event)
             return
-        # contenteditable check via property
-        try:
-            if focus is not None and focus.property("isWrapping") is not None:
-                # fallback: if focus has text interaction, don't steal
-                pass
-        except Exception:
-            pass
         key = event.key()
         if key == Qt.Key_Left:  # type: ignore[attr-defined]
             self._prev_variant()
