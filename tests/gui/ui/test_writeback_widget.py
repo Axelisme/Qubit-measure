@@ -150,10 +150,13 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
         assert cm.left() == 0 and cm.top() == 0 and cm.right() == 0 and cm.bottom() == 0
         if len(rows) > 1:
             # second row directly follows first (allow 1px border)
-            assert abs(rows[1].geometry().top() - (rows[0].geometry().bottom() + 1)) <= 1
+            assert (
+                abs(rows[1].geometry().top() - (rows[0].geometry().bottom() + 1)) <= 1
+            )
         # row internal margins per spec 8,4,8,4
-        lm = rows[0].layout().contentsMargins() if rows[0].layout() is not None else None
-        assert lm is not None
+        lay0 = rows[0].layout()
+        assert lay0 is not None
+        lm = lay0.contentsMargins()
         assert lm.left() == 8 and lm.top() == 4 and lm.right() == 8 and lm.bottom() == 4
         # identical Edit/Copy geometry
         edit_btns = [b for b in widget.findChildren(QPushButton) if b.text() == "Edit"]
