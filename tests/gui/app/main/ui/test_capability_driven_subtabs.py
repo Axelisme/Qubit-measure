@@ -490,7 +490,7 @@ def test_save_and_image_ownership_and_placeholder_routing(qapp, exp_tab_widget):
     assert tab.get_post_image_path() == ""
     tab._left_tabs.setCurrentWidget(tab._save_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
-    assert tab._right_stack.currentWidget() is tab._right_placeholder
+    assert tab._right_stack.currentWidget() is tab._data_gallery
     tab._left_tabs.setCurrentWidget(tab._guide_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     assert tab._right_stack.currentWidget() is tab._right_placeholder

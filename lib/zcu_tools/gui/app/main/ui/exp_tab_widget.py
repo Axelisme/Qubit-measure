@@ -58,6 +58,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from .analyze_form import AnalyzeFormWidget
+from .data_figure_preview_gallery import DataFigurePreviewGallery
 from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:
@@ -248,6 +249,7 @@ class ExpTabWidget(QWidget):
         parent: QWidget | None = None,
         *,
         dialog_presenter: DialogPresenter | None = None,
+        preview_renderer: Any | None = None,
     ) -> None:
         super().__init__(parent)
         if not isinstance(capabilities, AdapterCapabilities):
@@ -265,6 +267,8 @@ class ExpTabWidget(QWidget):
         self._cfg_editor_id: str | None = None
         # The action boundary is retained for Reset; button slots close over it.
         self._actions: TabActions | None = None
+        # Optional injected Figure->PNG renderer for Data preview (tests)
+        self._preview_renderer = preview_renderer
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -500,7 +504,13 @@ class ExpTabWidget(QWidget):
                 self._post_stack, self._post_placeholder
             )
 
-        # Placeholder for Save/Guide (no figure)
+        # Data preview gallery — Variant A stacked rail (S1, S3)
+        self._data_gallery = DataFigurePreviewGallery(
+            self._capabilities,
+            renderer=self._preview_renderer,  # type: ignore[arg-type]
+        )
+
+        # Placeholder for Guide (no figure) — Data now shows gallery (S4)
         self._right_placeholder = QLabel("(no plot yet)")
         self._right_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
 
@@ -509,6 +519,7 @@ class ExpTabWidget(QWidget):
             self._right_stack.addWidget(self._analysis_stack)
         if self._has_post:
             self._right_stack.addWidget(self._post_stack)
+        self._right_stack.addWidget(self._data_gallery)
         self._right_stack.addWidget(self._right_placeholder)
 
         self._plot_layout.addWidget(self._right_stack, stretch=1)
@@ -818,12 +829,14 @@ class ExpTabWidget(QWidget):
             self._analysis_container.clear_dynamic_canvases()
         if self._has_post:
             self._post_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
         return self._run_container
 
     def prepare_analysis_container(self) -> FigureContainer:
         """Clear Analysis presentation and return its container."""
         self._require_analysis()
         self._analysis_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
         return self._analysis_container
 
     def prepare_post_container(self) -> FigureContainer:
@@ -835,6 +848,7 @@ class ExpTabWidget(QWidget):
         """Clear only the invalidated Post-Analysis presentation."""
         self._require_post()
         self._post_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
 
     def mount_interactive_widget(self, widget: QWidget) -> None:
         """Mount an interactive analysis widget as the visible plot content (analysis pane)."""
@@ -889,6 +903,7 @@ class ExpTabWidget(QWidget):
             self._analysis_container.clear_dynamic_canvases()
         if self._has_post:
             self._post_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
 
     def show_run_figure(self, fig: Figure) -> None:
         """Embed a matplotlib Figure in the Run pane."""
@@ -898,6 +913,7 @@ class ExpTabWidget(QWidget):
             raise RuntimeError("Attached run canvas does not support draw()")
         draw()
         logger.debug("show_run_figure: tab_id=%r canvas set", self.tab_id)
+        self._refresh_data_gallery()
 
     def show_analysis_figure(self, fig: Figure) -> None:
         """Embed a matplotlib Figure in the Analysis pane and bring it to front."""
@@ -908,6 +924,7 @@ class ExpTabWidget(QWidget):
             raise RuntimeError("Attached analysis canvas does not support draw()")
         draw()
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
+        self._refresh_data_gallery()
 
     def show_post_analysis_figure(self, fig: Figure) -> None:
         """Embed a matplotlib Figure in the Post-Analysis pane."""
@@ -918,6 +935,7 @@ class ExpTabWidget(QWidget):
             raise RuntimeError("Attached post canvas does not support draw()")
         draw()
         logger.debug("show_post_analysis_figure: tab_id=%r canvas set", self.tab_id)
+        self._refresh_data_gallery()
 
     def _on_reset_cfg_clicked(self) -> None:
         confirmed = self._dialog_presenter.confirm(
@@ -944,8 +962,44 @@ class ExpTabWidget(QWidget):
         self._cfg_editor_id = editor_id
         self.cfg_form.attach(self._ctrl.get_cfg_editor_draft(editor_id))
 
+    def _is_data_visible(self) -> bool:
+        return self._left_tabs.currentWidget() is self._save_panel
+
+    def _refresh_data_gallery(self) -> None:
+        """Refresh Data gallery from current pane figures when Data is visible (S2)."""
+        if not hasattr(self, "_data_gallery"):
+            return
+        if not self._is_data_visible():
+            return
+        try:
+            run_fig = self.get_current_figure_for_pane("run")
+        except Exception:
+            run_fig = None
+        if self._has_analysis:
+            try:
+                ana_fig = self.get_current_figure_for_pane("analysis")
+            except Exception:
+                ana_fig = None
+        else:
+            ana_fig = None
+        if self._has_post:
+            try:
+                post_fig = self.get_current_figure_for_pane("post_analysis")
+            except Exception:
+                post_fig = None
+        else:
+            post_fig = None
+        try:
+            self._data_gallery.update_figures(run_fig, ana_fig, post_fig)
+        except Exception:
+            logger.exception("failed to refresh data gallery")
+
     def _on_left_tab_changed(self, index: int) -> None:
-        """Switch right pane to match left subtab (Save/Guide → placeholder)."""
+        """Switch right pane to match left subtab (S4).
+
+        Data → gallery (with snapshot refresh), Guide → placeholder,
+        Run/Analysis/Post → their source stacks.
+        """
         widget = self._left_tabs.widget(index)
         if widget is self._run_panel:
             self._right_stack.setCurrentWidget(self._run_stack)
@@ -956,7 +1010,11 @@ class ExpTabWidget(QWidget):
         if self._has_post and widget is self._post_panel:
             self._right_stack.setCurrentWidget(self._post_stack)
             return
-        # Save or Guide
+        if widget is self._save_panel:
+            self._refresh_data_gallery()
+            self._right_stack.setCurrentWidget(self._data_gallery)
+            return
+        # Guide
         self._right_stack.setCurrentWidget(self._right_placeholder)
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
