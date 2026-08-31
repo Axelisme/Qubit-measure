@@ -34,7 +34,7 @@ _RED_STOP_STYLESHEET = (
     "border: 1px solid #d32f2f; border-radius: 4px;"
 )
 
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore
 from qtpy.QtGui import (  # type: ignore[attr-defined]
     QColor,
     QPainter,
@@ -160,6 +160,8 @@ class _LedgerSection(QWidget):
     adapter remains the only cross-module structural seam (S1).
     """
 
+    toggled = Signal(bool)  # type: ignore[attr-defined]
+
     def __init__(
         self,
         title: str,
@@ -227,6 +229,10 @@ class _LedgerSection(QWidget):
         self._body.setVisible(not self._collapsed)
         self._toggle_btn.setText("▶" if self._collapsed else "▼")
         self._toggle_btn.setChecked(not self._collapsed)
+        try:
+            self.toggled.emit(self._collapsed)  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     def set_collapsed(self, collapsed: bool) -> None:
         if bool(collapsed) == self._collapsed:
@@ -397,6 +403,20 @@ class ExpTabWidget(QWidget):
             analysis_layout.addStretch()
             analysis_scroll.setWidget(analysis_inner)
             analysis_outer.addWidget(analysis_scroll, stretch=1)
+            # S3: keep ledger cap synchronized with analysis param folding and viewport/layout changes
+            try:
+                self._analyze_section.toggled.connect(  # type: ignore[attr-defined]
+                    lambda _c: self.writeback_widget._schedule_scroll_update()  # type: ignore[attr-defined]
+                )
+                # Viewport resize and inner layout changes are also forwarded;
+                # WritebackWidget also installs its own filters lazily, but this
+                # ensures production nesting is bound even before show.
+                analysis_scroll.viewport().installEventFilter(self.writeback_widget)  # type: ignore[arg-type]
+                analysis_inner.installEventFilter(self.writeback_widget)  # type: ignore[arg-type]
+                self._analyze_section.installEventFilter(self.writeback_widget)  # type: ignore[arg-type]
+                self._analyze_section._body.installEventFilter(self.writeback_widget)  # type: ignore[attr-defined,arg-type]
+            except Exception:
+                pass
 
             self._analysis_panel = analysis_container
             self._analysis_tab_index = self._left_tabs.addTab(

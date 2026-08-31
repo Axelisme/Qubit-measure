@@ -5,7 +5,16 @@ import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
+# fmt: off
+from qtpy.QtCore import (  # type: ignore  # pyright: ignore[reportPrivateImportUsage]
+    QEvent,
+    QObject,
+    Qt,
+    QTimer,
+    Signal,  # type: ignore  # pyright: ignore[reportPrivateImportUsage]
+)
+
+# fmt: on
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
     QCheckBox,
@@ -340,6 +349,161 @@ class WritebackWidget(QWidget):
         self._rows: list[_WritebackRow] = []
 
         self._refresh_apply_enabled()
+        # S3: viewport/layout-bound cap — track outer viewport and layout
+        self._outer_scroll: QScrollArea | None = None
+        self._outer_viewport: QWidget | None = None
+        self._outer_inner: QWidget | None = None
+        self._observed: list[QObject] = []
+        self._scroll_update_pending = False
+
+    # ------------------------------------------------------------------
+    # S3 viewport/layout-bound cap helpers
+    # ------------------------------------------------------------------
+
+    def _find_outer_scroll(self) -> QScrollArea | None:
+        p = self.parentWidget()
+        while p is not None:
+            if isinstance(p, QScrollArea):  # type: ignore[arg-type]
+                vp = p.viewport()
+                if vp is not None:
+                    w = p.widget()
+                    if w is not None:
+                        q: QWidget | None = self.parentWidget()
+                        found = False
+                        while q is not None:
+                            if q is w:
+                                found = True
+                                break
+                            q = q.parentWidget()
+                        if found:
+                            return p
+            p = p.parentWidget()
+        return None
+
+    def _ensure_outer_listeners(self) -> None:
+        outer = self._find_outer_scroll()
+        if outer is self._outer_scroll and outer is not None:
+            # Already installed; verify viewport/inner still same
+            try:
+                if (
+                    outer.viewport() is self._outer_viewport
+                    and outer.widget() is self._outer_inner
+                ):
+                    return
+            except Exception:
+                pass
+        # Uninstall previous
+        for obj in list(self._observed):
+            try:
+                obj.removeEventFilter(self)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        self._observed.clear()
+        self._outer_scroll = outer
+        if outer is None:
+            self._outer_viewport = None
+            self._outer_inner = None
+            return
+        vp = outer.viewport()
+        inner = outer.widget()
+        self._outer_viewport = vp
+        self._outer_inner = inner
+        to_watch: list[QObject] = []
+        if vp is not None:
+            to_watch.append(vp)
+        if inner is not None:
+            to_watch.append(inner)
+            # Watch direct children that are ledger sections / siblings
+            try:
+                lay = inner.layout()
+                if lay is not None:
+                    for i in range(lay.count()):
+                        item = lay.itemAt(i)
+                        if item is None:
+                            continue
+                        w2 = item.widget()
+                        if w2 is None:
+                            continue
+                        # Skip the branch that contains self (walk up)
+                        q2: QWidget | None = self.parentWidget()
+                        contains = False
+                        while q2 is not None:
+                            if q2 is w2:
+                                contains = True
+                                break
+                            q2 = q2.parentWidget()
+                        if contains:
+                            # For the writeback branch, still watch its ancestors up to inner
+                            # but sibling branches are those not containing self
+                            continue
+                        to_watch.append(w2)
+                        try:
+                            body = getattr(w2, "_body", None)
+                            if isinstance(body, QWidget):
+                                to_watch.append(body)
+                        except Exception:
+                            pass
+                        # Also watch analyze form inside sibling if present
+                        try:
+                            # Generic: watch all children of sibling for Show/Hide via layout
+                            pass
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        # Also watch ancestors between self and inner for Show/Hide of collapsible bodies
+        anc: QWidget | None = self.parentWidget()
+        while anc is not None and anc is not inner:
+            # Avoid duplicate
+            if anc not in to_watch:
+                to_watch.append(anc)
+            # If anc is a _LedgerSection body, ensure its header is also watched? header visibility not changed
+            anc = anc.parentWidget()
+            if anc is inner:
+                break
+        for obj in to_watch:
+            try:
+                obj.installEventFilter(self)  # type: ignore[attr-defined]
+                self._observed.append(obj)
+            except Exception:
+                pass
+
+    def _schedule_scroll_update(self) -> None:
+        if self._scroll_update_pending:
+            return
+        self._scroll_update_pending = True
+        QTimer.singleShot(0, self._do_scheduled_scroll_update)  # type: ignore[attr-defined]
+
+    def _do_scheduled_scroll_update(self) -> None:
+        self._scroll_update_pending = False
+        self._update_scroll_height()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        try:
+            et = event.type()
+            if et in (
+                QEvent.Type.Resize,  # type: ignore[attr-defined]
+                QEvent.Type.Show,  # type: ignore[attr-defined]
+                QEvent.Type.Hide,  # type: ignore[attr-defined]
+                QEvent.Type.LayoutRequest,  # type: ignore[attr-defined]
+            ):
+                self._schedule_scroll_update()
+        except Exception:
+            pass
+        return super().eventFilter(watched, event)
+
+    def changeEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        try:
+            if event.type() == QEvent.Type.ParentChange:  # type: ignore[attr-defined]
+                QTimer.singleShot(0, self._ensure_outer_listeners)  # type: ignore[attr-defined]
+                self._schedule_scroll_update()
+        except Exception:
+            pass
+
+    def hideEvent(self, event: Any) -> None:  # type: ignore[override]
+        super().hideEvent(event)  # type: ignore[arg-type]
+        # Keep listeners for when we show again; schedule no update needed while hidden
 
     def populate(self, items: Sequence[WritebackItem]) -> None:
         # Clear old rows
@@ -451,25 +615,29 @@ class WritebackWidget(QWidget):
 
         self._refresh_apply_enabled()
         self._update_responsive()
+        self._ensure_outer_listeners()
         # Deferred pass ensures width-dependent row heights (narrow vs wide)
         # have been laid out before measuring content_h.
         QTimer.singleShot(0, self._update_scroll_height)  # type: ignore[attr-defined]
+        self._schedule_scroll_update()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         self._update_responsive()
-        self._update_scroll_height()
+        self._schedule_scroll_update()
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
+        self._ensure_outer_listeners()
         self._update_responsive()
-        self._update_scroll_height()
+        self._schedule_scroll_update()
 
     def _update_responsive(self) -> None:
         is_narrow = self.width() < 450
         for row in self._rows:
             row.set_narrow(is_narrow)
         self._update_scroll_height()
+        self._schedule_scroll_update()
 
     def _update_scroll_height(self) -> None:
         """Make the bordered scroll field hug content, capped by available height.
@@ -480,6 +648,8 @@ class WritebackWidget(QWidget):
         geometry, not hard-coded row counts.
         """
         try:
+            # Debug
+            # print(f"_update_scroll_height called: w height {self.height()} hint visible {self._hint.isVisible()} hint height {self._hint.height() if self._hint.isVisible() else 'hidden'} outer viewport {self._outer_viewport.height() if self._outer_viewport else None} outer inner {self._outer_inner.height() if self._outer_inner else None}")
             # Content height from rows container sizeHint (sum of row heights).
             content_h = self._rows_container.sizeHint().height()
             # When rows exist, sizeHint may be 0 before layout; fallback to
@@ -537,6 +707,7 @@ class WritebackWidget(QWidget):
                     avail = total_h - non_scroll
                     if avail is not None and avail < 0:
                         avail = 0
+                    # print(f"[debug] total_h {total_h} hint_h {hint_h} apply_h {apply_h} gaps {gaps} non_scroll {non_scroll} avail {avail}")
             # If we are nested inside an outer QScrollArea (Analysis pane),
             # outer viewport may be tighter than widget height (which hugs).
             # Walk ancestors to find nearest enclosing scroll viewport and use
@@ -660,9 +831,10 @@ class WritebackWidget(QWidget):
                             outer_avail_for_scroll is not None
                             and outer_avail_for_scroll >= 0
                         ):
-                            # Use tighter of the two avails
-                            if avail is None or outer_avail_for_scroll < avail:
-                                avail = outer_avail_for_scroll
+                            # S3 nested cap is viewport-bound, not w-height bound (avoids feedback loop)
+                            # Use outer viewport avail directly when nested
+                            avail = outer_avail_for_scroll
+                            # print(f"[debug outer] outer_viewport {outer_viewport_h} reserve {reserve} outer_avail_for_widget {outer_avail_for_widget} outer_avail_for_scroll {outer_avail_for_scroll} avail now {avail}")
                 except Exception:
                     pass
             if avail is None or avail < 0:

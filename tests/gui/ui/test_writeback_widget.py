@@ -410,11 +410,18 @@ def test_writeback_ledger_hugs_short_and_caps_long(qapp):
         )
         vbar = scroll.verticalScrollBar()
         assert vbar is not None
-        # QScrollArea with AsNeeded will have max >0 when content overflows
-        assert (
-            vbar.maximum() > 0
-            or scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        ), f"capped ledger should be scrollable, vbar max {vbar.maximum()}"
+        assert vbar.maximum() > 0, (
+            f"capped ledger should be scrollable, vbar max {vbar.maximum()}"
+        )
+        # Verify scrollbar extent is real — moving to maximum should change value
+        vbar.setValue(vbar.maximum())
+        qapp.processEvents()
+        assert abs(vbar.value() - vbar.maximum()) <= 4, (
+            f"vbar value {vbar.value()} vs max {vbar.maximum()}"
+        )
+        # Reset to top for further geometry checks
+        vbar.setValue(0)
+        qapp.processEvents()
         # Scroll height is capped by available widget height (widget height - hint - apply - margins/spacing)
         # Available = widget height - non-scroll chrome
         layout = widget.layout()
@@ -505,3 +512,152 @@ def test_writeback_ledger_hugs_short_and_caps_long(qapp):
         _check_capped(w_long)
     finally:
         w_long.close()
+
+
+def test_writeback_nested_analysis_pane_recaps_on_collapse_and_viewport_resize(qapp):
+    """S3 — nested Analysis pane: ledger recaps on param collapse/expand and viewport resize,
+    Apply stays fixed outside inner scroll. Verifies viewport/layout-bound cap (blocker 1)."""
+    from unittest.mock import MagicMock
+
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QScrollArea
+    from zcu_tools.gui.app.main.adapter import (
+        AdapterCapabilities,
+        AnalysisMode,
+        MetaDictWriteback,
+    )
+    from zcu_tools.gui.app.main.services import PersistedStartup
+    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
+
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)  # type: ignore[call-arg]
+    ctrl = MagicMock()
+    ctrl.get_persisted_startup.return_value = PersistedStartup(left_panel_width=500)
+    ctrl.progress_control.attach_progress.return_value = lambda: None
+    ctrl.progress_control.progress_bars.return_value = []
+    ctrl.get_tab_adapter_name.return_value = "fake"
+    ctrl.get_adapter_guide.return_value = {}
+
+    tab = ExpTabWidget("tab-1", ctrl, caps)
+    # Need to stub _populate_cfg not needed for this test, but ExpTabWidget attach would need it.
+    # We just use the widget as constructed; no attach needed for writeback ledger test.
+    tab.resize(600, 500)
+    tab.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    # Switch to Analysis tab so nested scroll viewport is visible (QTabWidget hides inactive pages)
+    tab._left_tabs.setCurrentWidget(tab._analysis_panel)
+    qapp.processEvents()
+    qapp.processEvents()
+
+    # Long ledger to ensure capping
+    items_long: list[MetaDictWriteback] = []
+    for i in range(30):
+        it = MetaDictWriteback(
+            target_name=f"p{i}", description=f"d{i}", proposed_value=float(i)
+        )
+        it.session_id = f"md-{i}"
+        items_long.append(it)
+    # Populate via production path: writeback_widget + section visibility
+    tab.writeback_widget.populate(items_long)
+    tab.writeback_section.setVisible(True)
+    qapp.processEvents()
+    qapp.processEvents()
+    # Allow deferred cap update (singleShot)
+    tab.writeback_widget._update_scroll_height()
+    qapp.processEvents()
+    qapp.processEvents()
+
+    def _assert_capped_nested():
+        w = tab.writeback_widget
+        scroll = w._scroll
+        viewport = scroll.viewport()
+        assert viewport is not None
+        panel = w._rows_container
+        # No horizontal overflow
+        hbar = scroll.horizontalScrollBar()
+        assert hbar is not None
+        assert hbar.maximum() == 0
+        assert (
+            scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        # Must be scrollable with real extent
+        assert panel.height() > viewport.height() + 2, (
+            f"panel {panel.height()} vs viewport {viewport.height()}"
+        )
+        vbar = scroll.verticalScrollBar()
+        assert vbar is not None
+        assert vbar.maximum() > 0, (
+            f"capped nested should be scrollable, vbar max {vbar.maximum()}"
+        )
+        vbar.setValue(vbar.maximum())
+        qapp.processEvents()
+        assert abs(vbar.value() - vbar.maximum()) <= 4, (
+            f"vbar value {vbar.value()} vs max {vbar.maximum()}"
+        )
+        vbar.setValue(0)
+        qapp.processEvents()
+        # Apply remains fixed outside inner scroll
+        apply = w._apply_btn
+        assert apply.isVisible()
+        assert apply.parent() is w
+        assert apply.geometry().y() > scroll.geometry().y()
+        # Apply bottom within writeback widget and not overlapping scroll viewport
+        assert apply.geometry().bottom() <= w.height() + 6
+        assert apply.geometry().y() >= scroll.geometry().y() + scroll.height() - 6
+        # Scroll height is capped (less than content)
+        assert scroll.height() < panel.height()
+        # Outer viewport still responsible for outer content; inner cap is viewport-bound
+
+    try:
+        _assert_capped_nested()
+        init_cap = tab.writeback_widget._scroll.maximumHeight()
+        init_viewport_h = tab.writeback_widget._scroll.viewport().height()  # type: ignore[union-attr]
+
+        # Collapse Analysis parameters — should free vertical space, inner cap should increase (auto via toggled signal / layout filter)
+        tab._analyze_section.set_collapsed(True)
+        qapp.processEvents()
+        qapp.processEvents()
+        # Let scheduled update fire (eventFilter on body hide / inner layout, plus toggled signal)
+        qapp.processEvents()
+        qapp.processEvents()
+        _assert_capped_nested()
+        collapsed_cap = tab.writeback_widget._scroll.maximumHeight()
+        # Collapsing sibling should not shrink cap; with reserve method it grows, with fixed viewport it stays equal
+        assert collapsed_cap >= init_cap - 4, (
+            f"collapsed cap {collapsed_cap} vs init {init_cap}"
+        )
+
+        # Expand again — cap should return toward init (auto)
+        tab._analyze_section.set_collapsed(False)
+        qapp.processEvents()
+        qapp.processEvents()
+        qapp.processEvents()
+        _assert_capped_nested()
+        expanded_cap = tab.writeback_widget._scroll.maximumHeight()
+        assert abs(expanded_cap - init_cap) <= 8, (
+            f"expanded cap {expanded_cap} vs init {init_cap}"
+        )
+
+        # Viewport height change — taller window should increase inner cap (auto via viewport resize filter)
+        tab.resize(600, 800)
+        qapp.processEvents()
+        qapp.processEvents()
+        qapp.processEvents()
+        _assert_capped_nested()
+        tall_cap = tab.writeback_widget._scroll.maximumHeight()
+        assert tall_cap >= expanded_cap - 4, (
+            f"tall cap {tall_cap} vs expanded {expanded_cap}"
+        )
+
+        # Shorter window should decrease cap but remain capped (auto)
+        tab.resize(600, 400)
+        qapp.processEvents()
+        qapp.processEvents()
+        qapp.processEvents()
+        _assert_capped_nested()
+        short_cap = tab.writeback_widget._scroll.maximumHeight()
+        assert short_cap <= tall_cap + 4, f"short cap {short_cap} vs tall {tall_cap}"
+        assert short_cap > 0
+    finally:
+        tab.close()
+        qapp.processEvents()
