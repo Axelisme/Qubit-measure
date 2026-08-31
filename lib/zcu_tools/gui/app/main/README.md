@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-31 — universal cfg tree (sole presentation, dark guide lines, 20/80 Run, full-width Analyze)
+**Last updated:** 2026-08-31 — Writeback compact unified ledger with responsive reflow, bounded matrix summary and 56×26 actions
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -50,9 +50,18 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
   `WritebackService` remains stage-agnostic and owns the display-only baseline
   capture (S2): at draft creation it snapshots the destination `ExpContext` and
-  exposes per-item `current_summary` / `proposed_summary` to Qt; scalar MetaDict
-  items show concrete values, module/waveform items show bounded
-  target/change summaries and keep full cfg editing in `Edit` (Save/Cancel).
+  exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
+  compact unified ledger: target-only checkbox labels with description tooltips,
+  centered Current → Proposed columns on a shared-background continuous-boundary
+  panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions
+  (scalar MetaDict and editable module/waveform items use Edit; non-scalar
+  MetaDict values use a bounded summary like `3 × 3 matrix`). A small matrix
+  renders a compact read-only inline table and its Copy places the complete JSON
+  on the clipboard; arbitrary long values show only the bounded summary so the
+  ledger never widens. The widget owns a ~450 px breakpoint: wide rows stay
+  single-line, narrow rows reflow to target/action above centered
+  Current → Proposed, the list is vertically scrollable without horizontal
+  overflow, and Apply Selected stays fixed at the bottom.
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
   retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an
@@ -65,10 +74,28 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   successes); tracker/invariant failures Fast Fail and operational failures are
   presented centrally, and async data completion is routed to the center.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
-  remains view-only (display + screenshot, no canonical Save). Top-level
-  orchestration invokes behavior-oriented tab methods for result focus, plot
-  hosting, interactive-widget lifecycle, figure reads, and persisted panel
-  geometry; the tab does not expose its Qt containers.
+  remains view-only (display + screenshot, no canonical Save). Data's right pane
+  is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
+  construction (Run always, Analysis/Post only when supported), viewport-driven
+  mosaic reflow — narrow single-column vertical vs wide three-card Run-left
+  spanning two rows with Analysis/Post on the right, two-card side-by-side,
+  and single full-width at the two-minimum-width-cards-plus-spacing breakpoint
+  (gallery's own viewport, not window, no persisted toggle) — scrollable cards
+  with named empty/unavailable states, raster-only presentation cache (pixmap/text)
+  fed by an injected `Figure -> PNG bytes` adapter — production uses the existing
+  fixed-size figure renderer with size restore — per-card render caches the
+  original pixmap and aspect-fits with `KeepAspectRatio` and smooth transformation
+  inside the image viewport without cropping; per-card failure is isolated and
+  logged without blocking other cards or save controls, and no Figure/canvas
+  ownership, timer, or per-draw subscription is introduced. `ExpTabWidget` remains the sole `FigureContainer` and
+  current-figure authority: Data activation and Data-visible
+  prepare/clear/show lifecycle refresh the gallery snapshot, while
+  Data-invisible mutations postpone PNG rendering until the next activation;
+  the gallery never attaches or reparents a canvas. Subtab routing keeps
+  Run/Analysis/Post on their source stacks, Data on the gallery, and Guide on
+  its placeholder. Top-level orchestration invokes behavior-oriented tab methods
+  for result focus, plot hosting, interactive-widget lifecycle, figure reads,
+  and persisted panel geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
@@ -225,6 +252,16 @@ and path carriers; there are no flat tab result/writeback/path projections. Call
 name the pane they consume. Operation-start request/context inputs are captured and
 reused by analysis and proposal hooks, without context-identity checks or terminal
 active-context reads.
+
+Data preview never owns pane resources: `ExpTabWidget` reads current figures from
+the fixed `FigureContainer`s and pushes a transient `Figure` snapshot to
+`DataFigurePreviewGallery` only on Data activation or while Data is visible;
+the gallery renders to PNG via the fixed-size adapter with size restore, holds
+only the raster cache (original pixmap) and isolates per-card failures with
+aspect-fit scaling (`KeepAspectRatio`) that never exceeds the image viewport.
+Viewport-driven mosaic reflow (gallery's own width vs two-minimum-width-cards
+threshold) is presentation-only and never moves figure ownership, adds a second
+canvas, or changes ADR-0048 reactions. No competing state owner is introduced.
 
 ## Tab Lifecycle And Ordering
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
-from qtpy.QtWidgets import QCheckBox, QPushButton
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QPushButton, QTableWidget
 from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
@@ -94,3 +96,181 @@ def test_writeback_widget_non_scalar_item_is_read_only(qapp):
     assert len(checks) == 2
     assert any("confusion_matrix" in cb.text() for cb in checks)
     assert all(cb.isChecked() for cb in checks)
+
+
+def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
+    """A1 — target-only labels, tooltip, centered Current → Proposed,
+    shared backgrounds/borders and equal 56x26 actions."""
+    matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
+    scalar = MetaDictWriteback(
+        target_name="r_f", description="resonator freq", proposed_value=6000.0
+    )
+    scalar.session_id = "md-1"
+    nonscalar = MetaDictWriteback(
+        target_name="confusion_matrix", description="matrix desc", proposed_value=matrix
+    )
+    nonscalar.session_id = "md-2"
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    widget.resize(600, 400)
+    widget.populate([scalar, nonscalar])
+    widget.show()
+    qapp.processEvents()
+    try:
+        # target-only, tooltip, no duplication
+        cbs = {cb.text(): cb for cb in widget.findChildren(QCheckBox)}
+        assert set(cbs) == {"r_f", "confusion_matrix"}
+        assert cbs["r_f"].toolTip() == "resonator freq"
+        assert cbs["confusion_matrix"].toolTip() == "matrix desc"
+        assert "0.95" not in cbs["confusion_matrix"].text()
+        assert "freq" not in cbs["r_f"].text()
+        # centered Current → Proposed
+        for lbl in widget.findChildren(QLabel):
+            if lbl.objectName() in (
+                "writebackCurrent",
+                "writebackProposed",
+                "writebackProposedChip",
+                "writebackArrow",
+            ):
+                assert lbl.alignment() & Qt.AlignmentFlag.AlignHCenter
+                assert lbl.alignment() & Qt.AlignmentFlag.AlignVCenter
+        # shared backgrounds / continuous borders via stylesheet
+        ss = widget.styleSheet()
+        assert "writebackPanel" in ss and "white" in ss
+        assert "writebackRow" in ss and "border-bottom" in ss
+        # identical Edit/Copy geometry
+        edit_btns = [b for b in widget.findChildren(QPushButton) if b.text() == "Edit"]
+        copy_btns = [b for b in widget.findChildren(QPushButton) if b.text() == "Copy"]
+        assert len(edit_btns) == 1 and len(copy_btns) == 1
+        for b in edit_btns + copy_btns:
+            assert b.width() == 56 and b.height() == 26
+            assert b.size().width() == 56 and b.size().height() == 26
+    finally:
+        widget.close()
+
+
+def test_writeback_structured_matrix_bounded_table_copy_and_long_bounded(qapp):
+    """A2 — 3×3 shows 3 \u00d7 3 matrix + read-only table, Copy JSON, long bounded."""
+    matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    item = MetaDictWriteback(
+        target_name="confusion_matrix", description="d", proposed_value=matrix
+    )
+    item.session_id = "md-1"
+    widget.resize(600, 400)
+    widget.populate([item])
+    widget.show()
+    qapp.processEvents()
+    try:
+        # bounded summary
+        prop = next(
+            l
+            for l in widget.findChildren(QLabel)
+            if "writebackProposed" in l.objectName()
+        )
+        assert prop.text() == "3 \u00d7 3 matrix"
+        # compact read-only table
+        tables = widget.findChildren(QTableWidget)
+        assert len(tables) == 1
+        tbl = tables[0]
+        assert tbl.rowCount() == 3 and tbl.columnCount() == 3
+        assert tbl.editTriggers() == QTableWidget.EditTrigger.NoEditTriggers
+        assert tbl.selectionMode() == QTableWidget.SelectionMode.NoSelection
+        first = tbl.item(0, 0)
+        assert first is not None
+        assert first.text() == "0.9500"
+        assert first.textAlignment() & Qt.AlignmentFlag.AlignCenter
+        # Copy places complete JSON
+        copy_btn = next(
+            b for b in widget.findChildren(QPushButton) if b.text() == "Copy"
+        )
+        copy_btn.click()
+        qapp.processEvents()
+        cb_clip = QApplication.clipboard()
+        assert cb_clip is not None
+        assert cb_clip.text() == json.dumps(matrix)
+        # long value cannot widen ledger
+        long_val = list(range(200))
+        w2 = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+        long_item = MetaDictWriteback(
+            target_name="long_list", description="d", proposed_value=long_val
+        )
+        long_item.session_id = "md-1"
+        w2.resize(600, 400)
+        w2.populate([long_item])
+        w2.show()
+        qapp.processEvents()
+        try:
+            prop2 = next(
+                l
+                for l in w2.findChildren(QLabel)
+                if "writebackProposed" in l.objectName()
+            )
+            assert prop2.text() == "list[200]"
+            # size hint remains bounded
+            assert w2.sizeHint().width() < widget.sizeHint().width() + 200
+            assert w2.findChildren(QTableWidget) == []
+            hbar2 = w2._scroll.horizontalScrollBar()
+            assert hbar2 is not None
+            assert (
+                w2._scroll.horizontalScrollBarPolicy()
+                == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+        finally:
+            w2.close()
+    finally:
+        widget.close()
+
+
+def test_writeback_responsive_reflow_scroll_and_fixed_apply(qapp):
+    """A3 — 500 px wide single-line vs 400 px narrow stacked, vertical scroll, fixed Apply."""
+    items: list[MetaDictWriteback] = []
+    for i in range(3):
+        it = MetaDictWriteback(
+            target_name=f"p{i}", description=f"d{i}", proposed_value=float(i)
+        )
+        it.session_id = f"md-{i}"
+        items.append(it)
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    widget.resize(500, 400)
+    widget.populate(items)
+    widget.show()
+    qapp.processEvents()
+    try:
+        # wide: checkbox and current share Y
+        cbs = widget.findChildren(QCheckBox)
+        curs = [
+            l
+            for l in widget.findChildren(QLabel)
+            if l.objectName() == "writebackCurrent"
+        ]
+        assert cbs and curs
+        assert abs(cbs[0].y() - curs[0].y()) < 30
+        # vertical scroll, no horizontal overflow, Apply fixed visible
+        assert (
+            widget._scroll.horizontalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        assert (
+            widget._scroll.verticalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        hbar = widget._scroll.horizontalScrollBar()
+        assert hbar is not None
+        assert hbar.maximum() == 0
+        assert widget._apply_btn.isVisible()
+        assert widget._apply_btn.parent() is widget
+        # narrow
+        widget.resize(400, 400)
+        qapp.processEvents()
+        widget._update_responsive()
+        qapp.processEvents()
+        # in narrow, checkbox above current
+        assert cbs[0].y() < curs[0].y() - 5
+        hbar_n = widget._scroll.horizontalScrollBar()
+        assert hbar_n is not None
+        assert hbar_n.maximum() == 0
+        assert widget._apply_btn.isVisible()
+        # Apply remains outside scroll viewport
+        assert widget._apply_btn.geometry().y() > widget._scroll.geometry().y()
+    finally:
+        widget.close()
