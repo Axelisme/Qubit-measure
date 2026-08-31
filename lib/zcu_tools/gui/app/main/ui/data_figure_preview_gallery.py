@@ -380,6 +380,15 @@ class DataFigurePreviewGallery(QWidget):
 
         self._scroll.setWidget(self._inner)
         outer.addWidget(self._scroll, stretch=1)
+        # Viewport-driven reflow must track scroll viewport size, not only
+        # gallery widget size; QScrollArea viewport may resize after gallery
+        # layout, so arrange on viewport resize as well (S1).
+        try:
+            vp = self._scroll.viewport()
+            if vp is not None:
+                vp.installEventFilter(self)
+        except Exception:
+            pass
 
         # Initial layout arrangement
         self._arrange_cards()
@@ -485,6 +494,14 @@ class DataFigurePreviewGallery(QWidget):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self._arrange_cards()
+
+    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+        try:
+            if obj is self._scroll.viewport() and event.type() == QEvent.Resize:  # type: ignore[attr-defined]
+                self._arrange_cards()
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
 
     # -- capability queries -----------------------------------------
 
