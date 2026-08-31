@@ -112,29 +112,6 @@ def _registry_with_factories(
     return builder.freeze()
 
 
-def _registry_with_section_factory(
-    renderer: FieldRenderer,
-) -> FrozenFieldRendererRegistry:
-    return _registry_with_factories({SectionField: renderer})
-
-
-def _marked_section_factory(
-    marker: str,
-    calls: list[tuple[CfgField, FieldRenderContext]],
-) -> FieldRenderer:
-    def factory(
-        field: CfgField,
-        context: FieldRenderContext,
-    ) -> FieldWidgetProtocol:
-        from zcu_tools.gui.widgets.cfg.fields.containers import SectionWidget
-
-        calls.append((field, context))
-        widget = SectionWidget(cast(SectionField, field), context=context)
-        widget.setObjectName(marker)
-        return widget
-
-    return factory
-
 
 def _make_ctx():
     from zcu_tools.gui.app.main.adapter import ExpContext
@@ -337,57 +314,7 @@ def test_optional_scalar_widget_round_trips_value(qapp):
     assert read_scalar_widget(w, spec) is None
 
 
-def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
-    from zcu_tools.gui.cfg import make_default_value
-    from zcu_tools.gui.widgets.cfg import FieldRenderContext
-    from zcu_tools.gui.widgets.cfg.fields.containers import (
-        SectionWidget,
-        _CollapsibleSection,
-    )
 
-    spec = CfgSectionSpec(
-        fields={
-            "reps": ScalarSpec(label="Reps", type=int),
-            "mixer_freq": ScalarSpec(
-                label="Mixer freq", type=float, optional=True, group="Advanced"
-            ),
-        }
-    )
-    field = (
-        MeasureCfgBindings(ctrl)
-        .new_draft(CfgSchema(spec, make_default_value(spec)))
-        .root
-    )
-    # SectionField is structural (sole tree) and has no default registry entry;
-    # this test verifies the legacy SectionWidget's group handling via a custom registry.
-    from zcu_tools.gui.widgets.cfg.registry import FieldRendererRegistry
-    from zcu_tools.gui.widgets.cfg.fields.containers import SectionWidget as SW
-
-    def _section_factory(f, ctx):
-        return SW(cast(SectionField, f), context=ctx)
-
-    registry = (
-        FieldRendererRegistry()
-        .register(SectionField, _section_factory)
-        .register(ScalarField, lambda f, ctx: __import__("zcu_tools.gui.widgets.cfg.fields", fromlist=["ScalarWidget"]).ScalarWidget(cast(ScalarField, f)))
-        .freeze()
-    )
-    # Use a minimal registry that can render the SectionField for this legacy test.
-    # Instead, directly instantiate SectionWidget to verify grouping logic without involving default registry.
-    w = SectionWidget(field, context=FieldRenderContext(registry=registry, top_level=True))
-
-    # Both fields get widgets (grouping is presentation-only, not a value change).
-    assert set(w._child_widgets) == {"reps", "mixer_freq"}
-
-    # A collapsed "Advanced" sub-section was created for the grouped field.
-    advanced = [
-        s
-        for s in w.findChildren(_CollapsibleSection)
-        if s._header_label is not None and "Advanced" in s._header_label.text()
-    ]
-    assert len(advanced) == 1
-    assert advanced[0]._toggle_btn is not None
-    assert not advanced[0]._toggle_btn.isChecked()  # collapsed by default
 
 
 def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl):
@@ -425,51 +352,7 @@ def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl)
     assert leaf._field is not None
 
 
-def test_custom_section_factory_renders_root_nested_and_reference_subtree(qapp, ctrl):
-    # Sole tree: SectionField is structural (QTreeWidgetItems), not a registry widget.
-    # A custom SectionField factory is therefore not invoked for tree sections;
-    # reference headers and leaf widgets still go through the registry.
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 
-    nested_spec = CfgSectionSpec(
-        label="Nested",
-        fields={"nested_value": ScalarSpec(label="Nested value", type=int)},
-    )
-    reference_spec = CfgSectionSpec(
-        label="Reference inner",
-        fields={"ref_value": ScalarSpec(label="Reference value", type=int)},
-    )
-    schema = _schema(
-        {
-            "nested": nested_spec,
-            "reference": ReferenceSpec(kind="module", allowed=[reference_spec]),
-        },
-        {
-            "nested": CfgSectionValue(
-                fields={"nested_value": DirectValue(1)},
-            ),
-            "reference": ReferenceValue(
-                chosen_key="<Custom:Reference inner>",
-                value=CfgSectionValue(fields={"ref_value": DirectValue(2)}),
-            ),
-        },
-    )
-    calls: list[tuple[CfgField, FieldRenderContext]] = []
-    registry = _registry_with_section_factory(
-        _marked_section_factory("custom-section", calls)
-    )
-    form = CfgFormWidget(renderers=registry)
-
-    _attach(form, schema, ctrl)
-
-    root = form._root_widget
-    assert isinstance(root, TreeCfgWidget)
-    # Tree does not delegate SectionField to the registry; custom factory not called for sections
-    assert calls == []
-    # Tree still renders reference header and leaf via registry
-    assert root._ref_headers  # type: ignore[attr-defined]
-    assert root._leaf_widgets  # type: ignore[attr-defined]
 
 
 def test_custom_reference_factory_renders_actual_widget(qapp, ctrl):
@@ -516,40 +399,7 @@ def test_custom_reference_factory_renders_actual_widget(qapp, ctrl):
     ]
 
 
-def test_two_forms_render_with_isolated_custom_factories(qapp, ctrl):
-    # With sole tree, custom SectionField factories are not used for structural
-    # rendering; each form keeps its own TreeCfgWidget isolate and leaf rendering.
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 
-    schema = _schema(
-        {"value": ScalarSpec(label="Value", type=int)},
-        {"value": DirectValue(1)},
-    )
-    first_calls: list[tuple[CfgField, FieldRenderContext]] = []
-    second_calls: list[tuple[CfgField, FieldRenderContext]] = []
-    first = CfgFormWidget(
-        renderers=_registry_with_section_factory(
-            _marked_section_factory("first-form", first_calls)
-        )
-    )
-    second = CfgFormWidget(
-        renderers=_registry_with_section_factory(
-            _marked_section_factory("second-form", second_calls)
-        )
-    )
-
-    _attach(first, schema, ctrl)
-    _attach(second, schema, ctrl)
-
-    assert isinstance(first._root_widget, TreeCfgWidget)
-    assert isinstance(second._root_widget, TreeCfgWidget)
-    assert first._root_widget is not second._root_widget
-    # Leaf registry still isolated; section factory not invoked for tree
-    assert len(first_calls) == 0
-    assert len(second_calls) == 0
-    assert first._root_widget._leaf_widgets  # type: ignore[attr-defined]
-    assert second._root_widget._leaf_widgets  # type: ignore[attr-defined]
 
 
 def test_scalar_widget_minimum_width_reduced(qapp):
@@ -1884,7 +1734,7 @@ def test_module_ref_toggle_sits_left_of_combo_and_controls_subsection(qapp, ctrl
     ref_widget = w.findChild(ReferenceWidget)
     assert ref_widget is not None
 
-    # Sole tree: ReferenceWidget is header inside QTreeWidget (render_reference_children=False),
+    # Sole tree: ReferenceWidget is header-only inside QTreeWidget (no sub_container),
     # so its internal expand/sub_container layout is not the form's collapsible section.
     # Verify tree structure instead.
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
@@ -2037,63 +1887,7 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     assert isinstance(readout_spec, ReferenceSpec)
 
 
-def test_section_widget_no_header(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import FieldRenderContext
-    from zcu_tools.gui.widgets.cfg.fields.containers import SectionWidget
-    from zcu_tools.gui.widgets.cfg.registry import FieldRendererRegistry
-    from zcu_tools.gui.cfg.binding import SectionField as _SF
-    from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget as _ScW
-    from zcu_tools.gui.cfg import DirectValue as _DV
-    from zcu_tools.gui.cfg.binding import ScalarField as _ScF
-    from typing import cast as _cast
 
-    spec = CfgSectionSpec(
-        label="TestSection",
-        fields={"val": ScalarSpec(label="Val", type=int)},
-    )
-    val = CfgSectionValue(fields={"val": DirectValue(10)})
-    field = MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, val)).root
-
-    # SectionWidget is structural (sole tree) and has no default registry entry;
-    # this legacy test verifies its header logic via a custom registry.
-    def _sec_factory(f, ctx):
-        return SectionWidget(_cast(_SF, f), context=ctx)
-    def _scalar_factory(f, ctx):
-        return _ScW(_cast(_ScF, f))
-    renderers = (
-        FieldRendererRegistry()
-        .register(_SF, _sec_factory)
-        .register(_ScF, _scalar_factory)
-        .freeze()
-    )
-    w1 = _cast(
-        SectionWidget,
-        renderers.render(
-            field,
-            FieldRenderContext(
-                registry=renderers,
-                path="section",
-                top_level=False,
-            ),
-        ),
-    )
-    assert w1._container._toggle_btn is not None
-    assert w1._container._header_label is not None
-
-    # A reference subtree boundary omits its duplicate section header.
-    w2 = _cast(
-        SectionWidget,
-        renderers.render(
-            field,
-            FieldRenderContext(
-                registry=renderers,
-                path="reference",
-                top_level=True,
-            ),
-        ),
-    )
-    assert w2._container._toggle_btn is None
-    assert w2._container._header_label is None
 
 
 def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):

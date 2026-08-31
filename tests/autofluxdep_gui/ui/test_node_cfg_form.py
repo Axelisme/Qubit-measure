@@ -892,3 +892,65 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
         assert generation_editor.isEnabled()
     finally:
         form.teardown()
+def test_qubit_freq_drive_gain_reference_subtree_preserves_header_and_unrelated(qapp):
+    """Shipped qubit_freq: changing drive_gain.mode only rebuilds modules.qub_pulse subtree."""
+    from zcu_tools.gui.app.autofluxdep.app import build_core
+    from zcu_tools.gui.app.autofluxdep.ui.node_cfg_form import NodeCfgForm
+    from zcu_tools.gui.cfg import DirectValue
+    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+
+    ctrl = build_core()
+    try:
+        node = ctrl.add_node_by_type("qubit_freq")
+        idx = ctrl.state.nodes.index(node)
+        form = NodeCfgForm(ctrl, node, idx)
+        try:
+            root = form._default_form._root_widget
+            assert isinstance(root, TreeCfgWidget)
+            # Find reference header for modules.qub_pulse and an unrelated leaf
+            ref_path = "modules.qub_pulse"
+            ref_item = root._path_to_item.get(ref_path)
+            assert ref_item is not None
+            header_before = root._tree.itemWidget(ref_item, 1)
+            assert header_before is not None
+            gain_before = root._leaf_path_to_widget.get("modules.qub_pulse.gain")
+            assert gain_before is not None
+            # Unrelated leaf not under that reference, e.g., relax_delay
+            # For qubit_freq, relax_delay is not present, but modules.readout is another reference; pick a leaf not under qub_pulse
+            unrelated_path = None
+            unrelated_before = None
+            for p, w in root._leaf_path_to_widget.items():
+                if not p.startswith("modules.qub_pulse"):
+                    unrelated_path = p
+                    unrelated_before = w
+                    break
+            assert unrelated_before is not None, "need an unrelated leaf"
+            # Change drive_gain.mode via Generation draft
+            gen = form._generation_draft
+            assert gen is not None
+            # Find drive_gain section in generation
+            from zcu_tools.gui.cfg.binding import SectionField
+            drive_gain = None
+            for k, v in gen.root.fields.items():
+                if k == "drive_gain":
+                    drive_gain = v
+                    break
+            assert isinstance(drive_gain, SectionField)
+            mode_field = drive_gain.fields["drive_gain_mode"]
+            mode_field.set_value(DirectValue("fixed"))
+            qapp.processEvents()
+            qapp.processEvents()
+            # Decoration should have changed for modules.qub_pulse.gain
+            dec = form._default_form.decoration_for_path("modules.qub_pulse.gain")
+            assert dec.enabled is True  # was generated (disabled) in adaptive, now enabled
+            # Header should be preserved, gain leaf should be recreated, unrelated preserved
+            header_after = root._tree.itemWidget(ref_item, 1)
+            assert header_after is header_before
+            gain_after = root._leaf_path_to_widget.get("modules.qub_pulse.gain")
+            assert gain_after is not None
+            assert gain_after is not gain_before
+            assert root._leaf_path_to_widget[unrelated_path] is unrelated_before
+        finally:
+            form.teardown()
+    finally:
+        ctrl._background_svc.quiesce()

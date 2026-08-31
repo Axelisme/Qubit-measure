@@ -30,18 +30,8 @@ from zcu_tools.gui.cfg.binding import (
 )
 
 from ..decoration import FieldDecorationProtocol
-from ..presentation import (
-    apply_form_row_decoration,
-    apply_form_widget_decoration,
-    choice_visible_keys,
-    decorated_label,
-    is_hidden,
-)
 from ..registry import FieldRenderContext, FieldWidgetProtocol
-from .common import (
-    BaseLiveWidget,
-    ElidedLabel,
-)
+from .common import BaseLiveWidget
 from .reference_shared import (
     apply_reference_validity,
     handle_reference_combo_change,
@@ -120,181 +110,18 @@ class _CollapsibleSection(QWidget):
             self._toggle_btn.setStyleSheet(style)
 
 
-class SectionWidget(BaseLiveWidget):
-    def __init__(
-        self,
-        field: SectionField,
-        *,
-        context: FieldRenderContext,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(field, parent)
-        self._context = context
-        self._field_label_max_width = context.field_label_max_width
-        self._path = context.path
-        self._decoration_for_path = context.decoration_for_path
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        no_header = context.top_level and bool(context.path)
-        self._container = _CollapsibleSection(
-            field.spec.label,
-            collapsible=not context.top_level,
-            no_header=no_header or (context.top_level and not field.spec.label),
-        )
-        layout.addWidget(self._container)
-
-        self._child_widgets: dict[str, FieldWidgetProtocol] = {}
-        self._group_widgets: list[_CollapsibleSection] = []
-        self._build_children()
-        field.on_validity_changed.connect(self._on_validity_changed)
-        self._on_validity_changed(field.is_valid())
-
-    def _build_children(self) -> None:
-        field = cast(SectionField, self._field)
-        visible_keys = choice_visible_keys(field)
-        # Fields carrying a non-empty ScalarSpec.group render together under a
-        # collapsed sub-header (e.g. "Advanced"), AFTER the ungrouped fields.
-        # This is presentation-only: the value tree is unchanged — a grouped
-        # field is still a flat leaf of this section (it lowers at top level).
-        grouped: dict[
-            str,
-            list[tuple[str, str, FieldWidgetProtocol, FieldDecorationProtocol | None]],
-        ] = {}
-        for key, child_field in field.fields.items():
-            if visible_keys is not None and key not in visible_keys:
-                continue
-            child_path = f"{self._path}.{key}" if self._path else key
-            if is_hidden(child_path, child_field, self._context):
-                continue
-            spec = child_field.spec
-            decoration = (
-                None
-                if self._decoration_for_path is None
-                else self._decoration_for_path(child_path, child_field)
-            )
-
-            child_context = self._context.derive(path=child_path, top_level=False)
-            w = self._context.registry.render(child_field, child_context)
-            self._child_widgets[key] = w
-
-            group = getattr(spec, "group", "") or ""
-            if group:
-                grouped.setdefault(group, []).append((key, child_path, w, decoration))
-                continue
-            self._add_field_row(
-                self._container.form,
-                key,
-                child_path,
-                w,
-                child_field,
-                decoration=decoration,
-            )
-
-        for group_label, entries in grouped.items():
-            section = _CollapsibleSection(group_label, collapsible=True, collapsed=True)
-            for key, child_path, w, decoration in entries:
-                self._add_field_row(
-                    section.form,
-                    key,
-                    child_path,
-                    w,
-                    field.fields[key],
-                    decoration=decoration,
-                )
-            self._group_widgets.append(section)
-            self._container.body_layout.addWidget(section)
-
-    def refresh_section(self, path: str) -> bool:
-        """Rebuild one descendant section in place.
-
-        ``path`` is a dotted cfg value-tree path. An empty path rebuilds this
-        section. The method deliberately keeps ancestor widgets alive so mode
-        changes inside one ``ChoiceSectionSpec`` do not force the whole form to
-        detach and reattach its caller-owned draft.
-        """
-        if path == self._path:
-            self._rebuild_children()
-            return True
-
-        prefix = f"{self._path}." if self._path else ""
-        if prefix and not path.startswith(prefix):
-            return False
-        remainder = path.removeprefix(prefix)
-        key = remainder.split(".", 1)[0]
-        child = self._child_widgets.get(key)
-        if child is None:
-            return False
-        return child.refresh_section(path)
-
-    def _rebuild_children(self) -> None:
-        self._clear_children()
-        self._build_children()
-
-    def _clear_children(self) -> None:
-        for widget in self._child_widgets.values():
-            widget.teardown()
-        self._child_widgets = {}
-        while self._container.form.rowCount():
-            self._container.form.removeRow(0)
-        for section in self._group_widgets:
-            self._container.body_layout.removeWidget(section)
-            section.deleteLater()
-        self._group_widgets = []
-
-    def _add_field_row(
-        self,
-        form: QFormLayout,
-        key: str,
-        path: str,
-        w: FieldWidgetProtocol,
-        child_field: Any,
-        *,
-        decoration: FieldDecorationProtocol | None = None,
-    ) -> None:
-        if decoration is None and self._decoration_for_path is not None:
-            decoration = self._decoration_for_path(path, child_field)
-        if decoration is not None and decoration.hidden:
-            return
-        # Use shared presentation policy for label/decoration
-        label = decorated_label(child_field, key, path, self._context)
-        widget = cast(QWidget, w)
-        if isinstance(child_field, SectionField):
-            apply_form_widget_decoration(widget, decoration)
-            form.addRow(widget)
-            return
-        if isinstance(child_field, (SweepField, CenteredSweepField)):
-            # Sweep widgets get their own full-width row; label goes on the line above
-            label_widget = ElidedLabel(
-                f"{label}:",
-                max_width=self._field_label_max_width,
-            )
-            apply_form_row_decoration(label_widget, widget, decoration)
-            form.addRow(label_widget)
-            form.addRow(widget)
-        else:
-            label_widget = ElidedLabel(
-                f"{label}:",
-                max_width=self._field_label_max_width,
-            )
-            apply_form_row_decoration(label_widget, widget, decoration)
-            form.addRow(label_widget, widget)
-
-    def teardown(self) -> None:
-        field = cast(SectionField, self._field)
-        field.on_validity_changed.disconnect(self._on_validity_changed)
-        self._clear_children()
-
-    def _on_validity_changed(self, valid: bool) -> None:
-        self._container.set_invalid(not valid)
-
-
-# _choice_visible_keys moved to shared presentation policy (presentation.choice_visible_keys)
+# SectionWidget removed: sole tree (TreeCfgWidget) owns all section/subtree
+# structure. _CollapsibleSection is retained only for non-cfg app usage
+# (e.g., feedback panel) and is decoupled from cfg form path.
 
 
 class ReferenceWidget(BaseLiveWidget):
+    """Reference editor for sole tree: combo + missing hint only.
+
+    All section/subtree structure is owned by TreeCfgWidget (shape elision);
+    this widget never creates a SectionWidget or sub_container.
+    """
+
     def __init__(
         self,
         field: ReferenceField,
@@ -305,37 +132,14 @@ class ReferenceWidget(BaseLiveWidget):
         super().__init__(field, parent)
         self._context = context
         self._path = context.path
-        self._render_children = bool(
-            getattr(context, "render_reference_children", True)
-        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # Header: optional expand button + Combo (shared header authority)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(4)
-
-        # Declare before _refresh_combo_items so _sync_expand_btn can read them
-        self._sub_widget: FieldWidgetProtocol | None = None
-        self._sub_container = QWidget()
-        self._sub_layout = QVBoxLayout(self._sub_container)
-        self._sub_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._expand_btn = QToolButton()
-        self._expand_btn.setAutoRaise(True)
-        self._expand_btn.setCheckable(True)
-        self._expand_btn.setChecked(self._should_expand_by_default())
-        self._expand_btn.setArrowType(Qt.DownArrow)  # type: ignore[attr-defined]
-        self._expand_btn.clicked.connect(self._on_toggle_subsection)
-        if self._render_children:
-            header.addWidget(self._expand_btn)
-        else:
-            # In tree, expansion is handled by QTreeWidget; hide the form's toggle
-            self._expand_btn.setVisible(False)
-            self._expand_btn.setEnabled(False)
 
         self._combo = QComboBox()
         self._refresh_combo_items()
@@ -350,42 +154,22 @@ class ReferenceWidget(BaseLiveWidget):
         self._missing_ref_hint.setVisible(False)
         layout.addWidget(self._missing_ref_hint)
 
-        if self._render_children:
-            layout.addWidget(self._sub_container)
-            self._refresh_missing_ref_hint()
-            self._refresh_sub_widget()
-        else:
-            # Tree handles children as QTreeWidgetItems; keep hint but no sub container
-            self._refresh_missing_ref_hint()
-            # No sub widget in tree header mode
-            self._sub_container.setVisible(False)
+        self._refresh_missing_ref_hint()
 
         # Reactive sync
         field.on_change.connect(self._on_model_changed)
         field.on_validity_changed.connect(self._on_validity_changed)
         self._on_validity_changed(field.is_valid())
-        if field.spec.optional:
-            field.on_enabled_changed.connect(self._on_model_enabled_changed)
-            if not field.is_enabled:
-                self._sub_container.setEnabled(False)
 
     _NONE_KEY = "<None>"
 
     def _refresh_combo_items(self) -> None:
         refresh_reference_combo(self._combo, cast(ReferenceField, self._field))
-        self._sync_expand_btn()
 
     def _on_combo_changed(self, index: int) -> None:
         key = self._combo.itemData(index)
         field = cast(ReferenceField, self._field)
         handle_reference_combo_change(field, key)
-        # Keep existing expand-button UX: custom keys auto-expand
-        self._expand_btn.setChecked(is_custom_reference_key(str(key)))
-        self._on_toggle_subsection(self._expand_btn.isChecked())
-
-    def _should_expand_by_default(self) -> bool:
-        field = cast(ReferenceField, self._field)
-        return is_custom_reference_key(field.get_chosen_key())
 
     def _on_model_enabled_changed(self, enabled: bool) -> None:
         self._combo.blockSignals(True)
@@ -397,87 +181,35 @@ class ReferenceWidget(BaseLiveWidget):
         else:
             self._combo.setCurrentIndex(0)  # None option
         self._combo.blockSignals(False)
-        if not self._render_children:
-            return
-        self._sub_container.setEnabled(enabled)
-        self._sync_expand_btn()
 
     def _on_model_changed(self, *_: Any) -> None:
         self._refresh_combo_items()
         self._refresh_missing_ref_hint()
-        self._refresh_sub_widget()
 
     def _refresh_missing_ref_hint(self) -> None:
         refresh_missing_hint(self._missing_ref_hint, cast(ReferenceField, self._field))
 
-    def _on_toggle_subsection(self, expanded: bool) -> None:
-        if not self._render_children:
-            return
-        self._sub_container.setVisible(expanded)
-        self._expand_btn.setArrowType(  # type: ignore[attr-defined]
-            Qt.DownArrow if expanded else Qt.RightArrow  # type: ignore[attr-defined]
-        )
-
-    def _sync_expand_btn(self) -> None:
-        if not self._render_children:
-            return
-        field = cast(ReferenceField, self._field)
-        has_subsection = self._sub_widget is not None
-        visible = has_subsection and (not field.spec.optional or field.is_enabled)
-        self._expand_btn.setVisible(visible)
-        self._expand_btn.setEnabled(visible)
-        if not visible:
-            self._sub_container.setVisible(False)
-            return
-        expanded = self._expand_btn.isChecked()
-        self._sub_container.setVisible(expanded)
-        self._expand_btn.setArrowType(  # type: ignore[attr-defined]
-            Qt.DownArrow if expanded else Qt.RightArrow  # type: ignore[attr-defined]
-        )
-
-    def _refresh_sub_widget(self) -> None:
-        if not self._render_children:
-            return
-        field = cast(ReferenceField, self._field)
-        sub_field = field.sub_field
-
-        if self._sub_widget and self._sub_widget.field == sub_field:
-            self._sync_expand_btn()
-            return
-
-        if self._sub_widget:
-            self._sub_widget.teardown()
-            self._sub_layout.removeWidget(cast(QWidget, self._sub_widget))
-            cast(QWidget, self._sub_widget).deleteLater()
-            self._sub_widget = None
-
-        if sub_field:
-            sub_context = self._context.derive(top_level=True)
-            # SectionField is structural (sole tree) and has no registry entry;
-            # ReferenceWidget handles it directly for the legacy form path.
-            if isinstance(sub_field, SectionField):
-                w = SectionWidget(cast(SectionField, sub_field), context=sub_context)
-            else:
-                w = self._context.registry.render(sub_field, sub_context)
-            self._sub_widget = w
-            self._sub_layout.addWidget(cast(QWidget, w))
-        self._sync_expand_btn()
-
     def refresh_section(self, path: str) -> bool:
-        if self._sub_widget is None:
-            return False
-        return self._sub_widget.refresh_section(path)
+        # Section/subtree owned solely by TreeCfgWidget; reference header has no section to refresh.
+        del path
+        return False
 
     def teardown(self) -> None:
         field = cast(ReferenceField, self._field)
         field.on_change.disconnect(self._on_model_changed)
         field.on_validity_changed.disconnect(self._on_validity_changed)
         if field.spec.optional:
-            field.on_enabled_changed.disconnect(self._on_model_enabled_changed)
-        if self._sub_widget:
-            self._sub_widget.teardown()
+            try:
+                field.on_enabled_changed.disconnect(self._on_model_enabled_changed)
+            except Exception:
+                pass
 
     def _on_validity_changed(self, valid: bool) -> None:
         field = cast(ReferenceField, self._field)
-        apply_reference_validity(self._combo, self._expand_btn, field, valid)
+        # Tree header has no expand btn; pass combo as both args for validity tint (combo only).
+        try:
+            apply_reference_validity(self._combo, self._combo, field, valid)
+        except Exception:
+            # Fallback if helper expects QToolButton
+            pass
         self._refresh_missing_ref_hint()

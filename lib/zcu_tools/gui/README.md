@@ -223,10 +223,12 @@ remains owned by the five exact non-section `FieldRenderer` factories via the sa
 Choice visibility, literal hiding, decorated labels, and full decoration
 (hidden/enabled/tooltip/tone/badge/suffix) are implemented once in the shared presentation
 policy and used by the sole tree presentation; reference editing (combo population,
-selection, missing hint, validity) is also single-sourced. Section-local refresh
-(`refresh_section(path)`) only rebuilds the target section item's descendants and preserves
-unrelated items/editors. The seam's executable owner is `zcu_tools.gui.widgets.cfg`
-and its durable declaration owner is this section.
+selection, missing hint, validity) is also single-sourced and header-only (no form
+subtree). Section-local refresh (`refresh_section(path)`) only rebuilds the target
+section or reference-elided subtree owner's descendants (e.g., `modules.qub_pulse` for
+`modules.qub_pulse.gain`) and preserves unrelated items/editors and the reference header.
+The seam's executable owner is `zcu_tools.gui.widgets.cfg` and its durable declaration owner
+is this section.
 
 ## EventBus Lifecycle
 

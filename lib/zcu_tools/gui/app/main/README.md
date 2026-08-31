@@ -337,11 +337,12 @@ across Run, autofluxdep, and module/waveform editors.
 whose fields depend on a local mode/strategy. The section still owns a complete
 union `CfgSectionValue`; each `ChoiceBinding` names the selector field and the
 fields rendered for each selector value. `CfgFormWidget` refreshes only the
-affected section subtree when a selector changes, while hidden inactive fields
-keep their values in the model and lower/persist through the normal section
-path. Decoration-provider changes follow the same section-local refresh path
-instead of reattaching the full `CfgDraft`-backed form. Field widgets expose a
-typed `refresh_section(path) -> bool` surface, and decoration state is consumed
+affected section subtree (including reference-elided subtree owner, e.g.
+`modules.qub_pulse` for `modules.qub_pulse.gain`) when a selector or decoration changes,
+while hidden inactive fields keep their values in the model and lower/persist through the
+normal section path. Decoration-provider changes follow the same section-local (section or
+reference) refresh path instead of reattaching the full `CfgDraft`-backed form. Field widgets
+expose a typed `refresh_section(path) -> bool` surface, and decoration state is consumed
 through the shared `FieldDecoration` surface rather than ad-hoc attribute probing.
 Unknown `ChoiceSectionSpec` selector values fast-fail instead of hiding all
 controlled fields.
