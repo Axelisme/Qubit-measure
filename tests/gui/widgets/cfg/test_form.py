@@ -91,7 +91,6 @@ _RENDERED_FIELD_TYPES = (
     ScalarField,
     SweepField,
     CenteredSweepField,
-    SectionField,
     ReferenceField,
 )
 
@@ -106,6 +105,10 @@ def _registry_with_factories(
             field_type,
             overrides.get(field_type, defaults.resolve(field_type)),
         )
+    # SectionField is structural (sole tree) and has no default registry entry.
+    # Tests that need a SectionField factory provide it explicitly via overrides.
+    if SectionField in overrides:
+        builder.register(SectionField, overrides[SectionField])
     return builder.freeze()
 
 
@@ -123,7 +126,7 @@ def _marked_section_factory(
         field: CfgField,
         context: FieldRenderContext,
     ) -> FieldWidgetProtocol:
-        from zcu_tools.gui.widgets.cfg.fields import SectionWidget
+        from zcu_tools.gui.widgets.cfg.fields.containers import SectionWidget
 
         calls.append((field, context))
         widget = SectionWidget(cast(SectionField, field), context=context)
@@ -336,8 +339,8 @@ def test_optional_scalar_widget_round_trips_value(qapp):
 
 def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
     from zcu_tools.gui.cfg import make_default_value
-    from zcu_tools.gui.widgets.cfg import FieldRenderContext, default_cfg_renderers
-    from zcu_tools.gui.widgets.cfg.fields import (
+    from zcu_tools.gui.widgets.cfg import FieldRenderContext
+    from zcu_tools.gui.widgets.cfg.fields.containers import (
         SectionWidget,
         _CollapsibleSection,
     )
@@ -355,14 +358,23 @@ def test_grouped_field_renders_in_collapsed_subsection(qapp, ctrl):
         .new_draft(CfgSchema(spec, make_default_value(spec)))
         .root
     )
-    registry = default_cfg_renderers()
-    w = cast(
-        SectionWidget,
-        registry.render(
-            field,
-            FieldRenderContext(registry=registry, top_level=True),
-        ),
+    # SectionField is structural (sole tree) and has no default registry entry;
+    # this test verifies the legacy SectionWidget's group handling via a custom registry.
+    from zcu_tools.gui.widgets.cfg.registry import FieldRendererRegistry
+    from zcu_tools.gui.widgets.cfg.fields.containers import SectionWidget as SW
+
+    def _section_factory(f, ctx):
+        return SW(cast(SectionField, f), context=ctx)
+
+    registry = (
+        FieldRendererRegistry()
+        .register(SectionField, _section_factory)
+        .register(ScalarField, lambda f, ctx: __import__("zcu_tools.gui.widgets.cfg.fields", fromlist=["ScalarWidget"]).ScalarWidget(cast(ScalarField, f)))
+        .freeze()
     )
+    # Use a minimal registry that can render the SectionField for this legacy test.
+    # Instead, directly instantiate SectionWidget to verify grouping logic without involving default registry.
+    w = SectionWidget(field, context=FieldRenderContext(registry=registry, top_level=True))
 
     # Both fields get widgets (grouping is presentation-only, not a value change).
     assert set(w._child_widgets) == {"reps", "mixer_freq"}
@@ -1422,6 +1434,8 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
             "stable": DirectValue(3.0),
         },
     )
+    from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+
     w = CfgFormWidget()
     model = _attach(w, schema, ctrl)
     root_widget = w._root_widget
@@ -1429,14 +1443,28 @@ def test_choice_section_rebuilds_only_changed_section(qapp, ctrl):
     # Choice decoration paths should update section-locally and keep widget instance
     w.decoration_paths()
     assert "search.half_width" in w.decoration_paths()
+    # Capture unrelated subtree widget identity before change
+    stable_before = root_widget._leaf_path_to_widget["stable"]
+    stable_item_before = root_widget._tree.findItems("Stable", Qt.MatchExactly | Qt.MatchRecursive, 0)
+    assert stable_item_before
     search = model.fields["search"]
     assert isinstance(search, SectionField)
+    # Capture search's half_width widget before (should be replaced)
+    half_before = root_widget._leaf_path_to_widget.get("search.half_width")
+    assert half_before is not None
     search.fields["mode"].set_value(DirectValue("fixed"))
     w.decoration_paths()
 
     assert w._root_widget is root_widget
     assert "search.half_width" not in w.decoration_paths()
     assert "search.manual_value" in w.decoration_paths()
+    # Unrelated leaf "stable" must retain same widget/item (section-local)
+    assert root_widget._leaf_path_to_widget["stable"] is stable_before
+    # Changed section's old leaf should be gone, new leaf should be present and different
+    assert "search.half_width" not in root_widget._leaf_path_to_widget
+    manual_after = root_widget._leaf_path_to_widget.get("search.manual_value")
+    assert manual_after is not None
+    assert manual_after is not half_before
 
 
 def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
@@ -1539,11 +1567,18 @@ def test_decoration_provider_refresh_rebuilds_only_affected_section(qapp, ctrl):
     _attach(w, schema, ctrl)
     root_widget = w._root_widget
     assert isinstance(root_widget, TreeCfgWidget)
-    # Section-local decoration refresh keeps the same TreeCfgWidget instance
+    # Capture unrelated leaf before decoration change
+    stable_before = root_widget._leaf_path_to_widget["stable"]
+    group_value_before = root_widget._leaf_path_to_widget["group.value"]
+    # Section-local decoration refresh keeps the same TreeCfgWidget instance and preserves unrelated subtree
     w.set_decoration_provider(BadgeProvider("generated"))
 
     assert w._root_widget is root_widget
     assert w.decoration_for_path("group.value").badge == "generated"
+    # Unrelated "stable" leaf must retain same widget
+    assert root_widget._leaf_path_to_widget["stable"] is stable_before
+    # Changed section's leaf should be recreated (different widget) but still present
+    assert root_widget._leaf_path_to_widget["group.value"] is not group_value_before
 
 
 def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl):
@@ -2003,8 +2038,14 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 
 
 def test_section_widget_no_header(qapp, ctrl):
-    from zcu_tools.gui.widgets.cfg import FieldRenderContext, default_cfg_renderers
-    from zcu_tools.gui.widgets.cfg.fields import SectionWidget
+    from zcu_tools.gui.widgets.cfg import FieldRenderContext
+    from zcu_tools.gui.widgets.cfg.fields.containers import SectionWidget
+    from zcu_tools.gui.widgets.cfg.registry import FieldRendererRegistry
+    from zcu_tools.gui.cfg.binding import SectionField as _SF
+    from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget as _ScW
+    from zcu_tools.gui.cfg import DirectValue as _DV
+    from zcu_tools.gui.cfg.binding import ScalarField as _ScF
+    from typing import cast as _cast
 
     spec = CfgSectionSpec(
         label="TestSection",
@@ -2013,9 +2054,19 @@ def test_section_widget_no_header(qapp, ctrl):
     val = CfgSectionValue(fields={"val": DirectValue(10)})
     field = MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, val)).root
 
-    # A regular nested section owns a collapsible header.
-    renderers = default_cfg_renderers()
-    w1 = cast(
+    # SectionWidget is structural (sole tree) and has no default registry entry;
+    # this legacy test verifies its header logic via a custom registry.
+    def _sec_factory(f, ctx):
+        return SectionWidget(_cast(_SF, f), context=ctx)
+    def _scalar_factory(f, ctx):
+        return _ScW(_cast(_ScF, f))
+    renderers = (
+        FieldRendererRegistry()
+        .register(_SF, _sec_factory)
+        .register(_ScF, _scalar_factory)
+        .freeze()
+    )
+    w1 = _cast(
         SectionWidget,
         renderers.render(
             field,
@@ -2030,7 +2081,7 @@ def test_section_widget_no_header(qapp, ctrl):
     assert w1._container._header_label is not None
 
     # A reference subtree boundary omits its duplicate section header.
-    w2 = cast(
+    w2 = _cast(
         SectionWidget,
         renderers.render(
             field,

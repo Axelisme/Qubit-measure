@@ -175,11 +175,13 @@ shared Qt leaf同時集中scalar input的write/connect dispatch與純`QWidget`�
 app仍擁有visibility、target lookup、main-thread marshal與remote wire policy。
 
 每個`CfgFormWidget`持有一個`FrozenFieldRendererRegistry`。沒有顯式注入時，
-`default_cfg_renderers()`會建立全新的builder、為六個exact field types註冊固定
-`FieldRenderer(field, context)` factory再freeze。immutable `FieldRenderContext`只攜帶path、
+`default_cfg_renderers()`會建立全新的builder、為五個 non-section exact field types
+（`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
+`FieldRenderer(field, context)` factory再freeze；`SectionField` 不在 registry，由 sole tree
+（`TreeCfgWidget`）直接建立 `QTreeWidgetItem` 結構。immutable `FieldRenderContext`只攜帶path、
 top-level標記、label width、decoration resolver、text enhancer與同一frozen registry；不攜帶
-controller/service/app/runtime資料。root、section child與reference subtree都走registry
-`render()`，沒有consumer-side constructor分支、module-global mapping、decorator、string key或
+controller/service/app/runtime資料。leaf 與 reference header 走 registry `render()`，而 section
+結構由 tree 直接建立，沒有consumer-side constructor分支、module-global mapping、decorator、string key或
 inheritance fallback。registration會先驗factory call shape，render則驗QWidget與field-widget
 protocol。
 
@@ -215,13 +217,15 @@ is stable under horizontal scroll via logical-column normalization, and elides
 the guaranteed single materialized reference-shape row. The tree viewport
 follows the available panel height and scrolls only when rendered content
 exceeds the viewport, without a fixed-height threshold. Editor behavior
-remains owned by the six exact `FieldRenderer` factories via the same frozen
-`FrozenFieldRendererRegistry`; the tree varies only structural node
-composition. Choice visibility, literal hiding, decorated labels, and full
-decoration (hidden/enabled/tooltip/tone/badge/suffix) are implemented once in
-the shared presentation policy and used by both adapters; reference editing
-(combo population, selection, missing hint, validity) is also single-sourced
-and reused by both. The seam's executable owner is `zcu_tools.gui.widgets.cfg`
+remains owned by the five exact non-section `FieldRenderer` factories via the same frozen
+`FrozenFieldRendererRegistry`; section structure is owned solely by the dense tree
+(`TreeCfgWidget` creates `QTreeWidgetItem`s, handles folding/indentation/connectors/elision).
+Choice visibility, literal hiding, decorated labels, and full decoration
+(hidden/enabled/tooltip/tone/badge/suffix) are implemented once in the shared presentation
+policy and used by the sole tree presentation; reference editing (combo population,
+selection, missing hint, validity) is also single-sourced. Section-local refresh
+(`refresh_section(path)`) only rebuilds the target section item's descendants and preserves
+unrelated items/editors. The seam's executable owner is `zcu_tools.gui.widgets.cfg`
 and its durable declaration owner is this section.
 
 ## EventBus Lifecycle

@@ -18,7 +18,7 @@ from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_co
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
+from zcu_tools.gui.widgets.cfg.fields.containers import _CollapsibleSection
 
 logger = logging.getLogger(__name__)
 

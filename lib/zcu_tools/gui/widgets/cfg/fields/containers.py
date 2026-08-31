@@ -453,7 +453,12 @@ class ReferenceWidget(BaseLiveWidget):
 
         if sub_field:
             sub_context = self._context.derive(top_level=True)
-            w = self._context.registry.render(sub_field, sub_context)
+            # SectionField is structural (sole tree) and has no registry entry;
+            # ReferenceWidget handles it directly for the legacy form path.
+            if isinstance(sub_field, SectionField):
+                w = SectionWidget(cast(SectionField, sub_field), context=sub_context)
+            else:
+                w = self._context.registry.render(sub_field, sub_context)
             self._sub_widget = w
             self._sub_layout.addWidget(cast(QWidget, w))
         self._sync_expand_btn()

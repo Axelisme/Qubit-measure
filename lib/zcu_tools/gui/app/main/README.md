@@ -305,29 +305,33 @@ The framework protocol does not expose a static spec query. Shared
 knowledge (ADR-0012、ADR-0045).
 
 `CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
-每個form使用自己的frozen exact renderer registry；固定renderer factory接收immutable
-presentation context，root與recursive section/reference共享該instance，沒有consumer-side
-constructor dispatch、global decorator registration或inheritance fallback。attach在成功build
-root後才訂閱draft，detach會解除change/validity callbacks但不close draft。`CfgFormWidget`
-accepts an optional field decoration provider keyed by full value
-tree path. The shared widget owns only generic presentation metadata
-(`hidden`/`enabled`/tone/badge/tooltip/label suffix) and computes the default
-decoration from the spec; app-specific policy such as generated fields stays in
-the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider
-can explicitly reveal them as framed read-only values for generated or locked
-review fields. Decoration is a view contract only: domain enforcement remains in
-the owning controller/runtime.
+每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
+`default_cfg_renderers()` 為五個 non-section exact field types
+（`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
+`FieldRenderer(field, context)`，`SectionField` 不在 registry 而由 sole tree
+（`TreeCfgWidget`）直接建立 `QTreeWidgetItem` 結構。immutable `FieldRenderContext` 只攜帶 path、
+top-level 標記、label width、decoration resolver、text enhancer 與同一 frozen registry；leaf 與
+reference header 走 registry `render()`，而 section 結構由 tree 直接建立，沒有 consumer-side
+constructor dispatch、global decorator registration 或 inheritance fallback。attach 在成功 build
+tree root 後才訂閱 draft，detach 會解除 change/validity callbacks 但不 close draft。`CfgFormWidget`
+accepts an optional field decoration provider keyed by full value tree path. The shared widget
+owns only generic presentation metadata (`hidden`/`enabled`/tone/badge/tooltip/label suffix) and
+computes the default decoration from the spec; app-specific policy such as generated fields stays in
+the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider can explicitly
+reveal them as framed read-only values for generated or locked review fields. Decoration is a view
+contract only: domain enforcement remains in the owning controller/runtime.
 
 `CfgFormWidget.set_editing_enabled()` locks only the rendered form content, not
 the widget shell or its `QScrollArea`. Busy/read-only hosts keep the cfg pane
 scrollable while child editor controls are disabled, and the desired editing
 state persists across `detach()` / `attach()` swaps of the service-owned draft.
 
-Nested `CfgSectionSpec` fields render as full-width collapsible sections and do
-not get an additional parent-row label. The section header is the label, which
-keeps grouped forms such as autofluxdep Generation overrides from showing
-duplicated text like `Frequency recovery:` next to a second `Frequency recovery`
-header.
+Nested `CfgSectionSpec` fields render as tree items with whole-row folding
+(`QTreeWidgetItem` at 10 px indentation, 13 px text, classic connectors); the section header
+is the item label and does not create an additional parent-row label. This keeps grouped forms
+such as autofluxdep Generation overrides from showing duplicated text like `Frequency recovery:`
+next to a second `Frequency recovery` header, and keeps the single tree presentation consistent
+across Run, autofluxdep, and module/waveform editors.
 
 `ChoiceSectionSpec` is the shared selector-driven display contract for sections
 whose fields depend on a local mode/strategy. The section still owns a complete

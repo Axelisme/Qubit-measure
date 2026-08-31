@@ -225,28 +225,114 @@ class TreeCfgWidget(QWidget):
         self._ref_prev_state.clear()
 
     def refresh_section(self, path: str) -> bool:
-        # Normalize dotted path handling similar to SectionWidget.
+        # Section-local refresh: only rebuild the target section item's subtree,
+        # preserving unrelated branches (A7/A8).
         if path == self._path:
             self._rebuild_tree()
             return True
         prefix = f"{self._path}." if self._path else ""
         if prefix and not path.startswith(prefix):
             return False
-        # Accept any descendant section/reference path that currently has an item.
-        # For simplicity, any known path triggers a full rebuild and returns True
-        # to satisfy CfgFormWidget's section-local refresh contract.
-        if path in self._path_to_item:
-            self._rebuild_tree()
-            return True
-        # Also accept paths that are ancestors of current items (e.g., parent section
-        # whose children include hidden fields). Walk visible keys to decide.
-        remainder = path.removeprefix(prefix)
-        # Quick existence check: traverse field tree to see if path is a SectionField.
-        sec = self._find_section_field(path)
-        if sec is not None:
-            self._rebuild_tree()
-            return True
-        return False
+        item = self._path_to_item.get(path)
+        if item is None:
+            return False
+        sec_field = self._find_section_field(path)
+        if sec_field is None:
+            return False
+        # Collect descendant item paths (sections/references/groups) under target.
+        descendant_item_paths = [
+            p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
+        ]
+        # Collect descendant leaf widget paths under target.
+        descendant_leaf_paths = [
+            p
+            for p in list(self._leaf_path_to_widget.keys())
+            if p.startswith(path + ".")
+        ]
+        # Teardown and remove descendant leaf widgets.
+        for leaf_path in descendant_leaf_paths:
+            widget = self._leaf_path_to_widget.pop(leaf_path, None)
+            if widget is not None:
+                try:
+                    widget.teardown()
+                except Exception:
+                    pass
+                try:
+                    self._leaf_widgets.remove(widget)
+                except ValueError:
+                    pass
+                try:
+                    cast(QWidget, widget).setParent(None)
+                except Exception:
+                    pass
+                try:
+                    cast(QWidget, widget).deleteLater()
+                except Exception:
+                    pass
+        # Teardown descendant reference headers and disconnect their callbacks.
+        # Find reference paths that are descendants of target.
+        descendant_ref_paths = [
+            p
+            for p in descendant_item_paths
+            if self._find_reference_field(p) is not None
+        ]
+        # Also include direct descendant refs that may not be in _path_to_item? They are.
+        for ref_path in descendant_ref_paths:
+            # Find header widget for this ref item (column 1 widget).
+            ref_item = self._path_to_item.get(ref_path)
+            if ref_item is not None:
+                header = self._tree.itemWidget(ref_item, 1)
+                if header is not None:
+                    try:
+                        cast(FieldWidgetProtocol, header).teardown()
+                    except Exception:
+                        pass
+                    try:
+                        cast(QWidget, header).setParent(None)
+                    except Exception:
+                        pass
+                    try:
+                        cast(QWidget, header).deleteLater()
+                    except Exception:
+                        pass
+                    try:
+                        self._ref_headers.remove(cast(FieldWidgetProtocol, header))
+                    except ValueError:
+                        pass
+            # Disconnect callbacks for this reference field.
+            ref_field = self._find_reference_field(ref_path)
+            if ref_field is not None:
+                # Remove from _ref_connections
+                self._ref_connections = [
+                    (f, cb) for (f, cb) in self._ref_connections if f is not ref_field
+                ]
+                self._ref_enabled_connections = [
+                    (f, cb)
+                    for (f, cb) in self._ref_enabled_connections
+                    if f is not ref_field
+                ]
+                # Also disconnect the field's signals if callback still connected
+                # (best effort, ignore errors)
+                self._ref_prev_state.pop(ref_path, None)
+            # Remove from maps
+            self._path_to_item.pop(ref_path, None)
+            self._item_depth.pop(id(ref_item), None) if ref_item is not None else None
+        # Remove remaining descendant section/group items (non-reference sections and groups).
+        for item_path in descendant_item_paths:
+            if item_path in descendant_ref_paths:
+                continue
+            it = self._path_to_item.pop(item_path, None)
+            if it is not None:
+                self._item_depth.pop(id(it), None)
+            self._ref_prev_state.pop(item_path, None)
+        # Remove all child QTreeWidgetItems from target item (clears UI).
+        while item.childCount():
+            item.takeChild(0)
+        # Drop decorations under target will be handled by CfgFormWidget caller;
+        # here we just rebuild the subtree.
+        target_depth = self._item_depth.get(id(item), 0)
+        self._add_section_children(item, sec_field, path, target_depth + 1)
+        return True
 
     def _find_section_field(self, path: str) -> SectionField | None:
         if path == self._path or path == "":

@@ -157,16 +157,18 @@ def test_default_factory_returns_fresh_frozen_complete_registries() -> None:
     assert isinstance(first, FrozenFieldRendererRegistry)
     assert isinstance(second, FrozenFieldRendererRegistry)
     assert first is not second
+    # Sole tree owns SectionField structurally; default registry exposes five non-section editors.
     for field_type in (
         LiteralField,
         ScalarField,
         SweepField,
         CenteredSweepField,
-        SectionField,
         ReferenceField,
     ):
         assert callable(first.resolve(field_type))
         assert callable(second.resolve(field_type))
+    with pytest.raises(TypeError, match="exact field type SectionField"):
+        first.resolve(SectionField)
 
 
 def test_render_rejects_non_qwidget_result(qapp) -> None:  # noqa: ARG001
