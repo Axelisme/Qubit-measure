@@ -1013,6 +1013,13 @@ class ExpTabWidget(QWidget):
         if widget is self._save_panel:
             self._refresh_data_gallery()
             self._right_stack.setCurrentWidget(self._data_gallery)
+            # Viewport-driven mosaic must reflow by gallery's own width (S1);
+            # QStackedWidget hides inactive pages so width changes while hidden
+            # would otherwise defer resize/show until next event.
+            try:
+                self._data_gallery._arrange_cards()  # type: ignore[attr-defined]
+            except Exception:
+                pass
             return
         # Guide
         self._right_stack.setCurrentWidget(self._right_placeholder)

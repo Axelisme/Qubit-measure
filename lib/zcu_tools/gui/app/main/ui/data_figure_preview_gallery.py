@@ -10,6 +10,17 @@ deterministic fake. Each card is rendered independently — a single
 card failure produces a named unavailable state without blocking
 other cards or the save controls.
 
+Responsive mosaic (S1/S4):
+- Breakpoint is viewport-driven: the gallery's own width (scroll
+  viewport if available) is checked against two minimum-width cards
+  plus spacing. Wide when available >= 2*MIN_CARD_WIDTH + spacing,
+  otherwise narrow.
+- Narrow: vertical single column (Run, Analysis, Post-Analysis).
+- Wide + 3 cards: Run left spanning two rows, Analysis top-right,
+  Post-Analysis bottom-right.
+- Wide + 2 cards: Run and Analysis side-by-side.
+- Single card: full width.
+
 Ownership (S2):
 - Never retains a matplotlib ``Figure`` or its canvas — only the
   presentation cache (pixmap and text state) is held.
@@ -17,6 +28,11 @@ Ownership (S2):
   :class:`ExpTabWidget` stays the sole ``FigureContainer`` authority.
 - No timer or per-draw subscription — refresh is snapshot-driven by
   Data activation and the Data-visible prepare/clear/show lifecycle.
+
+Render cache (S3):
+- Each available card caches the original pixmap; on image-viewport
+  resize the displayed pixmap is recomputed with KeepAspectRatio and
+  SmoothTransformation so it never exceeds the viewport or crops.
 """
 
 from __future__ import annotations
@@ -24,10 +40,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, QSize, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QPixmap  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QScrollArea,
@@ -48,6 +65,12 @@ logger = logging.getLogger(__name__)
 
 _EMPTY_TEXT = "— No figure"
 _UNAVAILABLE_TEXT = "— Preview unavailable"
+
+# Responsive mosaic — viewport-driven breakpoint (S1).
+MIN_CARD_WIDTH = 220
+LAYOUT_SPACING = 10
+OUTER_MARGIN = 6
+WIDE_THRESHOLD = 2 * MIN_CARD_WIDTH + LAYOUT_SPACING  # 450 for inner viewport
 
 
 class _PreviewCard(QWidget):
@@ -72,6 +95,7 @@ class _PreviewCard(QWidget):
             "{ border:1px solid #dee2e6; border-radius:6px; background:white; }"
         )
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)  # type: ignore[attr-defined]
+        self.setMinimumWidth(MIN_CARD_WIDTH)
 
         # Header
         header = QHBoxLayout()
@@ -98,9 +122,12 @@ class _PreviewCard(QWidget):
         self._image_label.setScaledContents(False)
         self._image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # type: ignore[attr-defined]
         self._image_label.setMinimumHeight(120)
+        self._image_label.setMinimumWidth(120)
         img_layout.addWidget(self._image_label)
         self._stack.addWidget(image_page)
         self._image_page = image_page
+        # Watch image viewport resize so aspect-fit stays within bounds (S3).
+        self._image_label.installEventFilter(self)
 
         # Empty page — supported but no figure
         empty_page = QWidget()
@@ -140,13 +167,18 @@ class _PreviewCard(QWidget):
 
         outer.addWidget(self._stack, stretch=1)
 
+        # Presentation cache — original pixmap, never a Figure (S3).
+        self._orig_pixmap: QPixmap | None = None
+
         # Initial state: empty (supported but no figure yet)
         self.show_empty()
 
     def show_empty(self) -> None:
+        self._orig_pixmap = None
         self._stack.setCurrentWidget(self._empty_page)
 
     def show_unavailable(self, detail: str | None = None) -> None:
+        self._orig_pixmap = None
         if detail:
             self._error_label.setText(
                 f"{self._display_name} — {_UNAVAILABLE_TEXT}\n{detail}"
@@ -156,8 +188,51 @@ class _PreviewCard(QWidget):
         self._stack.setCurrentWidget(self._error_page)
 
     def show_image(self, pixmap: QPixmap) -> None:
-        self._image_label.setPixmap(pixmap)
+        # Cache original pixmap (presentation cache, S3).
+        self._orig_pixmap = pixmap
+        self._apply_scaled()
         self._stack.setCurrentWidget(self._image_page)
+
+    def _apply_scaled(self) -> None:
+        """Scale original pixmap to image viewport with KeepAspectRatio (S3)."""
+        if self._orig_pixmap is None or self._orig_pixmap.isNull():
+            return
+        # Viewport is the image label's available size.
+        vp = self._image_label.size()
+        # If label not yet laid out (0), fallback to card width or defer.
+        if vp.width() <= 0 or vp.height() <= 0:
+            # Try card size minus margins, or assume minimal viewport.
+            cw = self.width()
+            ch = self.height()
+            # Estimate inner label size: card width minus outer margins (12) and
+            # card inner margins, label min 120.
+            est_w = max(120, cw - 12) if cw > 0 else 396
+            est_h = max(120, vp.height() if vp.height() > 0 else 120)
+            vp = QSize(est_w, est_h)
+        # KeepAspectRatio + SmoothTransformation per spec; ensure does not exceed viewport.
+        scaled = self._orig_pixmap.scaled(
+            vp,
+            Qt.KeepAspectRatio,  # type: ignore[attr-defined]
+            Qt.SmoothTransformation,  # type: ignore[attr-defined]
+        )
+        self._image_label.setPixmap(scaled)
+
+    def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
+        if obj is self._image_label and event.type() == QEvent.Resize:  # type: ignore[attr-defined]
+            if (
+                self._orig_pixmap is not None
+                and self._stack.currentWidget() is self._image_page
+            ):
+                self._apply_scaled()
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        if (
+            self._orig_pixmap is not None
+            and self._stack.currentWidget() is self._image_page
+        ):
+            self._apply_scaled()
 
     def current_state(self) -> str:
         """Return 'available' | 'empty' | 'unavailable' for test inspection."""
@@ -181,12 +256,29 @@ class _PreviewCard(QWidget):
             return self._error_label.text()
         return ""
 
+    # -- aspect-fit inspection helpers (for tests) -------------------
+
+    def original_pixmap(self) -> QPixmap | None:
+        """Return cached original pixmap (presentation cache)."""
+        return self._orig_pixmap
+
+    def displayed_pixmap(self) -> QPixmap | None:
+        """Return currently displayed (scaled) pixmap, or None."""
+        pm = self._image_label.pixmap()
+        if pm is None or pm.isNull():
+            return None
+        return pm
+
+    def image_viewport_size(self) -> QSize:
+        """Return current image label viewport size."""
+        return self._image_label.size()
+
 
 class DataFigurePreviewGallery(QWidget):
     """Variant A stacked raster preview rail (S1, S3).
 
     Construction declares Analysis/Post-Analysis capability; presentation
-    is a scrollable vertical rail of named cards. :meth:`update_figures`
+    is a scrollable viewport-responsive card mosaic. :meth:`update_figures`
     accepts a complete snapshot; each card renders independently via the
     injected ``Figure -> PNG bytes`` callable. A single card failure
     produces a named unavailable state and is logged, without blocking
@@ -194,6 +286,10 @@ class DataFigurePreviewGallery(QWidget):
 
     The gallery holds only pixmap/text cache — never a ``Figure``,
     canvas, result, or save state (S2).
+    Responsive reflow (S1/S4) is viewport-driven: the gallery's own width
+    (scroll viewport when available) decides narrow vs wide at threshold
+    2*MIN_CARD_WIDTH + spacing. Aspect-fit scaling (S3) keeps the displayed
+    pixmap within the image viewport with KeepAspectRatio.
     """
 
     def __init__(
@@ -228,9 +324,10 @@ class DataFigurePreviewGallery(QWidget):
             self._renderer = render_figure_png
 
         self.setObjectName("dataFigurePreviewGallery")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # type: ignore[attr-defined]
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(6, 6, 6, 6)
+        outer.setContentsMargins(OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN)
         outer.setSpacing(6)
 
         header = QLabel(
@@ -251,42 +348,143 @@ class DataFigurePreviewGallery(QWidget):
         self._scroll.setObjectName("previewGalleryScroll")
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)  # type: ignore[attr-defined]
-        inner = QWidget()
-        inner.setObjectName("previewGalleryInner")
-        self._inner_layout = QVBoxLayout(inner)
+        self._inner = QWidget()
+        self._inner.setObjectName("previewGalleryInner")
+        # Use grid for viewport-driven mosaic (narrow single column vs wide mosaic).
+        self._inner_layout = QGridLayout(self._inner)
         self._inner_layout.setContentsMargins(0, 0, 0, 0)
-        self._inner_layout.setSpacing(10)
+        self._inner_layout.setSpacing(LAYOUT_SPACING)
         self._inner_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+        # Track ordered cards for layout.
+        self._ordered_cards: list[_PreviewCard] = []
 
         # Cards — Run always, Analysis/Post per capability
         self._cards: dict[str, _PreviewCard] = {}
 
         run_card = _PreviewCard("run", "Run")
         self._cards["run"] = run_card
-        self._inner_layout.addWidget(run_card, stretch=2)
+        self._ordered_cards.append(run_card)
 
         if self._has_analysis:
             ana_card = _PreviewCard("analysis", "Analysis")
             self._cards["analysis"] = ana_card
-            self._inner_layout.addWidget(ana_card, stretch=1)
+            self._ordered_cards.append(ana_card)
 
         if self._has_post:
             post_card = _PreviewCard("post", "Post-Analysis")
-            # Normalize key: use "post_analysis" externally but "post" internally? Use "post_analysis" for update_figures.
+            # Normalize key: use "post_analysis" externally but "post" internally.
             self._cards["post_analysis"] = post_card
             # Also expose alias "post" for convenience
             self._cards["post"] = post_card
-            self._inner_layout.addWidget(post_card, stretch=1)
+            self._ordered_cards.append(post_card)
 
-        self._inner_layout.addStretch()
-        self._scroll.setWidget(inner)
+        self._scroll.setWidget(self._inner)
         outer.addWidget(self._scroll, stretch=1)
+
+        # Initial layout arrangement
+        self._arrange_cards()
 
         # Initial empty state for all present cards
         for card in self._cards.values():
             # Avoid double-setting for alias
             if card.current_state() != "empty":
                 card.show_empty()
+
+    # -- viewport-driven responsive helpers -------------------------
+
+    def _viewport_available_width(self) -> int:
+        """Return available width for cards (gallery's own viewport)."""
+        # Prefer scroll viewport when laid out; it reflects the inner preview
+        # area's actual width excluding outer margins and scroll chrome.
+        try:
+            vp = self._scroll.viewport()
+            if vp is not None and vp.width() > 0:
+                return int(vp.width())
+        except Exception:
+            pass
+        # Fallback to gallery width minus outer margins.
+        w = int(self.width())
+        if w > 0:
+            return max(0, w - 2 * OUTER_MARGIN)
+        return 0
+
+    def _is_wide(self) -> bool:
+        """Return True when viewport can fit two minimum-width cards (S1)."""
+        avail = self._viewport_available_width()
+        if avail <= 0:
+            # Not yet laid out — treat as narrow until resize/show.
+            return False
+        return avail >= WIDE_THRESHOLD
+
+    def is_wide_mode(self) -> bool:
+        """Public inspector for tests: current responsive mode."""
+        return self._is_wide()
+
+    def _arrange_cards(self) -> None:
+        """Reflow cards by viewport width and card count (S1/S4)."""
+        # Clear grid without deleting widgets.
+        while self._inner_layout.count():
+            item = self._inner_layout.takeAt(0)
+            # widget stays owned; just removed from layout
+            del item
+        # Reset stretches
+        for i in range(max(2, len(self._ordered_cards))):
+            self._inner_layout.setColumnStretch(i, 0)
+            self._inner_layout.setRowStretch(i, 0)
+
+        is_wide = self._is_wide()
+        n = len(self._ordered_cards)
+        if n == 0:
+            return
+        if not is_wide:
+            # Narrow: single column vertical.
+            for r, card in enumerate(self._ordered_cards):
+                self._inner_layout.addWidget(card, r, 0, 1, 1)
+            self._inner_layout.setColumnStretch(0, 1)
+            return
+        # Wide mode — shape by card count.
+        if n == 1:
+            self._inner_layout.addWidget(self._ordered_cards[0], 0, 0, 1, 1)
+            self._inner_layout.setColumnStretch(0, 1)
+        elif n == 2:
+            # Side-by-side
+            self._inner_layout.addWidget(self._ordered_cards[0], 0, 0, 1, 1)
+            self._inner_layout.addWidget(self._ordered_cards[1], 0, 1, 1, 1)
+            self._inner_layout.setColumnStretch(0, 1)
+            self._inner_layout.setColumnStretch(1, 1)
+            self._inner_layout.setRowStretch(0, 1)
+        else:  # n >=3, use first three for mosaic (Run left spanning two rows)
+            # Run left spanning two rows
+            self._inner_layout.addWidget(self._ordered_cards[0], 0, 0, 2, 1)
+            self._inner_layout.addWidget(self._ordered_cards[1], 0, 1, 1, 1)
+            if n >= 3:
+                self._inner_layout.addWidget(self._ordered_cards[2], 1, 1, 1, 1)
+            # Extra cards beyond 3 (should not happen per capability, but handle vertically)
+            for idx in range(3, n):
+                self._inner_layout.addWidget(
+                    self._ordered_cards[idx], 2 + (idx - 3), 0, 1, 2
+                )
+            # Make left column larger (Run is "large" per spec).
+            self._inner_layout.setColumnStretch(0, 2)
+            self._inner_layout.setColumnStretch(1, 1)
+            self._inner_layout.setRowStretch(0, 1)
+            self._inner_layout.setRowStretch(1, 1)
+
+        # Ensure each card rescales after reflow (viewport size changed).
+        for card in self._ordered_cards:
+            if (
+                card.original_pixmap() is not None
+                and card.current_state() == "available"
+            ):
+                card._apply_scaled()  # type: ignore[attr-defined]
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._arrange_cards()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._arrange_cards()
 
     # -- capability queries -----------------------------------------
 
@@ -329,9 +527,8 @@ class DataFigurePreviewGallery(QWidget):
 
     def card_count(self) -> int:
         """Return number of distinct preview cards (Run + optional)."""
-        # Deduplicate alias
-        keys = {k for k in self._cards if k != "post"}
-        return len(keys)
+        # Deduplicate alias — count ordered cards.
+        return len(self._ordered_cards)
 
     # -- snapshot update ---------------------------------------------
 
@@ -392,8 +589,6 @@ class DataFigurePreviewGallery(QWidget):
                 )
             if not pixmap.loadFromData(png_bytes, "PNG"):
                 raise RuntimeError("pixmap loadFromData failed")
-            # Optional scaling to gallery width is handled by the outer scroll
-            # and label's size policy; keep the pixmap at its rendered size.
             card.show_image(pixmap)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("preview pixmap failed for %r: %s", key, exc, exc_info=True)
@@ -407,3 +602,30 @@ class DataFigurePreviewGallery(QWidget):
         if card is None and key in ("post", "post_analysis"):
             card = self._cards.get("post_analysis") or self._cards.get("post")
         return card
+
+    def card_viewport_size(self, key: str) -> QSize | None:
+        """Return image viewport size for card ``key`` (test helper)."""
+        card = self.find_card(key)
+        if card is None:
+            return None
+        return card.image_viewport_size()
+
+    def displayed_pixmap_size(self, key: str) -> QSize | None:
+        """Return displayed (scaled) pixmap size for card ``key``."""
+        card = self.find_card(key)
+        if card is None:
+            return None
+        pm = card.displayed_pixmap()
+        if pm is None:
+            return None
+        return pm.size()
+
+    def original_pixmap_size(self, key: str) -> QSize | None:
+        """Return original pixmap size for card ``key``."""
+        card = self.find_card(key)
+        if card is None:
+            return None
+        pm = card.original_pixmap()
+        if pm is None:
+            return None
+        return pm.size()

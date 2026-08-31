@@ -8,8 +8,21 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtGui import QPixmap  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QLabel, QScrollArea, QWidget
+from qtpy.QtCore import (  # type: ignore[attr-defined]
+    QBuffer,
+    QByteArray,
+    QIODevice,
+    QRect,
+    QSize,
+    Qt,
+)
+from qtpy.QtGui import QColor, QPixmap  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QApplication,
+    QLabel,
+    QScrollArea,
+    QWidget,
+)
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
@@ -37,6 +50,60 @@ _FAKE_PNG_BYTES = base64.b64decode(
 
 def _fake_renderer(_fig: object) -> bytes:
     return bytes(_FAKE_PNG_BYTES)
+
+
+def _make_png_bytes(width: int, height: int, color: str = "#286ac7") -> bytes:
+    """Deterministic PNG bytes of exact size (for aspect-fit regression)."""
+    pix = QPixmap(width, height)
+    pix.fill(QColor(color))
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.WriteOnly)  # type: ignore[attr-defined]
+    pix.save(buf, "PNG")  # type: ignore[attr-defined]
+    buf.close()
+    return bytes(ba)  # type: ignore[arg-type]
+
+
+_640x480_PNG = None  # lazy
+
+
+def _renderer_640x480(_fig: object) -> bytes:
+    # Each call returns fresh 640x480 PNG (production screenshot size).
+    return _make_png_bytes(640, 480, "#286ac7")
+
+
+def _aspect_ratio(size: QSize) -> float:
+    if size.height() == 0:
+        return 0.0
+    return float(size.width()) / float(size.height())
+
+
+def _assert_aspect_fit(
+    viewport: QSize, displayed: QSize, original: QSize, *, tol: float = 0.02
+) -> None:
+    # Displayed must fit within viewport (allow 1px rounding)
+    assert displayed.width() <= viewport.width() + 1, (
+        f"width {displayed.width()} > viewport {viewport.width()}"
+    )
+    assert displayed.height() <= viewport.height() + 1, (
+        f"height {displayed.height()} > viewport {viewport.height()}"
+    )
+    # Must not be cropped to zero
+    assert displayed.width() > 0 and displayed.height() > 0
+    # Aspect ratio preserved
+    orig_ar = _aspect_ratio(original)
+    disp_ar = _aspect_ratio(displayed)
+    assert abs(orig_ar - disp_ar) < tol, (
+        f"aspect {disp_ar:.3f} vs original {orig_ar:.3f}"
+    )
+    # Displayed should be maximal within viewport: at least one dimension tight (within 2px)
+    # For 640x480 -> 396x120 viewport, height should be ~120, width ~160.
+    assert (
+        abs(displayed.width() - viewport.width()) <= 2
+        or abs(displayed.height() - viewport.height()) <= 2
+    ), (
+        f"not tight {displayed.width()}x{displayed.height()} in {viewport.width()}x{viewport.height()}"
+    )
 
 
 def _failing_renderer_for(target_fig: object):
@@ -533,3 +600,273 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
     assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
     assert tab._save_center.has_artifact(tab._save_center.artifact_kinds[0])
     tab.detach()
+
+
+# ---------------------------------------------------------------------------
+# A3 regression: 640x480 pixmap must aspect-fit inside ~396x120 viewport
+# ---------------------------------------------------------------------------
+
+
+def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
+    """Fails on current fixed-size renderer without KeepAspectRatio scaling.
+
+    Production screenshots are 640x480. Card image viewport in the Data
+    gallery is approximately 396x120 when the gallery is ~420px wide. The
+    displayed pixmap must stay within the viewport, preserve 4:3 aspect,
+    and remain correct after resize (S3). This test would fail on the
+    pre-fix code that stored the raw 640x480 pixmap directly.
+    """
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    g = DataFigurePreviewGallery(caps, renderer=_renderer_640x480)
+    # Show gallery at narrow width that yields ~396x120 image viewport.
+    g.setFixedSize(420, 400)
+    g.show()
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()
+    fig = Figure()
+    g.update_figures(fig)
+    QApplication.processEvents()
+    card = g.find_card("run")
+    assert card is not None
+    # Viewport is the image label's size, expected ~396x120 in this geometry.
+    vp = card.image_viewport_size()
+    disp = card.displayed_pixmap()
+    orig = card.original_pixmap()
+    assert vp is not None and disp is not None and orig is not None
+    # Viewport width should be ~396 for gallery ~420 (narrow). Height depends on gallery height
+    # and card layout; we only require width ~396 and height at least 100.
+    assert 350 <= vp.width() <= 430, f"viewport width {vp.width()} not ~396"
+    assert 100 <= vp.height() <= 400, f"viewport height {vp.height()} out of range"
+    # Original must be 640x480 (production)
+    assert orig.width() == 640 and orig.height() == 480
+    # Displayed must fit and preserve aspect — would fail pre-fix where disp==640x480
+    _assert_aspect_fit(vp, disp.size(), orig.size())
+    # After resize: widen gallery, viewport grows, displayed must re-scale and still fit
+    g.setFixedSize(700, 500)
+    QApplication.processEvents()
+    QApplication.processEvents()
+    vp2 = card.image_viewport_size()
+    disp2 = card.displayed_pixmap()
+    assert vp2 is not None and disp2 is not None
+    assert vp2.width() > vp.width() or vp2.height() >= vp.height()
+    _assert_aspect_fit(vp2, disp2.size(), orig.size())
+    # Original cache must stay 640x480 across resizes
+    assert card.original_pixmap().size() == orig.size()  # type: ignore[union-attr]
+    g.hide()
+
+
+def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
+    qapp, exp_tab_widget
+):
+    """Via shipped ExpTabWidget Data path, verify bounds and ratio before/after resize."""
+    ctrl = make_ctrl()
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    tab = exp_tab_widget("t-aspect", ctrl, caps, preview_renderer=_renderer_640x480)
+    snap = make_snapshot("t-aspect", analysis=AnalysisMode.NONE, post=False)
+    tab.attach(snap, MagicMock())
+    # Switch to Data so gallery is active right widget
+    for i in range(tab._left_tabs.count()):
+        if tab._left_tabs.tabText(i) == "Data":
+            tab._left_tabs.setCurrentIndex(i)
+            break
+    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
+    assert tab._right_stack.currentWidget() is tab._data_gallery
+    tab.show()
+    tab.resize(500, 600)
+    QApplication.processEvents()
+    QApplication.processEvents()
+    fig = Figure()
+    tab.show_run_figure(fig)
+    QApplication.processEvents()
+    card = tab._data_gallery.find_card("run")
+    assert card is not None
+    vp = card.image_viewport_size()
+    disp = card.displayed_pixmap()
+    orig = card.original_pixmap()
+    assert vp is not None and disp is not None and orig is not None
+    _assert_aspect_fit(vp, disp.size(), orig.size())
+    # Resize larger — simulate user dragging splitter wider (still gallery viewport, not window)
+    tab._data_gallery.setFixedWidth(700)
+    QApplication.processEvents()
+    QApplication.processEvents()
+    vp2 = card.image_viewport_size()
+    disp2 = card.displayed_pixmap()
+    assert vp2 is not None and disp2 is not None
+    _assert_aspect_fit(vp2, disp2.size(), orig.size())
+    tab.detach()
+
+
+# ---------------------------------------------------------------------------
+# S1/S4 responsive geometry — viewport-driven narrow vs wide mosaic
+# ---------------------------------------------------------------------------
+
+
+def _gallery_geometry_cards(g: DataFigurePreviewGallery) -> dict[str, QRect]:
+    # Force layout
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    geoms: dict[str, QRect] = {}
+    for key in ["run", "analysis", "post_analysis"]:
+        c = g.find_card(key)
+        if c is not None:
+            geoms[key] = c.geometry()  # type: ignore[attr-defined]
+    return geoms
+
+
+def test_gallery_narrow_single_column_three_cards(qapp):
+    """Narrow viewport (< threshold) must show three cards in one vertical column (S1)."""
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g.setFixedSize(360, 700)  # narrow: viewport ~348 < 450
+    g.show()
+    QApplication.processEvents()
+    QApplication.processEvents()
+    assert not g.is_wide_mode(), f"expected narrow mode at 360, got wide"
+    geoms = _gallery_geometry_cards(g)
+    assert "run" in geoms and "analysis" in geoms and "post_analysis" in geoms
+    r: QRect = geoms["run"]
+    a: QRect = geoms["analysis"]
+    p: QRect = geoms["post_analysis"]
+    # Single column -> same x, y strictly increasing
+    assert abs(r.x() - a.x()) <= 2 and abs(a.x() - p.x()) <= 2, (
+        f"x not aligned {r.x()},{a.x()},{p.x()}"
+    )
+    assert r.y() < a.y() < p.y(), f"y not monotonic {r.y()},{a.y()},{p.y()}"
+    # Widths should all span full available width (within tolerance)
+    assert abs(r.width() - a.width()) <= 4 and abs(a.width() - p.width()) <= 4
+    g.hide()
+
+
+def test_gallery_wide_three_card_mosaic_run_left_spanning(qapp):
+    """Wide + 3 cards: Run left spanning two rows, Analysis/Post right (S1/S4)."""
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g.setFixedSize(750, 700)  # wide: viewport ~738 > 450
+    g.show()
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    assert g.is_wide_mode(), "expected wide mode at 750"
+    geoms = _gallery_geometry_cards(g)
+    r: QRect = geoms["run"]
+    a: QRect = geoms["analysis"]
+    p: QRect = geoms["post_analysis"]
+    # Run left, others right
+    assert r.x() < a.x() - 2, f"Run not left of Analysis {r.x()} vs {a.x()}"
+    assert abs(a.x() - p.x()) <= 2, f"Analysis/Post x not aligned {a.x()} vs {p.x()}"
+    # Top alignment: Run top == Analysis top
+    assert abs(r.y() - a.y()) <= 4, f"Run/Analysis top not aligned {r.y()} vs {a.y()}"
+    # Post below Analysis
+    assert p.y() > a.y() + 2, f"Post not below Analysis {p.y()} vs {a.y()}"
+    # Run spans two rows -> height approx Analysis+Post+spacing
+    assert r.height() > a.height() + 2, (
+        f"Run height {r.height()} not > Analysis {a.height()}"
+    )
+    assert abs(r.height() - (a.height() + p.height() + 10)) <= 20, (
+        f"Run height {r.height()} not sum {a.height()}+{p.height()}"
+    )
+    # Run width larger than right column (stretch 2 vs 1) or at least not smaller
+    assert r.width() >= a.width() - 4
+    g.hide()
+
+
+def test_gallery_wide_two_card_side_by_side(qapp):
+    """Wide + 2 cards: Run and Analysis side-by-side (S4)."""
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)  # type: ignore[call-arg]
+    g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g.setFixedSize(750, 400)
+    g.show()
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    assert g.is_wide_mode()
+    geoms = _gallery_geometry_cards(g)
+    r: QRect = geoms["run"]
+    a: QRect = geoms["analysis"]
+    # Side-by-side -> same y, distinct x
+    assert abs(r.y() - a.y()) <= 4, f"Run/Analysis y not aligned {r.y()} vs {a.y()}"
+    assert a.x() > r.x() + r.width() - 4, (
+        f"Analysis not right of Run {a.x()} vs {r.x()}+{r.width()}"
+    )
+    # Heights similar
+    assert abs(r.height() - a.height()) <= 10
+    # Widths similar (equal stretch)
+    assert abs(r.width() - a.width()) <= 20
+    assert "post_analysis" not in geoms
+    g.hide()
+
+
+def test_gallery_wide_single_full_width(qapp):
+    """Single card (Run only) occupies full width in both narrow and wide (S4)."""
+    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
+    # Narrow
+    g_n = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g_n.setFixedSize(360, 400)
+    g_n.show()
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    assert not g_n.is_wide_mode()
+    r_n: QRect = g_n.find_card("run").geometry()  # type: ignore[union-attr]
+    # Wide
+    g_w = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
+    g_w.setFixedSize(750, 400)
+    g_w.show()
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    r_w: QRect = g_w.find_card("run").geometry()  # type: ignore[union-attr]
+    # Both should span full inner width — wide width larger than narrow
+    assert r_w.width() > r_n.width() + 20
+    # In single-card case, card x is near left margin for both
+    assert r_n.x() <= 4 and r_w.x() <= 4
+    g_n.hide()
+    g_w.hide()
+
+
+def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
+    """Geometry via shipped ExpTabWidget Data path for each capability combination (A1)."""
+    import zcu_tools.gui.app.main.ui.data_figure_preview_gallery as gallery_mod
+
+    ctrl = make_ctrl()
+    # Three-card case through ExpTabWidget
+    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
+    tab = exp_tab_widget("t-geom", ctrl, caps, preview_renderer=_fake_renderer)
+    snap = make_snapshot("t-geom", analysis=AnalysisMode.FIT, post=True)
+    tab.attach(snap, MagicMock())
+    for i in range(tab._left_tabs.count()):
+        if tab._left_tabs.tabText(i) == "Data":
+            tab._left_tabs.setCurrentIndex(i)
+            break
+    tab._on_left_tab_changed(tab._left_tabs.currentIndex())
+    assert tab._right_stack.currentWidget() is tab._data_gallery
+    tab.show()
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    g = tab._data_gallery
+    # Narrow via gallery viewport
+    g.setFixedWidth(360)
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    g._arrange_cards()  # type: ignore[attr-defined]  # ensure viewport logic runs even if hidden before
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    assert not g.is_wide_mode()
+    # Verify narrow column via card x alignment
+    r: QRect = g.find_card("run").geometry()  # type: ignore[union-attr]
+    a: QRect = g.find_card("analysis").geometry()  # type: ignore[union-attr]
+    p: QRect = g.find_card("post_analysis").geometry()  # type: ignore[union-attr]
+    assert abs(r.x() - a.x()) <= 2 and abs(a.x() - p.x()) <= 2
+    assert r.y() < a.y() < p.y()
+    # Wide
+    g.setFixedWidth(750)
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    g._arrange_cards()  # type: ignore[attr-defined]
+    QApplication.processEvents()  # type: ignore[attr-defined]
+    assert g.is_wide_mode()
+    r = g.find_card("run").geometry()  # type: ignore[union-attr]
+    a = g.find_card("analysis").geometry()  # type: ignore[union-attr]
+    p = g.find_card("post_analysis").geometry()  # type: ignore[union-attr]
+    assert r.x() < a.x() - 2 and abs(a.x() - p.x()) <= 2
+    assert r.y() <= a.y() + 4 and p.y() > a.y()
+    # Also verify wide threshold uses gallery viewport not window width:
+    # Gallery's own width decides, we just proved by toggling gallery width alone.
+    assert g._viewport_available_width() >= gallery_mod.WIDE_THRESHOLD  # type: ignore[attr-defined]
+    tab.detach()
+    g.hide()

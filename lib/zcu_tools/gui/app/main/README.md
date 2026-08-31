@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-31 — Variant A stacked Data previews (DataFigurePreviewGallery rail, figure authority and lifecycle, render-adapter failure isolation)
+**Last updated:** 2026-08-31 — DataFigurePreviewGallery viewport-responsive Variant A mosaic with aspect-fit pixmap cache and capability-driven reflow
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -66,14 +66,19 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   presented centrally, and async data completion is routed to the center.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
-  is a `DataFigurePreviewGallery` Variant A stacked rail: capability-declared at
-  construction (Run always, Analysis/Post only when supported), scrollable
-  vertical cards with named empty/unavailable states, raster-only presentation
-  cache (pixmap/text) fed by an injected `Figure -> PNG bytes` adapter —
-  production uses the existing fixed-size figure renderer, tests inject a fake —
-  per-card failure is isolated and logged without blocking other cards or save
-  controls, and no Figure/canvas ownership, timer, or per-draw subscription is
-  introduced. `ExpTabWidget` remains the sole `FigureContainer` and
+  is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
+  construction (Run always, Analysis/Post only when supported), viewport-driven
+  mosaic reflow — narrow single-column vertical vs wide three-card Run-left
+  spanning two rows with Analysis/Post on the right, two-card side-by-side,
+  and single full-width at the two-minimum-width-cards-plus-spacing breakpoint
+  (gallery's own viewport, not window, no persisted toggle) — scrollable cards
+  with named empty/unavailable states, raster-only presentation cache (pixmap/text)
+  fed by an injected `Figure -> PNG bytes` adapter — production uses the existing
+  fixed-size figure renderer with size restore — per-card render caches the
+  original pixmap and aspect-fits with `KeepAspectRatio` and smooth transformation
+  inside the image viewport without cropping; per-card failure is isolated and
+  logged without blocking other cards or save controls, and no Figure/canvas
+  ownership, timer, or per-draw subscription is introduced. `ExpTabWidget` remains the sole `FigureContainer` and
   current-figure authority: Data activation and Data-visible
   prepare/clear/show lifecycle refresh the gallery snapshot, while
   Data-invisible mutations postpone PNG rendering until the next activation;
@@ -243,8 +248,11 @@ Data preview never owns pane resources: `ExpTabWidget` reads current figures fro
 the fixed `FigureContainer`s and pushes a transient `Figure` snapshot to
 `DataFigurePreviewGallery` only on Data activation or while Data is visible;
 the gallery renders to PNG via the fixed-size adapter with size restore, holds
-only the raster cache, and isolates per-card failures. No competing state owner
-or ADR-0048 reaction change is introduced.
+only the raster cache (original pixmap) and isolates per-card failures with
+aspect-fit scaling (`KeepAspectRatio`) that never exceeds the image viewport.
+Viewport-driven mosaic reflow (gallery's own width vs two-minimum-width-cards
+threshold) is presentation-only and never moves figure ownership, adds a second
+canvas, or changes ADR-0048 reactions. No competing state owner is introduced.
 
 ## Tab Lifecycle And Ordering
 
