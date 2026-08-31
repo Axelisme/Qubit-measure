@@ -91,12 +91,21 @@ class _TreeBranchStyle(QProxyStyle):
         rect = option.rect  # type: ignore[attr-defined]
         x = rect.center().x()
         y = rect.center().y()
-        # A1: depth is per-segment indentation column only; do not overwrite with row model depth
+        # A1: depth is per-segment indentation column only, normalized for horizontal viewport offset
         pen_color = QColor("#b8c1cc")
         try:
             if _INDENTATION_PX:
+                logical_x = rect.x()
+                # Normalize for horizontal scroll so same logical guide keeps same color
+                if widget is not None and isinstance(widget, QTreeWidget):
+                    try:
+                        h_bar = widget.horizontalScrollBar()
+                        if h_bar is not None:
+                            logical_x += h_bar.value()
+                    except Exception:
+                        pass
                 depth_guess = (
-                    max(0, int(rect.x() // _INDENTATION_PX)) if rect.x() >= 0 else 0
+                    max(0, int(logical_x // _INDENTATION_PX)) if logical_x >= 0 else 0
                 )
                 pen_color = _branch_color(depth_guess)
         except Exception:

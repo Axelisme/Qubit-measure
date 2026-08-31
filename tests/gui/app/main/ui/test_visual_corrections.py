@@ -254,6 +254,45 @@ def test_A1_depth_colors_on_guide_lines_not_row_backgrounds(qapp):
     pen2_color = pen2.color().name().lower()
     expected2 = TREE_DEPTH_COLORS[2].lower()
     assert pen2_color == expected2, f"segment at x=20 should be depth 2 color {expected2}, got {pen2_color}"
+    # Verify horizontal scroll invariance: same logical guide keeps same color after viewport offset
+    if hasattr(tree, "horizontalScrollBar"):
+        h_bar = tree.horizontalScrollBar()
+        orig_range = (h_bar.minimum(), h_bar.maximum())
+        orig_val = h_bar.value()
+        h_bar.setRange(0, 100)
+        h_bar.setValue(15)
+        qapp.processEvents()
+        painter3 = MagicMock()
+        painter3.save = MagicMock()
+        painter3.restore = MagicMock()
+        painter3.drawLine = MagicMock()
+        painter3.setPen = MagicMock()
+        option3 = QStyleOptionViewItem()
+        option3.rect = QRect(5, 0, 10, 20)  # viewport x=5 + scroll 15 => logical 20 => depth 2
+        option3.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
+        if deep_index.isValid():
+            option3.index = deep_index  # type: ignore[attr-defined]
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorBranch, option3, painter3, tree)  # type: ignore[arg-type]
+        pen3 = painter3.setPen.call_args[0][0]
+        pen3_color = pen3.color().name().lower()
+        assert pen3_color == expected2, f"with h_scroll 15, viewport x=5 should still be depth 2 color {expected2}, got {pen3_color}"
+        painter4 = MagicMock()
+        painter4.save = MagicMock()
+        painter4.restore = MagicMock()
+        painter4.drawLine = MagicMock()
+        painter4.setPen = MagicMock()
+        option4 = QStyleOptionViewItem()
+        option4.rect = QRect(0, 0, 10, 20)  # viewport 0 +15 => logical 15 => depth 1
+        option4.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
+        if deep_index.isValid():
+            option4.index = deep_index  # type: ignore[attr-defined]
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorBranch, option4, painter4, tree)  # type: ignore[arg-type]
+        pen4 = painter4.setPen.call_args[0][0]
+        pen4_color = pen4.color().name().lower()
+        expected1 = TREE_DEPTH_COLORS[1].lower()
+        assert pen4_color == expected1, f"with h_scroll 15, viewport x=0 should be depth 1 color {expected1}, got {pen4_color}"
+        h_bar.setRange(*orig_range)
+        h_bar.setValue(orig_val)
     w.detach()
     draft.close()
 
