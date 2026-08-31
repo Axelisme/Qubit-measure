@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-31 — DataFigurePreviewGallery viewport-responsive Variant A mosaic with aspect-fit pixmap cache and capability-driven reflow
+**Last updated:** 2026-08-31 — DataFigurePreviewGallery responsive mosaic and compact responsive writeback ledger
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -50,9 +50,20 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
   `WritebackService` remains stage-agnostic and owns the display-only baseline
   capture (S2): at draft creation it snapshots the destination `ExpContext` and
-  exposes per-item `current_summary` / `proposed_summary` to Qt; scalar MetaDict
-  items show concrete values, module/waveform items show bounded
-  target/change summaries and keep full cfg editing in `Edit` (Save/Cancel).
+  exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
+  compact unified ledger: target-only checkbox labels with description tooltips,
+  centered Current → Proposed columns on a shared-background continuous-boundary
+  panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions
+  (scalar MetaDict and editable module/waveform items use Edit; non-scalar
+  MetaDict values use a bounded summary like `3 × 3 matrix`). A small matrix
+  renders a compact read-only inline table and its Copy places the complete JSON
+  on the clipboard; arbitrary long values show only the bounded summary so the
+  ledger never widens. The widget owns a ~450 px breakpoint: wide rows stay
+  single-line, narrow rows reflow to target/action above centered
+  Current → Proposed, the bordered ledger hugs its rendered rows with Apply
+  Selected immediately after it; long content grows naturally and delegates
+  vertical scrolling to the existing Analysis pane rather than owning a nested
+  scroll/cap lifecycle.
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
   retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an

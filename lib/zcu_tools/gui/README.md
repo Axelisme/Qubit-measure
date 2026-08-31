@@ -208,13 +208,23 @@ cfg paths, reference identity, validation, persistence, or lowering. The tree
 hides `Property` / `Value` headers, uses 13 px field text, shows the root row
 at indentation 0 and descendants at 10 px with classic vertical/horizontal
 connectors without triangles via a `QProxyStyle` whose guide lines carry the
-depth colors, supports whole-row folding (click any row that has children),
-cycles five depth colors `#5b8dc6`, `#6aae8a`, `#b8942f`, `#8a6bc9`,
-`#4fb3a8` (repeating after the fifth) on the corresponding descendant tree
-guide lines; cfg rows do not use those colors as depth backgrounds, and each
-guide level is colored at its displayed depth (only its children advance) and
-is stable under horizontal scroll via logical-column normalization, and elides
-the guaranteed single materialized reference-shape row. The tree viewport
+depth colors, supports whole-row folding (click any row that has children;
+a disabled optional reference is collapsed and does not respond to row-fold
+clicks until re-enabled), cycles five depth colors `#5b8dc6`, `#6aae8a`,
+`#b8942f`, `#8a6bc9`, `#4fb3a8` (repeating after the fifth) on the
+corresponding descendant tree guide lines; cfg rows do not use those colors as
+depth backgrounds, and each guide level is colored at its displayed depth (only
+its children advance) and is stable under horizontal scroll via logical-column
+normalization, and elides the guaranteed single materialized reference-shape
+row. Reference rows follow the established editor folding policy: a library
+reference starts collapsed, a custom reference starts expanded, and changing
+the reference identity reapplies that policy; a disabled optional reference is
+collapsed and non-foldable. When a materialized reference shape contains
+exactly one visible nested section, the tree elides that redundant section
+wrapper row and renders its leaf rows directly under the reference without
+altering cfg paths, editors, refresh, or model behavior; shapes with multiple
+visible children remain structurally distinct, and the elision never hides an
+editable `ReferenceField` — only a `SectionField` wrapper. The tree viewport
 follows the available panel height and scrolls only when rendered content
 exceeds the viewport, without a fixed-height threshold. Editor behavior
 remains owned by the five exact non-section `FieldRenderer` factories via the same frozen

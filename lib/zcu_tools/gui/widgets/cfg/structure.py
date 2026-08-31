@@ -25,7 +25,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceSpec
+from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceSpec, is_custom_reference_key
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
     CfgField,
@@ -185,6 +185,7 @@ class TreeCfgWidget(QWidget):
         self._ref_enabled_connections: list[tuple[ReferenceField, object]] = []
         self._ref_prev_state: dict[str, tuple[str, int | None, str | None]] = {}
         self._expanded_state: dict[str, bool] = {}
+        self._elided_singleton_path_to_parent: dict[str, str] = {}
 
         self._tree.itemClicked.connect(self._on_item_clicked)
         self._tree.itemExpanded.connect(
@@ -223,6 +224,7 @@ class TreeCfgWidget(QWidget):
         self._leaf_path_to_widget.clear()
         self._tree.clear()
         self._ref_prev_state.clear()
+        self._elided_singleton_path_to_parent.clear()
 
     def refresh_section(self, path: str) -> bool:
         # Section-local refresh: only rebuild the target section item's subtree,
@@ -233,6 +235,9 @@ class TreeCfgWidget(QWidget):
         prefix = f"{self._path}." if self._path else ""
         if prefix and not path.startswith(prefix):
             return False
+        # Elided singleton sections have no tree item; redirect to parent reference
+        if path in self._elided_singleton_path_to_parent:
+            path = self._elided_singleton_path_to_parent[path]
         item = self._path_to_item.get(path)
         if item is None:
             return False
@@ -336,9 +341,8 @@ class TreeCfgWidget(QWidget):
                 self._ref_prev_state.pop(item_path, None)
             while item.childCount():
                 item.takeChild(0)
-            if sub is not None:
-                target_depth = self._item_depth.get(id(item), 0)
-                self._add_section_children(item, sub, path, target_depth + 1)
+            target_depth = self._item_depth.get(id(item), 0)
+            self._populate_reference_subtree(item, ref_field, path, target_depth)
             return True
         # Collect descendant item paths (sections/references/groups) under target.
         descendant_item_paths = [
@@ -441,6 +445,7 @@ class TreeCfgWidget(QWidget):
         # Drop decorations under target will be handled by CfgFormWidget caller;
         # here we just rebuild the subtree.
         target_depth = self._item_depth.get(id(item), 0)
+        assert sec_field is not None
         self._add_section_children(item, sec_field, path, target_depth + 1)
         return True
 
@@ -488,10 +493,29 @@ class TreeCfgWidget(QWidget):
     def _remember_expanded(self, item: QTreeWidgetItem, expanded: bool) -> None:
         path = item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
         if isinstance(path, str):
+            rf = self._find_reference_field(path)
+            if rf is not None and rf.spec.optional and not rf.is_enabled:
+                self._expanded_state[path] = False
+                if expanded:
+                    try:
+                        item.setExpanded(False)
+                    except Exception:
+                        pass
+                return
             self._expanded_state[path] = expanded
 
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         del column
+        path = item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+        if isinstance(path, str):
+            rf = self._find_reference_field(path)
+            if rf is not None and rf.spec.optional and not rf.is_enabled:
+                if item.isExpanded():
+                    try:
+                        item.setExpanded(False)
+                    except Exception:
+                        pass
+                return
         if item.childCount() > 0:
             item.setExpanded(not item.isExpanded())
 
@@ -502,6 +526,110 @@ class TreeCfgWidget(QWidget):
         # A1: rows no longer use depth background colors; guide lines are colored instead.
         # Kept for compatibility but intentionally no-op.
         return
+
+    def _default_expanded_for_reference(self, field: ReferenceField) -> bool:
+        if field.spec.optional and not field.is_enabled:
+            return False
+        try:
+            return is_custom_reference_key(field.get_chosen_key())
+        except Exception:
+            return False
+
+    def _singleton_section_for_reference(
+        self, section_field: SectionField, path_prefix: str
+    ) -> tuple[SectionField | None, str | None]:
+        """Return singleton nested SectionField to elide, if any (S2).
+
+        Elides the redundant wrapper when the materialized reference shape
+        contains exactly one visible child and that child is a SectionField.
+        Visibility uses shared choice/hidden policy; grouped entries are not
+        elided to avoid hiding group chrome. Hidden means decoration or choice.
+        Only SectionField wrappers are elided — a single ReferenceField child
+        remains visible (decision stop guard). A wrapper with non-neutral
+        section decoration (disabled, badge, tooltip, tone, suffix) is not
+        elided so shared presentation contracts remain observable via
+        apply_tree_item_decoration and descendant disabled propagation.
+        """
+        visible = choice_visible_keys(section_field)
+        entries: list[tuple[str, str, CfgField]] = []
+        for key, child_field in section_field.fields.items():
+            if visible is not None and key not in visible:
+                continue
+            child_path = f"{path_prefix}.{key}" if path_prefix else key
+            if is_hidden(child_path, child_field, self._context):
+                continue
+            group = getattr(child_field.spec, "group", "") or ""
+            if group:
+                return None, None
+            entries.append((key, child_path, child_field))
+        if len(entries) == 1 and isinstance(entries[0][2], SectionField):
+            wrapper_field = cast(SectionField, entries[0][2])
+            wrapper_path = entries[0][1]
+            # Do not elide a wrapper that carries observable decoration
+            if self._context.decoration_for_path is not None:
+                try:
+                    dec = self._context.decoration_for_path(wrapper_path, wrapper_field)  # type: ignore[arg-type]
+                except Exception:
+                    dec = None
+                if dec is not None:
+                    # FieldDecoration fields: hidden already excluded, but check remaining
+                    try:
+                        if not getattr(dec, "enabled", True):
+                            return None, None
+                        if (
+                            getattr(dec, "badge", "")
+                            or getattr(dec, "tooltip", "")
+                            or getattr(dec, "label_suffix", "")
+                        ):
+                            return None, None
+                        if getattr(dec, "tone", "normal") != "normal":
+                            return None, None
+                    except Exception:
+                        return None, None
+            return wrapper_field, wrapper_path
+        return None, None
+
+    def _maybe_resolve_elided_path(self, path: str) -> str:
+        parent = self._elided_singleton_path_to_parent.get(path)
+        if parent is not None:
+            return parent
+        return path
+
+    def _populate_reference_subtree(
+        self, ref_item: QTreeWidgetItem, field: ReferenceField, path: str, depth: int
+    ) -> None:
+        """Populate children of a reference row with shared singleton elision.
+
+        View-only helper used by initial render, identity rebuild, and
+        section-local refresh so reference shape elision and its disabled
+        propagation stay consistent. Clears stale elided mappings for the
+        reference before re-adding children.
+        """
+        for k in list(self._elided_singleton_path_to_parent.keys()):
+            if k.startswith(path + "."):
+                self._elided_singleton_path_to_parent.pop(k, None)
+        sub = field.sub_field
+        if sub is None:
+            return
+        singleton, singleton_path = self._singleton_section_for_reference(sub, path)
+        if singleton is not None and singleton_path is not None:
+            self._elided_singleton_path_to_parent[singleton_path] = path
+            self._add_section_children(ref_item, singleton, singleton_path, depth + 1)
+        else:
+            self._add_section_children(ref_item, sub, path, depth + 1)
+        if field.spec.optional and not field.is_enabled:
+            stack: list[QTreeWidgetItem] = [ref_item]
+            while stack:
+                cur = stack.pop()
+                for idx in range(cur.childCount()):
+                    ch = cur.child(idx)
+                    if ch is None:
+                        continue
+                    ch.setDisabled(True)
+                    w = self._tree.itemWidget(ch, 1)
+                    if w is not None:
+                        w.setEnabled(False)
+                    stack.append(ch)
 
     def _disconnect_refs(self) -> None:
         for field, callback in self._ref_connections:
@@ -552,6 +680,7 @@ class TreeCfgWidget(QWidget):
         self._path_to_item.clear()
         self._item_depth.clear()
         self._ref_prev_state.clear()
+        self._elided_singleton_path_to_parent.clear()
         self._tree.clear()
 
         # Decide if root header should be shown.
@@ -621,6 +750,10 @@ class TreeCfgWidget(QWidget):
             while item.childCount():
                 item.takeChild(0)
             return
+        # Drop prior singleton elision mapping for this reference
+        for k in list(self._elided_singleton_path_to_parent.keys()):
+            if self._elided_singleton_path_to_parent[k] == path:
+                self._elided_singleton_path_to_parent.pop(k, None)
         # Tear down existing children widgets under this reference
         to_remove = [
             p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
@@ -643,8 +776,7 @@ class TreeCfgWidget(QWidget):
         # Remove all children from the reference item
         while item.childCount():
             item.takeChild(0)
-        # Re-add children for the new shape
-        self._add_section_children(item, field.sub_field, path, depth + 1)
+        self._populate_reference_subtree(item, field, path, depth)
 
     def _find_reference_field(self, path: str) -> ReferenceField | None:
         # Walk from root to locate ReferenceField at ``path``
@@ -824,7 +956,17 @@ class TreeCfgWidget(QWidget):
             item.setFont(0, font)
             self._path_to_item[child_path] = item
             self._item_depth[id(item)] = depth
-            item.setExpanded(self._expanded_state.get(child_path, True))
+            # S1: library collapsed, custom expanded, disabled optional collapsed
+            if child_path in self._expanded_state:
+                if child_field.spec.optional and not child_field.is_enabled:
+                    expanded = False
+                    self._expanded_state[child_path] = False
+                else:
+                    expanded = self._expanded_state[child_path]
+            else:
+                expanded = self._default_expanded_for_reference(child_field)
+                self._expanded_state[child_path] = expanded
+            item.setExpanded(expanded)
             # Use exact renderer authority: obtain reference header via registry
             # (sole tree; ReferenceWidget is header-only, subtree owned by tree)
             ref_context = self._context.derive(path=child_path, top_level=False)
@@ -841,26 +983,8 @@ class TreeCfgWidget(QWidget):
             ):
                 item.setDisabled(True)
                 cast(QWidget, header_widget).setEnabled(False)
-            # Elide guaranteed single materialized shape row: render shape fields directly under reference.
             sub = child_field.sub_field
-            if sub is not None:
-                # Shape elision: children depth advances only by one, not two.
-                self._add_section_children(item, sub, child_path, depth + 1)
-                # If reference is optional and currently disabled, disable its subtree
-                # (header itself remains enabled so combo can re-enable)
-                if child_field.spec.optional and not child_field.is_enabled:
-                    stack = [item]
-                    while stack:
-                        cur = stack.pop()
-                        for idx in range(cur.childCount()):
-                            ch = cur.child(idx)
-                            if ch is None:
-                                continue
-                            ch.setDisabled(True)
-                            w = self._tree.itemWidget(ch, 1)
-                            if w is not None:
-                                w.setEnabled(False)
-                            stack.append(ch)
+            self._populate_reference_subtree(item, child_field, child_path, depth)
             # Keep reference children in sync only when structural identity changes
             # (chosen key, materialized shape, or sub_field identity). Value edits
             # must preserve leaf editors/focus.
@@ -882,6 +1006,21 @@ class TreeCfgWidget(QWidget):
                     # Only value edits inside the shape – keep editors.
                     return
                 self._ref_prev_state[path] = cur_state
+                # S1: reapply library/custom folding on identity change
+                if field.spec.optional and not field.is_enabled:
+                    new_expanded = False
+                else:
+                    try:
+                        new_expanded = is_custom_reference_key(cur_key)
+                    except Exception:
+                        new_expanded = False
+                self._expanded_state[path] = new_expanded
+                ref_item = self._path_to_item.get(path)
+                if ref_item is not None:
+                    try:
+                        ref_item.setExpanded(new_expanded)
+                    except Exception:
+                        pass
                 self._rebuild_reference_children(path)
 
             child_field.on_change.connect(_on_ref_change)  # type: ignore[attr-defined]
@@ -902,6 +1041,22 @@ class TreeCfgWidget(QWidget):
                 ref_item = self._path_to_item.get(path)
                 if ref_item is None:
                     return
+                if enabled:
+                    try:
+                        new_expanded = is_custom_reference_key(field.get_chosen_key())
+                    except Exception:
+                        new_expanded = False
+                    self._expanded_state[path] = new_expanded
+                    try:
+                        ref_item.setExpanded(new_expanded)
+                    except Exception:
+                        pass
+                else:
+                    self._expanded_state[path] = False
+                    try:
+                        ref_item.setExpanded(False)
+                    except Exception:
+                        pass
                 # Walk the QTreeWidget hierarchy so leaf rows (which are not in _path_to_item) are covered.
                 stack: list[QTreeWidgetItem] = [ref_item]
                 while stack:
@@ -923,15 +1078,15 @@ class TreeCfgWidget(QWidget):
                         if desc_path:
                             desc_field = self._find_field_for_path(desc_path)
                             if desc_field is not None:
-                                dec = None
+                                dec_inner = None
                                 if self._context.decoration_for_path is not None:
                                     try:
-                                        dec = self._context.decoration_for_path(
+                                        dec_inner = self._context.decoration_for_path(
                                             desc_path, desc_field
                                         )  # type: ignore[arg-type]
                                     except Exception:
-                                        dec = None
-                                if dec is not None and not dec.enabled:
+                                        dec_inner = None
+                                if dec_inner is not None and not dec_inner.enabled:
                                     effective = False
                         # Strict ancestors: decoration gate + optional-reference gate
                         if effective and desc_path and "." in desc_path:
