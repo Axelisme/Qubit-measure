@@ -9,9 +9,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -104,10 +105,13 @@ class CfgFormWidget(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        self._outer_layout = outer
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setObjectName("cfgScroll")
         outer.addWidget(scroll)
+        self._scroll = scroll
 
         self._inner = QWidget()
         self._inner_layout = QVBoxLayout(self._inner)
@@ -147,6 +151,29 @@ class CfgFormWidget(QWidget):
             draft.on_validity_changed.connect(self._on_draft_validity_changed)
             draft.on_change.connect(self._on_draft_changed)
             self._apply_editing_enabled()
+            # A2: Run cfg tree viewport follows panel height — tree handles its own scrolling
+            # For tree structure, outer scroll should not introduce fixed-height threshold;
+            # let tree expand with panel height and scroll internally.
+            is_tree = self._structure is not None
+            if is_tree:
+                # Hide outer scroll's bars; tree's own scroll appears when content exceeds viewport
+                self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+                self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+                # Ensure outer scroll still expands with panel height
+                self._scroll.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                )  # type: ignore[attr-defined]
+                self._inner.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                )  # type: ignore[attr-defined]
+                # Make root_widget expanding inside inner layout
+                root_widget.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                )  # type: ignore[attr-defined]
+                self._inner_layout.setStretchFactor(root_widget, 1)
+            else:
+                self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+                self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
             self._inner_layout.insertWidget(
                 self._inner_layout.count() - 1,
                 root_widget,
@@ -185,6 +212,12 @@ class CfgFormWidget(QWidget):
             cast(FieldWidgetProtocol, root).teardown()
             self._inner_layout.removeWidget(root)
             root.deleteLater()
+        # Reset scroll policies for next attach (form vs tree)
+        try:
+            self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+            self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+        except Exception:
+            pass
         self._field_decorations = {}
         self._choice_state = ()
         self._pending_section_refresh_paths = set()

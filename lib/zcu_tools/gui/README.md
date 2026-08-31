@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-08-31（shared cfg tree presentation — structural adapter, depth/connectors/elision）
+**Last updated:** 2026-08-31 — visual corrections (guide-line colors, viewport, Run/Analysis placement)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -206,11 +206,15 @@ shape-row elision are view-only and do not alter cfg paths, reference
 identity, validation, persistence, or lowering. The tree hides `Property` /
 `Value` headers, uses 13 px field text, shows the root row at indentation 0
 and descendants at 10 px with classic vertical/horizontal connectors without
-triangles via a `QProxyStyle`, supports whole-row folding (click any row that
-has children), cycles five depth background colors `#e2ebf6`, `#e3f0e6`,
-`#f4e9d2`, `#eadff1`, `#dceeee` (repeating after the fifth), colors each
-foldable node row at its displayed depth (only its children advance), and
-elides the guaranteed single materialized reference-shape row. Editor behavior
+triangles via a `QProxyStyle` whose guide lines carry the depth colors,
+supports whole-row folding (click any row that
+has children), cycles five depth colors `#e2ebf6`, `#e3f0e6`,
+`#f4e9d2`, `#eadff1`, `#dceeee` (repeating after the fifth) on the
+corresponding descendant tree guide lines; cfg rows no longer use those colors
+as depth backgrounds, and colors each guide level at its displayed depth
+(only its children advance), and elides the guaranteed single materialized reference-shape row. The tree viewport
+follows the available panel height and scrolls only when rendered content
+exceeds the viewport, without a fixed-height threshold. Editor behavior
 remains owned by the six exact `FieldRenderer` factories via the same frozen
 `FrozenFieldRendererRegistry`; the tree varies only structural node
 composition. Choice visibility, literal hiding, decorated labels, and full

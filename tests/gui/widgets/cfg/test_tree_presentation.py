@@ -334,6 +334,9 @@ def test_tree_indentation_and_header_and_connectors(qapp, ctrl):
 
 
 def test_tree_depth_color_cycling_and_own_depth(qapp, ctrl):
+    # A1 corrected: depth colors cycle on guide lines, not row backgrounds
+    from zcu_tools.gui.widgets.cfg.structure import _branch_color
+
     # Build a 6-deep nested section chain to test cycling (0..5 should wrap)
     spec = CfgSectionSpec(label="L0", fields={"a": ScalarSpec(label="A", type=int)})
     # Nest 6 levels: each level contains a child section L{n}
@@ -371,10 +374,13 @@ def test_tree_depth_color_cycling_and_own_depth(qapp, ctrl):
     w = CfgFormWidget(structure=tree_structure)
     _attach(w, schema, ctrl)
     tree = cast(TreeCfgWidget, w._root_widget)._tree
-    # Walk depth chain and verify background colors cycle
-    # Root at depth 0 => TREE_DEPTH_COLORS[0]
-    # Its child L1 at depth 1 => TREE_DEPTH_COLORS[1], etc.
+    # Walk depth chain and verify guide-line colors cycle via helper, and row backgrounds are NOT depth colors
     expected = list(TREE_DEPTH_COLORS)  # 0..4
+    # Verify helper cycles correctly
+    for idx in range(len(expected) * 2):
+        exp = expected[idx % len(expected)].lower()
+        got = _branch_color(idx).name().lower()
+        assert got == exp, f"branch color depth {idx} got {got} != {exp}"
     # collect items in order of nesting
     items: list[QTreeWidgetItem] = []
     cur = tree.topLevelItem(0)
@@ -386,20 +392,21 @@ def test_tree_depth_color_cycling_and_own_depth(qapp, ctrl):
         cur = nxt
         items.append(cur)
     # items should be Root, L1, L2, L3, L4, L5, L6, leaf
-    # background for each foldable node row at its displayed depth, leaves at their depth
+    # Rows no longer use depth backgrounds (A1)
+    depth_set = {c.lower() for c in TREE_DEPTH_COLORS}
     for idx, it in enumerate(items):
         bg = it.background(0).color().name().lower()
-        # depth for item: for Root 0, L1 1, L2 2, etc., leaf depth 7?
-        # Our tree depth increments per section: Root 0, L1 1, L2 2...
+        assert bg not in depth_set, f"depth {idx} item {it.text(0)!r} background {bg} should not be depth color"
+        # Also verify that guide-line helper would give expected cycle
         exp = TREE_DEPTH_COLORS[idx % len(TREE_DEPTH_COLORS)].lower()
-        assert bg == exp, f"depth {idx} item {it.text(0)!r} bg {bg} != {exp}"
-    # own-depth: child's color should be next, not same as parent
+        assert _branch_color(idx).name().lower() == exp
+    # own-depth via guide lines: child's guide color should be next, not same as parent
     for i in range(1, len(items)):
-        assert (
-            items[i].background(0).color().name().lower()
-            != items[i - 1].background(0).color().name().lower()
-            or len(TREE_DEPTH_COLORS) == 1
-        )
+        assert _branch_color(i).name().lower() != _branch_color(i - 1).name().lower() or len(TREE_DEPTH_COLORS) == 1
+    # Nesting legibility: root alignment intact — root has no parent and indentation 10
+    assert tree.indentation() == 10
+    assert tree.topLevelItem(0) is not None
+    assert tree.topLevelItem(0).parent() is None
 
 
 def test_tree_reference_shape_elision(qapp, ctrl):

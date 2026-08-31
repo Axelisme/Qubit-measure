@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-31 — Run tree + Analysis ledger + writeback baseline (S1/S2)
+**Last updated:** 2026-08-31 — visual corrections (Run/Analysis placement, guide-line colors)
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -34,11 +34,17 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   outlives the operation without a lease). It receives tab actions through a narrow
   `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
   `MainWindow` adapts those actions to top-level handlers. Run selects the shared
-  `tree_structure` adapter (dense tree per `spec/spec.md`: 13 px, root at 0,
-  descendants at 10 px with connectors, five-color depth cycling, whole-row
-  folding, reference shape elision); Analysis uses an app-local single-column
-  13 px ledger with whole-header folding for `Analysis parameters` and
-  `Writeback preview` and a fixed bottom `Analyze` action bar (S1). Presentation
+  `tree_structure` adapter (dense tree per `spec/spec.md` as corrected in
+  run-analysis-visual-corrections: 13 px, root at 0, descendants at 10 px with
+  connectors, five depth colors cycle on guide lines (rows no longer use depth
+  backgrounds), whole-row folding, reference shape elision, viewport follows
+  available panel height with scrolling only when content exceeds viewport);
+  Run controls use the prototype action treatment: readiness/status at left and
+  Reset followed by Run/Stop right-aligned, Reset neutral secondary and Run blue
+  primary with Stop retaining red active semantics; Analysis uses an app-local
+  single-column 13 px ledger with whole-header folding for `Analysis parameters`
+  and `Writeback preview` and `Analyze` immediately after the parameters
+  section and before the Writeback preview (not fixed at the pane bottom) (S1). Presentation
   Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while

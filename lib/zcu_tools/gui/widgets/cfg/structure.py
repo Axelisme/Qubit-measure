@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QAbstractItemView,
     QHeaderView,
     QProxyStyle,
+    QSizePolicy,
     QStyle,
     QStyleOption,
     QTreeWidget,
@@ -57,8 +58,17 @@ _INDENTATION_PX = 10
 _TREE_FONT_SIZE_PX = 13
 
 
+def _branch_color(depth: int) -> QColor:
+    """Return depth-cycled guide-line color."""
+    return QColor(TREE_DEPTH_COLORS[depth % len(TREE_DEPTH_COLORS)])
+
+
 class _TreeBranchStyle(QProxyStyle):
-    """Classic vertical/horizontal branch lines without triangles."""
+    """Classic vertical/horizontal branch lines without triangles.
+
+    Guide lines are depth-colored via TREE_DEPTH_COLORS cycling; rows no
+    longer use depth backgrounds (A1).
+    """
 
     def drawPrimitive(  # type: ignore[override]
         self,
@@ -81,8 +91,49 @@ class _TreeBranchStyle(QProxyStyle):
         rect = option.rect  # type: ignore[attr-defined]
         x = rect.center().x()
         y = rect.center().y()
+        # Depth for coloring: derive from indentation x position when possible,
+        # fallback to model index depth or grey.
+        pen_color = QColor("#b8c1cc")
+        try:
+            # Prefer indentation-based depth (per-level guide color)
+            if _INDENTATION_PX:
+                # rect.x() is indentation offset for this branch level
+                depth_guess = (
+                    max(0, int(rect.x() // _INDENTATION_PX)) if rect.x() >= 0 else 0
+                )
+                # Clamp to reasonable range; use cycled color
+                pen_color = _branch_color(depth_guess)
+                # Try to refine via model index if available
+                if widget is not None and isinstance(widget, QTreeWidget):
+                    model_index = getattr(option, "index", None)
+                    if (
+                        model_index is not None
+                        and hasattr(model_index, "isValid")
+                        and model_index.isValid()
+                    ):
+                        d = 0
+                        par = model_index.parent()
+                        while par.isValid():
+                            d += 1
+                            par = par.parent()
+                        pen_color = _branch_color(d)
+                    else:
+                        # fallback via indexAt center
+                        try:
+                            idx2 = widget.indexAt(rect.center())
+                            if idx2.isValid():
+                                d2 = 0
+                                pp = idx2.parent()
+                                while pp.isValid():
+                                    d2 += 1
+                                    pp = pp.parent()
+                                pen_color = _branch_color(d2)
+                        except Exception:
+                            pass
+        except Exception:
+            pen_color = QColor("#b8c1cc")
         painter.save()
-        painter.setPen(QPen(QColor("#b8c1cc"), 1))
+        painter.setPen(QPen(pen_color, 1))
         if has_sibling:
             painter.drawLine(x, rect.top(), x, rect.bottom())
         else:
@@ -117,8 +168,15 @@ class TreeCfgWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        # A2: viewport follows available panel height — tree expands, no fixed threshold
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)  # type: ignore[attr-defined]
         self._tree = QTreeWidget()
-        layout.addWidget(self._tree)
+        self._tree.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )  # type: ignore[attr-defined]
+        self._tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+        self._tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
+        layout.addWidget(self._tree, stretch=1)
 
         self._tree.setObjectName("cfgTree")
         self._tree.setHeaderHidden(True)
@@ -268,9 +326,9 @@ class TreeCfgWidget(QWidget):
         return QColor(TREE_DEPTH_COLORS[depth % len(TREE_DEPTH_COLORS)])
 
     def _set_depth_background(self, item: QTreeWidgetItem, depth: int) -> None:
-        brush = QBrush(self._level_color(depth))
-        for col in range(2):
-            item.setBackground(col, brush)
+        # A1: rows no longer use depth background colors; guide lines are colored instead.
+        # Kept for compatibility but intentionally no-op.
+        return
 
     def _disconnect_refs(self) -> None:
         for field, callback in self._ref_connections:
@@ -327,7 +385,6 @@ class TreeCfgWidget(QWidget):
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
             root_item.setFont(0, font)
-            self._set_depth_background(root_item, 0)
             self._path_to_item[self._path] = root_item
             self._item_depth[id(root_item)] = 0
             root_item.setExpanded(self._expanded_state.get(self._path, True))
@@ -513,7 +570,6 @@ class TreeCfgWidget(QWidget):
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
             group_item.setFont(0, font)
-            self._set_depth_background(group_item, depth)
             # Propagate disabled from parent section if any (ignore invisible root)
             if (
                 isinstance(parent_item, QTreeWidgetItem)
@@ -554,7 +610,6 @@ class TreeCfgWidget(QWidget):
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
             item.setFont(0, font)
-            self._set_depth_background(item, depth)
             apply_tree_item_decoration(item, None, dec)
             # Propagate disabled from parent (ignore invisible root)
             if (
@@ -578,7 +633,6 @@ class TreeCfgWidget(QWidget):
             font.setBold(True)
             font.setPixelSize(_TREE_FONT_SIZE_PX)
             item.setFont(0, font)
-            self._set_depth_background(item, depth)
             self._path_to_item[child_path] = item
             self._item_depth[id(item)] = depth
             item.setExpanded(self._expanded_state.get(child_path, True))
@@ -738,7 +792,6 @@ class TreeCfgWidget(QWidget):
         leaf_label = decorated_label(child_field, key, child_path, self._context)
         item = QTreeWidgetItem(parent_item, (leaf_label, ""))  # type: ignore[arg-type]
         item.setData(0, Qt.ItemDataRole.UserRole, child_path)  # type: ignore[attr-defined]
-        self._set_depth_background(item, depth)
         # Create editor widget via exact registry.
         child_context = self._context.derive(path=child_path, top_level=False)
         widget = self._context.registry.render(child_field, child_context)

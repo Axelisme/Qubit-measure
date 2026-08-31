@@ -295,36 +295,43 @@ class ExpTabWidget(QWidget):
         run_layout.setContentsMargins(4, 4, 4, 4)
         run_layout.setSpacing(2)
 
-        # Thin top strip: Reset sits right-aligned at the top of the cfg area
-        cfg_top_strip = QHBoxLayout()
-        cfg_top_strip.setContentsMargins(0, 0, 0, 0)
-        cfg_top_strip.addStretch()
-        self.reset_btn = QPushButton("Reset")
-        self.reset_btn.setFlat(True)
-        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
-        reset_font = self.reset_btn.font()
-        reset_font.setPointSize(max(reset_font.pointSize() - 1, 7))
-        self.reset_btn.setFont(reset_font)
-        cfg_top_strip.addWidget(self.reset_btn)
-        run_layout.addLayout(cfg_top_strip)
-
         self.cfg_form = CfgFormWidget(
             text_input_enhancer=make_value_source_input_enhancer(ctrl),
             structure=tree_structure,
         )
         run_layout.addWidget(self.cfg_form, stretch=1)
 
+        # Bottom action row: status at left, Reset + Run/Stop right-aligned (A3)
+        self._run_action_bar = QFrame()
+        self._run_action_bar.setObjectName("runActionBar")
+        self._run_action_bar.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
+        bar_layout = QHBoxLayout(self._run_action_bar)
+        bar_layout.setContentsMargins(8, 6, 8, 6)
+        bar_layout.setSpacing(6)
+        self._run_status_label = QLabel("●  Ready")
+        self._run_status_label.setObjectName("readyStatus")
+        bar_layout.addWidget(self._run_status_label)
+        bar_layout.addStretch()
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setFlat(True)
+        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
+        reset_font = self.reset_btn.font()
+        reset_font.setPointSize(max(reset_font.pointSize() - 1, 7))
+        self.reset_btn.setFont(reset_font)
+        bar_layout.addWidget(self.reset_btn)
         self.run_btn = QPushButton("Run")
+        self.run_btn.setObjectName("primaryButton")
         self.run_btn.setFixedHeight(30)
-        run_layout.addWidget(self.run_btn)
+        self.run_btn.setMinimumWidth(94)
+        bar_layout.addWidget(self.run_btn)
+        run_layout.addWidget(self._run_action_bar)
         self._run_panel = run_panel
         self._left_tabs.addTab(run_panel, "Run")
 
         # ── Tab: Analysis (only when analysis capability present) ──
         if self._has_analysis:
-            # Single-column 13 px ledger with whole-header folding and fixed
-            # bottom action bar (S1/A2). The scroll area holds the ledger;
-            # the Analyze button stays visible.
+            # Single-column 13 px ledger with whole-header folding; Analyze sits
+            # immediately after params and before Writeback preview (A4).
             analysis_container = QWidget()
             analysis_outer = QVBoxLayout(analysis_container)
             analysis_outer.setContentsMargins(0, 0, 0, 0)
@@ -349,6 +356,19 @@ class ExpTabWidget(QWidget):
             self._analyze_section.body_layout.addWidget(self.analyze_form)
             analysis_layout.addWidget(self._analyze_section)
 
+            # Analyze appears immediately after params, before Writeback preview (A4)
+            analyze_row_widget = QWidget()
+            analyze_row = QHBoxLayout(analyze_row_widget)
+            analyze_row.setContentsMargins(8, 4, 8, 4)
+            analyze_row.setSpacing(6)
+            analyze_row.addStretch()
+            self.analyze_btn = QPushButton("Analyze")
+            self.analyze_btn.setObjectName("primaryButton")
+            self.analyze_btn.setFixedHeight(30)
+            self.analyze_btn.setMinimumWidth(94)
+            analyze_row.addWidget(self.analyze_btn)
+            analysis_layout.addWidget(analyze_row_widget)
+
             self.writeback_section = _LedgerSection(
                 "Writeback preview", collapsed=False
             )
@@ -362,20 +382,6 @@ class ExpTabWidget(QWidget):
             analysis_layout.addStretch()
             analysis_scroll.setWidget(analysis_inner)
             analysis_outer.addWidget(analysis_scroll, stretch=1)
-
-            # Fixed action bar (Analyze remains visible while scrolling)
-            self._analysis_action_bar = QFrame()
-            self._analysis_action_bar.setObjectName("analysisActionBar")
-            self._analysis_action_bar.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
-            bar_layout = QHBoxLayout(self._analysis_action_bar)
-            bar_layout.setContentsMargins(8, 6, 8, 6)
-            bar_layout.addStretch()
-            self.analyze_btn = QPushButton("Analyze")
-            self.analyze_btn.setObjectName("primaryButton")
-            self.analyze_btn.setFixedHeight(30)
-            self.analyze_btn.setMinimumWidth(94)
-            bar_layout.addWidget(self.analyze_btn)
-            analysis_outer.addWidget(self._analysis_action_bar)
 
             self._analysis_panel = analysis_container
             self._analysis_tab_index = self._left_tabs.addTab(
@@ -959,8 +965,14 @@ class ExpTabWidget(QWidget):
             self.run_btn.setStyleSheet(
                 "background-color: #f44336; color: white; font-weight: bold;"
             )
+            self.run_btn.setObjectName("")
+            # Status at left reflects running
+            if hasattr(self, "_run_status_label"):
+                self._run_status_label.setText("●  Running")
+                self._run_status_label.setToolTip("Running")
         else:
             self.run_btn.setText("Run")
+            self.run_btn.setObjectName("primaryButton")
             cfg_valid = self.cfg_form.is_valid()
             can_run = (
                 not local_busy
@@ -972,22 +984,53 @@ class ExpTabWidget(QWidget):
             self.run_btn.setEnabled(can_run)
             if can_run:
                 self.run_btn.setToolTip("")
+                if hasattr(self, "_run_status_label"):
+                    self._run_status_label.setText("●  Ready")
+                    self._run_status_label.setToolTip("")
             elif local_busy:
                 self.run_btn.setToolTip("Tab is busy")
+                if hasattr(self, "_run_status_label"):
+                    self._run_status_label.setText("●  Busy")
+                    self._run_status_label.setToolTip("Tab is busy")
             elif state.global_run_active:
                 self.run_btn.setToolTip("Another tab is running")
+                if hasattr(self, "_run_status_label"):
+                    self._run_status_label.setText("●  Busy")
+                    self._run_status_label.setToolTip("Another tab is running")
             elif not state.has_context:
                 self.run_btn.setToolTip("No experiment context")
+                if hasattr(self, "_run_status_label"):
+                    self._run_status_label.setText("●  No context")
+                    self._run_status_label.setToolTip("No experiment context")
             elif not state.has_active_context:
                 self.run_btn.setToolTip("Select or create a file-backed context")
+                if hasattr(self, "_run_status_label"):
+                    self._run_status_label.setText("●  No context")
+                    self._run_status_label.setToolTip(
+                        "Select or create a file-backed context"
+                    )
             elif capabilities.requires_soc and not state.has_soc:
                 self.run_btn.setToolTip("No SoC connection")
+                if hasattr(self, "_run_status_label"):
+                    self._run_status_label.setText("●  No SoC")
+                    self._run_status_label.setToolTip("No SoC connection")
             elif not cfg_valid:
                 reason = self.cfg_form.first_invalid_reason()
                 self.run_btn.setToolTip(
                     f"Config invalid: {reason}" if reason else "Config invalid"
                 )
+                if hasattr(self, "_run_status_label"):
+                    self._run_status_label.setText("●  Invalid cfg")
+                    self._run_status_label.setToolTip(
+                        f"Config invalid: {reason}" if reason else "Config invalid"
+                    )
+            # Apply primaryButton styling via dynamic property to trigger stylesheet
+            # Keep stylesheet empty so global stylesheet can color it blue; ensure objectName set
             self.run_btn.setStyleSheet("")
+            # Force style refresh for objectName change
+            self.run_btn.style().unpolish(self.run_btn)  # type: ignore[attr-defined]
+            self.run_btn.style().polish(self.run_btn)  # type: ignore[attr-defined]
+            self.run_btn.update()
 
         idle = not local_busy
         self.cfg_form.set_editing_enabled(idle)

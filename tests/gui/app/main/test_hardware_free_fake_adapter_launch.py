@@ -108,13 +108,41 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert tree.indentation() == 10
     assert tree.font().pixelSize() == 13
 
-    # A2: ledger + fixed bar (Primary Analysis)
+    # A2/A4: ledger with Analyze between params and writeback (not fixed bar)
     from zcu_tools.gui.app.main.ui.exp_tab_widget import _LedgerSection
+    from qtpy.QtWidgets import QScrollArea
 
     assert isinstance(tab._analyze_section, _LedgerSection)
-    assert hasattr(tab, "_analysis_action_bar")
-    assert tab.analyze_btn.parent() is tab._analysis_action_bar
+    assert not hasattr(tab, "_analysis_action_bar"), "fixed action bar should be removed for A4"
     assert tab.analyze_form.font().pixelSize() == 13
+    # Verify Analyze is inside scroll area between params and writeback
+    scroll = tab._analysis_panel.findChild(QScrollArea)
+    assert scroll is not None
+    inner = scroll.widget()
+    assert inner is not None
+    # Check Analyze is descendant of inner (scroll content) not fixed bar
+    def is_descendant(widget, ancestor):
+        cur = widget
+        while cur is not None:
+            if cur is ancestor:
+                return True
+            cur = cur.parent()
+        return False
+    assert is_descendant(tab.analyze_btn, inner)
+    # Verify ordering: params < analyze < writeback
+    layout = inner.layout()
+    assert layout is not None
+    widgets = [layout.itemAt(i).widget() for i in range(layout.count()) if layout.itemAt(i).widget() is not None]
+    idx_params = widgets.index(tab._analyze_section)
+    # Find container holding analyze_btn
+    idx_analyze = None
+    for idx, w in enumerate(widgets):
+        if is_descendant(tab.analyze_btn, w):
+            idx_analyze = idx
+            break
+    assert idx_analyze is not None
+    idx_writeback = widgets.index(tab.writeback_section)
+    assert idx_params < idx_analyze < idx_writeback
     # Post-Analysis should remain baseline _CollapsibleSection (not ledger)
     # fake/freq does not have post_analysis, so post widgets should not exist
     assert not hasattr(tab, "post_writeback_widget") or tab._has_post is False
