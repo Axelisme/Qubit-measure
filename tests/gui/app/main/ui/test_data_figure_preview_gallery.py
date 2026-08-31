@@ -13,6 +13,7 @@ from qtpy.QtWidgets import QLabel, QScrollArea, QWidget
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.app.main.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
@@ -247,7 +248,8 @@ def test_gallery_single_failure_isolated(qapp):
     assert "unavailable" in g.card_text("analysis").lower()
     assert g.card_state("post_analysis") == "available"
     # Gallery still scrollable and other cards not blocked
-    assert g.isVisible() or True  # creation succeeded
+    assert g.findChild(QScrollArea, "previewGalleryScroll") is not None
+    assert g.card_count() == 3
 
     # Second render with different failure isolates again
     def fail_post(fig):
@@ -525,7 +527,9 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
     assert tab._data_gallery.card_state("run") == "available"
     assert tab._data_gallery.card_state("analysis") == "unavailable"
     assert tab._data_gallery.card_state("post_analysis") == "available"
-    # Save center should still be usable (has result -> not saved)
-    assert tab._save_center.is_save_all_enabled() or True  # at least not crashed
+    # Save center should still be usable after single-card failure (A3)
+    assert tab._save_center.has_artifact(ArtifactKind.DATA)
+    assert tab._save_center.is_save_all_enabled() is True
+    assert tab._save_center.is_save_enabled(ArtifactKind.DATA) is True
     assert tab._save_center.has_artifact(tab._save_center.artifact_kinds[0])
     tab.detach()
