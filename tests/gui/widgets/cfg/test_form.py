@@ -2462,3 +2462,148 @@ def test_singleton_elision_does_not_hide_editable_reference_field(qapp, ctrl):
         "editable ReferenceField must remain visible"
     )
     assert root._path_to_item["ref.nested_ref"].text(0) != ""
+
+
+def test_elided_singleton_survives_decoration_provider_refresh(qapp, ctrl):
+    """Blocker 1: elided singleton stays elided after section-local decoration refresh."""
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget, FieldDecorationPatch
+    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+
+    inner = CfgSectionSpec(
+        label="Inner",
+        fields={
+            "gain": ScalarSpec(label="Gain", type=float),
+            "freq": ScalarSpec(label="Freq", type=float),
+        },
+    )
+    singleton_outer = CfgSectionSpec(label="Outer", fields={"inner": inner})
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[singleton_outer], label="Ref")},
+        {
+            "ref": ReferenceValue(
+                chosen_key="<Custom:Outer>",
+                value=CfgSectionValue(
+                    fields={
+                        "inner": CfgSectionValue(
+                            fields={"gain": DirectValue(0.5), "freq": DirectValue(5.0)}
+                        )
+                    }
+                ),
+            )
+        },
+    )
+    form = CfgFormWidget()
+    _attach(form, schema, ctrl)
+    root = form._root_widget
+    assert isinstance(root, TreeCfgWidget)
+    # Initially elided
+    assert "ref.inner" not in root._path_to_item
+    assert "ref.inner.gain" in root._leaf_path_to_widget
+    ref_item = root._path_to_item["ref"]
+    # Verify gain leaf is direct child of ref
+    found_gain = False
+    for idx in range(ref_item.childCount()):
+        ch = ref_item.child(idx)
+        if ch is not None and ch.data(0, 0x0100) == "ref.inner.gain":
+            found_gain = True
+            break
+    assert found_gain
+
+    # Provider that changes decoration for a leaf under the elided wrapper
+    class LeafBadgeProvider:
+        def decoration_for(self, path, spec, value):
+            if path == "ref.inner.gain":
+                return FieldDecorationPatch(badge="generated")
+            return None
+
+    form.set_decoration_provider(LeafBadgeProvider())
+    # Flush pending section refresh (queued via QTimer.singleShot 0)
+    qapp.processEvents()
+    # Process the queued refresh
+    try:
+        # CfgFormWidget queues refresh via singleShot, need extra process
+        form._flush_pending_section_refresh()
+    except Exception:
+        pass
+    qapp.processEvents()
+    # Still elided
+    assert "ref.inner" not in root._path_to_item, (
+        "wrapper should remain elided after decoration refresh"
+    )
+    assert "ref.inner.gain" in root._leaf_path_to_widget
+    # Parentage still direct
+    found_gain_after = False
+    for idx in range(ref_item.childCount()):
+        ch = ref_item.child(idx)
+        if ch is not None and ch.data(0, 0x0100) == "ref.inner.gain":
+            found_gain_after = True
+            break
+    assert found_gain_after
+    # cfg path preserved
+    out = form.read_values()
+    assert out.fields["ref"].value.fields["inner"].fields["gain"].value == 0.5  # type: ignore[union-attr]
+
+
+def test_singleton_wrapper_with_disabled_decoration_not_elided(qapp, ctrl):
+    """Blocker 2: singleton wrapper with disabled decoration is not elided and leaves are disabled."""
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget, FieldDecorationPatch
+    from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
+
+    inner = CfgSectionSpec(
+        label="Inner",
+        fields={
+            "gain": ScalarSpec(label="Gain", type=float),
+            "freq": ScalarSpec(label="Freq", type=float),
+        },
+    )
+    singleton_outer = CfgSectionSpec(label="Outer", fields={"inner": inner})
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[singleton_outer], label="Ref")},
+        {
+            "ref": ReferenceValue(
+                chosen_key="<Custom:Outer>",
+                value=CfgSectionValue(
+                    fields={
+                        "inner": CfgSectionValue(
+                            fields={"gain": DirectValue(0.5), "freq": DirectValue(5.0)}
+                        )
+                    }
+                ),
+            )
+        },
+    )
+
+    class DisabledWrapperProvider:
+        def decoration_for(self, path, spec, value):
+            if path == "ref.inner":
+                return FieldDecorationPatch(
+                    enabled=False, badge="muted", tooltip="disabled wrapper"
+                )
+            return None
+
+    form = CfgFormWidget(decoration_provider=DisabledWrapperProvider())
+    _attach(form, schema, ctrl)
+    root = form._root_widget
+    assert isinstance(root, TreeCfgWidget)
+    # Wrapper should NOT be elided because it has non-neutral decoration
+    assert "ref.inner" in root._path_to_item, "disabled wrapper must remain visible"
+    wrapper_item = root._path_to_item["ref.inner"]
+    # Leaves should be under wrapper, not directly under ref
+    ref_item = root._path_to_item["ref"]
+    # ref should have wrapper as child, not leaves directly
+    assert wrapper_item.parent() is ref_item
+    # Leaves should be disabled via wrapper propagation
+    gain_widget = root._leaf_path_to_widget.get("ref.inner.gain")
+    assert gain_widget is not None
+    # Check item disabled and widget disabled
+    gain_item = None
+    for idx in range(wrapper_item.childCount()):
+        ch = wrapper_item.child(idx)
+        if ch is not None and ch.data(0, 0x0100) == "ref.inner.gain":
+            gain_item = ch
+            break
+    assert gain_item is not None
+    assert gain_item.isDisabled() is True
+    assert not gain_widget.isEnabled()  # type: ignore[attr-defined]
+    # Wrapper decoration badge/tooltip should be applied (observable)
+    assert wrapper_item.toolTip(0) == "disabled wrapper"
