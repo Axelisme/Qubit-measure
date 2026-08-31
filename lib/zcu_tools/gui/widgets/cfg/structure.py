@@ -302,6 +302,18 @@ class TreeCfgWidget(QWidget):
                             pass
                 rf = self._find_reference_field(ref_path)
                 if rf is not None:
+                    for f, cb in list(self._ref_connections):
+                        if f is rf:
+                            try:
+                                f.on_change.disconnect(cb)  # type: ignore[attr-defined]
+                            except Exception:
+                                pass
+                    for f, cb in list(self._ref_enabled_connections):
+                        if f is rf:
+                            try:
+                                f.on_enabled_changed.disconnect(cb)  # type: ignore[attr-defined]
+                            except Exception:
+                                pass
                     self._ref_connections = [
                         (f, cb) for (f, cb) in self._ref_connections if f is not rf
                     ]
@@ -391,7 +403,18 @@ class TreeCfgWidget(QWidget):
             # Disconnect callbacks for this reference field.
             ref_field = self._find_reference_field(ref_path)
             if ref_field is not None:
-                # Remove from _ref_connections
+                for f, cb in list(self._ref_connections):
+                    if f is ref_field:
+                        try:
+                            f.on_change.disconnect(cb)  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                for f, cb in list(self._ref_enabled_connections):
+                    if f is ref_field:
+                        try:
+                            f.on_enabled_changed.disconnect(cb)  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
                 self._ref_connections = [
                     (f, cb) for (f, cb) in self._ref_connections if f is not ref_field
                 ]
@@ -400,8 +423,6 @@ class TreeCfgWidget(QWidget):
                     for (f, cb) in self._ref_enabled_connections
                     if f is not ref_field
                 ]
-                # Also disconnect the field's signals if callback still connected
-                # (best effort, ignore errors)
                 self._ref_prev_state.pop(ref_path, None)
             # Remove from maps
             self._path_to_item.pop(ref_path, None)

@@ -171,17 +171,6 @@ class ReferenceWidget(BaseLiveWidget):
         field = cast(ReferenceField, self._field)
         handle_reference_combo_change(field, key)
 
-    def _on_model_enabled_changed(self, enabled: bool) -> None:
-        self._combo.blockSignals(True)
-        if enabled:
-            field = cast(ReferenceField, self._field)
-            idx = self._combo.findData(field.get_chosen_key())
-            if idx >= 0:
-                self._combo.setCurrentIndex(idx)
-        else:
-            self._combo.setCurrentIndex(0)  # None option
-        self._combo.blockSignals(False)
-
     def _on_model_changed(self, *_: Any) -> None:
         self._refresh_combo_items()
         self._refresh_missing_ref_hint()
@@ -198,18 +187,8 @@ class ReferenceWidget(BaseLiveWidget):
         field = cast(ReferenceField, self._field)
         field.on_change.disconnect(self._on_model_changed)
         field.on_validity_changed.disconnect(self._on_validity_changed)
-        if field.spec.optional:
-            try:
-                field.on_enabled_changed.disconnect(self._on_model_enabled_changed)
-            except Exception:
-                pass
 
     def _on_validity_changed(self, valid: bool) -> None:
         field = cast(ReferenceField, self._field)
-        # Tree header has no expand btn; pass combo as both args for validity tint (combo only).
-        try:
-            apply_reference_validity(self._combo, self._combo, field, valid)
-        except Exception:
-            # Fallback if helper expects QToolButton
-            pass
+        apply_reference_validity(self._combo, None, field, valid)
         self._refresh_missing_ref_hint()
