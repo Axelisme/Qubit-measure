@@ -38,7 +38,7 @@ def test_known_2x2_correction_hand_computed() -> None:
     cm = np.array([[0.9, 0.1], [0.2, 0.8]], dtype=np.float64)
     measured = np.array([0.65, 0.35], dtype=np.float64)
 
-    expected = measured @ np.linalg.inv(cm)
+    expected = np.linalg.solve(cm.T, measured)
     # Cross-check the hand math too (both within [0, 1] -> no clip effect).
     np.testing.assert_allclose(expected, [0.45 / 0.70, 0.25 / 0.70])
 
@@ -47,12 +47,12 @@ def test_known_2x2_correction_hand_computed() -> None:
 
 
 def test_clip_negative_and_above_one() -> None:
-    """An input that inverts to out-of-range values is clipped into [0, 1]."""
+    """An input that solves to out-of-range values is clipped into [0, 1]."""
     cm = np.array([[0.9, 0.1], [0.2, 0.8]], dtype=np.float64)
     # Pick a measured vector whose unclipped correction goes out of range.
     measured = np.array([0.95, 0.05], dtype=np.float64)
 
-    raw = measured @ np.linalg.inv(cm)
+    raw = np.linalg.solve(cm.T, measured)
     # Sanity: the raw correction does leave [0, 1] so clipping is exercised.
     assert raw.min() < 0.0 or raw.max() > 1.0
 
@@ -76,7 +76,7 @@ def test_batched_input_shape_and_orientation_preserved() -> None:
         dtype=np.float64,
     )
 
-    expected = np.clip(measured @ np.linalg.inv(cm), 0.0, 1.0)
+    expected = np.clip(np.linalg.solve(cm.T, measured.T).T, 0.0, 1.0)
     result = correct_populations(measured, cm)
 
     assert result.shape == measured.shape
@@ -86,3 +86,33 @@ def test_batched_input_shape_and_orientation_preserved() -> None:
     # batched result equals the single-vector correction of row 0.
     single = correct_populations(measured[0], cm)
     np.testing.assert_allclose(result[0], single)
+
+
+def test_high_dimensional_batch_preserves_shape() -> None:
+    """All leading sweep axes are flattened only for the linear solve."""
+    cm = np.array(
+        [[0.90, 0.08, 0.02], [0.10, 0.85, 0.05], [0.03, 0.07, 0.90]],
+        dtype=np.float64,
+    )
+    measured = np.array(
+        [
+            [
+                [[0.70, 0.20, 0.10], [0.20, 0.70, 0.10]],
+                [[0.40, 0.40, 0.20], [0.10, 0.20, 0.70]],
+            ],
+            [
+                [[0.60, 0.30, 0.10], [0.30, 0.60, 0.10]],
+                [[0.50, 0.25, 0.25], [0.15, 0.15, 0.70]],
+            ],
+        ],
+        dtype=np.float64,
+    )
+
+    flat = measured.reshape(-1, measured.shape[-1])
+    expected = np.linalg.solve(cm.T, flat.T).T.reshape(measured.shape)
+    expected = np.clip(expected, 0.0, 1.0)
+
+    result = correct_populations(measured, cm)
+
+    assert result.shape == measured.shape
+    np.testing.assert_allclose(result, expected)
