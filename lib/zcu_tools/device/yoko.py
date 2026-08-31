@@ -260,6 +260,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     ) -> None:
         if self.get_output() != "on" and cfg.output == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
+        self.set_output(cfg.output)
 
         cur_mode = self.get_mode()
 

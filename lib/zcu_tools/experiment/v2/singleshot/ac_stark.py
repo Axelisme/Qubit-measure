@@ -153,7 +153,10 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
             np.linspace(gain_sweep.start**2, gain_sweep.stop**2, gain_sweep.expts)
         )
         gains = sweep2array(
-            gains, "gain", {"soccfg": soccfg, "gen_ch": modules.stark_pulse1.ch}
+            gains,
+            "gain",
+            {"soccfg": soccfg, "gen_ch": modules.stark_pulse1.ch},
+            allow_array=True,
         )
 
         fig, axs = make_plot_frame(2, 2, plot_instant=True, figsize=(8, 6))
