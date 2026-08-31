@@ -60,8 +60,10 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   on the clipboard; arbitrary long values show only the bounded summary so the
   ledger never widens. The widget owns a ~450 px breakpoint: wide rows stay
   single-line, narrow rows reflow to target/action above centered
-  Current → Proposed, the list is vertically scrollable without horizontal
-  overflow, and Apply Selected stays fixed at the bottom.
+  Current → Proposed, the bordered ledger hugs its rendered rows with Apply
+  Selected immediately after it; long content grows naturally and delegates
+  vertical scrolling to the existing Analysis pane rather than owning a nested
+  scroll/cap lifecycle.
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
   retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an
