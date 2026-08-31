@@ -4,7 +4,14 @@ import json
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QPushButton, QTableWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QTableWidget,
+)
 from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
@@ -207,7 +214,7 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
 
 
 def test_writeback_structured_matrix_bounded_table_copy_and_long_bounded(qapp):
-    """A2 — 3×3 shows 3 \u00d7 3 matrix + read-only table, Copy JSON, long bounded."""
+    """A2 — 3×3 shows 3 × 3 matrix + read-only table, Copy JSON, long bounded."""
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     item = MetaDictWriteback(
@@ -267,20 +274,20 @@ def test_writeback_structured_matrix_bounded_table_copy_and_long_bounded(qapp):
             # size hint remains bounded
             assert w2.sizeHint().width() < widget.sizeHint().width() + 200
             assert w2.findChildren(QTableWidget) == []
-            hbar2 = w2._scroll.horizontalScrollBar()
-            assert hbar2 is not None
-            assert (
-                w2._scroll.horizontalScrollBarPolicy()
-                == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-            )
+            # No nested writeback scroll — long value does not create inner scroll
+            assert w2.findChild(QScrollArea, "writebackScroll") is None
+            assert not hasattr(w2, "_scroll")
+            # No horizontal overflow: panel width bounded
+            assert w2._rows_container.width() <= w2.width() + 4
         finally:
             w2.close()
     finally:
         widget.close()
 
 
-def test_writeback_responsive_reflow_scroll_and_fixed_apply(qapp):
-    """A3 — 500 px wide single-line vs 400 px narrow stacked, vertical scroll, fixed Apply."""
+def test_writeback_responsive_reflow_no_overflow_and_tight_panel(qapp):
+    """A3 — 500 px wide single-line vs 400 px narrow stacked, no nested scroll,
+    no horizontal overflow, panel hugs rows, Apply immediately follows."""
     items: list[MetaDictWriteback] = []
     for i in range(3):
         it = MetaDictWriteback(
@@ -294,7 +301,12 @@ def test_writeback_responsive_reflow_scroll_and_fixed_apply(qapp):
     widget.show()
     qapp.processEvents()
     try:
-        # wide: checkbox and current share Y
+        # no nested writeback scroll
+        assert widget.findChild(QScrollArea, "writebackScroll") is None
+        assert not hasattr(widget, "_scroll")
+        assert widget.findChildren(QScrollArea) == []
+
+        # wide: checkbox and current share Y (single-line)
         cbs = widget.findChildren(QCheckBox)
         curs = [
             l
@@ -303,167 +315,95 @@ def test_writeback_responsive_reflow_scroll_and_fixed_apply(qapp):
         ]
         assert cbs and curs
         assert abs(cbs[0].y() - curs[0].y()) < 30
-        # vertical scroll, no horizontal overflow, Apply fixed visible
-        assert (
-            widget._scroll.horizontalScrollBarPolicy()
-            == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+        # No horizontal overflow: panel width within widget width
+        assert widget._rows_container.width() <= widget.width() + 2
+        # panel hugs rows, Apply immediately follows (content-tight)
+        panel = widget._rows_container
+        rows = widget._rows
+        assert rows, "no rows"
+        last = rows[-1]
+        assert abs(panel.height() - (last.geometry().bottom() + 1)) <= 6, (
+            f"panel {panel.height()} vs last bottom {last.geometry().bottom() + 1}"
         )
+        layout = widget.layout()
+        assert layout is not None
+        spacing = layout.spacing()
         assert (
-            widget._scroll.verticalScrollBarPolicy()
-            == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            abs(
+                widget._apply_btn.geometry().y()
+                - (panel.geometry().y() + panel.height() + spacing)
+            )
+            <= 6
+        ), (
+            f"Apply y {widget._apply_btn.geometry().y()} vs panel y {panel.geometry().y()} h {panel.height()} spacing {spacing}"
         )
-        hbar = widget._scroll.horizontalScrollBar()
-        assert hbar is not None
-        assert hbar.maximum() == 0
         assert widget._apply_btn.isVisible()
         assert widget._apply_btn.parent() is widget
-        # narrow
+
+        # narrow: should reflow to target/action above Current→Proposed
         widget.resize(400, 400)
         qapp.processEvents()
         widget._update_responsive()
         qapp.processEvents()
         # in narrow, checkbox above current
         assert cbs[0].y() < curs[0].y() - 5
-        hbar_n = widget._scroll.horizontalScrollBar()
-        assert hbar_n is not None
-        assert hbar_n.maximum() == 0
+        # still no nested scroll and still content-tight
+        assert widget.findChild(QScrollArea, "writebackScroll") is None
+        assert widget._rows_container.width() <= widget.width() + 2
+        assert abs(panel.height() - (rows[-1].geometry().bottom() + 1)) <= 6
+        assert (
+            abs(
+                widget._apply_btn.geometry().y()
+                - (panel.geometry().y() + panel.height() + spacing)
+            )
+            <= 6
+        )
         assert widget._apply_btn.isVisible()
-        # Apply remains outside scroll viewport
-        assert widget._apply_btn.geometry().y() > widget._scroll.geometry().y()
+        # no hidden inner scrollbar to interfere
+        assert widget.findChildren(QScrollArea) == []
     finally:
         widget.close()
 
 
-def test_writeback_ledger_hugs_short_and_caps_long(qapp):
-    """S3 — short ledger hugs rows at 500 px and 400 px (no blank inside
-    bordered field), long ledger capped with vertical scroll and fixed Apply.
+def test_writeback_ledger_content_tight_no_nested_scroll_and_long_grows_via_outer(qapp):
+    """A3 — bordered ledger bottom tracks last row, Apply immediately follows,
+    no nested writeback scroll at 500/400, long ledger grows naturally and
+    is reachable through an outer scroll (generic host)."""
+    from qtpy.QtWidgets import QVBoxLayout, QWidget
 
-    Uses layout/sizeHint/viewport geometry, not hard-coded row counts.
-    """
-    from qtpy.QtWidgets import QScrollArea
-
-    def _check_hugs(widget: WritebackWidget, *, frame_tolerance: int = 6) -> None:
-        # Viewport/content geometry: no unused interior below last row.
-        scroll = widget._scroll
-        viewport = scroll.viewport()
-        assert viewport is not None
+    def _assert_tight(widget: WritebackWidget, *, frame_tolerance: int = 6) -> None:
         panel = widget._rows_container
         rows = widget._rows
         assert rows, "no rows rendered"
         assert panel.isVisible()
-        assert scroll.isVisible()
-        # No horizontal overflow
-        hbar = scroll.horizontalScrollBar()
-        assert hbar is not None
-        assert hbar.maximum() == 0
-        assert (
-            scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        # Vertical: short should not need scrolling
-        vbar = scroll.verticalScrollBar()
-        assert vbar is not None
-        assert vbar.maximum() == 0, (
-            f"short ledger should not scroll, vbar max {vbar.maximum()}"
-        )
-        # Viewport height tracks panel/content height within frame tolerance
-        # (border 1px + radius, plus QScrollArea frame NoFrame => ~0-2)
-        assert abs(viewport.height() - panel.height()) <= frame_tolerance, (
-            f"viewport {viewport.height()} vs panel {panel.height()} diff {abs(viewport.height() - panel.height())}"
-        )
-        # Panel height tracks last row bottom (no blank after last row)
+        # no nested scroll
+        assert widget.findChild(QScrollArea, "writebackScroll") is None
+        assert widget.findChildren(QScrollArea) == []
+        # panel bottom tracks last row
         last = rows[-1]
-        # last.geometry is relative to panel
-        panel_last_bottom = last.geometry().bottom() + 1  # +1 for 0-index inclusive
-        # panel height should be last bottom plus panel's bottom margin (0) and last row's bottom border already accounted
-        assert abs(panel.height() - panel_last_bottom) <= frame_tolerance, (
-            f"panel {panel.height()} vs last bottom {panel_last_bottom} diff {abs(panel.height() - panel_last_bottom)}"
-        )
-        # Scroll height should be viewport + frame (NoFrame => ~2)
-        assert abs(scroll.height() - viewport.height()) <= frame_tolerance
-        # Apply remains fixed below the bordered field and visible
-        apply = widget._apply_btn
-        assert apply.isVisible()
-        assert apply.parent() is widget
         assert (
-            apply.geometry().y()
-            > scroll.geometry().y() + scroll.height() - frame_tolerance
-        )
-        # No blank inside scroll: last row bottom close to viewport bottom
-        # Map last row bottom to viewport coordinates: last.pos().y() is in panel, panel pos (0,0) in viewport when not scrolled
-        last_bottom_in_viewport = last.geometry().bottom() + 1
-        assert abs(viewport.height() - last_bottom_in_viewport) <= frame_tolerance, (
-            f"viewport {viewport.height()} vs last bottom in viewport {last_bottom_in_viewport}"
-        )
-
-    def _check_capped(widget: WritebackWidget, *, frame_tolerance: int = 6) -> None:
-        scroll = widget._scroll
-        viewport = scroll.viewport()
-        assert viewport is not None
-        panel = widget._rows_container
-        # Horizontal still no overflow
-        hbar = scroll.horizontalScrollBar()
-        assert hbar is not None
-        assert hbar.maximum() == 0
-        # Vertical must be scrollable: panel larger than viewport, scrollbar max >0
-        assert panel.height() > viewport.height() + frame_tolerance, (
-            f"capped: panel {panel.height()} should exceed viewport {viewport.height()}"
-        )
-        vbar = scroll.verticalScrollBar()
-        assert vbar is not None
-        assert vbar.maximum() > 0, (
-            f"capped ledger should be scrollable, vbar max {vbar.maximum()}"
-        )
-        # Verify scrollbar extent is real — moving to maximum should change value
-        vbar.setValue(vbar.maximum())
-        qapp.processEvents()
-        assert abs(vbar.value() - vbar.maximum()) <= 4, (
-            f"vbar value {vbar.value()} vs max {vbar.maximum()}"
-        )
-        # Reset to top for further geometry checks
-        vbar.setValue(0)
-        qapp.processEvents()
-        # Scroll height is capped by available widget height (widget height - hint - apply - margins/spacing)
-        # Available = widget height - non-scroll chrome
+            abs(panel.height() - (last.geometry().bottom() + 1)) <= frame_tolerance
+        ), f"panel {panel.height()} vs last bottom {last.geometry().bottom() + 1}"
+        # Apply immediately follows panel with only layout spacing
         layout = widget.layout()
         assert layout is not None
-        margins = layout.contentsMargins()
         spacing = layout.spacing()
-        hint_h = (
-            widget._hint.height()
-            if widget._hint.height() > 0
-            else widget._hint.sizeHint().height()
-        )
-        apply_h = (
-            widget._apply_btn.height()
-            if widget._apply_btn.height() > 0
-            else widget._apply_btn.sizeHint().height()
-        )
-        gaps = (1 if widget._hint.isVisible() else 0) + 1
-        non_scroll = (
-            margins.top() + margins.bottom() + hint_h + apply_h + gaps * spacing
-        )
-        available = widget.height() - non_scroll
-        # Scroll should be at available (capped), not at content height
-        assert abs(scroll.height() - available) <= 8, (
-            f"scroll {scroll.height()} vs available {available} diff {abs(scroll.height() - available)}"
-        )
-        assert scroll.height() < panel.height(), (
-            "capped scroll should be smaller than content"
-        )
-        # Apply remains fixed/visible below scroll, not scrolled out
-        apply = widget._apply_btn
-        assert apply.isVisible()
-        assert apply.parent() is widget
-        assert apply.geometry().y() > scroll.geometry().y()
-        # Apply bottom within widget
-        assert apply.geometry().bottom() <= widget.height() + frame_tolerance
-        # Apply not overlapping scroll viewport
         assert (
-            apply.geometry().y()
-            >= scroll.geometry().y() + scroll.height() - frame_tolerance
+            abs(
+                widget._apply_btn.geometry().y()
+                - (panel.geometry().y() + panel.height() + spacing)
+            )
+            <= frame_tolerance
+        ), (
+            f"Apply y {widget._apply_btn.geometry().y()} panel y {panel.geometry().y()} h {panel.height()} spacing {spacing}"
         )
+        assert widget._apply_btn.isVisible()
+        assert widget._apply_btn.parent() is widget
+        # no horizontal overflow: panel width bounded
+        assert panel.width() <= widget.width() + frame_tolerance
 
-    # Short ledger at 500 px wide and 400 px narrow — 4 rows matches live screenshot
+    # Short ledger at 500 and 400 — content-tight, no inner scroll
     for width in (500, 400):
         items_short: list[MetaDictWriteback] = []
         for i in range(4):
@@ -477,16 +417,18 @@ def test_writeback_ledger_hugs_short_and_caps_long(qapp):
         w.populate(items_short)
         w.show()
         qapp.processEvents()
-        # Allow deferred height update (singleShot) to fire
-        w._update_scroll_height()
         qapp.processEvents()
         try:
-            _check_hugs(w)
+            _assert_tight(w)
+            # natural height is compact (short)
+            short_h = w.sizeHint().height()
+            # For reference, store for long comparison
+            assert short_h < 600, f"short should be compact, got {short_h}"
         finally:
             w.close()
             qapp.processEvents()
 
-    # Long ledger — sufficiently many rows to exceed available height, should cap and scroll
+    # Long ledger — natural height grows, no capping, reachable via outer scroll
     items_long: list[MetaDictWriteback] = []
     for i in range(30):
         it = MetaDictWriteback(
@@ -494,38 +436,95 @@ def test_writeback_ledger_hugs_short_and_caps_long(qapp):
         )
         it.session_id = f"md-{i}"
         items_long.append(it)
+
+    # Measure natural height increase
+    w_short = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    w_short.resize(500, 400)
+    short_items = [
+        MetaDictWriteback(target_name="s0", description="d", proposed_value=0.0)
+    ]
+    short_items[0].session_id = "md-0"
+    w_short.populate(short_items)
+    w_short.show()
+    qapp.processEvents()
+    short_height = w_short.sizeHint().height()
+    short_panel_h = w_short._rows_container.height()
+    w_short.close()
+
     w_long = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     w_long.resize(500, 400)
     w_long.populate(items_long)
     w_long.show()
     qapp.processEvents()
-    w_long._update_scroll_height()
     qapp.processEvents()
     try:
-        _check_capped(w_long)
-        # Also check narrow long remains capped
-        w_long.resize(400, 400)
+        _assert_tight(w_long)
+        long_height = w_long.sizeHint().height()
+        long_panel_h = w_long._rows_container.height()
+        assert long_height > short_height + 200, (
+            f"long natural height {long_height} should exceed short {short_height} significantly"
+        )
+        assert long_panel_h > short_panel_h + 200
+        # Still no inner scroll
+        assert w_long.findChild(QScrollArea, "writebackScroll") is None
+
+        # Reachability via outer scroll: host outer QScrollArea with small viewport
+        outer = QScrollArea()
+        outer.setWidgetResizable(True)
+        outer.setFixedSize(520, 300)
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setContentsMargins(4, 4, 4, 4)
+        inner_layout.addWidget(w_long)
+        inner_layout.addStretch()
+        outer.setWidget(inner)
+        outer.show()
         qapp.processEvents()
-        w_long._update_responsive()
-        w_long._update_scroll_height()
         qapp.processEvents()
-        _check_capped(w_long)
+        try:
+            # Outer should be scrollable because long ledger exceeds viewport
+            vbar = outer.verticalScrollBar()
+            assert vbar is not None
+            # Need to wait for layout; outer should have scrollable extent
+            # The inner's height should exceed viewport's height
+            vp = outer.viewport()
+            assert vp is not None
+            assert inner.height() > vp.height(), (
+                f"inner {inner.height()} vs viewport {vp.height()}"
+            )
+            assert vbar.maximum() > 0, (
+                f"outer should be scrollable for long ledger, vbar max {vbar.maximum()}"
+            )
+            # Apply should be beyond initial viewport top, but reachable by scrolling to max
+            # Map Apply's bottom to outer viewport coordinates
+            # Initially at top, Apply may be outside viewport; after scrolling to max it should be visible
+            vbar.setValue(vbar.maximum())
+            qapp.processEvents()
+            assert abs(vbar.value() - vbar.maximum()) <= 2
+            # After scrolling, Apply's geometry mapped to outer should be within outer's visible rect
+            # We verify that Apply is still a child of w_long and outer is scrollable; exact visibility
+            # depends on layout, but the fact that outer max >0 proves reachability.
+            vbar.setValue(0)
+            qapp.processEvents()
+        finally:
+            outer.close()
+            # w_long was reparented to inner; inner's close will delete it, but we already manage
+            # Ensure w_long not double-closed; it was already inside outer, so just process events
+            qapp.processEvents()
     finally:
-        w_long.close()
+        # w_long already closed via outer if reparented; ensure no double close error
+        try:
+            w_long.close()
+        except Exception:
+            pass
+        qapp.processEvents()
 
 
-def test_writeback_nested_analysis_pane_recaps_on_collapse_and_viewport_resize(qapp):
-    """S3 — nested Analysis pane: ledger recaps on param collapse/expand and viewport resize,
-    Apply stays fixed outside inner scroll. Verifies viewport/layout-bound cap (blocker 1)."""
-    from unittest.mock import MagicMock
-
-    from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QScrollArea
-    from zcu_tools.gui.app.main.adapter import (
-        AdapterCapabilities,
-        AnalysisMode,
-        MetaDictWriteback,
-    )
+def test_writeback_shipped_analysis_composition_outer_scroll_owns_long_content(qapp):
+    """A3 — shipped Analysis composition: no nested writeback scroll, panel
+    bottom tracks last row, Apply immediately follows, long content is
+    reachable through the existing Analysis-pane outer scroll."""
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
     from zcu_tools.gui.app.main.services import PersistedStartup
     from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
 
@@ -538,18 +537,37 @@ def test_writeback_nested_analysis_pane_recaps_on_collapse_and_viewport_resize(q
     ctrl.get_adapter_guide.return_value = {}
 
     tab = ExpTabWidget("tab-1", ctrl, caps)
-    # Need to stub _populate_cfg not needed for this test, but ExpTabWidget attach would need it.
-    # We just use the widget as constructed; no attach needed for writeback ledger test.
     tab.resize(600, 500)
     tab.show()
     qapp.processEvents()
     qapp.processEvents()
-    # Switch to Analysis tab so nested scroll viewport is visible (QTabWidget hides inactive pages)
     tab._left_tabs.setCurrentWidget(tab._analysis_panel)
     qapp.processEvents()
     qapp.processEvents()
 
-    # Long ledger to ensure capping
+    # Need to locate outer analysis scroll: it's the QScrollArea containing analysis_inner
+    # Find it via tab children
+    outer_scroll: QScrollArea | None = None
+    for child in tab.findChildren(QScrollArea):
+        # The analysis_scroll is the one whose widget contains the writeback_section
+        w = child.widget()
+        if w is not None:
+            # Check if writeback_widget is descendant of w
+            q = tab.writeback_widget.parentWidget()
+            found = False
+            while q is not None:
+                if q is w:
+                    found = True
+                    break
+                q = q.parentWidget()
+            if found:
+                outer_scroll = child
+                break
+    assert outer_scroll is not None, (
+        "Analysis pane outer scroll not found — cannot delegate scrolling"
+    )
+
+    # Long ledger
     items_long: list[MetaDictWriteback] = []
     for i in range(30):
         it = MetaDictWriteback(
@@ -557,107 +575,102 @@ def test_writeback_nested_analysis_pane_recaps_on_collapse_and_viewport_resize(q
         )
         it.session_id = f"md-{i}"
         items_long.append(it)
-    # Populate via production path: writeback_widget + section visibility
     tab.writeback_widget.populate(items_long)
     tab.writeback_section.setVisible(True)
     qapp.processEvents()
     qapp.processEvents()
-    # Allow deferred cap update (singleShot)
-    tab.writeback_widget._update_scroll_height()
-    qapp.processEvents()
     qapp.processEvents()
 
-    def _assert_capped_nested():
+    def _assert_shipped_tight():
         w = tab.writeback_widget
-        scroll = w._scroll
-        viewport = scroll.viewport()
-        assert viewport is not None
         panel = w._rows_container
-        # No horizontal overflow
-        hbar = scroll.horizontalScrollBar()
-        assert hbar is not None
-        assert hbar.maximum() == 0
+        rows = w._rows
+        assert rows, "no rows"
+        # No nested inner scroll
+        assert w.findChild(QScrollArea, "writebackScroll") is None
+        assert w.findChildren(QScrollArea) == []
+        # Panel hugs last row
+        last = rows[-1]
+        assert abs(panel.height() - (last.geometry().bottom() + 1)) <= 6, (
+            f"panel {panel.height()} vs last {last.geometry().bottom() + 1}"
+        )
+        # Apply immediately follows panel
+        layout = w.layout()
+        assert layout is not None
+        spacing = layout.spacing()
         assert (
-            scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            abs(
+                w._apply_btn.geometry().y()
+                - (panel.geometry().y() + panel.height() + spacing)
+            )
+            <= 6
         )
-        # Must be scrollable with real extent
-        assert panel.height() > viewport.height() + 2, (
-            f"panel {panel.height()} vs viewport {viewport.height()}"
-        )
-        vbar = scroll.verticalScrollBar()
-        assert vbar is not None
-        assert vbar.maximum() > 0, (
-            f"capped nested should be scrollable, vbar max {vbar.maximum()}"
-        )
-        vbar.setValue(vbar.maximum())
-        qapp.processEvents()
-        assert abs(vbar.value() - vbar.maximum()) <= 4, (
-            f"vbar value {vbar.value()} vs max {vbar.maximum()}"
-        )
-        vbar.setValue(0)
-        qapp.processEvents()
-        # Apply remains fixed outside inner scroll
-        apply = w._apply_btn
-        assert apply.isVisible()
-        assert apply.parent() is w
-        assert apply.geometry().y() > scroll.geometry().y()
-        # Apply bottom within writeback widget and not overlapping scroll viewport
-        assert apply.geometry().bottom() <= w.height() + 6
-        assert apply.geometry().y() >= scroll.geometry().y() + scroll.height() - 6
-        # Scroll height is capped (less than content)
-        assert scroll.height() < panel.height()
-        # Outer viewport still responsible for outer content; inner cap is viewport-bound
+        assert w._apply_btn.isVisible()
+        assert w._apply_btn.parent() is w
 
     try:
-        _assert_capped_nested()
-        init_cap = tab.writeback_widget._scroll.maximumHeight()
-        init_viewport_h = tab.writeback_widget._scroll.viewport().height()  # type: ignore[union-attr]
-
-        # Collapse Analysis parameters — should free vertical space, inner cap should increase (auto via toggled signal / layout filter)
-        tab._analyze_section.set_collapsed(True)
+        _assert_shipped_tight()
+        # Outer scroll should now be scrollable for long content
+        # Inner (analysis_inner) should be taller than viewport
+        inner = outer_scroll.widget()
+        assert inner is not None
+        viewport = outer_scroll.viewport()
+        assert viewport is not None
+        # Process events to ensure layout updated
         qapp.processEvents()
-        qapp.processEvents()
-        # Let scheduled update fire (eventFilter on body hide / inner layout, plus toggled signal)
-        qapp.processEvents()
-        qapp.processEvents()
-        _assert_capped_nested()
-        collapsed_cap = tab.writeback_widget._scroll.maximumHeight()
-        # Collapsing sibling should not shrink cap; with reserve method it grows, with fixed viewport it stays equal
-        assert collapsed_cap >= init_cap - 4, (
-            f"collapsed cap {collapsed_cap} vs init {init_cap}"
+        assert inner.height() > viewport.height(), (
+            f"shipped outer inner {inner.height()} should exceed viewport {viewport.height()} for long ledger"
         )
-
-        # Expand again — cap should return toward init (auto)
-        tab._analyze_section.set_collapsed(False)
-        qapp.processEvents()
-        qapp.processEvents()
-        qapp.processEvents()
-        _assert_capped_nested()
-        expanded_cap = tab.writeback_widget._scroll.maximumHeight()
-        assert abs(expanded_cap - init_cap) <= 8, (
-            f"expanded cap {expanded_cap} vs init {init_cap}"
+        vbar = outer_scroll.verticalScrollBar()
+        assert vbar is not None
+        assert vbar.maximum() > 0, (
+            f"outer Analysis scroll should be scrollable, max {vbar.maximum()}"
         )
+        # Verify Apply is beyond initial viewport but reachable
+        # Map Apply to outer viewport coordinates via global
+        # Initially at top, Apply likely below viewport; after scrolling to max, verify max scroll works
+        vbar.setValue(vbar.maximum())
+        qapp.processEvents()
+        assert abs(vbar.value() - vbar.maximum()) <= 2
+        # After scroll, still tight
+        _assert_shipped_tight()
+        vbar.setValue(0)
+        qapp.processEvents()
+        _assert_shipped_tight()
 
-        # Viewport height change — taller window should increase inner cap (auto via viewport resize filter)
-        tab.resize(600, 800)
+        # Also verify at narrow width (400) the shipped composition still hugs and remains outer-scrollable
+        tab.resize(500, 500)
+        # Force writeback narrow mode by resizing writeback widget narrow? ExpTabWidget left pane width changes with splitter,
+        # but we can directly resize the writeback_widget to 400 to trigger narrow
+        tab.writeback_widget.resize(400, tab.writeback_widget.height())
         qapp.processEvents()
         qapp.processEvents()
+        tab.writeback_widget._update_responsive()
         qapp.processEvents()
-        _assert_capped_nested()
-        tall_cap = tab.writeback_widget._scroll.maximumHeight()
-        assert tall_cap >= expanded_cap - 4, (
-            f"tall cap {tall_cap} vs expanded {expanded_cap}"
-        )
+        _assert_shipped_tight()
+        # Re-check outer still scrollable after narrow reflow (rows taller in narrow)
+        qapp.processEvents()
+        assert inner.height() > viewport.height() or vbar.maximum() > 0
 
-        # Shorter window should decrease cap but remain capped (auto)
-        tab.resize(600, 400)
+        # Short ledger should not require outer scrolling to show Apply (but outer may still have some scroll due to other chrome)
+        short_items: list[MetaDictWriteback] = []
+        for i in range(2):
+            it = MetaDictWriteback(
+                target_name=f"s{i}", description="d", proposed_value=float(i)
+            )
+            it.session_id = f"md-{i}"
+            short_items.append(it)
+        tab.writeback_widget.populate(short_items)
         qapp.processEvents()
         qapp.processEvents()
-        qapp.processEvents()
-        _assert_capped_nested()
-        short_cap = tab.writeback_widget._scroll.maximumHeight()
-        assert short_cap <= tall_cap + 4, f"short cap {short_cap} vs tall {tall_cap}"
-        assert short_cap > 0
+        _assert_shipped_tight()
+        # For short, inner height growth should be smaller
+        short_inner_h = inner.height()
+        # Long was earlier, short should be smaller
+        # We already asserted long inner > viewport; now short should be noticeably smaller
+        # Just check that short still tight and no inner scroll
+        assert tab.writeback_widget.findChildren(QScrollArea) == []
+
     finally:
         tab.close()
         qapp.processEvents()

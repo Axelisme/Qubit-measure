@@ -5,16 +5,7 @@ import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-# fmt: off
-from qtpy.QtCore import (  # type: ignore  # pyright: ignore[reportPrivateImportUsage]
-    QEvent,
-    QObject,
-    Qt,
-    QTimer,
-    Signal,  # type: ignore  # pyright: ignore[reportPrivateImportUsage]
-)
-
-# fmt: on
+from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
     QCheckBox,
@@ -260,8 +251,9 @@ class WritebackWidget(QWidget):
       read-only inline table with JSON Copy.
     - Width breakpoint near 450 px: wide rows single-line, narrow rows
       reflow to target/action above Current → Proposed.
-    - Ledger is vertically scrollable without horizontal overflow;
-      Apply Selected stays fixed at the bottom.
+    - Bordered ledger hugs its rendered rows; Apply Selected immediately
+      follows the panel. Long content grows naturally and delegates
+      vertical scrolling to the existing Analysis-pane outer scroll.
     """
 
     apply_requested: Signal = Signal()  # apply the persistent draft as-is
@@ -301,7 +293,6 @@ class WritebackWidget(QWidget):
             "Select the items to write back. Use Edit to adjust values first."
         )
         self._hint.setWordWrap(True)
-        # Hint should hug its text height, not stretch to fill available space
         self._hint.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
@@ -319,191 +310,19 @@ class WritebackWidget(QWidget):
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
         self._rows_layout.setSpacing(0)
         self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # type: ignore[attr-defined]
-
-        self._scroll = QScrollArea()
-        self._scroll.setObjectName("writebackScroll")
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-        self._scroll.setWidget(self._rows_container)
-        # S3: content-tight but capped — scroll hugs rows until available cap.
-        # Maximum prevents stretch beyond sizeHint (no blank inside), while
-        # _update_scroll_height caps long ledgers to available widget height.
-        self._scroll.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
-        )
-        layout.addWidget(self._scroll)
+        layout.addWidget(self._rows_container)
 
         self._apply_btn = QPushButton("Apply Selected")
         self._apply_btn.setObjectName("writebackApply")
         self._apply_btn.setFixedHeight(30)
         self._apply_btn.clicked.connect(self._on_apply_clicked)
         layout.addWidget(self._apply_btn)
-        # Stretch consumes any remaining pane height outside the bordered
-        # field so short ledgers hug and long ledgers cap correctly.
         layout.addStretch(1)
 
         self._row_widgets: dict[str, tuple[QLabel, QLabel, QCheckBox]] = {}
         self._rows: list[_WritebackRow] = []
 
         self._refresh_apply_enabled()
-        # S3: viewport/layout-bound cap — track outer viewport and layout
-        self._outer_scroll: QScrollArea | None = None
-        self._outer_viewport: QWidget | None = None
-        self._outer_inner: QWidget | None = None
-        self._observed: list[QObject] = []
-        self._scroll_update_pending = False
-
-    # ------------------------------------------------------------------
-    # S3 viewport/layout-bound cap helpers
-    # ------------------------------------------------------------------
-
-    def _find_outer_scroll(self) -> QScrollArea | None:
-        p = self.parentWidget()
-        while p is not None:
-            if isinstance(p, QScrollArea):  # type: ignore[arg-type]
-                vp = p.viewport()
-                if vp is not None:
-                    w = p.widget()
-                    if w is not None:
-                        q: QWidget | None = self.parentWidget()
-                        found = False
-                        while q is not None:
-                            if q is w:
-                                found = True
-                                break
-                            q = q.parentWidget()
-                        if found:
-                            return p
-            p = p.parentWidget()
-        return None
-
-    def _ensure_outer_listeners(self) -> None:
-        outer = self._find_outer_scroll()
-        if outer is self._outer_scroll and outer is not None:
-            # Already installed; verify viewport/inner still same
-            try:
-                if (
-                    outer.viewport() is self._outer_viewport
-                    and outer.widget() is self._outer_inner
-                ):
-                    return
-            except Exception:
-                pass
-        # Uninstall previous
-        for obj in list(self._observed):
-            try:
-                obj.removeEventFilter(self)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        self._observed.clear()
-        self._outer_scroll = outer
-        if outer is None:
-            self._outer_viewport = None
-            self._outer_inner = None
-            return
-        vp = outer.viewport()
-        inner = outer.widget()
-        self._outer_viewport = vp
-        self._outer_inner = inner
-        to_watch: list[QObject] = []
-        if vp is not None:
-            to_watch.append(vp)
-        if inner is not None:
-            to_watch.append(inner)
-            # Watch direct children that are ledger sections / siblings
-            try:
-                lay = inner.layout()
-                if lay is not None:
-                    for i in range(lay.count()):
-                        item = lay.itemAt(i)
-                        if item is None:
-                            continue
-                        w2 = item.widget()
-                        if w2 is None:
-                            continue
-                        # Skip the branch that contains self (walk up)
-                        q2: QWidget | None = self.parentWidget()
-                        contains = False
-                        while q2 is not None:
-                            if q2 is w2:
-                                contains = True
-                                break
-                            q2 = q2.parentWidget()
-                        if contains:
-                            # For the writeback branch, still watch its ancestors up to inner
-                            # but sibling branches are those not containing self
-                            continue
-                        to_watch.append(w2)
-                        try:
-                            body = getattr(w2, "_body", None)
-                            if isinstance(body, QWidget):
-                                to_watch.append(body)
-                        except Exception:
-                            pass
-                        # Also watch analyze form inside sibling if present
-                        try:
-                            # Generic: watch all children of sibling for Show/Hide via layout
-                            pass
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-        # Also watch ancestors between self and inner for Show/Hide of collapsible bodies
-        anc: QWidget | None = self.parentWidget()
-        while anc is not None and anc is not inner:
-            # Avoid duplicate
-            if anc not in to_watch:
-                to_watch.append(anc)
-            # If anc is a _LedgerSection body, ensure its header is also watched? header visibility not changed
-            anc = anc.parentWidget()
-            if anc is inner:
-                break
-        for obj in to_watch:
-            try:
-                obj.installEventFilter(self)  # type: ignore[attr-defined]
-                self._observed.append(obj)
-            except Exception:
-                pass
-
-    def _schedule_scroll_update(self) -> None:
-        if self._scroll_update_pending:
-            return
-        self._scroll_update_pending = True
-        QTimer.singleShot(0, self._do_scheduled_scroll_update)  # type: ignore[attr-defined]
-
-    def _do_scheduled_scroll_update(self) -> None:
-        self._scroll_update_pending = False
-        self._update_scroll_height()
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
-        try:
-            et = event.type()
-            if et in (
-                QEvent.Type.Resize,  # type: ignore[attr-defined]
-                QEvent.Type.Show,  # type: ignore[attr-defined]
-                QEvent.Type.Hide,  # type: ignore[attr-defined]
-                QEvent.Type.LayoutRequest,  # type: ignore[attr-defined]
-            ):
-                self._schedule_scroll_update()
-        except Exception:
-            pass
-        return super().eventFilter(watched, event)
-
-    def changeEvent(self, event: QEvent) -> None:  # type: ignore[override]
-        super().changeEvent(event)
-        try:
-            if event.type() == QEvent.Type.ParentChange:  # type: ignore[attr-defined]
-                QTimer.singleShot(0, self._ensure_outer_listeners)  # type: ignore[attr-defined]
-                self._schedule_scroll_update()
-        except Exception:
-            pass
-
-    def hideEvent(self, event: Any) -> None:  # type: ignore[override]
-        super().hideEvent(event)  # type: ignore[arg-type]
-        # Keep listeners for when we show again; schedule no update needed while hidden
 
     def populate(self, items: Sequence[WritebackItem]) -> None:
         # Clear old rows
@@ -615,248 +434,19 @@ class WritebackWidget(QWidget):
 
         self._refresh_apply_enabled()
         self._update_responsive()
-        self._ensure_outer_listeners()
-        # Deferred pass ensures width-dependent row heights (narrow vs wide)
-        # have been laid out before measuring content_h.
-        QTimer.singleShot(0, self._update_scroll_height)  # type: ignore[attr-defined]
-        self._schedule_scroll_update()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         self._update_responsive()
-        self._schedule_scroll_update()
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
-        self._ensure_outer_listeners()
         self._update_responsive()
-        self._schedule_scroll_update()
 
     def _update_responsive(self) -> None:
         is_narrow = self.width() < 450
         for row in self._rows:
             row.set_narrow(is_narrow)
-        self._update_scroll_height()
-        self._schedule_scroll_update()
-
-    def _update_scroll_height(self) -> None:
-        """Make the bordered scroll field hug content, capped by available height.
-
-        Short ledgers: viewport bottom tracks last row (no blank inside).
-        Long ledgers: scroll height capped to available widget height, scrollbar
-        appears, Apply remains fixed below. Uses layout/sizeHint/viewport
-        geometry, not hard-coded row counts.
-        """
-        try:
-            # Debug
-            # print(f"_update_scroll_height called: w height {self.height()} hint visible {self._hint.isVisible()} hint height {self._hint.height() if self._hint.isVisible() else 'hidden'} outer viewport {self._outer_viewport.height() if self._outer_viewport else None} outer inner {self._outer_inner.height() if self._outer_inner else None}")
-            # Content height from rows container sizeHint (sum of row heights).
-            content_h = self._rows_container.sizeHint().height()
-            # When rows exist, sizeHint may be 0 before layout; fallback to
-            # sum of row sizeHints.
-            if content_h == 0 and self._rows:
-                content_h = sum(r.sizeHint().height() for r in self._rows)
-            # Available height inside this widget (for isolated tests) or
-            # outer scroll viewport (for Analysis pane nesting). Prefer
-            # widget-height based available for top-level hosts.
-            total_h = self.height()
-            avail: int | None = None
-            if total_h > 0:
-                layout = self.layout()
-                if layout is not None:
-                    margins = layout.contentsMargins()
-                    spacing = layout.spacing()
-                    # Hint height — width-dependent due to wordWrap.
-                    hint_h = 0
-                    if self._hint.isVisible():
-                        # Prefer actual height if laid out, else heightForWidth.
-                        if self._hint.height() > 0:
-                            hint_h = self._hint.height()
-                        else:
-                            try:
-                                hf = self._hint.heightForWidth(
-                                    max(
-                                        0,
-                                        self.width() - margins.left() - margins.right(),
-                                    )
-                                )
-                                hint_h = (
-                                    hf if hf > 0 else self._hint.sizeHint().height()
-                                )
-                            except Exception:
-                                hint_h = self._hint.sizeHint().height()
-                    apply_h = self._apply_btn.sizeHint().height()
-                    if self._apply_btn.height() > 0:
-                        apply_h = self._apply_btn.height()
-                    # layout now has hint, scroll, apply, stretch => gaps = count-1
-                    # (includes apply<->stretch). Use count-1 for spacing total.
-                    try:
-                        gaps = max(0, layout.count() - 1)
-                    except Exception:
-                        gaps = 0
-                        if self._hint.isVisible():
-                            gaps += 1
-                        gaps += 1
-                    non_scroll = (
-                        margins.top()
-                        + margins.bottom()
-                        + hint_h
-                        + apply_h
-                        + gaps * spacing
-                    )
-                    avail = total_h - non_scroll
-                    if avail is not None and avail < 0:
-                        avail = 0
-                    # print(f"[debug] total_h {total_h} hint_h {hint_h} apply_h {apply_h} gaps {gaps} non_scroll {non_scroll} avail {avail}")
-            # If we are nested inside an outer QScrollArea (Analysis pane),
-            # outer viewport may be tighter than widget height (which hugs).
-            # Walk ancestors to find nearest enclosing scroll viewport and use
-            # it as tighter cap when appropriate.
-            outer_viewport_h: int | None = None
-            outer_scroll = None
-            p = self.parentWidget()
-            while p is not None:
-                if isinstance(p, QScrollArea):  # type: ignore[arg-type]
-                    vp = p.viewport()
-                    if vp is not None and vp.height() > 0:
-                        # Check that inner is descendant of outer's widget
-                        w = p.widget()
-                        if w is not None:
-                            # is w ancestor of self?
-                            q = self.parentWidget()
-                            found = False
-                            while q is not None:
-                                if q is w:
-                                    found = True
-                                    break
-                                q = q.parentWidget()
-                            if found:
-                                outer_scroll = p
-                                outer_viewport_h = vp.height()
-                                break
-                p = p.parentWidget()
-            if outer_viewport_h is not None and outer_scroll is not None:
-                # Estimate other siblings inside outer's widget that compete
-                # for vertical space. Use inner layout sibling heights if
-                # available, else reserve a conservative chrome.
-                inner = outer_scroll.widget()
-                reserve = 0
-                if inner is not None and inner.layout() is not None:
-                    inner_layout = inner.layout()
-                    assert inner_layout is not None
-                    other_h = 0
-                    visible_other = 0
-                    for i in range(inner_layout.count()):
-                        item = inner_layout.itemAt(i)
-                        if item is None:
-                            continue
-                        w2 = item.widget()
-                        if w2 is None:
-                            continue
-                        # Skip the branch containing self (Walk up to see if w2 is ancestor of self)
-                        q2 = self.parentWidget()
-                        contains = False
-                        while q2 is not None:
-                            if q2 is w2:
-                                contains = True
-                                break
-                            q2 = q2.parentWidget()
-                        if contains:
-                            continue
-                        if not w2.isVisible():
-                            continue
-                        try:
-                            h2 = w2.sizeHint().height()
-                            if h2 <= 0 and w2.height() > 0:
-                                h2 = w2.height()
-                            other_h += h2
-                            visible_other += 1
-                        except Exception:
-                            pass
-                    # Layout margins/spacing of outer inner
-                    try:
-                        assert inner_layout is not None
-                        om = inner_layout.contentsMargins()
-                        os = inner_layout.spacing()
-                        other_h += om.top() + om.bottom() + max(0, visible_other) * os
-                        # Also account for spacing between other siblings and writeback branch
-                        if visible_other > 0:
-                            other_h += os
-                    except Exception:
-                        pass
-                    reserve = other_h
-                # Available for the whole WritebackWidget inside outer viewport
-                outer_avail_for_widget = outer_viewport_h - reserve
-                if outer_avail_for_widget < 0:
-                    outer_avail_for_widget = 0
-                # From that, available for scroll is widget avail minus hint/apply
-                try:
-                    layout2 = self.layout()
-                    assert layout2 is not None
-                    if layout2 is not None:
-                        margins2 = layout2.contentsMargins()
-                        spacing2 = layout2.spacing()
-                        hint_h2 = 0
-                        if self._hint.isVisible():
-                            if self._hint.height() > 0:
-                                hint_h2 = self._hint.height()
-                            else:
-                                hf2 = self._hint.heightForWidth(
-                                    max(
-                                        0,
-                                        self.width()
-                                        - margins2.left()
-                                        - margins2.right(),
-                                    )
-                                )
-                                hint_h2 = (
-                                    hf2 if hf2 > 0 else self._hint.sizeHint().height()
-                                )
-                        apply_h2 = self._apply_btn.sizeHint().height()
-                        if self._apply_btn.height() > 0:
-                            apply_h2 = self._apply_btn.height()
-                        try:
-                            gaps2 = max(0, layout2.count() - 1)
-                        except Exception:
-                            gaps2 = (1 if self._hint.isVisible() else 0) + 1
-                        non2 = (
-                            margins2.top()
-                            + margins2.bottom()
-                            + hint_h2
-                            + apply_h2
-                            + gaps2 * spacing2
-                        )
-                        outer_avail_for_scroll = outer_avail_for_widget - non2
-                        if (
-                            outer_avail_for_scroll is not None
-                            and outer_avail_for_scroll >= 0
-                        ):
-                            # S3 nested cap is viewport-bound, not w-height bound (avoids feedback loop)
-                            # Use outer viewport avail directly when nested
-                            avail = outer_avail_for_scroll
-                            # print(f"[debug outer] outer_viewport {outer_viewport_h} reserve {reserve} outer_avail_for_widget {outer_avail_for_widget} outer_avail_for_scroll {outer_avail_for_scroll} avail now {avail}")
-                except Exception:
-                    pass
-            if avail is None or avail < 0:
-                avail = content_h
-            # Enforce at least a minimal visible height for empty state
-            avail = max(0, avail)
-            # Set maximumHeight to available cap; with Maximum policy short
-            # will stay at content_h (< avail), long will be capped at avail
-            # and show scrollbar.
-            # Use 16777215 sentinel for unconstrained when no cap needed.
-            if content_h > 0 and avail >= content_h:
-                # No need to cap beyond content — let it hug
-                # Keep max large enough but not infinite to allow layout pass
-                self._scroll.setMaximumHeight(max(avail, content_h))
-            else:
-                self._scroll.setMaximumHeight(avail if avail > 0 else 0)
-            self._scroll.setMinimumHeight(0)
-            self._scroll.updateGeometry()
-            self._rows_container.updateGeometry()
-            self.updateGeometry()
-        except Exception:
-            logger.exception("failed to update scroll height")
 
     def _copy_value(self, value: Any) -> None:
         try:
