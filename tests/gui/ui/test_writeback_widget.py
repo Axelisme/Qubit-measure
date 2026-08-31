@@ -165,6 +165,43 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
         for b in edit_btns + copy_btns:
             assert b.width() == 56 and b.height() == 26
             assert b.size().width() == 56 and b.size().height() == 26
+        # rendered-image border checks — bounded deterministic sampling of
+        # visible outer panel border and adjacent-row divider (palette alone
+        # would hide a missing stylesheet border).
+        panel_grab = panel.grab()  # type: ignore[attr-defined]
+        img = panel_grab.toImage()
+        w = panel.width()
+        h = panel.height()
+        # offscreen QT_QPA_PLATFORM=offscreen has devicePixelRatio 1.0; scale if hidpi
+        dpr = panel_grab.devicePixelRatio()  # type: ignore[attr-defined]
+        scale = int(dpr) if dpr != 1 else 1  # type: ignore[arg-type]
+        outer_expected = "#d7dde7"
+        divider_expected = "#e8ecf2"
+        # outer border — top-center and left-mid avoid rounded corners
+        assert (
+            img.pixelColor((w // 2) * scale, 0 * scale).name().lower() == outer_expected
+        ), f"outer top border {img.pixelColor((w // 2) * scale, 0).name().lower()}"
+        assert (
+            img.pixelColor(0 * scale, (h // 2) * scale).name().lower() == outer_expected
+        )
+        # adjacent-row divider — horizontal 1px line at row boundary
+        assert len(rows) >= 2
+        y_div = rows[1].pos().y() - 1
+        assert 0 <= y_div < h, f"divider y {y_div} out of {h}"
+        assert (
+            img.pixelColor((w // 2) * scale, y_div * scale).name().lower()
+            == divider_expected
+        )
+        assert (
+            img.pixelColor((w // 4) * scale, y_div * scale).name().lower()
+            == divider_expected
+        )
+        # sanity: interior pixels are white, not border
+        assert img.pixelColor((w // 2) * scale, 1 * scale).name().lower() == "#ffffff"
+        assert (
+            img.pixelColor((w // 2) * scale, (y_div + 1) * scale).name().lower()
+            == "#ffffff"
+        )
     finally:
         widget.close()
 
