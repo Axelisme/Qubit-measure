@@ -197,6 +197,63 @@ def test_A1_depth_colors_on_guide_lines_not_row_backgrounds(qapp):
         c = _branch_color(i).name().lower()
         assert c in depth_set
         assert c == TREE_DEPTH_COLORS[i % len(TREE_DEPTH_COLORS)].lower()
+    # Verify actual paint path uses segment column, not row model depth
+    from qtpy.QtWidgets import QStyleOptionViewItem
+    from qtpy.QtCore import QRect
+    from qtpy.QtGui import QPainter
+    from qtpy.QtWidgets import QStyle
+    from zcu_tools.gui.widgets.cfg.structure import _TreeBranchStyle
+
+    style = _TreeBranchStyle()
+    # Get a deep model index (depth ~5) to try to trick the old row-depth logic
+    deep_index = tree.model().index(0, 0)
+    # Walk to deepest child if possible
+    for _ in range(5):
+        if deep_index.isValid() and tree.model().rowCount(deep_index) > 0:
+            deep_index = tree.model().index(0, 0, deep_index)
+        else:
+            break
+    # If we couldn't get deep index, just use the deepest item's index
+    if not deep_index.isValid():
+        # fallback: use last item's index via item
+        last_item = items[-1]
+        # Find its index via tree
+        deep_index = tree.indexFromItem(last_item) if hasattr(tree, "indexFromItem") else deep_index
+    # Now call drawPrimitive for a segment at x=0 (depth 0 guide) but with deep row index
+    painter = MagicMock()
+    painter.save = MagicMock()
+    painter.restore = MagicMock()
+    painter.drawLine = MagicMock()
+    painter.setPen = MagicMock()
+    option = QStyleOptionViewItem()
+    option.rect = QRect(0, 0, 10, 20)
+    option.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
+    # Set index to deep row (if valid, old code would have used deep depth)
+    if deep_index.isValid():
+        option.index = deep_index  # type: ignore[attr-defined]
+    style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorBranch, option, painter, tree)  # type: ignore[arg-type]
+    # Check that pen color corresponds to segment depth 0, not deep row depth
+    assert painter.setPen.called, "setPen should be called for branch"
+    pen = painter.setPen.call_args[0][0]
+    pen_color = pen.color().name().lower()
+    expected_segment_color = TREE_DEPTH_COLORS[0].lower()
+    assert pen_color == expected_segment_color, f"segment at x=0 should be depth 0 color {expected_segment_color}, got {pen_color} (row-depth overwrite bug)"
+    # Also verify a segment at x=20 (depth 2) gives depth 2 color even with same deep row index
+    painter2 = MagicMock()
+    painter2.save = MagicMock()
+    painter2.restore = MagicMock()
+    painter2.drawLine = MagicMock()
+    painter2.setPen = MagicMock()
+    option2 = QStyleOptionViewItem()
+    option2.rect = QRect(20, 0, 10, 20)
+    option2.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
+    if deep_index.isValid():
+        option2.index = deep_index  # type: ignore[attr-defined]
+    style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorBranch, option2, painter2, tree)  # type: ignore[arg-type]
+    pen2 = painter2.setPen.call_args[0][0]
+    pen2_color = pen2.color().name().lower()
+    expected2 = TREE_DEPTH_COLORS[2].lower()
+    assert pen2_color == expected2, f"segment at x=20 should be depth 2 color {expected2}, got {pen2_color}"
     w.detach()
     draft.close()
 
@@ -240,6 +297,12 @@ def test_A2_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget):
     # Check expanding size policies
     assert tree_w.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
     assert tree_w._tree.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+    # Verify stretch fix: root_widget should have stretch 1, trailing spacer stretch 0 (A2)
+    # inner layout has [root_widget, spacer]
+    assert w._inner_layout.count() == 2
+    # Check that root_widget is at index 0 with stretch 1, spacer at 1 with stretch 0
+    assert w._inner_layout.stretch(0) == 1, f"root_widget stretch should be 1, got {w._inner_layout.stretch(0)}"
+    assert w._inner_layout.stretch(1) == 0, f"trailing spacer stretch should be 0 for tree, got {w._inner_layout.stretch(1)}"
     # Verify that CfgForm expands with parent height: resize parent and check tree height grows
     parent = QWidget()
     layout = QHBoxLayout(parent)
@@ -299,6 +362,10 @@ def test_A3_Run_controls_match_prototype_treatment(qapp, exp_tab_widget):
     assert tab.run_btn.objectName() == "primaryButton"
     assert tab.run_btn.minimumWidth() == 94
     assert tab.run_btn.height() == 30 or tab.run_btn.minimumHeight() == 30
+    # Verify explicit blue primary stylesheet (not just objectName) — repo has no global #primaryButton stylesheet
+    blue_sheet = tab.run_btn.styleSheet().lower()
+    assert "286ac7" in blue_sheet, f"Run button should have blue primary stylesheet #286ac7, got {blue_sheet!r}"
+    assert "primarybutton" in blue_sheet or "#286ac7" in blue_sheet
     # Check right-aligned: stretch ensures buttons at right
     assert layout.count() >= 4
     # Stop retains active-state semantics: when running, Run becomes Stop red
@@ -317,6 +384,7 @@ def test_A3_Run_controls_match_prototype_treatment(qapp, exp_tab_widget):
     tab.update_interaction_state(snap2)
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
+    assert "286ac7" in tab.run_btn.styleSheet().lower(), "idle Run should restore blue primary stylesheet"
     assert tab._run_status_label.text() == "●  Ready"
     tab.detach()
 

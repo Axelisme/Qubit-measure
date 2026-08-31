@@ -91,45 +91,14 @@ class _TreeBranchStyle(QProxyStyle):
         rect = option.rect  # type: ignore[attr-defined]
         x = rect.center().x()
         y = rect.center().y()
-        # Depth for coloring: derive from indentation x position when possible,
-        # fallback to model index depth or grey.
+        # A1: depth is per-segment indentation column only; do not overwrite with row model depth
         pen_color = QColor("#b8c1cc")
         try:
-            # Prefer indentation-based depth (per-level guide color)
             if _INDENTATION_PX:
-                # rect.x() is indentation offset for this branch level
                 depth_guess = (
                     max(0, int(rect.x() // _INDENTATION_PX)) if rect.x() >= 0 else 0
                 )
-                # Clamp to reasonable range; use cycled color
                 pen_color = _branch_color(depth_guess)
-                # Try to refine via model index if available
-                if widget is not None and isinstance(widget, QTreeWidget):
-                    model_index = getattr(option, "index", None)
-                    if (
-                        model_index is not None
-                        and hasattr(model_index, "isValid")
-                        and model_index.isValid()
-                    ):
-                        d = 0
-                        par = model_index.parent()
-                        while par.isValid():
-                            d += 1
-                            par = par.parent()
-                        pen_color = _branch_color(d)
-                    else:
-                        # fallback via indexAt center
-                        try:
-                            idx2 = widget.indexAt(rect.center())
-                            if idx2.isValid():
-                                d2 = 0
-                                pp = idx2.parent()
-                                while pp.isValid():
-                                    d2 += 1
-                                    pp = pp.parent()
-                                pen_color = _branch_color(d2)
-                        except Exception:
-                            pass
         except Exception:
             pen_color = QColor("#b8c1cc")
         painter.save()

@@ -151,6 +151,10 @@ class CfgFormWidget(QWidget):
             draft.on_validity_changed.connect(self._on_draft_validity_changed)
             draft.on_change.connect(self._on_draft_changed)
             self._apply_editing_enabled()
+            self._inner_layout.insertWidget(
+                self._inner_layout.count() - 1,
+                root_widget,
+            )
             # A2: Run cfg tree viewport follows panel height — tree handles its own scrolling
             # For tree structure, outer scroll should not introduce fixed-height threshold;
             # let tree expand with panel height and scroll internally.
@@ -166,18 +170,16 @@ class CfgFormWidget(QWidget):
                 self._inner.setSizePolicy(
                     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
                 )  # type: ignore[attr-defined]
-                # Make root_widget expanding inside inner layout
+                # Make root_widget expanding inside inner layout and disable trailing stretch
                 root_widget.setSizePolicy(
                     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
                 )  # type: ignore[attr-defined]
                 self._inner_layout.setStretchFactor(root_widget, 1)
+                # Trailing spacer (addStretch) should not take space in tree mode
+                self._inner_layout.setStretch(self._inner_layout.count() - 1, 0)
             else:
                 self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
                 self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # type: ignore[attr-defined]
-            self._inner_layout.insertWidget(
-                self._inner_layout.count() - 1,
-                root_widget,
-            )
         except Exception:
             draft.on_change.disconnect(self._on_draft_changed)
             draft.on_validity_changed.disconnect(self._on_draft_validity_changed)

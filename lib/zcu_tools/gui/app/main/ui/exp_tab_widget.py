@@ -22,6 +22,18 @@ from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
 
 logger = logging.getLogger(__name__)
 
+# Approved prototype blue primary treatment (A3)
+_BLUE_PRIMARY_STYLESHEET = (
+    "QPushButton#primaryButton { background-color: #286ac7; color: white; "
+    "font-weight: 600; border: 1px solid #205aa9; border-radius: 4px; }"
+    "QPushButton#primaryButton:disabled { background-color: #a0b8d9; color: #e6edf7; border-color: #8da6c9; }"
+    "QPushButton#primaryButton:hover:!disabled { background-color: #2f76dc; }"
+)
+_RED_STOP_STYLESHEET = (
+    "background-color: #f44336; color: white; font-weight: bold; "
+    "border: 1px solid #d32f2f; border-radius: 4px;"
+)
+
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
     QColor,
@@ -323,6 +335,7 @@ class ExpTabWidget(QWidget):
         self.run_btn.setObjectName("primaryButton")
         self.run_btn.setFixedHeight(30)
         self.run_btn.setMinimumWidth(94)
+        self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
         bar_layout.addWidget(self.run_btn)
         run_layout.addWidget(self._run_action_bar)
         self._run_panel = run_panel
@@ -366,6 +379,7 @@ class ExpTabWidget(QWidget):
             self.analyze_btn.setObjectName("primaryButton")
             self.analyze_btn.setFixedHeight(30)
             self.analyze_btn.setMinimumWidth(94)
+            self.analyze_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
             analyze_row.addWidget(self.analyze_btn)
             analysis_layout.addWidget(analyze_row_widget)
 
@@ -962,9 +976,7 @@ class ExpTabWidget(QWidget):
             self.run_btn.setText("Stop")
             self.run_btn.setEnabled(True)
             self.run_btn.setToolTip("Running")
-            self.run_btn.setStyleSheet(
-                "background-color: #f44336; color: white; font-weight: bold;"
-            )
+            self.run_btn.setStyleSheet(_RED_STOP_STYLESHEET)
             self.run_btn.setObjectName("")
             # Status at left reflects running
             if hasattr(self, "_run_status_label"):
@@ -1024,10 +1036,9 @@ class ExpTabWidget(QWidget):
                     self._run_status_label.setToolTip(
                         f"Config invalid: {reason}" if reason else "Config invalid"
                     )
-            # Apply primaryButton styling via dynamic property to trigger stylesheet
-            # Keep stylesheet empty so global stylesheet can color it blue; ensure objectName set
-            self.run_btn.setStyleSheet("")
-            # Force style refresh for objectName change
+            # A3: apply explicit blue primary style (idle/disabled) — objectName alone has no stylesheet in repo
+            self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+            # Force style refresh for objectName/stylesheet change
             self.run_btn.style().unpolish(self.run_btn)  # type: ignore[attr-defined]
             self.run_btn.style().polish(self.run_btn)  # type: ignore[attr-defined]
             self.run_btn.update()
