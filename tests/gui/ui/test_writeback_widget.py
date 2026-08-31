@@ -332,3 +332,176 @@ def test_writeback_responsive_reflow_scroll_and_fixed_apply(qapp):
         assert widget._apply_btn.geometry().y() > widget._scroll.geometry().y()
     finally:
         widget.close()
+
+
+def test_writeback_ledger_hugs_short_and_caps_long(qapp):
+    """S3 — short ledger hugs rows at 500 px and 400 px (no blank inside
+    bordered field), long ledger capped with vertical scroll and fixed Apply.
+
+    Uses layout/sizeHint/viewport geometry, not hard-coded row counts.
+    """
+    from qtpy.QtWidgets import QScrollArea
+
+    def _check_hugs(widget: WritebackWidget, *, frame_tolerance: int = 6) -> None:
+        # Viewport/content geometry: no unused interior below last row.
+        scroll = widget._scroll
+        viewport = scroll.viewport()
+        assert viewport is not None
+        panel = widget._rows_container
+        rows = widget._rows
+        assert rows, "no rows rendered"
+        assert panel.isVisible()
+        assert scroll.isVisible()
+        # No horizontal overflow
+        hbar = scroll.horizontalScrollBar()
+        assert hbar is not None
+        assert hbar.maximum() == 0
+        assert (
+            scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        # Vertical: short should not need scrolling
+        vbar = scroll.verticalScrollBar()
+        assert vbar is not None
+        assert vbar.maximum() == 0, (
+            f"short ledger should not scroll, vbar max {vbar.maximum()}"
+        )
+        # Viewport height tracks panel/content height within frame tolerance
+        # (border 1px + radius, plus QScrollArea frame NoFrame => ~0-2)
+        assert abs(viewport.height() - panel.height()) <= frame_tolerance, (
+            f"viewport {viewport.height()} vs panel {panel.height()} diff {abs(viewport.height() - panel.height())}"
+        )
+        # Panel height tracks last row bottom (no blank after last row)
+        last = rows[-1]
+        # last.geometry is relative to panel
+        panel_last_bottom = last.geometry().bottom() + 1  # +1 for 0-index inclusive
+        # panel height should be last bottom plus panel's bottom margin (0) and last row's bottom border already accounted
+        assert abs(panel.height() - panel_last_bottom) <= frame_tolerance, (
+            f"panel {panel.height()} vs last bottom {panel_last_bottom} diff {abs(panel.height() - panel_last_bottom)}"
+        )
+        # Scroll height should be viewport + frame (NoFrame => ~2)
+        assert abs(scroll.height() - viewport.height()) <= frame_tolerance
+        # Apply remains fixed below the bordered field and visible
+        apply = widget._apply_btn
+        assert apply.isVisible()
+        assert apply.parent() is widget
+        assert (
+            apply.geometry().y()
+            > scroll.geometry().y() + scroll.height() - frame_tolerance
+        )
+        # No blank inside scroll: last row bottom close to viewport bottom
+        # Map last row bottom to viewport coordinates: last.pos().y() is in panel, panel pos (0,0) in viewport when not scrolled
+        last_bottom_in_viewport = last.geometry().bottom() + 1
+        assert abs(viewport.height() - last_bottom_in_viewport) <= frame_tolerance, (
+            f"viewport {viewport.height()} vs last bottom in viewport {last_bottom_in_viewport}"
+        )
+
+    def _check_capped(widget: WritebackWidget, *, frame_tolerance: int = 6) -> None:
+        scroll = widget._scroll
+        viewport = scroll.viewport()
+        assert viewport is not None
+        panel = widget._rows_container
+        # Horizontal still no overflow
+        hbar = scroll.horizontalScrollBar()
+        assert hbar is not None
+        assert hbar.maximum() == 0
+        # Vertical must be scrollable: panel larger than viewport, scrollbar max >0
+        assert panel.height() > viewport.height() + frame_tolerance, (
+            f"capped: panel {panel.height()} should exceed viewport {viewport.height()}"
+        )
+        vbar = scroll.verticalScrollBar()
+        assert vbar is not None
+        # QScrollArea with AsNeeded will have max >0 when content overflows
+        assert (
+            vbar.maximum() > 0
+            or scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        ), f"capped ledger should be scrollable, vbar max {vbar.maximum()}"
+        # Scroll height is capped by available widget height (widget height - hint - apply - margins/spacing)
+        # Available = widget height - non-scroll chrome
+        layout = widget.layout()
+        assert layout is not None
+        margins = layout.contentsMargins()
+        spacing = layout.spacing()
+        hint_h = (
+            widget._hint.height()
+            if widget._hint.height() > 0
+            else widget._hint.sizeHint().height()
+        )
+        apply_h = (
+            widget._apply_btn.height()
+            if widget._apply_btn.height() > 0
+            else widget._apply_btn.sizeHint().height()
+        )
+        gaps = (1 if widget._hint.isVisible() else 0) + 1
+        non_scroll = (
+            margins.top() + margins.bottom() + hint_h + apply_h + gaps * spacing
+        )
+        available = widget.height() - non_scroll
+        # Scroll should be at available (capped), not at content height
+        assert abs(scroll.height() - available) <= 8, (
+            f"scroll {scroll.height()} vs available {available} diff {abs(scroll.height() - available)}"
+        )
+        assert scroll.height() < panel.height(), (
+            "capped scroll should be smaller than content"
+        )
+        # Apply remains fixed/visible below scroll, not scrolled out
+        apply = widget._apply_btn
+        assert apply.isVisible()
+        assert apply.parent() is widget
+        assert apply.geometry().y() > scroll.geometry().y()
+        # Apply bottom within widget
+        assert apply.geometry().bottom() <= widget.height() + frame_tolerance
+        # Apply not overlapping scroll viewport
+        assert (
+            apply.geometry().y()
+            >= scroll.geometry().y() + scroll.height() - frame_tolerance
+        )
+
+    # Short ledger at 500 px wide and 400 px narrow — 4 rows matches live screenshot
+    for width in (500, 400):
+        items_short: list[MetaDictWriteback] = []
+        for i in range(4):
+            it = MetaDictWriteback(
+                target_name=f"s{i}", description=f"desc {i}", proposed_value=float(i)
+            )
+            it.session_id = f"md-{i}"
+            items_short.append(it)
+        w = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+        w.resize(width, 400)
+        w.populate(items_short)
+        w.show()
+        qapp.processEvents()
+        # Allow deferred height update (singleShot) to fire
+        w._update_scroll_height()
+        qapp.processEvents()
+        try:
+            _check_hugs(w)
+        finally:
+            w.close()
+            qapp.processEvents()
+
+    # Long ledger — sufficiently many rows to exceed available height, should cap and scroll
+    items_long: list[MetaDictWriteback] = []
+    for i in range(30):
+        it = MetaDictWriteback(
+            target_name=f"p{i}", description=f"d{i}", proposed_value=float(i)
+        )
+        it.session_id = f"md-{i}"
+        items_long.append(it)
+    w_long = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    w_long.resize(500, 400)
+    w_long.populate(items_long)
+    w_long.show()
+    qapp.processEvents()
+    w_long._update_scroll_height()
+    qapp.processEvents()
+    try:
+        _check_capped(w_long)
+        # Also check narrow long remains capped
+        w_long.resize(400, 400)
+        qapp.processEvents()
+        w_long._update_responsive()
+        w_long._update_scroll_height()
+        qapp.processEvents()
+        _check_capped(w_long)
+    finally:
+        w_long.close()
