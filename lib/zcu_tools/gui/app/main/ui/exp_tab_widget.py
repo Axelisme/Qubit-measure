@@ -18,9 +18,21 @@ from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_co
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
+from zcu_tools.gui.widgets.cfg.fields.containers import _CollapsibleSection
 
 logger = logging.getLogger(__name__)
+
+# Approved prototype blue primary treatment (A3)
+_BLUE_PRIMARY_STYLESHEET = (
+    "QPushButton#primaryButton { background-color: #286ac7; color: white; "
+    "font-weight: 600; border: 1px solid #205aa9; border-radius: 4px; }"
+    "QPushButton#primaryButton:disabled { background-color: #a0b8d9; color: #e6edf7; border-color: #8da6c9; }"
+    "QPushButton#primaryButton:hover:!disabled { background-color: #2f76dc; }"
+)
+_RED_STOP_STYLESHEET = (
+    "background-color: #f44336; color: white; font-weight: bold; "
+    "border: 1px solid #d32f2f; border-radius: 4px;"
+)
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
@@ -30,10 +42,13 @@ from qtpy.QtGui import (  # type: ignore[attr-defined]
     QPen,
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QTabWidget,
@@ -137,6 +152,91 @@ class _PanelEdgeHandle(QToolButton):
             painter.drawLine(center_x + 2, center_y + 7, center_x - 2, center_y)
 
 
+class _LedgerSection(QWidget):
+    """App-local single-column ledger section with whole-row folding.
+
+    Header row (blank or text area) toggles the body; the action bar stays
+    fixed outside the scroll area. Presentation is app-local; the shared tree
+    adapter remains the only cross-module structural seam (S1).
+    """
+
+    def __init__(
+        self,
+        title: str,
+        parent: QWidget | None = None,
+        *,
+        collapsed: bool = False,
+    ) -> None:
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Header — whole row is clickable (S1/A2).
+        self._header = QWidget()
+        self._header.setCursor(Qt.PointingHandCursor)  # type: ignore[attr-defined]
+        self._header.setObjectName("ledgerHeader")
+        header_row = QHBoxLayout(self._header)
+        header_row.setContentsMargins(4, 4, 4, 4)
+        header_row.setSpacing(6)
+
+        self._toggle_btn = QPushButton("▼" if not collapsed else "▶")
+        self._toggle_btn.setFixedWidth(16)
+        self._toggle_btn.setFlat(True)
+        self._toggle_btn.setCheckable(True)
+        self._toggle_btn.setChecked(not collapsed)
+        header_row.addWidget(self._toggle_btn)
+
+        self._title_label = QLabel(f"<b>{title}</b>")
+        font = self._title_label.font()
+        font.setPixelSize(13)
+        self._title_label.setFont(font)
+        header_row.addWidget(self._title_label, stretch=1)
+
+        # Body
+        self._body = QWidget()
+        self.body_layout = QVBoxLayout(self._body)
+        self.body_layout.setContentsMargins(8, 2, 0, 2)
+        self.body_layout.setSpacing(2)
+
+        outer.addWidget(self._header)
+        outer.addWidget(self._body)
+
+        self._collapsed = collapsed
+        self._body.setVisible(not collapsed)
+
+        # Whole header row toggles; button also toggles (no double toggle because
+        # click on button goes to button widget, not header).
+        self._toggle_btn.clicked.connect(self._toggle)
+        # Install header click handler via event filter on header.
+        self._header.mouseReleaseEvent = self._on_header_mouse_release  # type: ignore[method-assign]
+
+    def _on_header_mouse_release(self, event) -> None:
+        try:
+            if event.button() == Qt.LeftButton:  # type: ignore[attr-defined]
+                self._toggle()
+                event.accept()
+                return
+        except Exception:
+            pass
+        # Fallback to default
+        QWidget.mouseReleaseEvent(self._header, event)
+
+    def _toggle(self, *_: object) -> None:
+        self._collapsed = not self._collapsed
+        self._body.setVisible(not self._collapsed)
+        self._toggle_btn.setText("▶" if self._collapsed else "▼")
+        self._toggle_btn.setChecked(not self._collapsed)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if bool(collapsed) == self._collapsed:
+            return
+        self._toggle()
+
+    def is_collapsed(self) -> bool:
+        return self._collapsed
+
+
 class ExpTabWidget(QWidget):
     """A single experiment tab with capability-driven subtabs and independent figure panes."""
 
@@ -208,49 +308,84 @@ class ExpTabWidget(QWidget):
         run_layout.setContentsMargins(4, 4, 4, 4)
         run_layout.setSpacing(2)
 
-        # Thin top strip: Reset sits right-aligned at the top of the cfg area
-        cfg_top_strip = QHBoxLayout()
-        cfg_top_strip.setContentsMargins(0, 0, 0, 0)
-        cfg_top_strip.addStretch()
+        self.cfg_form = CfgFormWidget(
+            text_input_enhancer=make_value_source_input_enhancer(ctrl),
+        )
+        run_layout.addWidget(self.cfg_form, stretch=1)
+
+        # Run action row: status-free, Reset 20% / Run 80% of available width
+        # (A5). Both buttons expand proportionally; Run retains blue primary
+        # and Stop retains red active semantics.
+        self._run_action_bar = QFrame()
+        self._run_action_bar.setObjectName("runActionBar")
+        self._run_action_bar.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
+        bar_layout = QHBoxLayout(self._run_action_bar)
+        bar_layout.setContentsMargins(8, 6, 8, 6)
+        bar_layout.setSpacing(6)
         self.reset_btn = QPushButton("Reset")
         self.reset_btn.setFlat(True)
         self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
         reset_font = self.reset_btn.font()
         reset_font.setPointSize(max(reset_font.pointSize() - 1, 7))
         self.reset_btn.setFont(reset_font)
-        cfg_top_strip.addWidget(self.reset_btn)
-        run_layout.addLayout(cfg_top_strip)
-
-        self.cfg_form = CfgFormWidget(
-            text_input_enhancer=make_value_source_input_enhancer(ctrl)
-        )
-        run_layout.addWidget(self.cfg_form, stretch=1)
-
+        self.reset_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )  # type: ignore[attr-defined]
+        bar_layout.addWidget(self.reset_btn, stretch=20)
         self.run_btn = QPushButton("Run")
+        self.run_btn.setObjectName("primaryButton")
         self.run_btn.setFixedHeight(30)
-        run_layout.addWidget(self.run_btn)
+        self.run_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )  # type: ignore[attr-defined]
+        self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+        bar_layout.addWidget(self.run_btn, stretch=80)
+        run_layout.addWidget(self._run_action_bar)
         self._run_panel = run_panel
         self._left_tabs.addTab(run_panel, "Run")
 
         # ── Tab: Analysis (only when analysis capability present) ──
         if self._has_analysis:
+            # Single-column 13 px ledger with whole-header folding; Analyze sits
+            # immediately after params and before Writeback preview (A4).
+            analysis_container = QWidget()
+            analysis_outer = QVBoxLayout(analysis_container)
+            analysis_outer.setContentsMargins(0, 0, 0, 0)
+            analysis_outer.setSpacing(0)
+
             analysis_scroll = QScrollArea()
             analysis_scroll.setWidgetResizable(True)
+            analysis_scroll.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
             analysis_inner = QWidget()
             analysis_layout = QVBoxLayout(analysis_inner)
+            analysis_layout.setContentsMargins(4, 4, 4, 4)
+            analysis_layout.setSpacing(4)
             analysis_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
-            self._analyze_section = _CollapsibleSection(
-                "Analysis", collapsible=True, collapsed=False
+            self._analyze_section = _LedgerSection(
+                "Analysis parameters", collapsed=False
             )
             self.analyze_form = AnalyzeFormWidget()
+            font = self.analyze_form.font()
+            font.setPixelSize(13)
+            self.analyze_form.setFont(font)
             self._analyze_section.body_layout.addWidget(self.analyze_form)
             analysis_layout.addWidget(self._analyze_section)
+
+            # Analyze immediately below params and before Writeback preview,
+            # occupying 100% of available content width (A6). Stays enabled
+            # per availability/busy and retains blue primary when idle.
             self.analyze_btn = QPushButton("Analyze")
+            self.analyze_btn.setObjectName("primaryButton")
+            self.analyze_btn.setFixedHeight(30)
+            self.analyze_btn.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )  # type: ignore[attr-defined]
+            self.analyze_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
             analysis_layout.addWidget(self.analyze_btn)
 
-            self.writeback_section = _CollapsibleSection(
-                "Writeback", collapsible=True, collapsed=False
+            self.writeback_section = _LedgerSection(
+                "Writeback preview", collapsed=False
             )
             self.writeback_widget = WritebackWidget(
                 self._ctrl, tab_id=self.tab_id, pane="analysis"
@@ -261,9 +396,11 @@ class ExpTabWidget(QWidget):
 
             analysis_layout.addStretch()
             analysis_scroll.setWidget(analysis_inner)
-            self._analysis_panel = analysis_scroll
+            analysis_outer.addWidget(analysis_scroll, stretch=1)
+
+            self._analysis_panel = analysis_container
             self._analysis_tab_index = self._left_tabs.addTab(
-                analysis_scroll, "Analysis"
+                analysis_container, "Analysis"
             )
         # ── Tab: Post-Analysis (only when post capability true) ────
         if self._has_post:
@@ -836,15 +973,16 @@ class ExpTabWidget(QWidget):
         state = snapshot.interaction
         capabilities = snapshot.capabilities
         local_busy = state.is_running or state.is_analyzing or state.is_saving_data
+        # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
             self.run_btn.setText("Stop")
             self.run_btn.setEnabled(True)
             self.run_btn.setToolTip("Running")
-            self.run_btn.setStyleSheet(
-                "background-color: #f44336; color: white; font-weight: bold;"
-            )
+            self.run_btn.setStyleSheet(_RED_STOP_STYLESHEET)
+            self.run_btn.setObjectName("")
         else:
             self.run_btn.setText("Run")
+            self.run_btn.setObjectName("primaryButton")
             cfg_valid = self.cfg_form.is_valid()
             can_run = (
                 not local_busy
@@ -871,7 +1009,12 @@ class ExpTabWidget(QWidget):
                 self.run_btn.setToolTip(
                     f"Config invalid: {reason}" if reason else "Config invalid"
                 )
-            self.run_btn.setStyleSheet("")
+            # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
+            self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+            # Force style refresh for objectName/stylesheet change
+            self.run_btn.style().unpolish(self.run_btn)  # type: ignore[attr-defined]
+            self.run_btn.style().polish(self.run_btn)  # type: ignore[attr-defined]
+            self.run_btn.update()
 
         idle = not local_busy
         self.cfg_form.set_editing_enabled(idle)

@@ -19,8 +19,6 @@ from .common import (
 )
 from .containers import (
     ReferenceWidget,
-    SectionWidget,
-    _CollapsibleSection,
 )
 
 __all__ = [
@@ -30,9 +28,7 @@ __all__ = [
     "ScalarWidget",
     "SweepWidget",
     "TextInputEnhancer",
-    "SectionWidget",
     "ReferenceWidget",
-    "_CollapsibleSection",
     "make_value_widget",
     "connect_committed_value_widget",
     "connect_value_widget",

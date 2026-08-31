@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-07-12（owner-loop execution and Qt UI adapters）
+**Last updated:** 2026-08-31 — universal cfg tree (sole presentation, dark guide lines, 20/80 Run, full-width Analyze)
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -175,11 +175,13 @@ shared Qt leaf同時集中scalar input的write/connect dispatch與純`QWidget`�
 app仍擁有visibility、target lookup、main-thread marshal與remote wire policy。
 
 每個`CfgFormWidget`持有一個`FrozenFieldRendererRegistry`。沒有顯式注入時，
-`default_cfg_renderers()`會建立全新的builder、為六個exact field types註冊固定
-`FieldRenderer(field, context)` factory再freeze。immutable `FieldRenderContext`只攜帶path、
+`default_cfg_renderers()`會建立全新的builder、為五個 non-section exact field types
+（`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
+`FieldRenderer(field, context)` factory再freeze；`SectionField` 不在 registry，由 sole tree
+（`TreeCfgWidget`）直接建立 `QTreeWidgetItem` 結構。immutable `FieldRenderContext`只攜帶path、
 top-level標記、label width、decoration resolver、text enhancer與同一frozen registry；不攜帶
-controller/service/app/runtime資料。root、section child與reference subtree都走registry
-`render()`，沒有consumer-side constructor分支、module-global mapping、decorator、string key或
+controller/service/app/runtime資料。leaf 與 reference header 走 registry `render()`，而 section
+結構由 tree 直接建立，沒有consumer-side constructor分支、module-global mapping、decorator、string key或
 inheritance fallback。registration會先驗factory call shape，render則驗QWidget與field-widget
 protocol。
 
@@ -196,6 +198,37 @@ generated Default cfg fields from its `OverridePlan`。measure則以generic
 
 Normal `LiteralSpec` rows remain hidden, but a decoration may explicitly unhide a
 literal when an app needs to show a generated read-only value in the form.
+
+`CfgFormWidget` has the dense tree as its sole structural presentation
+(S1): there is no structure selector or legacy form fallback. Every existing
+caller receives the tree without opt-in. The widget attaches the same
+caller-owned `CfgDraft`; tree folding, depth presentation, root alignment,
+connectors, and reference shape-row elision are view-only and do not alter
+cfg paths, reference identity, validation, persistence, or lowering. The tree
+hides `Property` / `Value` headers, uses 13 px field text, shows the root row
+at indentation 0 and descendants at 10 px with classic vertical/horizontal
+connectors without triangles via a `QProxyStyle` whose guide lines carry the
+depth colors, supports whole-row folding (click any row that has children),
+cycles five depth colors `#5b8dc6`, `#6aae8a`, `#b8942f`, `#8a6bc9`,
+`#4fb3a8` (repeating after the fifth) on the corresponding descendant tree
+guide lines; cfg rows do not use those colors as depth backgrounds, and each
+guide level is colored at its displayed depth (only its children advance) and
+is stable under horizontal scroll via logical-column normalization, and elides
+the guaranteed single materialized reference-shape row. The tree viewport
+follows the available panel height and scrolls only when rendered content
+exceeds the viewport, without a fixed-height threshold. Editor behavior
+remains owned by the five exact non-section `FieldRenderer` factories via the same frozen
+`FrozenFieldRendererRegistry`; section structure is owned solely by the dense tree
+(`TreeCfgWidget` creates `QTreeWidgetItem`s, handles folding/indentation/connectors/elision).
+Choice visibility, literal hiding, decorated labels, and full decoration
+(hidden/enabled/tooltip/tone/badge/suffix) are implemented once in the shared presentation
+policy and used by the sole tree presentation; reference editing (combo population,
+selection, missing hint, validity) is also single-sourced and header-only (no form
+subtree). Section-local refresh (`refresh_section(path)`) only rebuilds the target
+section or reference-elided subtree owner's descendants (e.g., `modules.qub_pulse` for
+`modules.qub_pulse.gain`) and preserves unrelated items/editors and the reference header.
+The seam's executable owner is `zcu_tools.gui.widgets.cfg` and its durable declaration owner
+is this section.
 
 ## EventBus Lifecycle
 

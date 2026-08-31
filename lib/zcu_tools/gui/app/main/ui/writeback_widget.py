@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -53,6 +54,11 @@ class WritebackWidget(QWidget):
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
 
+        # 13 px ledger per spec — item rows show current → proposed.
+        font = self.font()
+        font.setPixelSize(13)
+        self.setFont(font)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -64,9 +70,10 @@ class WritebackWidget(QWidget):
         layout.addWidget(self._hint)
 
         self._rows_container = QWidget()
-        self._rows_layout = QVBoxLayout(self._rows_container)
+        self._rows_layout = QGridLayout(self._rows_container)
         self._rows_layout.setContentsMargins(0, 0, 0, 0)
-        self._rows_layout.setSpacing(6)
+        self._rows_layout.setHorizontalSpacing(8)
+        self._rows_layout.setVerticalSpacing(3)
         layout.addWidget(self._rows_container)
 
         self._apply_btn = QPushButton("Apply Selected")
@@ -74,10 +81,12 @@ class WritebackWidget(QWidget):
         self._apply_btn.clicked.connect(self._on_apply_clicked)
         layout.addWidget(self._apply_btn)
 
+        self._row_widgets: dict[str, tuple[QLabel, QLabel, QCheckBox]] = {}
+
         self._refresh_apply_enabled()
 
     def populate(self, items: Sequence[WritebackItem]) -> None:
-        # Clear old rows
+        # Clear old rows (grid)
         while self._rows_layout.count():
             child = self._rows_layout.takeAt(0)
             if child is not None:
@@ -90,27 +99,62 @@ class WritebackWidget(QWidget):
         # objects the agent and apply read.
         self._items = list(items)
         self._checks.clear()
+        self._row_widgets.clear()
 
-        for item in self._items:
-            row = QWidget(self)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-
-            label = self._make_label_text(item)
-            cb = QCheckBox(label)
+        for row, item in enumerate(self._items):
+            # Selection
+            cb = QCheckBox(self._make_label_text(item))
             cb.setChecked(item.selected)
             cb.stateChanged.connect(lambda _state, it=item: self._on_check_toggled(it))
-            row_layout.addWidget(cb, 1)
+            self._rows_layout.addWidget(cb, row, 0)
             self._checks[item.session_id] = cb
+
+            # Target already in checkbox label (preserves legacy checks); current/
+            # proposed are separate ledger columns for S2/A3.
+            current_text = self._display_current(item)
+            proposed_text = self._display_proposed(item)
+            # Target column is checkbox label; keep description visible via tooltip
+            cb.setToolTip(item.description)
+
+            current_label = QLabel(current_text)
+            current_label.setObjectName("writebackCurrent")
+            current_label.setStyleSheet("color: #5e6b7d;")
+            current_label.setWordWrap(True)
+            self._rows_layout.addWidget(current_label, row, 1)
+
+            arrow = QLabel("→")
+            arrow.setObjectName("writebackArrow")
+            arrow.setStyleSheet("color: #8a94a3; font-weight: 700;")
+            self._rows_layout.addWidget(arrow, row, 2)
+
+            proposed_label = QLabel(proposed_text)
+            proposed_label.setObjectName("writebackProposed")
+            proposed_label.setStyleSheet("color: #1f5fae; font-weight: 700;")
+            proposed_label.setWordWrap(True)
+            self._rows_layout.addWidget(proposed_label, row, 3)
+
+            self._row_widgets[item.session_id] = (
+                current_label,
+                proposed_label,
+                cb,
+            )
 
             if self._is_editable(item):
                 edit_btn = QPushButton("Edit")
+                edit_btn.setFixedWidth(52)
                 edit_btn.clicked.connect(
                     lambda _=False, it=item, chk=cb: self._edit_item(it, chk)
                 )
-                row_layout.addWidget(edit_btn)
+                self._rows_layout.addWidget(edit_btn, row, 4)
+            else:
+                # Placeholder to keep grid stable
+                placeholder = QLabel("")
+                placeholder.setFixedWidth(52)
+                self._rows_layout.addWidget(placeholder, row, 4)
 
-            self._rows_layout.addWidget(row)
+        # Stretch proposal column
+        self._rows_layout.setColumnStretch(1, 1)
+        self._rows_layout.setColumnStretch(3, 1)
 
         self._refresh_apply_enabled()
 
@@ -144,6 +188,38 @@ class WritebackWidget(QWidget):
             return item.edit_schema is not None
         return False
 
+    def _get_service_summaries(self, session_id: str) -> tuple[str | None, str | None]:
+        """Fetch S2 summaries from the service-owned draft (app-local)."""
+        try:
+            getter = getattr(self._ctrl, "get_writeback_summaries_for_pane", None)
+            if getter is None or not callable(getter):
+                return (None, None)
+            result = getter(self._tab_id, self._pane)  # type: ignore[call-arg]
+            if isinstance(result, dict) and session_id in result:
+                cur, prop = result[session_id]
+                return cur, prop
+        except Exception:
+            pass
+        return (None, None)
+
+    def _display_current(self, item: WritebackItem) -> str:
+        cur, _ = self._get_service_summaries(item.session_id)
+        if cur is not None:
+            return str(cur)
+        if isinstance(item, MetaDictWriteback):
+            return "—"
+        return "—"
+
+    def _display_proposed(self, item: WritebackItem) -> str:
+        _, prop = self._get_service_summaries(item.session_id)
+        if prop is not None:
+            return str(prop)
+        if isinstance(item, MetaDictWriteback):
+            return repr(item.proposed_value)
+        if isinstance(item, (ModuleWriteback, WaveformWriteback)):
+            return f"→ {item.target_name}"
+        return f"{item.target_name}"
+
     def _make_label_text(self, item: WritebackItem) -> str:
         if isinstance(item, MetaDictWriteback):
             return (
@@ -165,12 +241,17 @@ class WritebackWidget(QWidget):
         layout = QVBoxLayout(dialog)
 
         form = QFormLayout()
+        # Current is read-only (S2); target and proposed are editable.
+        current_label = QLabel(self._display_current(item))
+        current_label.setObjectName("writebackCurrentReadonly")
+        current_label.setStyleSheet("color: #6b7688;")
+        form.addRow("Current:", current_label)
         # target_name is the apply destination, decoupled from the stable
         # session_id (ADR-0008) — editable here so the user can retarget.
         name_edit = QLineEdit(item.target_name)
         form.addRow("Apply as:", name_edit)
         value_edit = QLineEdit(str(item.proposed_value))
-        form.addRow("Value:", value_edit)
+        form.addRow("Proposed:", value_edit)
         layout.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -199,6 +280,11 @@ class WritebackWidget(QWidget):
                 item.target_name = new_name
                 item.proposed_value = new_value
                 cb.setText(self._make_label_text(item))
+                # Update ledger row from service-owned summary (S2)
+                row_tuple_md = self._row_widgets.get(item.session_id)
+                if row_tuple_md is not None:
+                    _cur_md, proposed_label_md, _cb_md = row_tuple_md
+                    proposed_label_md.setText(self._display_proposed(item))
                 dialog.accept()
             except Exception as exc:
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
@@ -278,6 +364,12 @@ class WritebackWidget(QWidget):
             _commit_name()
             form_widget.detach()
             cb.setText(self._make_label_text(item))
+            # Refresh bounded summary after cfg edits (proposed may have changed)
+            row_tuple = self._row_widgets.get(item.session_id)
+            if row_tuple is not None:
+                _cur_cfg, proposed_label_cfg, _cb_cfg = row_tuple
+                # For cfg items, proposed_summary stays bounded; keep existing
+                proposed_label_cfg.setText(self._display_proposed(item))
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(_on_finished)

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-30 — Data save center corrections (module-altitude, owned saveability, Fast Fail)
+**Last updated:** 2026-08-31 — universal cfg tree (sole presentation, dark guide lines, 20/80 Run, full-width Analyze)
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -33,24 +33,41 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   the container; busy tabs cannot close or rebuild, so the captured worker target
   outlives the operation without a lease). It receives tab actions through a narrow
   `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
-  `MainWindow` adapts those actions to top-level handlers. Each `WritebackWidget`
+  `MainWindow` adapts those actions to top-level handlers. Run uses the sole
+  shared cfg tree (S1 corrected: 13 px, root at 0, descendants at 10 px with
+  connectors, five depth colors `#5b8dc6`/`#6aae8a`/`#b8942f`/`#8a6bc9`/`#4fb3a8`
+  cycle on guide lines stable under horizontal scroll, rows no longer use depth
+  backgrounds, whole-row folding, reference shape elision, viewport follows
+  available panel height with scrolling only when content exceeds viewport);
+  Run action row is status-free with Reset 20% / Run 80% of available width,
+  Reset neutral secondary and Run blue primary with Stop retaining red active
+  semantics (A5); Analysis uses an app-local single-column 13 px ledger with
+  whole-header folding for `Analysis parameters` and `Writeback preview` and a
+  full-width `Analyze` immediately after parameters and before Writeback preview
+  (A6). Presentation
+  Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
-  `WritebackService` remains stage-agnostic. `RenderHost` is pane-aware (run |
-  analysis | post_analysis) and the worker captures its pane's container at start —
-  switching the visible subtab never retargets the worker (ADR-0017). `ExpTabWidget`
-  delegates the Data pane to an internal `ArtifactSaveCenter` which owns
-  capability-driven artifact rows, high-contrast status rendering and the tab-local
-  status lifecycle derived from result availability, path/comment edits and true
-  terminal save outcomes (not persisted across process), with figure-gated save
-  enablement while status still tracks result lifecycle. The center owns the
-  saveability decision and the ordered Save All sequence (analysis→post→data with
-  Fast Fail, never rolling back prior successes); tracker/invariant failures Fast
-  Fail and operational failures are presented centrally, and async data completion
-  is routed to the center. Analysis/Post panes no longer own image-path/Save Image;
-  Run's live figure remains view-only (display + screenshot, no canonical Save).
-  Top-level orchestration invokes behavior-oriented tab methods for result focus,
-  plot hosting, interactive-widget lifecycle, figure reads, and persisted panel
+  `WritebackService` remains stage-agnostic and owns the display-only baseline
+  capture (S2): at draft creation it snapshots the destination `ExpContext` and
+  exposes per-item `current_summary` / `proposed_summary` to Qt; scalar MetaDict
+  items show concrete values, module/waveform items show bounded
+  target/change summaries and keep full cfg editing in `Edit` (Save/Cancel).
+  `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
+  captures its pane's container at start — switching the visible subtab never
+  retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an
+  internal `ArtifactSaveCenter` which owns capability-driven artifact rows,
+  high-contrast status rendering and the tab-local status lifecycle derived from
+  result availability, path/comment edits and true terminal save outcomes (not
+  persisted across process), with figure-gated save enablement while status still
+  tracks result lifecycle. The center owns the saveability decision and the ordered
+  Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
+  successes); tracker/invariant failures Fast Fail and operational failures are
+  presented centrally, and async data completion is routed to the center.
+  Analysis/Post panes no longer own image-path/Save Image; Run's live figure
+  remains view-only (display + screenshot, no canonical Save). Top-level
+  orchestration invokes behavior-oriented tab methods for result focus, plot
+  hosting, interactive-widget lifecycle, figure reads, and persisted panel
   geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
@@ -161,6 +178,10 @@ Key ownership rules:
 
 1. A tab is created from a registered experiment adapter.
 2. The tab owns a service-managed cfg editor session backed by `CfgDraft`.
+   Run renders that draft through the sole shared cfg tree (S1); Analysis
+   renders its params through the app-local 13 px ledger with whole-header
+   folding and a full-width `Analyze` immediately below parameters.
+
 3. `GuardService` validates static preconditions and materializes a permit.
 4. The operation policy builds worker thunks with the needed ambient scopes:
    plotting, progress, `Schedule` cancellation, and device setup cancellation.
@@ -169,7 +190,11 @@ Key ownership rules:
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /
    `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
 7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit. Primary and post workflows own proposal timing;
+   cfg-editor machinery before commit; `WritebackService.create_draft` snapshots
+   the destination `ExpContext` at creation and the ledger shows
+   `current_summary` → `proposed_summary` per item (S2). Scalar MetaDict items
+   show concrete values; module/waveform items show bounded change summaries and
+   keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
    the Writeback service remains stage-free.
 
 `tab.load_data` is the analysis-only entry for canonical result files. It installs
@@ -181,10 +206,12 @@ the adapter's import-validated `capabilities.load_data` gate.
 
 `Session` is the aggregate root and its fixed pane carriers are the resource owners:
 Run stores only the run result/source, Analysis and Post-Analysis each store params,
-result, canonical figure and an opaque writeback draft, and Save stores the data-path
-override. Analysis and Post-Analysis image-path overrides are independent resources;
-the read model projects data, analysis-image and post-analysis-image paths separately.
-Run live figures remain view-only and are not stored in State.
+result, canonical figure and an opaque writeback draft (with S2 baseline snapshot),
+and Save stores the data-path override. Analysis and Post-Analysis image-path
+overserides are independent resources; the read model projects data, analysis-image
+and post-analysis-image paths separately. Run live figures remain view-only and
+are not stored in State. Writeback baseline is a display-only draft-creation
+snapshot; no concurrent-write detection or apply-conflict policy is provided.
 
 Analysis/Post result services prepare proposals, figures and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear
@@ -278,39 +305,44 @@ The framework protocol does not expose a static spec query. Shared
 knowledge (ADR-0012、ADR-0045).
 
 `CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
-每個form使用自己的frozen exact renderer registry；固定renderer factory接收immutable
-presentation context，root與recursive section/reference共享該instance，沒有consumer-side
-constructor dispatch、global decorator registration或inheritance fallback。attach在成功build
-root後才訂閱draft，detach會解除change/validity callbacks但不close draft。`CfgFormWidget`
-accepts an optional field decoration provider keyed by full value
-tree path. The shared widget owns only generic presentation metadata
-(`hidden`/`enabled`/tone/badge/tooltip/label suffix) and computes the default
-decoration from the spec; app-specific policy such as generated fields stays in
-the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider
-can explicitly reveal them as framed read-only values for generated or locked
-review fields. Decoration is a view contract only: domain enforcement remains in
-the owning controller/runtime.
+每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
+`default_cfg_renderers()` 為五個 non-section exact field types
+（`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
+`FieldRenderer(field, context)`，`SectionField` 不在 registry 而由 sole tree
+（`TreeCfgWidget`）直接建立 `QTreeWidgetItem` 結構。immutable `FieldRenderContext` 只攜帶 path、
+top-level 標記、label width、decoration resolver、text enhancer 與同一 frozen registry；leaf 與
+reference header 走 registry `render()`，而 section 結構由 tree 直接建立，沒有 consumer-side
+constructor dispatch、global decorator registration 或 inheritance fallback。attach 在成功 build
+tree root 後才訂閱 draft，detach 會解除 change/validity callbacks 但不 close draft。`CfgFormWidget`
+accepts an optional field decoration provider keyed by full value tree path. The shared widget
+owns only generic presentation metadata (`hidden`/`enabled`/tone/badge/tooltip/label suffix) and
+computes the default decoration from the spec; app-specific policy such as generated fields stays in
+the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider can explicitly
+reveal them as framed read-only values for generated or locked review fields. Decoration is a view
+contract only: domain enforcement remains in the owning controller/runtime.
 
 `CfgFormWidget.set_editing_enabled()` locks only the rendered form content, not
 the widget shell or its `QScrollArea`. Busy/read-only hosts keep the cfg pane
 scrollable while child editor controls are disabled, and the desired editing
 state persists across `detach()` / `attach()` swaps of the service-owned draft.
 
-Nested `CfgSectionSpec` fields render as full-width collapsible sections and do
-not get an additional parent-row label. The section header is the label, which
-keeps grouped forms such as autofluxdep Generation overrides from showing
-duplicated text like `Frequency recovery:` next to a second `Frequency recovery`
-header.
+Nested `CfgSectionSpec` fields render as tree items with whole-row folding
+(`QTreeWidgetItem` at 10 px indentation, 13 px text, classic connectors); the section header
+is the item label and does not create an additional parent-row label. This keeps grouped forms
+such as autofluxdep Generation overrides from showing duplicated text like `Frequency recovery:`
+next to a second `Frequency recovery` header, and keeps the single tree presentation consistent
+across Run, autofluxdep, and module/waveform editors.
 
 `ChoiceSectionSpec` is the shared selector-driven display contract for sections
 whose fields depend on a local mode/strategy. The section still owns a complete
 union `CfgSectionValue`; each `ChoiceBinding` names the selector field and the
 fields rendered for each selector value. `CfgFormWidget` refreshes only the
-affected section subtree when a selector changes, while hidden inactive fields
-keep their values in the model and lower/persist through the normal section
-path. Decoration-provider changes follow the same section-local refresh path
-instead of reattaching the full `CfgDraft`-backed form. Field widgets expose a
-typed `refresh_section(path) -> bool` surface, and decoration state is consumed
+affected section subtree (including reference-elided subtree owner, e.g.
+`modules.qub_pulse` for `modules.qub_pulse.gain`) when a selector or decoration changes,
+while hidden inactive fields keep their values in the model and lower/persist through the
+normal section path. Decoration-provider changes follow the same section-local (section or
+reference) refresh path instead of reattaching the full `CfgDraft`-backed form. Field widgets
+expose a typed `refresh_section(path) -> bool` surface, and decoration state is consumed
 through the shared `FieldDecoration` surface rather than ad-hoc attribute probing.
 Unknown `ChoiceSectionSpec` selector values fast-fail instead of hiding all
 controlled fields.
