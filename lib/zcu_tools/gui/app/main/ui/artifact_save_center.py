@@ -266,9 +266,9 @@ class ArtifactSaveCenter(QWidget):
         self._status_labels: dict[ArtifactKind, QLabel] = {}
         self._path_edits: dict[ArtifactKind, QLineEdit] = {}
         self._save_btns: dict[ArtifactKind, QPushButton] = {}
-        self._saved_data_editor_state: tuple[QLineEdit, str, int, int, int] | None = (
-            None
-        )
+        self._saved_data_editor_state: (
+            tuple[QLineEdit, str, int, int, int, bool] | None
+        ) = None
 
         actions = QWidget()
         actions.setObjectName("dataActions")
@@ -449,13 +449,42 @@ class ArtifactSaveCenter(QWidget):
 
     def _remember_data_editor_state(self, edit: QLineEdit) -> None:
         selection_start = edit.selectionStart()
+        cursor = edit.cursorPosition()
+        selection_length = edit.selectionLength()
         self._saved_data_editor_state = (
             edit,
             edit.text(),
-            edit.cursorPosition(),
+            cursor,
             selection_start,
-            len(edit.selectedText()) if selection_start >= 0 else 0,
+            selection_length,
+            selection_start >= 0 and cursor == selection_start,
         )
+
+    @staticmethod
+    def _restore_cursor_and_selection(
+        edit: QLineEdit,
+        cursor: int,
+        selection_start: int,
+        selection_length: int,
+        selection_reversed: bool,
+    ) -> None:
+        """Restore a line edit with its active cursor endpoint intact."""
+        text_length = len(edit.text())
+        if selection_start < 0 or selection_length <= 0:
+            edit.setCursorPosition(min(cursor, text_length))
+            return
+
+        start = min(selection_start, text_length)
+        length = min(selection_length, text_length - start)
+        if length <= 0:
+            edit.setCursorPosition(start)
+            return
+        if selection_reversed:
+            edit.setCursorPosition(start + length)
+            edit.cursorBackward(True, length)
+        else:
+            edit.setCursorPosition(start)
+            edit.cursorForward(True, length)
 
     def _capture_data_editor_state(self) -> None:
         edit = self._path_edits[ArtifactKind.DATA]
@@ -479,15 +508,23 @@ class ArtifactSaveCenter(QWidget):
         self._saved_data_editor_state = None
         if state is None:
             return
-        edit, text, cursor, selection_start, selection_length = state
+        (
+            edit,
+            text,
+            cursor,
+            selection_start,
+            selection_length,
+            selection_reversed,
+        ) = state
         if edit.text() != text:
             return
-        edit.setCursorPosition(min(cursor, len(text)))
-        if selection_start >= 0 and selection_length:
-            start = min(selection_start, len(text))
-            length = min(selection_length, len(text) - start)
-            if length:
-                edit.setSelection(start, length)
+        self._restore_cursor_and_selection(
+            edit,
+            cursor,
+            selection_start,
+            selection_length,
+            selection_reversed,
+        )
         edit.setFocus()
 
     def get_data_path(self) -> str:
@@ -522,7 +559,8 @@ class ArtifactSaveCenter(QWidget):
             had_focus = edit.hasFocus()
             cursor = edit.cursorPosition()
             selection_start = edit.selectionStart()
-            selection_length = len(edit.selectedText()) if selection_start >= 0 else 0
+            selection_length = edit.selectionLength()
+            selection_reversed = selection_start >= 0 and cursor == selection_start
 
             edit.blockSignals(True)
             try:
@@ -530,12 +568,13 @@ class ArtifactSaveCenter(QWidget):
             finally:
                 edit.blockSignals(False)
 
-            edit.setCursorPosition(min(cursor, len(path)))
-            if selection_start >= 0 and selection_length:
-                start = min(selection_start, len(path))
-                length = min(selection_length, len(path) - start)
-                if length:
-                    edit.setSelection(start, length)
+            self._restore_cursor_and_selection(
+                edit,
+                cursor,
+                selection_start,
+                selection_length,
+                selection_reversed,
+            )
             if had_focus:
                 edit.setFocus()
         self._recompute_current_sig(kind)

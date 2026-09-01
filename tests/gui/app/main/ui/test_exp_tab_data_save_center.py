@@ -737,8 +737,8 @@ def test_save_all_preserves_data_pane_editor_state_and_statuses(exp_tab_factory,
     data_edit.setFocus()
     qapp.processEvents()
     assert qapp.focusWidget() is data_edit
-    data_edit.setCursorPosition(2)
-    data_edit.setSelection(1, 3)
+    data_edit.setCursorPosition(4)
+    data_edit.cursorBackward(True, 3)
     before = (
         data_edit.hasFocus(),
         data_edit.cursorPosition(),
@@ -784,6 +784,47 @@ def test_save_all_preserves_data_pane_editor_state_and_statuses(exp_tab_factory,
     ) == before
     assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
     window.deleteLater()
+    tab.deleteLater()
+    qapp.processEvents()
+
+
+def test_changed_path_refresh_preserves_reverse_data_editor_state(
+    exp_tab_factory, qapp
+):
+    ctrl = _mock_ctrl()
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
+    )
+    snap = _snapshot(
+        "tab-1",
+        has_run=True,
+        analysis_mode=AnalysisMode.FIT,
+        post_cap=False,
+        load_cap=False,
+    )
+    tab = exp_tab_factory("tab-1", ctrl, caps)
+    tab.attach(snap, MagicMock())
+    tab.show()
+    qapp.processEvents()
+
+    center = tab._save_center
+    data_edit = center._path_edits[ArtifactKind.DATA]
+    data_edit.setFocus()
+    qapp.processEvents()
+    data_edit.setCursorPosition(4)
+    data_edit.cursorBackward(True, 3)
+    assert data_edit.cursorPosition() == 1
+    assert data_edit.selectionStart() == 1
+    assert data_edit.selectionLength() == 3
+    assert data_edit.selectedText() == "tmp"
+
+    center.set_data_path("/tmp/changed-data.h5")
+
+    assert data_edit.hasFocus()
+    assert data_edit.cursorPosition() == 1
+    assert data_edit.selectionStart() == 1
+    assert data_edit.selectionLength() == 3
+    assert data_edit.selectedText() == "tmp"
     tab.deleteLater()
     qapp.processEvents()
 
