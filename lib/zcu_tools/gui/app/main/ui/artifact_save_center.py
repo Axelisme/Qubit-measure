@@ -1,9 +1,10 @@
 """Data save center — capability-driven artifact rows with terminal-outcome status.
 
 Owns the Data subtab's compact save rows, high-contrast status rendering and
-tab-local status lifecycle. It does not call concrete save services; it only
-renders interaction derived from :class:`TabSnapshot` and the narrow status
-owner.
+tab-local status lifecycle. Save All updates this center in place and preserves
+the data-path editor's focus, cursor and selection. It does not call concrete
+save services; it only renders interaction derived from :class:`TabSnapshot` and
+the narrow status owner.
 
 Status derivation (S3):
 - NO RESULT — capability present but no result yet.
@@ -23,9 +24,9 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFileDialog,
     QHBoxLayout,
@@ -189,6 +190,30 @@ class _StatusTracker:
         return f"_StatusTracker({self._records!r})"
 
 
+class _FocusPreservingSaveAllButton(QPushButton):
+    """Run Save All without consuming the data-path editor's interaction state."""
+
+    def __init__(
+        self,
+        capture_editor_state: Callable[[], None],
+        restore_editor_state: Callable[[], None],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__("Save All", parent)
+        self._capture_editor_state = capture_editor_state
+        self._restore_editor_state = restore_editor_state
+
+    def mousePressEvent(self, e: Any) -> None:
+        self._capture_editor_state()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e: Any) -> None:
+        try:
+            super().mouseReleaseEvent(e)
+        finally:
+            self._restore_editor_state()
+
+
 # ---------------------------------------------------------------------------
 # Artifact save center widget
 # ---------------------------------------------------------------------------
@@ -241,6 +266,9 @@ class ArtifactSaveCenter(QWidget):
         self._status_labels: dict[ArtifactKind, QLabel] = {}
         self._path_edits: dict[ArtifactKind, QLineEdit] = {}
         self._save_btns: dict[ArtifactKind, QPushButton] = {}
+        self._saved_data_editor_state: tuple[QLineEdit, str, int, int, int] | None = (
+            None
+        )
 
         actions = QWidget()
         actions.setObjectName("dataActions")
@@ -254,12 +282,18 @@ class ArtifactSaveCenter(QWidget):
             QSizePolicy.Expanding,  # type: ignore[attr-defined]
             QSizePolicy.Fixed,  # type: ignore[attr-defined]
         )
-        self.save_all_button = QPushButton("Save All")
+        self.save_all_button = _FocusPreservingSaveAllButton(
+            self._capture_data_editor_state,
+            self._restore_data_editor_state,
+        )
         self.save_all_button.setFixedHeight(36)
         self.save_all_button.setSizePolicy(
             QSizePolicy.Expanding,  # type: ignore[attr-defined]
             QSizePolicy.Fixed,  # type: ignore[attr-defined]
         )
+        # Save All restores the data-path editor after its ordered saves have
+        # updated this center; normal mouse focus lets the editor observe which
+        # action caused its FocusOut event.
         self.save_all_button.setDefault(True)
 
         if self._has_load:
@@ -382,6 +416,7 @@ class ArtifactSaveCenter(QWidget):
             edit.textChanged.connect(
                 lambda _text, k=kind: self._on_path_or_comment_changed(k)
             )
+        self._path_edits[ArtifactKind.DATA].installEventFilter(self)
         if hasattr(self, "_comment_edit"):
             self._comment_edit.textChanged.connect(
                 lambda: self._on_path_or_comment_changed(ArtifactKind.DATA)
@@ -412,6 +447,49 @@ class ArtifactSaveCenter(QWidget):
 
     # -- path/comment accessors --------------------------------------
 
+    def _remember_data_editor_state(self, edit: QLineEdit) -> None:
+        selection_start = edit.selectionStart()
+        self._saved_data_editor_state = (
+            edit,
+            edit.text(),
+            edit.cursorPosition(),
+            selection_start,
+            len(edit.selectedText()) if selection_start >= 0 else 0,
+        )
+
+    def _capture_data_editor_state(self) -> None:
+        edit = self._path_edits[ArtifactKind.DATA]
+        # A FocusOut event may have already been delivered before the button's
+        # mouse-press handler runs. In that case eventFilter captured the state;
+        # do not replace it with the already-cleared selection.
+        if edit.hasFocus():
+            self._remember_data_editor_state(edit)
+
+    def eventFilter(self, a0: Any, a1: Any) -> bool:
+        if (
+            a0 is self._path_edits.get(ArtifactKind.DATA)
+            and a1.type() == QEvent.Type.FocusOut
+            and self.save_all_button.hasFocus()
+        ):
+            self._remember_data_editor_state(a0)
+        return super().eventFilter(a0, a1)
+
+    def _restore_data_editor_state(self) -> None:
+        state = self._saved_data_editor_state
+        self._saved_data_editor_state = None
+        if state is None:
+            return
+        edit, text, cursor, selection_start, selection_length = state
+        if edit.text() != text:
+            return
+        edit.setCursorPosition(min(cursor, len(text)))
+        if selection_start >= 0 and selection_length:
+            start = min(selection_start, len(text))
+            length = min(selection_length, len(text) - start)
+            if length:
+                edit.setSelection(start, length)
+        edit.setFocus()
+
     def get_data_path(self) -> str:
         return self._path_edits[ArtifactKind.DATA].text()
 
@@ -430,30 +508,50 @@ class ArtifactSaveCenter(QWidget):
             return self._comment_edit.toPlainText()
         return ""
 
+    def _set_path_preserving_editor_state(self, kind: ArtifactKind, path: str) -> None:
+        """Apply a state-driven path without disturbing the active editor.
+
+        Save lifecycle reactions can refresh a pane while a path is being
+        edited. Avoiding a redundant ``setText`` is important: Qt clears a
+        line edit's selection even when the replacement text is identical.
+        When the text does change, retain the best valid cursor/selection
+        projection and restore focus only when this editor owned it.
+        """
+        edit = self._path_edits[kind]
+        if edit.text() != path:
+            had_focus = edit.hasFocus()
+            cursor = edit.cursorPosition()
+            selection_start = edit.selectionStart()
+            selection_length = len(edit.selectedText()) if selection_start >= 0 else 0
+
+            edit.blockSignals(True)
+            try:
+                edit.setText(path)
+            finally:
+                edit.blockSignals(False)
+
+            edit.setCursorPosition(min(cursor, len(path)))
+            if selection_start >= 0 and selection_length:
+                start = min(selection_start, len(path))
+                length = min(selection_length, len(path) - start)
+                if length:
+                    edit.setSelection(start, length)
+            if had_focus:
+                edit.setFocus()
+        self._recompute_current_sig(kind)
+
     def set_data_path(self, path: str) -> None:
-        edit = self._path_edits[ArtifactKind.DATA]
-        edit.blockSignals(True)
-        edit.setText(path)
-        edit.blockSignals(False)
-        self._recompute_current_sig(ArtifactKind.DATA)
+        self._set_path_preserving_editor_state(ArtifactKind.DATA, path)
 
     def set_analysis_path(self, path: str) -> None:
         if not self._has_analysis:
             raise RuntimeError(f"tab {self._tab_id!r} does not support analysis")
-        edit = self._path_edits[ArtifactKind.ANALYSIS]
-        edit.blockSignals(True)
-        edit.setText(path)
-        edit.blockSignals(False)
-        self._recompute_current_sig(ArtifactKind.ANALYSIS)
+        self._set_path_preserving_editor_state(ArtifactKind.ANALYSIS, path)
 
     def set_post_analysis_path(self, path: str) -> None:
         if not self._has_post:
             raise RuntimeError(f"tab {self._tab_id!r} does not support post-analysis")
-        edit = self._path_edits[ArtifactKind.POST_ANALYSIS]
-        edit.blockSignals(True)
-        edit.setText(path)
-        edit.blockSignals(False)
-        self._recompute_current_sig(ArtifactKind.POST_ANALYSIS)
+        self._set_path_preserving_editor_state(ArtifactKind.POST_ANALYSIS, path)
 
     def set_comment_text(self, text: str) -> None:
         if hasattr(self, "_comment_edit"):

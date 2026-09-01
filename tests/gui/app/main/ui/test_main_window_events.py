@@ -385,12 +385,13 @@ def test_bind_routes_events_and_close_unsubscribes() -> None:
     ]
 
 
-def test_run_finished_focuses_result_panel_only_for_finished_outcome() -> None:
+def test_run_finished_refreshes_without_focus_or_navigation() -> None:
     snapshot = _snapshot()
     coordinator, log, ctrl, _host = _coordinator(snapshot)
 
     # Terminal events are interpreted against the State-owned running identity,
-    # not against a cached/payload-derived marker value.
+    # not against a cached/payload-derived marker value. Neither outcome may
+    # trigger a pane-selection reaction.
     ctrl.running_tab_id = None
     coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="cancelled"))
     ctrl.running_tab_id = None
@@ -409,9 +410,38 @@ def test_run_finished_focuses_result_panel_only_for_finished_outcome() -> None:
         call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", None),
         call("host", "refresh_feedback_widget"),
-        call("host", "has_tab_widget", "tab-1"),
-        call("host", "focus_run_result_panel", "tab-1"),
     ]
+    assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
+
+
+def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
+    from qtpy.QtWidgets import QTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = BaseEventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = None
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    ctrl.has_tab.return_value = True
+    ctrl.get_tab_snapshot.return_value = _snapshot(has_run_result=True)
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    tab._left_tabs = QTabWidget()
+    for label in ("Run", "Analysis", "Post", "Data", "Guide"):
+        tab._left_tabs.addTab(QWidget(), label)
+    window._tab_widgets["tab-1"] = tab
+
+    for index in range(tab._left_tabs.count()):
+        tab._left_tabs.setCurrentIndex(index)
+        bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
+        assert tab._left_tabs.currentIndex() == index
+
+    tab.focus_result_panel.assert_not_called()
+    window.deleteLater()
+    tab._left_tabs.deleteLater()
+    qapp.processEvents()
 
 
 def test_run_started_refreshes_invalidated_content_once() -> None:

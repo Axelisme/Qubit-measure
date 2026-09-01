@@ -39,7 +39,6 @@ class MainWindowEventHost(Protocol):
     def remove_tab_widget(self, tab_id: str) -> None: ...
     def has_tab_widget(self, tab_id: str) -> bool: ...
     def view_tab_ids(self) -> list[str]: ...
-    def focus_run_result_panel(self, tab_id: str) -> None: ...
 
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -279,11 +278,10 @@ class MainWindowEventCoordinator:
         self._host.refresh_feedback_widget()
 
     def _on_run_finished(self, payload: RunFinishedPayload) -> None:
+        """Refresh terminal state without changing the user's selected pane."""
         self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
         self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
         self._host.refresh_feedback_widget()
-        if payload.outcome == "finished" and self._host.has_tab_widget(payload.tab_id):
-            self._host.focus_run_result_panel(payload.tab_id)
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
