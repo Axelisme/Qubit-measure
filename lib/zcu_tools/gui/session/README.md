@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-12 — headless session composition
+**Last updated:** 2026-09-02 — device Apply activity marker projection
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -62,6 +62,16 @@ session/
     ├── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook `_build_extra_toolbar_buttons` 讓子類在 Refresh 左側加 app-specific 入口，hook `_build_extra_ml_buttons` / `_on_ml_selection_changed` 讓子類加 ml create/modify。**consumers**：measure subclass（InspectDialog，加 Arb Waveforms 入口與 CfgEditor create/modify）；autofluxdep **直接用不 subclass**（不要 create/modify）
     └── value_source_input.py — QLineEdit value-source helper：`@{prefix` 顯示分段 completion（`@{`→頂層、`dev`→`device.` 並展開下一段、`device.`→下一段），Tab/Backtab 接受預設候選時若當前候選全是 namespace 會自動補 `.` drill down，補到完整 key 才加 `}`；在 `@{full.key} ` 後輸入空格才立即 resolve 並以文字替換；token 完成或解析後明確 hide popup；依賴 `ValueSourceInputHost` port，不知道 ContextService/LiveModel
 ```
+
+## Operation markers
+
+`DeviceDialog` owns the shared device-list activity projection. Each row reads its
+State-owned `DeviceStatus` through `DeviceControlPort` and receives the same compact
+blue `●` treatment as the MainWindow Run tab while that device is `SETTING_UP`.
+Setup start, every terminal outcome, device-change repaint, and dialog reopen derive
+rows again from State; concurrent devices therefore clear independently and the
+user's selection remains unchanged. No persisted marker or competing busy cache is
+introduced.
 
 ## 關鍵設計
 

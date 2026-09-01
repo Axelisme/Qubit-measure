@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
@@ -385,20 +387,26 @@ def test_bind_routes_events_and_close_unsubscribes() -> None:
 
 def test_run_finished_focuses_result_panel_only_for_finished_outcome() -> None:
     snapshot = _snapshot()
-    coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    coordinator, log, ctrl, _host = _coordinator(snapshot)
 
+    # Terminal events are interpreted against the State-owned running identity,
+    # not against a cached/payload-derived marker value.
+    ctrl.running_tab_id = None
     coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="cancelled"))
+    ctrl.running_tab_id = None
     coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="finished"))
 
     assert log.calls == [
         call("host", "has_tab_widget", "tab-1"),
         call("ctrl", "get_tab_snapshot", "tab-1"),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
+        call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", None),
         call("host", "refresh_feedback_widget"),
         call("host", "has_tab_widget", "tab-1"),
         call("ctrl", "get_tab_snapshot", "tab-1"),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
+        call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", None),
         call("host", "refresh_feedback_widget"),
         call("host", "has_tab_widget", "tab-1"),
@@ -419,9 +427,50 @@ def test_run_started_refreshes_invalidated_content_once() -> None:
         call("host", "refresh_tab_post_analyze_form", "tab-1", snapshot),
         call("host", "refresh_tab_writeback", "tab-1", snapshot),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("host", "refresh_run_lock", "tab-1"),
+        call("ctrl", "get_running_tab_id"),
+        call("host", "refresh_run_lock", "running-tab"),
         call("host", "refresh_feedback_widget"),
     ]
+
+
+def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = BaseEventBus()
+    ctrl.get_running_tab_id.return_value = "tab-a"
+    ctrl.get_active_tab_id.return_value = None
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    ctrl.has_tab.return_value = True
+
+    class _TabStub(QWidget):
+        def update_interaction_state(self, _snapshot: object) -> None:
+            pass
+
+    window = MainWindow(ctrl)
+    tab_a = _TabStub()
+    tab_b = _TabStub()
+    window._tab_widgets["tab-a"] = tab_a  # type: ignore[assignment]
+    window._tab_widgets["tab-b"] = tab_b  # type: ignore[assignment]
+    window._tabs.addTab(tab_a, "A")
+    window._tabs.addTab(tab_b, "B")
+
+    window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
+
+    tab_bar = window._tabs.tabBar()
+    assert tab_bar is not None
+    assert window._tabs.tabText(0) == "● A"
+    assert window._tabs.tabText(1) == "B"
+    assert tab_bar.tabTextColor(0).name() == "#286ac7"
+    assert tab_bar.tabToolTip(0) == "Run in progress"
+
+    ctrl.get_running_tab_id.return_value = None
+    window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
+
+    assert window._tabs.tabText(0) == "A"
+    assert window._tabs.tabText(1) == "B"
+    assert tab_bar.tabToolTip(0) == ""
 
 
 def test_context_event_refreshes_paths_and_interaction_without_writeback() -> None:
