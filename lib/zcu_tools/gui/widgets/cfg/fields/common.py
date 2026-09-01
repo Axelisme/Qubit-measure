@@ -609,7 +609,7 @@ class ScalarWidget(BaseLiveWidget):
 
 
 class SweepWidget(BaseLiveWidget):
-    """Inline 2x2 input for start/stop/expts/step with synchronized updates."""
+    """Inline 2x2 input for start/stop/points/step with synchronized updates."""
 
     def __init__(
         self,
@@ -679,7 +679,7 @@ class SweepWidget(BaseLiveWidget):
             0,
         )
         layout.addWidget(
-            _sweep_pair(QLabel("expts"), self._expts, QLabel("step"), self._step),
+            _sweep_pair(QLabel("points"), self._expts, QLabel("step"), self._step),
             1,
             0,
         )
@@ -719,7 +719,7 @@ class SweepWidget(BaseLiveWidget):
 
 
 class CenteredSweepWidget(BaseLiveWidget):
-    """Inline 2x2 input for center/span/expts/step with synchronized updates."""
+    """Inline 2x2 input for center/span/points/step with synchronized updates."""
 
     def __init__(
         self,
@@ -782,7 +782,7 @@ class CenteredSweepWidget(BaseLiveWidget):
             0,
         )
         layout.addWidget(
-            _sweep_pair(QLabel("expts"), self._expts, QLabel("step"), self._step),
+            _sweep_pair(QLabel("points"), self._expts, QLabel("step"), self._step),
             1,
             0,
         )
