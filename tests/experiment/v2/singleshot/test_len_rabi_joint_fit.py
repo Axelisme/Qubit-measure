@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import cast
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import zcu_tools.experiment.v2.singleshot.len_rabi_fit as fit_module
 from matplotlib.figure import Figure
+from matplotlib.patches import StepPatch
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 from scipy.special import ndtr
@@ -206,7 +210,39 @@ def test_public_analysis_recovers_identifiable_raw_iq_joint_fit() -> None:
     assert np.isfinite(fit.condition_number)
     assert fit.measured_populations.shape == (lengths.size, 3)
     assert fit.fitted_populations.shape == (lengths.size, 3)
+    assert len(figure.axes) == 3
     assert len(figure.axes[0].lines) == 6
+
+    histogram_ax = figure.axes[1]
+    stairs = {
+        patch.get_label(): np.asarray(cast(StepPatch, patch).get_data()[0])
+        for patch in histogram_ax.patches
+    }
+    np.testing.assert_array_equal(stairs["Observed counts"], fit.projection.counts[0])
+    qg, qe = transition_state_bin_probabilities(
+        fit.projection.bin_edges,
+        fit.projected_g_center,
+        fit.projected_e_center,
+        fit.sigma,
+        fit.p_avg,
+        fit.length_ratio,
+    )
+    p_e = fit.fitted_populations[0, 1]
+    shots = fit.projection.counts[0].sum()
+    np.testing.assert_allclose(
+        stairs["Fitted total"],
+        shots * ((1.0 - p_e) * qg + p_e * qe),
+    )
+    np.testing.assert_allclose(stairs["Ground contribution"], shots * (1.0 - p_e) * qg)
+    np.testing.assert_allclose(stairs["Excited contribution"], shots * p_e * qe)
+
+    confusion_ax = figure.axes[2]
+    assert len(confusion_ax.images) == 1
+    displayed_matrix = confusion_ax.images[0].get_array()
+    assert displayed_matrix is not None
+    np.testing.assert_allclose(displayed_matrix, fit.confusion_matrix)
+    assert confusion_ax.images[0].get_clim() == (0.0, 1.0)
+    assert "fixed by model" in confusion_ax.get_title().lower()
     plt.close(figure)
 
 
@@ -232,6 +268,47 @@ def test_public_fit_converges_for_gaussian_boundary_of_transition_family() -> No
     assert np.isfinite(fit.radius)
     np.testing.assert_allclose(fit.confusion_matrix.sum(axis=1), 1.0, atol=1e-12)
     np.testing.assert_array_equal(fit.confusion_matrix[2], [0.0, 0.0, 1.0])
+
+
+def test_explicit_call_limit_does_not_trigger_optimizer_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migrad_calls: list[int | None] = []
+
+    class FakeMinuit:
+        LIKELIHOOD = 0.5
+
+        def __init__(
+            self, objective: object, *initial: float, name: tuple[str, ...]
+        ) -> None:
+            del objective
+            self.values = dict(zip(name, initial, strict=True))
+            self.limits: dict[str, tuple[float, float]] = {}
+            self.errordef = self.LIKELIHOOD
+            self.covariance = None
+            self.fmin = None
+            self.fval = None
+
+        def migrad(self, *, ncall: int | None = None) -> FakeMinuit:
+            migrad_calls.append(ncall)
+            self.fmin = SimpleNamespace(
+                is_valid=False,
+                has_accurate_covar=False,
+                has_reached_call_limit=True,
+                hesse_failed=False,
+                edm=1.0,
+            )
+            self.fval = 1.0
+            return self
+
+    monkeypatch.setattr(fit_module, "Minuit", FakeMinuit)
+    lengths = np.array([0.1, 0.2])
+    signals = np.array([[0.0, 1.0], [1.0, 2.0]], dtype=np.complex128)
+
+    fit = fit_len_rabi_joint(lengths, signals, max_calls=3200)
+
+    assert not fit.backend.valid
+    assert migrad_calls == [3200]
 
 
 def test_invalid_backend_keeps_diagnostics_but_blocks_finite_calibration() -> None:
@@ -288,7 +365,9 @@ def test_fit_failure_keeps_numeric_and_figure_shapes(
     assert fit.condition_number == np.inf
     assert fit.measured_populations.shape == (5, 3)
     assert fit.fitted_populations.shape == (5, 3)
+    assert len(figure.axes) == 3
     assert figure.axes[0].get_title() == "Len Rabi joint fit invalid"
+    assert "unavailable" in figure.axes[2].get_title().lower()
     plt.close(figure)
 
 

@@ -301,13 +301,11 @@ def _fit_backend(
     )
     fit.migrad(ncall=max_calls)
     # Migrad already supplies the global covariance. A separate Hesse pass can
-    # raise EDM again on the flat zero-transition boundary, so continue an
-    # invalid minimum once instead and keep the caller's total call budget.
+    # raise EDM again on the flat zero-transition boundary, so the default fit
+    # may continue once. An explicit ncall budget always remains one Migrad.
     first_minimum = fit.fmin
-    if first_minimum is not None and not first_minimum.is_valid:
-        remaining_calls = None if max_calls is None else max_calls - calls
-        if remaining_calls is None or remaining_calls > 0:
-            fit.migrad(ncall=remaining_calls)
+    if max_calls is None and first_minimum is not None and not first_minimum.is_valid:
+        fit.migrad()
     fmin = fit.fmin
     fval = fit.fval
     if fmin is None or fval is None:

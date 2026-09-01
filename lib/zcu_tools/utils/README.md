@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-09-01 — named shared and Len Rabi likelihood fitting
+**Last updated:** 2026-09-01 — Len Rabi likelihood responsibility boundary
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -72,7 +72,9 @@ iminuit state。`fit_ge_decay(..., share_t1=True)` 是第一個 tracer：g/e tra
 Singleshot readout-transition family亦提供固定histogram edges的integrated-bin conditional
 probabilities與non-overlapping g/e circle積分；Len Rabi joint likelihood以同一conditional
 family建立multinomial NLL及derived confusion matrix，不以bin-center PDF高度或free matrix
-parameters取代其機率語意。
+parameters取代其機率語意。這個utils Module只擁有conditional probability與circle integration；
+Len Rabi experiment Module擁有optimizer continuation、backend validity、calibration阻擋與Figure
+呈現，避免generic fitting helper決定上層analysis lifecycle。
 
 Dual transition-rate fitting以六個stable rate names共享跨dataset identity，兩組initial
 g/e populations維持dataset-qualified local identity。`DualTransitionRateFitResult`直接持有

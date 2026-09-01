@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
@@ -35,6 +36,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
+from zcu_tools.utils.fitting.singleshot import transition_state_bin_probabilities
 
 from .len_rabi_fit import LenRabiJointFitResult, fit_len_rabi_joint
 from .util import classify_result, raw_shots_to_signal
@@ -58,6 +60,96 @@ def classify_len_rabi_iq(
         raise ValueError("Len Rabi raw IQ must have shape (length, shot)")
     g_mask, e_mask, _ = classify_result(signals, g_center, e_center, radius)
     return np.stack((g_mask.mean(axis=1), e_mask.mean(axis=1)), axis=1)
+
+
+def _plot_initial_histogram(
+    ax: Axes,
+    length: float,
+    fit: LenRabiJointFitResult,
+) -> None:
+    counts = fit.projection.counts[0]
+    edges = fit.projection.bin_edges
+    ax.stairs(counts, edges, label="Observed counts", color="black")
+
+    fitted_values = np.array(
+        [
+            fit.projected_g_center,
+            fit.projected_e_center,
+            fit.sigma,
+            fit.p_avg,
+            fit.length_ratio,
+            fit.fitted_populations[0, 0],
+            fit.fitted_populations[0, 1],
+        ]
+    )
+    if fit.backend.valid and np.isfinite(fitted_values).all():
+        qg, qe = transition_state_bin_probabilities(
+            edges,
+            fit.projected_g_center,
+            fit.projected_e_center,
+            fit.sigma,
+            fit.p_avg,
+            fit.length_ratio,
+        )
+        p_g, p_e = fit.fitted_populations[0, :2]
+        shots = float(counts.sum())
+        g_counts = shots * p_g * qg
+        e_counts = shots * p_e * qe
+        ax.stairs(g_counts + e_counts, edges, label="Fitted total", color="purple")
+        ax.stairs(
+            g_counts,
+            edges,
+            label="Ground contribution",
+            color="blue",
+            linestyle="--",
+        )
+        ax.stairs(
+            e_counts,
+            edges,
+            label="Excited contribution",
+            color="red",
+            linestyle="--",
+        )
+        ax.set_title(
+            "Initial-point projected IQ histogram\n"
+            f"L={length:.4g} μs, $P_g$={p_g:.3f}, $P_e$={p_e:.3f}"
+        )
+    else:
+        ax.set_title(
+            f"Initial-point projected IQ histogram\nL={length:.4g} μs; joint fit invalid"
+        )
+    ax.set_xlabel("Pooled PCA projection (a.u.)")
+    ax.set_ylabel("Counts")
+    ax.legend()
+    ax.grid(True)
+
+
+def _plot_confusion_matrix(ax: Axes, fit: LenRabiJointFitResult) -> None:
+    labels = ("g", "e", "other")
+    matrix = fit.confusion_matrix
+    if fit.backend.valid and np.isfinite(matrix).all():
+        ax.imshow(matrix, cmap="Blues", vmin=0.0, vmax=1.0)
+        for row in range(3):
+            for column in range(3):
+                value = matrix[row, column]
+                ax.text(
+                    column,
+                    row,
+                    f"{value:.3f}",
+                    ha="center",
+                    va="center",
+                    color="white" if value > 0.5 else "black",
+                )
+        ax.set_title("Fitted confusion matrix\nOther row fixed by model")
+    else:
+        ax.set_xlim(-0.5, 2.5)
+        ax.set_ylim(2.5, -0.5)
+        ax.text(1.0, 1.0, "Joint fit invalid", ha="center", va="center")
+        ax.set_title("Confusion matrix unavailable")
+    ax.set_xticks(range(3), labels)
+    ax.set_yticks(range(3), labels)
+    ax.set_xlabel("Classified state")
+    ax.set_ylabel("True state")
 
 
 class LenRabiSweepCfg(ConfigBase):
@@ -196,8 +288,13 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         assert result is not None, "no result found"
 
         fit = fit_len_rabi_joint(result.lengths, result.signals, max_calls=max_calls)
-        fig, ax = plt.subplots(figsize=config.figsize)
+        width, height = config.figsize
+        fig = plt.figure(figsize=(width, height * 1.6))
         assert isinstance(fig, Figure)
+        grid = fig.add_gridspec(2, 2, height_ratios=(2.0, 1.2))
+        ax = fig.add_subplot(grid[0, :])
+        histogram_ax = fig.add_subplot(grid[1, 0])
+        confusion_ax = fig.add_subplot(grid[1, 1])
 
         colors = ("blue", "red", "green")
         labels = ("$|0\\rangle$", "$|1\\rangle$", "$|L\\rangle$")
@@ -231,5 +328,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
+        _plot_initial_histogram(histogram_ax, float(result.lengths[0]), fit)
+        _plot_confusion_matrix(confusion_ax, fit)
         fig.tight_layout()
         return fit, fig
