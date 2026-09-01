@@ -556,6 +556,50 @@ def _setup_two_device_dialog(qapp):
     return dialog, ctrl, setting_up
 
 
+def test_setup_markers_follow_each_device_and_preserve_selection(qapp):
+    """Rows project each device's State status independently on start/finish."""
+    setting_up: set[str] = set()
+    ctrl = _two_device_ctrl(setting_up)
+    dialog = _make_dialog(ctrl)
+    dialog._list.setCurrentRow(1)  # Keep fd_b selected while fd_a settles.
+
+    setting_up.add("fd_a")
+    ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_a"))
+
+    first = dialog._list.item(0)
+    second = dialog._list.item(1)
+    assert first is not None and first.text() == "● fd_a (FakeDevice)"
+    assert second is not None and second.text() == "fd_b (FakeDevice)"
+    assert first.foreground().color().name() == "#286ac7"
+    selected = dialog._list.currentItem()
+    assert selected is not None and selected.data(256) == "fd_b"
+
+    setting_up.add("fd_b")
+    ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_b"))
+    second = dialog._list.item(1)
+    assert second is not None and second.text() == "● fd_b (FakeDevice)"
+
+    setting_up.remove("fd_a")
+    ctrl.get_bus.return_value.emit(
+        DeviceSetupFinishedPayload(name="fd_a", outcome="failed")
+    )
+
+    first = dialog._list.item(0)
+    second = dialog._list.item(1)
+    assert first is not None and first.text() == "fd_a (FakeDevice)"
+    assert second is not None and second.text() == "● fd_b (FakeDevice)"
+    selected = dialog._list.currentItem()
+    assert selected is not None and selected.data(256) == "fd_b"
+
+    setting_up.remove("fd_b")
+    ctrl.get_bus.return_value.emit(
+        DeviceSetupFinishedPayload(name="fd_b", outcome="cancelled")
+    )
+
+    items = [dialog._list.item(row) for row in range(dialog._list.count())]
+    assert all(item is not None and not item.text().startswith("● ") for item in items)
+
+
 def test_setup_running_list_remains_enabled(qapp):
     """During a setup the device list stays enabled so the user can switch
     to view (and even set up) another device."""

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-02 — dense measure Inspect Parameters editing
+**Last updated:** 2026-09-02 — dense Inspect Parameters editing and Run activity marker projection
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -23,7 +23,10 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
 - `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。`running_tab_id`
-  是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
+  是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。MainWindow
+  also projects that identity directly onto exactly one top-level tab as a compact blue
+  `●` marker while Run is active; Run start/terminal EventBus reactions and tab insertion
+  repaint from State, so the marker is never persisted or cached as a second busy state.
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |

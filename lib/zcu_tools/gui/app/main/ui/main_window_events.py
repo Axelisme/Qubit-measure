@@ -275,12 +275,12 @@ class MainWindowEventCoordinator:
                 _TabReaction.INTERACTION,
             ),
         )
-        self._host.refresh_run_lock(payload.tab_id)
+        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
         self._host.refresh_feedback_widget()
 
     def _on_run_finished(self, payload: RunFinishedPayload) -> None:
         self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
-        self._host.refresh_run_lock(None)
+        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
         self._host.refresh_feedback_widget()
         if payload.outcome == "finished" and self._host.has_tab_widget(payload.tab_id):
             self._host.focus_run_result_panel(payload.tab_id)
