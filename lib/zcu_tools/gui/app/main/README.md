@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-02 — embedded Inspect Modules cfg editing and transactional replacement
+**Last updated:** 2026-09-02 — transactional Inspect editing, stable Run/Save orientation and Run activity projection
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -71,7 +71,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   scroll/cap lifecycle.
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
-  retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an
+  retargets the worker (ADR-0017). Run terminal reactions refresh canonical
+  presentation without selecting a subtab; Analysis remains an explicit user
+  selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
   action row放在`Measurement data`card之前，同時擁有capability-driven artifact rows、
   high-contrast status rendering and the tab-local status lifecycle derived from
@@ -80,7 +82,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   tracks result lifecycle. The center owns the saveability decision and the ordered
   Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
   successes); tracker/invariant failures Fast Fail and operational failures are
-  presented centrally, and async data completion is routed to the center.
+  presented centrally, and async data completion is routed to the center. Save All
+  updates that center in place: terminal status updates do not replace the Data
+  pane or its widgets, and the data-path editor retains focus, cursor and selection.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
@@ -102,8 +106,8 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   the gallery never attaches or reparents a canvas. Subtab routing keeps
   Run/Analysis/Post on their source stacks, Data on the gallery, and Guide on
   its placeholder. Top-level orchestration invokes behavior-oriented tab methods
-  for result focus, plot hosting, interactive-widget lifecycle, figure reads,
-  and persisted panel geometry; the tab does not expose its Qt containers.
+  for result presentation, plot hosting, interactive-widget lifecycle, figure
+  reads, and persisted panel geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。

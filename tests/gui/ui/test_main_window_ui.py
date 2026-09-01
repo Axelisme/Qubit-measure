@@ -1171,9 +1171,9 @@ def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
     bus.emit(RunFinishedPayload(tab_id=tab_id, outcome=outcome))
 
 
-def test_finished_run_auto_switches_to_analysis_tab(qapp):
-    """RUN_FINISHED with outcome=finished switches the tab to Analysis — the
-    decision reads the outcome straight off the RUN_FINISHED payload."""
+def test_finished_run_preserves_selected_subtab(qapp):
+    """RUN_FINISHED refreshes state without choosing a result pane."""
+    from qtpy.QtWidgets import QTabWidget, QWidget
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -1183,11 +1183,16 @@ def test_finished_run_auto_switches_to_analysis_tab(qapp):
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1", has_run_result=True)
     window = MainWindow(ctrl)
     tab = MagicMock()
+    tab._left_tabs = QTabWidget()
+    for label in ("Run", "Analysis", "Data"):
+        tab._left_tabs.addTab(QWidget(), label)
+    tab._left_tabs.setCurrentIndex(2)
     window._tab_widgets["tab-1"] = tab
 
     _emit_run_finished(bus, "tab-1", outcome="finished")
 
-    tab.focus_result_panel.assert_called_once_with()
+    assert tab._left_tabs.currentIndex() == 2
+    tab.focus_result_panel.assert_not_called()
 
 
 def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
@@ -1209,12 +1214,9 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
     tab._left_tabs.setCurrentIndex.assert_not_called()
 
 
-def test_non_analysis_adapter_run_auto_switches_to_second_tab(qapp):
-    """flux_dep / power_dep adapters (analysis=NONE) keep the second
-    tab — its analysis widgets are hidden but the Save section stays — so a
-    finished run still switches there, landing the user on Save (where they save
-    the 2D sweep). Regression: switching used to be skipped, and earlier the
-    whole tab was hidden so the user could not save at all."""
+def test_non_analysis_adapter_run_preserves_selected_subtab(qapp):
+    """Non-analysis adapters also retain the user's selected pane after Run."""
+    from qtpy.QtWidgets import QTabWidget, QWidget
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -1226,11 +1228,16 @@ def test_non_analysis_adapter_run_auto_switches_to_second_tab(qapp):
     )
     window = MainWindow(ctrl)
     tab = MagicMock()
+    tab._left_tabs = QTabWidget()
+    for label in ("Run", "Data", "Guide"):
+        tab._left_tabs.addTab(QWidget(), label)
+    tab._left_tabs.setCurrentIndex(1)
     window._tab_widgets["tab-1"] = tab
 
     _emit_run_finished(bus, "tab-1", outcome="finished")
 
-    tab.focus_result_panel.assert_called_once_with()
+    assert tab._left_tabs.currentIndex() == 1
+    tab.focus_result_panel.assert_not_called()
 
 
 def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
