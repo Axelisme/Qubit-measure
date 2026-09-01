@@ -489,11 +489,14 @@ opens one `gc=False` editor session; field and Name edits stay in that draft.
 Apply calls the replacement write interface, which validates and lowers before the
 single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
 the resulting selection. Collision, invalid, or lowering failures leave the live
-entry and draft intact. Revert reloads live content, and dirty selection/close
-requires Apply, Discard, or Cancel. New remains a retained non-blocking role
-catalog dialog; the Modules tree Delete key is direct only at the tree focus
-boundary, while the button confirms. Autofluxdep keeps the base presentation and
-its read-only wrapper.
+entry and draft intact. Each existing-entry editor retains its source
+ModuleLibrary identity and fast-fails replacement after a context switch, leaving
+that draft for explicit Revert/Discard. A pending refresh is consumed after a
+dirty selection transaction so the tree reflects the resulting names. Revert
+reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
+New remains a retained non-blocking role catalog dialog; the Modules tree Delete
+key is direct only at the tree focus boundary, while the button confirms.
+Autofluxdep keeps the base presentation and its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the

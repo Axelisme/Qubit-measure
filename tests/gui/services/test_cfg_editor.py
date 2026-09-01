@@ -516,6 +516,23 @@ def test_replace_rejects_a_source_name_that_is_not_the_opened_entry(service, ctr
     assert service.get_draft(editor_id)
 
 
+def test_replace_rejects_a_context_switch_and_keeps_the_draft(service, ctrl, ml):
+    editor_id, _ = service.open("module", from_name="pulse_seed")
+    draft = service.get_draft(editor_id)
+    draft.root.fields["freq"].set_value(5000.0)
+    switched_ml = ModuleLibrary()
+    switched_ml.modules["pulse_seed"] = ml.modules["pulse_seed"]
+    ctrl.get_current_ml.return_value = switched_ml
+
+    with pytest.raises(CfgEditorError, match="different ModuleLibrary context"):
+        service.replace(editor_id, "pulse_seed", "pulse_renamed")
+
+    ctrl.replace_ml_module_from_schema.assert_not_called()
+    assert service.get_draft(editor_id) is draft
+    assert "pulse_seed" in switched_ml.modules
+    assert "pulse_renamed" not in switched_ml.modules
+
+
 # ---------------------------------------------------------------------------
 # Seeded (UI-owned, gc=False) sessions — tab cfg / inspect / writeback
 # ---------------------------------------------------------------------------

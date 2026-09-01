@@ -552,6 +552,33 @@ def test_inspect_dialog_ml_waveform_selection_uses_same_embedded_session(qapp):
     assert dialog._ml_status_label.text() == "Saved"
 
 
+def test_inspect_dialog_ml_context_switch_apply_failure_keeps_draft(qapp, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.app.main.services.cfg_editor import CfgEditorError
+
+    ml_a = _make_ml()
+    ml_b = _make_ml()
+    ctrl = _make_ctrl_with_ml(ml_a)
+    dialog = InspectDialog(ctrl, MagicMock())
+    _select_ml_child(dialog, 0)
+    editor_id = dialog._ml_editor_id
+    assert editor_id is not None
+    ctrl._drafts[editor_id].root.fields["ro_freq"].set_value(6123.0)
+    dialog._ml_name_edit.setText("readout_v2")
+    dialog._ml_name_edit.textEdited.emit("readout_v2")
+
+    ctrl.get_current_ml.return_value = ml_b
+    dialog.refresh()
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    ctrl.replace_cfg_editor.side_effect = CfgEditorError("different context")
+    dialog._ml_apply_btn.click()
+
+    assert ml_b.modules["readout_rf"].to_dict()["ro_freq"] == 6000.0
+    assert dialog._ml_editor_id == editor_id
+    assert dialog._ml_name_edit.text() == "readout_v2"
+    assert dialog._ml_status_label.text() == "Unsaved"
+
+
 def test_inspect_dialog_ml_apply_failure_keeps_live_and_draft(qapp, monkeypatch):
     from qtpy.QtWidgets import QMessageBox
 
@@ -627,6 +654,40 @@ def test_inspect_dialog_ml_dirty_selection_cannot_silently_discard(qapp, monkeyp
     assert dialog._ml_selected_data == ("modules", "readout_rf")
     assert dialog._current_ml_item_data() == ("modules", "readout_rf")
     assert dialog._ml_name_edit.text() == "draft_name"
+
+
+def test_inspect_dialog_ml_dirty_selection_save_refreshes_tree_after_apply(
+    qapp, monkeypatch
+):
+    from qtpy.QtWidgets import QMessageBox
+
+    ml = _make_ml()
+    ctrl = _make_ctrl_with_ml(ml)
+    dialog = InspectDialog(ctrl, MagicMock())
+    _select_ml_child(dialog, 0)
+    dialog._ml_name_edit.setText("readout_v2")
+    dialog._ml_name_edit.textEdited.emit("readout_v2")
+
+    replace = ctrl.replace_cfg_editor.side_effect
+
+    def _replace_and_refresh(*args: Any) -> None:
+        replace(*args)
+        dialog.refresh()
+
+    ctrl.replace_cfg_editor.side_effect = _replace_and_refresh
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *a, **k: QMessageBox.StandardButton.Save,
+    )
+    _select_ml_child(dialog, 1)
+    qapp.processEvents()
+
+    assert dialog._ml_selected_data == ("waveforms", "drive_wav")
+    assert dialog._ml_name_edit.text() == "drive_wav"
+    assert dialog._find_ml_item(("modules", "readout_rf")) is None
+    assert dialog._find_ml_item(("modules", "readout_v2")) is not None
+    assert not dialog._ml_refresh_pending
 
 
 def test_inspect_dialog_ml_dirty_close_requires_explicit_decision(qapp, monkeypatch):

@@ -942,7 +942,9 @@ class InspectDialog(InspectDialogBase):
         self._close_ml_editor()
         self._ml_selected_data = (group, new_name)
         self._ml_dirty_hint = False
-        self._ml_refresh_pending = False
+        # Keep a refresh requested by the synchronous ML_CHANGED fact. A
+        # selection transaction (or the next explicit refresh) consumes it after
+        # the resulting target is selected, so the tree cannot retain old names.
         if select_result:
             self._populate_ml(self._app_ctrl.get_current_ml())
         return True
