@@ -10,9 +10,16 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QWidget
-
+from qtpy.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QWidget,
+)
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
@@ -23,11 +30,10 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ScalarSpec,
 )
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg import CfgFormWidget, TreeCfgWidget
 from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS, _branch_color
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 
 
 def _luminance(hex_color: str) -> float:
@@ -61,6 +67,7 @@ def make_ctrl():
 
 
 def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
+    from matplotlib.figure import Figure
     from zcu_tools.gui.app.main.services.ports import (
         AnalysisPaneSnapshot,
         PathResourceSnapshot,
@@ -69,7 +76,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         SavePaneSnapshot,
         TabPathsSnapshot,
     )
-    from matplotlib.figure import Figure
 
     data_path = PathResourceSnapshot(override=None, path="/tmp/data.hdf5")
     image = PathResourceSnapshot(override=None, path="/tmp/img.png")
@@ -90,8 +96,12 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         image_path=image,
         has_writeback_draft=False,
     )
-    spec = CfgSectionSpec(label="root", fields={"reps": ScalarSpec(label="Reps", type=int)})
-    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(100)}))
+    spec = CfgSectionSpec(
+        label="root", fields={"reps": ScalarSpec(label="Reps", type=int)}
+    )
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(100)})
+    )
 
     @dataclasses.dataclass
     class P:
@@ -120,7 +130,9 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         analysis=analysis_snap,
         post_analysis=post_snap,
         save=SavePaneSnapshot(data_path=data_path),
-        paths=TabPathsSnapshot(data=data_path, analysis_image=image, post_analysis_image=image),
+        paths=TabPathsSnapshot(
+            data=data_path, analysis_image=image, post_analysis_image=image
+        ),
     )
 
 
@@ -160,10 +172,14 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
         new_lum = _luminance(new)
         # Every new color must be visibly darker than the lightest candidate (≈ 235 avg)
         # Candidate luminance range ~ 230-235; new should be < 180 to be clearly darker
-        assert new_lum < 180, f"{new} luminance {new_lum:.1f} not < 180 (darker than candidate)"
+        assert new_lum < 180, (
+            f"{new} luminance {new_lum:.1f} not < 180 (darker than candidate)"
+        )
         # Also ensure darker than each candidate individually
         for pastel in _CANDIDATE_PASTELS:
-            assert new_lum < _luminance(pastel) - 40, f"{new} not sufficiently darker than candidate {pastel}"
+            assert new_lum < _luminance(pastel) - 40, (
+                f"{new} not sufficiently darker than candidate {pastel}"
+            )
 
     # Verify helper cycles correctly
     for idx in range(10):
@@ -227,9 +243,8 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
         assert bg not in depth_set
 
     # Guide-line painting: depth is per-segment column, normalized for h-scroll
-    from qtpy.QtWidgets import QStyleOptionViewItem
     from qtpy.QtCore import QRect
-    from qtpy.QtWidgets import QStyle
+    from qtpy.QtWidgets import QStyle, QStyleOptionViewItem
     from zcu_tools.gui.widgets.cfg.structure import _TreeBranchStyle
 
     style = _TreeBranchStyle()
@@ -241,7 +256,11 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
             break
     if not deep_index.isValid():
         last_item = items[-1]
-        deep_index = tree.indexFromItem(last_item) if hasattr(tree, "indexFromItem") else deep_index
+        deep_index = (
+            tree.indexFromItem(last_item)
+            if hasattr(tree, "indexFromItem")
+            else deep_index
+        )
 
     # segment at viewport x=0 => depth 0 even with deep row
     painter = MagicMock()
@@ -254,7 +273,9 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
     option.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
     if deep_index.isValid():
         option.index = deep_index  # type: ignore[attr-defined]
-    style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorBranch, option, painter, tree)  # type: ignore[arg-type]
+    style.drawPrimitive(
+        QStyle.PrimitiveElement.PE_IndicatorBranch, option, painter, tree
+    )  # type: ignore[arg-type]
     assert painter.setPen.called
     pen = painter.setPen.call_args[0][0]
     pen_color = pen.color().name().lower()
@@ -272,7 +293,9 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
     option2.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
     if deep_index.isValid():
         option2.index = deep_index  # type: ignore[attr-defined]
-    style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorBranch, option2, painter2, tree)  # type: ignore[arg-type]
+    style.drawPrimitive(
+        QStyle.PrimitiveElement.PE_IndicatorBranch, option2, painter2, tree
+    )  # type: ignore[arg-type]
     pen2 = painter2.setPen.call_args[0][0]
     assert pen2.color().name().lower() == TREE_DEPTH_COLORS[2].lower()
 
@@ -294,7 +317,9 @@ def test_A1_depth_colors_dark_stable_and_not_row_background(qapp):
         option3.state = QStyle.StateFlag.State_Sibling | QStyle.StateFlag.State_Item  # type: ignore[attr-defined]
         if deep_index.isValid():
             option3.index = deep_index  # type: ignore[attr-defined]
-        style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorBranch, option3, painter3, tree)  # type: ignore[arg-type]
+        style.drawPrimitive(
+            QStyle.PrimitiveElement.PE_IndicatorBranch, option3, painter3, tree
+        )  # type: ignore[arg-type]
         pen3 = painter3.setPen.call_args[0][0]
         assert pen3.color().name().lower() == TREE_DEPTH_COLORS[2].lower()
         h_bar.setRange(*orig_range)
@@ -413,10 +438,14 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widge
         item = layout.itemAt(i)
         w = item.widget() if item is not None else None
         if w is tab.reset_btn:
-            assert layout.stretch(i) == 20, f"Reset stretch should be 20, got {layout.stretch(i)}"
+            assert layout.stretch(i) == 20, (
+                f"Reset stretch should be 20, got {layout.stretch(i)}"
+            )
             found_reset = True
         if w is tab.run_btn:
-            assert layout.stretch(i) == 80, f"Run stretch should be 80, got {layout.stretch(i)}"
+            assert layout.stretch(i) == 80, (
+                f"Run stretch should be 80, got {layout.stretch(i)}"
+            )
             found_run = True
     assert found_reset and found_run
     # Both buttons should be Expanding horizontally so they fill the proportion
@@ -428,8 +457,15 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widge
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
     idle_style = tab.run_btn.styleSheet()
+    reset_style = tab.reset_btn.styleSheet()
+    assert "background-color" in reset_style
+    assert ":hover" in reset_style
+    assert ":pressed" in reset_style
+    assert ":disabled" in reset_style
+    assert not tab.reset_btn.isHidden()
 
-    # When running, Run becomes Stop with red treatment and remains 80%
+    # When running, Reset disappears and Stop fills the action row.
+    assert snap.interaction is not None
     busy = dataclasses.replace(
         snap,
         interaction=dataclasses.replace(snap.interaction, is_running=True),
@@ -439,15 +475,28 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widge
     assert tab.run_btn.text() == "Stop"
     # style should have changed (Stop vs Run)
     assert tab.run_btn.styleSheet() != idle_style
-    # stretch should remain 80
+    assert tab.reset_btn.isHidden()
     for i in range(layout.count()):
-        if layout.itemAt(i).widget() is tab.run_btn:
-            assert layout.stretch(i) == 80
+        item = layout.itemAt(i)
+        assert item is not None
+        if item.widget() is tab.reset_btn:
+            assert layout.stretch(i) == 0
+        if item.widget() is tab.run_btn:
+            assert layout.stretch(i) == 100
 
-    # back to idle restores primary
+    # back to idle restores primary and 20/80 geometry
     tab.update_interaction_state(snap)
+    qapp.processEvents()
+    assert not tab.reset_btn.isHidden()
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        assert item is not None
+        if item.widget() is tab.reset_btn:
+            assert layout.stretch(i) == 20
+        if item.widget() is tab.run_btn:
+            assert layout.stretch(i) == 80
     tab.detach()
 
 
@@ -485,13 +534,17 @@ def test_A6_Analyze_full_width_below_params_before_writeback(qapp, exp_tab_widge
     idx_params = widgets.index(tab._analyze_section)
     # Analyze btn is directly a child of inner layout (100% width), not inside extra container
     # Check that analyze_btn is directly in widgets list
-    assert tab.analyze_btn in widgets, "Analyze should be directly in inner layout for 100% width"
+    assert tab.analyze_btn in widgets, (
+        "Analyze should be directly in inner layout for 100% width"
+    )
     idx_analyze = widgets.index(tab.analyze_btn)
     idx_writeback = widgets.index(tab.writeback_section)
     assert idx_params < idx_analyze < idx_writeback
 
     # 100% width: sizePolicy Expanding horizontally
-    assert tab.analyze_btn.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    assert (
+        tab.analyze_btn.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    )
     # Must expand to fill available width — check that minimum width is not the old 94 fixed right-aligned style
     # The button should not be inside a QHBoxLayout with stretch before it
     parent = tab.analyze_btn.parent()
@@ -507,7 +560,9 @@ def test_A6_Analyze_full_width_below_params_before_writeback(qapp, exp_tab_widge
                     if i > 0 and parent_layout.itemAt(i - 1).spacerItem() is not None:
                         has_stretch_before = True
                     break
-            assert not has_stretch_before, "Analyze should not have stretch before it (should be 100% width)"
+            assert not has_stretch_before, (
+                "Analyze should not have stretch before it (should be 100% width)"
+            )
 
     # Availability: when idle with context & run result, enabled
     assert tab.analyze_btn.isEnabled() is True

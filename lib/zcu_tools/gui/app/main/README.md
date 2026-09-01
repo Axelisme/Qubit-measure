@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-08-31 — DataFigurePreviewGallery responsive mosaic and compact responsive writeback ledger
+**Last updated:** 2026-09-01 — progress, writeback applied state, Data and Run actions
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -39,9 +39,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   cycle on guide lines stable under horizontal scroll, rows no longer use depth
   backgrounds, whole-row folding, reference shape elision, viewport follows
   available panel height with scrolling only when content exceeds viewport);
-  Run action row is status-free with Reset 20% / Run 80% of available width,
-  Reset neutral secondary and Run blue primary with Stop retaining red active
-  semantics (A5); Analysis uses an app-local single-column 13 px ledger with
+  Run action row is status-free with Reset 20% / Run 80% of available width；
+  idle Reset為green secondary、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
+  settled後恢復20/80（A5）； Analysis uses an app-local single-column 13 px ledger with
   whole-header folding for `Analysis parameters` and `Writeback preview` and a
   full-width `Analyze` immediately after parameters and before Writeback preview
   (A6). Presentation
@@ -51,7 +51,8 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `WritebackService` remains stage-agnostic and owns the display-only baseline
   capture (S2): at draft creation it snapshots the destination `ExpContext` and
   exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
-  compact unified ledger: target-only checkbox labels with description tooltips,
+  compact unified ledger: draft-owned unapplied items以粗體`target*`與`* = not applied`
+  legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
   centered Current → Proposed columns on a shared-background continuous-boundary
   panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions
   (scalar MetaDict and editable module/waveform items use Edit; non-scalar
@@ -67,7 +68,8 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
   retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an
-  internal `ArtifactSaveCenter` which owns capability-driven artifact rows,
+  internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
+  action row放在`Measurement data`card之前，同時擁有capability-driven artifact rows、
   high-contrast status rendering and the tab-local status lifecycle derived from
   result availability, path/comment edits and true terminal save outcomes (not
   persisted across process), with figure-gated save enablement while status still
@@ -240,7 +242,9 @@ and Save stores the data-path override. Analysis and Post-Analysis image-path
 overserides are independent resources; the read model projects data, analysis-image
 and post-analysis-image paths separately. Run live figures remain view-only and
 are not stored in State. Writeback baseline is a display-only draft-creation
-snapshot; no concurrent-write detection or apply-conflict policy is provided.
+snapshot；同一opaque draft另擁有per-item applied state，只有成功write包含的items才標記applied，
+selection本身不改狀態，retarget或內容修改會重設。狀態不跨draft/process持久化，也不提供
+concurrent-write detection或apply-conflict policy。
 
 Analysis/Post result services prepare proposals, figures and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear
@@ -416,7 +420,7 @@ operation outcomes instead of cancelled.
 
 Progress is operation-scoped:
 
-- Workers emit Qt-free `ProgressEvent` objects through a `ProgressTransport`.
+- Workers emit Qt-free `ProgressEvent` objects through a `ProgressTransport`; QICK accumulated acquisition的內部reps也經`progress_bar.make_pbar`進入同一ambient factory，因此GE每次g/e acquire共用operation-scoped transport而不另建progress model。
 - `ProgressService` owns per-operation containers and owner-to-operation mapping.
 - GUI widgets attach by owner id (`tab_id` or device name) through the relevant
   control facet; run tabs use `ProgressControlPort`, device panels use

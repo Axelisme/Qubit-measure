@@ -242,6 +242,34 @@ class ArtifactSaveCenter(QWidget):
         self._path_edits: dict[ArtifactKind, QLineEdit] = {}
         self._save_btns: dict[ArtifactKind, QPushButton] = {}
 
+        actions = QWidget()
+        actions.setObjectName("dataActions")
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(8)
+
+        self.load_button = QPushButton("Load Data")
+        self.load_button.setFixedHeight(36)
+        self.load_button.setSizePolicy(
+            QSizePolicy.Expanding,  # type: ignore[attr-defined]
+            QSizePolicy.Fixed,  # type: ignore[attr-defined]
+        )
+        self.save_all_button = QPushButton("Save All")
+        self.save_all_button.setFixedHeight(36)
+        self.save_all_button.setSizePolicy(
+            QSizePolicy.Expanding,  # type: ignore[attr-defined]
+            QSizePolicy.Fixed,  # type: ignore[attr-defined]
+        )
+        self.save_all_button.setDefault(True)
+
+        if self._has_load:
+            actions_layout.addWidget(self.load_button, stretch=1)
+            actions_layout.addWidget(self.save_all_button, stretch=1)
+        else:
+            actions_layout.addWidget(self.save_all_button, stretch=1)
+            self.load_button.hide()
+        outer.addWidget(actions)
+
         data_row = self._build_row(
             kind=ArtifactKind.DATA,
             title="Measurement data",
@@ -274,34 +302,7 @@ class ArtifactSaveCenter(QWidget):
             )
             outer.addWidget(post_row)
 
-        bottom = QWidget()
-        bottom_layout = QHBoxLayout(bottom)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(8)
-
-        self.load_button = QPushButton("Load Data")
-        self.load_button.setFixedHeight(36)
-        self.load_button.setSizePolicy(
-            QSizePolicy.Expanding,  # type: ignore[attr-defined]
-            QSizePolicy.Fixed,  # type: ignore[attr-defined]
-        )
-        self.save_all_button = QPushButton("Save All")
-        self.save_all_button.setFixedHeight(36)
-        self.save_all_button.setSizePolicy(
-            QSizePolicy.Expanding,  # type: ignore[attr-defined]
-            QSizePolicy.Fixed,  # type: ignore[attr-defined]
-        )
-        self.save_all_button.setDefault(True)
-
-        if self._has_load:
-            bottom_layout.addWidget(self.load_button, stretch=1)
-            bottom_layout.addWidget(self.save_all_button, stretch=1)
-        else:
-            bottom_layout.addWidget(self.save_all_button, stretch=1)
-            self.load_button.hide()
-
         outer.addStretch()
-        outer.addWidget(bottom)
 
         # Internal comment edit is created in _build_row for DATA
         self._comment_edit: QTextEdit  # assigned in row construction

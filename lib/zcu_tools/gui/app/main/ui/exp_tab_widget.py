@@ -33,6 +33,14 @@ _RED_STOP_STYLESHEET = (
     "background-color: #f44336; color: white; font-weight: bold; "
     "border: 1px solid #d32f2f; border-radius: 4px;"
 )
+_GREEN_RESET_STYLESHEET = (
+    "QPushButton#resetButton { background-color: #2e8b57; color: white; "
+    "font-weight: 600; border: 1px solid #246f46; border-radius: 4px; }"
+    "QPushButton#resetButton:hover:!disabled { background-color: #369d65; }"
+    "QPushButton#resetButton:pressed:!disabled { background-color: #226b43; }"
+    "QPushButton#resetButton:disabled { background-color: #9dbdaa; color: #eef5f0; "
+    "border-color: #8eab99; }"
+)
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
@@ -317,17 +325,18 @@ class ExpTabWidget(QWidget):
         )
         run_layout.addWidget(self.cfg_form, stretch=1)
 
-        # Run action row: status-free, Reset 20% / Run 80% of available width
-        # (A5). Both buttons expand proportionally; Run retains blue primary
-        # and Stop retains red active semantics.
+        # Run action row: idle Reset 20% / Run 80%; running hides Reset and
+        # lets Stop fill the row. Presentation changes do not alter commands.
         self._run_action_bar = QFrame()
         self._run_action_bar.setObjectName("runActionBar")
         self._run_action_bar.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
         bar_layout = QHBoxLayout(self._run_action_bar)
+        self._run_action_layout = bar_layout
         bar_layout.setContentsMargins(8, 6, 8, 6)
         bar_layout.setSpacing(6)
         self.reset_btn = QPushButton("Reset")
-        self.reset_btn.setFlat(True)
+        self.reset_btn.setObjectName("resetButton")
+        self.reset_btn.setStyleSheet(_GREEN_RESET_STYLESHEET)
         self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
         reset_font = self.reset_btn.font()
         reset_font.setPointSize(max(reset_font.pointSize() - 1, 7))
@@ -1040,12 +1049,18 @@ class ExpTabWidget(QWidget):
         local_busy = state.is_running or state.is_analyzing or state.is_saving_data
         # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
+            self.reset_btn.setVisible(False)
+            self._run_action_layout.setStretch(0, 0)
+            self._run_action_layout.setStretch(1, 100)
             self.run_btn.setText("Stop")
             self.run_btn.setEnabled(True)
             self.run_btn.setToolTip("Running")
             self.run_btn.setStyleSheet(_RED_STOP_STYLESHEET)
             self.run_btn.setObjectName("")
         else:
+            self.reset_btn.setVisible(True)
+            self._run_action_layout.setStretch(0, 20)
+            self._run_action_layout.setStretch(1, 80)
             self.run_btn.setText("Run")
             self.run_btn.setObjectName("primaryButton")
             cfg_valid = self.cfg_form.is_valid()

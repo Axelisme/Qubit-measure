@@ -656,6 +656,7 @@ class MainWindow(QMainWindow):
             )
             return
         result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        self.refresh_tab_writeback(tab_id)
         applied_ids = (
             result.get("applied_ids", []) if isinstance(result, dict) else result
         )

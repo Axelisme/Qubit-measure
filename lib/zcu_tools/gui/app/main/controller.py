@@ -894,6 +894,11 @@ class Controller(SessionControllerMixin):
     ) -> dict[str, tuple[str | None, str | None]]:
         return self._writeback_control.get_writeback_summaries_for_pane(tab_id, pane)
 
+    def get_writeback_applied_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, bool]:
+        return self._writeback_control.get_writeback_applied_for_pane(tab_id, pane)
+
     # ------------------------------------------------------------------
     # Save (TabService)
     # ------------------------------------------------------------------

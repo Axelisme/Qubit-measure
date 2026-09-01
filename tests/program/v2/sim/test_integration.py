@@ -118,6 +118,7 @@ from zcu_tools.program.v2.sim.readout import (
     resonator_freqs,
     s21,
 )
+from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 # Fixed operating point: reduced flux = 1.0 (R-3, matches the engine constant).
@@ -986,6 +987,73 @@ def _run_ge(
     result = exp.run(soc, soccfg, cfg)
     fid, pops, fit, _fig = exp.analyze(result, backend="pca")
     return fid, pops, fit["g_center"], fit["e_center"]
+
+
+class _RecordingProgressBar(BaseProgressBar):
+    def __init__(self, *, total: int | float | None = None, **_: object) -> None:
+        self._total = total
+        self._n: int | float = 0
+        self._desc = ""
+        self.closed = False
+
+    def __enter__(self) -> _RecordingProgressBar:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def set_description(self, description: str) -> None:
+        self._desc = description
+
+    def update(self, value: int | float = 1) -> None:
+        self._n += value
+
+    def set_progress(self, value: int | float) -> None:
+        self._n = value
+
+    def reset(self) -> None:
+        self._n = 0
+
+    def refresh(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+    @property
+    def total(self) -> int | float | None:
+        return self._total
+
+    @total.setter
+    def total(self, value: int | float | None) -> None:
+        self._total = value
+
+    @property
+    def n(self) -> int | float:
+        return self._n
+
+    @property
+    def desc(self) -> str:
+        return self._desc
+
+
+def test_ge_run_routes_each_accumulated_reps_progress_through_factory() -> None:
+    bars: list[_RecordingProgressBar] = []
+
+    def factory(**kwargs: object) -> _RecordingProgressBar:
+        total = kwargs.get("total")
+        assert total is None or isinstance(total, (int, float))
+        bar = _RecordingProgressBar(total=total)
+        bars.append(bar)
+        return bar
+
+    with use_pbar_factory(factory):
+        _run_ge(snr=5.0, shots=500)
+
+    reps_bars = [bar for bar in bars if bar.total == 500]
+    assert len(reps_bars) == 2
+    assert [bar.n for bar in reps_bars] == [500, 500]
+    assert all(bar.closed for bar in reps_bars)
 
 
 def _expected_ge_centers() -> tuple[complex, complex]:

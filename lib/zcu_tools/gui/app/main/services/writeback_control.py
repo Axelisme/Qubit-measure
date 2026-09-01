@@ -38,6 +38,10 @@ class WritebackControlPort(Protocol):
         self, tab_id: str, pane: WritebackPane
     ) -> dict[str, tuple[str | None, str | None]]: ...
 
+    def get_writeback_applied_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, bool]: ...
+
     def get_context_version(self) -> int: ...
 
 
@@ -112,6 +116,15 @@ class WritebackControlFacet:
         except Exception:
             return {}
         return self._writeback.get_all_summaries(draft)  # type: ignore[arg-type]
+
+    def get_writeback_applied_for_pane(
+        self, tab_id: str, pane: WritebackPane
+    ) -> dict[str, bool]:
+        try:
+            draft = self._draft_for_pane(tab_id, pane)
+        except Exception:
+            return {}
+        return self._writeback.get_all_applied(draft)  # type: ignore[arg-type]
 
     def _require_tab_idle(self, tab_id: str) -> None:
         if self._state.is_tab_busy(tab_id):

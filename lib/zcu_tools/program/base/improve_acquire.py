@@ -12,8 +12,9 @@ from qick.qick_asm import (
     AcquireMixin,
     logger,
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
-    tqdm,
 )
+
+from zcu_tools.progress_bar import make_pbar
 
 
 class CancelFlagProtocol(Protocol):
@@ -153,9 +154,10 @@ class EarlyStopMixin(TypedAcquireMixin):
 
         count = 0
         stats_start = len(self.stats) if self.stats is not None else 0
-        with tqdm(
+        reps_pbar = make_pbar(
             total=total_count, disable=self.acquire_params["hidereps"]
-        ) as reps_pbar:
+        )
+        try:
             soc.start_readout(
                 total_count,
                 counter_addr=self.counter_addr,
@@ -196,6 +198,8 @@ class EarlyStopMixin(TypedAcquireMixin):
                     return self._finish_stopped_partial_accumulated_round(
                         soc, stats_start=stats_start
                     )
+        finally:
+            reps_pbar.close()
 
         if cancel_flag.is_set():
             return self._finish_stopped_partial_accumulated_round(

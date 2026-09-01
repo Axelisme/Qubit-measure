@@ -243,7 +243,7 @@ class WritebackWidget(QWidget):
 
     Presentation is app-local; no data-model or wire contract is introduced.
 
-    - Target-only checkbox labels with description tooltips.
+    - Draft-owned applied state projected as bold ``target*`` vs normal ``target``.
     - Centered Current → Proposed columns on a shared-background,
       continuous-boundary panel.
     - Equal 56×26 Edit/Copy actions; non-scalar MetaDict values show a
@@ -272,6 +272,7 @@ class WritebackWidget(QWidget):
         self._pane: WritebackPane = pane
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
+        self._applied_states: dict[str, bool] = {}
 
         # 13 px ledger per spec — item rows show current → proposed.
         font = self.font()
@@ -298,6 +299,11 @@ class WritebackWidget(QWidget):
             QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
         )
         layout.addWidget(self._hint)
+
+        self._applied_legend = QLabel("* = not applied")
+        self._applied_legend.setObjectName("writebackAppliedLegend")
+        self._applied_legend.setStyleSheet("color: #6b7688;")
+        layout.addWidget(self._applied_legend)
 
         self._rows_container = QFrame()
         self._rows_container.setObjectName("writebackPanel")
@@ -337,16 +343,18 @@ class WritebackWidget(QWidget):
         # edits (checkbox, value, cfg via the editor model) land on the same
         # objects the agent and apply read.
         self._items = list(items)
+        self._applied_states = self._get_applied_states()
+        self._applied_legend.setVisible(bool(items))
         self._checks.clear()
         self._row_widgets.clear()
         self._rows.clear()
 
         for item in self._items:
             # Selection — target identity only (S1); description moves to tooltip.
-            cb = QCheckBox(self._make_label_text(item))
+            cb = QCheckBox()
             cb.setChecked(item.selected)
             cb.setToolTip(item.description)
-            cb.setStyleSheet("font-weight: 700; background: transparent;")
+            self._update_applied_presentation(item, cb)
             cb.stateChanged.connect(lambda _state, it=item: self._on_check_toggled(it))
             self._checks[item.session_id] = cb
 
@@ -487,6 +495,34 @@ class WritebackWidget(QWidget):
             return item.edit_schema is not None
         return False
 
+    def _get_applied_states(self) -> dict[str, bool]:
+        try:
+            getter = getattr(self._ctrl, "get_writeback_applied_for_pane", None)
+            if getter is None or not callable(getter):
+                return {}
+            result = getter(self._tab_id, self._pane)
+            if isinstance(result, dict):
+                return {str(key): bool(value) for key, value in result.items()}
+        except Exception:
+            pass
+        return {}
+
+    def _update_applied_presentation(
+        self, item: WritebackItem, checkbox: QCheckBox
+    ) -> None:
+        applied = self._applied_states.get(item.session_id, False)
+        checkbox.setText(item.target_name if applied else f"{item.target_name}*")
+        font = checkbox.font()
+        font.setBold(not applied)
+        checkbox.setFont(font)
+        checkbox.setStyleSheet("background: transparent;")
+
+    def _refresh_item_applied_presentation(
+        self, item: WritebackItem, checkbox: QCheckBox
+    ) -> None:
+        self._applied_states = self._get_applied_states()
+        self._update_applied_presentation(item, checkbox)
+
     def _get_service_summaries(self, session_id: str) -> tuple[str | None, str | None]:
         """Fetch S2 summaries from the service-owned draft (app-local)."""
         try:
@@ -524,11 +560,6 @@ class WritebackWidget(QWidget):
         if isinstance(item, (ModuleWriteback, WaveformWriteback)):
             return f"\u2192 {item.target_name}"
         return f"{item.target_name}"
-
-    def _make_label_text(self, item: WritebackItem) -> str:
-        # S1: target identity only; description lives in tooltip, proposed
-        # value is shown in its own column and never duplicated here.
-        return item.target_name
 
     def _edit_item(self, item: WritebackItem, cb: QCheckBox) -> None:
         if isinstance(item, MetaDictWriteback):
@@ -580,7 +611,7 @@ class WritebackWidget(QWidget):
                 )
                 item.target_name = new_name
                 item.proposed_value = new_value
-                cb.setText(self._make_label_text(item))
+                self._refresh_item_applied_presentation(item, cb)
                 # Update ledger row from service-owned summary (S2)
                 row_tuple_md = self._row_widgets.get(item.session_id)
                 if row_tuple_md is not None:
@@ -664,7 +695,7 @@ class WritebackWidget(QWidget):
         def _on_finished(*_: Any) -> None:
             _commit_name()
             form_widget.detach()
-            cb.setText(self._make_label_text(item))
+            self._refresh_item_applied_presentation(item, cb)
             # Refresh bounded summary after cfg edits (proposed may have changed)
             row_tuple = self._row_widgets.get(item.session_id)
             if row_tuple is not None:

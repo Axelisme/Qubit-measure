@@ -7,6 +7,7 @@ Public simulator physics and shape behavior stays in ``test_engine.py``.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -29,6 +30,7 @@ from zcu_tools.program.v2.sim.engine import (
 from zcu_tools.program.v2.sim.lowering import LoweredPoint, ReadoutPlan
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
+from zcu_tools.progress_bar import use_pbar_factory
 
 from .test_engine import (
     _RESET_RELAX_DELAY,
@@ -378,9 +380,19 @@ def test_acquire_cancel_flag_does_not_cancel_inside_mock_signal_grid(
         sweep=[("ro_freq", sw)],
     )
 
-    with pytest.raises(StoppedPartialAcquireError, match="first round"):
-        prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
+    reps_bar = MagicMock()
+    totals: list[object] = []
 
+    def factory(**kwargs: object) -> MagicMock:
+        totals.append(kwargs.get("total"))
+        return reps_bar
+
+    with use_pbar_factory(factory):
+        with pytest.raises(StoppedPartialAcquireError, match="first round"):
+            prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
+
+    assert totals == [sw.expts]
+    reps_bar.close.assert_called_once_with()
     assert readout_calls == sw.expts
     assert prog.get_rounds() == []
     assert prog.stats == []

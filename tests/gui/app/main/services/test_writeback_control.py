@@ -64,6 +64,10 @@ class RecordingWriteback:
         self._log.add("writeback", "apply_draft", draft)
         return {"applied_ids": ["pane-item"], "written": {}}
 
+    def get_all_applied(self, draft: object) -> dict[str, bool]:
+        self._log.add("writeback", "get_all_applied", draft)
+        return {"pane-item": True}
+
 
 def _facet() -> tuple[
     WritebackControlFacet,
@@ -124,6 +128,15 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     assert call("writeback", "get_item_draft", draft, "md-1") in log.calls
     assert call("writeback", "edit_draft", draft, "md-1", selected=False) in log.calls
     assert call("writeback", "apply_draft", draft) in log.calls
+
+
+def test_applied_projection_reads_the_pane_owned_draft() -> None:
+    facet, log, _state, writeback, _versions = _facet()
+
+    assert facet.get_writeback_applied_for_pane("tab-1", "analysis") == {
+        "pane-item": True
+    }
+    assert call("writeback", "get_all_applied", writeback.analysis_draft) in log.calls
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])

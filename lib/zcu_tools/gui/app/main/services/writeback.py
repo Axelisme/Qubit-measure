@@ -52,6 +52,7 @@ class _DraftEntry:
     # S2 display-only baseline — not on WritebackItem, not persisted/wire.
     current_summary: str | None = None
     proposed_summary: str | None = None
+    applied: bool = False
 
 
 class WritebackDraft:
@@ -204,6 +205,7 @@ class WritebackService:
             item.selected = selected
         if target_name is not None:
             item.target_name = target_name
+            entry.applied = False
             # Keep proposed summary in sync for module/waveform retarget (bounded)
             if isinstance(item, (ModuleWriteback, WaveformWriteback)):
                 # Preserve original current_summary; recompute proposed_summary
@@ -223,6 +225,7 @@ class WritebackService:
                 )
             item.proposed_value = proposed_value
             entry.proposed_summary = self._format_scalar(proposed_value)
+            entry.applied = False
 
         result = None
         if edits is not None:
@@ -242,6 +245,7 @@ class WritebackService:
                     )
                 typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
             result = self._cfg_editor.set_fields(entry.editor_id, typed_edits)
+            entry.applied = False
         if result is None:
             return {"valid": True, "removed": [], "added": []}
         return result.to_wire()
@@ -291,6 +295,10 @@ class WritebackService:
                     ml_waveforms=ml_waveforms,
                 )
             )
+            applied_id_set = set(applied_ids)
+            for entry in draft._entries:
+                if entry.item.session_id in applied_id_set:
+                    entry.applied = True
         return {"applied_ids": applied_ids, "written": written}
 
     def teardown_draft(self, draft: WritebackDraft) -> None:
@@ -474,6 +482,11 @@ class WritebackService:
             e.item.session_id: (e.current_summary, e.proposed_summary)
             for e in draft._entries
         }
+
+    def get_all_applied(self, draft: WritebackDraft) -> dict[str, bool]:
+        """Return the draft-owned applied state for presentation."""
+        self._require_draft(draft)
+        return {entry.item.session_id: entry.applied for entry in draft._entries}
 
     def _teardown_entries(self, entries: Iterable[_DraftEntry]) -> None:
         for entry in reversed(list(entries)):

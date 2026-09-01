@@ -354,7 +354,7 @@ def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory)
     _require_qapp().processEvents()
 
 
-def test_tall_data_pane_keeps_artifacts_compact_and_actions_at_bottom(
+def test_data_actions_appear_before_measurement_data_card(
     exp_tab_factory,
 ):
     ctrl = _mock_ctrl()
@@ -381,16 +381,16 @@ def test_tall_data_pane_keeps_artifacts_compact_and_actions_at_bottom(
         if label.text() == "Measurement data"
     )
     path_edit = center._path_edits[ArtifactKind.DATA]
+    title_top = title.mapTo(center, title.rect().topLeft()).y()
     title_bottom = title.mapTo(center, title.rect().bottomLeft()).y()
     path_top = path_edit.mapTo(center, path_edit.rect().topLeft()).y()
+    actions_top = center.save_all_button.mapTo(
+        center, center.save_all_button.rect().topLeft()
+    ).y()
 
     assert title.height() <= title.sizeHint().height() + 4
     assert path_top - title_bottom <= 16
-
-    save_all_bottom = center.save_all_button.mapTo(
-        center, center.save_all_button.rect().bottomLeft()
-    ).y()
-    assert center.rect().bottom() - save_all_bottom <= 16
+    assert actions_top < title_top
 
     tab.close()
     tab.deleteLater()

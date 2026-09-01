@@ -608,6 +608,27 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
     assert captured_dir["directory"] == str(database_root)
 
 
+def test_main_window_successful_writeback_refreshes_applied_projection(qapp):
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = _apply_window_defaults(MagicMock())
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.has_tab.return_value = True
+    ctrl.apply_writeback_for_pane.return_value = {
+        "applied_ids": ["md-1"],
+        "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+    }
+    window = MainWindow(ctrl)
+    window._tab_widgets["tab-1"] = MagicMock()
+    window.refresh_tab_writeback = MagicMock()
+    window.show_status_message = MagicMock()
+
+    window._on_writeback_inline_apply("tab-1", pane="analysis")
+
+    ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
+    window.refresh_tab_writeback.assert_called_once_with("tab-1")
+
+
 def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
     from qtpy.QtWidgets import QPushButton
     from zcu_tools.gui.app.main.ui.main_window import MainWindow

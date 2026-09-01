@@ -105,6 +105,29 @@ def test_writeback_widget_non_scalar_item_is_read_only(qapp):
     assert all(cb.isChecked() for cb in checks)
 
 
+def test_writeback_widget_projects_draft_owned_applied_state(qapp):
+    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=6000.0)
+    item.session_id = "md-1"
+    ctrl = MagicMock()
+    ctrl.get_writeback_applied_for_pane.return_value = {"md-1": False}
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
+
+    widget.populate([item])
+
+    checkbox = widget._checks["md-1"]
+    assert checkbox.text() == "r_f*"
+    assert checkbox.font().bold()
+    assert any(
+        label.text() == "* = not applied" for label in widget.findChildren(QLabel)
+    )
+
+    ctrl.get_writeback_applied_for_pane.return_value = {"md-1": True}
+    widget.populate([item])
+    checkbox = widget._checks["md-1"]
+    assert checkbox.text() == "r_f"
+    assert not checkbox.font().bold()
+
+
 def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
     """A1 — target-only labels, tooltip, centered Current → Proposed,
     shared backgrounds/borders and equal 56x26 actions."""
@@ -125,11 +148,11 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
     try:
         # target-only, tooltip, no duplication
         cbs = {cb.text(): cb for cb in widget.findChildren(QCheckBox)}
-        assert set(cbs) == {"r_f", "confusion_matrix"}
-        assert cbs["r_f"].toolTip() == "resonator freq"
-        assert cbs["confusion_matrix"].toolTip() == "matrix desc"
-        assert "0.95" not in cbs["confusion_matrix"].text()
-        assert "freq" not in cbs["r_f"].text()
+        assert set(cbs) == {"r_f*", "confusion_matrix*"}
+        assert cbs["r_f*"].toolTip() == "resonator freq"
+        assert cbs["confusion_matrix*"].toolTip() == "matrix desc"
+        assert "0.95" not in cbs["confusion_matrix*"].text()
+        assert "freq" not in cbs["r_f*"].text()
         # centered Current → Proposed
         for lbl in widget.findChildren(QLabel):
             if lbl.objectName() in (

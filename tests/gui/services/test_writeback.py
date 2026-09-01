@@ -187,6 +187,47 @@ def test_draft_cfg_edits_use_private_editor_session():
     cfg_editor.set_fields.assert_called_once_with("editor-1", [CfgEdit("freq", 5000.0)])
 
 
+def test_applied_state_follows_successful_writes_and_content_edits():
+    cfg_editor = MagicMock()
+    write_port = MagicMock()
+    svc = WritebackService(cfg_editor, write_port)
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0),
+            MetaDictWriteback(target_name="skip", description="d", proposed_value=2.0),
+        ]
+    )
+    assert svc.get_all_applied(draft) == {"md-1": False, "md-2": False}
+    draft.edit("md-2", selected=False)
+
+    draft.apply()
+
+    assert svc.get_all_applied(draft) == {"md-1": True, "md-2": False}
+    draft.edit("md-1", selected=False)
+    assert svc.get_all_applied(draft)["md-1"] is True
+    draft.edit("md-1", proposed_value=3.0)
+    assert svc.get_all_applied(draft)["md-1"] is False
+
+
+def test_failed_and_empty_apply_do_not_mark_items_applied():
+    cfg_editor = MagicMock()
+    write_port = MagicMock()
+    write_port.apply_writes.side_effect = RuntimeError("write failed")
+    svc = WritebackService(cfg_editor, write_port)
+    draft = svc.create_draft(
+        [MetaDictWriteback(target_name="r_f", description="d", proposed_value=1.0)]
+    )
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        draft.apply()
+    assert svc.get_all_applied(draft) == {"md-1": False}
+
+    draft.edit("md-1", selected=False)
+    result = draft.apply()
+    assert result["applied_ids"] == []
+    assert svc.get_all_applied(draft) == {"md-1": False}
+
+
 def test_apply_draft_sends_one_context_batch_for_selected_items():
     cfg_editor = MagicMock()
     write_port = MagicMock()
