@@ -205,6 +205,8 @@ def test_applied_state_follows_successful_writes_and_content_edits():
     assert svc.get_all_applied(draft) == {"md-1": True, "md-2": False}
     draft.edit("md-1", selected=False)
     assert svc.get_all_applied(draft)["md-1"] is True
+    draft.edit("md-1", target_name="r_f", proposed_value=1.0)
+    assert svc.get_all_applied(draft)["md-1"] is True
     draft.edit("md-1", proposed_value=3.0)
     assert svc.get_all_applied(draft)["md-1"] is False
 

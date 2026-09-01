@@ -105,6 +105,8 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
     T2RamseySweepCfg,
 )
 from zcu_tools.experiment.v2.utils import sweep2array, t1_delay_axis
+from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
+from zcu_tools.gui.session.services.progress import BoundProgressFactory
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -1039,8 +1041,10 @@ class _RecordingProgressBar(BaseProgressBar):
 
 def test_ge_run_routes_each_accumulated_reps_progress_through_factory() -> None:
     bars: list[_RecordingProgressBar] = []
+    factory_calls: list[dict[str, object]] = []
 
     def factory(**kwargs: object) -> _RecordingProgressBar:
+        factory_calls.append(kwargs)
         total = kwargs.get("total")
         assert total is None or isinstance(total, (int, float))
         bar = _RecordingProgressBar(total=total)
@@ -1054,6 +1058,32 @@ def test_ge_run_routes_each_accumulated_reps_progress_through_factory() -> None:
     assert len(reps_bars) == 2
     assert [bar.n for bar in reps_bars] == [500, 500]
     assert all(bar.closed for bar in reps_bars)
+    reps_calls = [call for call in factory_calls if call.get("total") == 500]
+    assert [call.get("leave") for call in reps_calls] == [False, False]
+
+
+def test_ge_inner_reps_emit_close_through_gui_progress_factory() -> None:
+    events: list[ProgressEvent] = []
+
+    class RecordingTransport:
+        def emit(self, event: ProgressEvent) -> None:
+            events.append(event)
+
+        def set_receiver(self, receiver: object) -> None:
+            del receiver
+
+    factory = BoundProgressFactory(RecordingTransport(), operation_id=7)  # type: ignore[arg-type]
+    with use_pbar_factory(factory):
+        _run_ge(snr=5.0, shots=500)
+
+    reps_events = [event for event in events if event.total == 500]
+    reps_handles = {event.handle_id for event in reps_events}
+    assert len(reps_handles) == 2
+    for handle_id in reps_handles:
+        kinds = [event.kind for event in reps_events if event.handle_id == handle_id]
+        assert kinds[0] is ProgressEventKind.CREATE
+        assert ProgressEventKind.UPDATE in kinds
+        assert kinds[-1] is ProgressEventKind.CLOSE
 
 
 def _expected_ge_centers() -> tuple[complex, complex]:

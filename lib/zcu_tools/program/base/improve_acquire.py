@@ -155,7 +155,9 @@ class EarlyStopMixin(TypedAcquireMixin):
         count = 0
         stats_start = len(self.stats) if self.stats is not None else 0
         reps_pbar = make_pbar(
-            total=total_count, disable=self.acquire_params["hidereps"]
+            total=total_count,
+            disable=self.acquire_params["hidereps"],
+            leave=False,
         )
         try:
             soc.start_readout(

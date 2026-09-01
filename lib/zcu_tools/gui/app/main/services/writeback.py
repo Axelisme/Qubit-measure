@@ -209,7 +209,7 @@ class WritebackService:
         item = entry.item
         if selected is not None:
             item.selected = selected
-        if target_name is not None:
+        if target_name is not None and target_name != item.target_name:
             item.target_name = target_name
             entry.applied = False
             # Keep proposed summary in sync for module/waveform retarget (bounded)
@@ -229,9 +229,10 @@ class WritebackService:
                 raise InvalidInputError(
                     f"{session_id!r} is not a metadict item; proposed_value invalid"
                 )
-            item.proposed_value = proposed_value
-            entry.proposed_summary = self._format_scalar(proposed_value)
-            entry.applied = False
+            if not self._values_equal(proposed_value, item.proposed_value):
+                item.proposed_value = proposed_value
+                entry.proposed_summary = self._format_scalar(proposed_value)
+                entry.applied = False
 
         result = None
         if edits is not None:
@@ -251,7 +252,6 @@ class WritebackService:
                     )
                 typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
             result = self._cfg_editor.set_fields(entry.editor_id, typed_edits)
-            entry.applied = False
         if result is None:
             return {"valid": True, "removed": [], "added": []}
         return result.to_wire()
@@ -509,6 +509,15 @@ class WritebackService:
         """Return the draft-owned applied state for presentation."""
         self._require_draft(draft)
         return {entry.item.session_id: entry.applied for entry in draft._entries}
+
+    @staticmethod
+    def _values_equal(left: Any, right: Any) -> bool:
+        if left is right:
+            return True
+        try:
+            return bool(left == right)
+        except (TypeError, ValueError):
+            return False
 
     @staticmethod
     def _mark_unapplied(entry: _DraftEntry) -> None:

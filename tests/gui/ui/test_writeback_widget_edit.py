@@ -203,3 +203,6 @@ def test_edit_cfg_item_can_change_target_name(qapp):
         assert name_edit.text() == "readout_rf_tuned"
     finally:
         dialog.close()
+    ctrl.set_writeback_item_for_pane.assert_called_once_with(
+        "tab-1", "analysis", "ml-1", target_name="readout_rf_tuned"
+    )

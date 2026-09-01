@@ -660,6 +660,8 @@ class WritebackWidget(QWidget):
             if not text:
                 name_edit.setText(item.target_name)  # revert, no blank target
                 return
+            if text == item.target_name:
+                return
             assert self._tab_id is not None
             self._ctrl.set_writeback_item_for_pane(
                 self._tab_id,
@@ -692,9 +694,11 @@ class WritebackWidget(QWidget):
         close_btn.clicked.connect(dialog.accept)
 
         def _on_finished(*_: Any) -> None:
-            _commit_name()
-            draft.on_change.disconnect(_on_draft_changed)
-            form_widget.detach()
+            try:
+                _commit_name()
+            finally:
+                draft.on_change.disconnect(_on_draft_changed)
+                form_widget.detach()
             self._refresh_item_applied_presentation(item, cb)
             # Refresh bounded summary after cfg edits (proposed may have changed)
             row_tuple = self._row_widgets.get(item.session_id)
