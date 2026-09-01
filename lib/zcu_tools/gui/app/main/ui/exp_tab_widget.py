@@ -338,9 +338,7 @@ class ExpTabWidget(QWidget):
         self.reset_btn.setObjectName("resetButton")
         self.reset_btn.setStyleSheet(_GREEN_RESET_STYLESHEET)
         self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
-        reset_font = self.reset_btn.font()
-        reset_font.setPointSize(max(reset_font.pointSize() - 1, 7))
-        self.reset_btn.setFont(reset_font)
+        self.reset_btn.setFixedHeight(30)
         self.reset_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )  # type: ignore[attr-defined]

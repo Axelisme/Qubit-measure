@@ -187,6 +187,30 @@ def test_draft_cfg_edits_use_private_editor_session():
     cfg_editor.set_fields.assert_called_once_with("editor-1", [CfgEdit("freq", 5000.0)])
 
 
+def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape():
+    state = _make_state_with_tab()
+    matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
+    state.exp_context.md.confusion_matrix = matrix
+    write_port = _make_write_port(state, EventBus())
+    write_port.get_exp_context.return_value = state.exp_context
+    svc = WritebackService(MagicMock(), write_port)
+
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(
+                target_name="confusion_matrix",
+                description="d",
+                proposed_value=matrix,
+            )
+        ]
+    )
+
+    assert svc.get_summaries(draft, "md-1") == (
+        "3 × 3 matrix",
+        "3 × 3 matrix",
+    )
+
+
 def test_applied_state_follows_successful_writes_and_content_edits():
     cfg_editor = MagicMock()
     write_port = MagicMock()

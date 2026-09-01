@@ -90,38 +90,30 @@ def _make_matrix_table(matrix: Sequence[Sequence[Any]]) -> QTableWidget:
     rows = len(matrix)
     cols = len(matrix[0]) if rows > 0 else 0
     table = QTableWidget(rows, cols)
-    table.setObjectName("writebackMatrixTable")
+    table.setObjectName("writebackProposedMatrixTable")
     table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
     table.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
     table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
     table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
-    vh0 = table.verticalHeader()
-    if vh0 is not None:
-        vh0.setVisible(False)
-    hh0 = table.horizontalHeader()
-    if hh0 is not None:
-        hh0.setVisible(False)
-    for r in range(rows):
-        for c in range(cols):
-            val = matrix[r][c]  # type: ignore[index]
-            if isinstance(val, float):
-                txt = f"{val:.4f}"
-            else:
-                txt = str(val)
-            item = QTableWidgetItem(txt)
+    vertical_header = table.verticalHeader()
+    if vertical_header is not None:
+        vertical_header.setVisible(False)
+        vertical_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # type: ignore[attr-defined]
+        vertical_header.setDefaultSectionSize(22)
+    horizontal_header = table.horizontalHeader()
+    if horizontal_header is not None:
+        horizontal_header.setVisible(False)
+        horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+    for row in range(rows):
+        for column in range(cols):
+            value = matrix[row][column]
+            text = f"{value:.4f}" if isinstance(value, float) else str(value)
+            item = QTableWidgetItem(text)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # type: ignore[attr-defined]
-            table.setItem(r, c, item)
-    hh = table.horizontalHeader()
-    if hh is not None:
-        hh.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
-    vh = table.verticalHeader()
-    if vh is not None:
-        vh.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # type: ignore[attr-defined]
-        vh.setDefaultSectionSize(22)
-    total_h = rows * 22 + 4
-    table.setFixedHeight(total_h)
+            table.setItem(row, column, item)
+    table.setFixedHeight(rows * 22 + 4)
     table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # type: ignore[attr-defined]
     table.setMinimumWidth(120)
     return table
@@ -135,8 +127,8 @@ def _make_matrix_table(matrix: Sequence[Sequence[Any]]) -> QTableWidget:
 class _WritebackRow(QFrame):
     """Compact ledger row with responsive reflow (S1/S3).
 
-    Owns checkbox, current → proposed labels, arrow, action button and
-    optional inline matrix table. :meth:`set_narrow` moves those widgets
+    Owns checkbox, current → proposed labels, arrow, action button, and an
+    optional proposed-value matrix table. :meth:`set_narrow` moves those widgets
     between a single-line wide layout and a two-line narrow layout without
     duplicating widgets.
     """
@@ -148,7 +140,7 @@ class _WritebackRow(QFrame):
         arrow: QLabel,
         proposed: QLabel,
         action: QWidget,
-        table: QTableWidget | None,
+        proposed_table: QTableWidget | None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -160,7 +152,7 @@ class _WritebackRow(QFrame):
         self._arrow = arrow
         self._prop = proposed
         self._btn = action
-        self._table = table
+        self._proposed_table = proposed_table
         self._narrow = False
         self._outer = QVBoxLayout(self)
         self._outer.setContentsMargins(8, 4, 8, 4)
@@ -213,8 +205,6 @@ class _WritebackRow(QFrame):
             primary.addWidget(self._prop, 2)
             primary.addWidget(self._btn)
             self._outer.addLayout(primary)
-            if self._table is not None:
-                self._outer.addWidget(self._table)
         else:
             heading = QHBoxLayout()
             heading.setSpacing(7)
@@ -231,9 +221,8 @@ class _WritebackRow(QFrame):
             self._prop.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
             change.addWidget(self._prop, 1)
             self._outer.addLayout(change)
-
-            if self._table is not None:
-                self._outer.addWidget(self._table)
+        if self._proposed_table is not None:
+            self._outer.addWidget(self._proposed_table)
         self.updateGeometry()
         self.update()
 
@@ -246,9 +235,9 @@ class WritebackWidget(QWidget):
     - Draft-owned applied state projected as bold ``target*`` vs normal ``target``.
     - Centered Current → Proposed columns on a shared-background,
       continuous-boundary panel.
-    - Equal 56×26 Edit/Copy actions; non-scalar MetaDict values show a
-      bounded summary (``3 × 3 matrix`` for matrices) and a compact
-      read-only inline table with JSON Copy.
+    - Equal 56×26 Edit/Copy actions; non-scalar MetaDict values use bounded
+      summaries, while small proposed matrices also show a read-only matrix view.
+      Current values remain summary-only and Copy retains the proposed JSON.
     - Width breakpoint near 450 px: wide rows single-line, narrow rows
       reflow to target/action above Current → Proposed.
     - Bordered ledger hugs its rendered rows; Apply Selected immediately
@@ -420,15 +409,18 @@ class WritebackWidget(QWidget):
                 placeholder.setStyleSheet("background: transparent;")
                 action = placeholder
 
-            table: QTableWidget | None = None
-            if (
-                isinstance(item, MetaDictWriteback)
-                and not _is_scalar_md_value(item.proposed_value)
-                and _should_show_table(item.proposed_value)
-            ):  # type: ignore[attr-defined]
-                table = _make_matrix_table(item.proposed_value)  # type: ignore[arg-type]
+            proposed_table: QTableWidget | None = None
+            if is_matrix and _should_show_table(item.proposed_value):  # type: ignore[attr-defined]
+                proposed_table = _make_matrix_table(item.proposed_value)  # type: ignore[arg-type]
 
-            row = _WritebackRow(cb, current_label, arrow, proposed_label, action, table)
+            row = _WritebackRow(
+                cb,
+                current_label,
+                arrow,
+                proposed_label,
+                action,
+                proposed_table,
+            )
             row.setToolTip(item.description)
 
             self._rows_layout.addWidget(row)

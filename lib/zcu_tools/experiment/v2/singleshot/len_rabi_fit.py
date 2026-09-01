@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import log
 from typing import cast
 
@@ -27,6 +27,8 @@ _PARAMETER_NAMES = (
     "log_omega",
 )
 _PENALTY = 1e300
+_COARSE_BIN_COUNT = 96
+_NORMAL_MAD_SCALE = 1.482602218505602
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,28 @@ class LenRabiJointFitResult:
     backend: LenRabiBackendResult
 
 
+def _cluster_projected_iq(
+    projected: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.intp]]:
+    cluster_centers = np.asarray(np.quantile(projected, [0.25, 0.75]), dtype=np.float64)
+    labels = np.empty(projected.shape, dtype=np.intp)
+    for _ in range(16):
+        labels = np.argmin(
+            np.abs(projected[..., None] - cluster_centers[None, None, :]), axis=2
+        )
+        updated = cluster_centers.copy()
+        for index in range(2):
+            members = projected[labels == index]
+            if members.size:
+                updated[index] = float(members.mean())
+        if np.allclose(updated, cluster_centers, rtol=0.0, atol=1e-12):
+            break
+        cluster_centers = updated
+    if np.unique(labels).size != 2:
+        raise ValueError("Len Rabi projected IQ requires two non-empty clusters")
+    return cluster_centers, labels
+
+
 def project_len_rabi_iq(
     signals: NDArray[np.complex128],
 ) -> LenRabiProjection:
@@ -111,20 +135,7 @@ def project_len_rabi_iq(
     # PCA eigenvectors have arbitrary sign. Cluster the pooled projection, then
     # assign the cluster that dominates the first length to ground and orient it
     # below excited. This remains deterministic when row and pooled means tie.
-    cluster_centers = np.asarray(np.quantile(projected, [0.25, 0.75]), dtype=np.float64)
-    labels = np.empty(projected.shape, dtype=np.intp)
-    for _ in range(16):
-        labels = np.argmin(
-            np.abs(projected[..., None] - cluster_centers[None, None, :]), axis=2
-        )
-        updated = cluster_centers.copy()
-        for index in range(2):
-            members = projected[labels == index]
-            if members.size:
-                updated[index] = float(members.mean())
-        if np.allclose(updated, cluster_centers, rtol=0.0, atol=1e-12):
-            break
-        cluster_centers = updated
+    cluster_centers, labels = _cluster_projected_iq(projected)
     initial_counts = np.bincount(labels[0], minlength=2)
     ground_cluster = int(np.argmax(initial_counts))
     if cluster_centers[ground_cluster] > cluster_centers[1 - ground_cluster]:
@@ -220,7 +231,7 @@ def _logit(value: float) -> float:
     return log(clipped / (1.0 - clipped))
 
 
-def _initial_values(
+def _quantile_initial_values(
     lengths: NDArray[np.float64], projection: LenRabiProjection
 ) -> NDArray[np.float64]:
     projected = projection.projected
@@ -229,6 +240,23 @@ def _initial_values(
     sigma = max(0.12 * separation, float(np.min(np.diff(projection.bin_edges))))
     threshold = 0.5 * (lower + upper)
     crude_e = np.mean(projected > threshold, axis=1)
+    return _initial_values_from_crude_populations(
+        lengths,
+        crude_e,
+        center_mid=0.5 * float(lower + upper),
+        separation=separation,
+        sigma=sigma,
+    )
+
+
+def _initial_values_from_crude_populations(
+    lengths: NDArray[np.float64],
+    crude_e: NDArray[np.float64],
+    *,
+    center_mid: float,
+    separation: float,
+    sigma: float,
+) -> NDArray[np.float64]:
     p_e0 = float(np.clip(crude_e[0], 0.02, 0.45))
     p_inf = float(np.clip(np.mean(crude_e), 0.05, 0.95))
 
@@ -241,7 +269,7 @@ def _initial_values(
         [
             _logit(2.0 * p_e0),
             _logit(p_inf),
-            0.5 * float(lower + upper),
+            center_mid,
             log(separation),
             log(sigma),
             _logit(0.2),
@@ -253,13 +281,46 @@ def _initial_values(
     )
 
 
+def _initial_values(
+    lengths: NDArray[np.float64], projection: LenRabiProjection
+) -> NDArray[np.float64]:
+    projected = projection.projected
+    cluster_centers, labels = _cluster_projected_iq(projected)
+    ground_label, excited_label = np.argsort(cluster_centers)
+    ground_mask = labels == ground_label
+    excited_mask = labels == excited_label
+    center_g = float(np.median(projected[ground_mask]))
+    center_e = float(np.median(projected[excited_mask]))
+    separation = center_e - center_g
+    if not np.isfinite(separation) or separation <= 0.0:
+        raise ValueError("Len Rabi projected cluster centers are not identifiable")
+
+    residuals = np.empty_like(projected)
+    residuals[ground_mask] = projected[ground_mask] - center_g
+    residuals[excited_mask] = projected[excited_mask] - center_e
+    robust_sigma = _NORMAL_MAD_SCALE * float(np.median(np.abs(residuals)))
+    sigma = max(robust_sigma, float(np.min(np.diff(projection.bin_edges))))
+    crude_e = np.mean(excited_mask, axis=1)
+    return _initial_values_from_crude_populations(
+        lengths,
+        crude_e,
+        center_mid=0.5 * (center_g + center_e),
+        separation=separation,
+        sigma=sigma,
+    )
+
+
 def _fit_backend(
     lengths: NDArray[np.float64],
     projection: LenRabiProjection,
     *,
     max_calls: int | None,
+    initial: NDArray[np.float64] | None = None,
 ) -> tuple[LenRabiPhysicalParams, LenRabiBackendResult]:
-    initial = _initial_values(lengths, projection)
+    if initial is None:
+        initial = _initial_values(lengths, projection)
+    elif initial.shape != (len(_PARAMETER_NAMES),) or np.any(~np.isfinite(initial)):
+        raise ValueError("Len Rabi initial parameters must be nine finite values")
     calls = 0
 
     def objective(*args: float) -> float:
@@ -433,6 +494,20 @@ def _confusion_matrix(
     return radius, matrix, float(np.linalg.cond(matrix))
 
 
+def _coarse_projection(projection: LenRabiProjection) -> LenRabiProjection:
+    if projection.counts.shape[1] <= _COARSE_BIN_COUNT:
+        return projection
+    edges = np.linspace(
+        float(projection.projected.min()),
+        float(projection.projected.max()),
+        _COARSE_BIN_COUNT + 1,
+    )
+    counts = np.stack(
+        [np.histogram(row, bins=edges)[0] for row in projection.projected], axis=0
+    ).astype(np.int64)
+    return replace(projection, bin_edges=edges, counts=counts)
+
+
 def fit_len_rabi_joint(
     lengths: NDArray[np.float64],
     signals: NDArray[np.complex128],
@@ -450,7 +525,48 @@ def fit_len_rabi_joint(
 
     backend: LenRabiBackendResult | None = None
     try:
-        params, backend = _fit_backend(times, projection, max_calls=max_calls)
+        initial_candidates: list[NDArray[np.float64] | None] = [None]
+        if max_calls is None:
+            coarse = _coarse_projection(projection)
+            if coarse is not projection:
+                coarse_backends = []
+                for coarse_initial in (
+                    _initial_values(times, coarse),
+                    _quantile_initial_values(times, coarse),
+                ):
+                    _, coarse_backend = _fit_backend(
+                        times,
+                        coarse,
+                        max_calls=None,
+                        initial=coarse_initial,
+                    )
+                    coarse_backends.append(coarse_backend)
+                coarse_backends.sort(
+                    key=lambda candidate: (
+                        not candidate.valid,
+                        not np.isfinite(candidate.nll),
+                        candidate.nll,
+                    )
+                )
+                initial_candidates = [candidate.values for candidate in coarse_backends]
+
+        params, backend = _fit_backend(
+            times,
+            projection,
+            max_calls=max_calls,
+            initial=initial_candidates[0],
+        )
+        if not backend.valid and len(initial_candidates) > 1:
+            fallback_params, fallback_backend = _fit_backend(
+                times,
+                projection,
+                max_calls=None,
+                initial=initial_candidates[1],
+            )
+            if fallback_backend.valid or (
+                not backend.valid and fallback_backend.nll < backend.nll
+            ):
+                params, backend = fallback_params, fallback_backend
         if not backend.valid:
             return _failed_result(projection, backend)
         physical = np.array(

@@ -231,7 +231,7 @@ class WritebackService:
                 )
             if not self._values_equal(proposed_value, item.proposed_value):
                 item.proposed_value = proposed_value
-                entry.proposed_summary = self._format_scalar(proposed_value)
+                entry.proposed_summary = self._format_value_summary(proposed_value)
                 entry.applied = False
 
         result = None
@@ -424,14 +424,32 @@ class WritebackService:
         return None
 
     @staticmethod
-    def _format_scalar(value: Any) -> str:
+    def _format_value_summary(value: Any) -> str:
         if value is None:
             return "—"
         if isinstance(value, float):
             return f"{value:.6g}"
         if isinstance(value, complex):
             return f"{value.real:.4g}{value.imag:+.4g}j"
-        return repr(value)
+        if isinstance(value, (list, tuple)):
+            if value and all(isinstance(row, (list, tuple)) for row in value):
+                row_lengths = {len(row) for row in value}
+                scalar_cells = all(
+                    not isinstance(cell, (list, tuple, dict))
+                    for row in value
+                    for cell in row
+                )
+                if (
+                    len(row_lengths) == 1
+                    and next(iter(row_lengths)) > 0
+                    and scalar_cells
+                ):
+                    return f"{len(value)} × {next(iter(row_lengths))} matrix"
+            return f"list[{len(value)}]"
+        if isinstance(value, dict):
+            return f"map[{len(value)}]"
+        text = repr(value)
+        return text if len(text) <= 48 else f"{text[:45]}..."
 
     def _capture_baseline(self, entry: _DraftEntry, ctx: Any | None) -> None:
         """Populate entry.current_summary / entry.proposed_summary.
@@ -455,10 +473,10 @@ class WritebackService:
                         has_current = False
                         current = None
                 if has_current:
-                    entry.current_summary = self._format_scalar(current)
+                    entry.current_summary = self._format_value_summary(current)
                 else:
                     entry.current_summary = "—"
-                entry.proposed_summary = self._format_scalar(item.proposed_value)
+                entry.proposed_summary = self._format_value_summary(item.proposed_value)
             elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
                 exists = False
                 if ctx is not None:

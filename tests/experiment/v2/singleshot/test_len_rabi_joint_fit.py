@@ -7,12 +7,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import zcu_tools.experiment.v2.singleshot.len_rabi_fit as fit_module
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import StepPatch
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult
 from scipy.special import ndtr
-from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResult
+from zcu_tools.experiment.v2.singleshot.len_rabi import (
+    LenRabiCfg,
+    LenRabiExp,
+    LenRabiResult,
+    classify_len_rabi_iq,
+)
 from zcu_tools.experiment.v2.singleshot.len_rabi_fit import (
     LenRabiPhysicalParams,
     fit_len_rabi_joint,
@@ -20,6 +26,7 @@ from zcu_tools.experiment.v2.singleshot.len_rabi_fit import (
     multinomial_nll,
     rabi_excited_population,
 )
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
 from zcu_tools.utils.fitting.singleshot import (
     calc_fc,
     transition_state_bin_probabilities,
@@ -174,7 +181,24 @@ def test_public_analysis_recovers_identifiable_raw_iq_joint_fit() -> None:
     )
     lengths = np.linspace(0.05, 3.2, 17)
     signals = _synthetic_raw(lengths, truth, shots=1000, seed=20260901)
-    result = LenRabiResult(lengths, np.arange(signals.shape[1]), signals)
+    cfg_snapshot = cast(
+        LenRabiCfg,
+        SimpleNamespace(
+            modules=SimpleNamespace(
+                readout=DirectReadoutCfg(
+                    ro_ch=0,
+                    ro_length=4.8,
+                    ro_freq=6_000.0,
+                )
+            )
+        ),
+    )
+    result = LenRabiResult(
+        lengths,
+        np.arange(signals.shape[1]),
+        signals,
+        cfg_snapshot=cfg_snapshot,
+    )
 
     fit, figure = LenRabiExp().analyze(result, max_calls=20_000)
 
@@ -243,7 +267,81 @@ def test_public_analysis_recovers_identifiable_raw_iq_joint_fit() -> None:
     np.testing.assert_allclose(displayed_matrix, fit.confusion_matrix)
     assert confusion_ax.images[0].get_clim() == (0.0, 1.0)
     assert "fixed by model" in confusion_ax.get_title().lower()
+
+    population_ax = figure.axes[0]
+    assert "P_e(0)" not in population_ax.get_title()
+    assert "T_R" not in population_ax.get_title()
+    assert "L=" not in histogram_ax.get_title()
+    assert "Pulse length" not in histogram_ax.get_title()
+    assert "Effective $T_1$" in histogram_ax.get_title()
+    assert f"{4.8 / fit.length_ratio:.3g} μs" in histogram_ax.get_title()
+
+    classified_ge = classify_len_rabi_iq(
+        signals,
+        fit.g_center,
+        fit.e_center,
+        fit.radius,
+    )[0]
+    expected_distribution = (*classified_ge, 1.0 - classified_ge.sum())
+    distribution_text = next(
+        text.get_text()
+        for text in histogram_ax.texts
+        if "Classified G/E/L" in text.get_text()
+    )
+    for population in expected_distribution:
+        assert f"{population:.1%}" in distribution_text
+
+    for size in ((6.4, 4.8), (8.0, 5.0)):
+        figure.set_size_inches(*size, forward=True)
+        canvas = cast(FigureCanvasAgg, figure.canvas)
+        canvas.draw()
+        renderer = canvas.get_renderer()
+        assert not population_ax.xaxis.label.get_window_extent(renderer).overlaps(
+            histogram_ax.title.get_window_extent(renderer)
+        )
+        for panel_ax in figure.axes:
+            bbox = panel_ax.get_tightbbox(renderer)
+            assert bbox is not None
+            assert figure.bbox.contains(bbox.x0, bbox.y0)
+            assert figure.bbox.contains(bbox.x1, bbox.y1)
+        if size == (6.4, 4.8):
+            annotation_boxes = [
+                text.get_window_extent(renderer) for text in confusion_ax.texts
+            ]
+            assert all(
+                not left.overlaps(right)
+                for index, left in enumerate(annotation_boxes)
+                for right in annotation_boxes[index + 1 :]
+            )
     plt.close(figure)
+
+
+def test_default_fit_converges_for_low_snr_high_shot_raw_iq() -> None:
+    # Equal cluster widths make center separation / sigma an SNR of 1.
+    truth = LenRabiPhysicalParams(
+        p_e0=0.39,
+        p_inf=0.49,
+        center_g=-26.0,
+        center_e=26.0,
+        sigma=52.0,
+        p_avg=0.25,
+        length_ratio=0.025,
+        t_r=11.7,
+        omega=8.67,
+    )
+    lengths = np.linspace(0.0286, 1.2, 51)
+    signals = _synthetic_raw(lengths, truth, shots=5_000, seed=1)
+
+    fit = fit_len_rabi_joint(lengths, signals)
+
+    assert fit.backend.valid
+    assert not fit.backend.reached_call_limit
+    assert fit.omega == pytest.approx(truth.omega, rel=0.02)
+    assert fit.projected_e_center - fit.projected_g_center == pytest.approx(
+        truth.center_e - truth.center_g,
+        rel=0.15,
+    )
+    assert fit.sigma == pytest.approx(truth.sigma, rel=0.1)
 
 
 def test_public_fit_converges_for_gaussian_boundary_of_transition_family() -> None:

@@ -248,10 +248,14 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
         widget.close()
 
 
-def test_writeback_structured_matrix_bounded_table_copy_and_long_bounded(qapp):
-    """A2 — 3×3 shows 3 × 3 matrix + read-only table, Copy JSON, long bounded."""
+def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qapp):
+    """A2 — Proposed shows the 3×3 view; Current stays bounded summary-only."""
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
-    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    controller = MagicMock()
+    controller.get_writeback_summaries_for_pane.return_value = {
+        "md-1": ("3 × 3 matrix", "3 × 3 matrix")
+    }
+    widget = WritebackWidget(controller, tab_id="tab-1", pane="analysis")
     item = MetaDictWriteback(
         target_name="confusion_matrix", description="d", proposed_value=matrix
     )
@@ -261,24 +265,26 @@ def test_writeback_structured_matrix_bounded_table_copy_and_long_bounded(qapp):
     widget.show()
     qapp.processEvents()
     try:
-        # bounded summary
+        current = widget.findChild(QLabel, "writebackCurrent")
+        assert current is not None
+        assert current.text() == "3 × 3 matrix"
+
+        # Proposed keeps its bounded heading and adds the readable matrix view.
         prop = next(
             l
             for l in widget.findChildren(QLabel)
             if "writebackProposed" in l.objectName()
         )
         assert prop.text() == "3 \u00d7 3 matrix"
-        # compact read-only table
         tables = widget.findChildren(QTableWidget)
         assert len(tables) == 1
-        tbl = tables[0]
-        assert tbl.rowCount() == 3 and tbl.columnCount() == 3
-        assert tbl.editTriggers() == QTableWidget.EditTrigger.NoEditTriggers
-        assert tbl.selectionMode() == QTableWidget.SelectionMode.NoSelection
-        first = tbl.item(0, 0)
-        assert first is not None
-        assert first.text() == "0.9500"
-        assert first.textAlignment() & Qt.AlignmentFlag.AlignCenter
+        assert tables[0].objectName() == "writebackProposedMatrixTable"
+        top_left = tables[0].item(0, 0)
+        bottom_right = tables[0].item(2, 2)
+        assert top_left is not None
+        assert bottom_right is not None
+        assert top_left.text() == "0.9500"
+        assert bottom_right.text() == "1.0000"
         # Copy places complete JSON
         copy_btn = next(
             b for b in widget.findChildren(QPushButton) if b.text() == "Copy"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from numbers import Real
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,8 +30,10 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.base import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
+    DirectReadoutCfg,
     ProgramV2Cfg,
     PulseCfg,
+    PulseReadoutCfg,
     ReadoutCfg,
     ResetCfg,
     SweepCfg,
@@ -62,10 +65,29 @@ def classify_len_rabi_iq(
     return np.stack((g_mask.mean(axis=1), e_mask.mean(axis=1)), axis=1)
 
 
+def _effective_t1_us(
+    readout: ReadoutCfg | None,
+    length_ratio: float,
+) -> float | None:
+    if readout is None or not np.isfinite(length_ratio) or length_ratio <= 0.0:
+        return None
+    if isinstance(readout, PulseReadoutCfg):
+        readout_length = readout.ro_cfg.ro_length
+    elif isinstance(readout, DirectReadoutCfg):
+        readout_length = readout.ro_length
+    else:
+        return None
+    if not isinstance(readout_length, Real):
+        return None
+    value = float(readout_length) / length_ratio
+    return value if np.isfinite(value) and value > 0.0 else None
+
+
 def _plot_initial_histogram(
     ax: Axes,
-    length: float,
     fit: LenRabiJointFitResult,
+    effective_t1_us: float | None,
+    classified_distribution: NDArray[np.float64] | None,
 ) -> None:
     counts = fit.projection.counts[0]
     edges = fit.projection.bin_edges
@@ -110,17 +132,37 @@ def _plot_initial_histogram(
             color="red",
             linestyle="--",
         )
-        ax.set_title(
-            "Initial-point projected IQ histogram\n"
-            f"L={length:.4g} μs, $P_g$={p_g:.3f}, $P_e$={p_e:.3f}"
-        )
+        title = "Initial-point projected IQ histogram"
+        if effective_t1_us is not None:
+            title += f"\nEffective $T_1$ = {effective_t1_us:.3g} μs"
+        ax.set_title(title, fontsize=10)
+        if (
+            classified_distribution is not None
+            and classified_distribution.shape == (3,)
+            and np.isfinite(classified_distribution).all()
+        ):
+            g_population, e_population, l_population = classified_distribution
+            ax.text(
+                0.98,
+                0.96,
+                "Classified G/E/L\n"
+                f"G {g_population:.1%}\n"
+                f"E {e_population:.1%}\n"
+                f"L {l_population:.1%}",
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=8,
+                bbox={"facecolor": "white", "edgecolor": "#c9cdd3", "alpha": 0.9},
+            )
     else:
         ax.set_title(
-            f"Initial-point projected IQ histogram\nL={length:.4g} μs; joint fit invalid"
+            "Initial-point projected IQ histogram\nJoint fit invalid",
+            fontsize=10,
         )
     ax.set_xlabel("Pooled PCA projection (a.u.)")
     ax.set_ylabel("Counts")
-    ax.legend()
+    ax.legend(fontsize=8, loc="lower left")
     ax.grid(True)
 
 
@@ -139,13 +181,14 @@ def _plot_confusion_matrix(ax: Axes, fit: LenRabiJointFitResult) -> None:
                     ha="center",
                     va="center",
                     color="white" if value > 0.5 else "black",
+                    fontsize=8,
                 )
-        ax.set_title("Fitted confusion matrix\nOther row fixed by model")
+        ax.set_title("Fitted confusion matrix\nOther row fixed by model", fontsize=10)
     else:
         ax.set_xlim(-0.5, 2.5)
         ax.set_ylim(2.5, -0.5)
         ax.text(1.0, 1.0, "Joint fit invalid", ha="center", va="center")
-        ax.set_title("Confusion matrix unavailable")
+        ax.set_title("Confusion matrix unavailable", fontsize=10)
     ax.set_xticks(range(3), labels)
     ax.set_yticks(range(3), labels)
     ax.set_xlabel("Classified state")
@@ -289,9 +332,15 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
 
         fit = fit_len_rabi_joint(result.lengths, result.signals, max_calls=max_calls)
         width, height = config.figsize
-        fig = plt.figure(figsize=(width, height * 1.6))
+        fig = plt.figure(figsize=(width, height * 1.6), layout="constrained")
         assert isinstance(fig, Figure)
-        grid = fig.add_gridspec(2, 2, height_ratios=(2.0, 1.2))
+        grid = fig.add_gridspec(
+            2,
+            2,
+            height_ratios=(2.0, 1.2),
+            hspace=0.16,
+            wspace=0.12,
+        )
         ax = fig.add_subplot(grid[0, :])
         histogram_ax = fig.add_subplot(grid[1, 0])
         confusion_ax = fig.add_subplot(grid[1, 1])
@@ -316,10 +365,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             )
         if fit.backend.valid:
             ax.set_title(
-                f"$P_e(0)$={fit.initial_populations[1]:.3f}, "
-                f"$T_R$={fit.t_r:.3g} μs, "
-                f"$\\Omega$={fit.omega:.3g} rad/μs, "
-                f"cond={fit.condition_number:.3g}"
+                f"$\\Omega$={fit.omega:.3g} rad/μs, cond={fit.condition_number:.3g}"
             )
         else:
             ax.set_title("Len Rabi joint fit invalid")
@@ -328,7 +374,30 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
-        _plot_initial_histogram(histogram_ax, float(result.lengths[0]), fit)
+        readout = (
+            result.cfg_snapshot.modules.readout
+            if result.cfg_snapshot is not None
+            else None
+        )
+        effective_t1_us = (
+            _effective_t1_us(readout, fit.length_ratio) if fit.backend.valid else None
+        )
+        classified_distribution = None
+        if fit.backend.valid:
+            classified_ge = classify_len_rabi_iq(
+                result.signals[:1],
+                fit.g_center,
+                fit.e_center,
+                fit.radius,
+            )[0]
+            classified_distribution = np.array(
+                (*classified_ge, 1.0 - classified_ge.sum()), dtype=np.float64
+            )
+        _plot_initial_histogram(
+            histogram_ax,
+            fit,
+            effective_t1_us,
+            classified_distribution,
+        )
         _plot_confusion_matrix(confusion_ax, fit)
-        fig.tight_layout()
         return fit, fig

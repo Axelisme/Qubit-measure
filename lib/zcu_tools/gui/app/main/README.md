@@ -40,7 +40,7 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   backgrounds, whole-row folding, reference shape elision, viewport follows
   available panel height with scrolling only when content exceeds viewport);
   Run action row is status-free with Reset 20% / Run 80% of available width；
-  idle Reset為green secondary、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
+  idle Reset與Run同高，Reset為green secondary、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
   settled後恢復20/80（A5）； Analysis uses an app-local single-column 13 px ledger with
   whole-header folding for `Analysis parameters` and `Writeback preview` and a
   full-width `Analyze` immediately after parameters and before Writeback preview
@@ -55,12 +55,12 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
   centered Current → Proposed columns on a shared-background continuous-boundary
-  panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions
-  (scalar MetaDict and editable module/waveform items use Edit; non-scalar
-  MetaDict values use a bounded summary like `3 × 3 matrix`). A small matrix
-  renders a compact read-only inline table and its Copy places the complete JSON
-  on the clipboard; arbitrary long values show only the bounded summary so the
-  ledger never widens. The widget owns a ~450 px breakpoint: wide rows stay
+  panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions。
+  Scalar MetaDict與editable module/waveform items使用Edit；non-scalar MetaDict的
+  current/proposed headings使用一致的bounded summary（例如`3 × 3 matrix`）。small
+  proposed matrix另外顯示read-only matrix view，current value維持summary-only；Copy會把
+  complete proposed JSON放入clipboard。其它arbitrary long values只顯示bounded summary，
+  因此ledger never widens. The widget owns a ~450 px breakpoint: wide rows stay
   single-line, narrow rows reflow to target/action above centered
   Current → Proposed, the bordered ledger hugs its rendered rows with Apply
   Selected immediately after it; long content grows naturally and delegates
