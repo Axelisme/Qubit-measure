@@ -8,10 +8,10 @@ from typing import Any, ClassVar, TypeAlias
 import numpy as np
 from matplotlib.figure import Figure
 
-from zcu_tools.experiment.v2.singleshot.len_rabi import (
-    LenRabiCfg,
-    LenRabiExp,
-    LenRabiResult,
+from zcu_tools.experiment.v2.singleshot.amp_rabi import (
+    AmpRabiCfg,
+    AmpRabiExp,
+    AmpRabiResult,
 )
 from zcu_tools.experiment.v2.singleshot.rabi_fit import RabiJointFitResult
 from zcu_tools.experiment.v2_gui.adapters._support import (
@@ -41,14 +41,14 @@ from zcu_tools.gui.cfg import (
 
 from ._shared import read_ge_centers
 
-# ``LenRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *length* and
+# ``AmpRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *gain* and
 # preserves every raw IQ shot. Analysis derives populations from that canonical
 # raw result rather than persisting a second population representation.
-SsLenRabiRunResult: TypeAlias = LenRabiResult
+SsAmpRabiRunResult: TypeAlias = AmpRabiResult
 
 
 @dataclass
-class SsLenRabiAnalyzeResult(AnalyzeResultBase):
+class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
     # The full numeric fit is intentionally non-JSON-safe and therefore omitted
     # from the GUI summary. The operator reviews the population/fit Figure while
     # writeback projection reads the typed domain result directly.
@@ -56,15 +56,15 @@ class SsLenRabiAnalyzeResult(AnalyzeResultBase):
     figure: Figure
 
 
-class SsLenRabiAdapter(
-    BaseAdapter[LenRabiCfg, SsLenRabiRunResult, SsLenRabiAnalyzeResult, NoAnalyzeParams]
+class SsAmpRabiAdapter(
+    BaseAdapter[AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, NoAnalyzeParams]
 ):
-    exp_cls = LenRabiExp
-    ExpCfg_cls: ClassVar[Any] = LenRabiCfg
+    exp_cls = AmpRabiExp
+    ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Single-shot Length Rabi: sweeps the qubit-drive pulse length, "
+            "Single-shot amp Rabi: sweeps the qubit-drive pulse gain, "
             "preserves every raw IQ shot, and derives ground / excited / other "
             "population curves during live view and analysis. Runs on real hardware."
         ),
@@ -73,8 +73,8 @@ class SsLenRabiAdapter(
             "MetaDict — run 'singleshot/ge' first and apply its writeback so "
             "'g_center' / 'e_center' / 'ge_radius' are present; run "
             "fast-fails if any is missing. Those values support live classification; "
-            "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_len' "
-            "to seed the sweep stop (4*pi_len when calibrated; fallback sweep "
+            "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_gain' "
+            "to seed the sweep stop (4*pi_gain when calibrated; fallback sweep "
             "0.03–0.2 us); "
             "'q_f' / 'qub_ch' to seed the qubit-drive defaults."
         ),
@@ -88,7 +88,7 @@ class SsLenRabiAdapter(
             "independent items. The four-item proposal is all-or-none."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. A sweep spanning a few pi lengths "
+            "Run after 'singleshot/ge'. A sweep spanning a few pi gains "
             "captures a full oscillation. Review the measured population curves "
             "and overlaid joint-fit curves before applying all four calibration "
             "proposals."
@@ -109,11 +109,11 @@ class SsLenRabiAdapter(
             .readout()
             .relax_delay(50.5)
             .sweep(
-                "length",
-                label="Length (us)",
+                "gain",
+                label="Gain (a.u.)",
                 default=SweepDefault(
-                    start=0.03,
-                    stop=scaled_md("pi_len", factor=4.0, fallback_value=0.2),
+                    start=-0.3,
+                    stop=scaled_md("pi_gain", factor=4.0, fallback_value=1.0),
                     expts=51,
                 ),
             )
@@ -123,22 +123,22 @@ class SsLenRabiAdapter(
             .build()
         )
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> SsLenRabiRunResult:
+    def run(self, req: RunRequest, schema: CfgSchema) -> SsAmpRabiRunResult:
         # Override standard run: domain run needs the GE classification trio.
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         g_center, e_center, radius = read_ge_centers(req.md)
-        return LenRabiExp().run(soc, soccfg, cfg, g_center, e_center, radius)
+        return AmpRabiExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
-        self, req: AnalyzeRequest[SsLenRabiRunResult, NoAnalyzeParams]
-    ) -> SsLenRabiAnalyzeResult:
-        fit_result, figure = LenRabiExp().analyze(req.run_result)
-        return SsLenRabiAnalyzeResult(fit_result=fit_result, figure=figure)
+        self, req: AnalyzeRequest[SsAmpRabiRunResult, NoAnalyzeParams]
+    ) -> SsAmpRabiAnalyzeResult:
+        fit_result, figure = AmpRabiExp().analyze(req.run_result)
+        return SsAmpRabiAnalyzeResult(fit_result=fit_result, figure=figure)
 
     def get_writeback_items(
-        self, req: WritebackRequest[SsLenRabiRunResult, SsLenRabiAnalyzeResult]
+        self, req: WritebackRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         fit = req.analyze_result.fit_result
         calibration_is_finite = (
@@ -154,25 +154,25 @@ class SsLenRabiAdapter(
         return [
             MetaDictWriteback(
                 target_name="g_center",
-                description="Len Rabi fitted |g> IQ cluster centre (complex)",
+                description="Amp Rabi fitted |g> IQ cluster centre (complex)",
                 proposed_value=fit.g_center,
             ),
             MetaDictWriteback(
                 target_name="e_center",
-                description="Len Rabi fitted |e> IQ cluster centre (complex)",
+                description="Amp Rabi fitted |e> IQ cluster centre (complex)",
                 proposed_value=fit.e_center,
             ),
             MetaDictWriteback(
                 target_name="ge_radius",
-                description="Len Rabi fitted single-shot classification radius",
+                description="Amp Rabi fitted single-shot classification radius",
                 proposed_value=fit.radius,
             ),
             MetaDictWriteback(
                 target_name="confusion_matrix",
-                description="Len Rabi fitted 3x3 confusion matrix",
+                description="Amp Rabi fitted 3x3 confusion matrix",
                 proposed_value=fit.confusion_matrix.tolist(),
             ),
         ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
-        return f"{ctx.qub_name}_ss_len_rabi_{time.strftime('%m%d')}"
+        return f"{ctx.qub_name}_ss_amp_rabi_{time.strftime('%m%d')}"

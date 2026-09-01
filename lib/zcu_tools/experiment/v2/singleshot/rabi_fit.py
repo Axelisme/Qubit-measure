@@ -32,7 +32,7 @@ _NORMAL_MAD_SCALE = 1.482602218505602
 
 
 @dataclass(frozen=True)
-class LenRabiProjection:
+class RabiProjection:
     projected: NDArray[np.float64]
     bin_edges: NDArray[np.float64]
     counts: NDArray[np.int64]
@@ -42,7 +42,7 @@ class LenRabiProjection:
 
 
 @dataclass(frozen=True)
-class LenRabiPhysicalParams:
+class RabiPhysicalParams:
     p_e0: float
     p_inf: float
     center_g: float
@@ -55,7 +55,7 @@ class LenRabiPhysicalParams:
 
 
 @dataclass(frozen=True)
-class LenRabiBackendResult:
+class RabiBackendResult:
     parameter_names: tuple[str, ...]
     values: NDArray[np.float64]
     covariance: NDArray[np.float64]
@@ -69,7 +69,7 @@ class LenRabiBackendResult:
 
 
 @dataclass(frozen=True)
-class LenRabiJointFitResult:
+class RabiJointFitResult:
     initial_populations: NDArray[np.float64]
     p_inf: float
     t_r: float
@@ -86,8 +86,8 @@ class LenRabiJointFitResult:
     condition_number: float
     measured_populations: NDArray[np.float64]
     fitted_populations: NDArray[np.float64]
-    projection: LenRabiProjection
-    backend: LenRabiBackendResult
+    projection: RabiProjection
+    backend: RabiBackendResult
 
 
 def _cluster_projected_iq(
@@ -112,9 +112,9 @@ def _cluster_projected_iq(
     return cluster_centers, labels
 
 
-def project_len_rabi_iq(
+def project_rabi_iq(
     signals: NDArray[np.complex128],
-) -> LenRabiProjection:
+) -> RabiProjection:
     raw = np.asarray(signals, dtype=np.complex128)
     if raw.ndim != 2 or raw.shape[0] < 2 or raw.shape[1] < 2:
         raise ValueError("Len Rabi joint fit requires a two-dimensional raw-IQ sweep")
@@ -151,7 +151,7 @@ def project_len_rabi_iq(
         [np.histogram(row, bins=bin_edges)[0] for row in projected], axis=0
     ).astype(np.int64)
     perpendicular = np.array([-axis_vector[1], axis_vector[0]])
-    return LenRabiProjection(
+    return RabiProjection(
         projected=np.asarray(projected, dtype=np.float64),
         bin_edges=bin_edges,
         counts=counts,
@@ -162,7 +162,7 @@ def project_len_rabi_iq(
 
 
 def rabi_excited_population(
-    lengths: NDArray[np.float64], params: LenRabiPhysicalParams
+    lengths: NDArray[np.float64], params: RabiPhysicalParams
 ) -> NDArray[np.float64]:
     times = np.asarray(lengths, dtype=np.float64)
     return params.p_inf + (params.p_e0 - params.p_inf) * np.exp(
@@ -170,9 +170,9 @@ def rabi_excited_population(
     ) * np.cos(params.omega * times)
 
 
-def _unpack(values: NDArray[np.float64]) -> LenRabiPhysicalParams:
+def _unpack(values: NDArray[np.float64]) -> RabiPhysicalParams:
     separation = float(np.exp(values[3]))
-    return LenRabiPhysicalParams(
+    return RabiPhysicalParams(
         p_e0=0.5 * float(expit(values[0])),
         p_inf=float(expit(values[1])),
         center_g=float(values[2] - 0.5 * separation),
@@ -188,7 +188,7 @@ def _unpack(values: NDArray[np.float64]) -> LenRabiPhysicalParams:
 def model_bin_probabilities(
     lengths: NDArray[np.float64],
     bin_edges: NDArray[np.float64],
-    params: LenRabiPhysicalParams,
+    params: RabiPhysicalParams,
 ) -> NDArray[np.float64]:
     p_e = rabi_excited_population(lengths, params)
     if np.any(~np.isfinite(p_e)) or np.any((p_e < 0.0) | (p_e > 1.0)):
@@ -232,7 +232,7 @@ def _logit(value: float) -> float:
 
 
 def _quantile_initial_values(
-    lengths: NDArray[np.float64], projection: LenRabiProjection
+    lengths: NDArray[np.float64], projection: RabiProjection
 ) -> NDArray[np.float64]:
     projected = projection.projected
     lower, upper = np.quantile(projected, [0.2, 0.8])
@@ -282,7 +282,7 @@ def _initial_values_from_crude_populations(
 
 
 def _initial_values(
-    lengths: NDArray[np.float64], projection: LenRabiProjection
+    lengths: NDArray[np.float64], projection: RabiProjection
 ) -> NDArray[np.float64]:
     projected = projection.projected
     cluster_centers, labels = _cluster_projected_iq(projected)
@@ -312,11 +312,11 @@ def _initial_values(
 
 def _fit_backend(
     lengths: NDArray[np.float64],
-    projection: LenRabiProjection,
+    projection: RabiProjection,
     *,
     max_calls: int | None,
     initial: NDArray[np.float64] | None = None,
-) -> tuple[LenRabiPhysicalParams, LenRabiBackendResult]:
+) -> tuple[RabiPhysicalParams, RabiBackendResult]:
     if initial is None:
         initial = _initial_values(lengths, projection)
     elif initial.shape != (len(_PARAMETER_NAMES),) or np.any(~np.isfinite(initial)):
@@ -378,7 +378,7 @@ def _fit_backend(
         for row, row_name in enumerate(_PARAMETER_NAMES):
             for col, col_name in enumerate(_PARAMETER_NAMES):
                 covariance[row, col] = fit.covariance[row_name, col_name]
-    backend = LenRabiBackendResult(
+    backend = RabiBackendResult(
         parameter_names=_PARAMETER_NAMES,
         values=values,
         covariance=covariance,
@@ -393,9 +393,9 @@ def _fit_backend(
     return _unpack(values), backend
 
 
-def _failed_backend() -> LenRabiBackendResult:
+def _failed_backend() -> RabiBackendResult:
     size = len(_PARAMETER_NAMES)
-    return LenRabiBackendResult(
+    return RabiBackendResult(
         parameter_names=_PARAMETER_NAMES,
         values=np.full(size, np.nan),
         covariance=np.full((size, size), np.nan),
@@ -410,11 +410,11 @@ def _failed_backend() -> LenRabiBackendResult:
 
 
 def _failed_result(
-    projection: LenRabiProjection,
-    backend: LenRabiBackendResult | None = None,
-) -> LenRabiJointFitResult:
+    projection: RabiProjection,
+    backend: RabiBackendResult | None = None,
+) -> RabiJointFitResult:
     rows = projection.projected.shape[0]
-    return LenRabiJointFitResult(
+    return RabiJointFitResult(
         initial_populations=np.array([np.nan, np.nan, 0.0]),
         p_inf=np.nan,
         t_r=np.nan,
@@ -459,7 +459,7 @@ def _mixture_populations(
 
 
 def _confusion_matrix(
-    params: LenRabiPhysicalParams,
+    params: RabiPhysicalParams,
 ) -> tuple[float, NDArray[np.float64], float]:
     max_radius = 0.5 * (params.center_e - params.center_g)
 
@@ -494,7 +494,7 @@ def _confusion_matrix(
     return radius, matrix, float(np.linalg.cond(matrix))
 
 
-def _coarse_projection(projection: LenRabiProjection) -> LenRabiProjection:
+def _coarse_projection(projection: RabiProjection) -> RabiProjection:
     if projection.counts.shape[1] <= _COARSE_BIN_COUNT:
         return projection
     edges = np.linspace(
@@ -508,22 +508,22 @@ def _coarse_projection(projection: LenRabiProjection) -> LenRabiProjection:
     return replace(projection, bin_edges=edges, counts=counts)
 
 
-def fit_len_rabi_joint(
+def fit_rabi_joint(
     lengths: NDArray[np.float64],
     signals: NDArray[np.complex128],
     *,
     max_calls: int | None = None,
-) -> LenRabiJointFitResult:
+) -> RabiJointFitResult:
     times = np.asarray(lengths, dtype=np.float64)
     if times.ndim != 1 or times.size < 2 or np.any(~np.isfinite(times)):
         raise ValueError("Len Rabi joint fit requires at least two finite lengths")
     if np.any(np.diff(times) <= 0.0) or float(np.ptp(times)) <= 0.0:
         raise ValueError("Len Rabi lengths must be strictly increasing")
-    projection = project_len_rabi_iq(signals)
+    projection = project_rabi_iq(signals)
     if projection.projected.shape[0] != times.size:
         raise ValueError("Len Rabi length and raw-IQ row counts do not match")
 
-    backend: LenRabiBackendResult | None = None
+    backend: RabiBackendResult | None = None
     try:
         initial_candidates: list[NDArray[np.float64] | None] = [None]
         if max_calls is None:
@@ -602,7 +602,7 @@ def fit_len_rabi_joint(
         return _failed_result(projection, backend)
 
     axis = projection.axis
-    return LenRabiJointFitResult(
+    return RabiJointFitResult(
         initial_populations=np.array([1.0 - params.p_e0, params.p_e0, 0.0]),
         p_inf=params.p_inf,
         t_r=params.t_r,

@@ -14,7 +14,6 @@ from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
-    US_TO_S,
     AxesSpec,
     Axis,
     PersistableExperiment,
@@ -45,11 +44,11 @@ from .util import classify_result, raw_shots_to_signal
 
 
 @dataclass(frozen=True)
-class LenRabiResult:
-    lengths: NDArray[np.float64]
+class AmpRabiResult:
+    gains: NDArray[np.float64]
     shot_indices: NDArray[np.int64]
     signals: NDArray[np.complex128]
-    cfg_snapshot: LenRabiCfg | None = None
+    cfg_snapshot: AmpRabiCfg | None = None
 
 
 def classify_rabi_iq(
@@ -59,7 +58,7 @@ def classify_rabi_iq(
     radius: float,
 ) -> NDArray[np.float64]:
     if signals.ndim != 2:
-        raise ValueError("Len Rabi raw IQ must have shape (length, shot)")
+        raise ValueError("Amp Rabi raw IQ must have shape (length, shot)")
     g_mask, e_mask, _ = classify_result(signals, g_center, e_center, radius)
     return np.stack((g_mask.mean(axis=1), e_mask.mean(axis=1)), axis=1)
 
@@ -194,23 +193,23 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
     ax.set_ylabel("True state")
 
 
-class LenRabiSweepCfg(ConfigBase):
-    length: SweepCfg
+class AmpRabiSweepCfg(ConfigBase):
+    gain: SweepCfg
 
 
-class LenRabiModuleCfg(ConfigBase):
+class AmpRabiModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class LenRabiCfg(ProgramV2Cfg, ExpCfgModel):
-    modules: LenRabiModuleCfg
-    sweep: LenRabiSweepCfg
+class AmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: AmpRabiModuleCfg
+    sweep: AmpRabiSweepCfg
     shots: int
 
 
-class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
+class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
     AXES_SPEC = AxesSpec(
         axes=(
             Axis(
@@ -220,12 +219,12 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 scale=IDENTITY,
                 dtype=np.int64,
             ),
-            Axis("lengths", "Length", "s", scale=US_TO_S, dtype=np.float64),
+            Axis("gains", "Gain", "a.u.", scale=IDENTITY, dtype=np.float64),
         ),
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
-        result_type=LenRabiResult,
-        cfg_type=LenRabiCfg,
-        tag="singleshot/len_rabi",
+        result_type=AmpRabiResult,
+        cfg_type=AmpRabiCfg,
+        tag="singleshot/amp_rabi",
     )
 
     @record_result
@@ -233,11 +232,11 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         self,
         soc,
         soccfg,
-        cfg: LenRabiCfg,
+        cfg: AmpRabiCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> LenRabiResult:
+    ) -> AmpRabiResult:
         cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
         if cfg.rounds != 1:
@@ -248,18 +247,15 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             cfg.reps = cfg.shots
 
         modules = cfg.modules
-        assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
-            "This method only supports const and flat_top pulse style"
-        )
-        lengths = sweep2array(
-            cfg.sweep.length,
-            "time",
+        gains = sweep2array(
+            cfg.sweep.gain,
+            "gain",
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
-        expected_shape = (len(lengths), cfg.shots)
+        expected_shape = (len(gains), cfg.shots)
 
         with LivePlot1D(
-            "Length (us)",
+            "Gain (a.u.)",
             "Signal",
             segment_kwargs=dict(
                 num_lines=3,
@@ -277,7 +273,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 populations = classify_rabi_iq(raw_iq, g_center, e_center, radius)
                 populations[~acquired_rows] = np.nan
                 other = 1.0 - populations.sum(axis=1)
-                viewer.update(lengths, np.column_stack((populations, other)).T)
+                viewer.update(gains, np.column_stack((populations, other)).T)
 
             buffer = SignalBuffer(
                 expected_shape,
@@ -285,9 +281,9 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 on_update=update_view,
             )
             with Schedule(cfg, buffer) as sched:
-                for length, step in sched.scan("length", lengths.tolist()):
+                for gain, step in sched.scan("gain", gains.tolist()):
                     modules = step.cfg.modules
-                    modules.qub_pulse.set_param("length", length)
+                    modules.qub_pulse.set_param("gain", gain)
                     program = (
                         step.prog_builder(soc, soccfg)
                         .add_reset("reset", modules.reset)
@@ -305,15 +301,15 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                     expected_point_shape = (cfg.shots,)
                     if raw_iq.shape != expected_point_shape:
                         raise ValueError(
-                            "Len Rabi raw IQ shape mismatch: "
+                            "Amp Rabi raw IQ shape mismatch: "
                             f"expected {expected_point_shape}, got {raw_iq.shape}"
                         )
                     buffer[step].set(raw_iq)
             signals = buffer.array
             update_view(signals)
 
-        return LenRabiResult(
-            lengths=lengths,
+        return AmpRabiResult(
+            gains=gains,
             shot_indices=np.arange(cfg.shots, dtype=np.int64),
             signals=signals,
             cfg_snapshot=cfg,
@@ -322,13 +318,13 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
     @retrieve_result
     def analyze(
         self,
-        result: LenRabiResult | None = None,
+        result: AmpRabiResult | None = None,
         *,
         max_calls: int | None = None,
     ) -> tuple[RabiJointFitResult, Figure]:
         assert result is not None, "no result found"
 
-        fit = fit_rabi_joint(result.lengths, result.signals, max_calls=max_calls)
+        fit = fit_rabi_joint(result.gains, result.signals, max_calls=max_calls)
         width, height = config.figsize
         fig = plt.figure(figsize=(width, height * 1.6), layout="constrained")
         assert isinstance(fig, Figure)
@@ -347,7 +343,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         labels = ("$|0\\rangle$", "$|1\\rangle$", "$|L\\rangle$")
         for index, (color, label) in enumerate(zip(colors, labels, strict=True)):
             ax.plot(
-                result.lengths,
+                result.gains,
                 fit.measured_populations[:, index],
                 color=color,
                 ls="none",
@@ -356,18 +352,16 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 label=label,
             )
             ax.plot(
-                result.lengths,
+                result.gains,
                 fit.fitted_populations[:, index],
                 color=color,
                 ls="-",
             )
         if fit.backend.valid:
-            ax.set_title(
-                f"$\\Omega$={fit.omega:.3g} rad/μs, cond={fit.condition_number:.3g}"
-            )
+            ax.set_title(f"cond={fit.condition_number:.3g}")
         else:
-            ax.set_title("Len Rabi joint fit invalid")
-        ax.set_xlabel("Pulse length (μs)")
+            ax.set_title("Amp Rabi joint fit invalid")
+        ax.set_xlabel("Pulse Gain (a.u.)")
         ax.set_ylabel("Population")
         ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
