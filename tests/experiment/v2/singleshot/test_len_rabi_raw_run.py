@@ -74,7 +74,7 @@ class _Viewer:
         self.updates.append(populations.copy())
 
 
-def test_len_rabi_run_preserves_raw_iq_and_forces_singleshot_cfg(
+def test_len_rabi_run_soft_sweeps_points_and_preserves_raw_iq(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     desired = np.array(
@@ -85,19 +85,24 @@ def test_len_rabi_run_preserves_raw_iq_and_forces_singleshot_cfg(
         ],
         dtype=np.complex128,
     )
-    acquire_kwargs: dict[str, object] = {}
+    acquire_calls: list[dict[str, object]] = []
 
     class RawProgram(ModularProgramV2):
+        point_index: int
+
         def acquire(self, _soc: object, **kwargs: object) -> list[NDArray[np.float64]]:
-            acquire_kwargs.update(kwargs)
+            assert self.sweep_dict is None
+            assert self.loop_dims == [4]
+            self.point_index = len(acquire_calls)
+            acquire_calls.append(dict(kwargs))
             return []
 
         def get_raw(self) -> list[NDArray[np.int64]]:
             length = float(next(iter(self.ro_chs.values()))["length"])
-            qick_order = desired.T
-            raw = np.zeros((*qick_order.shape, 1, 2), dtype=np.int64)
-            raw[..., 0, 0] = np.rint(qick_order.real * length).astype(np.int64)
-            raw[..., 0, 1] = np.rint(qick_order.imag * length).astype(np.int64)
+            point_shots = desired[self.point_index]
+            raw = np.zeros((point_shots.size, 1, 2), dtype=np.int64)
+            raw[..., 0, 0] = np.rint(point_shots.real * length).astype(np.int64)
+            raw[..., 0, 1] = np.rint(point_shots.imag * length).astype(np.int64)
             return [raw]
 
     viewer = _Viewer()
@@ -123,7 +128,8 @@ def test_len_rabi_run_preserves_raw_iq_and_forces_singleshot_cfg(
     assert result.cfg_snapshot is not None
     assert result.cfg_snapshot.rounds == 1
     assert result.cfg_snapshot.reps == result.cfg_snapshot.shots == 4
-    assert "cancel_flag" in acquire_kwargs
+    assert len(acquire_calls) == len(result.lengths) == 3
+    assert all("cancel_flag" in kwargs for kwargs in acquire_calls)
     expected_populations = classify_len_rabi_iq(desired, -1.0 + 0.0j, 1.0 + 0.0j, 0.4)
     np.testing.assert_allclose(viewer.updates[-1][:2].T, expected_populations)
 
@@ -146,7 +152,7 @@ def test_len_rabi_run_rejects_non_qick_raw_layout(
     with pytest.warns(UserWarning):
         with pytest.raises(
             ValueError,
-            match=r"expected \(3, 4\), got \(4, 3\)",
+            match=r"expected \(4,\), got \(3, 4\)",
         ):
             LenRabiExp().run(
                 soc,
@@ -158,7 +164,45 @@ def test_len_rabi_run_rejects_non_qick_raw_layout(
             )
 
 
-def test_len_rabi_stopped_first_round_returns_nan_partial_raw_result(
+def test_len_rabi_stop_preserves_completed_soft_sweep_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acquire_count = 0
+
+    class StoppedSecondProgram(ModularProgramV2):
+        def acquire(self, _soc: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+            nonlocal acquire_count
+            acquire_count += 1
+            if acquire_count == 2:
+                raise StoppedPartialAcquireError("stopped")
+            return []
+
+        def get_raw(self) -> list[NDArray[np.int64]]:
+            return [np.zeros((4, 1, 2), dtype=np.int64)]
+
+    viewer = _Viewer()
+    monkeypatch.setattr(schedule_module, "ModularProgramV2", StoppedSecondProgram)
+    monkeypatch.setattr(len_rabi_module, "LivePlot1D", lambda *a, **k: viewer)
+    soc, soccfg = make_mock_soc(n_gens=1, n_readouts=1, sim=None)
+
+    with pytest.warns(UserWarning):
+        result = LenRabiExp().run(
+            soc,
+            soccfg,
+            _cfg(),
+            g_center=-1.0 + 0.0j,
+            e_center=1.0 + 0.0j,
+            radius=0.4,
+        )
+
+    assert acquire_count == 2
+    assert np.all(np.isfinite(result.signals[0]))
+    assert np.all(np.isnan(result.signals[1:]))
+    assert np.all(np.isfinite(viewer.updates[-1][:, 0]))
+    assert np.all(np.isnan(viewer.updates[-1][:, 1:]))
+
+
+def test_len_rabi_stopped_first_point_returns_nan_partial_raw_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class StoppedProgram(ModularProgramV2):

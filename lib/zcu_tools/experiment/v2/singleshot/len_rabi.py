@@ -37,7 +37,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     ResetCfg,
     SweepCfg,
-    sweep2param,
 )
 from zcu_tools.utils.fitting.singleshot import transition_state_bin_probabilities
 
@@ -274,7 +273,9 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             viewer.get_ax().set_ylim(0.0, 1.0)
 
             def update_view(raw_iq: NDArray[np.complex128]) -> None:
+                acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
                 populations = classify_len_rabi_iq(raw_iq, g_center, e_center, radius)
+                populations[~acquired_rows] = np.nan
                 other = 1.0 - populations.sum(axis=1)
                 viewer.update(lengths, np.column_stack((populations, other)).T)
 
@@ -284,35 +285,32 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 on_update=update_view,
             )
             with Schedule(cfg, buffer) as sched:
-                run_cfg = sched.cfg
-                modules = run_cfg.modules
-                length_sweep = run_cfg.sweep.length
-                modules.qub_pulse.set_param(
-                    "length", sweep2param("length", length_sweep)
-                )
-                program = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
-                    .declare_sweep("length", length_sweep)
-                    .build()
-                )
-                try:
-                    program.acquire(soc, progress=True, cancel_flag=sched.stop)
-                except StoppedPartialAcquireError:
-                    sched.set_stop()
-                else:
-                    # QICK raw buffers are reps-first; the persisted Result is
-                    # sweep-first so each row owns one length distribution.
-                    raw_iq = raw_shots_to_signal(program).T
-                    if raw_iq.shape != expected_shape:
+                for length, step in sched.scan("length", lengths.tolist()):
+                    modules = step.cfg.modules
+                    modules.qub_pulse.set_param("length", length)
+                    program = (
+                        step.prog_builder(soc, soccfg)
+                        .add_reset("reset", modules.reset)
+                        .add_pulse("qubit_pulse", modules.qub_pulse)
+                        .add_readout("readout", modules.readout)
+                        .build()
+                    )
+                    try:
+                        program.acquire(soc, progress=True, cancel_flag=step.stop)
+                    except StoppedPartialAcquireError:
+                        step.set_stop()
+                        break
+
+                    raw_iq = raw_shots_to_signal(program)
+                    expected_point_shape = (cfg.shots,)
+                    if raw_iq.shape != expected_point_shape:
                         raise ValueError(
                             "Len Rabi raw IQ shape mismatch: "
-                            f"expected {expected_shape}, got {raw_iq.shape}"
+                            f"expected {expected_point_shape}, got {raw_iq.shape}"
                         )
-                    buffer.set(raw_iq)
+                    buffer[step].set(raw_iq)
             signals = buffer.array
+            update_view(signals)
 
         return LenRabiResult(
             lengths=lengths,
