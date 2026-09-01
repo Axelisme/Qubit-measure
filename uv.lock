@@ -3,10 +3,10 @@ revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
-    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
     "python_full_version >= '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'",
     "python_full_version >= '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
+    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "python_full_version < '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'",
     "python_full_version < '3.13' and platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
 supported-markers = [
@@ -601,6 +601,30 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cd/63/9496c57188a2ee585e0f1db071d75089a11e98aa86eb99d9d7618fc1edce/idna-3.18.tar.gz", hash = "sha256:ffb385a7e039654cef1ab9ef32c6fafe283c0c0467bba1d9029738ce4a14a848", size = 196711, upload-time = "2026-06-02T14:34:07.794Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/5e/d4e9f1a599fb8e573b7b87160658329fbf28d19eac2718f51fc3def3aa5a/idna-3.18-py3-none-any.whl", hash = "sha256:7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2", size = 65455, upload-time = "2026-06-02T14:34:06.319Z" },
+]
+
+[[package]]
+name = "iminuit"
+version = "2.32.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/0d/48a09d00769634930b1bdbf1ea057a2747a81d07825cd6940784d8b6599f/iminuit-2.32.0.tar.gz", hash = "sha256:a32b34d18665959be75ad6bdb1dd80459bb94466c62b455631c00568accdf7d2", size = 1873843, upload-time = "2025-11-09T17:25:18.477Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/76/2b3281b4988e5d47534fc0bece70f3b9e31d8e943fe1b5f4a5831962c5cd/iminuit-2.32.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:b4c818abeb0ad1677a336f8caaa5faf9545cfef14be4a9be7cd08c9036e2924b", size = 386749, upload-time = "2025-11-09T17:23:46.473Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/de/2bd147bb17df581b642d02a0360bf30c2263d60f8717dd81809726b746e9/iminuit-2.32.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:91e8a206d82bef31d2ed2b1420a85f8d604c8b03ad1edf2d47d87984bf3d7817", size = 448197, upload-time = "2025-11-09T17:23:50.224Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/fd/42b36fc73dbbad436c64791735c78e7502364ea2991ac46ead03c6e32ad7/iminuit-2.32.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:101f21e26d90b766f89f64a1497d70157bb5d5b969a1176fabec3ee8b38a4d56", size = 1489599, upload-time = "2025-11-09T17:23:54.092Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/ab/bcf61e7466cb61310569c9ffe426bc9462fb7a5f9a04272f368389959260/iminuit-2.32.0-cp312-cp312-win_amd64.whl", hash = "sha256:b996f8f8ae186b761f16b3d163536728de92a451fce8ffb26acede7a23bd0af6", size = 393427, upload-time = "2025-11-09T17:23:57.773Z" },
+    { url = "https://files.pythonhosted.org/packages/00/49/c183a9ee8fd022ffb9c20fc615ddafe19ed6b74a2ab668ac12e35d19f5a0/iminuit-2.32.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:405ee46b44afea9e6cbbf9b35c606e8414a4acae834ad62ab7fadc09780f491d", size = 386816, upload-time = "2025-11-09T17:24:02.662Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/59/41b2db65f3d2ca872a059b25d51dbdf15d45ecbde72bda1341af01cf7e9a/iminuit-2.32.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:eadd4350bbf95dd3034a6cfd0da0a5b71909abf2b29faee58841a91905151892", size = 449068, upload-time = "2025-11-09T17:24:06.029Z" },
+    { url = "https://files.pythonhosted.org/packages/13/de/22f057b424acb7b27a14b080eae97147ecd4525e34071ffb684faf2196e2/iminuit-2.32.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:9e41de028b5267356e42478759c5650b868a3fdde736b8398909c0e79dff65aa", size = 1489998, upload-time = "2025-11-09T17:24:10.038Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/b7/549f900cda2f304cd64750519f9c90f9e82160d3c9197006616100de4406/iminuit-2.32.0-cp313-cp313-win_amd64.whl", hash = "sha256:720861a28e929a8b65afb4079ebd52a7deaaef3c9cb0896a8eff4a2cada718cb", size = 393459, upload-time = "2025-11-09T17:24:13.801Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/78/f90fd6b5ddc977fd96c4db9fe3c5c104cc1e3d93f8397ba1fda69386b5fe/iminuit-2.32.0-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:2a16b252e61cd6cc70f5c7f0e4aa3c022f66866285755a1daf52919299a2bd88", size = 403872, upload-time = "2025-11-09T17:24:18.314Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/71/76e96c414bff8fdb60e1ba1dcc7416b974f92bc56268e135b803e8d25f70/iminuit-2.32.0-cp313-cp313t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6f1bcec8fbec49242c4bdbfd3657d3d3a4ff673bc673d411f459cd3f401d4b50", size = 451568, upload-time = "2025-11-09T17:24:21.984Z" },
+    { url = "https://files.pythonhosted.org/packages/62/2c/0aac9e481c13abff4b6b133a0c4afbc7d1ee255ae45a4b6bfeed0f7c1883/iminuit-2.32.0-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:185a6fca41631af288275f19102a434ce63c2b80cbcf1ea5872fea77317d688e", size = 1493083, upload-time = "2025-11-09T17:24:25.923Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/34/95db7a37e912b18899c7ef9fa9a796cf3089b7165d36e1db823568a6ae23/iminuit-2.32.0-cp313-cp313t-win_amd64.whl", hash = "sha256:cb7c32520f5c2aff6ef4997086995c152c829b7f16f06749ace58e5f5636c2c6", size = 413859, upload-time = "2025-11-09T17:24:29.647Z" },
 ]
 
 [[package]]
@@ -2094,8 +2118,8 @@ version = "4.3.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
-    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
     "python_full_version >= '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
     "python_full_version < '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'",
 ]
 dependencies = [
@@ -2433,6 +2457,7 @@ all = [
     { name = "google-auth-httplib2" },
     { name = "google-auth-oauthlib" },
     { name = "h5py" },
+    { name = "iminuit" },
     { name = "ipykernel" },
     { name = "ipympl" },
     { name = "ipywidgets" },
@@ -2463,6 +2488,7 @@ all = [
 client = [
     { name = "flask" },
     { name = "h5py" },
+    { name = "iminuit" },
     { name = "ipykernel" },
     { name = "ipympl" },
     { name = "ipywidgets" },
@@ -2498,6 +2524,7 @@ development = [
     { name = "google-auth-httplib2" },
     { name = "google-auth-oauthlib" },
     { name = "h5py" },
+    { name = "iminuit" },
     { name = "ipykernel" },
     { name = "ipympl" },
     { name = "ipywidgets" },
@@ -2534,6 +2561,7 @@ gdrive = [
 gui = [
     { name = "flask" },
     { name = "h5py" },
+    { name = "iminuit" },
     { name = "ipykernel" },
     { name = "ipympl" },
     { name = "ipywidgets" },
@@ -2577,6 +2605,7 @@ requires-dist = [
     { name = "google-auth-httplib2", marker = "extra == 'gdrive'" },
     { name = "google-auth-oauthlib", marker = "extra == 'gdrive'" },
     { name = "h5py", marker = "extra == 'client'" },
+    { name = "iminuit", marker = "extra == 'client'", specifier = ">=2.32,<3" },
     { name = "ipykernel", marker = "extra == 'client'" },
     { name = "ipykernel", marker = "extra == 'design'" },
     { name = "ipympl", marker = "extra == 'client'" },

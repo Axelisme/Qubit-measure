@@ -11,6 +11,7 @@ from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import GE_Result, GEConfusionResult
 from zcu_tools.experiment.v2_gui.adapters.singleshot import GEAdapter
 from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
+    GEAnalyzeParams,
     GEAnalyzeResult,
     GEPostAnalyzeParams,
     GEPostAnalyzeResult,
@@ -24,6 +25,7 @@ from zcu_tools.gui.app.main.adapter import (
     PostWritebackRequest,
     RunRequest,
     WritebackRequest,
+    describe_analyze_params,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
@@ -158,9 +160,14 @@ def _patched_analyze(
     fit = _fake_fit_result()
     pops = np.array([[0.9, 0.1], [0.1, 0.9]])
 
-    def fake_analyze(self: Any, run_result: Any, backend: str) -> Any:
+    def fake_analyze(self: Any, run_result: Any, **kwargs: Any) -> Any:
         del self, run_result
-        assert backend == "pca"
+        assert kwargs == {
+            "backend": "pca",
+            "logscale": False,
+            "align_t1": True,
+            "length_ratio": None,
+        }
         return 0.95, pops, fit, fig
 
     def fail_confusion(*args: object, **kwargs: object) -> None:
@@ -177,6 +184,51 @@ def _patched_analyze(
         predictor=None,
     )
     return adapter.analyze(req)
+
+
+def test_ge_analyze_params_expose_only_approved_controls() -> None:
+    assert GEAnalyzeParams() == GEAnalyzeParams(
+        backend="pca", logscale=False, align_t1=True, length_ratio=None
+    )
+    assert [entry["name"] for entry in describe_analyze_params(GEAnalyzeParams)] == [
+        "backend",
+        "logscale",
+        "align_t1",
+        "length_ratio",
+    ]
+    length_ratio = describe_analyze_params(GEAnalyzeParams)[-1]
+    assert length_ratio["type"] == "float"
+    assert length_ratio["optional"] is True
+    assert length_ratio["default"] is None
+
+
+def test_ge_analyze_forwards_approved_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_analyze(self: Any, result: Any, **kwargs: object) -> Any:
+        del self, result
+        captured.update(kwargs)
+        return 0.95, np.eye(2), _fake_fit_result(), Figure()
+
+    monkeypatch.setattr(GE_Exp, "analyze", fake_analyze, raising=True)
+    req = AnalyzeRequest(
+        run_result=_fake_result(),
+        analyze_params=GEAnalyzeParams(
+            backend="center", logscale=True, align_t1=False, length_ratio=0.37
+        ),
+        md=MagicMock(),
+        ml=_make_ml(),
+        predictor=None,
+    )
+
+    GEAdapter().analyze(req)
+
+    assert captured == {
+        "backend": "center",
+        "logscale": True,
+        "align_t1": False,
+        "length_ratio": 0.37,
+    }
 
 
 def test_ge_analyze_maps_fit_result(monkeypatch: pytest.MonkeyPatch) -> None:

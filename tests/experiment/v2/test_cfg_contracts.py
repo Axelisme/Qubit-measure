@@ -87,21 +87,21 @@ def _readout() -> DirectReadoutCfg:
 def test_concrete_module_cfg_owns_full_contract(
     module_cfg_type: type[ConfigBase],
 ) -> None:
-    assert set(module_cfg_type.model_fields) == {
-        "reset",
-        "init_pulse",
-        "qub_pulse",
-        "readout",
-    }
-    assert module_cfg_type.model_fields["reset"].default is None
-    assert module_cfg_type.model_fields["init_pulse"].default is None
-
+    expected_fields = {"reset", "qub_pulse", "readout"}
     values = {
         "reset": None,
-        "init_pulse": None,
         "qub_pulse": _pulse(),
         "readout": _readout(),
     }
+    if module_cfg_type is not SingleshotLenRabiModuleCfg:
+        expected_fields.add("init_pulse")
+        values["init_pulse"] = None
+
+    assert set(module_cfg_type.model_fields) == expected_fields
+    assert module_cfg_type.model_fields["reset"].default is None
+    if "init_pulse" in expected_fields:
+        assert module_cfg_type.model_fields["init_pulse"].default is None
+
     module_cfg_type.model_validate(values)
 
     with pytest.raises(ValidationError):

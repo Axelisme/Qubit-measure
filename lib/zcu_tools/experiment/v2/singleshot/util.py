@@ -66,7 +66,7 @@ def correct_populations(
     flat_populations = populations.reshape(-1, state_count)
     corrected = np.linalg.solve(matrix.T, flat_populations.T).T
     corrected = corrected.reshape(populations.shape)
-    return np.clip(corrected, 0.0, 1.0)
+    return np.asarray(np.clip(corrected, 0.0, 1.0), dtype=np.float64)
 
 
 def classify_result(

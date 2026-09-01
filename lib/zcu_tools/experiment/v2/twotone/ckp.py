@@ -39,12 +39,14 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.fitting import batch_fit_func, fitlor, lorfunc
+from zcu_tools.utils.fitting import (
+    FitTrace,
+    ParameterSpec,
+    fit_shared,
+    fitlor,
+    lorfunc,
+)
 from zcu_tools.utils.process import rotate2real
-
-
-def _default_initial_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,9 @@ class CKP_Result:
     res_freqs: NDArray[np.float64]
     qub_freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
+    initial_states: NDArray[np.int64] = field(
+        default_factory=lambda: np.array([0, 1], dtype=np.int64)
+    )
     cfg_snapshot: CKP_Cfg | None = None
 
 
@@ -240,10 +244,16 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
         res_freqs = result.res_freqs
         qub_freqs = result.qub_freqs
         signals = result.signals
+        if not np.any(np.isfinite(signals)):
+            raise RuntimeError("CKP analysis requires finite signal data")
         amps = ckp_signal2real(signals)
 
         g_res_freqs, g_qub_freqs = get_resonance_freq(res_freqs, qub_freqs, amps[0])
         e_res_freqs, e_qub_freqs = get_resonance_freq(res_freqs, qub_freqs, amps[1])
+        if g_res_freqs.size < 5 or e_res_freqs.size < 5:
+            raise RuntimeError(
+                "CKP resonance extraction requires at least five finite points per state"
+            )
 
         # y0, slope, yscale, x0, gamma
         fixedparams: list[float | None] = [None] * 5
@@ -256,29 +266,74 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
         yscale = 0.5 * (e_params[2] + g_params[2])
         gamma = 0.5 * (e_params[4] + g_params[4])
 
-        (g_params, e_params), (g_Cov, e_Cov) = batch_fit_func(
-            [g_res_freqs, e_res_freqs],
-            [g_qub_freqs, e_qub_freqs],
-            lorfunc,
-            list_init_p=[
-                (y0, 0.0, yscale, g_params[3], gamma),
-                (y0, 0.0, yscale, e_params[3], gamma),
-            ],
-            shared_idxs=[0, 2, 4],
-            fixedparams=[None, 0.0, None, None, None],
+        fit_result = fit_shared(
+            traces=(
+                FitTrace(
+                    g_res_freqs,
+                    g_qub_freqs,
+                    lorfunc,
+                    ("baseline", "g_slope", "scale", "g_res_freq", "width"),
+                ),
+                FitTrace(
+                    e_res_freqs,
+                    e_qub_freqs,
+                    lorfunc,
+                    ("baseline", "e_slope", "scale", "e_res_freq", "width"),
+                ),
+            ),
+            parameters=(
+                ParameterSpec("baseline", y0),
+                ParameterSpec("g_slope", 0.0, fixed=True),
+                ParameterSpec("e_slope", 0.0, fixed=True),
+                ParameterSpec("scale", yscale),
+                ParameterSpec(
+                    "g_res_freq",
+                    g_params[3],
+                    limits=(float(g_res_freqs.min()), float(g_res_freqs.max())),
+                ),
+                ParameterSpec(
+                    "e_res_freq",
+                    e_params[3],
+                    limits=(float(e_res_freqs.min()), float(e_res_freqs.max())),
+                ),
+                ParameterSpec("width", gamma, limits=(0.0, None)),
+            ),
         )
+        diagnostics = fit_result.diagnostics
+        if not diagnostics.valid or not diagnostics.covariance_accurate:
+            raise RuntimeError(
+                "CKP shared fit is invalid "
+                f"(EDM={diagnostics.edm:.6g}, "
+                f"covariance_accurate={diagnostics.covariance_accurate})"
+            )
 
-        g_freq = g_params[3]
-        e_freq = e_params[3]
+        baseline = fit_result.values["baseline"]
+        scale = fit_result.values["scale"]
+        width = fit_result.values["width"]
+        g_freq = fit_result.values["g_res_freq"]
+        e_freq = fit_result.values["e_res_freq"]
+        g_params = (baseline, 0.0, scale, g_freq, width)
+        e_params = (baseline, 0.0, scale, e_freq, width)
         chi = abs(e_freq - g_freq) / 2
-        kappa = e_params[4] + g_params[4]
+        kappa = 2.0 * width
 
         res_freq = (g_freq + e_freq) / 2
         if kappa < 2 * chi:
             res_freq += np.sqrt(chi**2 - (kappa / 2) ** 2) * np.sign(e_freq - g_freq)
 
-        kappa_err = np.sqrt(g_Cov[4, 4] + e_Cov[4, 4])
-        chi_err = np.sqrt(g_Cov[3, 3] + e_Cov[3, 3]) / 2
+        chi_variance = fit_result.projected_variance(
+            {"g_res_freq": -0.5, "e_res_freq": 0.5}
+        )
+        kappa_variance = fit_result.projected_variance({"width": 2.0})
+        if (
+            not np.isfinite(chi_variance)
+            or not np.isfinite(kappa_variance)
+            or chi_variance < -1e-12
+            or kappa_variance < -1e-12
+        ):
+            raise RuntimeError("CKP shared fit produced invalid derived covariance")
+        chi_err = np.sqrt(max(0.0, chi_variance))
+        kappa_err = np.sqrt(max(0.0, kappa_variance))
 
         g_fit_freqs = lorfunc(res_freqs, *g_params)
         e_fit_freqs = lorfunc(res_freqs, *e_params)

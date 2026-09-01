@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import ClassVar
+
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
@@ -7,12 +11,72 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
 from tqdm.auto import tqdm
 
-from .base import batch_fit_func, fit_func
+from .base import fit_func
+from .shared import FitDiagnostics, FitTrace, ParameterSpec, SharedFitResult, fit_shared
 
 RATE_UPPER_GUESS_MULTIPLIER = 5.0
 SINGLE_INITIAL_GROUND_BOUND = 0.01
 SINGLE_INITIAL_EXCITED_BOUND = 0.001
 DUAL_INITIAL_POPULATION_BOUND = 0.01
+
+
+@dataclass(frozen=True)
+class TransitionRates:
+    ge: float
+    eg: float
+    eo: float
+    oe: float
+    go: float
+    og: float
+
+    NAMES: ClassVar[tuple[str, ...]] = (
+        "rate_ge",
+        "rate_eg",
+        "rate_eo",
+        "rate_oe",
+        "rate_go",
+        "rate_og",
+    )
+
+    @classmethod
+    def from_values(cls, values: Mapping[str, float]) -> TransitionRates:
+        return cls(*(values[name] for name in cls.NAMES))
+
+    def as_tuple(self) -> tuple[float, float, float, float, float, float]:
+        return self.ge, self.eg, self.eo, self.oe, self.go, self.og
+
+    def as_array(self) -> NDArray[np.float64]:
+        return np.asarray(self.as_tuple(), dtype=np.float64)
+
+
+@dataclass(frozen=True)
+class DualTransitionRateFitResult:
+    rates: TransitionRates
+    rate_errors: TransitionRates
+    fitted_populations1: NDArray[np.float64]
+    fitted_populations2: NDArray[np.float64]
+    initial_populations1: tuple[float, float]
+    initial_populations2: tuple[float, float]
+    shared_fit: SharedFitResult
+
+    @property
+    def covariance(self) -> NDArray[np.float64]:
+        return self.shared_fit.covariance
+
+    @property
+    def diagnostics(self) -> FitDiagnostics:
+        return self.shared_fit.diagnostics
+
+    def model_parameters(
+        self, dataset: int
+    ) -> tuple[float, float, float, float, float, float, float, float]:
+        if dataset == 1:
+            initial = self.initial_populations1
+        elif dataset == 2:
+            initial = self.initial_populations2
+        else:
+            raise ValueError("dataset must be 1 or 2")
+        return (*self.rates.as_tuple(), *initial)
 
 
 def model_func(
@@ -221,82 +285,100 @@ def fit_dual_transition_rates(
     times: NDArray[np.float64],
     populations1: NDArray[np.float64],
     populations2: NDArray[np.float64],
-) -> tuple[
-    tuple[float, float, float, float, float, float],
-    tuple[float, float, float, float, float, float],
-    NDArray[np.float64],
-    NDArray[np.float64],
-    tuple[list[float], NDArray[np.float64]],
-    tuple[list[float], NDArray[np.float64]],
-]:
-    """
-    Returns:
-        fitted_rates: (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
-        rate_errs: Errors of the fitted rates
-        fit_populations1: Fitted populations1 over time
-        fit_populations2: Fitted populations2 over time
-        (pOpt_1, pCov_1)
-        (pOpt_2, pCov_2)
-    """
+) -> DualTransitionRateFitResult:
+    """Fit two population traces with six shared transition rates."""
 
     pass_times = times - times[0]
-
     p0_guess = guess_dual_initial_params(populations1, populations2, pass_times)
-
     p0_g1, p0_e1 = p0_guess[6], p0_guess[7]
     p0_g2, p0_e2 = p0_guess[8], p0_guess[9]
+    max_rate = RATE_UPPER_GUESS_MULTIPLIER * float(np.max(p0_guess[:6]))
 
-    p0_init1 = tuple([*p0_guess[:6], p0_g1, p0_e1])
-    p0_init2 = tuple([*p0_guess[:6], p0_g2, p0_e2])
-
-    max_R = RATE_UPPER_GUESS_MULTIPLIER * float(np.max(p0_guess[:6]))
-    (pOpt1, pOpt2), (pCov1, pCov2) = batch_fit_func(
-        [pass_times, pass_times],
-        [populations1.flatten(), populations2.flatten()],
-        lambda *args: model_func(*args).flatten(),
-        [p0_init1, p0_init2],
-        shared_idxs=[0, 1, 2, 3, 4, 5],
-        list_bounds=[
-            (
-                [0.0] * 6
-                + [
+    dataset1_names = (*TransitionRates.NAMES, "dataset1_pg0", "dataset1_pe0")
+    dataset2_names = (*TransitionRates.NAMES, "dataset2_pg0", "dataset2_pe0")
+    parameters = [
+        ParameterSpec(name, initial, limits=(0.0, max_rate))
+        for name, initial in zip(TransitionRates.NAMES, p0_guess[:6], strict=True)
+    ]
+    parameters.extend(
+        (
+            ParameterSpec(
+                "dataset1_pg0",
+                p0_g1,
+                limits=(
                     max(0.0, p0_g1 - DUAL_INITIAL_POPULATION_BOUND),
-                    max(0.0, p0_e1 - DUAL_INITIAL_POPULATION_BOUND),
-                ],
-                [max_R] * 6
-                + [
                     min(1.0, p0_g1 + DUAL_INITIAL_POPULATION_BOUND),
+                ),
+            ),
+            ParameterSpec(
+                "dataset1_pe0",
+                p0_e1,
+                limits=(
+                    max(0.0, p0_e1 - DUAL_INITIAL_POPULATION_BOUND),
                     min(1.0, p0_e1 + DUAL_INITIAL_POPULATION_BOUND),
-                ],
+                ),
             ),
-            (
-                [0.0] * 6
-                + [
+            ParameterSpec(
+                "dataset2_pg0",
+                p0_g2,
+                limits=(
                     max(0.0, p0_g2 - DUAL_INITIAL_POPULATION_BOUND),
-                    max(0.0, p0_e2 - DUAL_INITIAL_POPULATION_BOUND),
-                ],
-                [max_R] * 6
-                + [
                     min(1.0, p0_g2 + DUAL_INITIAL_POPULATION_BOUND),
-                    min(1.0, p0_e2 + DUAL_INITIAL_POPULATION_BOUND),
-                ],
+                ),
             ),
-        ],
+            ParameterSpec(
+                "dataset2_pe0",
+                p0_e2,
+                limits=(
+                    max(0.0, p0_e2 - DUAL_INITIAL_POPULATION_BOUND),
+                    min(1.0, p0_e2 + DUAL_INITIAL_POPULATION_BOUND),
+                ),
+            ),
+        )
     )
 
-    fit_pops1 = model_func(pass_times, *pOpt1)
-    fit_pops2 = model_func(pass_times, *pOpt2)
-
-    rates = tuple(pOpt1[:6])
-    rate_errs = tuple(np.sqrt(np.diag(pCov1))[:6])
-
-    return rates, rate_errs, fit_pops1, fit_pops2, (pOpt1, pCov1), (pOpt2, pCov2)  # type: ignore
+    shared_fit = fit_shared(
+        traces=(
+            FitTrace(pass_times, populations1, model_func, dataset1_names),
+            FitTrace(pass_times, populations2, model_func, dataset2_names),
+        ),
+        parameters=parameters,
+    )
+    rates = TransitionRates.from_values(shared_fit.values)
+    rate_errors = TransitionRates(
+        *(np.sqrt(shared_fit.variance(name)) for name in TransitionRates.NAMES)
+    )
+    initial_populations1 = (
+        shared_fit.values["dataset1_pg0"],
+        shared_fit.values["dataset1_pe0"],
+    )
+    initial_populations2 = (
+        shared_fit.values["dataset2_pg0"],
+        shared_fit.values["dataset2_pe0"],
+    )
+    fitted_populations1 = model_func(
+        pass_times, *rates.as_tuple(), *initial_populations1
+    )
+    fitted_populations2 = model_func(
+        pass_times, *rates.as_tuple(), *initial_populations2
+    )
+    return DualTransitionRateFitResult(
+        rates=rates,
+        rate_errors=rate_errors,
+        fitted_populations1=fitted_populations1,
+        fitted_populations2=fitted_populations2,
+        initial_populations1=initial_populations1,
+        initial_populations2=initial_populations2,
+        shared_fit=shared_fit,
+    )
 
 
 def calc_lambdas(
-    rate: tuple[float, float, float, float, float, float],
+    rate: TransitionRates | tuple[float, float, float, float, float, float],
 ) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
-    T_ge, T_eg, T_eo, T_oe, T_go, T_og = rate
+    T_ge, T_eg, T_eo, T_oe, T_go, T_og = (
+        rate.as_tuple() if isinstance(rate, TransitionRates) else rate
+    )
     M = [
         [-(T_ge + T_go), T_eg, T_og],
         [T_ge, -(T_eg + T_eo), T_oe],
@@ -448,11 +530,14 @@ def fit_dual_with_vadality(
     fit_amps1 = []
     fit_amps2 = []
     for i in tqdm(time_idxs):
-        rate, rate_err, *_, (pOpt1, _), (pOpt2, _) = fit_dual_transition_rates(
+        fit_result = fit_dual_transition_rates(
             times[:i], populations1[:i], populations2[:i]
         )
-        Rs.append(rate)
-        R_errs.append(rate_err)
+        rate = fit_result.rates
+        pOpt1 = fit_result.model_parameters(1)
+        pOpt2 = fit_result.model_parameters(2)
+        Rs.append(rate.as_tuple())
+        R_errs.append(fit_result.rate_errors.as_tuple())
         w, v = calc_lambdas(rate)
         fit_lambdas.append(w)
         fit_pps1.append(model_func(pass_times, *pOpt1))
@@ -539,9 +624,9 @@ def fit_dual_with_vadality(
     plt.show(fig)
     plt.close(fig)
 
-    rate, rate_err, *_, (_, pCov2) = fit_dual_transition_rates(
-        times, populations1, populations2
-    )
+    final_result = fit_dual_transition_rates(times, populations1, populations2)
+    rate = final_result.rates.as_tuple()
+    rate_err = final_result.rate_errors.as_tuple()
     for i, name in enumerate(names):
         err_perc = rate_err[i] / rate[i] * 100 if rate[i] != 0 else 0.0
         print(
@@ -550,7 +635,7 @@ def fit_dual_with_vadality(
 
     fig, (ax2, ax1) = plt.subplots(1, 2, figsize=(12, 5))
 
-    pCov = pCov2[:6, :6]
+    pCov = final_result.covariance[:6, :6]
     rpCov = pCov.copy()
     for i in range(rpCov.shape[0]):
         for j in range(rpCov.shape[1]):

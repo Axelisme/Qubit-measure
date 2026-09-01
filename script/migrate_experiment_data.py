@@ -350,16 +350,12 @@ def _convert_len_rabi_labber(input_path: Path, output_path: Path) -> None:
         expected_shape=(len(population_values), len(length_seconds)),
     )
 
-    result = LenRabiResult(
-        lengths=(length_seconds * 1e6).astype(np.float64),
-        signals=legacy_populations.T.astype(np.float64),
-        population_states=population_values.astype(np.int64),
+    del output_path, legacy_populations
+    raise ValueError(
+        "legacy population-only Len Rabi data cannot be migrated to the canonical "
+        "raw-IQ schema because the original IQ shots are unavailable; rerun the "
+        "measurement"
     )
-    axes_spec = LenRabiExp.AXES_SPEC
-    if axes_spec is None:
-        raise RuntimeError("LenRabiExp has no AXES_SPEC")
-
-    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
 
 
 def _convert_ac_stark_sidecars(input_path: Path, output_path: Path) -> None:

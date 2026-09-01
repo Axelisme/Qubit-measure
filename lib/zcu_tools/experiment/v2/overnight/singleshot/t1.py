@@ -221,9 +221,9 @@ class T1PlotAndSaveMixin(Generic[T_Cfg]):
         pbar = make_pbar(total=len(populations), desc=name, leave=False)
         try:
             for i, pop in enumerate(populations):
-                rate, rate_err, *_ = fit_dual_transition_rates(Ts, pop[0], pop[1])
-                rates[i] = rate
-                rate_errs[i] = rate_err
+                fit_result = fit_dual_transition_rates(Ts, pop[0], pop[1])
+                rates[i] = fit_result.rates.as_array()
+                rate_errs[i] = fit_result.rate_errors.as_array()
                 pbar.update()
         finally:
             pbar.close()

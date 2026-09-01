@@ -6,7 +6,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .base import (
-    batch_fit_func,
     decaycos,
     dual_expfunc,
     expfunc,
@@ -16,6 +15,7 @@ from .base import (
     fitexp,
     gauss_func,
 )
+from .shared import FitTrace, ParameterSpec, fit_shared
 
 
 def fit_decay(
@@ -97,35 +97,55 @@ def fit_ge_decay(
     )  # (y0, yscale, decay)
 
     if share_t1:
-        shared_idxs = [2]
-
-        ge_params, ge_pcov = batch_fit_func(
-            [times, times],
-            [g_populations, e_populations],
-            expfunc,
-            [g_params, e_params],
-            shared_idxs,
-            list_bounds=[
-                (
-                    [-np.inf, -2 * np.abs(g_params[1]), 0],
-                    [np.inf, 2 * np.abs(g_params[1]), np.inf],
-                ),
-                (
-                    [-np.inf, -2 * np.abs(e_params[1]), 0],
-                    [np.inf, 2 * np.abs(e_params[1]), np.inf],
-                ),
-            ],
+        fixed = (
+            tuple(value is not None for value in fixedparams)
+            if fixedparams is not None
+            else (False, False, False)
         )
-        g_params = (ge_params[0][0], ge_params[0][1], ge_params[0][2])
-        e_params = (ge_params[1][0], ge_params[1][1], ge_params[1][2])
-        g_pCov, e_pCov = ge_pcov
+        result = fit_shared(
+            traces=(
+                FitTrace(times, g_populations, expfunc, ("g_y0", "g_scale", "t1")),
+                FitTrace(times, e_populations, expfunc, ("e_y0", "e_scale", "t1")),
+            ),
+            parameters=(
+                ParameterSpec("g_y0", g_params[0], fixed=fixed[0]),
+                ParameterSpec(
+                    "g_scale",
+                    g_params[1],
+                    fixed=fixed[1],
+                    limits=(-2 * np.abs(g_params[1]), 2 * np.abs(g_params[1])),
+                ),
+                ParameterSpec(
+                    "e_y0",
+                    e_params[0],
+                    fixed=fixed[0],
+                ),
+                ParameterSpec(
+                    "e_scale",
+                    e_params[1],
+                    fixed=fixed[1],
+                    limits=(-2 * np.abs(e_params[1]), 2 * np.abs(e_params[1])),
+                ),
+                ParameterSpec(
+                    "t1",
+                    0.5 * (g_params[2] + e_params[2]),
+                    fixed=fixed[2],
+                    limits=(0.0, None),
+                ),
+            ),
+        )
+        shared_t1 = result.values["t1"]
+        g_params = (result.values["g_y0"], result.values["g_scale"], shared_t1)
+        e_params = (result.values["e_y0"], result.values["e_scale"], shared_t1)
+        shared_t1_error = np.sqrt(result.variance("t1"))
+        g_t1err = shared_t1_error
+        e_t1err = shared_t1_error
+    else:
+        g_t1err = np.sqrt(g_pCov[2, 2])
+        e_t1err = np.sqrt(e_pCov[2, 2])
 
     g_t1 = g_params[2]
     e_t1 = e_params[2]
-    # Shared-T1 fits return per-trace covariance blocks; cross-trace correlation is
-    # not represented in this error estimate.
-    g_t1err = np.sqrt(g_pCov[2, 2])
-    e_t1err = np.sqrt(e_pCov[2, 2])
 
     if g_t1 > 0.8 * np.max(times) or g_t1 < 3 * (times[1] - times[0]):
         g_t1 = np.nan

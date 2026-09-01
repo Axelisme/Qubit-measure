@@ -41,6 +41,11 @@ class GEAnalyzeParams:
     # ``backend`` selects the primary rotation/threshold fit. Post-analysis uses
     # the resulting centres and does not choose or run another fit backend.
     backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
+    logscale: Annotated[bool, ParamMeta(label="Log Scale")] = False
+    align_t1: Annotated[bool, ParamMeta(label="Align T1")] = True
+    length_ratio: Annotated[
+        float | None, ParamMeta(label="Length Ratio", decimals=4)
+    ] = None
 
 
 @dataclass
@@ -111,7 +116,9 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         ),
         recommended=(
             "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
-            "the default analysis backend is 'pca'. Run once the qubit pi-pulse "
+            "the default analysis backend is 'pca'. Analysis also exposes histogram "
+            "log scale, T1 alignment, and an optional shared length ratio; advanced "
+            "population priors remain internal. Run once the qubit pi-pulse "
             "and the readout are both calibrated — a clean two-cluster IQ "
             "scatter indicates good discrimination. Use Post-Analysis to inspect "
             "the classified shots and 3x3 confusion diagnostic derived from the "
@@ -140,7 +147,11 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         params = req.analyze_params
         exp = GE_Exp()
         fidelity, pops, fit_result, fig = exp.analyze(
-            req.run_result, backend=params.backend
+            req.run_result,
+            backend=params.backend,
+            logscale=params.logscale,
+            align_t1=params.align_t1,
+            length_ratio=params.length_ratio,
         )
         return GEAnalyzeResult(
             fidelity=fidelity,

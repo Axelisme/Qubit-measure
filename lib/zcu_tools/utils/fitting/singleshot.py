@@ -6,7 +6,11 @@ from typing import cast
 import numpy as np
 import scipy.stats as stats
 from numpy.typing import NDArray
-from scipy.special import iv
+from scipy.special import iv, ndtr
+
+_QUADRATURE_NODES, _QUADRATURE_WEIGHTS = np.polynomial.legendre.leggauss(48)
+_TRANSITION_POINTS = 0.5 * (_QUADRATURE_NODES + 1.0)
+_TRANSITION_WEIGHTS = 0.5 * _QUADRATURE_WEIGHTS
 
 from .base import assign_init_p, fit_func
 
@@ -70,6 +74,110 @@ def calc_population_pdf(
     norm_e_f = calc_noise_f((xs - se) / (sg - se), re, rg, norm_s)
     norm_f = p0_g * norm_g_f + p0_e * norm_e_f
     return norm_f / np.sum(norm_f) * (p0_g + p0_e)
+
+
+def transition_state_bin_probabilities(
+    bin_edges: NDArray[np.float64],
+    sg: float,
+    se: float,
+    sigma: float,
+    p_avg: float,
+    length_ratio: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Integrate the existing readout-transition family over fixed histogram bins."""
+    edges = np.asarray(bin_edges, dtype=np.float64)
+    if edges.ndim != 1 or edges.size < 3 or np.any(~np.isfinite(edges)):
+        raise ValueError("bin_edges must contain at least three finite values")
+    if np.any(np.diff(edges) <= 0.0):
+        raise ValueError("bin_edges must be strictly increasing")
+    if not np.isfinite([sg, se, sigma, p_avg, length_ratio]).all():
+        raise ValueError("readout-transition parameters must be finite")
+    if se <= sg:
+        raise ValueError("se must be greater than sg")
+    if sigma <= 0.0 or not 0.0 <= p_avg <= 1.0 or length_ratio < 0.0:
+        raise ValueError("invalid readout-transition parameter range")
+
+    rg = p_avg * length_ratio
+    re = (1.0 - p_avg) * length_ratio
+    points = _TRANSITION_POINTS
+    separation = se - sg
+
+    def integrated_state(
+        start: float,
+        means: NDArray[np.float64],
+        leave_rate: float,
+        return_rate: float,
+    ) -> NDArray[np.float64]:
+        upper = ndtr((edges[1:, None] - means[None, :]) / sigma)
+        lower = ndtr((edges[:-1, None] - means[None, :]) / sigma)
+        continuous = (upper - lower) @ (
+            calc_fc(points, leave_rate, return_rate) * _TRANSITION_WEIGHTS
+        )
+        atom = np.exp(-leave_rate) * (
+            ndtr((edges[1:] - start) / sigma) - ndtr((edges[:-1] - start) / sigma)
+        )
+        probabilities = np.asarray(atom + continuous, dtype=np.float64)
+        total = float(probabilities.sum())
+        if total <= 0.0 or not np.isfinite(total):
+            raise ValueError(
+                "readout-transition bin probabilities are not normalizable"
+            )
+        probabilities /= total
+        return probabilities
+
+    qg = integrated_state(sg, sg + separation * points, rg, re)
+    qe = integrated_state(se, se - separation * points, re, rg)
+    return qg, qe
+
+
+def transition_state_circle_probabilities(
+    sg: float,
+    se: float,
+    sigma: float,
+    p_avg: float,
+    length_ratio: float,
+    radius: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Integrate fitted conditional states over non-overlapping g/e circles."""
+    from scipy.stats import ncx2
+
+    if se <= sg or sigma <= 0.0 or radius < 0.0:
+        raise ValueError("invalid circle-classification geometry")
+    if radius > 0.5 * (se - sg):
+        raise ValueError("classification circles must not overlap")
+
+    rg = p_avg * length_ratio
+    re = (1.0 - p_avg) * length_ratio
+    points = _TRANSITION_POINTS
+    weights_g = calc_fc(points, rg, re) * _TRANSITION_WEIGHTS
+    weights_e = calc_fc(points, re, rg) * _TRANSITION_WEIGHTS
+    separation = se - sg
+    limit = (radius / sigma) ** 2
+
+    def circle_probability(
+        atom_weight: float,
+        atom_distance: float,
+        path_distances: NDArray[np.float64],
+        weights: NDArray[np.float64],
+    ) -> float:
+        atom = atom_weight * float(ncx2.cdf(limit, 2, (atom_distance / sigma) ** 2))
+        continuous = float(
+            np.dot(ncx2.cdf(limit, 2, (path_distances / sigma) ** 2), weights)
+        )
+        return float(np.clip(atom + continuous, 0.0, 1.0))
+
+    gg = circle_probability(np.exp(-rg), 0.0, separation * points, weights_g)
+    ge = circle_probability(
+        np.exp(-rg), separation, separation * (1.0 - points), weights_g
+    )
+    ee = circle_probability(np.exp(-re), 0.0, separation * points, weights_e)
+    eg = circle_probability(
+        np.exp(-re), separation, separation * (1.0 - points), weights_e
+    )
+    return (
+        np.array([gg, ge, max(0.0, 1.0 - gg - ge)], dtype=np.float64),
+        np.array([eg, ee, max(0.0, 1.0 - eg - ee)], dtype=np.float64),
+    )
 
 
 def gauss_func(xs: NDArray[np.float64], x_c: float, s: float) -> NDArray[np.float64]:

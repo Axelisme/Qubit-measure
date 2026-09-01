@@ -26,6 +26,7 @@ client = [
   "plotly",
   "kaleido",
   "scipy",
+  "iminuit>=2.32,<3",
   "PyWavelets",
   "nbformat>=4.2.0",
   "scikit-learn",

@@ -13,12 +13,19 @@ Covers:
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiCfg, LenRabiExp
+from zcu_tools.experiment.v2.singleshot.len_rabi_fit import (
+    LenRabiBackendResult,
+    LenRabiJointFitResult,
+    LenRabiProjection,
+)
 from zcu_tools.experiment.v2.singleshot.t1.t1 import T1Cfg, T1Exp
 from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone import (
     T1WithToneCfg,
@@ -92,8 +99,9 @@ def test_ss_len_rabi_default_seed_matches_notebook_values() -> None:
     ml = _make_ml()
     schema = SsLenRabiAdapter().make_default_cfg(_make_ctx(ml))
 
-    assert schema.value.fields["reps"] == DirectValue(1000)
-    assert schema.value.fields["rounds"] == DirectValue(100)
+    assert schema.value.fields["shots"] == DirectValue(1000)
+    assert schema.value.fields["reps"] == DirectValue(1)
+    assert schema.value.fields["rounds"] == DirectValue(1)
     assert schema.value.fields["relax_delay"] == DirectValue(50.5)
 
     modules = schema.value.fields["modules"]
@@ -366,39 +374,129 @@ def test_ss_t1_tone_run_fast_fails_without_centers(
 
 
 # ---------------------------------------------------------------------------
-# analyze — figure-only (len_rabi, t1) + numeric writeback (t1_tone)
+# analyze — figure-first (len_rabi, t1) + numeric writeback (t1_tone)
 # ---------------------------------------------------------------------------
 
 
-def test_ss_len_rabi_analyze_figure_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    fig = Figure()
+def _len_rabi_fit(*, valid: bool = True) -> LenRabiJointFitResult:
+    projection = LenRabiProjection(
+        projected=np.zeros((2, 3)),
+        bin_edges=np.array([-1.0, 0.0, 1.0]),
+        counts=np.zeros((2, 2), dtype=np.int64),
+        origin=0.0j,
+        axis=1.0 + 0.0j,
+        perpendicular_offset=0.0,
+    )
+    backend = LenRabiBackendResult(
+        parameter_names=("p_e0_u",),
+        values=np.array([0.1]),
+        covariance=np.array([[0.01]]),
+        valid=valid,
+        covariance_accurate=True,
+        reached_call_limit=False,
+        hesse_failed=False,
+        edm=1e-7,
+        nll=1.0,
+        calls=20,
+    )
+    return LenRabiJointFitResult(
+        initial_populations=np.array([0.9, 0.1, 0.0]),
+        p_inf=0.5,
+        t_r=4.0,
+        omega=3.0,
+        projected_g_center=-1.0,
+        projected_e_center=1.0,
+        sigma=0.2,
+        p_avg=0.3,
+        length_ratio=0.4,
+        g_center=-1.5 + 2.0j,
+        e_center=1.2 - 0.7j,
+        radius=0.42,
+        confusion_matrix=np.array(
+            [[0.95, 0.04, 0.01], [0.03, 0.94, 0.03], [0.0, 0.0, 1.0]]
+        ),
+        condition_number=1.2,
+        measured_populations=np.zeros((2, 3)),
+        fitted_populations=np.zeros((2, 3)),
+        projection=projection,
+        backend=backend,
+    )
 
-    def fake_analyze(self: Any, result: Any, *, confusion_matrix=None) -> Figure:
-        del self, result
-        return fig
 
-    monkeypatch.setattr(LenRabiExp, "analyze", fake_analyze, raising=True)
-    out = SsLenRabiAdapter().analyze(_analyze_req(MagicMock(), MetaDict()))
-    assert isinstance(out, SsLenRabiAnalyzeResult)
-    assert out.figure is fig
-
-
-def test_ss_len_rabi_analyze_forwards_confusion(
+def test_ss_len_rabi_analyze_is_figure_first_and_does_not_refit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, Any] = {}
     fig = Figure()
+    fit = _len_rabi_fit()
+    run_result = MagicMock()
+    calls = 0
 
-    def fake_analyze(self: Any, result: Any, *, confusion_matrix=None) -> Figure:
-        del self, result
-        captured["confusion"] = confusion_matrix
-        return fig
+    def fake_analyze(self: Any, result: Any) -> tuple[LenRabiJointFitResult, Figure]:
+        nonlocal calls
+        del self
+        calls += 1
+        assert result is run_result
+        return fit, fig
 
     monkeypatch.setattr(LenRabiExp, "analyze", fake_analyze, raising=True)
-    md = MetaDict()
-    md.confusion_matrix = [[0.9, 0.1], [0.05, 0.95]]
-    SsLenRabiAdapter().analyze(_analyze_req(MagicMock(), md))
-    assert captured["confusion"] == [[0.9, 0.1], [0.05, 0.95]]
+    out = SsLenRabiAdapter().analyze(_analyze_req(run_result, MetaDict()))
+
+    assert isinstance(out, SsLenRabiAnalyzeResult)
+    assert out.fit_result is fit
+    assert out.figure is fig
+    assert out.to_summary_dict() == {}
+    assert calls == 1
+
+
+def test_ss_len_rabi_writeback_emits_four_independent_items() -> None:
+    fit = _len_rabi_fit()
+    analyze_result = SsLenRabiAnalyzeResult(fit_result=fit, figure=Figure())
+    req = WritebackRequest(
+        run_result=cast(Any, MagicMock()),
+        analyze_result=analyze_result,
+        ctx=_make_ctx(),
+    )
+
+    items = SsLenRabiAdapter().get_writeback_items(req)
+
+    assert len(items) == 4
+    assert all(isinstance(item, MetaDictWriteback) for item in items)
+    proposals = {
+        item.target_name: item.proposed_value
+        for item in items
+        if isinstance(item, MetaDictWriteback)
+    }
+    assert proposals == {
+        "g_center": fit.g_center,
+        "e_center": fit.e_center,
+        "ge_radius": fit.radius,
+        "confusion_matrix": fit.confusion_matrix.tolist(),
+    }
+
+
+@pytest.mark.parametrize(
+    "invalid_field", ["backend", "g_center", "e_center", "radius", "matrix"]
+)
+def test_ss_len_rabi_writeback_is_all_or_none(invalid_field: str) -> None:
+    fit = _len_rabi_fit(valid=invalid_field != "backend")
+    if invalid_field == "g_center":
+        fit = dataclasses.replace(fit, g_center=complex(float("nan"), 0.0))
+    elif invalid_field == "e_center":
+        fit = dataclasses.replace(fit, e_center=complex(0.0, float("inf")))
+    elif invalid_field == "radius":
+        fit = dataclasses.replace(fit, radius=float("nan"))
+    elif invalid_field == "matrix":
+        matrix = fit.confusion_matrix.copy()
+        matrix[0, 0] = float("inf")
+        fit = dataclasses.replace(fit, confusion_matrix=matrix)
+    analyze_result = SsLenRabiAnalyzeResult(fit_result=fit, figure=Figure())
+    req = WritebackRequest(
+        run_result=cast(Any, MagicMock()),
+        analyze_result=analyze_result,
+        ctx=_make_ctx(),
+    )
+
+    assert SsLenRabiAdapter().get_writeback_items(req) == []
 
 
 def test_ss_t1_analyze_figure_only(monkeypatch: pytest.MonkeyPatch) -> None:

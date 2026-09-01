@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-08-27 — singleshot GE primary/post writeback ownership
+**Last updated:** 2026-09-01 — singleshot analysis controls and Len Rabi gated calibration
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -128,12 +128,19 @@ analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default
 capabilities 控制：Base 提供 no-op default，Protocol/Base exact signature 與 registry
 conformance tests 共同鎖定 framework mandatory surface。
 
-`singleshot/ge` 的 primary analysis 只產生 fit 產物：所選 backend 擬合 centres、`ge_s` 與
-initial populations，右側顯示 IQ distribution，並經 `get_writeback_items()` 提出 `fid`、`ge_s`、
-`g_center`、`e_center`。它的零參數 post-analysis 是 sole confusion 路徑：使用 primary fit 資料
-計算 `ge_radius` 與 3×3 confusion matrix，顯示完整 confusion diagnostic，並經
-`get_post_writeback_items()` 提出 `ge_radius`、`confusion_matrix`；兩組 proposal 分屬不同 pane
-的 opaque draft，adapter 不接觸 Writeback implementation。
+`singleshot/ge` 的 primary analysis 只產生 fit 產物：operator可選 backend、histogram log scale、
+T1 alignment與nullable shared length ratio；advanced population priors不進GUI。所選 backend擬合
+centres、`ge_s`與initial populations，右側顯示IQ distribution，並經`get_writeback_items()`提出
+`fid`、`ge_s`、`g_center`、`e_center`。它的零參數post-analysis是sole confusion路徑：使用primary
+fit資料計算`ge_radius`與3×3 confusion matrix，顯示完整confusion diagnostic，並經
+`get_post_writeback_items()`提出`ge_radius`、`confusion_matrix`；兩組proposal分屬不同pane的
+opaque draft，adapter不接觸Writeback implementation。
+
+`singleshot/len_rabi` 的analysis只在Figure summary呈現measured populations與joint-fit curves；完整
+typed numeric fit留在adapter result內，不展開額外GUI diagnostics。只有backend valid且
+`g_center`、`e_center`、`ge_radius`、`confusion_matrix`四項全部finite時，adapter才同時提出四個
+獨立`MetaDictWriteback` items；任一項無效就全數略過。Adapter只投影同一次domain analysis結果，
+不重跑fit、不重算stability，也不直接apply proposal。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，

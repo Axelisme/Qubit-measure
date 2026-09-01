@@ -431,9 +431,9 @@ class T1WithToneSweepExp(
         pbar = make_pbar(total=N, desc="Fitting transition rates")
         try:
             for i, pop in enumerate(populations):
-                rate, *_, (_, pCov1), _ = fit_dual_transition_rates(Ts, pop[0], pop[1])
-                rates[i] = rate
-                rate_Covs[i] = pCov1[:6, :6]
+                fit_result = fit_dual_transition_rates(Ts, pop[0], pop[1])
+                rates[i] = fit_result.rates.as_array()
+                rate_Covs[i] = fit_result.covariance[:6, :6]
                 pbar.update()
         finally:
             pbar.close()

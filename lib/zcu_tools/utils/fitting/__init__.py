@@ -2,7 +2,6 @@ from .anticross import fit_anticross, fit_anticross2d
 from .base import (
     assign_init_p,
     asym_lorfunc,
-    batch_fit_func,
     cosfunc,
     decaycos,
     dual_expfunc,
@@ -31,6 +30,13 @@ from .multi_decay import fit_transition_rates
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
 from .resonance import HangerModel, TransmissionModel, get_proper_model
+from .shared import (
+    FitDiagnostics,
+    FitTrace,
+    ParameterSpec,
+    SharedFitResult,
+    fit_shared,
+)
 from .singleshot import (
     calc_population_pdf,
     fit_singleshot,

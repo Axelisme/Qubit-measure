@@ -339,11 +339,11 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
 
-        rate, _, fit_pops1, fit_pops2, *_ = fit_dual_transition_rates(
-            lens, populations1, populations2
-        )
+        fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
-        lambdas, _ = calc_lambdas(rate)
+        lambdas, _ = calc_lambdas(fit_result.rates)
+        fit_pops1 = fit_result.fitted_populations1
+        fit_pops2 = fit_result.fitted_populations2
 
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]
