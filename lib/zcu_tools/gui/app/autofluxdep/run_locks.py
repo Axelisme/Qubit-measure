@@ -161,6 +161,14 @@ class GuardedContextControl:
     def coerce_md_value(self, key: str, text: str) -> Any:
         return self._inner.coerce_md_value(key, text)
 
+    def create_md_attr(self, key: str, value: Any) -> None:
+        self._guard("context")
+        self._inner.create_md_attr(key, value)
+
+    def rename_md_attr(self, old: str, new: str) -> None:
+        self._guard("context")
+        self._inner.rename_md_attr(old, new)
+
     def set_md_attr(self, key: str, value: Any) -> None:
         self._guard("context")
         self._inner.set_md_attr(key, value)

@@ -12,7 +12,11 @@ if TYPE_CHECKING:
 
 
 class ContextControlPort(Protocol):
-    """Context switching, md/ml, and value-source surface for shared consumers."""
+    """Context switching, md/ml, and value-source surface for shared consumers.
+
+    MetaDict create and rename commands are validated and committed by the
+    ContextService as one mutation; callers do not compose set/delete pairs.
+    """
 
     def has_project(self) -> bool: ...
 
@@ -33,6 +37,8 @@ class ContextControlPort(Protocol):
     def get_current_md(self) -> MetaDict: ...
     def get_current_ml(self) -> ModuleLibrary: ...
     def coerce_md_value(self, key: str, text: str) -> Any: ...
+    def create_md_attr(self, key: str, value: Any) -> None: ...
+    def rename_md_attr(self, old: str, new: str) -> None: ...
     def set_md_attr(self, key: str, value: Any) -> None: ...
     def del_md_attr(self, key: str) -> None: ...
     def rename_ml_module(self, old: str, new: str) -> None: ...
@@ -88,6 +94,12 @@ class ContextControlFacet:
 
     def coerce_md_value(self, key: str, text: str) -> Any:
         return self._context.coerce_md_value(key, text)
+
+    def create_md_attr(self, key: str, value: Any) -> None:
+        self._context.create_md_attr(key, value)
+
+    def rename_md_attr(self, old: str, new: str) -> None:
+        self._context.rename_md_attr(old, new)
 
     def set_md_attr(self, key: str, value: Any) -> None:
         self._context.set_md_attr(key, value)

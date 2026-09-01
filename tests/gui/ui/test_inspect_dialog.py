@@ -6,9 +6,13 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QApplication, QLineEdit  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.ui import inspect_dialog
 from zcu_tools.gui.app.main.ui.inspect_dialog import (
     InspectDialog,
+    _MdCreateDialog,
     _MlCreateDialog,
     _MlModifyDialog,
 )
@@ -182,109 +186,264 @@ def test_C9_inspect_dialog_raises_when_parent_has_no_open_dialog(qapp):
         dialog._on_arb_waveform_clicked()
 
 
-def test_inspect_dialog_md_edit(qapp):
-    ctrl = _make_ctrl()
-    bus = MagicMock()
+def _begin_inline_edit(dialog: InspectDialog, row: int, column: int, qapp) -> QLineEdit:
+    """Open one table editor with a real owner/focus in the offscreen test app."""
+    dialog.show()
+    dialog.activateWindow()
+    dialog.raise_()
+    qapp.processEvents()
+    item = dialog._md_table.item(row, column)
+    assert item is not None
+    dialog._md_table.editItem(item)
+    qapp.processEvents()
+    editor = dialog._md_table.findChild(QLineEdit)
+    assert editor is not None
+    editor.setFocus()
+    qapp.processEvents()
+    return editor
 
+
+def _send_key(widget: QLineEdit, key: Qt.Key, qapp) -> None:
+    event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        key,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(widget, event)
+    qapp.processEvents()
+
+
+def test_inspect_dialog_measure_parameters_is_dense_inline_grid(qapp):
+    ctrl = _make_ctrl()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    dialog = InspectDialog(ctrl, MagicMock())
+
+    assert dialog._md_table.columnCount() == 2
+    headers = [dialog._md_table.horizontalHeaderItem(i) for i in range(2)]
+    assert all(header is not None for header in headers)
+    assert [header.text() for header in headers if header is not None] == [
+        "Key",
+        "Value",
+    ]
+    key_item = dialog._md_table.item(0, 0)
+    value_item = dialog._md_table.item(0, 1)
+    assert key_item is not None and key_item.flags() & Qt.ItemFlag.ItemIsEditable
+    assert value_item is not None and value_item.flags() & Qt.ItemFlag.ItemIsEditable
+    assert dialog._new_btn.text() == "New"
+    assert dialog._delete_btn.text() == "Delete"
+
+
+def test_inspect_dialog_md_value_enter_commits_and_returns_table_focus(qapp):
+    ctrl = _make_ctrl()
     mock_md = MagicMock()
     mock_md.items.return_value = {"key1": 10}.items()
     ctrl.get_current_md.return_value = mock_md
     ctrl.coerce_md_value.return_value = 20
-    dialog = InspectDialog(ctrl, bus)
+    dialog = InspectDialog(ctrl, MagicMock())
 
-    # Select row to populate edit box
-    dialog._md_table.selectRow(0)
-    dialog._on_md_row_clicked(0, 0)
+    editor = _begin_inline_edit(dialog, 0, 1, qapp)
+    editor.setText("20")
+    _send_key(editor, Qt.Key.Key_Return, qapp)
 
-    dialog._edit_value.setText("20")
-    dialog._set_btn.click()
-
-    ctrl.coerce_md_value.assert_called_with("key1", "20")
-    ctrl.set_md_attr.assert_called_with("key1", 20)
+    ctrl.coerce_md_value.assert_called_once_with("key1", "20")
+    ctrl.set_md_attr.assert_called_once_with("key1", 20)
+    assert dialog._md_table.hasFocus()
 
 
-def test_inspect_dialog_md_value_source_resolves_in_value_input(qapp):
-    from zcu_tools.gui.session.value_lookup import ValueInfo
-
+def test_inspect_dialog_md_key_enter_renames_atomically(qapp):
     ctrl = _make_ctrl()
-    bus = MagicMock()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    dialog = InspectDialog(ctrl, MagicMock())
 
+    editor = _begin_inline_edit(dialog, 0, 0, qapp)
+    editor.setText("renamed")
+    _send_key(editor, Qt.Key.Key_Return, qapp)
+
+    ctrl.rename_md_attr.assert_called_once_with("key1", "renamed")
+    ctrl.set_md_attr.assert_not_called()
+    assert dialog._md_table.hasFocus()
+
+
+def test_inspect_dialog_md_escape_cancels_without_mutation(qapp):
+    ctrl = _make_ctrl()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    dialog = InspectDialog(ctrl, MagicMock())
+
+    editor = _begin_inline_edit(dialog, 0, 1, qapp)
+    editor.setText("99")
+    _send_key(editor, Qt.Key.Key_Escape, qapp)
+
+    ctrl.coerce_md_value.assert_not_called()
+    ctrl.set_md_attr.assert_not_called()
+    edited_item = dialog._md_table.item(0, 1)
+    assert edited_item is not None and edited_item.text() == "10"
+    assert dialog._md_table.hasFocus()
+
+
+def test_inspect_dialog_new_parameter_is_retained_horizontal_and_deferred(qapp):
+    ctrl = _make_ctrl()
     mock_md = MagicMock()
     mock_md.items.return_value = {}.items()
     ctrl.get_current_md.return_value = mock_md
-    ctrl.get_current_ml.return_value = _make_ml()
+    ctrl.get_current_ml.return_value = None
+    ctrl.coerce_md_value.return_value = 3.5
+    dialog = InspectDialog(ctrl, MagicMock())
+
+    dialog._new_btn.click()
+    qapp.processEvents()
+    new_dialog = dialog._new_md_dialog
+    assert isinstance(new_dialog, _MdCreateDialog)
+    assert new_dialog.isVisible()
+    assert new_dialog._key_edit.parent() is new_dialog
+    assert isinstance(new_dialog._value_edit, QLineEdit)
+    assert ctrl.create_md_attr.call_count == 0
+
+    new_dialog._key_edit.setText("new_key")
+    new_dialog._value_edit.setText("3.5")
+    assert ctrl.create_md_attr.call_count == 0
+    new_dialog._create_btn.click()
+    qapp.processEvents()
+
+    ctrl.coerce_md_value.assert_called_once_with("new_key", "3.5")
+    ctrl.create_md_attr.assert_called_once_with("new_key", 3.5)
+    assert dialog._new_md_dialog is None
+
+
+def test_inspect_dialog_new_parameter_coercion_failure_does_not_mutate(
+    qapp, monkeypatch
+):
+    from qtpy.QtWidgets import QMessageBox
+    from zcu_tools.gui.session.services.context import MdValueError
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    ctrl = _make_ctrl()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {}.items()
+    ctrl.get_current_md.return_value = mock_md
+    ctrl.get_current_ml.return_value = None
+    ctrl.coerce_md_value.side_effect = MdValueError("bad value")
+    dialog = InspectDialog(ctrl, MagicMock())
+
+    dialog._new_btn.click()
+    qapp.processEvents()
+    assert dialog._new_md_dialog is not None
+    new_dialog = dialog._new_md_dialog
+    new_dialog._key_edit.setText("new_key")
+    new_dialog._value_edit.setText("bad")
+    new_dialog._create_btn.click()
+
+    ctrl.create_md_attr.assert_not_called()
+    assert dialog._new_md_dialog is new_dialog
+    assert new_dialog._key_edit.text() == "new_key"
+    assert new_dialog._value_edit.text() == "bad"
+
+
+def test_inspect_dialog_md_delete_button_confirms(qapp, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    ctrl = _make_ctrl()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    dialog = InspectDialog(ctrl, MagicMock())
+    dialog._md_table.selectRow(0)
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
+    )
+    dialog._delete_btn.click()
+    ctrl.del_md_attr.assert_not_called()
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
+    )
+    dialog._delete_btn.click()
+    ctrl.del_md_attr.assert_called_once_with("key1")
+
+
+def test_inspect_dialog_md_delete_key_is_direct_when_table_has_focus(qapp, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+
+    ctrl = _make_ctrl()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    dialog = InspectDialog(ctrl, MagicMock())
+    dialog.show()
+    dialog.activateWindow()
+    dialog.raise_()
+    dialog._md_table.selectRow(0)
+    dialog._md_table.setFocus()
+    qapp.processEvents()
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *a, **k: pytest.fail("Delete key must not confirm"),
+    )
+
+    event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_Delete,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(dialog._md_table, event)
+    qapp.processEvents()
+
+    ctrl.del_md_attr.assert_called_once_with("key1")
+
+
+def test_inspect_dialog_md_delete_key_in_editor_remains_text_deletion(qapp):
+    ctrl = _make_ctrl()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {"key1": 10}.items()
+    ctrl.get_current_md.return_value = mock_md
+    dialog = InspectDialog(ctrl, MagicMock())
+
+    editor = _begin_inline_edit(dialog, 0, 1, qapp)
+    editor.setText("10")
+    editor.setCursorPosition(0)
+    _send_key(editor, Qt.Key.Key_Delete, qapp)
+
+    ctrl.del_md_attr.assert_not_called()
+    assert editor.text() == "0"
+
+
+def test_inspect_dialog_md_value_source_resolves_in_new_parameter(qapp):
+    from zcu_tools.gui.session.value_lookup import ValueInfo
+
+    ctrl = _make_ctrl()
+    mock_md = MagicMock()
+    mock_md.items.return_value = {}.items()
+    ctrl.get_current_md.return_value = mock_md
+    ctrl.get_current_ml.return_value = None
     ctrl.read_value_source.return_value = (
         ValueInfo("device.flux.value", float, "device:flux"),
         0.5,
     )
     ctrl.coerce_md_value.return_value = 0.5
-    dialog = InspectDialog(ctrl, bus)
+    dialog = InspectDialog(ctrl, MagicMock())
 
-    dialog._edit_key.setText("flx_current")
-    dialog._edit_value.setText("@{device.flux.value} ")
-    dialog._edit_value.setCursorPosition(len(dialog._edit_value.text()))
-    assert dialog._md_value_source_input is not None
-    dialog._md_value_source_input._on_text_edited(dialog._edit_value.text())
+    dialog._new_btn.click()
+    qapp.processEvents()
+    assert dialog._new_md_dialog is not None
+    new_dialog = dialog._new_md_dialog
+    new_dialog._key_edit.setText("flx_current")
+    new_dialog._value_edit.setText("@{device.flux.value} ")
+    new_dialog._value_edit.setCursorPosition(len(new_dialog._value_edit.text()))
+    assert new_dialog._value_source_input is not None
+    new_dialog._value_source_input._on_text_edited(new_dialog._value_edit.text())
 
-    assert dialog._edit_value.text() == "0.5"
-    dialog._set_btn.click()
-
+    assert new_dialog._value_edit.text() == "0.5"
+    new_dialog._create_btn.click()
     ctrl.read_value_source.assert_called_once_with("device.flux.value")
-    ctrl.coerce_md_value.assert_called_with("flx_current", "0.5")
-    ctrl.set_md_attr.assert_called_with("flx_current", 0.5)
-
-
-def test_inspect_dialog_md_set_success_clears_value_keeps_key(qapp):
-    """After a successful Set, the value field is cleared; the key field is kept."""
-    ctrl = _make_ctrl()
-    bus = MagicMock()
-
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    ctrl.coerce_md_value.return_value = 42
-    dialog = InspectDialog(ctrl, bus)
-
-    dialog._on_md_row_clicked(0, 0)  # fills key="key1", value="10"
-    dialog._edit_value.setText("42")
-
-    dialog._set_btn.click()
-
-    # Value field must be empty after successful set (visual "committed" signal).
-    assert dialog._edit_value.text() == ""
-    # Key field must be preserved so the user can chain edits or use Delete.
-    assert dialog._edit_key.text() == "key1"
-    # Set button remains enabled because the key is still present.
-    assert dialog._set_btn.isEnabled()
-
-
-def test_inspect_dialog_md_set_failure_preserves_value(qapp, monkeypatch):
-    """When coerce_md_value raises MdValueError, the value field is NOT cleared."""
-    from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.session.services.context import MdValueError
-
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
-
-    ctrl = _make_ctrl()
-    bus = MagicMock()
-
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    ctrl.coerce_md_value.side_effect = MdValueError("bad value")
-    dialog = InspectDialog(ctrl, bus)
-
-    dialog._on_md_row_clicked(0, 0)  # fills key="key1", value="10"
-    dialog._edit_value.setText("not_a_valid_value")
-
-    dialog._set_btn.click()
-
-    # coerce raised: set_md_attr must NOT have been called.
-    ctrl.set_md_attr.assert_not_called()
-    # Value field must still contain the user's input so they can fix it.
-    assert dialog._edit_value.text() == "not_a_valid_value"
-    # Key field must also be untouched.
-    assert dialog._edit_key.text() == "key1"
+    ctrl.coerce_md_value.assert_called_once_with("flx_current", "0.5")
+    ctrl.create_md_attr.assert_called_once_with("flx_current", 0.5)
 
 
 def test_inspect_dialog_ml_delete(qapp, monkeypatch):

@@ -95,6 +95,44 @@ def _coerce_scalar(text: str, current: Any) -> Any:
     )
 
 
+def _validate_md_key(key: str) -> None:
+    """Validate a user-facing MetaDict key before any content mutation."""
+    if not isinstance(key, str):
+        raise FailedPreconditionError(
+            f"MetaDict keys must be str, got {type(key).__name__}"
+        )
+    if not key.strip():
+        raise FailedPreconditionError("MetaDict key must not be empty.")
+    try:
+        MetaDict._ensure_data_key(key)
+    except (AttributeError, TypeError) as exc:
+        raise FailedPreconditionError(str(exc)) from exc
+
+
+def _commit_md_snapshot(md: MetaDict, snapshot: Mapping[str, Any]) -> None:
+    """Commit one already-validated MetaDict snapshot as a single mutation.
+
+    MetaDict exposes attribute-level writes but no rename primitive. Replacing
+    its data mapping under ContextService ownership avoids a caller-visible
+    set-then-delete window and lets the service publish one version/event pair.
+    The old in-memory mapping is restored if the underlying write fails.
+    """
+    previous = dict(md.items())
+    previous_dirty = md._dirty
+    try:
+        md._check_can_write()
+        md.sync()
+        md._data.clear()
+        md._data.update(snapshot)
+        md._dirty = True
+        md.sync()
+    except Exception:
+        md._data.clear()
+        md._data.update(previous)
+        md._dirty = previous_dirty
+        raise
+
+
 class ContextService:
     """Encapsulates context switching, MetaDict/ModuleLibrary access, and project paths."""
 
@@ -260,6 +298,41 @@ class ContextService:
             ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
         )
 
+    def create_md_attr(self, key: str, value: Any) -> None:
+        """Create one new MetaDict key after validating the complete request.
+
+        Validation happens before the atomic snapshot commit, so collisions and
+        invalid keys cannot leave a partially-created entry or emit a fact.
+        """
+        if not self.has_context():
+            raise FailedPreconditionError("No experiment context.")
+        _validate_md_key(key)
+        md = self._state.exp_context.md
+        snapshot = dict(md.items())
+        if key in snapshot:
+            raise FailedPreconditionError(f"MetaDict already has attribute {key!r}.")
+        snapshot[key] = value
+        _commit_md_snapshot(md, snapshot)
+        self._state.version.bump("context")
+        self._bus.emit(MdChangedPayload(md=md))
+
+    def rename_md_attr(self, old: str, new: str) -> None:
+        """Atomically rename one MetaDict key without a set-then-delete gap."""
+        if not self.has_context():
+            raise FailedPreconditionError("No experiment context.")
+        _validate_md_key(old)
+        _validate_md_key(new)
+        md = self._state.exp_context.md
+        snapshot = dict(md.items())
+        if old not in snapshot:
+            raise FailedPreconditionError(f"MetaDict has no attribute {old!r}.")
+        if new in snapshot:
+            raise FailedPreconditionError(f"MetaDict already has attribute {new!r}.")
+        snapshot[new] = snapshot.pop(old)
+        _commit_md_snapshot(md, snapshot)
+        self._state.version.bump("context")
+        self._bus.emit(MdChangedPayload(md=md))
+
     def set_md_attr(self, key: str, value: Any) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
@@ -270,8 +343,9 @@ class ContextService:
         #
         # CANONICAL ANCHOR — "writing md/ml must bump context" has TWO physical
         # paths (ADR-0006 collapsed writeback's direct write into path 1):
-        #   1. ContextService writes: set_md_attr / del_md_attr / set_ml_*_from_schema /
-        #      del_ml_* (field-level, each bumps+emits) and apply_writes (batch:
+        #   1. ContextService writes: create_md_attr / rename_md_attr / set_md_attr /
+        #      del_md_attr / set_ml_*_from_schema / del_ml_* (field-level, each
+        #      bumps+emits) and apply_writes (batch:
         #      one bump + one emit per kind). Writeback / editor commit / inspect /
         #      create_from_role all route here — the single write authority.
         #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)

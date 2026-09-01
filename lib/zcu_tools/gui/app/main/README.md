@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-01 — progress, writeback applied state, Data and Run actions
+**Last updated:** 2026-09-02 — dense measure Inspect Parameters editing
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -476,6 +476,13 @@ remote named-dialog surface delegate reference retention and `finished` /
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
 controller only for measure-only CfgEditor create/modify and role-catalog actions.
+Measure overrides only the md composition with a dense two-column property grid:
+Key and scalar Value cells use the standard Qt editor (Enter commits and returns
+focus to the table, Escape cancels), while New opens a retained `open()` dialog
+whose validation calls the ContextControlPort before the single ContextService
+mutation. The grid Delete button confirms; the table-only Delete shortcut is
+confirmation-free and never intercepts an active cell editor. Autofluxdep keeps
+the base presentation and its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the
