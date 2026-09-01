@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-01 — singleshot analysis controls and Len Rabi gated calibration
+**Last updated:** 2026-09-01 — Len Rabi Figure audit panels and gated calibration
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -136,8 +136,9 @@ fit資料計算`ge_radius`與3×3 confusion matrix，顯示完整confusion diagn
 `get_post_writeback_items()`提出`ge_radius`、`confusion_matrix`；兩組proposal分屬不同pane的
 opaque draft，adapter不接觸Writeback implementation。
 
-`singleshot/len_rabi` 的analysis只在Figure summary呈現measured populations與joint-fit curves；完整
-typed numeric fit留在adapter result內，不展開額外GUI diagnostics。只有backend valid且
+`singleshot/len_rabi` 的analysis維持Figure-only summary，不展開額外GUI scalar diagnostics；Figure
+上方呈現measured populations與joint-fit curves，左下呈現第一點integrated-bin histogram fit，右下
+呈現derived confusion matrix。完整typed numeric fit留在adapter result內。只有backend valid且
 `g_center`、`e_center`、`ge_radius`、`confusion_matrix`四項全部finite時，adapter才同時提出四個
 獨立`MetaDictWriteback` items；任一項無效就全數略過。Adapter只投影同一次domain analysis結果，
 不重跑fit、不重算stability，也不直接apply proposal。
