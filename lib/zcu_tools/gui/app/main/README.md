@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-02 — transactional Inspect editing, stable Run/Save orientation and Run activity projection
+**Last updated:** 2026-09-02 — transactional Inspect Modules and Parameters editing, stable Run/Save orientation and Run activity projection
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt

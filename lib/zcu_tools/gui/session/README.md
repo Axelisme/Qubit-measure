@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-02 — atomic ModuleLibrary replacement and Inspect draft lifecycle
+**Last updated:** 2026-09-02 — atomic ModuleLibrary/MetaDict mutations, Inspect draft lifecycle and device Apply activity projection
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
