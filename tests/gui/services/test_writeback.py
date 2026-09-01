@@ -209,6 +209,49 @@ def test_applied_state_follows_successful_writes_and_content_edits():
     assert svc.get_all_applied(draft)["md-1"] is False
 
 
+def test_direct_cfg_draft_change_marks_applied_item_unapplied():
+    cfg_editor = MagicMock()
+    editor_draft = MagicMock()
+    cfg_editor.open_seeded.return_value = ("editor-1", ())
+    cfg_editor.get_draft.return_value = editor_draft
+    svc = WritebackService(cfg_editor, MagicMock())
+    draft = svc.create_draft(
+        [
+            ModuleWriteback(
+                target_name="readout", description="d", edit_schema=MagicMock()
+            )
+        ]
+    )
+    draft.apply()
+    assert svc.get_all_applied(draft) == {"ml-1": True}
+
+    on_change = editor_draft.on_change.connect.call_args.args[0]
+    on_change()
+
+    assert svc.get_all_applied(draft) == {"ml-1": False}
+
+
+def test_duplicate_selected_destination_is_rejected_before_write():
+    write_port = MagicMock()
+    svc = WritebackService(MagicMock(), write_port)
+    draft = svc.create_draft(
+        [
+            MetaDictWriteback(
+                target_name="same", description="first", proposed_value=1.0
+            ),
+            MetaDictWriteback(
+                target_name="same", description="second", proposed_value=2.0
+            ),
+        ]
+    )
+
+    with pytest.raises(InvalidInputError, match="duplicate md writeback destination"):
+        draft.apply()
+
+    write_port.apply_writes.assert_not_called()
+    assert svc.get_all_applied(draft) == {"md-1": False, "md-2": False}
+
+
 def test_failed_and_empty_apply_do_not_mark_items_applied():
     cfg_editor = MagicMock()
     write_port = MagicMock()

@@ -42,6 +42,7 @@ class TabInteractionFact(str, Enum):
     ANALYZE_PARAMS_CHANGED = "analyze_params_changed"
     POST_ANALYZE_PARAMS_CHANGED = "post_analyze_params_changed"
     SAVE_PATHS_CHANGED = "save_paths_changed"
+    WRITEBACK_DRAFT_CHANGED = "writeback_draft_changed"
 
 
 class TabContentFact(str, Enum):

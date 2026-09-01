@@ -608,7 +608,7 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
     assert captured_dir["directory"] == str(database_root)
 
 
-def test_main_window_successful_writeback_refreshes_applied_projection(qapp):
+def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp):
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())
@@ -626,7 +626,8 @@ def test_main_window_successful_writeback_refreshes_applied_projection(qapp):
     window._on_writeback_inline_apply("tab-1", pane="analysis")
 
     ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
-    window.refresh_tab_writeback.assert_called_once_with("tab-1")
+    window.refresh_tab_writeback.assert_not_called()
+    window.show_status_message.assert_called_once_with("Writeback applied: md-1")
 
 
 def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):

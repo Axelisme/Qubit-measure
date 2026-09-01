@@ -53,6 +53,7 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
   compact unified ledger: draft-owned unapplied items以粗體`target*`與`* = not applied`
   legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
+  apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
   centered Current → Proposed columns on a shared-background continuous-boundary
   panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions
   (scalar MetaDict and editable module/waveform items use Edit; non-scalar
@@ -243,7 +244,8 @@ overserides are independent resources; the read model projects data, analysis-im
 and post-analysis-image paths separately. Run live figures remain view-only and
 are not stored in State. Writeback baseline is a display-only draft-creation
 snapshot；同一opaque draft另擁有per-item applied state，只有成功write包含的items才標記applied，
-selection本身不改狀態，retarget或內容修改會重設。狀態不跨draft/process持久化，也不提供
+selection本身不改狀態，retarget或內容修改會重設；同kind items不得指向重複destination，
+避免batch覆寫卻誤標applied。狀態不跨draft/process持久化，也不提供
 concurrent-write detection或apply-conflict policy。
 
 Analysis/Post result services prepare proposals, figures and drafts before calling one

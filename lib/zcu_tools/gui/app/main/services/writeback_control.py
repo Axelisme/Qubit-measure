@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
@@ -12,6 +16,7 @@ WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
     from zcu_tools.gui.cfg.binding import CfgDraft
+    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
     from .guard import GuardService
     from .writeback import WritebackService
@@ -55,11 +60,13 @@ class WritebackControlFacet:
         guard: GuardService,
         writeback: WritebackService,
         resource_versions: Callable[[], Mapping[str, int]],
+        bus: EventBus,
     ) -> None:
         self._state = state
         self._guard = guard
         self._writeback = writeback
         self._resource_versions = resource_versions
+        self._bus = bus
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
@@ -96,7 +103,9 @@ class WritebackControlFacet:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.edit_draft(draft, session_id, **changes)  # type: ignore[arg-type]
+        result = self._writeback.edit_draft(draft, session_id, **changes)  # type: ignore[arg-type]
+        self._emit_draft_changed(tab_id)
+        return result
 
     def apply_writeback_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -104,7 +113,9 @@ class WritebackControlFacet:
         self._guard.acquire_writeback_permit(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.apply_draft(draft)  # type: ignore[arg-type]
+        result = self._writeback.apply_draft(draft)  # type: ignore[arg-type]
+        self._emit_draft_changed(tab_id)
+        return result
 
     def get_writeback_summaries_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -113,7 +124,7 @@ class WritebackControlFacet:
         # no guard needed beyond existence check (read-only).
         try:
             draft = self._draft_for_pane(tab_id, pane)
-        except Exception:
+        except FailedPreconditionError:
             return {}
         return self._writeback.get_all_summaries(draft)  # type: ignore[arg-type]
 
@@ -122,9 +133,17 @@ class WritebackControlFacet:
     ) -> dict[str, bool]:
         try:
             draft = self._draft_for_pane(tab_id, pane)
-        except Exception:
+        except FailedPreconditionError:
             return {}
         return self._writeback.get_all_applied(draft)  # type: ignore[arg-type]
+
+    def _emit_draft_changed(self, tab_id: str) -> None:
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id,
+                fact=TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
+            )
+        )
 
     def _require_tab_idle(self, tab_id: str) -> None:
         if self._state.is_tab_busy(tab_id):

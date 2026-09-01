@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+import pytest
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QApplication,
@@ -126,6 +127,17 @@ def test_writeback_widget_projects_draft_owned_applied_state(qapp):
     checkbox = widget._checks["md-1"]
     assert checkbox.text() == "r_f"
     assert not checkbox.font().bold()
+
+
+def test_writeback_widget_does_not_hide_applied_projection_failures(qapp):
+    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=6000.0)
+    item.session_id = "md-1"
+    ctrl = MagicMock()
+    ctrl.get_writeback_applied_for_pane.side_effect = RuntimeError("projection failed")
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
+
+    with pytest.raises(RuntimeError, match="projection failed"):
+        widget.populate([item])
 
 
 def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):

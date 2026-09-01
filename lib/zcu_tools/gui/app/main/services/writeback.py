@@ -175,6 +175,12 @@ class WritebackService:
                         owner_key=f"writeback:{identity}:{item.session_id}",
                     )
                     entry.editor_id = editor_id
+                    editor_draft = self._cfg_editor.get_draft(editor_id)
+                    editor_draft.on_change.connect(
+                        lambda *_args, draft_entry=entry: self._mark_unapplied(
+                            draft_entry
+                        )
+                    )
         except BaseException:
             # Cleanup is best-effort per session so one teardown failure cannot
             # strand the remaining sessions. The creation failure remains the
@@ -268,18 +274,34 @@ class WritebackService:
         ml_modules: dict[str, CfgSchema] = {}
         ml_waveforms: dict[str, CfgSchema] = {}
 
-        for entry in draft._entries:
+        selected_entries = [entry for entry in draft._entries if entry.item.selected]
+        destinations: set[tuple[str, str]] = set()
+        for entry in selected_entries:
             item = entry.item
-            if not item.selected:
-                continue
+            if isinstance(item, MetaDictWriteback):
+                destination_kind = "md"
+            elif isinstance(item, ModuleWriteback):
+                destination_kind = "ml_modules"
+            elif isinstance(item, WaveformWriteback):
+                destination_kind = "ml_waveforms"
+            else:
+                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
+            destination = (destination_kind, item.target_name)
+            if destination in destinations:
+                raise InvalidInputError(
+                    f"duplicate {destination_kind} writeback destination: "
+                    f"{item.target_name!r}"
+                )
+            destinations.add(destination)
+
+        for entry in selected_entries:
+            item = entry.item
             if isinstance(item, MetaDictWriteback):
                 md[item.target_name] = item.proposed_value
             elif isinstance(item, ModuleWriteback):
                 ml_modules[item.target_name] = self._entry_schema(entry)
             elif isinstance(item, WaveformWriteback):
                 ml_waveforms[item.target_name] = self._entry_schema(entry)
-            else:
-                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
             applied_ids.append(item.session_id)
 
         written = {
@@ -487,6 +509,10 @@ class WritebackService:
         """Return the draft-owned applied state for presentation."""
         self._require_draft(draft)
         return {entry.item.session_id: entry.applied for entry in draft._entries}
+
+    @staticmethod
+    def _mark_unapplied(entry: _DraftEntry) -> None:
+        entry.applied = False
 
     def _teardown_entries(self, entries: Iterable[_DraftEntry]) -> None:
         for entry in reversed(list(entries)):

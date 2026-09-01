@@ -7,7 +7,12 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.main.services.writeback_control import WritebackControlFacet
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 from tests.gui._control_fakes import CallLog, call
@@ -75,6 +80,7 @@ def _facet() -> tuple[
     RecordingState,
     RecordingWriteback,
     dict[str, int],
+    BaseEventBus,
 ]:
     log = CallLog()
     state = RecordingState(log)
@@ -82,22 +88,25 @@ def _facet() -> tuple[
     state.tab.analysis.writeback_draft = writeback.analysis_draft
     state.tab.post_analysis.writeback_draft = writeback.post_draft
     versions = {"context": 7}
+    bus = BaseEventBus()
     return (
         WritebackControlFacet(
             state=cast(Any, state),
             guard=cast(Any, RecordingGuard(log)),
             writeback=cast(Any, writeback),
             resource_versions=lambda: versions,
+            bus=bus,
         ),
         log,
         state,
         writeback,
         versions,
+        bus,
     )
 
 
 def test_has_tab_reads_state() -> None:
-    facet, log, _state, _writeback, _versions = _facet()
+    facet, log, _state, _writeback, _versions, _bus = _facet()
 
     assert facet.has_tab("tab-1") is True
 
@@ -111,8 +120,10 @@ def test_has_tab_reads_state() -> None:
 def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     pane: str, draft_attr: str
 ) -> None:
-    facet, log, _state, writeback, _versions = _facet()
+    facet, log, _state, writeback, _versions, bus = _facet()
     draft = getattr(writeback, draft_attr)
+    events: list[TabInteractionChangedPayload] = []
+    bus.subscribe(TabInteractionChangedPayload, events.append)
 
     assert facet.get_writeback_item_draft_for_pane(
         "tab-1", cast(Any, pane), "md-1"
@@ -128,10 +139,14 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     assert call("writeback", "get_item_draft", draft, "md-1") in log.calls
     assert call("writeback", "edit_draft", draft, "md-1", selected=False) in log.calls
     assert call("writeback", "apply_draft", draft) in log.calls
+    assert [event.fact for event in events] == [
+        TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
+        TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
+    ]
 
 
 def test_applied_projection_reads_the_pane_owned_draft() -> None:
-    facet, log, _state, writeback, _versions = _facet()
+    facet, log, _state, writeback, _versions, _bus = _facet()
 
     assert facet.get_writeback_applied_for_pane("tab-1", "analysis") == {
         "pane-item": True
@@ -141,7 +156,7 @@ def test_applied_projection_reads_the_pane_owned_draft() -> None:
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
 def test_pane_writeback_requires_an_existing_draft(pane: str) -> None:
-    facet, _log, state, writeback, _versions = _facet()
+    facet, _log, state, writeback, _versions, _bus = _facet()
     draft_attr = "analysis_draft" if pane == "analysis" else "post_draft"
     setattr(writeback, draft_attr, None)
     setattr(
@@ -155,14 +170,16 @@ def test_pane_writeback_requires_an_existing_draft(pane: str) -> None:
 
 
 def test_pane_writeback_rejects_unknown_pane() -> None:
-    facet, _log, _state, _writeback, _versions = _facet()
+    facet, _log, _state, _writeback, _versions, _bus = _facet()
 
     with pytest.raises(InvalidInputError, match="unknown writeback pane"):
         facet.apply_writeback_for_pane("tab-1", cast(Any, "save"))
+    with pytest.raises(InvalidInputError, match="unknown writeback pane"):
+        facet.get_writeback_applied_for_pane("tab-1", cast(Any, "save"))
 
 
 def test_pane_writeback_rejects_edit_while_tab_is_busy() -> None:
-    facet, _log, state, _writeback, _versions = _facet()
+    facet, _log, state, _writeback, _versions, _bus = _facet()
     state.busy = True
 
     with pytest.raises(FailedPreconditionError, match="busy"):
@@ -170,7 +187,7 @@ def test_pane_writeback_rejects_edit_while_tab_is_busy() -> None:
 
 
 def test_get_context_version_reads_resource_versions() -> None:
-    facet, _log, _state, _writeback, versions = _facet()
+    facet, _log, _state, _writeback, versions, _bus = _facet()
 
     assert facet.get_context_version() == 7
     versions.clear()

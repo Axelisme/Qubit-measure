@@ -169,14 +169,14 @@ def test_edit_cfg_item_can_change_target_name(qapp):
     item.session_id = "ml-1"
 
     ctrl = MagicMock()
-    ctrl.get_writeback_item_draft_for_pane.return_value = MeasureCfgBindings(
-        ctrl
-    ).new_draft(
+    draft = MeasureCfgBindings(ctrl).new_draft(
         CfgSchema(
             spec=CfgSectionSpec(fields={}),
             value=CfgSectionValue(fields={}),
         )
     )
+    ctrl.get_writeback_item_draft_for_pane.return_value = draft
+    ctrl.get_writeback_applied_for_pane.return_value = {"ml-1": True}
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
     widget.populate([item])
 
@@ -190,6 +190,11 @@ def test_edit_cfg_item_can_change_target_name(qapp):
         name_edit.setText("readout_rf_tuned")
         name_edit.editingFinished.emit()
         assert item.target_name == "readout_rf_tuned"
+
+        ctrl.get_writeback_applied_for_pane.return_value = {"ml-1": False}
+        draft.on_change.emit()
+        assert cb.text() == "readout_rf_tuned*"
+        assert cb.font().bold()
 
         # Blank reverts to the previous name (no blank target).
         name_edit.setText("  ")

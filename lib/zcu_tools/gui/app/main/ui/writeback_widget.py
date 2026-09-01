@@ -496,16 +496,13 @@ class WritebackWidget(QWidget):
         return False
 
     def _get_applied_states(self) -> dict[str, bool]:
-        try:
-            getter = getattr(self._ctrl, "get_writeback_applied_for_pane", None)
-            if getter is None or not callable(getter):
-                return {}
-            result = getter(self._tab_id, self._pane)
-            if isinstance(result, dict):
-                return {str(key): bool(value) for key, value in result.items()}
-        except Exception:
-            pass
-        return {}
+        getter = getattr(self._ctrl, "get_writeback_applied_for_pane", None)
+        if getter is None or not callable(getter):
+            return {}
+        result = getter(self._tab_id, self._pane)
+        if not isinstance(result, dict):
+            return {}
+        return {str(key): bool(value) for key, value in result.items()}
 
     def _update_applied_presentation(
         self, item: WritebackItem, checkbox: QCheckBox
@@ -525,16 +522,13 @@ class WritebackWidget(QWidget):
 
     def _get_service_summaries(self, session_id: str) -> tuple[str | None, str | None]:
         """Fetch S2 summaries from the service-owned draft (app-local)."""
-        try:
-            getter = getattr(self._ctrl, "get_writeback_summaries_for_pane", None)
-            if getter is None or not callable(getter):
-                return (None, None)
-            result = getter(self._tab_id, self._pane)  # type: ignore[call-arg]
-            if isinstance(result, dict) and session_id in result:
-                cur, prop = result[session_id]
-                return cur, prop
-        except Exception:
-            pass
+        getter = getattr(self._ctrl, "get_writeback_summaries_for_pane", None)
+        if getter is None or not callable(getter):
+            return (None, None)
+        result = getter(self._tab_id, self._pane)  # type: ignore[call-arg]
+        if isinstance(result, dict) and session_id in result:
+            cur, prop = result[session_id]
+            return cur, prop
         return (None, None)
 
     def _display_current(self, item: WritebackItem) -> str:
@@ -683,6 +677,11 @@ class WritebackWidget(QWidget):
             text_input_enhancer=make_value_source_input_enhancer(self._ctrl)
         )
         form_widget.attach(draft)
+
+        def _on_draft_changed(*_: Any) -> None:
+            self._refresh_item_applied_presentation(item, cb)
+
+        draft.on_change.connect(_on_draft_changed)
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
@@ -694,6 +693,7 @@ class WritebackWidget(QWidget):
 
         def _on_finished(*_: Any) -> None:
             _commit_name()
+            draft.on_change.disconnect(_on_draft_changed)
             form_widget.detach()
             self._refresh_item_applied_presentation(item, cb)
             # Refresh bounded summary after cfg edits (proposed may have changed)

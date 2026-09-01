@@ -259,6 +259,10 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
             TabInteractionFact.SAVE_FAILED,
             ["refresh_tab_interaction", "refresh_feedback_widget"],
         ),
+        (
+            TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
+            ["refresh_tab_writeback"],
+        ),
     ],
 )
 def test_interaction_fact_reaction_matrix(

@@ -151,6 +151,7 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
     TabInteractionFact.ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.SAVE_PATHS_CHANGED: (),
+    TabInteractionFact.WRITEBACK_DRAFT_CHANGED: (_TabReaction.WRITEBACK,),
 }
 
 _CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {

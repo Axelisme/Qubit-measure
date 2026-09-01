@@ -195,6 +195,7 @@ def build_app_services(
         guard=guard,
         writeback=writeback,
         resource_versions=resource_versions,
+        bus=bus,
     )
     return AppServices(
         operation_gate=operation_gate,
