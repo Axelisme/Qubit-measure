@@ -86,6 +86,27 @@ def _synthetic_raw(
     )
 
 
+def _synthetic_gaussian_raw(
+    lengths: NDArray[np.float64],
+    params: LenRabiPhysicalParams,
+    *,
+    shots: int,
+    seed: int,
+) -> NDArray[np.complex128]:
+    rng = np.random.default_rng(seed)
+    p_e = rabi_excited_population(lengths, params)
+    excited = rng.random((lengths.size, shots)) < p_e[:, None]
+    projected = np.where(
+        excited,
+        rng.normal(params.center_e, params.sigma, size=excited.shape),
+        rng.normal(params.center_g, params.sigma, size=excited.shape),
+    )
+    perpendicular = rng.normal(0.0, params.sigma, size=projected.shape)
+    return np.asarray(
+        (projected + 1j * perpendicular) * np.exp(0.4j), dtype=np.complex128
+    )
+
+
 def test_pca_orientation_uses_initial_dominant_cluster_when_means_tie() -> None:
     initial = np.array([1.0] * 6 + [-1.5] * 4, dtype=np.complex128)
     second = np.array([1.0] * 5 + [-1.0] * 5, dtype=np.complex128)
@@ -187,6 +208,30 @@ def test_public_analysis_recovers_identifiable_raw_iq_joint_fit() -> None:
     assert fit.fitted_populations.shape == (lengths.size, 3)
     assert len(figure.axes[0].lines) == 6
     plt.close(figure)
+
+
+def test_public_fit_converges_for_gaussian_boundary_of_transition_family() -> None:
+    truth = LenRabiPhysicalParams(
+        p_e0=0.39,
+        p_inf=0.495,
+        center_g=-90.0,
+        center_e=90.0,
+        sigma=52.0,
+        p_avg=0.5,
+        length_ratio=0.0,
+        t_r=38.0,
+        omega=8.6466,
+    )
+    lengths = np.linspace(0.028645833333333, 1.200520833333333, 51)
+    signals = _synthetic_gaussian_raw(lengths, truth, shots=500, seed=1)
+
+    fit = fit_len_rabi_joint(lengths, signals)
+
+    assert fit.backend.valid
+    assert np.isfinite(fit.backend.covariance).all()
+    assert np.isfinite(fit.radius)
+    np.testing.assert_allclose(fit.confusion_matrix.sum(axis=1), 1.0, atol=1e-12)
+    np.testing.assert_array_equal(fit.confusion_matrix[2], [0.0, 0.0, 1.0])
 
 
 def test_invalid_backend_keeps_diagnostics_but_blocks_finite_calibration() -> None:
