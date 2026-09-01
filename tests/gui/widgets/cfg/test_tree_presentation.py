@@ -9,7 +9,9 @@ import pytest
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
+    QLabel,
     QLineEdit,
+    QSizePolicy,
     QTreeWidgetItem,  # type: ignore[attr-defined]
 )
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
@@ -43,6 +45,7 @@ from zcu_tools.gui.widgets.cfg import (
     FieldRenderContext,
     TreeCfgWidget,
 )
+from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget, SweepWidget
 from zcu_tools.meta_tool import MetaDict
 
 
@@ -257,6 +260,69 @@ def test_tree_renders_and_edits_same_observable_behavior(qapp, ctrl):
     w.detach()
     draft.close()
 
+
+def _assert_sweep_layout(qapp, widget, first_row_labels: tuple[str, str]) -> None:
+    labels = {label.text(): label for label in widget.findChildren(QLabel)}
+    expected_labels = {*first_row_labels, "points", "step"}
+    assert set(labels) == expected_labels
+
+    first_cells = tuple(labels[text].parentWidget() for text in first_row_labels)
+    second_cells = tuple(labels[text].parentWidget() for text in ("points", "step"))
+    assert all(cell is not None for cell in (*first_cells, *second_cells))
+    first_row = first_cells[0].parentWidget()
+    second_row = second_cells[0].parentWidget()
+    assert first_row is first_cells[1].parentWidget()
+    assert second_row is second_cells[1].parentWidget()
+    assert first_row is not second_row
+    assert first_row.y() < second_row.y()
+
+    for row, cells in ((first_row, first_cells), (second_row, second_cells)):
+        row.resize(801, row.sizeHint().height())
+        qapp.processEvents()
+        assert abs(cells[0].width() - cells[1].width()) <= 1
+        for cell in cells:
+            assert cell is not None
+            cell_layout = cell.layout()
+            assert cell_layout is not None
+            editor = cell_layout.itemAt(1).widget()
+            assert editor is not None
+            assert editor.width() >= 20
+            assert (
+                editor.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+            )
+
+
+def test_sweep_renderers_use_balanced_range_sampling_rows(qapp, ctrl):
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "ordinary": SweepSpec(label="Ordinary"),
+                "centered": CenteredSweepSpec(label="Centered"),
+            }
+        ),
+        value=CfgSectionValue(
+            fields={
+                "ordinary": SweepValue(start=0.0, stop=1.0, expts=11),
+                "centered": CenteredSweepValue(center=0.5, span=1.0, expts=11),
+            }
+        ),
+    )
+    w = CfgFormWidget()
+    _attach(w, schema, ctrl)
+    w.resize(900, 500)
+    w.show()
+    qapp.processEvents()
+
+    ordinary = w.findChild(SweepWidget)
+    centered = w.findChild(CenteredSweepWidget)
+    assert ordinary is not None
+    assert centered is not None
+    _assert_sweep_layout(qapp, ordinary, ("start", "stop"))
+    _assert_sweep_layout(qapp, centered, ("center", "span"))
+
+    w.close()
+
+
 def test_tree_whole_row_folding_is_view_only(qapp, ctrl):
     schema = _complex_schema()
     w = CfgFormWidget()
@@ -402,17 +468,23 @@ def test_tree_depth_color_cycling_and_own_depth(qapp, ctrl):
     depth_set = {c.lower() for c in TREE_DEPTH_COLORS}
     for idx, it in enumerate(items):
         bg = it.background(0).color().name().lower()
-        assert bg not in depth_set, f"depth {idx} item {it.text(0)!r} background {bg} should not be depth color"
+        assert bg not in depth_set, (
+            f"depth {idx} item {it.text(0)!r} background {bg} should not be depth color"
+        )
         # Also verify that guide-line helper would give expected cycle
         exp = TREE_DEPTH_COLORS[idx % len(TREE_DEPTH_COLORS)].lower()
         assert _branch_color(idx).name().lower() == exp
     # own-depth via guide lines: child's guide color should be next, not same as parent
     for i in range(1, len(items)):
-        assert _branch_color(i).name().lower() != _branch_color(i - 1).name().lower() or len(TREE_DEPTH_COLORS) == 1
+        assert (
+            _branch_color(i).name().lower() != _branch_color(i - 1).name().lower()
+            or len(TREE_DEPTH_COLORS) == 1
+        )
     # Nesting legibility: root alignment intact — root has no parent and indentation 10
     assert tree.indentation() == 10
-    assert tree.topLevelItem(0) is not None
-    assert tree.topLevelItem(0).parent() is None
+    root_item = tree.topLevelItem(0)
+    assert root_item is not None
+    assert root_item.parent() is None
 
 
 def test_tree_reference_shape_elision(qapp, ctrl):

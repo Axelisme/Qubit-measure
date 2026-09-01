@@ -6,6 +6,7 @@ Validates S1-S3 acceptance via production ExpTabWidget / MainWindow seams.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -689,6 +690,141 @@ def test_save_all_dispatch_only_result_present_and_order(qapp, monkeypatch):
     window._on_save_all_clicked("tab-1")
     assert call_order == ["analysis", "post", "data"]
     window.deleteLater()
+    tab.deleteLater()
+    qapp.processEvents()
+
+
+def test_save_all_preserves_data_pane_editor_state_and_statuses(exp_tab_factory, qapp):
+    from qtpy.QtCore import Qt
+    from qtpy.QtTest import QTest
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    ctrl.has_tab.return_value = True
+    ctrl.save_data = MagicMock(return_value="/tmp/data.h5")
+    ctrl.save_image = MagicMock(return_value="/tmp/a.png")
+    ctrl.save_post_image = MagicMock(return_value="/tmp/p.png")
+    window = MainWindow(ctrl)
+
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+    )
+    snap = _snapshot(
+        "tab-1",
+        has_run=True,
+        has_analysis=True,
+        has_post=True,
+        analysis_mode=AnalysisMode.FIT,
+        post_cap=True,
+        load_cap=True,
+        has_active_context=True,
+    )
+    tab_ctrl = _mock_ctrl()
+    tab = exp_tab_factory("tab-1", tab_ctrl, caps)
+    tab.attach(snap, window._tab_actions)
+    ctrl.get_tab_snapshot.return_value = snap
+    window._tab_widgets["tab-1"] = tab
+    tab.update_interaction_state(snap)
+
+    tab._left_tabs.setCurrentWidget(tab._save_panel)
+    tab.show()
+    qapp.processEvents()
+    center = tab._save_center
+    data_edit = center._path_edits[ArtifactKind.DATA]
+    data_edit.setFocus()
+    qapp.processEvents()
+    assert qapp.focusWidget() is data_edit
+    data_edit.setCursorPosition(4)
+    data_edit.cursorBackward(True, 3)
+    before = (
+        data_edit.hasFocus(),
+        data_edit.cursorPosition(),
+        data_edit.selectionStart(),
+        data_edit.selectedText(),
+    )
+
+    # A state refresh with identical text must not clear the user's selection.
+    center.set_data_path(data_edit.text())
+    assert (
+        data_edit.hasFocus(),
+        data_edit.cursorPosition(),
+        data_edit.selectionStart(),
+        data_edit.selectedText(),
+    ) == before
+
+    selected_pane = tab._left_tabs.currentWidget()
+    data_edit_identity = center._path_edits[ArtifactKind.DATA]
+    cast(Any, QTest).mouseClick(
+        cast(QPushButton, center.save_all_button), Qt.MouseButton.LeftButton
+    )
+    qapp.processEvents()
+
+    # Save All keeps the ordered operation's synchronous image statuses and
+    # leaves data pending until its terminal payload arrives.
+    assert center.status_text(ArtifactKind.ANALYSIS) == "✓ SAVED"
+    assert center.status_text(ArtifactKind.POST_ANALYSIS) == "✓ SAVED"
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+
+    window.handle_save_data_finished(
+        SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/data.h5")
+    )
+    qapp.processEvents()
+
+    assert tab._left_tabs.currentWidget() is selected_pane
+    assert tab._save_center is center
+    assert center._path_edits[ArtifactKind.DATA] is data_edit_identity
+    assert (
+        data_edit.hasFocus(),
+        data_edit.cursorPosition(),
+        data_edit.selectionStart(),
+        data_edit.selectedText(),
+    ) == before
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
+    window.deleteLater()
+    tab.deleteLater()
+    qapp.processEvents()
+
+
+def test_changed_path_refresh_preserves_reverse_data_editor_state(
+    exp_tab_factory, qapp
+):
+    ctrl = _mock_ctrl()
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
+    )
+    snap = _snapshot(
+        "tab-1",
+        has_run=True,
+        analysis_mode=AnalysisMode.FIT,
+        post_cap=False,
+        load_cap=False,
+    )
+    tab = exp_tab_factory("tab-1", ctrl, caps)
+    tab.attach(snap, MagicMock())
+    tab.show()
+    qapp.processEvents()
+
+    center = tab._save_center
+    data_edit = center._path_edits[ArtifactKind.DATA]
+    data_edit.setFocus()
+    qapp.processEvents()
+    data_edit.setCursorPosition(4)
+    data_edit.cursorBackward(True, 3)
+    assert data_edit.cursorPosition() == 1
+    assert data_edit.selectionStart() == 1
+    assert data_edit.selectionLength() == 3
+    assert data_edit.selectedText() == "tmp"
+
+    center.set_data_path("/tmp/changed-data.h5")
+
+    assert data_edit.hasFocus()
+    assert data_edit.cursorPosition() == 1
+    assert data_edit.selectionStart() == 1
+    assert data_edit.selectionLength() == 3
+    assert data_edit.selectedText() == "tmp"
     tab.deleteLater()
     qapp.processEvents()
 

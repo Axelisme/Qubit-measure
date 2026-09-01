@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-01 — progress, writeback applied state, Data and Run actions
+**Last updated:** 2026-09-02 — transactional Inspect Modules and Parameters editing, stable Run/Save orientation and Run activity projection
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -23,7 +23,10 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
 - `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。`running_tab_id`
-  是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
+  是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。MainWindow
+  also projects that identity directly onto exactly one top-level tab as a compact blue
+  `●` marker while Run is active; Run start/terminal EventBus reactions and tab insertion
+  repaint from State, so the marker is never persisted or cached as a second busy state.
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
@@ -68,7 +71,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   scroll/cap lifecycle.
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
   captures its pane's container at start — switching the visible subtab never
-  retargets the worker (ADR-0017). `ExpTabWidget` delegates the Data pane to an
+  retargets the worker (ADR-0017). Run terminal reactions refresh canonical
+  presentation without selecting a subtab; Analysis remains an explicit user
+  selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
   action row放在`Measurement data`card之前，同時擁有capability-driven artifact rows、
   high-contrast status rendering and the tab-local status lifecycle derived from
@@ -77,7 +82,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   tracks result lifecycle. The center owns the saveability decision and the ordered
   Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
   successes); tracker/invariant failures Fast Fail and operational failures are
-  presented centrally, and async data completion is routed to the center.
+  presented centrally, and async data completion is routed to the center. Save All
+  updates that center in place: terminal status updates do not replace the Data
+  pane or its widgets, and the data-path editor retains focus, cursor and selection.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
@@ -99,8 +106,8 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   the gallery never attaches or reparents a canvas. Subtab routing keeps
   Run/Analysis/Post on their source stacks, Data on the gallery, and Guide on
   its placeholder. Top-level orchestration invokes behavior-oriented tab methods
-  for result focus, plot hosting, interactive-widget lifecycle, figure reads,
-  and persisted panel geometry; the tab does not expose its Qt containers.
+  for result presentation, plot hosting, interactive-widget lifecycle, figure
+  reads, and persisted panel geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
@@ -191,7 +198,9 @@ Key ownership rules:
   ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
   （ADR-0047）。
 - `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
-  contents.
+  contents. Its ModuleLibrary schema-replacement interface validates names and
+  lowers before mutation, then emits one `ML_CHANGED` fact and bumps `context`
+  once; failures leave the live entry untouched.
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns static preconditions and returns typed permits for
@@ -475,7 +484,23 @@ remote named-dialog surface delegate reference retention and `finished` /
 
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
-controller only for measure-only CfgEditor create/modify and role-catalog actions.
+controller only for measure-only CfgEditor and role-catalog actions. Measure owns
+the dense two-column Parameters property grid and a separate Modules composition:
+the Modules tree exposes only New/Delete collection actions, while the right pane
+embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
+Apply on one row (there is no Raw pane or Modify/Rename action). Selecting an entry
+opens one `gc=False` editor session; field and Name edits stay in that draft.
+Apply calls the replacement write interface, which validates and lowers before the
+single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
+the resulting selection. Collision, invalid, or lowering failures leave the live
+entry and draft intact. Each existing-entry editor retains its source
+ModuleLibrary identity and fast-fails replacement after a context switch, leaving
+that draft for explicit Revert/Discard. A pending refresh is consumed after a
+dirty selection transaction so the tree reflects the resulting names. Revert
+reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
+New remains a retained non-blocking role catalog dialog; the Modules tree Delete
+key is direct only at the tree focus boundary, while the button confirms.
+Autofluxdep keeps the base presentation and its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the

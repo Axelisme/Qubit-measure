@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-08-31 — universal cfg tree (sole presentation, dark guide lines, 20/80 Run, full-width Analyze)
+**Last updated:** 2026-09-02 — universal cfg tree and shared sweep range/sampling presentation
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -173,6 +173,8 @@ experiment policy。
 
 shared Qt leaf同時集中scalar input的write/connect dispatch與純`QWidget`→PNG encoding；
 app仍擁有visibility、target lookup、main-thread marshal與remote wire policy。
+
+Sweep renderers use one balanced two-column Range/Sampling grammar: `SweepWidget` places Start/Stop in the first row and Points/Step in the second, while `CenteredSweepWidget` places Center/Span in the first row and Points/Step in the second. The displayed Points label is presentation-only for the canonical `expts` value; field update methods continue to own synchronization and preserve validation, decoration, snapshot, lowering, and persistence behavior.
 
 每個`CfgFormWidget`持有一個`FrozenFieldRendererRegistry`。沒有顯式注入時，
 `default_cfg_renderers()`會建立全新的builder、為五個 non-section exact field types

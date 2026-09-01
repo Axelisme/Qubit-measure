@@ -91,8 +91,24 @@ def ctrl(ml, md):
         raw = schema_to_raw_dict(schema, md, ml)
         ml.register_waveform(**{name: WaveformCfgFactory.from_raw(raw, ml=ml)})
 
+    def _replace_module(old_name, new_name, schema):
+        raw = schema_to_raw_dict(schema, md, ml)
+        replacement = ModuleCfgFactory.from_raw(raw, ml=ml)
+        if old_name != new_name:
+            del ml.modules[old_name]
+        ml.register_module(**{new_name: replacement})
+
+    def _replace_waveform(old_name, new_name, schema):
+        raw = schema_to_raw_dict(schema, md, ml)
+        replacement = WaveformCfgFactory.from_raw(raw, ml=ml)
+        if old_name != new_name:
+            del ml.waveforms[old_name]
+        ml.register_waveform(**{new_name: replacement})
+
     c.set_ml_module_from_schema.side_effect = _set_module
     c.set_ml_waveform_from_schema.side_effect = _set_waveform
+    c.replace_ml_module_from_schema.side_effect = _replace_module
+    c.replace_ml_waveform_from_schema.side_effect = _replace_waveform
     return c
 
 
@@ -463,6 +479,58 @@ def test_commit_failure_keeps_session(service, ctrl):
         service.commit(editor_id, "bad")
     # session survives so the agent can fix and retry.
     assert service.get_draft(editor_id)
+
+
+def test_replace_renames_and_commits_as_one_editor_operation(service, ctrl, ml):
+    editor_id, _ = service.open("module", from_name="pulse_seed")
+    service.set_field(editor_id, "freq", 5000.0)
+
+    service.replace(editor_id, "pulse_seed", "pulse_renamed")
+
+    assert "pulse_seed" not in ml.modules
+    assert ml.modules["pulse_renamed"].to_dict()["freq"] == 5000.0
+    ctrl.replace_ml_module_from_schema.assert_called_once()
+    with pytest.raises(CfgEditorError):
+        service.get_draft(editor_id)
+
+
+def test_replace_failure_keeps_editor_session(service, ctrl, ml):
+    editor_id, _ = service.open("module", from_name="pulse_seed")
+    service.set_field(editor_id, "freq", 5000.0)
+    ctrl.replace_ml_module_from_schema.side_effect = RuntimeError("collision")
+
+    with pytest.raises(RuntimeError, match="collision"):
+        service.replace(editor_id, "pulse_seed", "existing")
+
+    assert "pulse_seed" in ml.modules
+    assert service.get_draft(editor_id)
+
+
+def test_replace_rejects_a_source_name_that_is_not_the_opened_entry(service, ctrl):
+    editor_id, _ = service.open("module", from_name="pulse_seed")
+
+    with pytest.raises(CfgEditorError, match="does not match"):
+        service.replace(editor_id, "other", "renamed")
+
+    ctrl.replace_ml_module_from_schema.assert_not_called()
+    assert service.get_draft(editor_id)
+
+
+def test_replace_rejects_a_context_switch_and_keeps_the_draft(service, ctrl, ml):
+    editor_id, _ = service.open("module", from_name="pulse_seed")
+    draft = service.get_draft(editor_id)
+    draft.root.fields["freq"].set_value(5000.0)
+    switched_ml = ModuleLibrary()
+    switched_ml.modules["pulse_seed"] = ml.modules["pulse_seed"]
+    ctrl.get_current_ml.return_value = switched_ml
+
+    with pytest.raises(CfgEditorError, match="different ModuleLibrary context"):
+        service.replace(editor_id, "pulse_seed", "pulse_renamed")
+
+    ctrl.replace_ml_module_from_schema.assert_not_called()
+    assert service.get_draft(editor_id) is draft
+    assert "pulse_seed" in switched_ml.modules
+    assert "pulse_renamed" not in switched_ml.modules
 
 
 # ---------------------------------------------------------------------------

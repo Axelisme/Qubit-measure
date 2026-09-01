@@ -27,8 +27,12 @@ from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPrese
 
 logger = logging.getLogger(__name__)
 
+_ACTIVITY_MARKER_PREFIX = "● "
+_ACTIVITY_MARKER_COLOR = "#286ac7"
+_ACTIVITY_MARKER_TOOLTIP = "Run in progress"
 
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+
+from qtpy.QtGui import QCloseEvent, QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFileDialog,
     QHBoxLayout,
@@ -206,6 +210,10 @@ class MainWindow(QMainWindow):
         # Reuse the snapshot already fetched for capabilities (avoid second fetch).
         self._toolbar.set_new_tab_enabled(True)
         tab_w.attach(snapshot, self._tab_actions)
+        # A tab can be added while another tab is running. Project the current
+        # State-owned running identity immediately instead of waiting for a new
+        # lifecycle event.
+        self._set_tab_activity_marker(tab_id, self._ctrl.get_running_tab_id() == tab_id)
 
     def remove_tab_widget(self, tab_id: str) -> None:
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
@@ -355,8 +363,36 @@ class MainWindow(QMainWindow):
         if tab_w is not None:
             tab_w.clear_all_figures()
 
+    def _set_tab_activity_marker(self, tab_id: str, active: bool) -> None:
+        """Project Run activity on one top-level tab without storing busy state."""
+        tab_w = self._tab_widgets.get(tab_id)
+        if not isinstance(tab_w, QWidget):
+            return
+        index = self._tabs.indexOf(tab_w)
+        if index < 0:
+            return
+
+        tab_bar = self._tabs.tabBar()
+        assert tab_bar is not None
+        label = self._tabs.tabText(index)
+        if label.startswith(_ACTIVITY_MARKER_PREFIX):
+            label = label[len(_ACTIVITY_MARKER_PREFIX) :]
+        self._tabs.setTabText(
+            index, f"{_ACTIVITY_MARKER_PREFIX}{label}" if active else label
+        )
+        tab_bar.setTabTextColor(
+            index, QColor(_ACTIVITY_MARKER_COLOR) if active else QColor()
+        )
+        tab_bar.setTabToolTip(index, _ACTIVITY_MARKER_TOOLTIP if active else "")
+
+    def _refresh_tab_activity_markers(self, running_tab_id: str | None) -> None:
+        """Derive every tab marker from the current State running identity."""
+        for tab_id in self._tab_widgets:
+            self._set_tab_activity_marker(tab_id, tab_id == running_tab_id)
+
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
+        self._refresh_tab_activity_markers(running_tab_id)
         self._toolbar.set_new_tab_enabled(True)
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
