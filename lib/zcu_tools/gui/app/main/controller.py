@@ -947,6 +947,30 @@ class Controller(SessionControllerMixin):
             dump=False,
         )
 
+    def replace_ml_module_from_schema(
+        self, old_name: str, new_name: str, schema: CfgSchema
+    ) -> None:
+        self._ctx_svc.replace_ml_module_from_schema(
+            old_name,
+            new_name,
+            schema,
+            lower_module=lower_module,
+            lower_waveform=lower_waveform,
+            dump=False,
+        )
+
+    def replace_ml_waveform_from_schema(
+        self, old_name: str, new_name: str, schema: CfgSchema
+    ) -> None:
+        self._ctx_svc.replace_ml_waveform_from_schema(
+            old_name,
+            new_name,
+            schema,
+            lower_module=lower_module,
+            lower_waveform=lower_waveform,
+            dump=False,
+        )
+
     def apply_writes(self, writes: ContextWrites) -> None:
         self._ctx_svc.apply_ml_writes(
             writes.md,
@@ -1122,6 +1146,12 @@ class Controller(SessionControllerMixin):
 
     def commit_cfg_editor(self, editor_id: str, name: str) -> None:
         self._cfg_editor_svc.commit(editor_id, name)
+
+    def replace_cfg_editor(
+        self, editor_id: str, old_name: str, new_name: str
+    ) -> None:
+        """Atomically replace an existing ModuleLibrary entry from a draft."""
+        self._cfg_editor_svc.replace(editor_id, old_name, new_name)
 
     def discard_cfg_editor(self, editor_id: str) -> None:
         self._cfg_editor_svc.discard(editor_id)

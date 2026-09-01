@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-02 — dense Inspect Parameters editing and Run activity marker projection
+**Last updated:** 2026-09-02 — embedded Inspect Modules cfg editing and transactional replacement
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -194,7 +194,9 @@ Key ownership rules:
   ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
   （ADR-0047）。
 - `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
-  contents.
+  contents. Its ModuleLibrary schema-replacement interface validates names and
+  lowers before mutation, then emits one `ML_CHANGED` fact and bumps `context`
+  once; failures leave the live entry untouched.
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns static preconditions and returns typed permits for
@@ -478,14 +480,20 @@ remote named-dialog surface delegate reference retention and `finished` /
 
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
-controller only for measure-only CfgEditor create/modify and role-catalog actions.
-Measure overrides only the md composition with a dense two-column property grid:
-Key and scalar Value cells use the standard Qt editor (Enter commits and returns
-focus to the table, Escape cancels), while New opens a retained `open()` dialog
-whose validation calls the ContextControlPort before the single ContextService
-mutation. The grid Delete button confirms; the table-only Delete shortcut is
-confirmation-free and never intercepts an active cell editor. Autofluxdep keeps
-the base presentation and its read-only wrapper.
+controller only for measure-only CfgEditor and role-catalog actions. Measure owns
+the dense two-column Parameters property grid and a separate Modules composition:
+the Modules tree exposes only New/Delete collection actions, while the right pane
+embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
+Apply on one row (there is no Raw pane or Modify/Rename action). Selecting an entry
+opens one `gc=False` editor session; field and Name edits stay in that draft.
+Apply calls the replacement write interface, which validates and lowers before the
+single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
+the resulting selection. Collision, invalid, or lowering failures leave the live
+entry and draft intact. Revert reloads live content, and dirty selection/close
+requires Apply, Discard, or Cancel. New remains a retained non-blocking role
+catalog dialog; the Modules tree Delete key is direct only at the tree focus
+boundary, while the button confirms. Autofluxdep keeps the base presentation and
+its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the

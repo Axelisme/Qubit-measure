@@ -172,8 +172,8 @@ def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
     draft.close()
 
 
-def test_module_library_modify_uses_sole_tree(qapp, monkeypatch):
-    """ModuleLibrary module/waveform Modify dialog uses sole tree."""
+def test_module_library_cfg_form_uses_sole_tree(qapp, monkeypatch):
+    """ModuleLibrary cfg forms use the shared tree widget."""
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.cfg import CfgSectionSpec, CfgSectionValue, DirectValue, ScalarSpec
     from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
@@ -189,7 +189,7 @@ def test_module_library_modify_uses_sole_tree(qapp, monkeypatch):
     assert isinstance(w._root_widget, TreeCfgWidget)
     w.detach()
     draft.close()
-    # Also verify that _MlModifyDialog would create same — we check the class uses CfgFormWidget sole tree
-    # by inspecting that CfgFormWidget no longer accepts structure param
+    # The embedded Inspect and writeback editors use this same sole-tree form;
+    # the widget no longer accepts a separate structure parameter.
     with pytest.raises(TypeError):
         CfgFormWidget(structure=object())  # type: ignore[call-arg]

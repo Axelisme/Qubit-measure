@@ -416,6 +416,99 @@ class ContextService:
         if modules or waveforms:
             self._bus.emit(MlChangedPayload(ml=ctx.ml))
 
+    def replace_ml_module_from_schema(
+        self,
+        old_name: str,
+        new_name: str,
+        schema: Any,
+        *,
+        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        dump: bool = False,
+    ) -> None:
+        """Atomically replace one module name and its cfg.
+
+        The replacement validates the names and lowers the complete schema before
+        touching the live ``ModuleLibrary``.  A collision, missing source, or
+        lowering failure therefore leaves both the live entry and the caller's
+        draft unchanged.  A successful replacement is one ContextService-owned
+        content mutation: it bumps ``context`` once and emits one ``ML_CHANGED``.
+        """
+        self._replace_ml_entry_from_schema(
+            "module",
+            old_name,
+            new_name,
+            schema,
+            lower_module=lower_module,
+            lower_waveform=lower_waveform,
+            dump=dump,
+        )
+
+    def replace_ml_waveform_from_schema(
+        self,
+        old_name: str,
+        new_name: str,
+        schema: Any,
+        *,
+        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        dump: bool = False,
+    ) -> None:
+        """Atomically replace one waveform name and its cfg; see module variant."""
+        self._replace_ml_entry_from_schema(
+            "waveform",
+            old_name,
+            new_name,
+            schema,
+            lower_module=lower_module,
+            lower_waveform=lower_waveform,
+            dump=dump,
+        )
+
+    def _replace_ml_entry_from_schema(
+        self,
+        item_kind: str,
+        old_name: str,
+        new_name: str,
+        schema: Any,
+        *,
+        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
+        dump: bool = False,
+    ) -> None:
+        if not self.has_context():
+            raise FailedPreconditionError("No experiment context.")
+        if not old_name or not new_name:
+            raise FailedPreconditionError("ModuleLibrary names must not be empty.")
+
+        ctx = self._state.exp_context
+        store = ctx.ml.modules if item_kind == "module" else ctx.ml.waveforms
+        if old_name not in store:
+            raise FailedPreconditionError(f"No {item_kind} named {old_name!r}.")
+        if old_name != new_name and new_name in store:
+            raise FailedPreconditionError(
+                f"A {item_kind} named {new_name!r} already exists."
+            )
+
+        # Lower and construct the replacement before the first live write.  The
+        # lower callback is the app-owned cfg boundary; ContextService remains
+        # the only owner of the resulting ModuleLibrary mutation.
+        lower = lower_module if item_kind == "module" else lower_waveform
+        replacement = lower(schema, ctx.ml, ctx.md)
+        if item_kind == "module":
+            ctx.ml.register_module(**{new_name: replacement})
+            if old_name != new_name:
+                ctx.ml.delete_module(old_name)
+        else:
+            ctx.ml.register_waveform(**{new_name: replacement})
+            if old_name != new_name:
+                ctx.ml.delete_waveform(old_name)
+
+        if dump and ctx.ml.has_persistence:
+            ctx.ml.dump()
+        self._state.version.bump("context")
+        self._bus.emit(MlChangedPayload(ml=ctx.ml))
+
     def del_ml_module(self, name: str) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
