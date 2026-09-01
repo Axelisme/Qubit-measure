@@ -5,14 +5,23 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    ReferenceSpec,
+    ReferenceValue,
+    ScalarSpec,
+)
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue, DirectValue, ScalarSpec, ReferenceSpec, ReferenceValue
 
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
 
 def _fake_ctrl():
     c = MagicMock()
@@ -26,11 +35,10 @@ def _fake_ctrl():
 
 def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     """measure-gui Run renders through sole tree."""
-    from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.state import TabInteractionState
-    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
     import zcu_tools.gui.app.main.ui.exp_tab_widget as mod
+    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
     from zcu_tools.gui.app.main.services.ports import (
         AnalysisPaneSnapshot,
         PathResourceSnapshot,
@@ -39,7 +47,8 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         SavePaneSnapshot,
         TabPathsSnapshot,
     )
-    from matplotlib.figure import Figure
+    from zcu_tools.gui.app.main.state import TabInteractionState
+    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
 
     # stub _populate_cfg to avoid needing real cfg editor service
     orig = mod.ExpTabWidget._populate_cfg
@@ -64,8 +73,12 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     ctrl.get_exp_context.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
 
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
-    spec = CfgSectionSpec(label="root", fields={"reps": ScalarSpec(label="Reps", type=int)})
-    schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(10)}))
+    spec = CfgSectionSpec(
+        label="root", fields={"reps": ScalarSpec(label="Reps", type=int)}
+    )
+    schema = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(10)})
+    )
     # params dataclass
     import dataclasses
 
@@ -93,11 +106,29 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         capabilities=caps,
         run=RunPaneSnapshot(result=object(), source_path=None),
         analysis=AnalysisPaneSnapshot(
-            params=P(), result=object(), figure=Figure(), writeback_items=(), image_path=PathResourceSnapshot(override=None, path="/tmp/a"), has_writeback_draft=False
+            params=P(),
+            result=object(),
+            figure=Figure(),
+            writeback_items=(),
+            image_path=PathResourceSnapshot(override=None, path="/tmp/a"),
+            has_writeback_draft=False,
         ),
-        post_analysis=PostAnalysisPaneSnapshot(params=None, result=None, figure=None, writeback_items=(), image_path=PathResourceSnapshot(override=None, path="/tmp/b"), has_writeback_draft=False),
-        save=SavePaneSnapshot(data_path=PathResourceSnapshot(override=None, path="/tmp/c")),
-        paths=TabPathsSnapshot(data=PathResourceSnapshot(override=None, path="/tmp/c"), analysis_image=PathResourceSnapshot(override=None, path="/tmp/a"), post_analysis_image=PathResourceSnapshot(override=None, path="/tmp/b")),
+        post_analysis=PostAnalysisPaneSnapshot(
+            params=None,
+            result=None,
+            figure=None,
+            writeback_items=(),
+            image_path=PathResourceSnapshot(override=None, path="/tmp/b"),
+            has_writeback_draft=False,
+        ),
+        save=SavePaneSnapshot(
+            data_path=PathResourceSnapshot(override=None, path="/tmp/c")
+        ),
+        paths=TabPathsSnapshot(
+            data=PathResourceSnapshot(override=None, path="/tmp/c"),
+            analysis_image=PathResourceSnapshot(override=None, path="/tmp/a"),
+            post_analysis_image=PathResourceSnapshot(override=None, path="/tmp/b"),
+        ),
     )
 
     tab = ExpTabWidget("t1", ctrl, caps)
@@ -148,16 +179,25 @@ def test_autofluxdep_default_and_generation_use_sole_tree(qapp):
 
 def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
     """writeback module/waveform Edit dialog CfgFormWidget is sole tree."""
-    from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.cfg import CfgSectionSpec, CfgSectionValue, DirectValue, ScalarSpec
     from zcu_tools.gui.app.main.adapter import ModuleWriteback
     from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
+    from zcu_tools.gui.cfg import (
+        CfgSectionSpec,
+        CfgSectionValue,
+        DirectValue,
+        ScalarSpec,
+    )
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl = _fake_ctrl()
     # Create a realistic schema for edit
-    inner = CfgSectionSpec(label="Inner", fields={"gain": ScalarSpec(label="Gain", type=float)})
-    schema = CfgSchema(spec=inner, value=CfgSectionValue(fields={"gain": DirectValue(0.5)}))
+    inner = CfgSectionSpec(
+        label="Inner", fields={"gain": ScalarSpec(label="Gain", type=float)}
+    )
+    schema = CfgSchema(
+        spec=inner, value=CfgSectionValue(fields={"gain": DirectValue(0.5)})
+    )
     draft = MeasureCfgBindings(ctrl).new_draft(schema)
 
     # Mock controller to return this draft for writeback edit
@@ -174,9 +214,14 @@ def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
 
 def test_module_library_cfg_form_uses_sole_tree(qapp, monkeypatch):
     """ModuleLibrary cfg forms use the shared tree widget."""
-    from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.gui.cfg import CfgSectionSpec, CfgSectionValue, DirectValue, ScalarSpec
     from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.cfg import (
+        CfgSectionSpec,
+        CfgSectionValue,
+        DirectValue,
+        ScalarSpec,
+    )
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     ctrl = _fake_ctrl()
     schema = CfgSchema(

@@ -1147,9 +1147,7 @@ class Controller(SessionControllerMixin):
     def commit_cfg_editor(self, editor_id: str, name: str) -> None:
         self._cfg_editor_svc.commit(editor_id, name)
 
-    def replace_cfg_editor(
-        self, editor_id: str, old_name: str, new_name: str
-    ) -> None:
+    def replace_cfg_editor(self, editor_id: str, old_name: str, new_name: str) -> None:
         """Atomically replace an existing ModuleLibrary entry from a draft."""
         self._cfg_editor_svc.replace(editor_id, old_name, new_name)
 
