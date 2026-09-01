@@ -5,7 +5,7 @@ App-local Qt presentation Module for the measure-gui Data subtab (S1).
 It accepts a capability declaration at construction and a complete
 ``Figure`` snapshot via :meth:`update_figures`, rendering each available
 ``Figure`` to a fixed-size PNG via an injected ``Figure -> bytes``
-callable (S3). Production uses :func:`render_figure_png`; tests inject a
+callable (S3). Production uses :func:`render_figure_preview_png`; tests inject a
 deterministic fake. Each card is rendered independently — a single
 card failure produces a named unavailable state without blocking
 other cards or the save controls.
@@ -319,9 +319,9 @@ class DataFigurePreviewGallery(QWidget):
             self._renderer = renderer
         else:
             # Lazy import of production fixed-size renderer.
-            from zcu_tools.gui.app.main.figure_export import render_figure_png
+            from zcu_tools.gui.app.main.figure_export import render_figure_preview_png
 
-            self._renderer = render_figure_png
+            self._renderer = render_figure_preview_png
 
         self.setObjectName("dataFigurePreviewGallery")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # type: ignore[attr-defined]

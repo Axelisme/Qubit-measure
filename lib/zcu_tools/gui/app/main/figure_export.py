@@ -1,11 +1,11 @@
-"""Fixed-size figure export for save-image and figure-screenshot.
+"""Fixed-size figure rendering for save, Data Preview, and agent screenshots.
 
-Both paths render the *same* live matplotlib Figure that is embedded in a tab's
+All paths render the *same* live matplotlib Figure that is embedded in a tab's
 Qt canvas. That canvas resizes with the GUI window, which mutates the figure's
 ``size_inches`` — so a naive ``fig.savefig(path)`` (save) or ``canvas.grab()``
 (screenshot) produces an image whose dimensions track the current window shape.
 
-To make exports window-independent, both paths funnel through here: the live
+To make rendering window-independent, all paths funnel through here: the live
 figure's size is temporarily pinned to a fixed value, rendered, then restored
 (try/finally). All calls must run on the Qt main thread (the live figure is
 GUI-owned); the existing save/screenshot entry points already do.
@@ -18,9 +18,15 @@ import io
 from matplotlib.figure import Figure
 
 # Fixed export geometry for SAVED images — full quality, independent of the GUI
-# window size. This is what the user gets on disk, so it stays large.
-SAVE_FIGSIZE: tuple[float, float] = (8.0, 5.0)  # inches
+# window size. The 4:3 canvas matches the preview geometry while providing enough
+# physical area that labels do not dominate multi-panel figures.
+SAVE_FIGSIZE: tuple[float, float] = (12.0, 9.0)  # 1800x1350 at dpi=150
 SAVE_DPI: int = 150
+
+# Data Preview uses the same logical canvas as the saved image so typography and
+# layout are WYSIWYG, but rasterizes at 640x480 to keep gallery refresh lightweight.
+DATA_PREVIEW_FIGSIZE: tuple[float, float] = SAVE_FIGSIZE
+DATA_PREVIEW_DPI: float = 160.0 / 3.0
 
 # Fixed export geometry for AGENT SCREENSHOTS (tab.get_figure). The agent
 # only needs to eyeball the plot, so this is deliberately small to keep the
@@ -34,7 +40,7 @@ def _render_with_fixed_size(
     fig: Figure,
     sink: object,
     figsize: tuple[float, float],
-    dpi: int,
+    dpi: float,
     **savefig_kwargs: object,
 ) -> None:
     """Pin fig to ``figsize``, savefig to ``sink`` at ``dpi``, then restore.
@@ -54,6 +60,19 @@ def _render_with_fixed_size(
 def save_figure_to_path(fig: Figure, path: str) -> None:
     """Save ``fig`` to ``path`` at the full-quality save size/dpi (window-independent)."""
     _render_with_fixed_size(fig, path, SAVE_FIGSIZE, SAVE_DPI)
+
+
+def render_figure_preview_png(fig: Figure) -> bytes:
+    """Render a 640x480 Data Preview with the saved image's logical geometry."""
+    buf = io.BytesIO()
+    _render_with_fixed_size(
+        fig,
+        buf,
+        DATA_PREVIEW_FIGSIZE,
+        DATA_PREVIEW_DPI,
+        format="png",
+    )
+    return buf.getvalue()
 
 
 def render_figure_png(fig: Figure) -> bytes:

@@ -291,7 +291,7 @@ def test_public_analysis_recovers_identifiable_raw_iq_joint_fit() -> None:
     for population in expected_distribution:
         assert f"{population:.1%}" in distribution_text
 
-    for size in ((6.4, 4.8), (8.0, 5.0)):
+    for size in ((6.4, 4.8), (12.0, 9.0)):
         figure.set_size_inches(*size, forward=True)
         canvas = cast(FigureCanvasAgg, figure.canvas)
         canvas.draw()

@@ -87,8 +87,8 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   and single full-width at the two-minimum-width-cards-plus-spacing breakpoint
   (gallery's own viewport, not window, no persisted toggle) — scrollable cards
   with named empty/unavailable states, raster-only presentation cache (pixmap/text)
-  fed by an injected `Figure -> PNG bytes` adapter — production uses the existing
-  fixed-size figure renderer with size restore — per-card render caches the
+  fed by an injected `Figure -> PNG bytes` adapter — production uses the Data
+  Preview renderer with saved-image logical geometry and size restore — per-card render caches the
   original pixmap and aspect-fits with `KeepAspectRatio` and smooth transformation
   inside the image viewport without cropping; per-card failure is isolated and
   logged without blocking other cards or save controls, and no Figure/canvas
@@ -264,8 +264,8 @@ active-context reads.
 Data preview never owns pane resources: `ExpTabWidget` reads current figures from
 the fixed `FigureContainer`s and pushes a transient `Figure` snapshot to
 `DataFigurePreviewGallery` only on Data activation or while Data is visible;
-the gallery renders to PNG via the fixed-size adapter with size restore, holds
-only the raster cache (original pixmap) and isolates per-card failures with
+the gallery renders to a 640×480 PNG using the same 12×9 inch logical canvas as
+Save，restores the live size，holds only the raster cache (original pixmap) and isolates per-card failures with
 aspect-fit scaling (`KeepAspectRatio`) that never exceeds the image viewport.
 Viewport-driven mosaic reflow (gallery's own width vs two-minimum-width-cards
 threshold) is presentation-only and never moves figure ownership, adds a second
@@ -434,7 +434,9 @@ Progress is operation-scoped:
 Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib
 figures attach to the active `FigureContainer` through routing context; refresh,
 activate, and close resolve through the figure registry. Figure export uses fixed
-logical sizes so saved images and agent screenshots do not depend on window size.
+logical sizes so outputs do not depend on window size: saved images use a 12×9 inch
+4:3 canvas at 150 DPI；Data Preview沿用同一logical canvas並以約53.33 DPI產生
+640×480 WYSIWYG raster；agent screenshots維持6.4×4.8 inch at 100 DPI。
 Analysis start leaves plot teardown to the render host. Terminal domain facts
 restore retained figures only after failure, cancellation, or start rejection;
 successful content commits attach new figures once. Run failure keeps the
