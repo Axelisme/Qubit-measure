@@ -181,3 +181,24 @@ def test_create_returns_new_instance_each_time():
     a1 = reg.create("dummy")
     a2 = reg.create("dummy")
     assert a1 is not a2
+
+
+def test_replacement_detaches_candidate_and_clear_disables_creation():
+    live = Registry()
+    live.register("old", _DummyAdapter)
+    candidate = Registry()
+    candidate.register("new", _DummyAdapter)
+    candidate.validate()
+    live.replace_from(candidate)
+    candidate.clear()
+    assert live.list_names() == ["new"]
+    assert isinstance(live.create("new"), _DummyAdapter)
+    live.clear()
+    with pytest.raises(KeyError):
+        live.create("new")
+
+
+def test_registry_cannot_publish_itself():
+    registry = Registry()
+    with pytest.raises(ValueError, match="itself"):
+        registry.replace_from(registry)

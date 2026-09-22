@@ -21,6 +21,7 @@ from zcu_tools.gui.runtime import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.main.catalog import ExperimentCatalogLoader
     from zcu_tools.gui.app.main.controller import Controller
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.role_catalog import RoleCatalog
@@ -28,7 +29,9 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.main.ui.main_window import MainWindow
     from zcu_tools.gui.session.services.io_manager import IOManager
 
-RegistryFactory = Callable[[], tuple["Registry", "RoleCatalog"]]
+RegistryFactory = Callable[
+    [], tuple["Registry", "RoleCatalog", "ExperimentCatalogLoader"]
+]
 
 
 def _make_empty_ctx() -> ExpContext:
@@ -68,7 +71,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         )
 
         install_global_exception_hook(show_error_dialog)
-        self._registry, self._role_catalog = registry_factory()
+        self._registry, self._role_catalog, self._catalog_loader = registry_factory()
         self._clean = clean
         self._project_root = project_root
 
@@ -84,6 +87,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             self._role_catalog,
             io_manager,
             self._project_root,
+            catalog_loader=self._catalog_loader,
         )
 
         adapter = None
@@ -161,6 +165,8 @@ def _build_window(
     role_catalog: RoleCatalog,
     io_manager: IOManager,
     project_root: str | None = None,
+    *,
+    catalog_loader: ExperimentCatalogLoader | None = None,
 ) -> tuple[Controller, MainWindow]:
     """Create Controller + MainWindow in the correct order."""
 
@@ -178,6 +184,7 @@ def _build_window(
         view=None,
         bus=bus,
         project_root=project_root,
+        catalog_loader=catalog_loader,
     )
 
     window = MainWindow(ctrl)

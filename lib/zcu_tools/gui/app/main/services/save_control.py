@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.main.events.tab import (
-    TabInteractionChangedPayload,
-    TabInteractionFact,
-)
+from zcu_tools.gui.app.main.catalog import ExperimentAccess
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
@@ -46,6 +43,7 @@ class SaveControlFacet:
         tab: TabService,
         save: SaveService,
         notify_info: Callable[[str], None],
+        access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
         self._bus = bus
@@ -53,6 +51,7 @@ class SaveControlFacet:
         self._tab = tab
         self._save = save
         self._notify_info = notify_info
+        self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
@@ -92,5 +91,6 @@ class SaveControlFacet:
         return resolved
 
     def _require_tab_idle(self, tab_id: str) -> None:
+        self._access.require_available()
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")

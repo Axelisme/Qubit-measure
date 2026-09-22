@@ -8,7 +8,7 @@ import hashlib
 import json
 
 import pytest
-from zcu_tools.experiment.v2_gui.registry import (
+from zcu_tools.experiment.v2_gui.role_registry import (
     ALL_ROLE_ENTRIES,
     register_all_roles,
 )

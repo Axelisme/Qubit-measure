@@ -5,6 +5,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from zcu_tools.gui.app.main.catalog import ExperimentCatalogLoader
+from zcu_tools.gui.app.main.services.experiment_reload import (
+    ReloadPreview,
+    ReloadReport,
+)
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -32,7 +37,6 @@ from .adapter import (
     ExpContext,
     InteractiveHost,
     InteractiveSession,
-    WritebackItem,
 )
 from .events.completion import AnalyzeFailedPayload, SaveDataFinishedPayload
 from .events.run import RunFinishedPayload
@@ -232,6 +236,7 @@ class Controller(SessionControllerMixin):
         role_catalog: RoleCatalog | None = None,
         progress_transport: ProgressTransport | None = None,
         project_root: str | None = None,
+        catalog_loader: ExperimentCatalogLoader | None = None,
     ) -> None:
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
@@ -284,6 +289,7 @@ class Controller(SessionControllerMixin):
             resource_versions=self.resources_versions,
             render_host=lambda: self._render_host,
             project_root=self._project_root,
+            catalog_loader=catalog_loader,
         )
         self._services = services
         self._operation_gate = services.operation_gate
@@ -769,6 +775,24 @@ class Controller(SessionControllerMixin):
     # Shutdown coordination (cancel-all + wait, ADR-0003)
     # ------------------------------------------------------------------
 
+    def prepare_experiment_reload(self) -> ReloadPreview:
+        return self._services.experiment_reload.prepare_reload()
+
+    def reload_experiments(self, preview: ReloadPreview) -> ReloadReport:
+        return self._services.experiment_reload.reload_confirmed(preview)
+
+    def retry_experiment_reload(self) -> ReloadReport:
+        return self._services.experiment_reload.retry_failed_reload()
+
+    def retry_skipped_experiment_tabs(self) -> ReloadReport:
+        return self._services.experiment_reload.retry_skipped_tabs()
+
+    def can_retry_experiment_reload(self) -> bool:
+        return self._services.experiment_reload.can_retry_reload
+
+    def skipped_experiment_tab_count(self) -> int:
+        return self._services.experiment_reload.skipped_count
+
     def active_operation_count(self) -> int:
         """How many operations (run / device / connect) are live right now.
 
@@ -804,6 +828,7 @@ class Controller(SessionControllerMixin):
         Qt-free façade: the QTimer-driven coordinator lives in a driving adapter
         (ADR-0005), built lazily here so the Controller stays importable without
         a Qt loop. ``on_closed`` always runs on the main thread."""
+        self._services.experiment_access.shutting_down = True
         if self._shutdown_driver is None:
             from zcu_tools.gui.session.adapters.qt_shutdown_driver import (
                 QtShutdownDriver,

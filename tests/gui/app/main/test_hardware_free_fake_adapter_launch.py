@@ -21,7 +21,8 @@ def hw_fixture(qapp, tmp_path):
     """Real Controller + MainWindow via shipped composition, no hardware."""
     from unittest.mock import MagicMock
 
-    from zcu_tools.experiment.v2_gui.registry import register_all, register_all_roles
+    from zcu_tools.experiment.v2_gui.registry import register_all
+    from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
     from zcu_tools.gui.app.main.app import _build_window, _make_empty_ctx
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.role_catalog import RoleCatalog
@@ -95,6 +96,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert not hasattr(cfg_pkg, "form_structure")
     # CfgFormWidget should reject a structure kwarg
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
     try:
         CfgFormWidget(structure=object())  # type: ignore[call-arg]
         assert False, "structure selector should be removed"
@@ -116,17 +118,20 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert tree.font().pixelSize() == 13
 
     # A2/A4: ledger with Analyze between params and writeback (not fixed bar)
-    from zcu_tools.gui.app.main.ui.exp_tab_widget import _LedgerSection
     from qtpy.QtWidgets import QScrollArea
+    from zcu_tools.gui.app.main.ui.exp_tab_widget import _LedgerSection
 
     assert isinstance(tab._analyze_section, _LedgerSection)
-    assert not hasattr(tab, "_analysis_action_bar"), "fixed action bar should be removed for A4"
+    assert not hasattr(tab, "_analysis_action_bar"), (
+        "fixed action bar should be removed for A4"
+    )
     assert tab.analyze_form.font().pixelSize() == 13
     # Verify Analyze is inside scroll area between params and writeback
     scroll = tab._analysis_panel.findChild(QScrollArea)
     assert scroll is not None
     inner = scroll.widget()
     assert inner is not None
+
     # Check Analyze is descendant of inner (scroll content) not fixed bar
     def is_descendant(widget, ancestor):
         cur = widget
@@ -135,11 +140,16 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
                 return True
             cur = cur.parent()
         return False
+
     assert is_descendant(tab.analyze_btn, inner)
     # Verify ordering: params < analyze < writeback
     layout = inner.layout()
     assert layout is not None
-    widgets = [layout.itemAt(i).widget() for i in range(layout.count()) if layout.itemAt(i).widget() is not None]
+    widgets = [
+        layout.itemAt(i).widget()
+        for i in range(layout.count())
+        if layout.itemAt(i).widget() is not None
+    ]
     idx_params = widgets.index(tab._analyze_section)
     # Find container holding analyze_btn
     idx_analyze = None
