@@ -805,6 +805,10 @@ class ExpTabWidget(QWidget):
         """Apply async data terminal outcome (error None => success)."""
         self._save_center.handle_data_finished(payload.error)
 
+    def has_unsaved_data(self) -> bool:
+        """Return True if this tab contains unsaved measurement data."""
+        return self._save_center.has_unsaved_data()
+
     def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
         """Ordered saveable artifacts for Save All (snapshot single-fetch)."""
         return self._save_center.ordered_saveable_kinds(snapshot)

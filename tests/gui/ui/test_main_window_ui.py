@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-from typing import cast
+from collections.abc import Callable
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QCoreApplication, Qt
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     MetaDictWriteback,
 )
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
 from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
+from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
+from zcu_tools.gui.app.main.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import ExpContext
@@ -1680,7 +1684,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     assert dialogs.calls[-1].title == "Operations in progress"
     assert event.isAccepted() is False  # async wait — not closed yet
     QCoreApplication.processEvents()  # drain the deferred singleShot(0)
-    ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
+    _shutdown_callback(ctrl)
 
 
 def test_main_window_declining_confirmation_keeps_window_open(qapp):
@@ -1728,7 +1732,7 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     # Drain the singleShot(0) — the deferred turn runs begin_shutdown.
     QCoreApplication.processEvents()
 
-    ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
+    _shutdown_callback(ctrl)
     ctrl.persist_all.assert_called_once_with()
 
 
@@ -2058,3 +2062,637 @@ def test_feedback_panel_remounts_on_target_tab_change(qapp):
     assert _feedback_host_tab(window) is tabs["tab-b"]
     assert tabs["tab-a"]._plot_layout.indexOf(_feedback_panel(window)) == -1
     assert _panel_docked_below_stack(window, tabs["tab-b"])
+
+
+# ---------------------------------------------------------------------------
+# Unsaved measurement data close guard tests (TKT-001)
+# ---------------------------------------------------------------------------
+
+
+def _setup_window_with_tabs(
+    dialog_presenter: RecordingDialogPresenter | None = None,
+    active_operations: int = 0,
+) -> tuple[MainWindow, MagicMock]:
+    ctrl = _apply_window_defaults(_editor_wiring_ctrl())
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.active_operation_count.return_value = active_operations
+    ctrl.has_tab.side_effect = lambda tid: True
+    dialogs = dialog_presenter or RecordingDialogPresenter()
+    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    return window, ctrl
+
+
+def _add_tab(
+    window: MainWindow,
+    tab_id: str,
+    *,
+    has_run: bool = False,
+    saved: bool = False,
+) -> ExpTabWidget:
+    tab = ExpTabWidget(
+        tab_id,
+        window._ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+    )
+    snap = _snapshot(tab_id, has_run_result=has_run)
+    tab.attach(snap, _RecordingTabActions())
+    if has_run and saved:
+        tab.notify_save_started(ArtifactKind.DATA)
+        tab.handle_save_data_finished(
+            SaveDataFinishedPayload(
+                tab_id=tab_id, data_path="/tmp/data.hdf5", error=None
+            )
+        )
+    window._tab_widgets[tab_id] = tab
+    window._tabs.addTab(tab, tab_id)
+    return tab
+
+
+def _shutdown_callback(ctrl: MagicMock) -> Callable[[], None]:
+    ctrl.begin_shutdown.assert_called_once()
+    callback = ctrl.begin_shutdown.call_args.args[0]
+    assert callable(callback)
+    return cast(Callable[[], None], callback)
+
+
+class _DeferredClosePresenter(RecordingDialogPresenter):
+    def __init__(self) -> None:
+        super().__init__(confirm_answers=[True] * 4, destructive_answers=[True] * 4)
+        self.confirm_decisions: list[Callable[[bool], None]] = []
+        self.destructive_decisions: list[Callable[[bool], None]] = []
+
+    def confirm_async(
+        self,
+        parent: Any,
+        title: str,
+        message: str,
+        *,
+        on_decision: Callable[[bool], None],
+        default: bool = False,
+    ) -> None:
+        super().confirm_async(
+            parent,
+            title,
+            message,
+            on_decision=lambda _confirmed: None,
+            default=default,
+        )
+        self.confirm_decisions.append(on_decision)
+
+    def destructive_confirm(
+        self,
+        parent: Any,
+        title: str,
+        message: str,
+        *,
+        action_text: str,
+        on_decision: Callable[[bool], None],
+        default: bool = False,
+    ) -> None:
+        super().destructive_confirm(
+            parent,
+            title,
+            message,
+            action_text=action_text,
+            on_decision=lambda _confirmed: None,
+            default=default,
+        )
+        self.destructive_decisions.append(on_decision)
+
+
+def test_tab_close_without_result_closes_immediately(qapp):
+    """Scenario 1: Tab with NO_RESULT closes without prompting."""
+    dialogs = RecordingDialogPresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs)
+    _add_tab(window, "tab-1", has_run=False)
+
+    window._tabs.tabCloseRequested.emit(0)
+
+    assert len(dialogs.calls) == 0
+    ctrl.close_tab.assert_called_once_with("tab-1")
+
+
+def test_tab_close_with_saved_data_closes_immediately(qapp):
+    """Scenario 1: Tab with SAVED data closes without prompting."""
+    dialogs = RecordingDialogPresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+    assert tab.has_unsaved_data() is False
+
+    window._tabs.tabCloseRequested.emit(0)
+
+    assert len(dialogs.calls) == 0
+    ctrl.close_tab.assert_called_once_with("tab-1")
+
+
+def test_tab_close_with_unsaved_data_declined_keeps_tab(qapp):
+    """Scenario 2: Cancelling tab-close leaves the tab open."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[False])
+    window, ctrl = _setup_window_with_tabs(dialogs)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=False)
+    assert tab.has_unsaved_data() is True
+
+    window._tabs.tabCloseRequested.emit(0)
+
+    assert len(dialogs.calls) == 1
+    call = dialogs.calls[0]
+    assert call.kind == "destructive_confirm"
+    assert call.title == "Unsaved measurement data"
+    assert call.action_text == "Discard and Close"
+    ctrl.close_tab.assert_not_called()
+    assert window.has_tab_widget("tab-1") is True
+
+
+def test_tab_close_with_unsaved_data_confirmed_closes_tab(qapp):
+    """Scenario 2: Confirming tab-close closes the unsaved tab."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[True])
+    window, ctrl = _setup_window_with_tabs(dialogs)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=False)
+    assert tab.has_unsaved_data() is True
+
+    window._tabs.tabCloseRequested.emit(0)
+
+    assert len(dialogs.calls) == 1
+    call = dialogs.calls[0]
+    assert call.kind == "destructive_confirm"
+    assert call.title == "Unsaved measurement data"
+    assert call.action_text == "Discard and Close"
+    ctrl.close_tab.assert_called_once_with("tab-1")
+
+
+def test_tab_close_with_pending_or_failed_save_prompts(qapp):
+    """Scenario 2: Pending or failed save is unsaved; confirm closes, cancel keeps."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[False, True])
+    window, ctrl = _setup_window_with_tabs(dialogs)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    # Pending save
+    tab.notify_save_started(ArtifactKind.DATA)
+    assert tab.has_unsaved_data() is True
+    window._tabs.tabCloseRequested.emit(0)
+    assert dialogs.calls[-1].kind == "destructive_confirm"
+    assert dialogs.calls[-1].title == "Unsaved measurement data"
+    assert dialogs.calls[-1].action_text == "Discard and Close"
+    ctrl.close_tab.assert_not_called()
+
+    # Failed save
+    tab.handle_save_data_finished(
+        SaveDataFinishedPayload(
+            tab_id="tab-1", data_path="/tmp/data.hdf5", error="Write failed"
+        )
+    )
+    assert tab.has_unsaved_data() is True
+    window._tabs.tabCloseRequested.emit(0)
+    assert dialogs.calls[-1].kind == "destructive_confirm"
+    assert dialogs.calls[-1].title == "Unsaved measurement data"
+    ctrl.close_tab.assert_called_once_with("tab-1")
+
+
+def test_moved_tab_with_unsaved_data_closes_by_captured_identity(qapp):
+    """Scenario 3: A tab moved before close request closes by captured widget identity."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[True])
+    window, ctrl = _setup_window_with_tabs(dialogs)
+    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
+    _add_tab(window, "tab-b", has_run=False)
+    assert tab_a.has_unsaved_data() is True
+
+    tab_bar = window._tabs.tabBar()
+    assert tab_bar is not None
+    # Move tab-a from index 0 to index 1
+    tab_bar.moveTab(0, 1)
+    assert window._tabs.widget(1) is tab_a
+
+    # Request close on moved tab (now at index 1)
+    window._tabs.tabCloseRequested.emit(1)
+
+    assert len(dialogs.calls) == 1
+    assert dialogs.calls[0].kind == "destructive_confirm"
+    assert dialogs.calls[0].title == "Unsaved measurement data"
+    ctrl.close_tab.assert_called_once_with("tab-a")
+
+
+def test_tab_moved_while_confirmation_pending_closes_captured_widget(qapp):
+    """Scenario 3: Tab moved while confirmation prompt is open closes captured identity."""
+    window, ctrl = _setup_window_with_tabs()
+    tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
+    _add_tab(window, "tab-b", has_run=False)
+
+    decision_cb: list[Callable[[bool], None]] = []
+
+    class _DeferredPresenter(RecordingDialogPresenter):
+        def destructive_confirm(
+            self,
+            parent: Any,
+            title: str,
+            message: str,
+            *,
+            action_text: str,
+            on_decision: Callable[[bool], None],
+            default: bool = False,
+        ) -> None:
+            super().destructive_confirm(
+                parent,
+                title,
+                message,
+                action_text=action_text,
+                on_decision=lambda _: None,
+                default=default,
+            )
+            decision_cb.append(on_decision)
+
+    deferred_presenter = _DeferredPresenter(destructive_answers=[True])
+    window._dialog_presenter = deferred_presenter
+
+    # Request close on tab-a at index 0 via signal
+    window._tabs.tabCloseRequested.emit(0)
+    assert len(decision_cb) == 1
+
+    # While dialog is pending, move tab-a to index 1
+    tab_bar = window._tabs.tabBar()
+    assert tab_bar is not None
+    tab_bar.moveTab(0, 1)
+    assert window._tabs.widget(1) is tab_a
+
+    # User confirms the dialog
+    decision_cb[0](True)
+
+    ctrl.close_tab.assert_called_once_with("tab-a")
+
+
+def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(qapp):
+    """Scenario 2/3: Duplicate tab close requests for same tab are suppressed while prompt is open."""
+    window, ctrl = _setup_window_with_tabs()
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    decision_cb: list[Callable[[bool], None]] = []
+
+    class _DeferredPresenter(RecordingDialogPresenter):
+        def destructive_confirm(
+            self,
+            parent: Any,
+            title: str,
+            message: str,
+            *,
+            action_text: str,
+            on_decision: Callable[[bool], None],
+            default: bool = False,
+        ) -> None:
+            super().destructive_confirm(
+                parent,
+                title,
+                message,
+                action_text=action_text,
+                on_decision=lambda _: None,
+                default=default,
+            )
+            decision_cb.append(on_decision)
+
+    deferred_presenter = _DeferredPresenter(destructive_answers=[True])
+    window._dialog_presenter = deferred_presenter
+
+    # First request
+    window._tabs.tabCloseRequested.emit(0)
+    assert len(deferred_presenter.calls) == 1
+
+    # Second request while prompt is pending
+    window._tabs.tabCloseRequested.emit(0)
+    assert len(deferred_presenter.calls) == 1
+
+    # Confirm
+    decision_cb[0](True)
+    ctrl.close_tab.assert_called_once_with("tab-1")
+
+
+def test_app_close_idle_with_no_unsaved_tabs_shuts_down_without_prompt(qapp):
+    """Scenario 6: App close with neither unsaved data nor active operations closes cleanly."""
+    dialogs = RecordingDialogPresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+
+    assert len(dialogs.calls) == 0
+    QCoreApplication.processEvents()
+    _shutdown_callback(ctrl)
+
+
+def test_app_close_with_unsaved_tabs_prompts_and_declining_cancels(qapp):
+    """Scenario 4: App close with unsaved data warns; cancelling leaves app open."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[False])
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    window.close()
+
+    assert len(dialogs.calls) == 1
+    call = dialogs.calls[0]
+    assert call.kind == "destructive_confirm"
+    assert call.title == "Unsaved measurement data"
+    assert call.action_text == "Discard and Close"
+    QCoreApplication.processEvents()
+    ctrl.begin_shutdown.assert_not_called()
+
+
+def test_app_close_with_unsaved_tabs_prompts_and_confirming_shuts_down(qapp):
+    """Scenario 4: App close with unsaved data warns; confirming begins shutdown."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[True])
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+    _add_tab(window, "tab-2", has_run=False)
+
+    window.close()
+
+    assert len(dialogs.calls) == 1
+    call = dialogs.calls[0]
+    assert call.kind == "destructive_confirm"
+    assert call.title == "Unsaved measurement data"
+    assert call.action_text == "Discard and Close"
+    QCoreApplication.processEvents()
+    _shutdown_callback(ctrl)
+
+
+def test_app_close_with_both_unsaved_tabs_and_active_operations(qapp):
+    """Scenario 5: Both risks present; prompt communicates both, confirm shuts down."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[True])
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=3)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    window.close()
+
+    assert len(dialogs.calls) == 1
+    call = dialogs.calls[0]
+    assert call.kind == "destructive_confirm"
+    assert call.title == "Unsaved data and operations in progress"
+    assert "unsaved measurement data" in call.message.lower()
+    assert "3 operation(s)" in call.message
+    assert call.action_text == "Discard and Close"
+    QCoreApplication.processEvents()
+    _shutdown_callback(ctrl)
+
+
+def test_app_close_with_both_unsaved_tabs_and_active_operations_declined(qapp):
+    """Scenario 5: Both risks present; decline preserves app state."""
+    dialogs = RecordingDialogPresenter(destructive_answers=[False])
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=2)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    window.close()
+
+    assert len(dialogs.calls) == 1
+    call = dialogs.calls[0]
+    assert call.kind == "destructive_confirm"
+    assert call.title == "Unsaved data and operations in progress"
+    assert call.action_text == "Discard and Close"
+    QCoreApplication.processEvents()
+    ctrl.begin_shutdown.assert_not_called()
+
+
+def test_app_close_with_active_operations_only_uses_confirm_async(qapp):
+    """Active-operation-only prompt uses non-blocking confirm_async."""
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=2)
+    _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+
+    assert len(dialogs.calls) == 1
+    call = dialogs.calls[0]
+    assert call.kind == "confirm"
+    assert call.title == "Operations in progress"
+    assert "2 operation(s)" in call.message
+    QCoreApplication.processEvents()
+    _shutdown_callback(ctrl)
+
+
+def test_app_close_suppresses_duplicate_prompt_while_decision_pending(qapp):
+    """Scenario 4: Duplicate app close requests while prompt is open are suppressed."""
+    window, ctrl = _setup_window_with_tabs(active_operations=0)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    decision_cb: list[Callable[[bool], None]] = []
+
+    class _DeferredPresenter(RecordingDialogPresenter):
+        def destructive_confirm(
+            self,
+            parent: Any,
+            title: str,
+            message: str,
+            *,
+            action_text: str,
+            on_decision: Callable[[bool], None],
+            default: bool = False,
+        ) -> None:
+            super().destructive_confirm(
+                parent,
+                title,
+                message,
+                action_text=action_text,
+                on_decision=lambda _: None,
+                default=default,
+            )
+            decision_cb.append(on_decision)
+
+    deferred_presenter = _DeferredPresenter(destructive_answers=[True])
+    window._dialog_presenter = deferred_presenter
+
+    # First close
+    window.close()
+    assert len(deferred_presenter.calls) == 1
+
+    # Second close while dialog is pending
+    window.close()
+    assert len(deferred_presenter.calls) == 1
+
+    decision_cb[0](True)
+    QCoreApplication.processEvents()
+    _shutdown_callback(ctrl)
+
+
+def test_app_close_reprompts_if_unsaved_data_appears_before_decision(qapp):
+    """A newly completed result upgrades an active-only prompt before shutdown."""
+    dialogs = _DeferredClosePresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+
+    assert [call.kind for call in dialogs.calls] == ["confirm"]
+    tab.update_interaction_state(_snapshot("tab-1", has_run_result=True))
+    ctrl.active_operation_count.return_value = 0
+    dialogs.confirm_decisions.pop()(True)
+
+    assert [call.kind for call in dialogs.calls] == [
+        "confirm",
+        "destructive_confirm",
+    ]
+    assert dialogs.calls[-1].title == "Unsaved measurement data"
+    ctrl.begin_shutdown.assert_not_called()
+
+    dialogs.destructive_decisions.pop()(False)
+    ctrl.begin_shutdown.assert_not_called()
+
+
+def test_app_close_suppresses_reentry_while_shutdown_is_coordinating(qapp):
+    """Accepted close owns the lifecycle until the coordinator callback runs."""
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+    window.close()
+    QCoreApplication.processEvents()
+    _shutdown_callback(ctrl)
+
+    window.close()
+
+    assert len(dialogs.calls) == 1
+    ctrl.begin_shutdown.assert_called_once()
+
+
+def test_app_close_suppresses_duplicate_idle_shutdown_requests(qapp):
+    """Repeated idle close events schedule only one shutdown coordinator run."""
+    dialogs = RecordingDialogPresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+    window.close()
+    QCoreApplication.processEvents()
+    _shutdown_callback(ctrl)
+
+    window.close()
+
+    assert dialogs.calls == []
+    ctrl.begin_shutdown.assert_called_once()
+
+
+def test_app_close_rechecks_unsaved_data_after_operations_settle(qapp):
+    """A result completed during shutdown gets a final data-loss decision."""
+    dialogs = RecordingDialogPresenter(
+        confirm_answers=[True], destructive_answers=[False]
+    )
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+    QCoreApplication.processEvents()
+    on_closed = _shutdown_callback(ctrl)
+
+    tab.update_interaction_state(_snapshot("tab-1", has_run_result=True))
+    ctrl.active_operation_count.return_value = 0
+    on_closed()
+
+    assert [call.kind for call in dialogs.calls] == [
+        "confirm",
+        "destructive_confirm",
+    ]
+    assert "completed with unsaved measurement data" in dialogs.calls[-1].message
+    ctrl.persist_all.assert_not_called()
+
+    dialogs.queue_destructive_confirm(False)
+    window.close()
+    assert [call.kind for call in dialogs.calls] == [
+        "confirm",
+        "destructive_confirm",
+        "destructive_confirm",
+    ]
+
+
+def test_app_close_waits_for_pending_tab_close_decision(qapp):
+    """Tab and app close confirmations never overlap."""
+    dialogs = _DeferredClosePresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    window._tabs.tabCloseRequested.emit(0)
+    window.close()
+
+    assert [call.kind for call in dialogs.calls] == ["destructive_confirm"]
+    ctrl.begin_shutdown.assert_not_called()
+
+    dialogs.destructive_decisions.pop()(False)
+
+
+def test_repeated_programmatic_shutdown_waits_for_pre_prompt_coordination(qapp):
+    """Repeated RPC takeover cannot bypass the captured shutdown coordinator."""
+    dialogs = _DeferredClosePresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+    assert [call.kind for call in dialogs.calls] == ["confirm"]
+
+    window.request_shutdown()
+    QCoreApplication.processEvents()
+    on_closed = _shutdown_callback(ctrl)
+
+    window.request_shutdown()
+    QCoreApplication.processEvents()
+    ctrl.persist_all.assert_not_called()
+
+    dialogs.confirm_decisions.pop()(True)
+    ctrl.persist_all.assert_not_called()
+
+    on_closed()
+    ctrl.persist_all.assert_called_once_with()
+
+
+def test_programmatic_shutdown_supersedes_user_shutdown_coordination(qapp):
+    """RPC intent forces close when user-started coordination later settles."""
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+    QCoreApplication.processEvents()
+    on_closed = _shutdown_callback(ctrl)
+
+    window.request_shutdown()
+    tab.update_interaction_state(_snapshot("tab-1", has_run_result=True))
+    ctrl.active_operation_count.return_value = 0
+    on_closed()
+
+    assert [call.kind for call in dialogs.calls] == ["confirm"]
+    ctrl.begin_shutdown.assert_called_once()
+    ctrl.persist_all.assert_called_once_with()
+
+
+def test_programmatic_shutdown_supersedes_final_unsaved_prompt(qapp):
+    """RPC intent tears down without waiting for a post-settlement dialog."""
+    dialogs = _DeferredClosePresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    tab = _add_tab(window, "tab-1", has_run=True, saved=True)
+
+    window.close()
+    dialogs.confirm_decisions.pop()(True)
+    QCoreApplication.processEvents()
+    on_closed = _shutdown_callback(ctrl)
+
+    tab.update_interaction_state(_snapshot("tab-1", has_run_result=True))
+    ctrl.active_operation_count.return_value = 0
+    on_closed()
+    assert [call.kind for call in dialogs.calls] == [
+        "confirm",
+        "destructive_confirm",
+    ]
+
+    window.request_shutdown()
+    ctrl.persist_all.assert_not_called()
+    QCoreApplication.processEvents()
+    ctrl.persist_all.assert_called_once_with()
+
+    dialogs.destructive_decisions.pop()(False)
+    ctrl.persist_all.assert_called_once_with()
+
+
+def test_programmatic_request_shutdown_bypasses_unsaved_guard(qapp):
+    """Programmatic request_shutdown() remains non-interactive even with unsaved data."""
+    dialogs = RecordingDialogPresenter()
+    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    _add_tab(window, "tab-1", has_run=True, saved=False)
+
+    window.request_shutdown()
+
+    assert len(dialogs.calls) == 0
+    QCoreApplication.processEvents()
+    ctrl.begin_shutdown.assert_called_once_with(window._perform_close)

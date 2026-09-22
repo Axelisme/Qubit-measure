@@ -5,7 +5,7 @@ Validates S1-S3 acceptance via production ExpTabWidget / MainWindow seams.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -1289,4 +1289,102 @@ def test_replaced_result_invalidates_saved_via_monotonic_token(exp_tab_factory):
     assert c2.status_text(ArtifactKind.DATA) == "✓ SAVED"
     tab.deleteLater()
     tab2.deleteLater()
+    _require_qapp().processEvents()
+
+
+def test_artifact_save_center_and_tab_unsaved_data_queries(exp_tab_factory):
+    ctrl = _mock_ctrl()
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
+    )
+    tab = exp_tab_factory("tab-1", ctrl, caps)
+    center = tab._save_center
+
+    # 1. No result -> NO_RESULT, has_unsaved_data is False
+    snap_empty = _snapshot("tab-1", has_run=False, has_analysis=False)
+    tab.attach(snap_empty, MagicMock())
+    assert center.status_text(ArtifactKind.DATA) == "— NO RESULT"
+    assert center.has_unsaved_data() is False
+    assert tab.has_unsaved_data() is False
+
+    # 2. Run result arrives -> NOT_SAVED, has_unsaved_data is True
+    snap_run = _snapshot("tab-1", has_run=True, data_path="/tmp/test.h5")
+    tab.update_interaction_state(snap_run)
+    tab.set_data_path("/tmp/test.h5")
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    assert center.has_unsaved_data() is True
+    assert tab.has_unsaved_data() is True
+
+    # 3. Save started (pending save) -> remains NOT_SAVED, has_unsaved_data is True
+    tab.notify_save_started(ArtifactKind.DATA)
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    assert center.has_unsaved_data() is True
+    assert tab.has_unsaved_data() is True
+
+    # 4. Save failed -> remains NOT_SAVED, has_unsaved_data is True
+    tab.handle_save_data_finished(
+        SaveDataFinishedPayload(
+            tab_id="tab-1", data_path="/tmp/test.h5", error="Disk full"
+        )
+    )
+    assert center.status_text(ArtifactKind.DATA) == "○ NOT SAVED"
+    assert center.has_unsaved_data() is True
+    assert tab.has_unsaved_data() is True
+
+    # 5. Save succeeded -> SAVED, has_unsaved_data is False
+    tab.notify_save_started(ArtifactKind.DATA)
+    tab.handle_save_data_finished(
+        SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/test.h5", error=None)
+    )
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
+    assert center.has_unsaved_data() is False
+    assert tab.has_unsaved_data() is False
+
+    # 6. Drifted comment after save -> UNSAVED_CHANGES, has_unsaved_data is True
+    center.set_comment_text("drifted comment")
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
+    assert center.has_unsaved_data() is True
+    assert tab.has_unsaved_data() is True
+
+    # 7. Restore comment -> SAVED, has_unsaved_data is False
+    center.set_comment_text("")
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
+    assert center.has_unsaved_data() is False
+    assert tab.has_unsaved_data() is False
+
+    # 8. Drifted path after save -> UNSAVED_CHANGES, has_unsaved_data is True
+    tab.set_data_path("/tmp/test_drifted.h5")
+    assert center.status_text(ArtifactKind.DATA) == "● UNSAVED CHANGES"
+    assert center.has_unsaved_data() is True
+    assert tab.has_unsaved_data() is True
+
+    # 9. Analysis image unsaved does not make measurement data unsaved
+    tab.set_data_path("/tmp/test.h5")
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
+    assert center.has_unsaved_data() is False
+    # Analysis image is NOT_SAVED (snap_run has analysis capability)
+    snap_with_ana = _snapshot(
+        "tab-1",
+        has_run=True,
+        has_analysis=True,
+        data_path="/tmp/test.h5",
+        analysis_path="/tmp/ana.png",
+    )
+    # Ensure run object matches saved signature
+    assert snap_run.run is not None
+    assert snap_run.paths is not None
+    assert snap_with_ana.run is not None
+    assert snap_with_ana.paths is not None
+    snap_with_ana = replace(
+        snap_with_ana,
+        run=snap_run.run,
+        paths=replace(snap_with_ana.paths, data=snap_run.paths.data),
+    )
+    tab.update_interaction_state(snap_with_ana)
+    assert center.status_text(ArtifactKind.ANALYSIS) == "○ NOT SAVED"
+    assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
+    assert center.has_unsaved_data() is False
+    assert tab.has_unsaved_data() is False
+
+    tab.deleteLater()
     _require_qapp().processEvents()

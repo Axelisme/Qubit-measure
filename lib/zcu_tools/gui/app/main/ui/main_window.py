@@ -32,6 +32,7 @@ _ACTIVITY_MARKER_COLOR = "#286ac7"
 _ACTIVITY_MARKER_TOOLTIP = "Run in progress"
 
 
+from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent, QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFileDialog,
@@ -128,6 +129,11 @@ class MainWindow(QMainWindow):
         # closeEvent (triggered by _perform_close's self.close()) passes straight
         # through instead of re-entering the cancel-and-wait coordination.
         self._closing = False
+        self._close_prompt_open = False
+        self._shutdown_requested = False
+        self._programmatic_shutdown_requested = False
+        self._post_shutdown_prompt_open = False
+        self._pending_tab_closes: set[str] = set()
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
 
@@ -217,6 +223,7 @@ class MainWindow(QMainWindow):
 
     def remove_tab_widget(self, tab_id: str) -> None:
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
+        self._pending_tab_closes.discard(tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
             tab_w.detach()
@@ -578,8 +585,37 @@ class MainWindow(QMainWindow):
         if not isinstance(tab_w, ExpTabWidget):
             return
         tab_id = tab_w.tab_id
-        logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
-        self._ctrl.close_tab(tab_id)
+        if (
+            self._pending_tab_closes
+            or self._close_prompt_open
+            or self._shutdown_requested
+            or self._closing
+        ):
+            return
+
+        if not tab_w.has_unsaved_data():
+            logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
+            self._ctrl.close_tab(tab_id)
+            return
+
+        self._pending_tab_closes.add(tab_id)
+
+        def _on_decision(confirmed: bool) -> None:
+            self._pending_tab_closes.discard(tab_id)
+            if not confirmed or self._shutdown_requested or self._closing:
+                return
+            if self._tab_widgets.get(tab_id) is tab_w and self._ctrl.has_tab(tab_id):
+                logger.info("_on_tab_close_requested confirmed: tab_id=%r", tab_id)
+                self._ctrl.close_tab(tab_id)
+
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "Unsaved measurement data",
+            "Measurement data in this tab has not been saved. Discard unsaved data and close tab?",
+            action_text="Discard and Close",
+            on_decision=_on_decision,
+            default=False,
+        )
 
     def _on_tab_moved(self, from_index: int, to_index: int) -> None:
         logger.debug("_on_tab_moved: from=%d to=%d", from_index, to_index)
@@ -958,9 +994,123 @@ class MainWindow(QMainWindow):
         The cancel-and-wait is deferred to the next event-loop turn so the
         triggering RPC's reply is written back before the remote service tears
         down (else the agent's app.shutdown would race the socket teardown)."""
-        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+        if self._closing:
+            return
+        self._programmatic_shutdown_requested = True
+        if self._shutdown_requested:
+            if self._post_shutdown_prompt_open:
+                self._post_shutdown_prompt_open = False
+                self._close_prompt_open = False
+                QTimer.singleShot(0, self._perform_close)
+            return
+        self._close_prompt_open = False
+        self._schedule_shutdown(self._perform_close)
 
-        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
+    def _current_close_risks(self) -> tuple[bool, int]:
+        has_unsaved = any(tab.has_unsaved_data() for tab in self._tab_widgets.values())
+        return has_unsaved, self._ctrl.active_operation_count()
+
+    def _schedule_shutdown(self, on_closed: Callable[[], None]) -> None:
+        if self._closing or self._shutdown_requested:
+            return
+        self._shutdown_requested = True
+
+        def _begin_shutdown() -> None:
+            try:
+                self._ctrl.begin_shutdown(on_closed)
+            except Exception:
+                self._shutdown_requested = False
+                self._programmatic_shutdown_requested = False
+                raise
+
+        QTimer.singleShot(0, _begin_shutdown)
+
+    def _finish_user_shutdown(self, *, unsaved_warning_accepted: bool) -> None:
+        """Recheck data after cancelled operations settle, then close or ask again."""
+        if self._programmatic_shutdown_requested:
+            self._perform_close()
+            return
+
+        has_unsaved, _active = self._current_close_risks()
+        if unsaved_warning_accepted or not has_unsaved:
+            self._perform_close()
+            return
+
+        self._close_prompt_open = True
+        self._post_shutdown_prompt_open = True
+
+        def _on_decision(confirmed: bool) -> None:
+            self._close_prompt_open = False
+            self._post_shutdown_prompt_open = False
+            if self._programmatic_shutdown_requested or self._closing:
+                return
+            if confirmed:
+                self._perform_close()
+                return
+            self._shutdown_requested = False
+
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "Unsaved measurement data",
+            "An operation completed with unsaved measurement data while the app "
+            "was closing. Discard unsaved data and close?",
+            action_text="Discard and Close",
+            on_decision=_on_decision,
+            default=False,
+        )
+
+    def _present_app_close_confirmation(
+        self, *, has_unsaved: bool, active: int
+    ) -> None:
+        self._close_prompt_open = True
+
+        def _on_decision(confirmed: bool) -> None:
+            if not confirmed or self._shutdown_requested or self._closing:
+                self._close_prompt_open = False
+                return
+
+            current_unsaved, current_active = self._current_close_risks()
+            uncovered_unsaved = current_unsaved and not has_unsaved
+            uncovered_active = current_active > 0 and active == 0
+            if uncovered_unsaved or uncovered_active:
+                self._present_app_close_confirmation(
+                    has_unsaved=current_unsaved, active=current_active
+                )
+                return
+
+            self._close_prompt_open = False
+            self._schedule_shutdown(
+                lambda: self._finish_user_shutdown(unsaved_warning_accepted=has_unsaved)
+            )
+
+        if has_unsaved and active > 0:
+            self._dialog_presenter.destructive_confirm(
+                self,
+                "Unsaved data and operations in progress",
+                f"There is unsaved measurement data and {active} operation(s) "
+                "in progress. Discard unsaved data, cancel active operation(s), "
+                "and close?",
+                action_text="Discard and Close",
+                on_decision=_on_decision,
+                default=False,
+            )
+        elif has_unsaved:
+            self._dialog_presenter.destructive_confirm(
+                self,
+                "Unsaved measurement data",
+                "There is unsaved measurement data. Discard unsaved data and close?",
+                action_text="Discard and Close",
+                on_decision=_on_decision,
+                default=False,
+            )
+        else:
+            self._dialog_presenter.confirm_async(
+                self,
+                "Operations in progress",
+                f"Cancel {active} operation(s) in progress and close once they stop?",
+                on_decision=_on_decision,
+                default=False,
+            )
 
     def _perform_close(self, a0: QCloseEvent | None = None) -> None:
         """The actual teardown: persist session, stop remote, accept the close.
@@ -989,33 +1139,22 @@ class MainWindow(QMainWindow):
             if a0 is not None:
                 super().closeEvent(a0)
             return
-        # A user window-close cancels every live operation, then closes once they
-        # stop (or a timeout forces it). Confirm first if work is in progress —
-        # closing will interrupt it. The wait is asynchronous, so ignore this
-        # event now; the coordinator drives _perform_close when ready.
-        active = self._ctrl.active_operation_count()
-        if active > 0:
-            if a0 is None:
-                return
-            confirmed = self._dialog_presenter.confirm(
-                self,
-                "Operations in progress",
-                f"Cancel {active} operation(s) in progress and close once they stop?",
-                default=False,
-            )
-            if not confirmed:
-                a0.ignore()
-                return
-            a0.ignore()
-        elif a0 is not None:
-            a0.ignore()
-        # Defer begin_shutdown to the next event-loop turn (mirrors
-        # request_shutdown). When idle, the shutdown coordinator settles
-        # synchronously and calls _perform_close → self.close(), which would
-        # otherwise re-enter this closeEvent within its own stack — Qt does not
-        # honour a self.close() issued from inside a closeEvent handler, so the
-        # first click would appear to do nothing. The singleShot breaks out of
-        # this stack first.
-        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 
-        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
+        if a0 is not None:
+            a0.ignore()
+
+        if (
+            self._close_prompt_open
+            or self._shutdown_requested
+            or self._pending_tab_closes
+        ):
+            return
+
+        has_unsaved, active = self._current_close_risks()
+        if not has_unsaved and active == 0:
+            self._schedule_shutdown(
+                lambda: self._finish_user_shutdown(unsaved_warning_accepted=False)
+            )
+            return
+
+        self._present_app_close_confirmation(has_unsaved=has_unsaved, active=active)

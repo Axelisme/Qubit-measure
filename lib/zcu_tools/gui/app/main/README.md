@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-02 — transactional Inspect Modules and Parameters editing, stable Run/Save orientation and Run activity projection
+**Last updated:** 2026-09-22 — unsaved measurement-data close guard
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -82,8 +82,11 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   tracks result lifecycle. The center owns the saveability decision and the ordered
   Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
   successes); tracker/invariant failures Fast Fail and operational failures are
-  presented centrally, and async data completion is routed to the center. Save All
-  updates that center in place: terminal status updates do not replace the Data
+  presented centrally, and async data completion is routed to the center. The center
+  also owns the tab-local unsaved-data decision; `MainWindow` consults it before
+  user-triggered tab/app closes, combines app-close data-loss and active-operation
+  risks into one confirmation, and keeps programmatic RPC shutdown non-interactive.
+  Save All updates that center in place: terminal status updates do not replace the Data
   pane or its widgets, and the data-path editor retains focus, cursor and selection.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane

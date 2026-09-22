@@ -655,6 +655,16 @@ class ArtifactSaveCenter(QWidget):
         edit = self._path_edits.get(kind)
         return bool(edit is not None and edit.isEnabled())
 
+    def has_unsaved_data(self) -> bool:
+        """Return True if measurement data is unsaved (NOT_SAVED or UNSAVED_CHANGES)."""
+        if ArtifactKind.DATA not in self._artifacts:
+            return False
+        self._recompute_current_sig(ArtifactKind.DATA)
+        return self._tracker.status(ArtifactKind.DATA) in (
+            SaveStatus.NOT_SAVED,
+            SaveStatus.UNSAVED_CHANGES,
+        )
+
     def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
         """Ordered saveable artifacts for Save All (analysis→post→data)."""
         kinds: list[ArtifactKind] = []
