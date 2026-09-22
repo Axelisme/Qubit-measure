@@ -89,6 +89,13 @@ class WorkspaceService:
                     )
                 )
                 continue
+            except ValueError as exc:
+                rejected.append(
+                    RestoreIssue(
+                        persisted_tab.adapter_name, f"invalid adapter defaults ({exc})"
+                    )
+                )
+                continue
             try:
                 restored_schema = raw_to_schema(base_schema, persisted_tab.cfg_raw)
             except SessionCodecError as exc:

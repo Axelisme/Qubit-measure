@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-22 — unsaved measurement-data close guard
+**Last updated:** 2026-09-22 — reload recovery and cancellable shutdown
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -217,6 +217,33 @@ Key ownership rules:
 - `OperationRunner` owns the generic operation lifecycle; each operation supplies
   an `OperationSpec` policy and narrow write ports. Terminal policy exceptions
   are contained in the shared runner so handles settle and exclusion leases release.
+
+## Experiment reload
+
+`ExperimentReloadService` 擁有 RAM-only snapshot 與重載／恢復狀態，透過注入的
+`ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
+重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
+和 failure/recovery presentation。Role catalog、hardware context 與 framework 不重建。
+依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
+確切限制見 `experiment/v2_gui/README.md`。此取捨不放寬資料丟棄確認或 lifecycle 保護。
+
+Retry 的 prepare/load 皆保留 typed error disposition；要求 restart 後不再提供可 retry 狀態。
+Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消，MainWindow 呼叫
+`Controller.abort_shutdown()` 恢復入口，不自動重啟已取消的 operations，也不重新啟用失敗的
+catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
+
+Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
+共同阻止 reload，包含非 handle-backed data save。共用 `ExperimentAccess` 阻止 local/remote
+experiment driving facets 在切換時重入。確認等待期間 tab identity、resource versions 或 run
+result 改變會使確認失效。重新建立的 tabs 使用新 id，舊 RPC locator 不可沿用。
+
+Snapshot 只保留既有 `PersistedSession` 的名稱、cfg、順序與 active index，沒有 result、figure、
+analysis params 或 path overrides。Reload 不呼叫 caretaker，不新增 checkpoint 檔案；正常
+跨重啟 persistence policy 不變。Import cache 的一般 bytecode 清理不是 session persistence。
+Catalog load 失敗時保留 snapshot、停用 experiment entry，受控失敗允許 Retry reload；fixed-state
+integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Retry skipped tabs 只附加仍未
+成功的 entries、不重複還原或改變使用者選取；下一次完整 reload 需確認丟棄先前 skipped entries。
+所有 RAM recovery 在 process 結束後遺失。
 
 ## Run / Analyze Workflow
 

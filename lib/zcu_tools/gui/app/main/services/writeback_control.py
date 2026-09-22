@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
+from zcu_tools.gui.app.main.catalog import ExperimentAccess
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -61,12 +62,14 @@ class WritebackControlFacet:
         writeback: WritebackService,
         resource_versions: Callable[[], Mapping[str, int]],
         bus: EventBus,
+        access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
         self._guard = guard
         self._writeback = writeback
         self._resource_versions = resource_versions
         self._bus = bus
+        self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
@@ -146,6 +149,7 @@ class WritebackControlFacet:
         )
 
     def _require_tab_idle(self, tab_id: str) -> None:
+        self._access.require_available()
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 

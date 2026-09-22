@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
@@ -130,6 +131,7 @@ class MainWindow(QMainWindow):
         # through instead of re-entering the cancel-and-wait coordination.
         self._closing = False
         self._close_prompt_open = False
+        self._reload_prompt_open = False
         self._shutdown_requested = False
         self._programmatic_shutdown_requested = False
         self._post_shutdown_prompt_open = False
@@ -579,6 +581,96 @@ class MainWindow(QMainWindow):
 
     def create_tab(self, adapter_name: str) -> None:
         self._ctrl.new_tab(adapter_name)
+
+    def reload_experiments(self) -> None:
+        if (
+            self._reload_prompt_open
+            or self._close_prompt_open
+            or self._pending_tab_closes
+            or self._shutdown_requested
+            or self._closing
+        ):
+            return
+        try:
+            if self._ctrl.can_retry_experiment_reload():
+                self._present_reload_report(self._ctrl.retry_experiment_reload())
+                return
+            preview = self._ctrl.prepare_experiment_reload()
+        except Exception as exc:
+            logger.exception("experiment reload preparation/retry failed")
+            self.show_error_dialog("Experiment reload failed", str(exc))
+            return
+        names = "\n".join(name for _, name in preview.tabs)
+        unsaved = sum(
+            widget.has_unsaved_data() for widget in self._tab_widgets.values()
+        )
+        message = (
+            f"Rebuild all {len(preview.tabs)} experiment tabs using the latest code?\n\n"
+            "Only configuration and tab order are restored. Results, figures, analysis "
+            "parameters and save-path overrides are discarded.\n"
+            f"Tabs with unsaved measurement data: {unsaved}.\n\n{names}"
+        )
+        if preview.skipped_count:
+            message += f"\n\nDiscard {preview.skipped_count} previously skipped tab configurations from RAM?"
+        self._reload_prompt_open = True
+
+        def on_decision(confirmed: bool) -> None:
+            self._reload_prompt_open = False
+            if not confirmed or self._shutdown_requested or self._closing:
+                return
+            try:
+                self._present_reload_report(self._ctrl.reload_experiments(preview))
+            except Exception as exc:
+                logger.exception("confirmed experiment reload failed")
+                self.show_error_dialog("Experiment reload failed", str(exc))
+
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "Reload experiments",
+            message,
+            action_text="Discard Results and Reload",
+            on_decision=on_decision,
+            default=False,
+        )
+
+    def retry_skipped_experiment_tabs(self) -> None:
+        if (
+            self._reload_prompt_open
+            or self._close_prompt_open
+            or self._shutdown_requested
+            or self._closing
+        ):
+            return
+        try:
+            self._present_reload_report(self._ctrl.retry_skipped_experiment_tabs())
+        except Exception as exc:
+            logger.exception("skipped-tab recovery failed")
+            self.show_error_dialog("Tab recovery failed", str(exc))
+
+    def _present_reload_report(self, report: ReloadReport) -> None:
+        self._toolbar.set_reload_recovery(
+            retry_catalog=self._ctrl.can_retry_experiment_reload(),
+            skipped_count=self._ctrl.skipped_experiment_tab_count(),
+        )
+        active = self._ctrl.get_active_tab_id()
+        if active is not None and active in self._tab_widgets:
+            self._tabs.setCurrentWidget(self._tab_widgets[active])
+        if report.catalog_error:
+            action = (
+                "Restart is required; the RAM snapshot will be lost."
+                if report.restart_required
+                else "Fix the source and use Retry reload. Tab configurations remain in RAM."
+            )
+            self.show_error_dialog(
+                "Experiment reload failed", f"{report.catalog_error}\n\n{action}"
+            )
+        elif report.rejected_tabs:
+            issues = "\n".join(
+                f"{item.subject}: {item.message}" for item in report.rejected_tabs
+            )
+            self.show_error_dialog("Some tabs were not restored", issues)
+        else:
+            self.show_status_message(f"Restored {report.restored_tabs} experiment tabs")
 
     def _on_tab_close_requested(self, index: int) -> None:
         tab_w = self._tabs.widget(index)
@@ -1047,6 +1139,7 @@ class MainWindow(QMainWindow):
             if confirmed:
                 self._perform_close()
                 return
+            self._ctrl.abort_shutdown()
             self._shutdown_requested = False
 
         self._dialog_presenter.destructive_confirm(

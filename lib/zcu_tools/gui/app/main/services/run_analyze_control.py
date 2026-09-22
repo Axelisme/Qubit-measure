@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, AnalyzeRequest
+from zcu_tools.gui.app.main.catalog import ExperimentAccess
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
@@ -83,6 +84,7 @@ class RunAnalyzeControlFacet:
         analyze: AnalyzeService,
         post_analyze: PostAnalyzeService,
         render_host: Callable[[], RunAnalyzeRenderHost | None],
+        access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
         self._bus = bus
@@ -93,6 +95,7 @@ class RunAnalyzeControlFacet:
         self._analyze = analyze
         self._post_analyze = post_analyze
         self._render_host = render_host
+        self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
@@ -104,6 +107,7 @@ class RunAnalyzeControlFacet:
         return self._tab.get_snapshot(tab_id)
 
     def start_run(self, tab_id: str) -> int:
+        self._access.require_available()
         permit = self._guard.acquire_run_permit(tab_id)
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
@@ -111,6 +115,7 @@ class RunAnalyzeControlFacet:
         return self._run.start_run(permit, live_container)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
+        self._access.require_available()
         permit = self._guard.acquire_load_permit(tab_id)
         outcome = self._load.load_result(permit, data_path)
         tab = self._state.get_tab(tab_id)
@@ -139,6 +144,7 @@ class RunAnalyzeControlFacet:
         return self._tab.get_tab_analyze_result(tab_id)
 
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
+        self._access.require_available()
         permit = self._guard.acquire_analyze_permit(tab_id)
         self._ensure_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
@@ -208,6 +214,7 @@ class RunAnalyzeControlFacet:
         )
 
     def _ensure_tab_idle(self, tab_id: str) -> None:
+        self._access.require_available()
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 

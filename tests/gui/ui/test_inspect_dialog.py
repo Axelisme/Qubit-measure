@@ -780,7 +780,7 @@ def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
 
 
 def _catalog():
-    from zcu_tools.experiment.v2_gui.registry import register_all_roles
+    from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
     from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 
     cat = RoleCatalog()

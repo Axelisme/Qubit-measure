@@ -1,4 +1,4 @@
-**Last updated:** 2026-08-27 — singleshot GE primary/post writeback ownership
+**Last updated:** 2026-09-22 — reloadable adapters and fixed role composition
 
 # measure experiment adapters
 
@@ -23,7 +23,9 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
   契約見 `../README.md`。
 - `_support/` 是 private package，只放至少被兩個 concrete adapters 共用的 mechanics；它
   不擁有 registry order，也不 import concrete adapter。
-- `../registry.py` 是 composition root，明確列出 adapter 與 role catalog 項目。
+- `../registry.py` 明確列出可重載的 adapter catalog；`../role_registry.py` 擁有 startup-only role composition。
+- Reload experiments 會重建 concrete adapters 及 family helpers，但保留 `base.py` 與 `_support/`。
+  修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
 `cfg_definition()` 使用 `_support` 提供的 measure-domain builder vocabulary，但結構與預設
 policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_value` 兩個方法理解同一
