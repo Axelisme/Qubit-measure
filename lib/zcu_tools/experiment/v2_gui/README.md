@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-22 — bounded experiment catalog reload
+**Last updated:** 2026-09-22 — best-effort experiment reload
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -25,7 +25,8 @@ experiment/v2_gui/
 `catalog_loader` 由 launcher 注入 GUI framework，僅支援 standalone source deployment。重載
 `experiment.v2`、concrete adapters 與 adapter registry，包含 package exports；保留
 `v2.runner`、`v2.utils`、adapter `base`／`_support`、role factories 與 framework identity。
-固定專案 source 變更或新固定 dependency 被引入時要求重啟；新增未被載入的固定檔案不阻擋。
+Preflight 發現固定專案 source 變更，或受控 import 期間發現新增固定 dependency 時要求重啟；
+新增未被載入的固定檔案不阻擋。這些檢查不涵蓋所有延後或動態載入的依賴。
 新增 adapter 仍須加入 `registry.py`，不是自動掃描 class 註冊。
 
 Loader 在 GUI 關閉全部 tabs、排除進行中操作後才清除 owned import cache，從已檢查的 source
@@ -33,6 +34,12 @@ Loader 在 GUI 關閉全部 tabs、排除進行中操作後才清除 owned impor
 可重載程式在 import 時不得啟動 thread、操作硬體或註冊外部 callback。此功能不是 notebook
 autoreload，亦不支援保留舊 tabs 執行舊版本。延後 import 使用清除舊 bytecode 後的正常 Python
 載入；操作中持續編輯尚未 import 的檔案不提供版本隔離保證。
+
+Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 import，不使用常駐 import guard
+或 AST 規則禁止這種寫法。重載結束後的 deferred/dynamic import 可能載入新固定依賴，或造成
+新舊程式混用；此時不保證攔截、報錯或辨識靜默失敗，使用者可重啟 GUI 回到乾淨的載入狀態。
+已捕捉到的錯誤仍正常回報，不主動吞掉例外。這項取捨只放寬依賴完整性保證，不放寬 tab
+關閉確認、RAM snapshot/retry、操作排他或 shutdown lifecycle 的契約。
 
 `adapters/` 是使用者修改實驗流程的入口；每個 concrete adapter file 是該實驗 GUI policy
 的 authoritative definition。至少被兩個 adapter 共用的 mechanics 才放進 private

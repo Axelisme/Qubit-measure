@@ -230,6 +230,33 @@ def test_failed_catalog_retains_ram_snapshot_and_retry_uses_it(app: App) -> None
         app.reload.retry_failed_reload()
 
 
+@pytest.mark.parametrize("restart_required", [False, True])
+def test_retry_preflight_preserves_recovery_and_error_disposition(
+    app: App, restart_required: bool
+) -> None:
+    app.controls.new_tab("demo")
+    app.loader.failure = CatalogReloadError("broken catalog")
+    app.reload.reload_confirmed(app.reload.prepare_reload())
+    app.loader.failure = None
+    app.loader.prepare_failure = CatalogReloadError(
+        "preflight rejected", restart_required=restart_required
+    )
+
+    report = app.reload.retry_failed_reload()
+
+    assert report.catalog_error == "preflight rejected"
+    assert report.restart_required is restart_required
+    assert app.reload.can_retry_reload is not restart_required
+    assert app.state.list_tab_ids() == []
+    assert app.loader.loads == 1
+    app.loader.prepare_failure = None
+    if restart_required:
+        with pytest.raises(FailedPreconditionError):
+            app.reload.retry_failed_reload()
+    else:
+        assert app.reload.retry_failed_reload().restored_tabs == 1
+
+
 def test_restart_required_failure_cannot_retry(app: App) -> None:
     app.controls.new_tab("demo")
     app.loader.failure = CatalogReloadError("unsafe", restart_required=True)

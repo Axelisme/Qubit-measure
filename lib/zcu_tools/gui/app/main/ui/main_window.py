@@ -1139,6 +1139,7 @@ class MainWindow(QMainWindow):
             if confirmed:
                 self._perform_close()
                 return
+            self._ctrl.abort_shutdown()
             self._shutdown_requested = False
 
         self._dialog_presenter.destructive_confirm(

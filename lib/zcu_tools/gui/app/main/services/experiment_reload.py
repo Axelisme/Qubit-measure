@@ -151,7 +151,13 @@ class ExperimentReloadService:
             or self._state.list_tab_ids()
         ):
             raise FailedPreconditionError("There is no failed catalog reload to retry")
-        plan = loader.prepare()
+        try:
+            plan = loader.prepare()
+        except CatalogReloadError as exc:
+            self._restart_required = exc.restart_required
+            return ReloadReport(
+                catalog_error=str(exc), restart_required=exc.restart_required
+            )
         with self._switch():
             return self._load_and_restore(loader, plan)
 

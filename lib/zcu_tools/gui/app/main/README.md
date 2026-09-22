@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-22 — RAM-only experiment reload lifecycle
+**Last updated:** 2026-09-22 — reload recovery and cancellable shutdown
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -224,6 +224,13 @@ Key ownership rules:
 `ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
 重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
 和 failure/recovery presentation。Role catalog、hardware context 與 framework 不重建。
+依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
+確切限制見 `experiment/v2_gui/README.md`。此取捨不放寬資料丟棄確認或 lifecycle 保護。
+
+Retry 的 prepare/load 皆保留 typed error disposition；要求 restart 後不再提供可 retry 狀態。
+Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消，MainWindow 呼叫
+`Controller.abort_shutdown()` 恢復入口，不自動重啟已取消的 operations，也不重新啟用失敗的
+catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
 
 Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
 共同阻止 reload，包含非 handle-backed data save。共用 `ExperimentAccess` 阻止 local/remote

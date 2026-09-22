@@ -828,14 +828,27 @@ class Controller(SessionControllerMixin):
         Qt-free façade: the QTimer-driven coordinator lives in a driving adapter
         (ADR-0005), built lazily here so the Controller stays importable without
         a Qt loop. ``on_closed`` always runs on the main thread."""
-        self._services.experiment_access.shutting_down = True
-        if self._shutdown_driver is None:
-            from zcu_tools.gui.session.adapters.qt_shutdown_driver import (
-                QtShutdownDriver,
-            )
+        access = self._services.experiment_access
+        was_shutting_down = access.shutting_down
+        access.shutting_down = True
+        try:
+            if self._shutdown_driver is None:
+                from zcu_tools.gui.session.adapters.qt_shutdown_driver import (
+                    QtShutdownDriver,
+                )
 
-            self._shutdown_driver = QtShutdownDriver(self._operation_handles)
-        self._shutdown_driver.begin(on_closed)
+                self._shutdown_driver = QtShutdownDriver(self._operation_handles)
+            self._shutdown_driver.begin(on_closed)
+        except Exception:
+            access.shutting_down = was_shutting_down
+            raise
+
+    def abort_shutdown(self) -> None:
+        """Resume entry points after the settled close confirmation is declined.
+
+        This does not restart cancelled operations or reopen a failed catalog.
+        """
+        self._services.experiment_access.shutting_down = False
 
     def get_operation_progress(self, operation_id: int) -> tuple:
         return self._operation_control.get_operation_progress(operation_id)
