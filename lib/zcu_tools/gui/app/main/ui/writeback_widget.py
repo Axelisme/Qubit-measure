@@ -240,8 +240,8 @@ class WritebackWidget(QWidget):
       Current values remain summary-only and Copy retains the proposed JSON.
     - Width breakpoint near 450 px: wide rows single-line, narrow rows
       reflow to target/action above Current → Proposed.
-    - Bordered ledger hugs its rendered rows; Apply Selected immediately
-      follows the panel. Long content grows naturally and delegates
+    - Bordered ledger hugs its rendered rows; Apply Selected sits directly
+      above the panel. Long content grows naturally and delegates
       vertical scrolling to the existing Analysis-pane outer scroll.
     """
 
@@ -289,6 +289,13 @@ class WritebackWidget(QWidget):
         )
         layout.addWidget(self._hint)
 
+        # Apply sits above the ledger so it stays close to the analyze output.
+        self._apply_btn = QPushButton("Apply Selected")
+        self._apply_btn.setObjectName("writebackApply")
+        self._apply_btn.setFixedHeight(30)
+        self._apply_btn.clicked.connect(self._on_apply_clicked)
+        layout.addWidget(self._apply_btn)
+
         self._applied_legend = QLabel("* = not applied")
         self._applied_legend.setObjectName("writebackAppliedLegend")
         self._applied_legend.setStyleSheet("color: #6b7688;")
@@ -306,12 +313,6 @@ class WritebackWidget(QWidget):
         self._rows_layout.setSpacing(0)
         self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # type: ignore[attr-defined]
         layout.addWidget(self._rows_container)
-
-        self._apply_btn = QPushButton("Apply Selected")
-        self._apply_btn.setObjectName("writebackApply")
-        self._apply_btn.setFixedHeight(30)
-        self._apply_btn.clicked.connect(self._on_apply_clicked)
-        layout.addWidget(self._apply_btn)
         layout.addStretch(1)
 
         self._row_widgets: dict[str, tuple[QLabel, QLabel, QCheckBox]] = {}
