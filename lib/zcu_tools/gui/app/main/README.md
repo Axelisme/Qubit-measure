@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-22 — reload recovery and cancellable shutdown
+**Last updated:** 2026-09-23 — Load result Config backfill
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -268,10 +268,16 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
    the Writeback service remains stage-free.
 
-`tab.load_data` is the analysis-only entry for canonical result files. It installs
-the loaded result into an existing adapter tab, clears stale analysis/writeback
-state, and does not backfill the Config tab. The Guard and LoadService both enforce
-the adapter's import-validated `capabilities.load_data` gate.
+`tab.load_data` installs a canonical result into an existing adapter tab and clears
+stale analysis/writeback state. When the result carries a compatible execution
+snapshot, Load best-effort projects its concrete values into the current tab Config.
+It validates a complete detached candidate, replaces the service-owned editor and
+State Config once, and reports `cfg_backfill=applied|not_applied` to Qt and remote.
+Failed backfill keeps Config and its draft unchanged without undoing the loaded
+result. Fields without a reliable runtime inverse keep the current draft value;
+module/waveform references become custom values rather than guessed library keys.
+The Guard and LoadService both enforce the adapter's import-validated
+`capabilities.load_data` gate.
 
 ### Pane-owned lifecycle
 

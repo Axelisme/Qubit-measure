@@ -297,7 +297,7 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
 
     adapter = DisabledAdapter()
     state.get_tab(tab_id).adapter = adapter  # type: ignore[assignment]
-    load = LoadService(state, MagicMock())
+    load = LoadService(state, MagicMock(), cfg_editor=MagicMock(), bus=EventBus())
 
     with pytest.raises(LoadDataError) as exc_info:
         load.load_result(LoadPermit(tab_id), "/tmp/x")

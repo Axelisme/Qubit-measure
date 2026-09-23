@@ -86,6 +86,9 @@ class RecordingHost:
     def focus_run_result_panel(self, tab_id: str) -> None:
         self._log.add("host", "focus_run_result_panel", tab_id)
 
+    def refresh_tab_cfg(self, tab_id: str) -> None:
+        self._log.add("host", "refresh_tab_cfg", tab_id)
+
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: object | None = None
     ) -> None:
@@ -320,6 +323,10 @@ def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> Non
                 "refresh_tab_writeback",
                 "refresh_tab_interaction",
             ],
+        ),
+        (
+            TabContentFact.CFG_REPLACED,
+            ["refresh_tab_cfg"],
         ),
         (
             TabContentFact.PRIMARY_ANALYSIS_COMMITTED,

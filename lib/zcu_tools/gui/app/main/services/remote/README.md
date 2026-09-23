@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-08-27 — subtab-qualified remote/MCP contract（WIRE 55）
+**Last updated:** 2026-09-23 — Load Config result（WIRE 56）
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -118,8 +118,8 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 55`, `GUI_VERSION = 78`, and
-`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 55發布subtab-qualified contract：figure/writeback/save-image要求必填`(tab_id, subtab_id)`且wire值固定為`run|analysis|post_analysis`（save_image僅`analysis|post_analysis`），移除舊`tab.get_current_figure`、`tab.save_post_image`與`tab.save_result`及其MCP/tool/bundle fallback，preview/apply回傳當下`destination_context`投影；GUI 78提供capability-driven subtabs與pane-owned resources；MCP 74分離save為`gui_tab_save_data`（tab-only）與`gui_tab_save_image`（pane-qualified），移除`gui_tab_save`/`gui_tab_commit` bundle。
+Current measure-gui values are `WIRE_VERSION = 56`, `GUI_VERSION = 79`, and
+`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 56的`tab.load_data`回覆新增`cfg_backfill=applied|not_applied`，result載入成功但Config未回填仍是成功回覆。GUI 79在同tab以runtime snapshot的可靠欄位替換Cfg和editor，舊editor id不重用。原subtab-qualified pane locator、writeback與save contract維持不變。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -197,7 +197,9 @@ dotted edge paths that `tab.get_cfg` reports.
 
 Headless editor sessions are owned by `CfgEditorService`. Agent-created sessions
 are garbage-collected on commit/discard/client drop; UI-owned sessions are tied
-to their owner widget or tab.
+to their owner widget or tab. Each owner session has a fresh id; Load's successful
+Config replacement retires the old id, so clients rediscover the new session
+before editing.
 
 ## Operation Handles
 
