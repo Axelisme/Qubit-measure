@@ -1120,7 +1120,7 @@ class TestDeterministicBranch:
         assert idle.delta == pytest.approx(0.0)
 
     def test_three_way_branch_selects_each(self) -> None:
-        # Models reset/rabi_check's 3-way Branch; assert each index picks its body.
+        # Assert each index of a three-way Branch picks its own body.
         p1 = _const_pulse(gain=1.0, length=0.4, freq=4000.0)
         p2a = _const_pulse(gain=1.0, length=0.4, freq=4000.0)
         p2b = _const_pulse(gain=0.5, length=0.4, freq=4000.0)

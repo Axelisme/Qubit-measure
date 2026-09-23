@@ -2,8 +2,8 @@
 
 ``FigureOnlyAnalyzeResult`` is the look-at-the-curve analyze result: a single
 ``figure`` field and nothing else (no fitted scalar, hence no writeback). The
-reset length sweeps (single/dual/bath) all share this shape, so they subclass it
-rather than redeclaring ``figure: Figure`` each.
+reset check and length sweeps share this shape, so they subclass it rather than
+redeclaring ``figure: Figure`` each.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def run_figure_only_analyze(
 ) -> _FigureOnlyT:
     """Render ``exp_cls().analyze(run_result)`` into a figure-only result.
 
-    Shared by the reset length sweeps whose ``analyze`` is exactly "run the
+    Shared by reset visual checks whose ``analyze`` is exactly "run the
     experiment's figure-producing analyze, wrap the figure" — the only per-adapter
     variation is which ``exp_cls`` and which figure-only ``result_cls`` (the return
     type is exactly that subclass)."""

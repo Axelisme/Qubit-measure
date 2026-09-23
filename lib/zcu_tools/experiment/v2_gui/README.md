@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-23 — singleshot Rabi analysis parameters
+**Last updated:** 2026-09-23 — reset/check figure analysis
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -280,7 +280,11 @@ review 後執行，不屬於 adapter code。
 | single-tone（sideband） | `freq` → `length` | `reset_10` |
 | dual-tone | `freq` → `power` → `length` | `reset_120` |
 | bath（cavity-assisted） | `freq_gain` → `length` → `phase` | `reset_bath` / `reset_bath_e` |
-| 共用驗證 | `check`（RabiCheck，三型共用，`analysis=NONE`） | — |
+| 共用驗證 | `check`（RabiCheck，三型共用，Figure-only analysis） | — |
+
+`reset/check`的analysis直接呈現gain sweep的三條分支，legend區分未套用tested reset、
+套用tested reset，以及tested reset後以相同掃描gain追加第二個rabi pulse；不擬合純量，
+也不提出writeback。cfg只設定一個`rabi_pulse`，兩次pulse使用相同波形與gain。
 
 ### cfg → writeback 的兩種產出
 

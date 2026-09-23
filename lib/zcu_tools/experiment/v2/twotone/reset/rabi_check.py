@@ -27,6 +27,7 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Branch,
+    Module,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -58,7 +59,6 @@ class RabiCheckModuleCfg(ConfigBase):
     reset: ResetCfg | None = None
     rabi_pulse: PulseCfg
     tested_reset: ResetCfg
-    pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
@@ -69,6 +69,28 @@ class RabiCheckSweepCfg(ConfigBase):
 class RabiCheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: RabiCheckModuleCfg
     sweep: RabiCheckSweepCfg
+
+
+def _rabi_check_sequence(
+    modules: RabiCheckModuleCfg, gain_sweep: SweepCfg
+) -> tuple[Module, ...]:
+    # Both Pulse instances copy this swept cfg, so the post-reset drive follows
+    # the same gain axis while keeping a distinct module name in diagnostics.
+    modules.rabi_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+    return (
+        Reset("reset", modules.reset),
+        Pulse("rabi_pulse", modules.rabi_pulse),
+        Branch(
+            "reset_sel",
+            [],
+            Reset("tested_reset_1", modules.tested_reset),
+            [
+                Reset("tested_reset_2", modules.tested_reset),
+                Pulse("rabi_pulse_after_reset", modules.rabi_pulse),
+            ],
+        ),
+        Readout("readout", modules.readout),
+    )
 
 
 class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
@@ -112,26 +134,9 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
                 ),
             )
             with Schedule(cfg, signals_buffer) as sched:
-                modules = sched.cfg.modules
-                modules.rabi_pulse.set_param(
-                    "gain", sweep2param("gain", sched.cfg.sweep.gain)
-                )
                 _ = (
                     sched.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("rabi_pulse", modules.rabi_pulse),
-                        Branch(
-                            "reset_sel",
-                            [],
-                            Reset("tested_reset_1", modules.tested_reset),
-                            [
-                                Reset("tested_reset_2", modules.tested_reset),
-                                Pulse("pi_pulse", modules.pi_pulse),
-                            ],
-                        ),
-                        Readout("readout", modules.readout),
-                    )
+                    .add(*_rabi_check_sequence(sched.cfg.modules, sched.cfg.sweep.gain))
                     .declare_sweep("reset_sel", 3)
                     .declare_sweep("gain", sched.cfg.sweep.gain)
                     .build_and_acquire(
@@ -144,19 +149,21 @@ class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
 
     @retrieve_result
     def analyze(self, result: RabiCheckResult | None = None) -> Figure:
-        """Analyze reset rabi check results. (No specific analysis implemented)"""
+        """Show the three reset branches from the live gain sweep."""
         assert result is not None, "no result found"
 
         gains, signals = result.gains, result.signals
         real_signals = reset_rabi_signal2real(signals)
 
-        wo_signals, w_signals, wp_signals = real_signals
+        wo_signals, w_signals, wr_signals = real_signals
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax.plot(gains, wo_signals, label="Without Reset", marker=".")
-        ax.plot(gains, w_signals, label="With Reset", marker=".")
-        ax.plot(gains, wp_signals, label="  + Pi Pulse", marker=".")
+        ax.plot(gains, wo_signals, label="Without Tested Reset", marker=".")
+        ax.plot(gains, w_signals, label="With Tested Reset", marker=".")
+        ax.plot(gains, wr_signals, label="Tested Reset + Rabi Pulse", marker=".")
+        ax.set_xlabel("Pulse gain")
+        ax.set_ylabel("Amplitude")
         ax.legend()
         ax.grid(True)
 
