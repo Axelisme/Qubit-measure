@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -24,16 +24,24 @@ from zcu_tools.gui.cfg.lowering import validate_finished_cfg
 from zcu_tools.gui.cfg.materialization import materialize_spec_value
 from zcu_tools.program.v2.sweep import SweepCfg
 
+_OptionProvider = Callable[[str], Sequence[object]]
 
-def project_loaded_cfg(current: CfgSchema, snapshot: ExpCfgModel) -> CfgSchema | None:
+
+def project_loaded_cfg(
+    current: CfgSchema,
+    snapshot: ExpCfgModel,
+    *,
+    provide_options: _OptionProvider | None = None,
+) -> CfgSchema | None:
     """Return a detached complete candidate, or None if nothing can be adopted.
 
-    This does not recover editing expressions or library identities. Validation
-    of the complete candidate against the live library belongs to the caller.
+    This does not recover editing expressions or library identities. Dynamic
+    selectors need live options; without a provider they remain unchanged.
+    Validation of the complete candidate belongs to the caller.
     """
     candidate = deepcopy(current)
     raw = snapshot.model_dump(mode="python", exclude_none=False)
-    if _project_section(candidate.spec, candidate.value, raw, ()) == 0:
+    if _project_section(candidate.spec, candidate.value, raw, (), provide_options) == 0:
         return None
     return candidate
 
@@ -43,6 +51,7 @@ def _project_section(
     value: CfgSectionValue,
     raw: Mapping[str, object],
     path: tuple[str, ...],
+    provide_options: _OptionProvider | None,
 ) -> int:
     adopted = 0
     for name, child_spec in spec.fields.items():
@@ -67,10 +76,12 @@ def _project_section(
                 child_value, CfgSectionValue
             ):
                 adopted += _project_section(
-                    child_spec, child_value, incoming, child_path
+                    child_spec, child_value, incoming, child_path, provide_options
                 )
             continue
-        supported, replacement = _project_node(child_spec, incoming, child_path)
+        supported, replacement = _project_node(
+            child_spec, incoming, child_path, provide_options
+        )
         if supported:
             value.fields[name] = replacement
             adopted += 1
@@ -78,9 +89,14 @@ def _project_section(
 
 
 def _project_node(
-    spec: CfgNodeSpec, raw: object, path: tuple[str, ...]
+    spec: CfgNodeSpec,
+    raw: object,
+    path: tuple[str, ...],
+    provide_options: _OptionProvider | None,
 ) -> tuple[bool, CfgNodeValue | None]:
     if isinstance(spec, ScalarSpec) and spec.editable:
+        if (raw is None and not spec.optional) or (spec.required and raw == ""):
+            return False, None
         value = DirectValue(deepcopy(raw))
         schema = CfgSchema(
             spec=CfgSectionSpec(fields={"value": spec}),
@@ -88,6 +104,15 @@ def _project_node(
         )
         try:
             validate_finished_cfg(schema, resolve_reference=None)
+            if spec.choices_source and raw is not None:
+                if provide_options is None:
+                    return False, None
+                options = provide_options(spec.choices_source)
+                if isinstance(options, (str, bytes)) or (
+                    raw not in options
+                    and not (spec.type is str and not spec.required and raw == "")
+                ):
+                    return False, None
         except (RuntimeError, TypeError, ValueError):
             return False, None
         return True, value
@@ -140,5 +165,8 @@ def _require_complete(spec: CfgNodeSpec, raw: object, path: tuple[str, ...]) -> 
             if name not in raw:
                 raise ValueError(f"Missing config field {'.'.join((*path, name))}")
             _require_complete(child, raw[name], (*path, name))
+    elif isinstance(spec, ScalarSpec):
+        if (raw is None and not spec.optional) or (spec.required and raw == ""):
+            raise ValueError("Snapshot scalar is not valid for the reference")
     elif isinstance(spec, LiteralSpec) and raw != spec.value:
         raise ValueError("Snapshot disagrees with locked literal")

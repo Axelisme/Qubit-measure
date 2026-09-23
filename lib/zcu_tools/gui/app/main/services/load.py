@@ -130,7 +130,9 @@ class LoadService:
             current = self._cfg_editor.snapshot_owner(tab_id)
             if current is None:
                 current = self._state.get_tab(tab_id).cfg_schema
-            candidate = project_loaded_cfg(current, snapshot)
+            candidate = project_loaded_cfg(
+                current, snapshot, provide_options=self._cfg_editor.provide_options
+            )
             if candidate is None:
                 return "not_applied"
             validate_schema(candidate, self._state.exp_context.ml)

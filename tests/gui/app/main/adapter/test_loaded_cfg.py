@@ -59,13 +59,24 @@ def test_projection_replaces_expressions_but_keeps_missing_fields_detached():
     assert current == before
 
 
-@pytest.mark.parametrize("value", ["12", True, [], {}])
+@pytest.mark.parametrize("value", [None, "12", True, [], {}])
 def test_incompatible_scalar_does_not_count_as_adopted(value):
     current = CfgSchema(
         spec=CfgSectionSpec(fields={"reps": ScalarSpec("Reps", int)}),
         value=CfgSectionValue(fields={"reps": DirectValue(2)}),
     )
     assert project_loaded_cfg(current, Snapshot(reps=value)) is None
+    assert current.value.fields["reps"] == DirectValue(2)
+
+
+def test_optional_scalar_can_adopt_explicit_null():
+    current = CfgSchema(
+        spec=CfgSectionSpec(fields={"reps": ScalarSpec("Reps", int, optional=True)}),
+        value=CfgSectionValue(fields={"reps": DirectValue(2)}),
+    )
+    result = project_loaded_cfg(current, Snapshot(reps=None))
+    assert result is not None
+    assert result.value.fields["reps"] == DirectValue(None)
     assert current.value.fields["reps"] == DirectValue(2)
 
 
@@ -147,6 +158,49 @@ def test_device_label_inverse_requires_unique_name():
     assert isinstance(dev, CfgSectionValue)
     assert dev.fields["flux_dev"] == DirectValue("flux_yoko")
     assert project_loaded_cfg(current, Snapshot(dev={"a": info, "b": info})) is None
+
+
+def test_device_selector_rejects_names_absent_from_live_options():
+    spec = CfgSectionSpec(
+        fields={
+            "dev": CfgSectionSpec(
+                fields={
+                    "jpa_rf_dev": ScalarSpec(
+                        "JPA RF device", str, required=True, choices_source="devices"
+                    )
+                }
+            )
+        }
+    )
+    current = CfgSchema(
+        spec=spec,
+        value=CfgSectionValue(
+            fields={"dev": CfgSectionValue(fields={"jpa_rf_dev": DirectValue("old")})}
+        ),
+    )
+    info = FakeDeviceInfo(address="fake", label="jpa_rf_dev")
+
+    assert (
+        project_loaded_cfg(
+            current,
+            Snapshot(dev={"stale": info}),
+            provide_options=lambda source: ("old",) if source == "devices" else (),
+        )
+        is None
+    )
+    assert project_loaded_cfg(current, Snapshot(dev={"stale": info})) is None
+    adopted = project_loaded_cfg(
+        current,
+        Snapshot(dev={"available": info}),
+        provide_options=lambda source: ("old", "available"),
+    )
+    assert adopted is not None
+    dev = adopted.value.fields["dev"]
+    assert isinstance(dev, CfgSectionValue)
+    assert dev.fields["jpa_rf_dev"] == DirectValue("available")
+    original_dev = current.value.fields["dev"]
+    assert isinstance(original_dev, CfgSectionValue)
+    assert original_dev.fields["jpa_rf_dev"] == DirectValue("old")
 
 
 def test_multi_axis_sweep_preserves_run_only_uniform():
@@ -251,6 +305,40 @@ def test_bath_reset_nested_references_are_custom():
         assert isinstance(child, ReferenceValue)
         assert is_custom_reference_key(child.chosen_key)
         assert isinstance(child.value.fields["waveform"], ReferenceValue)
+
+
+def test_null_in_nested_module_preserves_the_entire_reference():
+    spec = CfgSectionSpec(
+        fields={
+            "reps": ScalarSpec("Reps", int),
+            "modules": CfgSectionSpec(
+                fields={
+                    "pulse": ReferenceSpec(kind="module", allowed=[make_pulse_spec()])
+                }
+            ),
+        }
+    )
+    current = CfgSchema(spec=spec, value=make_default_value(spec))
+    before = deepcopy(current)
+    result = project_loaded_cfg(
+        current,
+        Snapshot(
+            modules={
+                "pulse": {
+                    "type": "pulse",
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": None,
+                    "gain": 0.2,
+                    "waveform": {"style": "const", "length": 0.1},
+                }
+            }
+        ),
+    )
+    assert result is not None
+    assert result.value.fields["reps"] == DirectValue(12)
+    assert result.value.fields["modules"] == before.value.fields["modules"]
+    assert current == before
 
 
 def test_incomplete_module_does_not_invent_defaults():

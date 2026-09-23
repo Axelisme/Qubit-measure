@@ -413,6 +413,9 @@ class CfgEditorService:
         editor_id = self.editor_id_for_owner(owner_key)
         return None if editor_id is None else self.get_draft(editor_id).snapshot()
 
+    def provide_options(self, source_id: str) -> Sequence[object]:
+        return self._bindings.provide_options(source_id)
+
     def prepare_replacement(self, owner_key: str, seed: CfgSchema) -> PreparedCfgEditor:
         """Build off-registry without closing or publishing the current draft."""
         if not owner_key:
@@ -420,6 +423,8 @@ class CfgEditorService:
         previous_id = self.editor_id_for_owner(owner_key)
         draft = self._bindings.new_draft(seed)
         try:
+            if not draft.is_valid():
+                raise ValueError("Replacement cfg editor draft is invalid")
             session = CfgEditorSession(
                 editor_id=self._new_id(owner_key),
                 draft=draft,

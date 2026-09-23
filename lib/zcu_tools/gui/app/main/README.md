@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-23 — Load result Config backfill
+**Last updated:** 2026-09-23 — Load result Config backfill validation
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -275,7 +275,9 @@ It validates a complete detached candidate, replaces the service-owned editor an
 State Config once, and reports `cfg_backfill=applied|not_applied` to Qt and remote.
 Failed backfill keeps Config and its draft unchanged without undoing the loaded
 result. Fields without a reliable runtime inverse keep the current draft value;
-module/waveform references become custom values rather than guessed library keys.
+dynamic selectors must match live options and the new complete draft must be valid
+before publication. Module/waveform references become custom values rather than
+guessed library keys.
 The Guard and LoadService both enforce the adapter's import-validated
 `capabilities.load_data` gate.
 

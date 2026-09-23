@@ -117,6 +117,20 @@ def test_prepare_failure_keeps_live_draft(service):
     assert service.snapshot_owner("tab").value.fields["reps"] == DirectValue(3)
 
 
+def test_prepare_rejects_invalid_complete_draft_without_revoking_owner(service):
+    original, _ = service.open_seeded(seed(1), owner_key="tab")
+    invalid = CfgSchema(
+        spec=seed(1).spec,
+        value=CfgSectionValue(fields={"reps": DirectValue(None)}),
+    )
+
+    with pytest.raises(ValueError, match="invalid"):
+        service.prepare_replacement("tab", invalid)
+    assert service.editor_id_for_owner("tab") == original
+    assert service.get_draft(original).is_valid()
+    assert service.snapshot_owner("tab") == seed(1)
+
+
 def test_replacement_can_create_a_headless_owner(service):
     assert service.snapshot_owner("tab") is None
     prepared = service.prepare_replacement("tab", seed(2))
