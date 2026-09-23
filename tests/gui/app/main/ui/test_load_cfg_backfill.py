@@ -3,7 +3,7 @@ from typing import ClassVar
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QFileDialog
+from qtpy.QtWidgets import QFileDialog, QPushButton
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
@@ -166,11 +166,19 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
 def test_qt_load_status_reports_one_overall_disposition(
     app, monkeypatch, path, expected
 ):
-    _, window, _, tab_id = app
+    _, window, _, _ = app
     messages: list[str] = []
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args: (path, ""))
     monkeypatch.setattr(window, "show_status_message", messages.append)
-    window._on_load_data_clicked(tab_id)
+    tab = window.findChild(ExpTabWidget)
+    assert tab is not None
+    load_button = next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Load Data"
+    )
+    assert load_button.isEnabled()
+    load_button.click()
     assert messages == [expected]
 
 
