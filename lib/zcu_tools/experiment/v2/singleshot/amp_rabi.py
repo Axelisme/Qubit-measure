@@ -324,7 +324,9 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
     ) -> tuple[RabiJointFitResult, Figure]:
         assert result is not None, "no result found"
 
-        fit = fit_rabi_joint(result.gains, result.signals, max_calls=max_calls)
+        fit = fit_rabi_joint(
+            result.gains, result.signals, decay=False, max_calls=max_calls
+        )
         width, height = config.figsize
         fig = plt.figure(figsize=(width, height * 1.6), layout="constrained")
         assert isinstance(fig, Figure)

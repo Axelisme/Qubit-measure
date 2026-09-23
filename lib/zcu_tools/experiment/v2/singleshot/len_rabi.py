@@ -324,11 +324,14 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         self,
         result: LenRabiResult | None = None,
         *,
+        decay: bool = True,
         max_calls: int | None = None,
     ) -> tuple[RabiJointFitResult, Figure]:
         assert result is not None, "no result found"
 
-        fit = fit_rabi_joint(result.lengths, result.signals, max_calls=max_calls)
+        fit = fit_rabi_joint(
+            result.lengths, result.signals, decay=decay, max_calls=max_calls
+        )
         width, height = config.figsize
         fig = plt.figure(figsize=(width, height * 1.6), layout="constrained")
         assert isinstance(fig, Figure)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, TypeAlias
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -28,7 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeResultBase,
     ExpContext,
     MetaDictWriteback,
-    NoAnalyzeParams,
+    ParamMeta,
     RunRequest,
     WritebackItem,
     WritebackRequest,
@@ -48,6 +48,11 @@ SsLenRabiRunResult: TypeAlias = LenRabiResult
 
 
 @dataclass
+class SsLenRabiAnalyzeParams:
+    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
+
+
+@dataclass
 class SsLenRabiAnalyzeResult(AnalyzeResultBase):
     # The full numeric fit is intentionally non-JSON-safe and therefore omitted
     # from the GUI summary. The operator reviews the population/fit Figure while
@@ -57,7 +62,9 @@ class SsLenRabiAnalyzeResult(AnalyzeResultBase):
 
 
 class SsLenRabiAdapter(
-    BaseAdapter[LenRabiCfg, SsLenRabiRunResult, SsLenRabiAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[
+        LenRabiCfg, SsLenRabiRunResult, SsLenRabiAnalyzeResult, SsLenRabiAnalyzeParams
+    ]
 ):
     exp_cls = LenRabiExp
     ExpCfg_cls: ClassVar[Any] = LenRabiCfg
@@ -132,9 +139,11 @@ class SsLenRabiAdapter(
         return LenRabiExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
-        self, req: AnalyzeRequest[SsLenRabiRunResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[SsLenRabiRunResult, SsLenRabiAnalyzeParams]
     ) -> SsLenRabiAnalyzeResult:
-        fit_result, figure = LenRabiExp().analyze(req.run_result)
+        fit_result, figure = LenRabiExp().analyze(
+            req.run_result, decay=req.analyze_params.decay
+        )
         return SsLenRabiAnalyzeResult(fit_result=fit_result, figure=figure)
 
     def get_writeback_items(
