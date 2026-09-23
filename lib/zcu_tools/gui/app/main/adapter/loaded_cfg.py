@@ -110,7 +110,7 @@ def _project_node(
             if provide_options is None:
                 return False, None
             options = provide_options(spec.choices_source)
-            if isinstance(options, (str, bytes)):
+            if isinstance(options, (str, bytes)) or not isinstance(options, Sequence):
                 raise TypeError(
                     "Dynamic choice provider must return an option sequence"
                 )

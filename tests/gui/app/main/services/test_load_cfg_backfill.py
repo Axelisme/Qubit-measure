@@ -280,6 +280,8 @@ def test_device_choice_disappears_before_draft_preparation(device_app):
         (TypeError("device discovery failed"), TypeError),
         (ValueError("device discovery failed"), ValueError),
         ("not an option list", TypeError),
+        ({"stable": True, "new": True}, TypeError),
+        ({"stable", "new"}, TypeError),
     ],
 )
 def test_device_option_provider_failure_aborts_entire_backfill(
@@ -289,7 +291,7 @@ def test_device_option_provider_failure_aborts_entire_backfill(
     adapter.load.return_value = Result(
         RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
     )
-    host.list_device_names.side_effect = [first_response, ["stable"]]
+    host.list_device_names.side_effect = [first_response, ["stable", "new"]]
     before = state.get_tab("tab").cfg_schema
     draft_before = editors.snapshot_owner("tab")
     version = state.version.get("tab:tab:cfg")
