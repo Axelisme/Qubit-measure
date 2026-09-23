@@ -104,17 +104,20 @@ def _project_node(
         )
         try:
             validate_finished_cfg(schema, resolve_reference=None)
-            if spec.choices_source and raw is not None:
-                if provide_options is None:
-                    return False, None
-                options = provide_options(spec.choices_source)
-                if isinstance(options, (str, bytes)) or (
-                    raw not in options
-                    and not (spec.type is str and not spec.required and raw == "")
-                ):
-                    return False, None
         except (RuntimeError, TypeError, ValueError):
             return False, None
+        if spec.choices_source and raw is not None:
+            if provide_options is None:
+                return False, None
+            options = provide_options(spec.choices_source)
+            if isinstance(options, (str, bytes)):
+                raise TypeError(
+                    "Dynamic choice provider must return an option sequence"
+                )
+            if raw not in options and not (
+                spec.type is str and not spec.required and raw == ""
+            ):
+                return False, None
         return True, value
     if isinstance(spec, SweepSpec) and spec.editable and isinstance(raw, Mapping):
         try:

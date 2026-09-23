@@ -273,6 +273,47 @@ def test_device_choice_disappears_before_draft_preparation(device_app):
     assert events == []
 
 
+@pytest.mark.parametrize(
+    ("first_response", "error_type"),
+    [
+        (RuntimeError("device discovery failed"), RuntimeError),
+        (TypeError("device discovery failed"), TypeError),
+        (ValueError("device discovery failed"), ValueError),
+        ("not an option list", TypeError),
+    ],
+)
+def test_device_option_provider_failure_aborts_entire_backfill(
+    device_app, caplog, first_response, error_type
+):
+    state, editors, service, adapter, bus, host, original = device_app
+    adapter.load.return_value = Result(
+        RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
+    )
+    host.list_device_names.side_effect = [first_response, ["stable"]]
+    before = state.get_tab("tab").cfg_schema
+    draft_before = editors.snapshot_owner("tab")
+    version = state.version.get("tab:tab:cfg")
+    events = []
+    bus.subscribe(TabContentChangedPayload, events.append)
+
+    outcome = service.load_result(LoadPermit("tab"), "result.hdf5")
+
+    assert outcome.cfg_backfill == "not_applied"
+    assert state.get_tab("tab").run.result is adapter.load.return_value
+    assert state.get_tab("tab").cfg_schema is before
+    assert state.version.get("tab:tab:cfg") == version
+    assert editors.editor_id_for_owner("tab") == original
+    assert editors.snapshot_owner("tab") == draft_before
+    assert events == []
+    assert any(
+        record.exc_info and record.exc_info[0] is error_type
+        for record in caplog.records
+    )
+    assert editors.get_draft(original).is_valid()
+    editors.set_field(original, "reps", 9)
+    assert editors.snapshot_owner("tab").value.fields["reps"] == DirectValue(9)
+
+
 def test_prepare_failure_does_not_undo_loaded_result(app, monkeypatch):
     state, editors, service, adapter, _ = app
     before = state.get_tab("tab").cfg_schema

@@ -276,8 +276,9 @@ State Config once, and reports `cfg_backfill=applied|not_applied` to Qt and remo
 Failed backfill keeps Config and its draft unchanged without undoing the loaded
 result. Fields without a reliable runtime inverse keep the current draft value;
 dynamic selectors must match live options and the new complete draft must be valid
-before publication. Module/waveform references become custom values rather than
-guessed library keys.
+before publication. A failed live option lookup rejects the entire backfill rather
+than silently skipping that selector. Module/waveform references become custom
+values rather than guessed library keys.
 The Guard and LoadService both enforce the adapter's import-validated
 `capabilities.load_data` gate.
 
