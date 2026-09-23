@@ -71,7 +71,13 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
-from .ports import CfgEdit, CfgEditResult, ContextWritePort
+from .ports import (
+    CfgEdit,
+    CfgEditResult,
+    ContextWritePort,
+    PreparedCfgEditor,
+    RetiredCfgEditor,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -228,6 +234,29 @@ class CfgEditorSession:
         return self.draft.snapshot()
 
 
+@dataclass
+class _PreparedReplacement:
+    service: CfgEditorService
+    session: CfgEditorSession
+    previous_id: str | None
+    consumed: bool = False
+
+    @property
+    def editor_id(self) -> str:
+        return self.session.editor_id
+
+
+@dataclass
+class _RetiredReplacement:
+    service: CfgEditorService
+    session: CfgEditorSession
+    closed: bool = False
+
+    @property
+    def editor_id(self) -> str:
+        return self.session.editor_id
+
+
 class CfgEditorService:
     """Repository for ``CfgEditorSession`` aggregates, keyed by a server id.
 
@@ -379,6 +408,94 @@ class CfgEditorService:
         if gc:
             self._evict_excess_gc()
         return editor_id, session.current_targets()
+
+    def snapshot_owner(self, owner_key: str) -> CfgSchema | None:
+        editor_id = self.editor_id_for_owner(owner_key)
+        return None if editor_id is None else self.get_draft(editor_id).snapshot()
+
+    def prepare_replacement(self, owner_key: str, seed: CfgSchema) -> PreparedCfgEditor:
+        """Build off-registry without closing or publishing the current draft."""
+        if not owner_key:
+            raise ValueError("Replacement requires an owner key")
+        previous_id = self.editor_id_for_owner(owner_key)
+        draft = self._bindings.new_draft(seed)
+        try:
+            session = CfgEditorSession(
+                editor_id=self._new_id(owner_key),
+                draft=draft,
+                resolve_value_ref=self._bindings.resolve_value_ref,
+                gc=False,
+                owner_key=owner_key,
+                seq=next(self._seq),
+            )
+            session.current_targets()
+            self._attach_change_stream(session)
+            return _PreparedReplacement(self, session, previous_id)
+        except Exception:
+            draft.close()
+            raise
+
+    def activate_replacement(
+        self, prepared: PreparedCfgEditor
+    ) -> RetiredCfgEditor | None:
+        """Swap registry membership without emitting or closing viewer resources.
+
+        Preparation and activation must run in the same owner-thread turn.
+        A changed owner is a programming error; discard the prepared token.
+        """
+        if (
+            not isinstance(prepared, _PreparedReplacement)
+            or prepared.service is not self
+        ):
+            raise ValueError("Replacement belongs to another service")
+        if prepared.consumed:
+            raise ValueError("Replacement has already been consumed")
+        session = prepared.session
+        assert session.owner_key is not None
+        if self.editor_id_for_owner(session.owner_key) != prepared.previous_id:
+            raise ValueError("Replacement owner changed after preparation")
+        previous = (
+            self._editors.get(prepared.previous_id)
+            if prepared.previous_id is not None
+            else None
+        )
+        retired = _RetiredReplacement(self, previous) if previous is not None else None
+        if previous is not None:
+            if previous.change_cb is not None:
+                previous.draft.on_change.disconnect(previous.change_cb)
+                previous.change_cb = None
+            del self._editors[previous.editor_id]
+        self._editors[session.editor_id] = session
+        prepared.consumed = True
+        return retired
+
+    def discard_prepared(self, prepared: PreparedCfgEditor) -> None:
+        if (
+            not isinstance(prepared, _PreparedReplacement)
+            or prepared.service is not self
+        ):
+            raise ValueError("Replacement belongs to another service")
+        if prepared.consumed:
+            return
+        prepared.consumed = True
+        prepared.session.draft.close()
+
+    def retire_replaced(self, retired: RetiredCfgEditor) -> None:
+        if not isinstance(retired, _RetiredReplacement) or retired.service is not self:
+            raise ValueError("Retired editor belongs to another service")
+        if retired.closed:
+            return
+        retired.closed = True
+        session = retired.session
+        try:
+            session.draft.close()
+        finally:
+            try:
+                self._version_drop(session.editor_id)
+            finally:
+                self._emit(
+                    session.editor_id, "editor_closed", lambda: {"reason": "reopened"}
+                )
 
     def editor_id_for_owner(self, owner_key: str) -> str | None:
         for editor_id, session in self._editors.items():
