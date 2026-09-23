@@ -43,7 +43,7 @@ from __future__ import annotations
 import itertools
 import logging
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -503,13 +503,10 @@ class CfgEditorService:
     # ------------------------------------------------------------------
 
     def _new_id(self, owner_key: str | None) -> str:
-        # Owner-keyed sessions (a tab cfg draft / writeback item) read as
-        # '<owner>-ed' so the agent sees which tab/item an editor_id belongs to
-        # without a lookup; the owner_key is already unique. Owner-less sessions
-        # (agent-opened ml-entry edits) keep an opaque short id.
-        if owner_key:
-            return f"{owner_key}-ed"
-        return "editor-" + uuid.uuid4().hex[:8]
+        # Identify a session lifetime, not only its owner: stale client handles
+        # must never address a replacement draft after load or reset.
+        prefix = f"{owner_key}-ed" if owner_key else "editor"
+        return f"{prefix}-{uuid.uuid4().hex}"
 
     def _attach_change_stream(self, session: CfgEditorSession) -> None:
         """Bind a root ``on_change`` callback that pushes ``editor_changed``.
