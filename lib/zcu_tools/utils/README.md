@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-09-01 — Len Rabi likelihood responsibility boundary
+**Last updated:** 2026-09-23 — nearest-center singleshot regions
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -70,7 +70,7 @@ iminuit state。`fit_ge_decay(..., share_t1=True)` 是第一個 tracer：g/e tra
 `t1` identity，並由 global covariance 投影既有 T1 error result。
 
 Singleshot readout-transition family亦提供固定histogram edges的integrated-bin conditional
-probabilities與non-overlapping g/e circle積分；Len Rabi joint likelihood以同一conditional
+probabilities與radius-limited nearest-center g/e region積分；Len Rabi joint likelihood以同一conditional
 family建立multinomial NLL及derived confusion matrix，不以bin-center PDF高度或free matrix
 parameters取代其機率語意。這個utils Module只擁有conditional probability與circle integration；
 Len Rabi experiment Module擁有optimizer continuation、backend validity、calibration阻擋與Figure
@@ -142,3 +142,5 @@ exception；若 exception 來自 Pyro 且包含 `_pyroTraceback`，會把 remote
 `utils.process` 保留 ndarray dtype 形狀的 helper 會優先使用 numpy ufunc
 （例如 `np.subtract`）來表達泛型 array 運算。這比在 `NDArray[T]` 上直接使用
 Python 運算子更容易讓 numpy stub 維持 dtype 關係，也避免用 `cast()` 補洞。
+
+Program 與離線分析共用 `shot_classification` 的互斥分類；等距與 radius 邊界不納入 g/e。Gaussian region 積分使用相同的圓與半平面交集。

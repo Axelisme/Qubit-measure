@@ -15,6 +15,7 @@ from qick.qick_asm import (
 )
 
 from zcu_tools.progress_bar import make_pbar
+from zcu_tools.utils.shot_classification import classify_shots
 
 
 class CancelFlagProtocol(Protocol):
@@ -361,11 +362,10 @@ class SingleShotMixin(TypedAcquireMixin):
             if remove_offset:
                 offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # type: ignore
                 avg -= offset
-            g_dist = np.abs(avg.dot([1, 1j]) - g_center)
-            e_dist = np.abs(avg.dot([1, 1j]) - e_center)
-            g_shot = np.heaviside(ge_radius - g_dist, 0)
-            e_shot = np.heaviside(ge_radius - e_dist, 0)
-            shots.append(np.stack([g_shot, e_shot], axis=-1))
+            g_shot, e_shot, _ = classify_shots(
+                avg.dot([1, 1j]), g_center, e_center, ge_radius
+            )
+            shots.append(np.stack([g_shot, e_shot], axis=-1).astype(np.float64))
         return shots
 
 

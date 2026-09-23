@@ -12,6 +12,8 @@ _QUADRATURE_NODES, _QUADRATURE_WEIGHTS = np.polynomial.legendre.leggauss(48)
 _TRANSITION_POINTS = 0.5 * (_QUADRATURE_NODES + 1.0)
 _TRANSITION_WEIGHTS = 0.5 * _QUADRATURE_WEIGHTS
 
+from zcu_tools.utils.shot_classification import gaussian_region_probability
+
 from .base import assign_init_p, fit_func
 
 
@@ -138,13 +140,10 @@ def transition_state_circle_probabilities(
     length_ratio: float,
     radius: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Integrate fitted conditional states over non-overlapping g/e circles."""
-    from scipy.stats import ncx2
+    """Integrate conditional states over radius-limited nearest-center regions."""
 
     if se <= sg or sigma <= 0.0 or radius < 0.0:
         raise ValueError("invalid circle-classification geometry")
-    if radius > 0.5 * (se - sg):
-        raise ValueError("classification circles must not overlap")
 
     rg = p_avg * length_ratio
     re = (1.0 - p_avg) * length_ratio
@@ -152,7 +151,6 @@ def transition_state_circle_probabilities(
     weights_g = calc_fc(points, rg, re) * _TRANSITION_WEIGHTS
     weights_e = calc_fc(points, re, rg) * _TRANSITION_WEIGHTS
     separation = se - sg
-    limit = (radius / sigma) ** 2
 
     def circle_probability(
         atom_weight: float,
@@ -160,10 +158,11 @@ def transition_state_circle_probabilities(
         path_distances: NDArray[np.float64],
         weights: NDArray[np.float64],
     ) -> float:
-        atom = atom_weight * float(ncx2.cdf(limit, 2, (atom_distance / sigma) ** 2))
-        continuous = float(
-            np.dot(ncx2.cdf(limit, 2, (path_distances / sigma) ** 2), weights)
+        probabilities = gaussian_region_probability(
+            np.concatenate(([atom_distance], path_distances)), sigma, radius, separation
         )
+        atom = atom_weight * probabilities[0]
+        continuous = float(np.dot(probabilities[1:], weights))
         return float(np.clip(atom + continuous, 0.0, 1.0))
 
     gg = circle_probability(np.exp(-rg), 0.0, separation * points, weights_g)

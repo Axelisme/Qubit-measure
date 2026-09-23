@@ -5,8 +5,10 @@ from typing import Any, Protocol
 
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.patches import Circle
+from matplotlib.patches import Polygon
 from numpy.typing import NDArray
+
+from zcu_tools.utils.shot_classification import classify_shots
 
 
 class RawShotProgram(Protocol):
@@ -76,12 +78,7 @@ def classify_result(
     radius: float,
 ) -> tuple[NDArray[np.bool_], NDArray[np.bool_], NDArray[np.bool_]]:
     """Classify shots into ground, excited, and other."""
-    dists_g = np.abs(signals - np.array(g_center))
-    dists_e = np.abs(signals - np.array(e_center))
-    mask_g = dists_g < radius
-    mask_e = dists_e < radius
-    mask_o = ~(mask_g | mask_e)
-    return mask_g, mask_e, mask_o
+    return classify_shots(signals, g_center, e_center, radius)
 
 
 def plot_with_classified(
@@ -129,24 +126,21 @@ def plot_with_classified(
         label="Excited",
         **plt_params,  # type: ignore
     )
-    ax.add_patch(
-        Circle(
-            (g_center.real, g_center.imag),
-            radius,
-            color="b",
-            fill=False,
-            linestyle="--",
+    separation = abs(e_center - g_center)
+    axis = (e_center - g_center) / separation
+    cut_angle = np.arccos(separation / (2 * radius)) if radius > separation / 2 else 0.0
+    angles = np.linspace(cut_angle, 2 * np.pi - cut_angle, 361)
+    for center, direction, color in ((g_center, axis, "b"), (e_center, -axis, "r")):
+        boundary = center + direction * radius * np.exp(1j * angles)
+        ax.add_patch(
+            Polygon(
+                np.column_stack((boundary.real, boundary.imag)),
+                closed=True,
+                color=color,
+                fill=False,
+                linestyle="--",
+            )
         )
-    )
-    ax.add_patch(
-        Circle(
-            (e_center.real, e_center.imag),
-            radius,
-            color="r",
-            fill=False,
-            linestyle="--",
-        )
-    )
 
     ax.set_aspect("equal")
     ax.legend()

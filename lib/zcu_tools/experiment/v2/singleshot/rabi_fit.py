@@ -473,7 +473,7 @@ def _mixture_populations(
 def _confusion_matrix(
     params: RabiPhysicalParams,
 ) -> tuple[float, NDArray[np.float64], float]:
-    max_radius = 0.5 * (params.center_e - params.center_g)
+    max_radius = params.center_e - params.center_g
 
     def matrix_at(radius: float) -> NDArray[np.float64]:
         g_row, e_row = transition_state_circle_probabilities(
@@ -502,6 +502,7 @@ def _confusion_matrix(
     radius = float(optimum.x)
     if not optimum.success or not np.isfinite(radius):
         raise RuntimeError("classification-radius optimization failed")
+    radius = min((radius, max_radius), key=objective)
     matrix = matrix_at(radius)
     return radius, matrix, float(np.linalg.cond(matrix))
 

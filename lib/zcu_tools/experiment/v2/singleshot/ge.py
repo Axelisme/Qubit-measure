@@ -34,6 +34,7 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
 )
+from zcu_tools.utils.shot_classification import gaussian_region_probability
 
 from .util import classify_result, plot_with_classified, raw_shots_to_signal
 
@@ -91,29 +92,6 @@ def solve_confusion_matrix(
     return confusion_matrix
 
 
-def calc_overlay(s: float, x: float, r: float) -> float:
-    """計算二維高斯分佈在指定偏心圓內的比例"""
-    from scipy.stats import ncx2
-
-    if s <= 0:
-        raise ValueError("標準差 s 必須大於 0")
-    if r < 0:
-        return 0.0
-
-    # 自由度 k = 2 (對應二維空間)
-    df = 2
-
-    # 非中心參數 lambda = (dist_center / s)^2
-    # 這裡圓心距離原點的距離為 x
-    nc = (x / s) ** 2
-
-    # 積分上限需歸一化： (r / s)^2
-    limit = (r / s) ** 2
-
-    # 使用非中心卡方分佈的累積分佈函數 (CDF)
-    return ncx2.cdf(limit, df, nc).item()
-
-
 def optimize_ge_radius(
     g_signals: NDArray[np.complex128],
     e_signals: NDArray[np.complex128],
@@ -125,6 +103,8 @@ def optimize_ge_radius(
 ) -> float:
     from scipy.optimize import minimize_scalar
 
+    # Validate geometry even before the optimizer evaluates its first candidate.
+    classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, 0.0)
     ge_dist = abs(g_center - e_center)
     A_init = make_init_matrix(init_pops)
 
@@ -144,8 +124,17 @@ def optimize_ge_radius(
         n_ee = ee_mask.sum() / ee_mask.shape[0]
         n_eo = eo_mask.sum() / eo_mask.shape[0]
 
-        # assume other state is in the middle of g and e, calculate effective population
-        n_og = calc_overlay(sigma, ge_dist / 2, radius) if consider_other else 0.0
+        # Radius-selection penalty only: model other at the midpoint.
+        # The returned calibration retains the isolated-other row.
+        n_og = (
+            float(
+                gaussian_region_probability(
+                    np.array([ge_dist / 2]), sigma, radius, ge_dist
+                )[0]
+            )
+            if consider_other
+            else 0.0
+        )
         n_oe = n_og
         n_oo = 1.0 - n_og - n_oe
 
@@ -153,10 +142,14 @@ def optimize_ge_radius(
         confusion_matrix = solve_confusion_matrix(A_init, Q)
 
         # calculate condision number of confusion matrix as loss
-        return np.linalg.cond(confusion_matrix)
+        condition = float(np.linalg.cond(confusion_matrix))
+        return condition if np.isfinite(condition) else 1e12
 
-    result = minimize_scalar(loss_fn, bounds=(0.0, ge_dist / 2))
-    return float(result.x)  # type: ignore
+    result = minimize_scalar(loss_fn, bounds=(0.0, ge_dist), method="bounded")
+    if not result.success or not np.isfinite(result.x):
+        raise RuntimeError("classification-radius optimization failed")
+    # The optimum can be the upper bound; bounded minimization excludes endpoints.
+    return min((float(result.x), ge_dist), key=loss_fn)
 
 
 # ------------------------------------------------------------
