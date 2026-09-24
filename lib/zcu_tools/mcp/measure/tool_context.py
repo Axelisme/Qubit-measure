@@ -8,7 +8,12 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import Any, Protocol
 
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.mcp.core.bridge import (
+    McpBridge,
+    MCPBridgeConfig,
+    generated_rpc_timeout_seconds,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
 
@@ -25,11 +30,25 @@ class GuiRpcSender(Protocol):
 class MeasureToolContext:
     config: MCPBridgeConfig
     session: MeasureMcpSession
-    bridge: McpBridge
-    method_specs: Mapping[str, Any]
-    send_gui_rpc: GuiRpcSender
-    overview: Callable[[], dict[str, Any]]
+    method_specs: Mapping[str, MethodSpec]
     resolve_connect_port: Callable[[MCPBridgeConfig, int | None], int]
+
+    @property
+    def bridge(self) -> McpBridge:
+        return self.session.bridge
+
+    def send_gui_rpc(
+        self,
+        method: str,
+        params: dict[str, Any],
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        """Send through this session with the wire method's timeout policy."""
+        if timeout_seconds is None:
+            if method in {"operation.await", "notify.await"}:
+                raise ValueError(f"{method!r} requires explicit timeout_seconds")
+            timeout_seconds = generated_rpc_timeout_seconds(self.method_specs[method])
+        return self.session.send_gui_rpc(method, params, float(timeout_seconds))
 
 
 _CONTEXT: MeasureToolContext | None = None
@@ -78,7 +97,9 @@ def send_gui_rpc(
 
 
 def _assemble_overview() -> dict[str, Any]:
-    return _ctx().overview()
+    from zcu_tools.mcp.measure.tools_overview import _assemble_overview as overview
+
+    return overview()
 
 
 def resolve_connect_port(config: MCPBridgeConfig, requested: int | None) -> int:

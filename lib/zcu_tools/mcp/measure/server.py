@@ -87,6 +87,7 @@ from zcu_tools.mcp.measure import (  # noqa: E402
     tools_soc,
     tools_tab,
 )
+from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
 from zcu_tools.mcp.measure.exposure import (  # noqa: E402
     build_mcp_exposure_plan,
 )
@@ -392,11 +393,8 @@ def _resolve_connect_port_late(config: MCPBridgeConfig, requested: int | None) -
 _TOOL_CTX = MeasureToolContext(
     config=_CONFIG,
     session=_SESSION,
-    bridge=_BRIDGE,
     method_specs=METHOD_SPECS,
-    send_gui_rpc=_send_gui_rpc_late,
-    overview=_overview_late,
-    resolve_connect_port=_resolve_connect_port_late,
+    resolve_connect_port=resolve_connect_port,
 )
 tool_context.bind_context(_TOOL_CTX)
 
@@ -518,23 +516,7 @@ _NON_GENERATED_METHODS = _MCP_EXPOSURE.non_generated_methods
 # Generated tools (schema from the ParamSpec SSOT, forwarding through the guarded
 # send_gui_rpc) overlaid with the hand-written override subset (lifecycle /
 # fan-out / file-write / coercion). assemble_tools fails fast on a name collision.
-TOOLS: dict[str, dict[str, Any]] = assemble_tools(
-    generate_tools(
-        _CONFIG,
-        METHOD_SPECS,
-        _MCP_EXPOSURE.non_generated_methods,
-        send_gui_rpc,
-    ),
-    _OVERRIDE_TOOLS,
-    _OVERRIDE_NAMES,
-)
-
-# Wrap every top-level handler for call logging. Transparent
-# side-effect only: same args in, same result out (or re-raised exception);
-# only writes one JSONL line per invocation.  Applied after assemble_tools so
-# generated + override + bundle tools are all covered in a single pass.
-for _tool_name, _tool_entry in TOOLS.items():
-    _tool_entry["handler"] = wrap_handler(_tool_name, _tool_entry["handler"])
+TOOLS = build_measure_tools(_TOOL_CTX)
 
 
 def _cleanup_on_exit() -> None:
