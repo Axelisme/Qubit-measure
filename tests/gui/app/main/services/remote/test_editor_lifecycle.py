@@ -6,8 +6,9 @@ import json
 import socket
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
@@ -32,11 +33,29 @@ class Client:
         self.socket = socket.create_connection(("127.0.0.1", port), timeout=1)
         self.scheduler = scheduler
         self.buffer = bytearray()
+        self.events: list[dict[str, object]] = []
         self.sequence = 0
 
     def close(self) -> None:
         self.socket.close()
         self.buffer.clear()
+        self.events.clear()
+
+    def _read_frame(self, deadline: float) -> dict[str, object]:
+        while time.monotonic() < deadline:
+            if b"\n" in self.buffer:
+                line, _, remaining = self.buffer.partition(b"\n")
+                self.buffer = bytearray(remaining)
+                frame: dict[str, object] = json.loads(line)
+                return frame
+            try:
+                chunk = self.socket.recv(65536)
+                assert chunk, "connection closed before next frame"
+                self.buffer.extend(chunk)
+                continue
+            except BlockingIOError:
+                self.scheduler.pump_once(block=True, timeout=0.005)
+        pytest.fail("no wire frame before deadline")
 
     def call(self, method: str, **params: object) -> dict[str, object]:
         self.sequence += 1
@@ -50,20 +69,26 @@ class Client:
         self.socket.setblocking(False)
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            try:
-                chunk = self.socket.recv(65536)
-                assert chunk, "connection closed before reply"
-                self.buffer.extend(chunk)
-            except BlockingIOError:
-                pass
-            while b"\n" in self.buffer:
-                line, _, remaining = self.buffer.partition(b"\n")
-                self.buffer = bytearray(remaining)
-                response: dict[str, object] = json.loads(line)
-                if response.get("id") == rid:
-                    return response
-            self.scheduler.pump_once(block=True, timeout=0.005)
+            frame = self._read_frame(deadline)
+            if frame.get("id") == rid:
+                return frame
+            assert "event" in frame and "id" not in frame, frame
+            self.events.append(frame)
         pytest.fail(f"no reply for {method}")
+
+    def next_event(self, expected: str) -> dict[str, object]:
+        event = (
+            self.events.pop(0)
+            if self.events
+            else self._read_frame(time.monotonic() + 3)
+        )
+        assert event.get("event") == expected, event
+        return event
+
+    def assert_no_events(self) -> None:
+        # A reply queued after the action fences its earlier pushes on this link.
+        self.result("resources.versions")
+        assert self.events == []
 
     def result(self, method: str, **params: object) -> dict[str, object]:
         response = self.call(method, **params)
@@ -257,3 +282,190 @@ def test_non_editor_request_and_empty_disconnect_do_not_reclaim(
     connections.service.stop()
     connections.scheduler.pump_all()
     assert connections.reclaimed == []
+
+
+def test_editor_subscription_routes_changes_and_unsubscribe(
+    connections: Connections, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner, other = connections.connect(), connections.connect()
+    editor_id = owner.open_editor()
+    assert owner.result("editor.subscribe", editor_id=editor_id) == {
+        "subscribed_editors": [editor_id]
+    }
+    owner.result("editor.set_field", editor_id=editor_id, path="length", value=0.5)
+    event = owner.next_event("editor_changed")
+    assert set(event) == {"event", "payload"}
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    assert payload["editor_id"] == editor_id
+    assert any(entry["path"] == "length" for entry in payload["paths"])
+    other.assert_no_events()
+
+    assert owner.result("editor.unsubscribe", editor_id=editor_id) == {
+        "subscribed_editors": []
+    }
+    draft = connections.controller.get_cfg_editor_draft(editor_id)
+    snapshot = MagicMock(wraps=draft.iter_settable_targets)
+    monkeypatch.setattr(draft, "iter_settable_targets", snapshot)
+    owner.result("editor.set_field", editor_id=editor_id, path="length", value=0.6)
+    snapshot.assert_not_called()
+    owner.assert_no_events()
+    other.assert_no_events()
+
+
+def test_editor_closed_push_clears_only_delivered_subscription(
+    connections: Connections,
+) -> None:
+    owner = connections.connect()
+    editor_id = owner.open_editor()
+    owner.result("editor.subscribe", editor_id=editor_id)
+    owner.result("editor.discard", editor_id=editor_id)
+    closed = owner.next_event("editor_closed")
+    assert closed == {
+        "event": "editor_closed",
+        "payload": {"editor_id": editor_id, "reason": "discarded"},
+    }
+    assert owner.result("editor.subscribe", editor_id="future") == {
+        "subscribed_editors": ["future"]
+    }
+    owner.assert_no_events()
+
+
+@pytest.mark.parametrize("editor_id", ["", 0, None])
+def test_editor_subscription_rejects_invalid_id(
+    connections: Connections, editor_id: object
+) -> None:
+    client = connections.connect()
+    for method in ("editor.subscribe", "editor.unsubscribe"):
+        response = client.call(method, editor_id=editor_id)
+        assert response["ok"] is False
+        error = response["error"]
+        assert isinstance(error, dict)
+        assert error["code"] == "invalid_params"
+    client.assert_no_events()
+
+
+def test_editor_subscription_can_precede_open_and_is_per_client(
+    connections: Connections,
+) -> None:
+    a, b = connections.connect(), connections.connect()
+    assert a.result("editor.subscribe", editor_id="future") == {
+        "subscribed_editors": ["future"]
+    }
+    assert b.result("editor.subscribe", editor_id="other") == {
+        "subscribed_editors": ["other"]
+    }
+    assert a.result("editor.unsubscribe", editor_id="future") == {
+        "subscribed_editors": []
+    }
+    a.assert_no_events()
+    b.assert_no_events()
+
+
+def test_editor_without_subscribers_does_not_build_snapshot(
+    connections: Connections, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = connections.connect()
+    editor_id = owner.open_editor()
+    draft = connections.controller.get_cfg_editor_draft(editor_id)
+    snapshot = MagicMock(wraps=draft.iter_settable_targets)
+    monkeypatch.setattr(draft, "iter_settable_targets", snapshot)
+
+    owner.result("editor.set_field", editor_id=editor_id, path="length", value=0.5)
+
+    snapshot.assert_not_called()
+    owner.assert_no_events()
+
+
+def test_editor_change_builds_one_snapshot_for_two_subscribers(
+    connections: Connections, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner, other = connections.connect(), connections.connect()
+    editor_id = owner.open_editor()
+    owner.result("editor.subscribe", editor_id=editor_id)
+    other.result("editor.subscribe", editor_id=editor_id)
+    draft = connections.controller.get_cfg_editor_draft(editor_id)
+    snapshot = MagicMock(wraps=draft.iter_settable_targets)
+    monkeypatch.setattr(draft, "iter_settable_targets", snapshot)
+
+    owner.result("editor.set_field", editor_id=editor_id, path="length", value=0.5)
+
+    first = owner.next_event("editor_changed")
+    assert first == other.next_event("editor_changed")
+    payload = first["payload"]
+    assert isinstance(payload, dict)
+    assert payload["editor_id"] == editor_id
+    snapshot.assert_called_once_with()
+
+
+def test_editor_snapshot_failure_is_logged_without_push(
+    connections: Connections,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    owner = connections.connect()
+    editor_id = owner.open_editor()
+    owner.result("editor.subscribe", editor_id=editor_id)
+    draft = connections.controller.get_cfg_editor_draft(editor_id)
+    monkeypatch.setattr(
+        draft,
+        "iter_settable_targets",
+        MagicMock(side_effect=RuntimeError("paths failed")),
+    )
+
+    with caplog.at_level("ERROR"):
+        owner.result("editor.set_field", editor_id=editor_id, path="length", value=0.5)
+
+    owner.assert_no_events()
+    assert f"failed to build editor push {editor_id}/editor_changed" in caplog.text
+
+
+def test_failed_editor_closed_encoding_keeps_subscription(
+    connections: Connections,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from zcu_tools.gui.app.main.services.remote import service as service_module
+
+    owner = connections.connect()
+    editor_id = owner.open_editor()
+    owner.result("editor.subscribe", editor_id=editor_id)
+    encode = service_module.encode_line
+
+    def fail_closed(value: Mapping[str, object]) -> bytes:
+        if value.get("event") == "editor_closed":
+            raise RuntimeError("closed encoding failed")
+        return encode(value)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "encode_line", fail_closed)
+        with caplog.at_level("ERROR"):
+            owner.result("editor.discard", editor_id=editor_id)
+
+    owner.assert_no_events()
+    subscribed = owner.result("editor.subscribe", editor_id="future")
+    editor_ids = subscribed["subscribed_editors"]
+    assert isinstance(editor_ids, list)
+    assert set(editor_ids) == {editor_id, "future"}
+    assert f"failed to build editor push {editor_id}/editor_closed" in caplog.text
+
+
+def test_editor_can_subscribe_after_other_client_disconnect(
+    connections: Connections,
+) -> None:
+    a, b = connections.connect(), connections.connect()
+    a_id = a.open_editor()
+    editor_id = b.open_editor()
+    a.close()
+    connections.wait(lambda: bool(connections.reclaimed))
+    b.assert_missing(a_id)
+
+    assert b.result("editor.subscribe", editor_id=editor_id) == {
+        "subscribed_editors": [editor_id]
+    }
+    b.result("editor.set_field", editor_id=editor_id, path="length", value=0.5)
+    event = b.next_event("editor_changed")
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    assert payload["editor_id"] == editor_id
+    b.assert_no_events()
