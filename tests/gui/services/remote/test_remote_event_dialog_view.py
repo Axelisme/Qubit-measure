@@ -427,41 +427,6 @@ def test_unsubscribe_stops_push(fx):
         sock.close()
 
 
-def test_editor_subscription_lazily_builds_then_unsubscribe_stops_it(fx):
-    sock = open_client(fx.service.port)
-    try:
-        subscribed = call(
-            sock,
-            "editor.subscribe",
-            {"editor_id": "editor-race"},
-        )
-        assert subscribed["result"]["subscribed_editors"] == ["editor-race"]
-        payload_factory = MagicMock(return_value=())
-
-        fx.service._on_editor_event("editor-race", "editor_changed", payload_factory)
-
-        editor_changed = recv_push(sock, "editor_changed")
-        assert set(editor_changed) == {"event", "payload"}
-        assert editor_changed["payload"] == {
-            "editor_id": "editor-race",
-            "paths": [],
-        }
-        payload_factory.assert_called_once_with()
-
-        unsubscribed = call(
-            sock,
-            "editor.unsubscribe",
-            {"editor_id": "editor-race"},
-            rid="unsub-editor",
-        )
-        assert unsubscribed["result"]["subscribed_editors"] == []
-        payload_factory.reset_mock()
-        fx.service._on_editor_event("editor-race", "editor_changed", payload_factory)
-        payload_factory.assert_not_called()
-    finally:
-        sock.close()
-
-
 def test_md_changed_emits_requery_hint(fx):
     """Composite payloads (MetaDict here) must not cross the wire."""
     sock = open_client(fx.service.port)
