@@ -13,12 +13,25 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter import MetaDictWriteback, ModuleWriteback
+from zcu_tools.gui.app.main.adapter import (
+    AdapterCapabilities,
+    AnalysisMode,
+    MetaDictWriteback,
+    ModuleWriteback,
+    WritebackItem,
+)
+from zcu_tools.gui.app.main.services.ports import (
+    AnalysisPaneSnapshot,
+    PathResourceSnapshot,
+    PostAnalysisPaneSnapshot,
+    TabSnapshot,
+)
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 
-def _items() -> list:
+def _items() -> list[WritebackItem]:
     md = MetaDictWriteback(
         target_name="r_f", description="Resonator freq", proposed_value=6012.3
     )
@@ -30,62 +43,57 @@ def _items() -> list:
         role_id="readout",
     )
     mod.session_id = "ml-1"
-    setattr(mod, "editor_id", "editor-9")
+    # A GUI-only attribute must not leak into the wire item.
+    vars(mod)["editor_id"] = "editor-9"
     return [md, mod]
 
 
-def _ctrl() -> MagicMock:
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import (
-        AnalysisPaneSnapshot,
-        PathResourceSnapshot,
-        PostAnalysisPaneSnapshot,
-        TabSnapshot,
+def _snapshot(
+    tab_id: str, items: list[WritebackItem], *, has_writeback_draft: bool
+) -> TabSnapshot:
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT,
+        post_analysis=True,
+        load_data=False,
+        requires_soc=False,
     )
-    from zcu_tools.gui.cfg import CfgSchema
+    ana = AnalysisPaneSnapshot(
+        params=None,
+        result=object(),
+        figure=None,
+        writeback_items=tuple(items),
+        image_path=PathResourceSnapshot(override=None, path=None),
+        has_writeback_draft=has_writeback_draft,
+    )
+    post = PostAnalysisPaneSnapshot(
+        params=None,
+        result=None,
+        figure=None,
+        writeback_items=tuple(),
+        image_path=PathResourceSnapshot(override=None, path=None),
+    )
+    return TabSnapshot(
+        adapter_name="fake",
+        cfg_schema=MagicMock(spec=CfgSchema),
+        tab_id=tab_id,
+        interaction=MagicMock(),
+        capabilities=caps,
+        run=None,
+        analysis=ana,
+        post_analysis=post,
+        save=None,
+        paths=None,
+    )
 
-    def _snap(tab_id: str = "t", items=None):
-        if items is None:
-            items = _items()
-        caps = AdapterCapabilities(
-            analysis=AnalysisMode.FIT,
-            post_analysis=True,
-            load_data=False,
-            requires_soc=False,
-        )
-        ana = AnalysisPaneSnapshot(
-            params=None,
-            result=object(),
-            figure=None,
-            writeback_items=tuple(items),
-            image_path=PathResourceSnapshot(override=None, path=None),
-            has_writeback_draft=True,
-        )
-        post = PostAnalysisPaneSnapshot(
-            params=None,
-            result=None,
-            figure=None,
-            writeback_items=tuple(),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        return TabSnapshot(
-            adapter_name="fake",
-            cfg_schema=MagicMock(spec=CfgSchema),
-            tab_id=tab_id,
-            interaction=MagicMock(),
-            capabilities=caps,
-            run=None,
-            analysis=ana,
-            post_analysis=post,
-            save=None,
-            paths=None,
-        )
 
+def _ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
     ctrl.get_context_version.return_value = 7
     # New pane-qualified controls
-    ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snap(tab_id)
+    ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, _items(), has_writeback_draft=True
+    )
     ctrl.get_exp_context.return_value = MagicMock(
         active_label="ctx001",
         chip_name="chip",
@@ -111,7 +119,9 @@ def _ctrl() -> MagicMock:
     wc.get_tab_snapshot = ctrl.get_tab_snapshot
     # attach to ctrl for dispatch helper fallback
     ctrl.tab_control = MagicMock()
-    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap(tab_id)
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, _items(), has_writeback_draft=True
+    )
     ctrl.tab_control.has_tab.return_value = True
     ctrl.writeback_control = wc
     ctrl.writeback_control.has_tab.return_value = True
@@ -219,7 +229,6 @@ def test_preview_delegates_to_writeback_control_without_ctrl_fallback():
 def test_set_delegates_to_writeback_control_without_ctrl_fallback():
     ctrl = _ctrl()
     writeback_control = _ctrl().writeback_control
-    tab_control = ctrl.tab_control
     ctrl.writeback_control = writeback_control
     ctrl.has_tab = MagicMock(
         side_effect=AssertionError("tab.writeback_set must use writeback_control")
@@ -431,7 +440,7 @@ def test_set_unknown_id_rejected():
 # ---------------------------------------------------------------------------
 
 
-def _complex_items() -> list:
+def _complex_items() -> list[WritebackItem]:
     md = MetaDictWriteback(
         target_name="g_center",
         description="|g> IQ centre",
@@ -443,54 +452,9 @@ def _complex_items() -> list:
 
 def test_preview_serializes_complex_as_tag():
     ctrl = _ctrl()
-    # New handler reads via tab_control snapshot; mock that to return complex items
-    from unittest.mock import MagicMock
-
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import (
-        AnalysisPaneSnapshot,
-        PathResourceSnapshot,
-        PostAnalysisPaneSnapshot,
-        TabSnapshot,
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, _complex_items(), has_writeback_draft=False
     )
-    from zcu_tools.gui.cfg import CfgSchema
-
-    def _snap_complex(tab_id="t"):
-        items = _complex_items()
-        caps = AdapterCapabilities(
-            analysis=AnalysisMode.FIT,
-            post_analysis=True,
-            load_data=False,
-            requires_soc=False,
-        )
-        ana = AnalysisPaneSnapshot(
-            params=None,
-            result=object(),
-            figure=None,
-            writeback_items=tuple(items),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        post = PostAnalysisPaneSnapshot(
-            params=None,
-            result=None,
-            figure=None,
-            writeback_items=tuple(),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        return TabSnapshot(
-            adapter_name="fake",
-            cfg_schema=MagicMock(spec=CfgSchema),
-            tab_id=tab_id,
-            interaction=MagicMock(),
-            capabilities=caps,
-            run=None,
-            analysis=ana,
-            post_analysis=post,
-            save=None,
-            paths=None,
-        )
-
-    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_complex(tab_id)
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
@@ -518,53 +482,9 @@ def test_set_coerces_complex_tag_back_to_complex():
 def test_complex_preview_set_round_trip_is_lossless():
     """preview tag -> set -> the same complex the service would apply."""
     ctrl = _ctrl()
-    from unittest.mock import MagicMock
-
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import (
-        AnalysisPaneSnapshot,
-        PathResourceSnapshot,
-        PostAnalysisPaneSnapshot,
-        TabSnapshot,
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, _complex_items(), has_writeback_draft=False
     )
-    from zcu_tools.gui.cfg import CfgSchema
-
-    def _snap_complex(tab_id="t"):
-        items = _complex_items()
-        caps = AdapterCapabilities(
-            analysis=AnalysisMode.FIT,
-            post_analysis=True,
-            load_data=False,
-            requires_soc=False,
-        )
-        ana = AnalysisPaneSnapshot(
-            params=None,
-            result=object(),
-            figure=None,
-            writeback_items=tuple(items),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        post = PostAnalysisPaneSnapshot(
-            params=None,
-            result=None,
-            figure=None,
-            writeback_items=tuple(),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        return TabSnapshot(
-            adapter_name="fake",
-            cfg_schema=MagicMock(spec=CfgSchema),
-            tab_id=tab_id,
-            interaction=MagicMock(),
-            capabilities=caps,
-            run=None,
-            analysis=ana,
-            post_analysis=post,
-            save=None,
-            paths=None,
-        )
-
-    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_complex(tab_id)
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
@@ -594,7 +514,7 @@ def test_complex_preview_set_round_trip_is_lossless():
 _CONFUSION = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
 
 
-def _matrix_items() -> list:
+def _matrix_items() -> list[WritebackItem]:
     md = MetaDictWriteback(
         target_name="confusion_matrix",
         description="3x3 confusion matrix",
@@ -606,53 +526,9 @@ def _matrix_items() -> list:
 
 def test_preview_serializes_nested_list_verbatim():
     ctrl = _ctrl()
-    from unittest.mock import MagicMock
-
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import (
-        AnalysisPaneSnapshot,
-        PathResourceSnapshot,
-        PostAnalysisPaneSnapshot,
-        TabSnapshot,
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, _matrix_items(), has_writeback_draft=False
     )
-    from zcu_tools.gui.cfg import CfgSchema
-
-    def _snap_matrix(tab_id="t"):
-        items = _matrix_items()
-        caps = AdapterCapabilities(
-            analysis=AnalysisMode.FIT,
-            post_analysis=True,
-            load_data=False,
-            requires_soc=False,
-        )
-        ana = AnalysisPaneSnapshot(
-            params=None,
-            result=object(),
-            figure=None,
-            writeback_items=tuple(items),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        post = PostAnalysisPaneSnapshot(
-            params=None,
-            result=None,
-            figure=None,
-            writeback_items=tuple(),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        return TabSnapshot(
-            adapter_name="fake",
-            cfg_schema=MagicMock(spec=CfgSchema),
-            tab_id=tab_id,
-            interaction=MagicMock(),
-            capabilities=caps,
-            run=None,
-            analysis=ana,
-            post_analysis=post,
-            save=None,
-            paths=None,
-        )
-
-    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_matrix(tab_id)
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
@@ -679,53 +555,9 @@ def test_set_passes_nested_list_through_untouched():
 def test_nested_list_preview_set_round_trip_is_lossless():
     """preview verbatim -> set -> the same nested list the service would apply."""
     ctrl = _ctrl()
-    from unittest.mock import MagicMock
-
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services.ports import (
-        AnalysisPaneSnapshot,
-        PathResourceSnapshot,
-        PostAnalysisPaneSnapshot,
-        TabSnapshot,
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+        tab_id, _matrix_items(), has_writeback_draft=False
     )
-    from zcu_tools.gui.cfg import CfgSchema
-
-    def _snap_matrix(tab_id="t"):
-        items = _matrix_items()
-        caps = AdapterCapabilities(
-            analysis=AnalysisMode.FIT,
-            post_analysis=True,
-            load_data=False,
-            requires_soc=False,
-        )
-        ana = AnalysisPaneSnapshot(
-            params=None,
-            result=object(),
-            figure=None,
-            writeback_items=tuple(items),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        post = PostAnalysisPaneSnapshot(
-            params=None,
-            result=None,
-            figure=None,
-            writeback_items=tuple(),
-            image_path=PathResourceSnapshot(override=None, path=None),
-        )
-        return TabSnapshot(
-            adapter_name="fake",
-            cfg_schema=MagicMock(spec=CfgSchema),
-            tab_id=tab_id,
-            interaction=MagicMock(),
-            capabilities=caps,
-            run=None,
-            analysis=ana,
-            post_analysis=post,
-            save=None,
-            paths=None,
-        )
-
-    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snap_matrix(tab_id)
     preview = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
