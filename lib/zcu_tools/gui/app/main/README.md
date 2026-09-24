@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-23 — Load result Config backfill validation
+**Last updated:** 2026-09-24 — writeback Apply placement
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -65,8 +65,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   complete proposed JSON放入clipboard。其它arbitrary long values只顯示bounded summary，
   因此ledger never widens. The widget owns a ~450 px breakpoint: wide rows stay
   single-line, narrow rows reflow to target/action above centered
-  Current → Proposed, the bordered ledger hugs its rendered rows with Apply
-  Selected immediately after it; long content grows naturally and delegates
+  Current → Proposed. Apply Selected sits above the applied-state legend and
+  bordered ledger, close to the analysis controls. The ledger hugs its rendered
+  rows; long content grows naturally and delegates
   vertical scrolling to the existing Analysis pane rather than owning a nested
   scroll/cap lifecycle.
   `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
