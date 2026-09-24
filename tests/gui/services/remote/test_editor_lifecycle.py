@@ -1,16 +1,7 @@
-"""Per-connection lifecycle of CfgEditor sessions in RemoteControlAdapter.
+"""Per-editor change-stream routing in RemoteControlAdapter.
 
-editor.new binds the returned id to the connection's per-connection context
-(``_ClientCtx`` on ``ClientLink.app_ctx``); commit / discard forget it; a dropped
-connection reclaims any leftover sessions via ctrl.discard_cfg_editors. These
-test the bookkeeping (_track_editor_lifecycle / _reclaim_editors) + the per-editor
-change-stream routing (_on_editor_event) directly, without a live socket.
-
-Post-E3 the transport (sockets, the client registry) lives in the shared
-``NdjsonRpcEndpoint`` (``svc._endpoint``); the adapter keeps only measure-gui's
-dispatch policy. ``_track_editor_lifecycle`` / ``_reclaim_editors`` take a
-``_ClientCtx``; ``_handle_editor_subscribe`` / ``_on_editor_event`` take / route
-over ``ClientLink``s carrying that ctx on ``app_ctx``.
+Connection lifecycle is covered through NDJSON in
+ tests/gui/app/main/services/remote/test_editor_lifecycle.py.
 """
 
 from __future__ import annotations
@@ -40,65 +31,11 @@ def _service():
     return svc, ctrl
 
 
-def _ctx() -> _ClientCtx:
-    return _ClientCtx()
-
-
 def _link() -> ClientLink:
     """A ClientLink with a fresh _ClientCtx attached, as on_client_open would do."""
     link = ClientLink(peer="127.0.0.1:1", token_required=False)
     link.app_ctx = _ClientCtx()
     return link
-
-
-def test_open_binds_id_to_client():
-    svc, _ = _service()
-    ctx = _ctx()
-    svc._track_editor_lifecycle(
-        ctx, "editor.new", {"item_kind": "module"}, {"editor_id": "editor-1"}
-    )
-    assert ctx.editor_ids == {"editor-1"}
-
-
-def test_commit_forgets_id():
-    svc, _ = _service()
-    ctx = _ctx()
-    ctx.editor_ids.add("editor-1")
-    svc._track_editor_lifecycle(ctx, "editor.commit", {"editor_id": "editor-1"}, {})
-    assert ctx.editor_ids == set()
-
-
-def test_discard_forgets_id():
-    svc, _ = _service()
-    ctx = _ctx()
-    ctx.editor_ids.add("editor-1")
-    svc._track_editor_lifecycle(ctx, "editor.discard", {"editor_id": "editor-1"}, {})
-    assert ctx.editor_ids == set()
-
-
-def test_non_editor_method_ignored():
-    svc, _ = _service()
-    ctx = _ctx()
-    svc._track_editor_lifecycle(ctx, "tab.new", {"adapter_name": "x"}, {"tab_id": "t"})
-    assert ctx.editor_ids == set()
-
-
-def test_reclaim_discards_open_sessions_directly():
-    svc, ctrl = _service()
-    ctx = _ctx()
-    ctx.editor_ids.update({"editor-1", "editor-2"})
-    svc._reclaim_editors(ctx, marshal=False)
-    ctrl.discard_cfg_editors.assert_called_once()
-    (ids_arg,) = ctrl.discard_cfg_editors.call_args.args
-    assert set(ids_arg) == {"editor-1", "editor-2"}
-    assert ctx.editor_ids == set()
-
-
-def test_reclaim_noop_when_no_sessions():
-    svc, ctrl = _service()
-    ctx = _ctx()
-    svc._reclaim_editors(ctx, marshal=False)
-    ctrl.discard_cfg_editors.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
