@@ -6,8 +6,9 @@
 兩者的讀者不同，不混用。
 
 本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
-stdout。`check_file_size.py`、`check_suppressions.py`、`check_test_capabilities.py`、
-`check_test_path_correspondence.py` 另把人類可讀的違規行輸出到 stderr；`check_ratchet.py` 與
+stdout。`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
+另把人類可讀的違規行輸出到 stderr；`check_suppressions.py` 只計量不判定，在 stderr 列出使用量最多的
+抑制（最多 20 筆）並固定 exit 0；`check_ratchet.py` 與
 `check_pytest_collection.py` 只在工具本身失敗時寫 stderr。`gate.py` 是給人看的入口，輸出純文字。
 它們可以被 import，`tools/check_ratchet.py` 就是這樣使用其他幾支的。
 

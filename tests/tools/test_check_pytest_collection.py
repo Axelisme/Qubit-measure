@@ -170,10 +170,12 @@ def test_collection_runs_with_colour_disabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A terminal exporting FORCE_COLOR would otherwise break summary parsing."""
+    seen: list[dict[str, str]] = []
 
     def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
         env = kwargs["env"]
         assert isinstance(env, dict)
+        seen.append(env)
         coloured = "FORCE_COLOR" in env or "NO_COLOR" not in env
         summary = "1 test collected in 0.01s"
         if coloured:
@@ -188,5 +190,8 @@ def test_collection_runs_with_colour_disabled(
 
     result = oracle.collect(tmp_path, parallel=False)
 
+    assert len(seen) == 1
+    assert "FORCE_COLOR" not in seen[0]
+    assert seen[0]["NO_COLOR"] == "1"
     assert "\x1b[" not in result.summary
     assert result.summary == "1 test collected in 0.01s"
