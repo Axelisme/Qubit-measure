@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.main.events.tab import (
-    TabInteractionChangedPayload,
-    TabInteractionFact,
-)
+from zcu_tools.gui.app.main.catalog import ExperimentAccess
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import State
@@ -36,10 +33,8 @@ class TabControlPort(Protocol):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None: ...
+
     def reset_tab_cfg(self, tab_id: str) -> CfgSchema: ...
-    def update_tab_save_paths(
-        self, tab_id: str, data_path: str, image_path: str
-    ) -> None: ...
 
 
 class TabControlFacet:
@@ -52,16 +47,20 @@ class TabControlFacet:
         tab: TabService,
         workspace: WorkspaceService,
         bus: EventBus,
+        access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
         self._tab = tab
         self._workspace = workspace
         self._bus = bus
+        self._access = access if access is not None else ExperimentAccess()
 
     def new_tab(self, adapter_name: str) -> str:
+        self._access.require_available()
         return self._workspace.new_tab(adapter_name)
 
     def close_tab(self, tab_id: str) -> None:
+        self._access.require_available()
         self._workspace.close_tab(tab_id)
 
     def set_active_tab(self, tab_id: str) -> None:
@@ -89,9 +88,11 @@ class TabControlFacet:
         return self._tab.get_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
+        self._access.require_available()
         self._tab.update_tab_cfg(tab_id, schema)
 
     def reset_tab_cfg(self, tab_id: str) -> CfgSchema:
+        self._access.require_available()
         if self._state.running_tab_id == tab_id:
             raise RuntimeError(
                 f"tab {tab_id!r} is currently running; cancel the run before "
@@ -101,14 +102,3 @@ class TabControlFacet:
         schema = self._tab.make_default_cfg(adapter_name)
         self._tab.update_tab_cfg(tab_id, schema)
         return schema
-
-    def update_tab_save_paths(
-        self, tab_id: str, data_path: str, image_path: str
-    ) -> None:
-        self._tab.update_tab_save_path_overrides(tab_id, data_path, image_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
-            )
-        )

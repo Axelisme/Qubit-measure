@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 (event attribution pass-through)
+**Last updated:** 2026-08-27 (subtab-qualified remote/MCP contract WIRE 55 / MCP 74)
 
 # `zcu_tools/mcp/measure/`
 
@@ -9,6 +9,8 @@ RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 trans
 
 Cfg agent直接複製`gui_tab_get_cfg`/`gui_editor_get_cfg`列出的canonical leaf path；不加入
 `.sweep`或`.value` wrapper。Batch path diff是成功後final net結果，失敗後重新讀cfg reconcile。
+
+Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, subtab_id=run|analysis|post_analysis)`讀對應pane figure（run為live container截圖，analysis/post為canonical State figure）；`gui_tab_writeback_list`、`gui_tab_writeback_set_item`與`gui_tab_writeback_apply`以`(tab_id, subtab_id=analysis|post_analysis)`定址pane draft；`gui_tab_save_data`（tab-only）與`gui_tab_save_image(tab_id, subtab_id=analysis|post_analysis)`分離，無`gui_tab_save` bundle與`gui_tab_commit`。舊`gui_tab_get_current_figure`、`tab.save_result`/`save_post_image`及其bundle均已移除；寫入/預覽回覆投影`destination_context`（當下active ExpContext）；operation期間同pane的remote edit/apply被gate。
 
 - `server.py` 是 MCP bootstrap / aggregation facade：保留 standalone preflight、
   server instructions/config、session/bridge setup、guarded `send_gui_rpc`、

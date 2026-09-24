@@ -16,6 +16,7 @@ from .types import (
     NoAnalysisResult,
     NoAnalyzeParams,
     PostAnalyzeRequest,
+    PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
     SavePaths,
@@ -114,6 +115,12 @@ class ExpAdapterProtocol(Protocol):
         self, req: WritebackRequest[Any, Any]
     ) -> Sequence[WritebackItem]:
         """Return the writeback items proposed from run/analyze results."""
+        ...
+
+    def get_post_writeback_items(
+        self, req: PostWritebackRequest[Any, Any, Any]
+    ) -> Sequence[WritebackItem]:
+        """Return the writeback items proposed from one post-analysis result."""
         ...
 
     def save(self, req: SaveDataRequest[Any]) -> None:

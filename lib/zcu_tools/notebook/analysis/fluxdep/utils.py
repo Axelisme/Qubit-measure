@@ -8,10 +8,19 @@ import pandas as pd
 import plotly.graph_objects as go
 from numpy.typing import NDArray
 
+from zcu_tools.meta_tool.sample_schema import (
+    SAMPLE_COORDINATE_COLUMNS,
+    SampleFluxFrame,
+    resolve_sample_flux,
+    validate_sample_table_v2,
+)
 from zcu_tools.notebook.persistance import SpectrumResult, TransitionDict
 
 from .models import energy2transition
 from .processing import cast2real_and_norm
+
+# Coordinate and measurement columns never shown in sample-point hover labels.
+_PLOT_EXCLUDED_COLUMNS = frozenset((*SAMPLE_COORDINATE_COLUMNS, "Freq (MHz)"))
 
 
 def derive_bound(
@@ -176,16 +185,28 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
     def plot_sample_points(
         self,
         sample_table: pd.DataFrame,
-        convert_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+        *,
+        fallback_frame: SampleFluxFrame | None = None,
     ) -> Self:
-        xs = convert_fn(np.asarray(sample_table["calibrated mA"]))
+        """Plot v2 sample rows at their resolved flux.
+
+        The table must satisfy the flat v2 coordinate contract
+        (``validate_sample_table_v2``); per-row flux comes from the shared
+        resolver with ``explicit -> row-frame -> fallback-frame`` precedence.
+        Rows without explicit flux, a row frame or a matching fallback frame
+        fail fast with their indexes before anything is plotted, and legacy
+        coordinate columns (e.g. ``calibrated mA``) are rejected outright.
+        """
+        validate_sample_table_v2(sample_table)
+        resolution = resolve_sample_flux(sample_table, fallback_frame=fallback_frame)
+        xs = resolution.values
         ys = np.asarray(sample_table["Freq (MHz)"]) * 1e-3  # GHz
         labels = [
             ", ".join(
                 [
                     f"{key}={value}"
                     for key, value in row.items()
-                    if key not in ["calibrated mA", "Freq (MHz)"]
+                    if key not in _PLOT_EXCLUDED_COLUMNS
                 ]
             )
             for _, row in sample_table.iterrows()

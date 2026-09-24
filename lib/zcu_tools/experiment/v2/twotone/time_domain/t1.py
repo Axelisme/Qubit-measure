@@ -26,7 +26,10 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils import sweep2array
+from zcu_tools.experiment.v2.utils import (
+    materialize_nonuniform_t1_delays,
+    sweep2array,
+)
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     Delay,
@@ -98,23 +101,12 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         original_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
-        length_sweep = cfg.sweep.length
-
-        if isinstance(length_sweep, SweepCfg):
-            expected_t1 = 0.2 * length_sweep.stop
-            y0 = np.exp(-length_sweep.start / expected_t1)
-            yN = np.exp(-length_sweep.stop / expected_t1)
-            y_seq = np.linspace(y0, yN, length_sweep.expts, endpoint=True)
-            lengths = -expected_t1 * np.log(y_seq)
-        else:
-            lengths = np.asarray(length_sweep)
-        length_cycles = np.asarray(
-            [int(soccfg.us2cycles(t)) for t in lengths], dtype=np.int32
+        delay_table = materialize_nonuniform_t1_delays(
+            cfg.sweep.length,
+            soccfg=soccfg,
         )
-        length_cycles = np.unique(length_cycles)
-        lengths = np.asarray(
-            [soccfg.cycles2us(int(cycle)) for cycle in length_cycles], dtype=np.float64
-        )
+        length_cycles = delay_table.cycles
+        lengths = delay_table.times_us
 
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
             signals_buffer = SignalBuffer(

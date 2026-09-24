@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-07-23 — resonance phase-curvature analyze contract
+**Last updated:** 2026-09-23 — Load Config result（WIRE 56）
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -118,11 +118,8 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 54`, `GUI_VERSION = 75`, and
-`MCP_VERSION = 73`（defined in `zcu_tools.mcp.measure.server`）。WIRE 54讓one-tone
-analyze params新增`fit_bg_phase_curvature`，表示optional resonance-centered
-quadratic phase background；GUI 75同步resonance fitting與conditional plotting；
-MCP 73維持不變。
+Current measure-gui values are `WIRE_VERSION = 56`, `GUI_VERSION = 79`, and
+`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 56的`tab.load_data`回覆新增`cfg_backfill=applied|not_applied`，result載入成功但Config未回填仍是成功回覆。GUI 79在同tab以runtime snapshot的可靠欄位替換Cfg和editor，舊editor id不重用。原subtab-qualified pane locator、writeback與save contract維持不變。
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -165,13 +162,15 @@ The wire surface is grouped by ownership:
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
   `PredictorControlPort`.
-- `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save, figures.
-- `analyze.*` / `post_analyze.*`：primary and secondary analysis.
-- `writeback.*`：analysis result writeback preview and apply.
+- `tab.*`：tab lifecycle, cfg discovery/edit, run, load, save (data via `tab_id` only; image via `(tab_id, subtab_id)` with `analysis|post_analysis`) and figures via `(tab_id, subtab_id)` (`run` reads live FigureContainer, `analysis`/`post_analysis` read canonical State figures). `tab.snapshot.save_paths` projects independent `data_path`、`analysis_image_path`與`post_analysis_image_path`; save calls accept optional one-shot destinations, and there is no combined remote path setter.
+- `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
+- `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active ExpContext projection at reply time).
 - `editor.*`：headless cfg-editor session lifecycle.
 - `operation.*` / `notify.*`：generic waits, polls, progress, prompt replies.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
+
+Subtab locator is required and closed (`run|analysis|post_analysis`); save_image only `analysis|post_analysis`; legacy `tab.get_current_figure`, `tab.save_post_image`, `tab.save_result` and omitted-subtab fallback are removed (clean break, no alias). MCP convenience bundles (`gui_tab_run`→`run`, `gui_tab_analyze`/`gui_tab_analyze_review`→`analysis`, `gui_tab_post_analyze_start`→`post_analysis`) query the pane they just operated on, and `gui_tab_get_figure`/`gui_tab_save_data`+`gui_tab_save_image`/`gui_tab_writeback_*` use the same qualified wire forms (no `gui_tab_save` bundle, no `gui_tab_commit`).
 
 `method_entries/` is the registration SSOT. Adding an agent-visible method
 requires one entry containing the wire method name, handler ref, method spec, MCP
@@ -198,7 +197,9 @@ dotted edge paths that `tab.get_cfg` reports.
 
 Headless editor sessions are owned by `CfgEditorService`. Agent-created sessions
 are garbage-collected on commit/discard/client drop; UI-owned sessions are tied
-to their owner widget or tab.
+to their owner widget or tab. Each owner session has a fresh id; Load's successful
+Config replacement retires the old id, so clients rediscover the new session
+before editing.
 
 ## Operation Handles
 

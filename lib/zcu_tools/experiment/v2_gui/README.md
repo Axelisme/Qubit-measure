@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-07-22 — route-scoped resonator electrical delay
+**Last updated:** 2026-09-23 — reset/check figure analysis
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -12,13 +12,34 @@
 
 ```text
 experiment/v2_gui/
-├── registry.py          — register_all / register_all_roles（啟動時把 adapter 與 role 填進框架 catalog）
+├── registry.py          — register_all（明確的、可重載 adapter catalog）
+├── role_registry.py     — register_all_roles（startup-only role catalog）
+├── catalog_loader.py    — 受控 fresh-source import，回傳未發布的 Registry
 └── adapters/
     ├── base.py          — BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]（共用實作）
     ├── _support/        — private cross-adapter mechanics：MeasureCfgBuilder / typed Seed recipes / role defaults
-    ├── lookback / onetone / twotone / fake
+    ├── lookback / onetone / twotone / jpa / fake
     └── twotone/reset/   — reset 校準實驗群（single_tone / dual_tone / bath / check）
 ```
+
+`catalog_loader` 由 launcher 注入 GUI framework，僅支援 standalone source deployment。重載
+`experiment.v2`、concrete adapters 與 adapter registry，包含 package exports；保留
+`v2.runner`、`v2.utils`、adapter `base`／`_support`、role factories 與 framework identity。
+Preflight 發現固定專案 source 變更，或受控 import 期間發現新增固定 dependency 時要求重啟；
+新增未被載入的固定檔案不阻擋。這些檢查不涵蓋所有延後或動態載入的依賴。
+新增 adapter 仍須加入 `registry.py`，不是自動掃描 class 註冊。
+
+Loader 在 GUI 關閉全部 tabs、排除進行中操作後才清除 owned import cache，從已檢查的 source
+建立新 modules，並驗證 candidate registry。它不重啟硬體，也不交易回滾任意 import side effect；
+可重載程式在 import 時不得啟動 thread、操作硬體或註冊外部 callback。此功能不是 notebook
+autoreload，亦不支援保留舊 tabs 執行舊版本。延後 import 使用清除舊 bytecode 後的正常 Python
+載入；操作中持續編輯尚未 import 的檔案不提供版本隔離保證。
+
+Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 import，不使用常駐 import guard
+或 AST 規則禁止這種寫法。重載結束後的 deferred/dynamic import 可能載入新固定依賴，或造成
+新舊程式混用；此時不保證攔截、報錯或辨識靜默失敗，使用者可重啟 GUI 回到乾淨的載入狀態。
+已捕捉到的錯誤仍正常回報，不主動吞掉例外。這項取捨只放寬依賴完整性保證，不放寬 tab
+關閉確認、RAM snapshot/retry、操作排他或 shutdown lifecycle 的契約。
 
 `adapters/` 是使用者修改實驗流程的入口；每個 concrete adapter file 是該實驗 GUI policy
 的 authoritative definition。至少被兩個 adapter 共用的 mechanics 才放進 private
@@ -92,8 +113,9 @@ ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內
 `onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
 結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
 `twotone/time_domain/t1` 的 `uniform` 是 run-only 欄位：預設 `True` 使用線性 delay
-sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，但把 sweep
-分布交給底層 non-uniform T1 run path。
+sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
+沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
+conversion 保留點數與順序，格點 collision 直接提示擴大 span 或減少 points，而不靜默減點。
 
 跨session狀態的少數default走`value_source(key, target_type, fallback?)` Seed，於definition
 instantiate時透過`ctx.values` resolve once，成功後寫入普通direct value，不把lazy ref放進cfg
@@ -123,9 +145,28 @@ analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default
 時才必須覆寫；params 每欄位都有 default（含 `NoAnalyzeParams`、及把常數折進欄位 default 的 adapter）時
 沿用 base default（回 `params_cls()`）。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作
 `get_post_analyze_params()` / `post_analyze()`；post-analysis 是第二層 CPU-only 探索/比較視圖，
-不更新 writeback draft，writeback 仍只由 primary `analyze()` result 經 `get_writeback_items()`
-產生。`validate_run_request` 不受 capabilities 控制：Base 提供 no-op default，Protocol/Base exact
-signature 與 registry conformance tests 共同鎖定 framework mandatory surface。
+可選地透過 `get_post_writeback_items()` 提出獨立 writeback。`validate_run_request` 不受
+capabilities 控制：Base 提供 no-op default，Protocol/Base exact signature 與 registry
+conformance tests 共同鎖定 framework mandatory surface。
+
+`singleshot/ge` 的 primary analysis 只產生 fit 產物：operator可選 backend、histogram log scale、
+T1 alignment與nullable shared length ratio；advanced population priors不進GUI。所選 backend擬合
+centres、`ge_s`與initial populations，右側顯示IQ distribution，並經`get_writeback_items()`提出
+`fid`、`ge_s`、`g_center`、`e_center`。它的零參數post-analysis是sole confusion路徑：使用primary
+fit資料計算`ge_radius`與3×3 confusion matrix，顯示完整confusion diagnostic，並經
+`get_post_writeback_items()`提出`ge_radius`、`confusion_matrix`；兩組proposal分屬不同pane的
+opaque draft，adapter不接觸Writeback implementation。
+
+`singleshot/len_rabi` 的analysis維持Figure-only summary，不展開額外GUI scalar diagnostics；Figure
+上方呈現measured populations與joint-fit curves，左下呈現第一點integrated-bin histogram fit，右下
+呈現derived confusion matrix。完整typed numeric fit留在adapter result內。只有backend valid且
+`g_center`、`e_center`、`ge_radius`、`confusion_matrix`四項全部finite時，adapter才同時提出四個
+獨立`MetaDictWriteback` items；任一項無效就全數略過。Adapter只投影同一次domain analysis結果，
+不重跑fit、不重算stability，也不直接apply proposal。
+
+`singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
+`singleshot/amp_rabi`沒有此選項，固定用無衰減joint fit。此選擇不屬於量測cfg，
+不改變raw-IQ acquisition。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，
@@ -190,6 +231,45 @@ agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
 
 ---
 
+## JPA 校準 family（`adapters/jpa/`）
+
+JPA（Josephson parametric amplifier）校準由六個 adapter 構成單一可發現的
+family：startup catalog（`registry.py` 的 `ADAPTERS`）依 bring-up 順序註冊，generic
+tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列出全部六個名稱：
+
+| 順序 | adapter | 角色 |
+| --- | --- | --- |
+| 1 | `jpa/freq` | 找 JPA pump frequency（FIT analysis，寫回 `best_jpa_freq`） |
+| 2 | `jpa/flux` | 找 JPA flux sweet spot（FIT analysis，寫回 `best_jpa_flux`） |
+| 3 | `jpa/power` | 找 JPA pump power（FIT analysis，寫回 `best_jpa_power`） |
+| 4 | `jpa/auto_optimize` | 聯合最佳化 flux/freq/power（FIT analysis，一次提出三個 `best_jpa_*`） |
+| 5 | `jpa/flux_onetone` | flux × readout frequency 2D survey（`analysis=NONE`，無 writeback） |
+| 6 | `jpa/check` | pump off/on 比較診斷（figure-only analysis，無 writeback） |
+
+共同 mechanics 在 `adapters/jpa/_shared.py`：RF 選擇使用 `jpa_rf_dev` role
+（`set_freq` / `set_power` / `set_output` knob 能力檢查），flux 選擇使用
+`jpa_flux_dev` role（`set_flux` knob）；lowering 與 preflight 只作用於 cached
+device snapshot，任何硬體工作前 fast-fail。六個 adapter 都顯式暴露 `reps`、
+`rounds`、`relax_delay`，fresh defaults 沿用 notebook bring-up workflow：
+`freq` / `flux` / `power` 是 `10000 / 1 / 0.5 us`，`auto_optimize` 是
+`1000 / 1 / 30.5 us`，`flux_onetone` 是 `100 / 10 / 0.1 us`，`check` 是
+`1000 / 5 / 0.5 us`；`initial_delay` 維持 GUI 隱藏並使用 core 的 `1.0 us`
+default。這些是可修改的操作 seed，不是跨 setup 的最佳 SNR 或安全保證。
+
+`auto_optimize` 的三軸 `start` / `stop` 是 search bounds；各 sweep 的 `expts`
+是會影響 phase-1 flux-grid 與 per-slice budget allocation 的 relative resolution
+hints，不是 Cartesian sample count，總 measurement budget 仍由 `num_points` 表達。
+JPA flux 在六個 adapter 一律以中性 device value／`a.u.` 語彙呈現（sweep label、
+liveplot 與 canonical persistence 一致，無 `1e3` 縮放或 physical-unit 宣稱）。
+capabilities 一致：四個校準 adapter 是 `analysis=FIT` 並提出
+`MetaDictWriteback`，survey/diagnostic 兩個 adapter 不提供 writeback。每個 adapter
+的 operator guide 都以現在式說明 seeded bounds 是 bring-up defaults 而非 certified
+safety limits，operator 必須先 review device 與 sweep 再 run；`jpa/check` 特別警告
+run 結束時 pump output 保持 ON。真實硬體 acceptance 由 operator 在 device/sweep
+review 後執行，不屬於 adapter code。
+
+---
+
 ## Reset 校準實驗群（`adapters/twotone/reset/`）
 
 對應 notebook `single_qubit.md` 的三種 reset 校準流程，每種一條多步 adapter 鏈。
@@ -200,7 +280,11 @@ agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
 | single-tone（sideband） | `freq` → `length` | `reset_10` |
 | dual-tone | `freq` → `power` → `length` | `reset_120` |
 | bath（cavity-assisted） | `freq_gain` → `length` → `phase` | `reset_bath` / `reset_bath_e` |
-| 共用驗證 | `check`（RabiCheck，三型共用，`analysis=NONE`） | — |
+| 共用驗證 | `check`（RabiCheck，三型共用，Figure-only analysis） | — |
+
+`reset/check`的analysis直接呈現gain sweep的三條分支，legend區分未套用tested reset、
+套用tested reset，以及tested reset後以相同掃描gain追加第二個rabi pulse；不擬合純量，
+也不提出writeback。cfg只設定一個`rabi_pulse`，兩次pulse使用相同波形與gain。
 
 ### cfg → writeback 的兩種產出
 

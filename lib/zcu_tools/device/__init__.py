@@ -8,7 +8,11 @@ from .cancel_scope import (
     device_setup_cancel_scope,
 )
 from .fake import FakeDevice, FakeDeviceInfo
-from .manager import GlobalDeviceManager
+from .manager import (
+    DeviceCloseFailure,
+    DeviceCloseInProgressError,
+    GlobalDeviceManager,
+)
 from .mg3692 import AnritsuMG3692, AnritsuMG3692Info
 from .sgs100a import RohdeSchwarzSGS100A, RohdeSchwarzSGS100AInfo
 from .yoko import YOKOGS200, YOKOGS200Info
@@ -27,6 +31,8 @@ __all__ = [
     "device_setup_cancel_scope",
     # manager
     "GlobalDeviceManager",
+    "DeviceCloseFailure",
+    "DeviceCloseInProgressError",
     # devices
     "YOKOGS200",
     "YOKOGS200Info",

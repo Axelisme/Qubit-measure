@@ -42,7 +42,6 @@ def test_capture_session_returns_payload_without_disk(monkeypatch) -> None:
     svc, state, _, _ = _make_service()
     tab = MagicMock()
     tab.adapter_name = "fake"
-    tab.save_path_overrides = None
     state.tabs["tab-1"] = tab
     state.active_tab_id = "tab-1"
     monkeypatch.setattr(workspace_mod, "schema_to_raw", lambda schema: {"x": 1})
@@ -60,10 +59,8 @@ def test_reorder_tabs_updates_capture_session_order(monkeypatch) -> None:
     svc, state, _, _ = _make_service()
     tab_a = MagicMock()
     tab_a.adapter_name = "fake-a"
-    tab_a.save_path_overrides = None
     tab_b = MagicMock()
     tab_b.adapter_name = "fake-b"
-    tab_b.save_path_overrides = None
     state.tabs["tab-a"] = tab_a
     state.tabs["tab-b"] = tab_b
     state.active_tab_id = "tab-a"
@@ -83,7 +80,7 @@ def test_reorder_tabs_updates_capture_session_order(monkeypatch) -> None:
 def test_apply_invalid_configuration_returns_typed_issue(monkeypatch) -> None:
     svc, state, tabs, _ = _make_service()
     session = PersistedSession(
-        tabs=(PersistedTab(adapter_name="fake", cfg_raw={}, save_paths_override=None),),
+        tabs=(PersistedTab(adapter_name="fake", cfg_raw={}),),
         active_tab_index=0,
     )
     tabs.make_default_cfg.return_value = MagicMock()

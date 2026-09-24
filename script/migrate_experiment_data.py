@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+import h5py
 import numpy as np
 from numpy.lib.npyio import NpzFile
 from numpy.typing import NDArray
@@ -14,11 +15,18 @@ from zcu_tools.experiment.legacy_migration import (
 )
 from zcu_tools.experiment.legacy_migration import (
     ConverterSpec,
+    single_input_paths,
 )
 from zcu_tools.experiment.legacy_migration import (
     migrate_experiment_data as _migrate_experiment_data,
 )
 from zcu_tools.experiment.v2.jpa.jpa_auto_optimize import (
+    JPA_AUTO_FLUX_ROLE,
+    JPA_AUTO_FREQ_ROLE,
+    JPA_AUTO_GROUPED_ROLES,
+    JPA_AUTO_PHASE_ROLE,
+    JPA_AUTO_POWER_ROLE,
+    JPA_AUTO_SNR_ROLE,
     JPAOptimizeResult,
     load_jpa_auto_grouped_result,
     save_jpa_auto_grouped_result,
@@ -48,20 +56,32 @@ from zcu_tools.experiment.v2.singleshot.t1.t1_with_tone_sweep import (
 from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp, CKP_Result
 from zcu_tools.experiment.v2.twotone.reset.bath.length import LengthExp, LengthResult
 from zcu_tools.experiment.v2.twotone.ro_optimize.auto_optimize import (
+    RO_AUTO_GROUPED_ROLES,
     AutoOptResult,
     load_auto_opt_grouped_result,
     save_auto_opt_grouped_result,
 )
 from zcu_tools.experiment.v2.twotone.time_domain.cpmg import (
+    CPMG_GROUPED_ROLES,
     CPMG_Result,
     load_cpmg_grouped_result,
     save_cpmg_grouped_result,
 )
 from zcu_tools.utils.datasaver import (
+    DatasetRole,
+    GroupedLabberData,
     LabberData,
+    LabberPayload,
     format_ext,
+    load_grouped_labber_data,
     load_labber_data,
+    save_grouped_labber_data,
     save_labber_data,
+)
+from zcu_tools.utils.datasaver.grouped import (
+    GROUPED_VERSION_ATTR,
+    _load_streaming_grouped_v1,
+    _read_exact_version,
 )
 
 
@@ -160,6 +180,60 @@ def _save_axes_spec_result_exact(
         raise RuntimeError(
             f"converter wrote {written_path}, expected exact path {requested_path}"
         )
+
+
+def _load_grouped_v1_for_migration(input_path: Path) -> GroupedLabberData:
+    with h5py.File(input_path, "r") as file:
+        raw_version = file.attrs.get(GROUPED_VERSION_ATTR)
+        if (
+            raw_version is None
+            or _read_exact_version(raw_version, "grouped dataset") != 1
+        ):
+            raise ValueError(
+                f"input file {input_path} is not grouped dataset version 1"
+            )
+        if "zcu_tools.streaming_grouped_dataset_version" in file.attrs:
+            raise ValueError(
+                f"input file {input_path} is a streaming grouped dataset, not a "
+                "grouped/v1 migration input"
+            )
+        return _load_streaming_grouped_v1(file, required_roles=None)
+
+
+def _select_grouped_v1_result_loader(
+    grouped: GroupedLabberData,
+) -> Callable[[str], object]:
+    role_set = frozenset(str(role) for role in grouped.roles)
+    if role_set == frozenset(CPMG_GROUPED_ROLES):
+        return load_cpmg_grouped_result
+    if role_set == frozenset(RO_AUTO_GROUPED_ROLES):
+        return load_auto_opt_grouped_result
+    if role_set == frozenset(JPA_AUTO_GROUPED_ROLES):
+        return load_jpa_auto_grouped_result
+    names = ", ".join(sorted(role_set))
+    raise ValueError(f"unsupported grouped v1 dataset role set: {names}")
+
+
+def _validate_grouped_v1_input(input_path: Path) -> None:
+    if not input_path.is_file():
+        raise FileNotFoundError(f"input file does not exist: {input_path}")
+    _select_grouped_v1_result_loader(_load_grouped_v1_for_migration(input_path))
+
+
+def _convert_grouped_v1(input_path: Path, output_path: Path) -> None:
+    grouped = _load_grouped_v1_for_migration(input_path)
+    _select_grouped_v1_result_loader(grouped)
+    save_grouped_labber_data(
+        str(output_path),
+        {str(role): payload for role, payload in grouped.roles.items()},
+        metadata=grouped.metadata,
+    )
+
+
+def _validate_grouped_v1_output(path: str) -> object:
+    grouped = load_grouped_labber_data(path)
+    result_loader = _select_grouped_v1_result_loader(grouped)
+    return result_loader(path)
 
 
 def _convert_cpmg_npz(input_path: Path, output_path: Path) -> None:
@@ -276,16 +350,12 @@ def _convert_len_rabi_labber(input_path: Path, output_path: Path) -> None:
         expected_shape=(len(population_values), len(length_seconds)),
     )
 
-    result = LenRabiResult(
-        lengths=(length_seconds * 1e6).astype(np.float64),
-        signals=legacy_populations.T.astype(np.float64),
-        population_states=population_values.astype(np.int64),
+    del output_path, legacy_populations
+    raise ValueError(
+        "legacy population-only Len Rabi data cannot be migrated to the canonical "
+        "raw-IQ schema because the original IQ shots are unavailable; rerun the "
+        "measurement"
     )
-    axes_spec = LenRabiExp.AXES_SPEC
-    if axes_spec is None:
-        raise RuntimeError("LenRabiExp has no AXES_SPEC")
-
-    _save_axes_spec_result_exact(output_path, axes_spec, result, comment=data.comment)
 
 
 def _convert_ac_stark_sidecars(input_path: Path, output_path: Path) -> None:
@@ -677,6 +747,86 @@ def _validate_jpa_auto_sidecar_input(input_path: Path) -> None:
     _validate_sidecar_input(
         _legacy_sidecar_paths_by_name(input_path, ("_params", "_phases", "_signals")),
         "legacy JPA auto-optimize sidecar",
+    )
+
+
+# Legacy grouped contract written by the pre-a.u. JPA auto-optimize spec: every
+# role already matches the current canonical layout except the jpa_flux z
+# channel, whose unit was 'A' (same unscaled device-native values).
+_JPA_AUTO_LEGACY_A_ROLE_UNITS: dict[str, str] = {
+    JPA_AUTO_FLUX_ROLE: "A",
+    JPA_AUTO_FREQ_ROLE: "Hz",
+    JPA_AUTO_POWER_ROLE: "dBm",
+    JPA_AUTO_PHASE_ROLE: "index",
+    JPA_AUTO_SNR_ROLE: "a.u.",
+}
+
+
+def _load_jpa_auto_legacy_a_grouped_input(
+    input_path: Path,
+) -> GroupedLabberData:
+    with h5py.File(input_path, "r") as file:
+        raw_version = file.attrs.get(GROUPED_VERSION_ATTR)
+        if raw_version is None:
+            raise ValueError(f"input file {input_path} is not a grouped dataset")
+        version = _read_exact_version(raw_version, "grouped dataset")
+
+    if version == 1:
+        grouped = _load_grouped_v1_for_migration(input_path)
+        actual_roles = frozenset(str(role) for role in grouped.roles)
+        if actual_roles != frozenset(JPA_AUTO_GROUPED_ROLES):
+            names = ", ".join(sorted(actual_roles))
+            raise ValueError(f"unsupported legacy-A dataset role set: {names}")
+        return grouped
+    return load_grouped_labber_data(
+        str(input_path), required_roles=JPA_AUTO_GROUPED_ROLES
+    )
+
+
+def _validate_jpa_auto_legacy_a_grouped_input(input_path: Path) -> None:
+    if not input_path.is_file():
+        raise FileNotFoundError(f"input file does not exist: {input_path}")
+    grouped = _load_jpa_auto_legacy_a_grouped_input(input_path)
+    for role in JPA_AUTO_GROUPED_ROLES:
+        payload = grouped.roles[DatasetRole(role)]
+        expected_unit = _JPA_AUTO_LEGACY_A_ROLE_UNITS[str(role)]
+        if payload.data.unit != expected_unit:
+            raise ValueError(
+                f"legacy grouped file {input_path} role {str(role)!r} z channel "
+                f"unit is {payload.data.unit!r}; expected {expected_unit!r}"
+            )
+        if [axis.name for axis in payload.axes] != ["Iteration"] or [
+            axis.unit for axis in payload.axes
+        ] != ["a.u."]:
+            raise ValueError(
+                f"legacy grouped file {input_path} role {str(role)!r} axes must "
+                "be [('Iteration', 'a.u.')]"
+            )
+
+
+def _convert_jpa_auto_legacy_a_grouped(input_path: Path, output_path: Path) -> None:
+    """Rewrite a legacy-A grouped file into the current a.u. canonical file.
+
+    Only the jpa_flux z channel unit metadata is re-stamped; every numeric
+    array, every role payload (including per-entry timestamps), the role set
+    and the full shared metadata (comment carrying the cfg snapshot, tags,
+    project, user, creation_time) are preserved unchanged. The input file is
+    read-only.
+    """
+    grouped = _load_jpa_auto_legacy_a_grouped_input(input_path)
+    roles: dict[str, LabberPayload] = {}
+    for role, payload in grouped.roles.items():
+        if role == DatasetRole(JPA_AUTO_FLUX_ROLE):
+            payload = LabberPayload(
+                (payload.data.name, "a.u.", payload.data.values),
+                axes=payload.axes,
+                timestamps=payload.timestamps,
+            )
+        roles[str(role)] = payload
+    save_grouped_labber_data(
+        str(output_path),
+        roles,
+        metadata=grouped.metadata,
     )
 
 
@@ -1256,73 +1406,106 @@ def _npz_comment(data: NpzFile) -> str:
 
 CONVERTERS: dict[str, ConverterSpec] = {
     **SINGLE_FILE_CONVERTERS,
+    "grouped/v1": ConverterSpec(
+        convert=_convert_grouped_v1,
+        validate=_validate_grouped_v1_output,
+        input_paths=single_input_paths,
+        validate_input=_validate_grouped_v1_input,
+    ),
     "singleshot/ac_stark": ConverterSpec(
         convert=_convert_ac_stark_sidecars,
         validate=_validate_ac_stark_output,
+        input_paths=lambda p: _legacy_sidecar_paths_by_name(p, ("_g_pop", "_e_pop")),
         validate_input=_validate_ac_stark_sidecar_input,
     ),
     "singleshot/ge": ConverterSpec(
         convert=_convert_ge_labber,
         validate=_validate_ge_output,
+        input_paths=single_input_paths,
     ),
     "singleshot/len_rabi": ConverterSpec(
         convert=_convert_len_rabi_labber,
         validate=_validate_len_rabi_output,
+        input_paths=single_input_paths,
     ),
     "singleshot/mist/freq": ConverterSpec(
         convert=_convert_mist_freq_labber,
         validate=_validate_mist_freq_output,
+        input_paths=single_input_paths,
     ),
     "singleshot/mist/power": ConverterSpec(
         convert=_convert_mist_power_labber,
         validate=_validate_mist_power_output,
+        input_paths=single_input_paths,
     ),
     "singleshot/mist/power_freq": ConverterSpec(
         convert=_convert_mist_power_freq_sidecars,
         validate=_validate_mist_power_freq_output,
+        input_paths=lambda p: _legacy_sidecar_paths_exact_by_name(
+            p, ("_g_population", "_e_population")
+        ),
         validate_input=_validate_mist_power_freq_sidecar_input,
     ),
     "singleshot/mist/pre_freq": ConverterSpec(
         convert=_convert_mist_pre_freq_labber,
         validate=_validate_mist_pre_freq_output,
+        input_paths=single_input_paths,
     ),
     "singleshot/t1/t1": ConverterSpec(
         convert=_convert_t1_sidecars,
         validate=_validate_t1_output,
+        input_paths=lambda p: _legacy_sidecar_paths_by_stem(p, ("_initg", "_inite")),
         validate_input=_validate_t1_sidecar_input,
     ),
     "singleshot/t1/t1_with_tone": ConverterSpec(
         convert=_convert_t1_with_tone_sidecars,
         validate=_validate_t1_with_tone_output,
+        input_paths=lambda p: _legacy_sidecar_paths_by_stem(p, ("_initg", "_inite")),
         validate_input=_validate_t1_sidecar_input,
     ),
     "singleshot/t1/t1_with_tone_sweep": ConverterSpec(
         convert=_convert_t1_with_tone_sweep_sidecars,
         validate=_validate_t1_with_tone_sweep_output,
+        input_paths=lambda p: _legacy_sidecar_paths_by_name(
+            p, ("_gg_pop", "_ge_pop", "_eg_pop", "_ee_pop")
+        ),
         validate_input=_validate_t1_with_tone_sweep_sidecar_input,
     ),
     "twotone/reset/bath/length": ConverterSpec(
         convert=_convert_bath_length_labber,
         validate=_validate_bath_length_output,
+        input_paths=single_input_paths,
     ),
     "twotone/cpmg": ConverterSpec(
         convert=_convert_cpmg_npz,
         validate=load_cpmg_grouped_result,
+        input_paths=single_input_paths,
     ),
     "twotone/ckp": ConverterSpec(
         convert=_convert_ckp_sidecars,
         validate=_validate_ckp_output,
+        input_paths=lambda p: _legacy_ckp_sidecar_paths(p),
         validate_input=_validate_ckp_sidecar_input,
     ),
     "twotone/ro_optimize/auto_optimize": ConverterSpec(
         convert=_convert_ro_auto_sidecars,
         validate=_validate_ro_auto_output,
+        input_paths=lambda p: _legacy_sidecar_paths_by_name(p, ("_params", "_signals")),
         validate_input=_validate_ro_auto_sidecar_input,
     ),
     "jpa/jpa_auto_optimize": ConverterSpec(
         convert=_convert_jpa_auto_sidecars,
         validate=_validate_jpa_auto_output,
+        input_paths=lambda p: _legacy_sidecar_paths_by_name(
+            p, ("_params", "_phases", "_signals")
+        ),
         validate_input=_validate_jpa_auto_sidecar_input,
+    ),
+    "jpa/jpa_auto_optimize/legacy_a": ConverterSpec(
+        convert=_convert_jpa_auto_legacy_a_grouped,
+        validate=_validate_jpa_auto_output,
+        input_paths=single_input_paths,
+        validate_input=_validate_jpa_auto_legacy_a_grouped_input,
     ),
 }
 

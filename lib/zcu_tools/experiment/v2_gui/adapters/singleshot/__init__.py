@@ -2,6 +2,7 @@ from .ac_stark import SsAcStarkAdapter
 from .check import CheckAdapter
 from .ge import GEAdapter
 from .len_rabi import SsLenRabiAdapter
+from .amp_rabi import SsAmpRabiAdapter
 from .mist import MistFreqAdapter, MistPowerAdapter, MistPowerFreqAdapter
 from .t1 import SsT1Adapter
 from .t1_tone import SsT1ToneAdapter
@@ -11,6 +12,7 @@ __all__ = [
     "GEAdapter",
     "CheckAdapter",
     "SsLenRabiAdapter",
+    "SsAmpRabiAdapter",
     "SsAcStarkAdapter",
     "MistFreqAdapter",
     "MistPowerAdapter",

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from zcu_tools.gui.app.main.adapter import SavePaths
 from zcu_tools.gui.app.main.services.persistence_types import (
     APP_STATE_VERSION,
     AppPersistedState,
@@ -29,7 +28,6 @@ def test_app_state_model_dump_validate_roundtrip():
                 PersistedTab(
                     adapter_name="fake",
                     cfg_raw={"x": 1, "nested": {"y": 2}},
-                    save_paths_override=SavePaths("d.h5", "i.png"),
                 ),
             ),
             active_tab_index=0,
@@ -50,9 +48,13 @@ def test_frozen():
         s.ip = "x"  # type: ignore[misc]
 
 
-def test_save_paths_override_roundtrips_through_json():
-    tab = PersistedTab(
-        adapter_name="fake", cfg_raw={}, save_paths_override=SavePaths("d", "i")
-    )
-    back = PersistedTab.model_validate(tab.model_dump(mode="json"))
-    assert back.save_paths_override == SavePaths("d", "i")
+def test_persisted_tab_does_not_carry_save_paths_override():
+    # Process-local data/analysis/post path overrides are not persisted; only
+    # adapter_name + cfg_raw survive a round-trip. This proves the final
+    # contract has no combined save_paths_override projection.
+    tab = PersistedTab(adapter_name="fake", cfg_raw={})
+    dumped = tab.model_dump(mode="json")
+    assert "save_paths_override" not in dumped
+    back = PersistedTab.model_validate(dumped)
+    assert back.adapter_name == "fake"
+    assert back.cfg_raw == {}

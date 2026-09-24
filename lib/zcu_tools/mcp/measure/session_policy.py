@@ -33,15 +33,21 @@ _GUARD_DEPS_DATA: dict[str, tuple[str, ...]] = {
         "tab:{tab_id}:analyze",
         "context",
     ),
-    "tab.save_data": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "tab.save_image": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "tab.save_post_image": ("tab:{tab_id}:post_analyze", "tab:{tab_id}:save_path"),
-    "tab.save_result": ("tab:{tab_id}:result", "tab:{tab_id}:save_path"),
-    "tab.save_set_paths": ("tab:{tab_id}:save_path",),
-    "tab.writeback_set": ("tab:{tab_id}:result", "tab:{tab_id}:analyze", "context"),
+    "tab.save_data": ("tab:{tab_id}:result", "tab:{tab_id}:path:data"),
+    "tab.save_image": (
+        "tab:{tab_id}:result",
+        "tab:{tab_id}:post_analyze",
+        "tab:{tab_id}:path:analysis_image",
+        "tab:{tab_id}:path:post_analysis_image",
+    ),
+    "tab.writeback_set": (
+        "tab:{tab_id}:result",
+        "tab:{tab_id}:{writeback_resource}",
+        "context",
+    ),
     "tab.writeback_apply": (
         "tab:{tab_id}:result",
-        "tab:{tab_id}:analyze",
+        "tab:{tab_id}:{writeback_resource}",
         "context",
     ),
     "editor.commit": ("editor:{editor_id}", "context"),
@@ -106,10 +112,15 @@ def expand_pattern_keys(
                 if key.startswith("device:"):
                     out[key] = version
             continue
+        writeback_resource = {
+            "analysis": "analyze",
+            "post_analysis": "post_analyze",
+        }.get(str(params.get("subtab_id", "")), "invalid_writeback_subtab")
         key = pattern.format(
             tab_id=params.get("tab_id", ""),
             editor_id=params.get("editor_id", ""),
             name=params.get("name", ""),
+            writeback_resource=writeback_resource,
         )
         out[key] = source_table.get(key, 0)
     return out
@@ -139,7 +150,11 @@ def describe_stale_keys(keys: list[Any]) -> list[str]:
                 "cfg": "this tab's cfg",
                 "result": "this tab's run result",
                 "analyze": "this tab's analysis",
+                "post_analyze": "this tab's post-analysis",
                 "save_path": "this tab's save path",
+                "path:data": "this tab's data path",
+                "path:analysis_image": "this tab's analysis image path",
+                "path:post_analysis_image": "this tab's post-analysis image path",
             }.get(facet, "this tab")
             if label not in out:
                 out.append(label)

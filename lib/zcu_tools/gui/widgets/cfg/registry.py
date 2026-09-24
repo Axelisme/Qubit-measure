@@ -160,14 +160,19 @@ class FrozenFieldRendererRegistry:
 
 
 def default_cfg_renderers() -> FrozenFieldRendererRegistry:
-    """Build a fresh frozen registry containing the standard cfg factories."""
+    """Build a fresh frozen registry containing the standard cfg factories.
+
+    Sole tree composition owns ``SectionField`` structurally (``TreeCfgWidget``
+    creates ``QTreeWidgetItem``s for sections). The registry therefore
+    exposes exactly five non-section editor factories; SectionField has no
+    registry entry and is never rendered via ``registry.render``.
+    """
     return (
         FieldRendererRegistry()
         .register(LiteralField, _render_literal)
         .register(ScalarField, _render_scalar)
         .register(SweepField, _render_sweep)
         .register(CenteredSweepField, _render_centered_sweep)
-        .register(SectionField, _render_section)
         .register(ReferenceField, _render_reference)
         .freeze()
     )
@@ -229,15 +234,6 @@ def _render_centered_sweep(
         cast(CenteredSweepField, field),
         text_input_enhancer=context.text_input_enhancer,
     )
-
-
-def _render_section(
-    field: CfgField,
-    context: FieldRenderContext,
-) -> FieldWidgetProtocol:
-    from .fields import SectionWidget
-
-    return SectionWidget(cast(SectionField, field), context=context)
 
 
 def _render_reference(

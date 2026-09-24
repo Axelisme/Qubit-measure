@@ -26,6 +26,7 @@ from zcu_tools.experiment.v2.runner.schedule import (
 from zcu_tools.experiment.v2.runner.task import MeasurementBundle
 from zcu_tools.experiment.v2.utils import Result
 from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.liveplot.backend.jupyter import grab_frame_with_instant_plot
 from zcu_tools.utils.debug import log_current_exception
 
@@ -213,9 +214,7 @@ class MultiMeasurementExecutor(Generic[T_Measurement, T_Cfg, T_Env, T_Axis]):
                             assert writer is not None
                             writer.finish()
         finally:
-            import matplotlib.pyplot as plt
-
-            plt.close(fig)
+            close_figure(fig)
 
         signals_dict = {
             name: result_tree.measurement_result(name)

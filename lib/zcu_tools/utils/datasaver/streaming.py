@@ -1,8 +1,7 @@
 """Streaming grouped Labber dataset writer.
 
-This module is the partial-write counterpart to the one-shot grouped writer.
-It keeps the same Labber-compatible on-disk layout, but preallocates each role
-with NaNs and lets callers commit the outer workflow row one slice at a time.
+Streaming owns its heterogeneous grouped-v1 root/``Log_N`` layout independently
+of the root-only common-grid one-shot grouped format.
 """
 
 from __future__ import annotations
@@ -16,16 +15,12 @@ from typing import Any
 import h5py
 import numpy as np
 
-from .grouped import (
-    DATASET_ROLE_ATTR,
-    DATASET_ROLES_ATTR,
-    GROUPED_DATASET_VERSION,
-    GROUPED_VERSION_ATTR,
-)
+from .grouped import DATASET_ROLE_ATTR, DATASET_ROLES_ATTR, GROUPED_VERSION_ATTR
 from .labber import _str_array, _write_payload_to_log
 from .models import Axis, DatasetRole, LabberMetadata, LabberPayload, as_axis
 from .paths import format_ext
 
+STREAMING_GROUPED_DATASET_VERSION = 1
 STREAMING_DATASET_VERSION = 1
 STREAMING_VERSION_ATTR = "zcu_tools.streaming_grouped_dataset_version"
 STREAMING_FINALIZED_ATTR = "zcu_tools.streaming_finalized"
@@ -165,7 +160,7 @@ class StreamingGroupedLabberWriter:
                     timestamps=_require_dataset(data_group, "Time stamp"),
                 )
 
-            self._file.attrs[GROUPED_VERSION_ATTR] = GROUPED_DATASET_VERSION
+            self._file.attrs[GROUPED_VERSION_ATTR] = STREAMING_GROUPED_DATASET_VERSION
             self._file.attrs[DATASET_ROLES_ATTR] = _str_array(role_names)
             self._file.attrs[STREAMING_VERSION_ATTR] = STREAMING_DATASET_VERSION
             self._file.attrs[STREAMING_FINALIZED_ATTR] = False

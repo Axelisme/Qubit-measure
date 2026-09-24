@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-07-23 — resonance background model
+**Last updated:** 2026-09-23 — nearest-center singleshot regions
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -17,11 +17,19 @@ import。
 - `DatasetRole`、`GroupedLabberData` 描述 grouped experiment dataset：單一
   experiment data file 內含多個 role payload，metadata 共用。
 - `save_labber_data` / `load_labber_data` 處理 single-role file。
-- `save_grouped_labber_data` / `load_grouped_labber_data` 處理 grouped file；
-  experiment loader 傳 required roles，省略 required roles 只用於 diagnostic
-  與 migration tooling。
+- `save_grouped_labber_data` / `load_grouped_labber_data` 處理 canonical one-shot
+  grouped v2。所有 roles 必須共享完全相同的 inner-first axes、shape 與
+  timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 roles 寫成
+  root Labber log 的平行 scalar channels。ordered role-to-channel attrs 保存 domain
+  identity；experiment loader 傳 required roles，省略 required roles 只用於
+  diagnostic 與 migration tooling。
+- unmarked grouped v1 是離線 migration input。runtime loader 不做 compatibility
+  load、不改寫 input，只回報 `script/migrate_experiment_data.py --experiment
+  grouped/v1` 的手動指令。
 - `StreamingLabberRoleSpec` / `open_streaming_grouped_labber_data` 處理
-  grouped Labber file 的 partial-write use case；`open_streaming_labber_data`
+  grouped Labber file 的 partial-write use case。它保留 marker-qualified grouped v1
+  root/`Log_N` layout 與 heterogeneous axes，不共用 one-shot v2 decoder。
+  `open_streaming_labber_data`
   是 single-log `save_labber_data` 的 streaming 對偶。caller 先宣告 full-shape
   schema，writer 預建 nan-filled datasets，之後以 outer row slice 寫入並
   flush。它是長掃 workflow 的 streaming primitive，不改變 one-shot save helper
@@ -45,6 +53,34 @@ import。
 `datasaver/` 內部 module 是責任拆分，不是額外 public import path。
 
 ## fitting helpers
+
+`utils.fitting.shared` 是多 trace shared/fixed fitting 的唯一 public authority；不提供
+positional shared-index compatibility。它的 least-squares path 讓每條
+`FitTrace` 以名稱宣告 local/shared parameter identity；caller 透過唯一一組
+`ParameterSpec` 集中宣告 initial value、fixed state 與 limits。Module 在進入
+optimizer 前拒絕未知或重複名稱、無效 limits 與不一致資料形狀，並把 iminuit
+object 完全藏在 Interface 後方。
+
+`SharedFitResult` 以單一 global parameter order 持有 named values、完整 covariance /
+correlation、選定 profile intervals 與 validity、EDM、covariance accuracy、call-limit
+等 diagnostics。Fixed parameter 保留 zero covariance row/column；least-squares
+covariance 依 reduced chi-square scaling，維持既有 `curve_fit(absolute_sigma=False)`
+慣例。Backend 無效但仍能形成 result 時由 diagnostics 表達，不由 caller 解析
+iminuit state。`fit_ge_decay(..., share_t1=True)` 是第一個 tracer：g/e trace 共用同一
+`t1` identity，並由 global covariance 投影既有 T1 error result。
+
+Singleshot readout-transition family亦提供固定histogram edges的integrated-bin conditional
+probabilities與radius-limited nearest-center g/e region積分；Len Rabi joint likelihood以同一conditional
+family建立multinomial NLL及derived confusion matrix，不以bin-center PDF高度或free matrix
+parameters取代其機率語意。這個utils Module只擁有conditional probability與circle integration；
+Len Rabi experiment Module擁有optimizer continuation、backend validity、calibration阻擋與Figure
+呈現，避免generic fitting helper決定上層analysis lifecycle。
+
+Dual transition-rate fitting以六個stable rate names共享跨dataset identity，兩組initial
+g/e populations維持dataset-qualified local identity。`DualTransitionRateFitResult`直接持有
+named `TransitionRates`與errors、兩組fitted populations、local initial populations，以及
+foundation提供的單一global covariance與diagnostics；singleshot、tone/sweep及overnight
+callers不解包positional per-trace covariance。
 
 `utils.fitting.base.fit_func` 保留既有 `curve_fit` 失敗時回退 `init_p` 的
 contract，但會發出 `RuntimeWarning`，讓 caller 不再把 fallback 靜默當成成功擬合。
@@ -106,3 +142,5 @@ exception；若 exception 來自 Pyro 且包含 `_pyroTraceback`，會把 remote
 `utils.process` 保留 ndarray dtype 形狀的 helper 會優先使用 numpy ufunc
 （例如 `np.subtract`）來表達泛型 array 運算。這比在 `NDArray[T]` 上直接使用
 Python 運算子更容易讓 numpy stub 維持 dtype 關係，也避免用 `cast()` 補洞。
+
+Program 與離線分析共用 `shot_classification` 的互斥分類；等距與 radius 邊界不納入 g/e。Gaussian region 積分使用相同的圓與半平面交集。

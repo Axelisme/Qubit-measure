@@ -21,11 +21,10 @@ from ._helpers import dispatch_handler as _dispatch
 
 
 def _snapshot(*, has_analyze_result: bool, post_params: object) -> SimpleNamespace:
-    """A minimal TabSnapshot stand-in carrying the two fields the post handlers
-    read: interaction.has_analyze_result and post_analyze_params."""
+    """Minimal pane-qualified snapshot consumed by the post handlers."""
     return SimpleNamespace(
         interaction=SimpleNamespace(has_analyze_result=has_analyze_result),
-        post_analyze_params=post_params,
+        post_analysis=SimpleNamespace(params=post_params),
     )
 
 
@@ -34,7 +33,7 @@ _DEFAULT = object()
 
 def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
     if post_params is _DEFAULT:
-        post_params = GEPostAnalyzeParams(backend="pca", angle=None)
+        post_params = GEPostAnalyzeParams()
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
     ctrl.get_tab_snapshot.return_value = _snapshot(
@@ -50,26 +49,13 @@ def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
 
 
 def test_start_with_primary_result_starts_op():
-    """A primary analyze result present -> the post op is started and its
-    operation_id returned; updates are applied onto the param instance."""
-    ctrl = _ctrl()
-    res = _dispatch(
-        ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {"backend": "center"}}
-    )
-    assert res == {"operation_id": 77}
-    ctrl.start_post_analyze.assert_called_once()
-    args, _ = ctrl.start_post_analyze.call_args
-    assert args[0] == "t"
-    # dataclasses.replace applied the update onto the snapshot's param instance.
-    assert args[1] == GEPostAnalyzeParams(backend="center", angle=None)
-
-
-def test_start_without_updates_uses_snapshot_params():
+    """A primary analyze result starts post-analysis with its zero-field params."""
     ctrl = _ctrl()
     res = _dispatch(ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {}})
     assert res == {"operation_id": 77}
+    ctrl.start_post_analyze.assert_called_once()
     args, _ = ctrl.start_post_analyze.call_args
-    assert args[1] == GEPostAnalyzeParams(backend="pca", angle=None)
+    assert args == ("t", GEPostAnalyzeParams())
 
 
 def test_start_without_primary_result_fast_fails():
@@ -109,9 +95,7 @@ def test_start_invalid_update_field_rejected():
 def test_get_params_serializes_dataclass():
     ctrl = _ctrl()
     res = _dispatch(ctrl, "tab.get_post_analyze_params", {"tab_id": "t"})
-    assert res["post_analyze_params"] == asdict(
-        GEPostAnalyzeParams(backend="pca", angle=None)
-    )
+    assert res["post_analyze_params"] == asdict(GEPostAnalyzeParams())
 
 
 def test_get_params_none_when_absent():
@@ -128,10 +112,18 @@ def test_get_params_none_when_absent():
 def test_get_result_summarizes():
     ctrl = _ctrl()
     result = MagicMock()
-    result.to_summary_dict.return_value = {"fidelity": 0.97, "backend": "pca"}
+    result.to_summary_dict.return_value = {
+        "ge_radius": 0.37,
+        "confusion": [[1.0, 0.0], [0.0, 1.0]],
+    }
     ctrl.get_post_analyze_result.return_value = result
     res = _dispatch(ctrl, "tab.get_post_analyze_result", {"tab_id": "t"})
-    assert res == {"summary": {"fidelity": 0.97, "backend": "pca"}}
+    assert res == {
+        "summary": {
+            "ge_radius": 0.37,
+            "confusion": [[1.0, 0.0], [0.0, 1.0]],
+        }
+    }
 
 
 def test_get_result_none_when_absent():

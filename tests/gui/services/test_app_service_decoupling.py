@@ -18,7 +18,7 @@ What does NOT count as a forbidden dependency, and why:
   receives. Only importing the concrete ``*Service`` class is the coupling we ban.
 - **TYPE_CHECKING-only imports** (e.g. ``WritebackService`` under
   ``if TYPE_CHECKING:`` for an annotation). These have no runtime effect; the
-  runtime wiring goes through the injected port (``WritebackQueryPort``).
+  runtime wiring goes through the injected ``WritebackLifecyclePort``.
 
 Coverage includes the infrastructure modules that have session-layer ports:
 ``operation_gate`` (port: ``ExclusionGate``), ``cfg_editor`` (port:

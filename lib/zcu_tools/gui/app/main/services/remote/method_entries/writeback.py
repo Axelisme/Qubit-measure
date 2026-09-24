@@ -18,18 +18,21 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "writeback:_h_tab_writeback_preview",
         MethodSpec(
             5.0,
-            "List the tab's persistent writeback draft (pure read — not a dry-run; the "
-            "draft was computed once at analyze time). Returns {has_draft, items}; "
-            "has_draft is false before any analyze produced a draft. Each item: id "
+            "List a pane's persistent writeback draft (pure read — not a dry-run; the "
+            "draft was computed once at analyze time). Requires (tab_id, subtab_id) "
+            "with closed values analysis|post_analysis. Returns "
+            "{has_draft, items, destination_context}; has_draft is false before any "
+            "analyze produced a draft; destination_context is the current active "
+            "ExpContext projection at reply time. Each item: id "
             "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
             "kind (metadict|module|waveform), description, selected; metadict adds "
-            "proposed_value; module/waveform add editor_id + has_edit_schema, and "
+            "proposed_value; module/waveform add has_edit_schema, and "
             "may include role_id when the proposal corresponds to a ModuleLibrary "
             "role. A complex metadict proposed_value is carried as "
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
             "gui_tab_writeback_set_item; the user's Edit dialog renders the same "
             "model (WYSIWYG).",
-            (_str("tab_id"),),
+            (_str("tab_id"), _str("subtab_id", "Pane: analysis|post_analysis")),
             tool_name="gui_tab_writeback_list",
         ),
     ),
@@ -38,8 +41,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "writeback:_h_tab_writeback_set",
         MethodSpec(
             5.0,
-            "Edit a persistent writeback item by id — the single writeback editing "
-            "surface. selected? / target_name? apply to any item. proposed_value? is "
+            "Edit a pane's persistent writeback item by id — the single writeback "
+            "editing surface. Requires (tab_id, subtab_id) with closed values "
+            "analysis|post_analysis. selected? / target_name? apply to any item. "
+            "proposed_value? is "
             "the METADICT-only facet (a complex value is passed as "
             '{"__complex__": [re, im]}, the same shape the list emits; it applies as '
             "a Python complex). edits? is the MODULE/WAVEFORM-only facet: an ORDERED "
@@ -55,6 +60,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "replacement. Read the item's current paths via tab.writeback_preview.",
             (
                 _str("tab_id"),
+                _str("subtab_id", "Pane: analysis|post_analysis"),
                 _str("id", "writeback item session id (<kind>-<n>)"),
                 # Boolean (not JSON): a JSON schema of {type: boolean} makes the
                 # client send a real boolean. Declared as JSON, the client may send
@@ -84,13 +90,19 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "writeback:_h_tab_writeback_apply",
         MethodSpec(
             10.0,
-            "Apply the tab's persistent writeback draft as-is (edit it first via "
-            "gui_tab_writeback_set_item). Applies items currently selected. Returns "
-            "{applied_ids, written, context_version}: written lists the destination "
+            "Apply a pane's persistent writeback draft as-is (edit it first via "
+            "gui_tab_writeback_set_item). Requires (tab_id, subtab_id) with closed "
+            "values analysis|post_analysis. Applies items currently selected. Returns "
+            "{applied_ids, written, context_version, destination_context}: written lists the destination "
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "
             "context_version is the bumped 'context' resource version after apply (use "
-            "it as an expected_versions guard on a follow-up write).",
-            (_str("tab_id"), _expected_versions()),
+            "it as an expected_versions guard on a follow-up write); "
+            "destination_context is the active ExpContext projection at reply time.",
+            (
+                _str("tab_id"),
+                _str("subtab_id", "Pane: analysis|post_analysis"),
+                _expected_versions(),
+            ),
         ),
     ),
 )

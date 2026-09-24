@@ -673,11 +673,11 @@ def test_real_mcp_bridge_piggybacks_agent_run_origin(fx, qapp, monkeypatch) -> N
         handle = started["handle"]
         deadline = time.monotonic() + 5.0
         while (
-            fx.state.get_tab(tab_id).run_result is None and time.monotonic() < deadline
+            fx.state.get_tab(tab_id).run.result is None and time.monotonic() < deadline
         ):
             qapp.processEvents()
             time.sleep(0.005)
-        assert fx.state.get_tab(tab_id).run_result is not None
+        assert fx.state.get_tab(tab_id).run.result is not None
 
         # Model the next successful MCP tool reply: the stdio loop invokes this
         # hook only after a handler succeeds.

@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
@@ -38,7 +39,8 @@ class MainWindowEventHost(Protocol):
     def remove_tab_widget(self, tab_id: str) -> None: ...
     def has_tab_widget(self, tab_id: str) -> bool: ...
     def view_tab_ids(self) -> list[str]: ...
-    def focus_run_result_panel(self, tab_id: str) -> None: ...
+
+    def refresh_tab_cfg(self, tab_id: str) -> None: ...
 
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -67,8 +69,11 @@ class MainWindowEventHost(Protocol):
     def refresh_predictor_panel(self) -> None: ...
     def refresh_feedback_widget(self) -> None: ...
 
+    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None: ...
+
 
 class _TabReaction(Enum):
+    CFG = auto()
     ANALYZE_FORM = auto()
     POST_ANALYZE_FORM = auto()
     WRITEBACK = auto()
@@ -148,9 +153,11 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
     TabInteractionFact.ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.SAVE_PATHS_CHANGED: (),
+    TabInteractionFact.WRITEBACK_DRAFT_CHANGED: (_TabReaction.WRITEBACK,),
 }
 
 _CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {
+    TabContentFact.CFG_REPLACED: (_TabReaction.CFG,),
     TabContentFact.RUN_RESULT_COMMITTED: (
         _TabReaction.ANALYZE_FORM,
         _TabReaction.POST_ANALYZE_FORM,
@@ -168,9 +175,11 @@ _CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {
         _TabReaction.POST_ANALYZE_FORM,
         _TabReaction.WRITEBACK,
         _TabReaction.FIGURE,
+        _TabReaction.POST_FIGURE,
         _TabReaction.INTERACTION,
     ),
     TabContentFact.POST_ANALYSIS_COMMITTED: (
+        _TabReaction.WRITEBACK,
         _TabReaction.FIGURE,
         _TabReaction.POST_FIGURE,
         _TabReaction.INTERACTION,
@@ -248,6 +257,7 @@ class MainWindowEventCoordinator:
             bus, DeviceSetupFinishedPayload, self._on_device_setup_finished
         )
         self._subs.subscribe(bus, DeviceChangedPayload, self._on_device_changed)
+        self._subs.subscribe(bus, SaveDataFinishedPayload, self._on_save_data_finished)
 
     def close(self) -> None:
         """Unsubscribe every main-window bus handler."""
@@ -268,15 +278,14 @@ class MainWindowEventCoordinator:
                 _TabReaction.INTERACTION,
             ),
         )
-        self._host.refresh_run_lock(payload.tab_id)
+        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
         self._host.refresh_feedback_widget()
 
     def _on_run_finished(self, payload: RunFinishedPayload) -> None:
+        """Refresh terminal state without changing the user's selected pane."""
         self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
-        self._host.refresh_run_lock(None)
+        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
         self._host.refresh_feedback_widget()
-        if payload.outcome == "finished" and self._host.has_tab_widget(payload.tab_id):
-            self._host.focus_run_result_panel(payload.tab_id)
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -302,7 +311,9 @@ class MainWindowEventCoordinator:
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         for reaction in reactions:
-            if reaction is _TabReaction.ANALYZE_FORM:
+            if reaction is _TabReaction.CFG:
+                self._host.refresh_tab_cfg(tab_id)
+            elif reaction is _TabReaction.ANALYZE_FORM:
                 self._host.refresh_tab_analyze_form(tab_id, snapshot)
             elif reaction is _TabReaction.POST_ANALYZE_FORM:
                 self._host.refresh_tab_post_analyze_form(tab_id, snapshot)
@@ -339,6 +350,9 @@ class MainWindowEventCoordinator:
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         del payload
         self._host.refresh_feedback_widget()
+
+    def _on_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
+        self._host.handle_save_data_finished(payload)
 
 
 __all__ = ["MainWindowEventCoordinator", "MainWindowEventHost"]

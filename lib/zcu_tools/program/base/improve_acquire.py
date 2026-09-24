@@ -12,8 +12,10 @@ from qick.qick_asm import (
     AcquireMixin,
     logger,
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
-    tqdm,
 )
+
+from zcu_tools.progress_bar import make_pbar
+from zcu_tools.utils.shot_classification import classify_shots
 
 
 class CancelFlagProtocol(Protocol):
@@ -153,9 +155,12 @@ class EarlyStopMixin(TypedAcquireMixin):
 
         count = 0
         stats_start = len(self.stats) if self.stats is not None else 0
-        with tqdm(
-            total=total_count, disable=self.acquire_params["hidereps"]
-        ) as reps_pbar:
+        reps_pbar = make_pbar(
+            total=total_count,
+            disable=self.acquire_params["hidereps"],
+            leave=False,
+        )
+        try:
             soc.start_readout(
                 total_count,
                 counter_addr=self.counter_addr,
@@ -196,6 +201,8 @@ class EarlyStopMixin(TypedAcquireMixin):
                     return self._finish_stopped_partial_accumulated_round(
                         soc, stats_start=stats_start
                     )
+        finally:
+            reps_pbar.close()
 
         if cancel_flag.is_set():
             return self._finish_stopped_partial_accumulated_round(
@@ -355,11 +362,10 @@ class SingleShotMixin(TypedAcquireMixin):
             if remove_offset:
                 offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # type: ignore
                 avg -= offset
-            g_dist = np.abs(avg.dot([1, 1j]) - g_center)
-            e_dist = np.abs(avg.dot([1, 1j]) - e_center)
-            g_shot = np.heaviside(ge_radius - g_dist, 0)
-            e_shot = np.heaviside(ge_radius - e_dist, 0)
-            shots.append(np.stack([g_shot, e_shot], axis=-1))
+            g_shot, e_shot, _ = classify_shots(
+                avg.dot([1, 1j]), g_center, e_center, ge_radius
+            )
+            shots.append(np.stack([g_shot, e_shot], axis=-1).astype(np.float64))
         return shots
 
 

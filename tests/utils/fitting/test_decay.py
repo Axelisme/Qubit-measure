@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from zcu_tools.utils.fitting.base import decaycos, dual_expfunc, expfunc
 from zcu_tools.utils.fitting.decay import (
     fit_decay,
@@ -28,16 +29,33 @@ def test_fit_dual_decay_recovers_two_times():
 
 
 def test_fit_ge_decay_shared_t1():
+    rng = np.random.default_rng(20260901)
     times = np.linspace(0, 20, 300)
     g_true = (0.1, 0.8, 6.0)
     e_true = (0.9, -0.8, 6.0)
-    g_pops = expfunc(times, *g_true)
-    e_pops = expfunc(times, *e_true)
-    (g_t1, _, _, _), (e_t1, _, _, _) = fit_ge_decay(
+    g_pops = expfunc(times, *g_true) + rng.normal(0.0, 2e-3, times.size)
+    e_pops = expfunc(times, *e_true) + rng.normal(0.0, 2e-3, times.size)
+    (g_t1, g_t1err, _, _), (e_t1, e_t1err, _, _) = fit_ge_decay(
         times, g_pops, e_pops, share_t1=True
     )
     assert abs(g_t1 - 6.0) / 6.0 < 1e-2
-    assert abs(e_t1 - 6.0) / 6.0 < 1e-2
+    assert g_t1 == e_t1
+    assert np.isfinite(g_t1err)
+    assert g_t1err > 0.0
+    assert g_t1err == e_t1err
+
+
+def test_fit_ge_decay_non_shared_t1_remains_independent():
+    times = np.linspace(0, 20, 300)
+    g_pops = expfunc(times, 0.1, 0.8, 5.0)
+    e_pops = expfunc(times, 0.9, -0.8, 7.0)
+
+    (g_t1, _, _, _), (e_t1, _, _, _) = fit_ge_decay(
+        times, g_pops, e_pops, share_t1=False
+    )
+
+    assert g_t1 == pytest.approx(5.0, rel=1e-3)
+    assert e_t1 == pytest.approx(7.0, rel=1e-3)
 
 
 def test_fit_decay_fringe_recovers_T2_and_detune():

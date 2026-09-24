@@ -33,11 +33,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from tests.gui.services._completion_helpers import (
-    on_analyze_failed,
-    on_post_analyze_failed,
-    on_post_analyze_finished,
-)
+from tests.gui.services._completion_helpers import on_post_analyze_failed
 
 from ._progress_fakes import DirectProgressTransport
 
@@ -95,7 +91,9 @@ def _make_service(
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(MagicMock(), handles, progress, bg, bus)  # type: ignore[arg-type]
-    svc = PostAnalyzeService(state, runner, bus, handles)
+    writeback = MagicMock()
+    writeback.create_draft.return_value = None
+    svc = PostAnalyzeService(state, runner, bus, handles, writeback)
     return svc, bg
 
 
@@ -139,8 +137,8 @@ def test_start_post_analyze_submit_rejection_preserves_figures(qapp):  # noqa: A
     old_primary = Figure()
     old_post = Figure()
     tab = state.get_tab("tab1")
-    tab.figure = old_primary
-    tab.post_figure = old_post
+    tab.analysis.figure = old_primary
+    tab.post_analysis.figure = old_post
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
@@ -150,8 +148,8 @@ def test_start_post_analyze_submit_rejection_preserves_figures(qapp):  # noqa: A
         svc.start_post_analyze("tab1", post_analyze_params_instance=object())
 
     assert received == [TabInteractionFact.POST_ANALYZE_START_REJECTED]
-    assert tab.figure is old_primary
-    assert tab.post_figure is old_post
+    assert tab.analysis.figure is old_primary
+    assert tab.post_analysis.figure is old_post
     assert tab.is_analyzing is False
 
 
@@ -207,14 +205,23 @@ def test_on_post_analyze_finished_updates_state(qapp):  # noqa: ARG001
     post_result.figure = Figure()
 
     finished: list = []
-    on_post_analyze_finished(svc, lambda tid, r: finished.append((tid, r)))
+    bus.subscribe(
+        TabInteractionChangedPayload,
+        lambda payload: (
+            finished.append(
+                (payload.tab_id, state.get_tab(payload.tab_id).post_analysis.result)
+            )
+            if payload.fact is TabInteractionFact.POST_ANALYZE_SUCCEEDED
+            else None
+        ),
+    )
 
     assert bg.last_on_done is not None
     bg.last_on_done(post_result)
 
     tab = state.get_tab("tab1")
-    assert tab.post_analyze_result is post_result
-    assert tab.post_figure is post_result.figure
+    assert tab.post_analysis.result is post_result
+    assert tab.post_analysis.figure is post_result.figure
     assert tab.is_analyzing is False
     assert finished == [("tab1", post_result)]
     outcome = svc._handles.poll(token)

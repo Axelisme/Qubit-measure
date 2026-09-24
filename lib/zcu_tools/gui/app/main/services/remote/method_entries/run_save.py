@@ -33,7 +33,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             30.0,
             "Load a canonical result file into an already-open adapter tab. The tab "
             "then has a run result and can be analyzed without a SoC connection. "
-            "First release does not backfill Config from cfg_snapshot.",
+            "Compatible snapshot values backfill Config automatically, replacing "
+            "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
+            "backfill failure does not undo the loaded result.",
             (
                 _str("tab_id"),
                 _str("data_path", "Canonical HDF5 result file to load"),
@@ -70,17 +72,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:_h_tab_save_data",
         MethodSpec(
             30.0,
-            "Save data file",
+            "Save data file (tab-only).",
             (
                 _str("tab_id"),
                 _str_opt("data_path", "Override data path"),
                 _comment(),
                 _expected_versions(),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_save",
-                reason="manual MCP tool merges data/image save selectors",
-            ),
+            tool_name="gui_tab_save_data",
         ),
     ),
     method_entry(
@@ -88,71 +87,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:_h_tab_save_image",
         MethodSpec(
             30.0,
-            "Save image file",
+            "Save a pane's canonical image file (analysis|post_analysis only; run "
+            "has no canonical image). Requires (tab_id, subtab_id) with closed "
+            "values analysis|post_analysis.",
             (
                 _str("tab_id"),
+                _str("subtab_id", "Pane: analysis|post_analysis"),
                 _str_opt("image_path", "Override image path"),
                 _expected_versions(),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_save",
-                reason="manual MCP tool merges data/image save selectors",
-            ),
-        ),
-    ),
-    method_entry(
-        "tab.save_post_image",
-        "run_save:_h_tab_save_post_image",
-        MethodSpec(
-            30.0,
-            "Save the post-analysis figure image file (the post sub-tab's own Save "
-            "Image). Mirrors tab.save_image but targets the tab's post-analysis figure; "
-            "requires a post-analysis result.",
-            (
-                _str("tab_id"),
-                _str_opt("image_path", "Override image path"),
-                _expected_versions(),
-            ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_save",
-                reason="manual MCP tool merges data/image save selectors",
-            ),
-        ),
-    ),
-    method_entry(
-        "tab.save_result",
-        "run_save:_h_tab_save_result",
-        MethodSpec(
-            30.0,
-            "Save the result's data and image",
-            (
-                _str("tab_id"),
-                _str_opt("data_path", "Override data path"),
-                _str_opt("image_path", "Override image path"),
-                _comment(),
-                _expected_versions(),
-            ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_save",
-                reason="manual MCP tool merges data/image save selectors",
-            ),
-        ),
-    ),
-    method_entry(
-        "tab.save_set_paths",
-        "run_save:_h_tab_save_set_paths",
-        MethodSpec(
-            5.0,
-            "Set the tab's default save destinations (data + image). Echoes the "
-            "applied {data_path, image_path}. Version-guarded on the tab's save_path: "
-            "rejects with precondition_failed if a concurrent edit moved it.",
-            (
-                _str("tab_id"),
-                _str("data_path"),
-                _str("image_path"),
-                _expected_versions(),
-            ),
-            tool_name="gui_tab_set_save_paths",
+            tool_name="gui_tab_save_image",
         ),
     ),
 )

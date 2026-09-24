@@ -69,21 +69,19 @@ display(ctx.params_table)
 display(ctx.samples_preview)
 ```
 
-# Flux Calibration
-
-```python
-current_scale_candidates = (1.0, 1000.0)
-```
+# Flux Resolution (v2)
 
 ```python
 cal = zt2.calibrate_t2_flux(
     ctx,
-    current_scale_candidates=current_scale_candidates,
+    fallback_frame_unit="A",  # params.json fluxdep_fit frame declared in A
 )
 ```
 
 ```python
-print(f"current scale = {cal.current_scale:g}")
+print(f"explicit flux rows = {sum(s == 'explicit' for s in cal.resolution.sources)}")
+print(f"row-frame flux rows = {sum(s == 'row-frame' for s in cal.resolution.sources)}")
+print(f"fallback-frame flux rows = {sum(s == 'fallback-frame' for s in cal.resolution.sources)}")
 print(f"finite f01 rows = {len(cal.freq_rows)}")
 ```
 
@@ -129,6 +127,10 @@ figure_paths["flux_calibration"] = zt2.save_t2_curve_figure(
 
 fig, _ = zt2.plot_t2_dephasing_data(data)
 figure_paths["t2e_vs_flux"] = zt2.save_t2_curve_figure(fig, ctx, "T2e_vs_flux.png")
+```
+
+```python
+display(data.summary_table)  # prepared frequency-source and branch-shift diagnostics
 ```
 
 # Flux-Noise-Only Probe

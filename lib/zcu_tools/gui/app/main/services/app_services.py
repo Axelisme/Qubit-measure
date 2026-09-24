@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.main.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -18,6 +19,7 @@ from zcu_tools.gui.session.services.startup import StartupService
 from .analyze import AnalyzeService
 from .arb_waveform import ArbWaveformService
 from .cfg_editor import CfgEditorService
+from .experiment_reload import ExperimentReloadService
 from .guard import GuardService
 from .load import LoadService
 from .operation_control import OperationControlFacet
@@ -68,6 +70,8 @@ class AppServices:
     is shared by run / analyze / post-analyze / device-setup operations.
     """
 
+    experiment_access: ExperimentAccess
+    experiment_reload: ExperimentReloadService
     operation_gate: OperationGate
     operation_control: OperationControlPort
     handles: OperationHandles
@@ -112,6 +116,7 @@ def build_app_services(
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
     project_root: str,
+    catalog_loader: ExperimentCatalogLoader | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -120,6 +125,7 @@ def build_app_services(
     called during construction, so passing the still-initialising Controller is
     safe and keeps the bundle complete (no service built outside this function).
     """
+    access = ExperimentAccess()
     operation_gate = OperationGate(bus)
     handles = OperationHandles()
     background = BackgroundRunner()
@@ -153,7 +159,7 @@ def build_app_services(
         version_drop=cfg_editor_ctrl.drop_editor_version,
         bus=bus,
     )
-    writeback = WritebackService(state, cfg_editor, write_port=cfg_editor_ctrl)
+    writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0005).
     tab = TabService(state, registry, writeback)
@@ -163,12 +169,13 @@ def build_app_services(
         tab=tab,
         workspace=workspace,
         bus=bus,
+        access=access,
     )
     guard = GuardService(state)
-    load = LoadService(state, writeback)
+    load = LoadService(state, writeback, cfg_editor=cfg_editor, bus=bus)
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
-    post_analyze = PostAnalyzeService(state, runner, bus, handles)
+    post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
     save = SaveService(state, background, bus)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
@@ -180,6 +187,7 @@ def build_app_services(
         analyze=analyze,
         post_analyze=post_analyze,
         render_host=render_host,
+        access=access,
     )
     operation_control = OperationControlFacet(handles=handles, progress=progress)
     save_control = SaveControlFacet(
@@ -189,14 +197,27 @@ def build_app_services(
         tab=tab,
         save=save,
         notify_info=notify_info,
+        access=access,
     )
     writeback_control = WritebackControlFacet(
         state=state,
         guard=guard,
         writeback=writeback,
         resource_versions=resource_versions,
+        bus=bus,
+        access=access,
+    )
+    reload_service = ExperimentReloadService(
+        state=state,
+        workspace=workspace,
+        registry=registry,
+        loader=catalog_loader,
+        active_operations=handles.live_count,
+        access=access,
     )
     return AppServices(
+        experiment_access=access,
+        experiment_reload=reload_service,
         operation_gate=operation_gate,
         operation_control=operation_control,
         handles=handles,

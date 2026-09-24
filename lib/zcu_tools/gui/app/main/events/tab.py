@@ -42,6 +42,7 @@ class TabInteractionFact(str, Enum):
     ANALYZE_PARAMS_CHANGED = "analyze_params_changed"
     POST_ANALYZE_PARAMS_CHANGED = "post_analyze_params_changed"
     SAVE_PATHS_CHANGED = "save_paths_changed"
+    WRITEBACK_DRAFT_CHANGED = "writeback_draft_changed"
 
 
 class TabContentFact(str, Enum):
@@ -49,6 +50,7 @@ class TabContentFact(str, Enum):
 
     RUN_RESULT_COMMITTED = "run_result_committed"
     LOADED_RESULT_COMMITTED = "loaded_result_committed"
+    CFG_REPLACED = "cfg_replaced"
     PRIMARY_ANALYSIS_COMMITTED = "primary_analysis_committed"
     POST_ANALYSIS_COMMITTED = "post_analysis_committed"
 

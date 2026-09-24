@@ -26,7 +26,7 @@ def tool_gui_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
         widgets) via the view.screenshot wire method.
       - target=<dialog name> → that named dialog via dialog.screenshot.
 
-    Mirrors gui_tab_get_current_figure / the old dialog grab: the convenience
+    Mirrors gui_tab_get_figure / the old dialog grab: the convenience
     layer never returns inline base64 (a full-window grab would blow the
     tool-output token budget — the footgun this override removes). Both wire
     methods return base64 for raw consumers; we decode + write here. When out_path

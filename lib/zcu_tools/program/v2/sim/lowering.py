@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 
 import numpy as np
@@ -80,7 +81,7 @@ from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
-from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
+from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
     DirectReadout,
@@ -805,6 +806,40 @@ def _readout_plan(
         )
 
 
+def _require_frequency_decoder_surface(
+    soccfg: QickConfig | None,
+    *,
+    consumer: str,
+    methods: tuple[str, ...],
+    gen_ch: int,
+    ro_ch: int,
+) -> QickConfig:
+    """Return a complete QICK frequency-decoding surface or fail at the module boundary."""
+    if soccfg is None:
+        raise UnsupportedModuleError(f"{consumer} requires a soccfg frequency decoder")
+
+    missing_methods = [
+        name for name in methods if not callable(getattr(soccfg, name, None))
+    ]
+    if missing_methods:
+        raise UnsupportedModuleError(
+            f"{consumer} requires soccfg methods: {', '.join(missing_methods)}"
+        )
+
+    try:
+        gen_cfg = soccfg["gens"][gen_ch]
+        has_mixer = gen_cfg["has_mixer"]
+        if has_mixer:
+            _ = gen_cfg["b_dds"]
+            _ = soccfg["readouts"][ro_ch]
+    except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        raise UnsupportedModuleError(
+            f"{consumer} requires soccfg generator/readout mapping entries for "
+            f"gen_ch={gen_ch}, ro_ch={ro_ch}"
+        ) from exc
+    return soccfg
+
+
 def _load_word_gen_freq_mhz(
     val_reg: str,
     dmem_tables: dict[str, _DmemTable],
@@ -817,13 +852,15 @@ def _load_word_gen_freq_mhz(
     raw = _load_word_value(
         val_reg, dmem_tables, point, consumer="PulseReadout.freq_val"
     )
-    if soccfg is None or not hasattr(soccfg, "reg2freq"):
-        raise UnsupportedModuleError(
-            "PulseReadout.freq_val requires soccfg.reg2freq to decode LoadWord "
-            "frequency words"
-        )
-    return readout_freq_from_word(
+    decoder = _require_frequency_decoder_surface(
         soccfg,
+        consumer="PulseReadout.freq_val",
+        methods=("reg2freq", "calc_mixer_freq"),
+        gen_ch=pulse_cfg.ch,
+        ro_ch=ro_ch,
+    )
+    return readout_freq_from_word(
+        decoder,
         raw,
         kind="gen",
         gen_ch=pulse_cfg.ch,
@@ -846,13 +883,21 @@ def _load_word_ro_freq_mhz(
     raw = _load_word_value(
         val_reg, dmem_tables, point, consumer="PulseReadout.ro_freq_val"
     )
-    if soccfg is None or not hasattr(soccfg, "reg2freq_adc"):
-        raise UnsupportedModuleError(
-            "PulseReadout.ro_freq_val requires soccfg.reg2freq_adc to decode "
-            "LoadWord readout frequency words"
-        )
-    return readout_freq_from_word(
+    decoder = _require_frequency_decoder_surface(
         soccfg,
+        consumer="PulseReadout.ro_freq_val",
+        methods=("reg2freq_adc", "freq2reg_adc", "calc_mixer_freq"),
+        gen_ch=pulse_cfg.ch,
+        ro_ch=ro_ch,
+    )
+    try:
+        _ = decoder["readouts"][ro_ch]["f_dds"]
+    except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        raise UnsupportedModuleError(
+            "PulseReadout.ro_freq_val requires soccfg readout f_dds metadata"
+        ) from exc
+    return readout_freq_from_word(
+        decoder,
         raw,
         kind="ro",
         gen_ch=pulse_cfg.ch,
@@ -879,15 +924,16 @@ def _load_word_pair_freq_mhz(
     ro_word = _load_word_value(
         ro_val_reg, dmem_tables, point, consumer="PulseReadout.ro_freq_val"
     )
-    if soccfg is None or not all(
-        hasattr(soccfg, name) for name in ("reg2freq", "freq2reg", "freq2reg_adc")
-    ):
-        raise UnsupportedModuleError(
-            "paired PulseReadout frequency words require soccfg frequency converters"
-        )
+    decoder = _require_frequency_decoder_surface(
+        soccfg,
+        consumer="paired PulseReadout frequency words",
+        methods=("reg2freq", "freq2reg", "freq2reg_adc", "calc_mixer_freq"),
+        gen_ch=pulse_cfg.ch,
+        ro_ch=ro_ch,
+    )
     try:
         return readout_freq_from_words(
-            soccfg,
+            decoder,
             gen_word,
             ro_word,
             gen_ch=pulse_cfg.ch,
@@ -997,7 +1043,7 @@ def _frame_detuning(
     freqs = {
         round(_resolve_scalar(module.cfg.freq, loop_counts, point), 9)
         for module in _iter_evolution_modules(modules, point)
-        if isinstance(module, Pulse) and module.cfg is not None
+        if isinstance(module, (Pulse, TableLengthPulse)) and module.cfg is not None
     }
     if not freqs:
         return 0.0
@@ -1205,6 +1251,33 @@ def _lower_module(
         segments.extend(
             _pulse_segments(
                 module.cfg,
+                sim,
+                equilibrium_pop,
+                f_qubit_mhz,
+                frame_detuning,
+                detune_offset,
+                loop_counts,
+                point,
+            )
+        )
+        return
+    if isinstance(module, TableLengthPulse):
+        if module.idx_reg not in point:
+            raise UnsupportedModuleError(
+                f"TableLengthPulse {module.name!r} index register "
+                f"{module.idx_reg!r} is not a sweep axis at this point"
+            )
+        idx = point[module.idx_reg]
+        if not 0 <= idx < len(module.lengths):
+            raise UnsupportedModuleError(
+                f"TableLengthPulse {module.name!r} index {idx} is out of range"
+            )
+        length = module.lengths[idx]
+        cfg = deepcopy(module.cfg)
+        cfg.set_param("length", length)
+        segments.extend(
+            _pulse_segments(
+                cfg,
                 sim,
                 equilibrium_pop,
                 f_qubit_mhz,

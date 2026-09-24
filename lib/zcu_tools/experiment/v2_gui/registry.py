@@ -1,40 +1,16 @@
-"""Register the v2 experiment-adapter layer into the GUI framework.
+"""Explicit, reloadable experiment catalog; startup roles live in role_registry."""
 
-The GUI defines the ``Registry`` (experiment adapters) and ``RoleCatalog``
-(module/waveform role templates) interfaces; this module — in the experiment
-layer, which may import gui — fills both. Wired once at startup by the entry
-script (``run_measure_gui.py``), which builds the empty containers and passes them in.
-
-Role kinds (``RoleCatalog``):
-
-- **md-aware** (``res_probe``, ``bath_reset``, …): the eval-aware
-  ``make_<role>_default`` builders — seed a fresh blank with md-linked defaults.
-- **blank** (``<discriminator>:blank``): a plain structural-zero blank of one
-  concrete shape, for shapes that have no md-aware role (bare ``pulse``;
-  ``drag``/``flat_top``/``gauss``/``arb`` waveforms) or when a literal blank is
-  wanted. This is the single create path for *any* shape.
-
-(The ``_ref`` factory variants are intentionally not used: creating from a role
-seeds a fresh entry, it does not reference an existing library entry.)
-"""
-
-from __future__ import annotations
-
-from collections.abc import Callable
-
-from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
-from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
-from zcu_tools.gui.cfg import (
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, ProgramShape
 
-from .adapters._support import ROLE_FACTORIES
 from .adapters.fake.freq import FakeFreqAdapter
+from .adapters.jpa import (
+    JpaAutoOptimizeAdapter,
+    JpaCheckAdapter,
+    JpaFluxAdapter,
+    JpaFluxOneToneAdapter,
+    JpaFreqAdapter,
+    JpaPowerAdapter,
+)
 from .adapters.lookback import LookbackAdapter
 from .adapters.onetone.flux_dep import OneToneFluxDepAdapter
 from .adapters.onetone.freq import OneToneFreqAdapter
@@ -46,12 +22,14 @@ from .adapters.singleshot import (
     MistPowerAdapter,
     MistPowerFreqAdapter,
     SsAcStarkAdapter,
+    SsAmpRabiAdapter,
     SsLenRabiAdapter,
     SsT1Adapter,
     SsT1ToneAdapter,
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
 )
+from .adapters.twotone.ckp import CKPAdapter
 from .adapters.twotone.flux_dep import FluxDepAdapter
 from .adapters.twotone.freq import FreqAdapter
 from .adapters.twotone.power_dep import PowerDepAdapter
@@ -83,8 +61,6 @@ from .adapters.twotone.time_domain.t1 import T1Adapter
 from .adapters.twotone.time_domain.t2echo import T2EchoAdapter
 from .adapters.twotone.time_domain.t2ramsey import T2RamseyAdapter
 
-# --- experiment adapters -------------------------------------------------
-
 ADAPTERS = {
     "lookback": LookbackAdapter,
     "fake/freq": FakeFreqAdapter,
@@ -92,6 +68,7 @@ ADAPTERS = {
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
     "twotone/freq": FreqAdapter,
+    "twotone/ckp": CKPAdapter,
     "twotone/power_dep": PowerDepAdapter,
     "twotone/flux_dep": FluxDepAdapter,
     "twotone/rabi/amp_rabi": AmpRabiAdapter,
@@ -99,8 +76,8 @@ ADAPTERS = {
     "twotone/reset/single_tone/freq": SingleToneFreqAdapter,
     "twotone/reset/single_tone/length": SingleToneLengthAdapter,
     "twotone/reset/dual_tone/freq": DualToneFreqAdapter,
-    "twotone/reset/dual_tone/power": DualTonePowerAdapter,
     "twotone/reset/dual_tone/length": DualToneLengthAdapter,
+    "twotone/reset/dual_tone/power": DualTonePowerAdapter,
     "twotone/reset/bath/freq_gain": BathFreqGainAdapter,
     "twotone/reset/bath/length": BathLengthAdapter,
     "twotone/reset/bath/phase": BathPhaseAdapter,
@@ -116,6 +93,7 @@ ADAPTERS = {
     "singleshot/ge": GEAdapter,
     "singleshot/check": CheckAdapter,
     "singleshot/len_rabi": SsLenRabiAdapter,
+    "singleshot/amp_rabi": SsAmpRabiAdapter,
     "singleshot/t1": SsT1Adapter,
     "singleshot/t1_tone": SsT1ToneAdapter,
     "singleshot/t1_tone_sweep_gain": SsT1ToneSweepGainAdapter,
@@ -124,98 +102,15 @@ ADAPTERS = {
     "singleshot/mist/freq": MistFreqAdapter,
     "singleshot/mist/power": MistPowerAdapter,
     "singleshot/mist/power_freq": MistPowerFreqAdapter,
+    "jpa/freq": JpaFreqAdapter,
+    "jpa/flux": JpaFluxAdapter,
+    "jpa/power": JpaPowerAdapter,
+    "jpa/auto_optimize": JpaAutoOptimizeAdapter,
+    "jpa/flux_onetone": JpaFluxOneToneAdapter,
+    "jpa/check": JpaCheckAdapter,
 }
 
 
 def register_all(registry: Registry) -> None:
     for name, cls in ADAPTERS.items():
         registry.register(name, cls)
-
-
-# --- role catalog --------------------------------------------------------
-
-
-def _blank_value_factory(
-    shape: ProgramShape,
-) -> Callable[[ExpContext], ReferenceValue]:
-    def _make(_ctx: ExpContext) -> ReferenceValue:
-        value = make_default_value(shape.make_spec(MAIN_PROGRAM_SPEC_POLICY))
-        return ReferenceValue(make_custom_reference_key(shape.discriminator), value)
-
-    return _make
-
-
-def _blank_entries() -> list[RoleEntry]:
-    entries: list[RoleEntry] = []
-    factory: Callable[[ExpContext], ReferenceValue]
-    for shape in PROGRAM_SHAPES.modules():
-        factory = _blank_value_factory(shape)
-        entries.append(
-            RoleEntry(
-                f"{shape.discriminator}:blank",
-                f"Blank: {shape.discriminator}",
-                "module",
-                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
-                factory,
-            )
-        )
-    for shape in PROGRAM_SHAPES.waveforms():
-        factory = _blank_value_factory(shape)
-        entries.append(
-            RoleEntry(
-                f"{shape.discriminator}:blank",
-                f"Blank: {shape.discriminator}",
-                "waveform",
-                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
-                factory,
-            )
-        )
-    return entries
-
-
-# Catalog dropdown entries: (role_id, label, item_kind, default_name). Insertion
-# order = dropdown order. Readout/probe first, then pulses, then resets, then
-# waveforms. The factory is the role's *blank* builder, taken from the shared
-# ROLE_FACTORIES table (single source) — creating from a role always seeds a fresh
-# entry, never a library reference (the blank builder never adopts). The
-# library-aware roles "readout" / "reset" therefore appear here too: their blank
-# IS the pulse shape, so they double as the "create an inline pulse readout/reset"
-# templates (ModuleInit only affects fresh adapter cfg materialization, not the catalog).
-# default_name is the create dialog's naming-convention suggestion.
-_CATALOG_ROLES: list[tuple[str, str, RoleItemKind, str]] = [
-    ("res_probe", "Resonator probe", "module", "readout_rf"),
-    ("readout", "Pulse readout", "module", "readout_rf"),
-    ("readout_dpm", "Optimized readout (DPM)", "module", "readout_dpm"),
-    ("direct_readout", "Direct readout", "module", "readout_direct"),
-    ("qub_probe", "Qubit probe pulse", "module", "qub_pulse"),
-    ("pi_pulse", "Pi pulse", "module", "pi_amp"),
-    ("pi2_pulse", "Pi/2 pulse", "module", "pi2_amp"),
-    ("none_reset", "No reset", "module", "reset_none"),
-    ("reset", "Pulse reset", "module", "reset_10"),
-    ("two_pulse_reset", "Two-pulse reset", "module", "reset_120"),
-    ("bath_reset", "Bath reset", "module", "reset_bath"),
-    ("qub_waveform", "Qubit drive waveform", "waveform", "qub_flat"),
-    ("res_waveform", "Res-probe waveform", "waveform", "ro_waveform"),
-]
-
-ROLE_ENTRIES: list[RoleEntry] = [
-    RoleEntry(
-        role_id,
-        label,
-        kind,
-        ROLE_FACTORIES[role_id].shape,
-        ROLE_FACTORIES[role_id].blank,
-        default_name,
-    )
-    for role_id, label, kind, default_name in _CATALOG_ROLES
-]
-
-
-# md-aware roles first, then the structural-blank roles (dropdown groups
-# "named" roles on top, raw blanks below).
-ALL_ROLE_ENTRIES: list[RoleEntry] = [*ROLE_ENTRIES, *_blank_entries()]
-
-
-def register_all_roles(catalog: RoleCatalog) -> None:
-    for entry in ALL_ROLE_ENTRIES:
-        catalog.register(entry)

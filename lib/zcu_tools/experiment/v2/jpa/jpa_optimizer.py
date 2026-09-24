@@ -132,9 +132,9 @@ class JPAOptimizer:
     ) -> None:
         # Initialize bounds
         self.bounds = ParameterBounds(
-            flux=(flux_sweep.start, flux_sweep.stop),
-            freq=(freq_sweep.start, freq_sweep.stop),
-            power=(gain_sweep.start, gain_sweep.stop),
+            flux=self._normalized_bounds(flux_sweep),
+            freq=self._normalized_bounds(freq_sweep),
+            power=self._normalized_bounds(gain_sweep),
         )
 
         # Calculate budget allocation
@@ -153,12 +153,12 @@ class JPAOptimizer:
 
         # Initialize Phase 1 state
         flux_grid = np.linspace(
-            self.bounds.flux[0], self.bounds.flux[1], num_flux_points
+            flux_sweep.start, flux_sweep.stop, num_flux_points
         )
         flux_interval = (
-            (self.bounds.flux[1] - self.bounds.flux[0]) / (num_flux_points - 1)
+            abs(flux_sweep.stop - flux_sweep.start) / (num_flux_points - 1)
             if num_flux_points > 1
-            else (self.bounds.flux[1] - self.bounds.flux[0])
+            else abs(flux_sweep.stop - flux_sweep.start)
         )
         self.phase1 = Phase1State(flux_grid=flux_grid, flux_interval=flux_interval)
 
@@ -189,6 +189,11 @@ class JPAOptimizer:
     # =========================================================================
     # Initialization Helpers
     # =========================================================================
+
+    @staticmethod
+    def _normalized_bounds(sweep: SweepCfg) -> Bounds:
+        """Return canonical low/high bounds without changing sweep direction."""
+        return (min(sweep.start, sweep.stop), max(sweep.start, sweep.stop))
 
     def _calculate_flux_grid_size(
         self,

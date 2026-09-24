@@ -8,6 +8,10 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
+_ACTIVITY_MARKER_PREFIX = "● "
+_ACTIVITY_MARKER_COLOR = "#286ac7"
+_ACTIVITY_MARKER_TOOLTIP = "Apply in progress"
+
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -464,16 +468,29 @@ class DeviceDialog(QDialog):
         self._list.clear()
         entries = self._dev.list_devices()
         for entry in entries:
-            # "Connected" for the list label keeps the prior is_connected bool
-            # semantics: a settled or in-mutation live driver (connected /
-            # disconnecting / setting_up), NOT the transient connecting state
-            # (DeviceEntry.status, FC7).
-            if entry.status in ("connected", "disconnecting", "setting_up"):
-                item = QListWidgetItem(f"{entry.name} ({entry.type_name})")
+            # DeviceEntry and DeviceSnapshot are both State projections. Prefer
+            # the snapshot so a reopened dialog and every repaint read the
+            # authoritative per-device status directly; the entry status keeps
+            # lightweight test/fallback ports usable when no snapshot exists.
+            snapshot = self._dev.get_device_snapshot(entry.name)
+            status = (
+                snapshot.status if snapshot is not None else DeviceStatus(entry.status)
+            )
+            is_setting_up = status is DeviceStatus.SETTING_UP
+            is_live = status in {
+                DeviceStatus.CONNECTED,
+                DeviceStatus.DISCONNECTING,
+                DeviceStatus.SETTING_UP,
+            }
+            label = f"{entry.name} ({entry.type_name})"
+            if is_setting_up:
+                item = QListWidgetItem(f"{_ACTIVITY_MARKER_PREFIX}{label}")
+                item.setForeground(QColor(_ACTIVITY_MARKER_COLOR))
+                item.setToolTip(_ACTIVITY_MARKER_TOOLTIP)
+            elif is_live:
+                item = QListWidgetItem(label)
             else:
-                item = QListWidgetItem(
-                    f"{entry.name} ({entry.type_name}) [not connected]"
-                )
+                item = QListWidgetItem(f"{label} [not connected]")
                 item.setForeground(QColor("gray"))
             item.setData(Qt.ItemDataRole.UserRole, entry.name)  # type: ignore[attr-defined]
             self._list.addItem(item)
@@ -823,6 +840,11 @@ class DeviceDialog(QDialog):
             )
 
     def _on_setup_started(self, payload: DeviceSetupStartedPayload) -> None:
+        del payload
+        # The start event is also a repaint boundary: derive every row from the
+        # State-owned status so a dialog opened before the event shows the marker
+        # without maintaining a second busy cache.
+        self._refresh_list()
         self._sync_progress_subscriptions()
         # A concurrent setup may have started on a device other than the selected
         # one; recompute the selected device's buttons so e.g. its Apply stays
@@ -830,11 +852,12 @@ class DeviceDialog(QDialog):
         self._refresh_button_states(self._selected_device_name())
 
     def _on_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
+        del payload
+        # Rebuild the list from State on every terminal outcome. The selected
+        # device is preserved by _refresh_list, while each row clears or keeps its
+        # own marker independently.
+        self._refresh_list()
         self._sync_progress_subscriptions()
-        # Repaint the right panel + buttons in case the finished device was the
-        # selected one (its panel may need a fresh info load if setup changed
-        # hardware state); _on_selection_changed also re-derives button states.
-        self._on_selection_changed(self._list.currentRow())
 
     def _sync_progress_subscriptions(self) -> None:
         """Diff the live setup set against current subscriptions (Phase C).

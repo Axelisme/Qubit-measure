@@ -16,6 +16,7 @@ from zcu_tools.gui.app.main.adapter import (
     LoadDataRequest,
     MetaDictWriteback,
     NoAnalyzeParams,
+    PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
     WritebackRequest,
@@ -124,6 +125,13 @@ class _DummyAdapter:
     def post_analyze(self, req: object) -> None:  # noqa: ARG002
         raise NotImplementedError
 
+    def get_post_writeback_items(
+        self,
+        req: PostWritebackRequest[object, _DummyAnalyzeResult, _DummyAnalyzeResult],
+    ) -> Sequence[MetaDictWriteback]:
+        del req
+        return []
+
     def save(self, req: SaveDataRequest[object]) -> None:  # noqa: ARG002
         pass
 
@@ -173,3 +181,24 @@ def test_create_returns_new_instance_each_time():
     a1 = reg.create("dummy")
     a2 = reg.create("dummy")
     assert a1 is not a2
+
+
+def test_replacement_detaches_candidate_and_clear_disables_creation():
+    live = Registry()
+    live.register("old", _DummyAdapter)
+    candidate = Registry()
+    candidate.register("new", _DummyAdapter)
+    candidate.validate()
+    live.replace_from(candidate)
+    candidate.clear()
+    assert live.list_names() == ["new"]
+    assert isinstance(live.create("new"), _DummyAdapter)
+    live.clear()
+    with pytest.raises(KeyError):
+        live.create("new")
+
+
+def test_registry_cannot_publish_itself():
+    registry = Registry()
+    with pytest.raises(ValueError, match="itself"):
+        registry.replace_from(registry)

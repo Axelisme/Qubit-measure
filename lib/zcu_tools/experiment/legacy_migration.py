@@ -31,6 +31,7 @@ __all__ = [
     "migrate_experiment_data",
     "migrated_legacy_tempfile",
     "save_axes_spec_result_exact",
+    "single_input_paths",
 ]
 
 
@@ -38,7 +39,18 @@ __all__ = [
 class ConverterSpec:
     convert: Callable[[Path, Path], None]
     validate: Callable[[str], object]
+    # Resolves every actual input file this converter will read for the given
+    # user-supplied input path (the single file itself for single-file
+    # converters, the resolved sidecar files for sidecar-base converters).
+    # The generic migration guard rejects an output aliasing any of them, so
+    # ADR-0027's input read-only promise holds for every converter kind.
+    input_paths: Callable[[Path], tuple[Path, ...]]
     validate_input: Callable[[Path], None] | None = None
+
+
+def single_input_paths(input_path: Path) -> tuple[Path, ...]:
+    """The one input file a single-file converter reads."""
+    return (input_path,)
 
 
 @dataclass(frozen=True)
@@ -64,7 +76,11 @@ class SingleFileLegacySpec:
     validate: Callable[[str], object]
 
     def to_converter(self) -> ConverterSpec:
-        return ConverterSpec(convert=self.convert, validate=self.validate)
+        return ConverterSpec(
+            convert=self.convert,
+            validate=self.validate,
+            input_paths=single_input_paths,
+        )
 
     def convert(self, input_path: Path, output_path: Path) -> None:
         data = load_labber_data(str(input_path))
@@ -118,6 +134,8 @@ def migrate_experiment_data(
         spec.validate_input(input_path)
 
     output_path = Path(format_ext(str(output_path)))
+    input_paths = spec.input_paths(input_path)
+    _validate_distinct_input_output(input_paths, output_path)
     if output_path.exists() and not overwrite:
         raise FileExistsError(
             f"output file already exists: {output_path}; pass --overwrite to replace it"
@@ -206,6 +224,36 @@ def _make_temp_path(output_path: Path) -> Path:
 def _validate_regular_input_file(input_path: Path) -> None:
     if not input_path.is_file():
         raise FileNotFoundError(f"input file does not exist: {input_path}")
+
+
+def _validate_distinct_input_output(
+    input_paths: tuple[Path, ...], output_path: Path
+) -> None:
+    """Refuse a migration whose output would overwrite any actual input file.
+
+    Guards every input the converter really reads (the single file for
+    single-file converters, the resolved sidecar files for sidecar-base
+    converters) against the exact same pathname (relative vs absolute
+    spellings included) and filesystem aliases (symlink / hard link) before
+    any mutation, so a converter can never clobber its own input. Overwriting
+    a *separate* existing output remains allowed via ``overwrite=True``.
+    """
+    for input_path in input_paths:
+        if Path(os.path.abspath(input_path)) == Path(os.path.abspath(output_path)):
+            raise ValueError(
+                f"input and output resolve to the same file: {output_path}; "
+                "refusing to overwrite the input"
+            )
+        if input_path.exists() and output_path.exists():
+            try:
+                same_file = os.path.samefile(input_path, output_path)
+            except OSError:
+                same_file = False
+            if same_file:
+                raise ValueError(
+                    f"input and output refer to the same file: {output_path}; "
+                    "refusing to overwrite the input"
+                )
 
 
 def _axes_spec(exp_cls: type[Any]) -> AxesSpec[Any, Any]:

@@ -68,11 +68,7 @@ def test_writeback_service_satisfies_writeback_lifecycle_port():
     from zcu_tools.gui.app.main.services.ports import WritebackLifecyclePort
     from zcu_tools.gui.app.main.services.writeback import WritebackService
 
-    svc = WritebackService(
-        state=_make_state(),
-        cfg_editor=MagicMock(),
-        write_port=MagicMock(),
-    )
+    svc = WritebackService(cfg_editor=MagicMock(), write_port=MagicMock())
     assert isinstance(svc, WritebackLifecyclePort)
 
 

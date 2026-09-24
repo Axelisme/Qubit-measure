@@ -43,7 +43,7 @@ from __future__ import annotations
 import itertools
 import logging
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -71,10 +71,17 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
-from .ports import CfgEdit, CfgEditResult, ContextWritePort
+from .ports import (
+    CfgEdit,
+    CfgEditResult,
+    ContextWritePort,
+    PreparedCfgEditor,
+    RetiredCfgEditor,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.meta_tool import ModuleLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +148,11 @@ class CfgEditorSession:
     # the ml entry kind being built ("module"/"waveform"); commit uses it. None
     # for a seeded session (tab cfg / writeback draft) that is teardown-only.
     item_kind: str | None = None
+    # Existing ml-entry sessions retain their source name and ModuleLibrary
+    # identity so replacement cannot apply a draft to a different live context.
+    # Seeded sessions have no replacement source.
+    source_name: str | None = None
+    source_ml: ModuleLibrary | None = None
     # the owner's key (a tab uses its tab_id; an inspect/writeback widget uses its
     # own key), so the owner can look its editor_id back up.
     owner_key: str | None = None
@@ -222,6 +234,29 @@ class CfgEditorSession:
         return self.draft.snapshot()
 
 
+@dataclass
+class _PreparedReplacement:
+    service: CfgEditorService
+    session: CfgEditorSession
+    previous_id: str | None
+    consumed: bool = False
+
+    @property
+    def editor_id(self) -> str:
+        return self.session.editor_id
+
+
+@dataclass
+class _RetiredReplacement:
+    service: CfgEditorService
+    session: CfgEditorSession
+    closed: bool = False
+
+    @property
+    def editor_id(self) -> str:
+        return self.session.editor_id
+
+
 class CfgEditorService:
     """Repository for ``CfgEditorSession`` aggregates, keyed by a server id.
 
@@ -237,7 +272,10 @@ class CfgEditorService:
     registers itself); ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a
-    stale dependency on a gone session reads version 0).
+    stale dependency on a gone session reads version 0). Existing-entry
+    ``open(from_name=...)`` sessions also retain the exact source
+    ``ModuleLibrary`` identity; ``replace`` fast-fails after a context switch so
+    a dirty draft cannot write into a same-named entry in another context.
     """
 
     def __init__(
@@ -308,9 +346,16 @@ class CfgEditorService:
             )
         if owner_key is not None:
             self._teardown_owner(owner_key)
-        spec, value = self._initial_schema(item_kind, from_name)
+        source_ml = self._read.get_current_ml()
+        spec, value = self._initial_schema(item_kind, from_name, ml=source_ml)
         return self._make_session(
-            spec, value, item_kind=item_kind, gc=gc, owner_key=owner_key
+            spec,
+            value,
+            item_kind=item_kind,
+            source_name=from_name,
+            source_ml=source_ml,
+            gc=gc,
+            owner_key=owner_key,
         )
 
     def open_seeded(
@@ -340,6 +385,8 @@ class CfgEditorService:
         value,
         *,
         item_kind: str | None,
+        source_name: str | None = None,
+        source_ml: ModuleLibrary | None = None,
         gc: bool,
         owner_key: str | None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
@@ -351,6 +398,8 @@ class CfgEditorService:
             resolve_value_ref=self._bindings.resolve_value_ref,
             gc=gc,
             item_kind=item_kind,
+            source_name=source_name,
+            source_ml=source_ml,
             owner_key=owner_key,
             seq=next(self._seq),
         )
@@ -359,6 +408,99 @@ class CfgEditorService:
         if gc:
             self._evict_excess_gc()
         return editor_id, session.current_targets()
+
+    def snapshot_owner(self, owner_key: str) -> CfgSchema | None:
+        editor_id = self.editor_id_for_owner(owner_key)
+        return None if editor_id is None else self.get_draft(editor_id).snapshot()
+
+    def provide_options(self, source_id: str) -> Sequence[object]:
+        return self._bindings.provide_options(source_id)
+
+    def prepare_replacement(self, owner_key: str, seed: CfgSchema) -> PreparedCfgEditor:
+        """Build off-registry without closing or publishing the current draft."""
+        if not owner_key:
+            raise ValueError("Replacement requires an owner key")
+        previous_id = self.editor_id_for_owner(owner_key)
+        draft = self._bindings.new_draft(seed)
+        try:
+            if not draft.is_valid():
+                raise ValueError("Replacement cfg editor draft is invalid")
+            session = CfgEditorSession(
+                editor_id=self._new_id(owner_key),
+                draft=draft,
+                resolve_value_ref=self._bindings.resolve_value_ref,
+                gc=False,
+                owner_key=owner_key,
+                seq=next(self._seq),
+            )
+            session.current_targets()
+            self._attach_change_stream(session)
+            return _PreparedReplacement(self, session, previous_id)
+        except Exception:
+            draft.close()
+            raise
+
+    def activate_replacement(
+        self, prepared: PreparedCfgEditor
+    ) -> RetiredCfgEditor | None:
+        """Swap registry membership without emitting or closing viewer resources.
+
+        Preparation and activation must run in the same owner-thread turn.
+        A changed owner is a programming error; discard the prepared token.
+        """
+        if (
+            not isinstance(prepared, _PreparedReplacement)
+            or prepared.service is not self
+        ):
+            raise ValueError("Replacement belongs to another service")
+        if prepared.consumed:
+            raise ValueError("Replacement has already been consumed")
+        session = prepared.session
+        assert session.owner_key is not None
+        if self.editor_id_for_owner(session.owner_key) != prepared.previous_id:
+            raise ValueError("Replacement owner changed after preparation")
+        previous = (
+            self._editors.get(prepared.previous_id)
+            if prepared.previous_id is not None
+            else None
+        )
+        retired = _RetiredReplacement(self, previous) if previous is not None else None
+        if previous is not None:
+            if previous.change_cb is not None:
+                previous.draft.on_change.disconnect(previous.change_cb)
+                previous.change_cb = None
+            del self._editors[previous.editor_id]
+        self._editors[session.editor_id] = session
+        prepared.consumed = True
+        return retired
+
+    def discard_prepared(self, prepared: PreparedCfgEditor) -> None:
+        if (
+            not isinstance(prepared, _PreparedReplacement)
+            or prepared.service is not self
+        ):
+            raise ValueError("Replacement belongs to another service")
+        if prepared.consumed:
+            return
+        prepared.consumed = True
+        prepared.session.draft.close()
+
+    def retire_replaced(self, retired: RetiredCfgEditor) -> None:
+        if not isinstance(retired, _RetiredReplacement) or retired.service is not self:
+            raise ValueError("Retired editor belongs to another service")
+        if retired.closed:
+            return
+        retired.closed = True
+        session = retired.session
+        try:
+            session.draft.close()
+        finally:
+            try:
+                self._version_drop(session.editor_id)
+            finally:
+                self._emit(
+                    session.editor_id, "editor_closed", lambda: {"reason": "reopened"}
+                )
 
     def editor_id_for_owner(self, owner_key: str) -> str | None:
         for editor_id, session in self._editors.items():
@@ -402,6 +544,40 @@ class CfgEditorService:
             self._write.set_ml_module_from_schema(name, schema)
         else:
             self._write.set_ml_waveform_from_schema(name, schema)
+        self._remove(editor_id, teardown=True, reason="committed")
+
+    def replace(self, editor_id: str, old_name: str, new_name: str) -> None:
+        """Replace one existing ml entry with the session's complete draft.
+
+        Unlike :meth:`commit`, this preserves replacement semantics for a UI
+        editor: the ContextWritePort validates ``old_name``/``new_name`` and
+        lowers the draft before one atomic ModuleLibrary content mutation. The
+        session's source ModuleLibrary identity is checked first, so a context
+        switch fast-fails without writing. The session is removed only after that
+        write succeeds, so every expected failure leaves the draft available for
+        correction or discard.
+        """
+        session = self._require(editor_id)
+        if session.source_name is None or session.source_ml is None:
+            raise CfgEditorError(
+                f"{editor_id!r} is not an existing ml-entry session; replacement "
+                "requires the original name and source context"
+            )
+        if self._read.get_current_ml() is not session.source_ml:
+            raise CfgEditorError(
+                f"{editor_id!r} belongs to a different ModuleLibrary context; "
+                "discard or revert the draft before applying"
+            )
+        if old_name != session.source_name:
+            raise CfgEditorError(
+                f"replacement source {old_name!r} does not match the session's "
+                f"original name {session.source_name!r}"
+            )
+        schema = session.commit_schema()
+        if session.item_kind == "module":
+            self._write.replace_ml_module_from_schema(old_name, new_name, schema)
+        else:
+            self._write.replace_ml_waveform_from_schema(old_name, new_name, schema)
         self._remove(editor_id, teardown=True, reason="committed")
 
     def discard(self, editor_id: str) -> None:
@@ -449,13 +625,10 @@ class CfgEditorService:
     # ------------------------------------------------------------------
 
     def _new_id(self, owner_key: str | None) -> str:
-        # Owner-keyed sessions (a tab cfg draft / writeback item) read as
-        # '<owner>-ed' so the agent sees which tab/item an editor_id belongs to
-        # without a lookup; the owner_key is already unique. Owner-less sessions
-        # (agent-opened ml-entry edits) keep an opaque short id.
-        if owner_key:
-            return f"{owner_key}-ed"
-        return "editor-" + uuid.uuid4().hex[:8]
+        # Identify a session lifetime, not only its owner: stale client handles
+        # must never address a replacement draft after load or reset.
+        prefix = f"{owner_key}-ed" if owner_key else "editor"
+        return f"{prefix}-{uuid.uuid4().hex}"
 
     def _attach_change_stream(self, session: CfgEditorSession) -> None:
         """Bind a root ``on_change`` callback that pushes ``editor_changed``.
@@ -554,8 +727,9 @@ class CfgEditorService:
         self,
         item_kind: str,
         from_name: str,
+        *,
+        ml: ModuleLibrary,
     ):
-        ml = self._read.get_current_ml()
         if item_kind == "module":
             if from_name not in ml.modules:
                 raise CfgEditorError(f"unknown module: {from_name!r}")

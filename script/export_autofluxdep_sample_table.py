@@ -8,8 +8,11 @@ Usage:
 The input may be either an ``autofluxdep_runs/<run_slug>`` directory or its
 ``manifest.json`` file. Passing the paired heavy data root under
 ``Database/.../autofluxdep_runs/<run_slug>`` is also supported when its metadata
-manifest can be found nearby. Existing output CSV files are appended by default,
-and missing sample fields are left blank.
+manifest can be found nearby. The artifact must carry an authoritative A/V
+flux unit snapshotted at run creation (`manifest.json` `workflow.flux.unit`);
+artifacts without one (bare sweeps, missing/unsupported devices, legacy
+empty-unit artifacts) fail before any file is written. Existing output CSV
+files are appended by default, and missing sample fields are left blank.
 """
 
 from __future__ import annotations

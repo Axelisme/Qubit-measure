@@ -81,19 +81,22 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "tab.get_current_figure",
-        "view:_h_tab_get_current_figure",
+        "tab.get_figure",
+        "view:_h_tab_get_figure",
         MethodSpec(
             10.0,
-            "Get the tab's current figure (run 2D map, or analysis fit) as PNG. The "
-            "PNG is rendered at a fixed small geometry (token-light), independent of "
-            "the GUI window size; the live figure is never permanently resized.",
+            "Get a tab pane's figure as PNG (subtab-qualified). Run reads the live "
+            "FigureContainer (view-only, not canonical); analysis/post read their "
+            "canonical figures from State. Requires (tab_id, subtab_id) with closed "
+            "values run|analysis|post_analysis. The PNG is rendered at a fixed "
+            "small geometry (token-light), independent of the GUI window size.",
             (
                 _str("tab_id"),
+                _str("subtab_id", "Pane: run|analysis|post_analysis"),
                 _str_opt("out_path", "Write PNG here instead of returning base64"),
             ),
             mcp=McpMethodPolicy.override(
-                "gui_tab_get_current_figure",
+                "gui_tab_get_figure",
                 reason="manual MCP tool writes PNG files instead of returning base64",
             ),
         ),

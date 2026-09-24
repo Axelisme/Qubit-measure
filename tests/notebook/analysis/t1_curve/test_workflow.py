@@ -12,9 +12,11 @@ import zcu_tools.notebook.analysis.t1_curve.workflow as workflow
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from zcu_tools.meta_tool import SampleTableV2Error
 from zcu_tools.notebook.analysis.fit_tools import F01FluxCorrectionResult
 from zcu_tools.notebook.analysis.t1_curve import (
     PurcellEffectParams,
+    T1CurveAnalysisConfig,
     T1CurveContext,
     T1CurveData,
     T1FitParams,
@@ -25,9 +27,11 @@ from zcu_tools.notebook.analysis.t1_curve import (
     calibrate_t1_flux,
     fit_t1_curve,
     load_t1_curve_context,
+    load_t1_purcell_params,
     make_t1_fit_init,
     mechanisms_to_fixed_params,
     prepare_t1_curve_data,
+    run_t1_curve_analysis,
     subtract_relaxation_limit,
 )
 
@@ -49,7 +53,10 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
     )
     pd.DataFrame(
         {
-            "calibrated mA": [0.0],
+            "dev_value": [0.0],
+            "dev_unit": ["A"],
+            "flux_int": [0.5],
+            "flux_period": [1.0],
             "Freq (MHz)": [350.0],
             "T1 (us)": [40.0],
         }
@@ -64,43 +71,75 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
     assert len(ctx.samples_preview) == 1
 
 
-def test_calibrate_t1_flux_filters_finite_rows_and_records_scale(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None:
+    (tmp_path / "params.json").write_text(
+        """
+{
+  "fluxdep_fit": {
+    "params": {"EJ": 3.4, "EC": 0.9, "EL": 0.6},
+    "flux_half": 0.0,
+    "flux_int": 0.5,
+    "flux_period": 1.0,
+    "plot_transitions": {"r_f": 5.7}
+  },
+  "dispersive": {
+    "bare_rf": 5.793127423605109,
+    "g": 0.07390631094081157
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "dev_value": [0.0],
+            "dev_unit": ["A"],
+            "flux_int": [0.5],
+            "flux_period": [1.0],
+            "Freq (MHz)": [350.0],
+            "T1 (us)": [40.0],
+        }
+    ).to_csv(tmp_path / "samples.csv", index=False)
+
+    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
+    purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3)
+
+    assert purcell.kappa_ghz == pytest.approx(14.8e-3)
+    assert purcell.bare_rf == pytest.approx(5.793127423605109)
+    assert purcell.g == pytest.approx(0.07390631094081157)
+
+
+def test_calibrate_t1_flux_filters_finite_rows_and_records_provenance() -> None:
     samples = pd.DataFrame(
         {
-            "calibrated mA": [0.0, 0.01, np.nan],
+            "dev_value": [0.0, 0.01, 0.02],
+            "dev_unit": ["A", "A", "A"],
+            "flux_int": [0.5, 0.5, 0.5],
+            "flux_period": [1.0, 1.0, 1.0],
             "Freq (MHz)": [350.0, 360.0, 370.0],
             "T1 (us)": [40.0, np.nan, 42.0],
         }
     )
     context = _synthetic_context(samples)
 
-    def _choose_scale(
-        raw_values: NDArray[np.float64],
-        measured_freqs_mhz: NDArray[np.float64],
-        **_kwargs: object,
-    ) -> tuple[float, pd.DataFrame]:
-        np.testing.assert_allclose(raw_values, [0.0, 0.01])
-        np.testing.assert_allclose(measured_freqs_mhz, [350.0, 360.0])
-        return 1000.0, pd.DataFrame({"scale": [1000.0]})
-
-    monkeypatch.setattr(workflow, "choose_current_scale_from_f01", _choose_scale)
-
     cal = calibrate_t1_flux(context)
 
-    assert cal.current_scale == pytest.approx(1000.0)
-    assert len(cal.freq_rows) == 2
-    assert len(cal.t1_df) == 1
+    assert len(cal.freq_rows) == 3
+    assert len(cal.t1_df) == 2
+    assert cal.resolution.sources == ("row-frame", "row-frame", "row-frame")
+    np.testing.assert_allclose(cal.resolution.values, [-0.5, -0.49, -0.48])
+    assert not hasattr(cal, "current_scale")
 
 
 def test_prepare_t1_curve_data_default_keeps_nan_error_points(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fluxs = np.array([0.500, 0.510], dtype=np.float64)
     samples = pd.DataFrame(
         {
-            "calibrated mA": [0.0, 0.01],
+            "dev_value": [0.0, 0.01],
+            "dev_unit": ["A", "A"],
+            "flux_int": [0.5, 0.5],
+            "flux_period": [1.0, 1.0],
             "Freq (MHz)": [350.0, 360.0],
             "T1 (us)": [40.0, 41.0],
             "T1err (us)": [np.nan, 0.2],
@@ -109,18 +148,15 @@ def test_prepare_t1_curve_data_default_keeps_nan_error_points(
     calibration = _synthetic_calibration(samples)
 
     def _identity_correction(
-        dev_values: NDArray[np.float64],
-        _f01_freqs: NDArray[np.float64],
+        raw_fluxs: NDArray[np.float64],
+        _f01_freqs_ghz: NDArray[np.float64],
         *_args: object,
         **_kwargs: object,
     ) -> F01FluxCorrectionResult:
         return F01FluxCorrectionResult(
-            raw_fluxs=fluxs,
-            corrected_fluxs=fluxs,
-            corrected_dev_values=dev_values,
-            candidate_biases=np.zeros_like(dev_values),
-            candidate_flux_corrections=np.zeros_like(dev_values),
-            accepted=np.ones_like(dev_values, dtype=bool),
+            raw_fluxs=raw_fluxs,
+            corrected_fluxs=raw_fluxs,
+            accepted=np.ones_like(raw_fluxs, dtype=bool),
         )
 
     monkeypatch.setattr(workflow, "correct_flux_from_f01", _identity_correction)
@@ -189,6 +225,72 @@ def test_t1_mechanism_probe_uses_pointwise_q_for_init(
     assert probe.parameter_init == pytest.approx(2.0e5)
     assert probe.pointwise_table["Q"].tolist() == pytest.approx([1.0e5, 2.0e5, 4.0e5])
 
+    fig, ax = workflow.plot_t1_mechanism_probe(probe)
+    try:
+        expected_center = np.mean(np.log(probe.q_values))
+        expected_spread = np.std(np.log(probe.q_values))
+        assert ax.get_ylim() == pytest.approx(
+            (
+                np.exp(expected_center - 3.0 * expected_spread),
+                np.exp(expected_center + 3.0 * expected_spread),
+            )
+        )
+    finally:
+        plt.close(fig)
+
+
+def test_t1_mechanism_probe_passes_temperature_bounds_to_temp_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+    captured: dict[str, object] = {}
+
+    def _fake_find_temp(
+        guess_Temp: float,
+        calc_Q_fn: Callable[[float], NDArray[np.float64]],  # noqa: ARG001
+        *,
+        Temp_bounds: tuple[float | None, float],
+    ) -> float:
+        captured["guess_Temp"] = guess_Temp
+        captured["Temp_bounds"] = Temp_bounds
+        return 0.08
+
+    def _fake_arrays(
+        _data: T1PreparedData,
+        mechanism: workflow.MechanismName,
+        Temp: float,
+        *,
+        T1_ns: NDArray[np.float64] | None = None,
+        T1err_ns: NDArray[np.float64] | None = None,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        assert mechanism == "capacitive"
+        assert Temp == pytest.approx(0.08)
+        assert T1_ns is not None
+        assert T1err_ns is not None
+        return (
+            np.array([1.0e5, 2.0e5, 4.0e5], dtype=np.float64),
+            np.array([1.0e4, 2.0e4, 4.0e4], dtype=np.float64),
+            np.array([2.0, 2.0, 2.0], dtype=np.float64),
+        )
+
+    monkeypatch.setattr(workflow, "find_proper_Temp", _fake_find_temp)
+    monkeypatch.setattr(workflow, "_calculate_mechanism_arrays", _fake_arrays)
+
+    probe = workflow.analyze_t1_capacitive_limit(
+        data,
+        Temp=0.06,
+        purcell=_synthetic_purcell(),
+        fit_temperature=True,
+        Temp_bounds=(None, 120e-3),
+    )
+
+    assert captured["guess_Temp"] == pytest.approx(0.06)
+    captured_bounds = cast(tuple[float | None, float], captured["Temp_bounds"])
+    assert captured_bounds[0] is None
+    assert captured_bounds[1] == pytest.approx(120e-3)
+    assert probe.temperature == pytest.approx(0.08)
+    assert "default..120.00 mK" in set(probe.summary_table["value"])
+
 
 def test_subtract_relaxation_limit_uses_rate_domain() -> None:
     observed_T1s = np.array([40_000.0, 50_000.0], dtype=np.float64)
@@ -211,7 +313,10 @@ def test_calculate_purcell_t1_limit_reuses_lru_cache(
     workflow.clear_t1_purcell_cache()
     samples = pd.DataFrame(
         {
-            "calibrated mA": [0.0],
+            "dev_value": [0.0],
+            "dev_unit": ["A"],
+            "flux_int": [0.5],
+            "flux_period": [1.0],
             "Freq (MHz)": [350.0],
             "T1 (us)": [40.0],
         }
@@ -252,6 +357,114 @@ def test_calculate_purcell_t1_limit_reuses_lru_cache(
     np.testing.assert_allclose(first, second)
     np.testing.assert_allclose(third, 1000.07)
     assert call_count == 2
+
+
+def test_estimate_purcell_temp_upper_bound_uses_observed_t1_constraint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+
+    def _fake_purcell(
+        context: T1CurveContext,  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        purcell: PurcellEffectParams,  # noqa: ARG001
+        *,
+        Temp: float,
+    ) -> NDArray[np.float64]:
+        return np.full(len(fluxs), 100_000.0 - 1_000_000.0 * Temp)
+
+    monkeypatch.setattr(workflow, "calculate_purcell_t1_limit", _fake_purcell)
+
+    Temp_upper = workflow.estimate_purcell_Temp_upper_bound(
+        data,
+        _synthetic_purcell(),
+        Temp_range=(10e-3, 90e-3),
+        tolerance=1e-5,
+        max_iter=20,
+    )
+
+    assert Temp_upper == pytest.approx(58e-3, abs=1e-4)
+
+
+def test_estimate_purcell_temp_upper_bound_updates_progress_bar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+    bars: list[_RecordingProgressBar] = []
+
+    def _fake_purcell(
+        context: T1CurveContext,  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        purcell: PurcellEffectParams,  # noqa: ARG001
+        *,
+        Temp: float,
+    ) -> NDArray[np.float64]:
+        return np.full(len(fluxs), 100_000.0 - 1_000_000.0 * Temp)
+
+    def _make_pbar(*_args: object, **kwargs: object) -> _RecordingProgressBar:
+        bar = _RecordingProgressBar(**kwargs)
+        bars.append(bar)
+        return bar
+
+    monkeypatch.setattr(workflow, "calculate_purcell_t1_limit", _fake_purcell)
+    monkeypatch.setattr(workflow, "make_pbar", _make_pbar)
+
+    workflow.estimate_purcell_Temp_upper_bound(
+        data,
+        _synthetic_purcell(),
+        Temp_range=(10e-3, 90e-3),
+        tolerance=1e-8,
+        max_iter=4,
+        progress=True,
+    )
+
+    assert len(bars) == 1
+    assert bars[0].total == 6
+    assert bars[0].n == 6
+    assert bars[0].closed
+    assert any(desc.startswith("Purcell Temp=") for desc in bars[0].descriptions)
+
+
+def test_plot_purcell_temp_upper_bound_overlays_t1_samples_and_curve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _synthetic_prepared_data()
+    captured: dict[str, object] = {}
+
+    def _fake_purcell(
+        context: T1CurveContext,  # noqa: ARG001
+        fluxs: NDArray[np.float64],
+        purcell: PurcellEffectParams,  # noqa: ARG001
+        *,
+        Temp: float,
+    ) -> NDArray[np.float64]:
+        captured["fluxs"] = fluxs
+        captured["Temp"] = Temp
+        return np.linspace(50_000.0, 60_000.0, len(fluxs), dtype=np.float64)
+
+    monkeypatch.setattr(workflow, "calculate_purcell_t1_limit", _fake_purcell)
+
+    fig, ax = workflow.plot_purcell_Temp_upper_bound(
+        data,
+        _synthetic_purcell(),
+        Temp=58e-3,
+        t_flux_count=5,
+        flux_range=(0.49, 0.51),
+    )
+
+    try:
+        assert captured["Temp"] == pytest.approx(58e-3)
+        np.testing.assert_allclose(
+            cast(NDArray[np.float64], captured["fluxs"]),
+            np.linspace(0.49, 0.51, 5),
+        )
+        _, labels = ax.get_legend_handles_labels()
+        assert "T1 samples" in labels
+        assert "Purcell upper @ 58.00 mK" in labels
+        assert ax.get_xlabel() == r"Flux quanta ($\Phi_{ext}/\Phi_0$)"
+        assert ax.get_yscale() == "log"
+    finally:
+        plt.close(fig)
 
 
 def test_t1_mechanism_probe_subtracts_purcell_before_q(
@@ -428,12 +641,18 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
         title: str | None = None,  # noqa: ARG001
         xlabel: str = "Current (mA)",  # noqa: ARG001
         component_t1s: dict[str, NDArray[np.float64]] | None = None,
+        component_bands: (
+            dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]] | None
+        ) = None,
         parameter_text: str | None = None,
+        show_value_axis: bool = False,  # noqa: ARG001
     ) -> tuple[Figure, Axes]:
         captured["t1_effs"] = t1_effs
         captured["component_t1s"] = component_t1s
+        captured["component_bands"] = component_bands
         captured["label"] = label
         captured["parameter_text"] = parameter_text
+        captured["title"] = title
         return plt.subplots()
 
     monkeypatch.setattr(workflow, "_calculate_mechanism_arrays", _fake_arrays)
@@ -454,13 +673,25 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
     assert captured["label"] == "capacitive + Purcell"
     assert "Purcell" in component_t1s
     np.testing.assert_allclose(component_t1s["Purcell"], 40.0)
-    np.testing.assert_allclose(component_t1s["capacitive lower"], 40.0 / 3.0)
-    np.testing.assert_allclose(component_t1s["capacitive upper"], 40.0 / 9.0)
+    np.testing.assert_allclose(component_t1s["- lower"], 40.0 / 3.0)
+    np.testing.assert_allclose(component_t1s["- upper"], 40.0 / 9.0)
+    component_bands = cast(
+        dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]],
+        captured["component_bands"],
+    )
+    band_lower, band_upper = component_bands["capacitive bounds"]
+    np.testing.assert_allclose(band_lower, 40.0 / 3.0)
+    np.testing.assert_allclose(band_upper, 40.0 / 9.0)
     np.testing.assert_allclose(
         cast(NDArray[np.float64], captured["t1_effs"]),
         8.0,
     )
-    assert "Purcell kappa" in str(captured["parameter_text"])
+    parameter_text = str(captured["parameter_text"])
+    assert "Q_cap" in parameter_text
+    assert "Temp" in parameter_text
+    assert "Purcell kappa" not in parameter_text
+    assert "lower" not in parameter_text
+    assert captured["title"] is None
 
 
 def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
@@ -508,6 +739,7 @@ def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
     combined = fit_t1_curve(
         data,
         init=T1FitParams(Q_cap=7.0e5, Temp=0.06),
+        bounds={"Temp": (None, 120e-3), "Q_cap": (1.0e4, 1.0e8)},
         T1_error_policy=error_policy,
         flux_weighting=flux_weighting,
     )
@@ -520,6 +752,9 @@ def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
     )
     assert captured["T1_error_policy"] is error_policy
     assert captured["flux_weighting"] is flux_weighting
+    captured_bounds = cast(dict[str, tuple[float, float]], captured["bounds"])
+    assert captured_bounds["Temp"] == pytest.approx((10e-3, 120e-3))
+    assert combined.bounds == captured_bounds
     assert combined.fit_result.success
 
 
@@ -583,14 +818,40 @@ def test_fit_t1_curve_passes_purcell_rate_callable(
     assert combined.purcell is not None
 
 
-def test_plot_t1_flux_calibration_shows_before_after_positions() -> None:
+def test_t1_parameter_text_shows_only_active_noise_params_and_temp() -> None:
+    result = T1FitResult(
+        params=T1FitParams(Q_cap=7.0e5, Temp=0.06),
+        stderr=T1FitParams(Q_cap=0.0, Temp=0.0),
+        fixed=(),
+        free=("Q_cap", "Temp"),
+        model_T1s=np.array([1.0], dtype=np.float64),
+        residuals=np.array([0.0], dtype=np.float64),
+        cost=0.0,
+        reduced_chi2=12.3,
+        success=True,
+        message="ok",
+        optimizer_result=None,
+    )
+
+    text = workflow.t1_parameter_text(result)
+
+    assert "Q_cap" in text
+    assert "Temp" in text
+    assert "reduced chi2" not in text
+    assert "Purcell kappa" not in text
+
+
+def test_plot_t1_flux_calibration_shows_provenance_categories() -> None:
     data = _synthetic_prepared_data()
     sample = replace(
         data.sample,
         raw_fluxs=np.array([0.488, 0.500, 0.514], dtype=np.float64),
         fluxs=np.array([0.490, 0.500, 0.510], dtype=np.float64),
-        f01_correction_accepted=np.array([True, False, True]),
-        flux_corrections=np.array([0.002, 0.000, -0.004], dtype=np.float64),
+        f01_measured=np.array([True, True, False], dtype=bool),
+        f01_correction_applied=np.array([True, False, False]),
+        flux_corrections=np.array([0.002, 0.000, 0.000], dtype=np.float64),
+        flux_sources=("row-frame", "explicit", "row-frame"),
+        correction_skipped_reason=("", "explicit_flux", "missing_f01"),
     )
     data = replace(data, sample=sample)
 
@@ -599,14 +860,19 @@ def test_plot_t1_flux_calibration_shows_before_after_positions() -> None:
     labels = {collection.get_label() for collection in ax.collections}
     assert "raw flux" in labels
     assert "f01 corrected flux" in labels
-    assert "kept raw flux" in labels
-    assert len(ax.lines) == len(sample.fluxs)
+    assert "explicit flux (uncorrected)" in labels
+    assert "missing f01 (model freq)" in labels
+    assert "integer aligned flux" in labels
+    # One f01-correction segment and one branch-alignment segment per row.
+    assert len(ax.lines) == 2 * len(sample.fluxs)
     assert ax.get_ylabel() == "f01 frequency (MHz)"
-    for line, f01_mhz in zip(ax.lines, sample.f01_mhz, strict=True):
-        np.testing.assert_allclose(
-            np.asarray(line.get_ydata(), dtype=np.float64),
-            [f01_mhz, f01_mhz],
-        )
+    for index, f01_mhz in enumerate(sample.f01_mhz):
+        raw_flux, aligned_flux = ax.lines[2 * index], ax.lines[2 * index + 1]
+        for line in (raw_flux, aligned_flux):
+            np.testing.assert_allclose(
+                np.asarray(line.get_ydata(), dtype=np.float64),
+                [f01_mhz, f01_mhz],
+            )
     plt.close(fig)
 
 
@@ -737,10 +1003,13 @@ def test_build_t1_channel_curves_adds_purcell_component(
 
 def _synthetic_calibration(samples: pd.DataFrame) -> T1FluxCalibration:
     context = _synthetic_context(samples)
+    resolution = workflow.resolve_sample_flux(
+        samples, fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0)
+    )
     return T1FluxCalibration(
         context=context,
-        current_scale=1.0,
-        scale_report=pd.DataFrame(),
+        resolution=resolution,
+        fallback_frame=workflow.SampleFluxFrame("A", 0.5, 1.0),
         t1_df=samples,
         freq_rows=samples,
         summary_table=pd.DataFrame(),
@@ -771,33 +1040,31 @@ def _synthetic_purcell() -> PurcellEffectParams:
 def _synthetic_prepared_data() -> T1PreparedData:
     fluxs = np.array([0.49, 0.50, 0.51], dtype=np.float64)
     curve = T1CurveData(
-        current_raw=fluxs,
-        values=fluxs,
-        raw_fluxs=fluxs,
         fluxs=fluxs,
+        raw_fluxs=fluxs,
+        integer_shifts=np.zeros(3, dtype=np.float64),
+        flux_sources=("row-frame", "row-frame", "row-frame"),
         f01_mhz=np.array([350.0, 360.0, 370.0], dtype=np.float64),
+        f01_measured=np.ones(3, dtype=bool),
+        f01_correction_applied=np.ones(3, dtype=bool),
+        flux_corrections=np.zeros(3, dtype=np.float64),
+        correction_skipped_reason=("", "", ""),
         T1_ns=np.array([40_000.0, 42_000.0, 41_000.0], dtype=np.float64),
         T1err_ns=np.array([500.0, np.nan, 600.0], dtype=np.float64),
         omegas=np.array([2.0, 3.0, 4.0], dtype=np.float64),
-        f01_correction_accepted=np.ones(3, dtype=bool),
-        flux_corrections=np.zeros(3, dtype=np.float64),
     )
     samples = pd.DataFrame(
         {
-            "calibrated mA": curve.current_raw,
+            "dev_value": [0.0, 0.01, 0.02],
+            "dev_unit": ["A", "A", "A"],
+            "flux_int": [0.5, 0.5, 0.5],
+            "flux_period": [1.0, 1.0, 1.0],
             "Freq (MHz)": curve.f01_mhz,
             "T1 (us)": 1e-3 * curve.T1_ns,
             "T1err (us)": 1e-3 * curve.T1err_ns,
         }
     )
-    calibration = T1FluxCalibration(
-        context=_synthetic_context(samples),
-        current_scale=1.0,
-        scale_report=pd.DataFrame(),
-        t1_df=samples,
-        freq_rows=samples,
-        summary_table=pd.DataFrame(),
-    )
+    calibration = _synthetic_calibration(samples)
     return T1PreparedData(
         calibration=calibration,
         analysis_flux_range=(0.49, 0.51),
@@ -810,3 +1077,292 @@ def _synthetic_prepared_data() -> T1PreparedData:
         source_rows=len(curve.fluxs),
         summary_table=pd.DataFrame(),
     )
+
+
+def test_calibrate_t1_flux_resolution_provenance_covers_three_sources() -> None:
+    samples = pd.DataFrame(
+        {
+            "dev_value": [0.0, 0.0, 0.01],
+            "dev_unit": ["A", "A", "A"],
+            "flux": [0.5, np.nan, np.nan],
+            "flux_int": [np.nan, 0.5, np.nan],
+            "flux_period": [np.nan, 1.0, np.nan],
+            "Freq (MHz)": [350.0, 351.0, 352.0],
+            "T1 (us)": [40.0, 41.0, 42.0],
+        }
+    )
+    cal = calibrate_t1_flux(_synthetic_context(samples))
+
+    assert cal.resolution.sources == (
+        "explicit",
+        "row-frame",
+        "fallback-frame",
+    )
+    np.testing.assert_allclose(cal.resolution.values, [0.5, -0.5, -0.49])
+    assert np.array_equal(cal.resolution.explicit_mask, [True, False, False])
+
+
+def test_t1_unresolved_flux_rows_fail_fast() -> None:
+    samples = pd.DataFrame(
+        {
+            "dev_value": [0.0, 0.01],
+            "dev_unit": ["V", "V"],
+            "Freq (MHz)": [np.nan, np.nan],
+            "T1 (us)": [40.0, 41.0],
+        }
+    )
+    context = _synthetic_context(samples)
+
+    with pytest.raises(SampleTableV2Error, match="unable to resolve flux"):
+        calibrate_t1_flux(context, fallback_frame_unit="A")
+
+
+def test_t1_rows_with_null_freq_reach_analysis_with_model_f01() -> None:
+    samples = pd.DataFrame(
+        {
+            "dev_value": [0.0, 0.0, 0.01],
+            "dev_unit": ["A", "A", "A"],
+            "flux": [0.5, np.nan, np.nan],
+            "flux_int": [np.nan, 0.5, np.nan],
+            "flux_period": [np.nan, 1.0, np.nan],
+            "Freq (MHz)": [np.nan, np.nan, np.nan],
+            "T1 (us)": [40.0, 41.0, 42.0],
+            "T1err (us)": [0.5, 0.5, 0.5],
+        }
+    )
+    calibration = _synthetic_calibration(samples)
+
+    data = prepare_t1_curve_data(calibration, analysis_flux_range=(0.49, 0.53))
+
+    assert len(data.fit.T1_ns) == 3
+    assert not np.any(data.sample.f01_measured)
+    assert set(data.sample.correction_skipped_reason) == {
+        "explicit_flux",
+        "missing_f01",
+    }
+    assert np.all(np.isfinite(data.sample.f01_mhz))
+    np.testing.assert_allclose(
+        np.asarray(data.sample.fluxs), [0.5, 0.5, 0.51], atol=1e-9
+    )
+
+
+def test_t1_explicit_rows_are_not_auto_corrected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    samples = pd.DataFrame(
+        {
+            "dev_value": [0.0, 0.0],
+            "dev_unit": ["A", "A"],
+            "flux": [0.5, np.nan],
+            "flux_int": [np.nan, 0.5],
+            "flux_period": [np.nan, 1.0],
+            "Freq (MHz)": [350.0, 351.0],
+            "T1 (us)": [40.0, 42.0],
+            "T1err (us)": [0.5, 0.5],
+        }
+    )
+    calibration = _synthetic_calibration(samples)
+    captured: dict[str, object] = {}
+
+    def _fake_correct(
+        raw_fluxs: NDArray[np.float64],
+        f01_freqs_ghz: NDArray[np.float64],
+        _params: tuple[float, float, float],
+        *_args: object,
+        **_kwargs: object,
+    ) -> F01FluxCorrectionResult:
+        captured["freq_ghz"] = f01_freqs_ghz
+        return F01FluxCorrectionResult(
+            raw_fluxs=raw_fluxs,
+            corrected_fluxs=raw_fluxs + 0.01,
+            accepted=np.ones_like(raw_fluxs, dtype=bool),
+        )
+
+    monkeypatch.setattr(workflow, "correct_flux_from_f01", _fake_correct)
+
+    data = prepare_t1_curve_data(calibration, analysis_flux_range=(0.49, 0.53))
+
+    assert data.sample.flux_sources == ("explicit", "row-frame")
+    np.testing.assert_array_equal(data.sample.f01_correction_applied, [False, True])
+    np.testing.assert_allclose(data.sample.fluxs, [0.5, 0.51])
+    np.testing.assert_allclose(data.sample.raw_fluxs, [0.5, -0.5])
+    assert data.sample.correction_skipped_reason == ("explicit_flux", "")
+    np.testing.assert_allclose(
+        np.asarray(cast(NDArray[np.float64], captured["freq_ghz"])),
+        [0.350, 0.351],
+    )
+
+
+def test_t1_integer_equivalent_branches_align_to_same_flux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    samples = pd.DataFrame(
+        {
+            "dev_value": [0.0, 0.0],
+            "dev_unit": ["A", "A"],
+            "flux": [0.5, np.nan],
+            "flux_int": [np.nan, 0.5],
+            "flux_period": [np.nan, 1.0],
+            "Freq (MHz)": [350.0, 351.0],
+            "T1 (us)": [40.0, 42.0],
+            "T1err (us)": [0.5, 0.5],
+        }
+    )
+    calibration = _synthetic_calibration(samples)
+
+    def _identity_correction(
+        raw_fluxs: NDArray[np.float64],
+        _f01_freqs_ghz: NDArray[np.float64],
+        *_args: object,
+        **_kwargs: object,
+    ) -> F01FluxCorrectionResult:
+        return F01FluxCorrectionResult(
+            raw_fluxs=raw_fluxs,
+            corrected_fluxs=raw_fluxs,
+            accepted=np.ones_like(raw_fluxs, dtype=bool),
+        )
+
+    monkeypatch.setattr(workflow, "correct_flux_from_f01", _identity_correction)
+
+    data = prepare_t1_curve_data(calibration, analysis_flux_range=(0.49, 0.53))
+
+    # Explicit 0.5 and row-frame-derived -0.5 land on the same aligned branch.
+    np.testing.assert_allclose(data.sample.fluxs, [0.5, 0.5])
+    np.testing.assert_allclose(data.sample.raw_fluxs, [0.5, -0.5])
+    np.testing.assert_allclose(data.sample.integer_shifts, [0.0, 1.0])
+
+    # Prepared summary reports the branch-shift counts.
+    shifts_row = data.summary_table.loc[
+        data.summary_table["metric"] == "integer shifts"
+    ]
+    assert shifts_row["value"].iloc[0] == "k=0:1 k=1:1"
+
+
+def test_t1_invalid_analysis_window_fails_fast() -> None:
+    samples = pd.DataFrame(
+        {
+            "dev_value": [0.0],
+            "dev_unit": ["A"],
+            "flux_int": [0.5],
+            "flux_period": [1.0],
+            "Freq (MHz)": [np.nan],
+            "T1 (us)": [40.0],
+        }
+    )
+    calibration = _synthetic_calibration(samples)
+
+    with pytest.raises(ValueError, match="one flux period"):
+        prepare_t1_curve_data(calibration, analysis_flux_range=(0.0, 1.5))
+    with pytest.raises(ValueError, match="finite"):
+        prepare_t1_curve_data(calibration, analysis_flux_range=(np.nan, 0.6))
+
+
+def test_t1_correction_disabled_preserves_raw_flux_and_reports_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    samples = pd.DataFrame(
+        {
+            "dev_value": [0.0, 0.0],
+            "dev_unit": ["A", "A"],
+            "flux": [0.5, np.nan],
+            "flux_int": [np.nan, 0.5],
+            "flux_period": [np.nan, 1.0],
+            "Freq (MHz)": [350.0, 351.0],
+            "T1 (us)": [40.0, 42.0],
+            "T1err (us)": [0.5, 0.5],
+        }
+    )
+    calibration = _synthetic_calibration(samples)
+
+    def _must_not_run(
+        *_args: object,
+        **_kwargs: object,
+    ) -> F01FluxCorrectionResult:
+        raise AssertionError("f01 correction must not run when disabled")
+
+    monkeypatch.setattr(workflow, "correct_flux_from_f01", _must_not_run)
+
+    data = prepare_t1_curve_data(
+        calibration,
+        analysis_flux_range=(0.49, 0.53),
+        correct_flux_from_f01_enabled=False,
+    )
+
+    assert not np.any(data.sample.f01_correction_applied)
+    np.testing.assert_allclose(data.sample.flux_corrections, [0.0, 0.0])
+    np.testing.assert_allclose(data.sample.raw_fluxs, [0.5, -0.5])
+    np.testing.assert_allclose(data.sample.fluxs, [0.5, 0.5])
+    np.testing.assert_allclose(data.sample.integer_shifts, [0.0, 1.0])
+    assert data.sample.correction_skipped_reason == ("disabled", "disabled")
+    assert (
+        data.summary_table.loc[
+            data.summary_table["metric"] == "f01 correction skipped reasons",
+            "value",
+        ].iloc[0]
+        == "disabled=2"
+    )
+
+
+def test_run_t1_curve_analysis_threads_correction_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    config = T1CurveAnalysisConfig(
+        result_dir="/tmp/result",
+        correct_flux_from_f01_enabled=False,
+        active_mechanisms=(),
+        fit_bounds={"Q_cap": (1e3, 1e9)},
+        progress=False,
+        save_figures=False,
+        show_figures=False,
+    )
+
+    def _fake_prepare(calibration: object, **kwargs: object) -> object:
+        captured["prepare_kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(workflow, "load_t1_curve_context", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        workflow, "calibrate_t1_flux", lambda _context, **_kwargs: object()
+    )
+    monkeypatch.setattr(workflow, "prepare_t1_curve_data", _fake_prepare)
+    monkeypatch.setattr(workflow, "make_t1_fit_init", lambda **_kwargs: object())
+    monkeypatch.setattr(workflow, "fit_t1_curve", lambda _data, **_kwargs: object())
+    monkeypatch.setattr(
+        workflow,
+        "build_t1_channel_curves",
+        lambda _combined_fit, **_kwargs: object(),
+    )
+    monkeypatch.setattr(workflow, "collect_t1_curve_result", lambda **_kwargs: object())
+
+    run_t1_curve_analysis(config)
+
+    prepare_kwargs = cast(dict[str, object], captured["prepare_kwargs"])
+    assert prepare_kwargs["correct_flux_from_f01_enabled"] is False
+
+
+def test_t1_workflow_has_no_current_scale_vocabulary() -> None:
+    import zcu_tools.notebook.analysis.fit_tools as fit_tools
+
+    assert not hasattr(workflow, "choose_current_scale_from_f01")
+    assert not hasattr(fit_tools, "choose_current_scale_from_f01")
+    assert "calibrated mA" not in workflow._REQUIRED_COLUMNS
+
+
+class _RecordingProgressBar:
+    def __init__(self, **kwargs: object) -> None:
+        self.total = kwargs.get("total")
+        self.n: int | float = 0
+        self.closed = False
+        self.descriptions: list[str] = []
+        if "desc" in kwargs:
+            self.descriptions.append(str(kwargs["desc"]))
+
+    def update(self, value: int | float = 1) -> None:
+        self.n += value
+
+    def set_description(self, description: str) -> None:
+        self.descriptions.append(description)
+
+    def close(self) -> None:
+        self.closed = True

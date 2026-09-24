@@ -51,6 +51,8 @@ class MainWindowToolbarHost(Protocol):
     def list_adapter_names(self) -> list[str]: ...
     def create_tab(self, adapter_name: str) -> None: ...
     def open_dialog(self, name: DialogName) -> None: ...
+    def reload_experiments(self) -> None: ...
+    def retry_skipped_experiment_tabs(self) -> None: ...
 
 
 class MainWindowToolbar:
@@ -63,6 +65,15 @@ class MainWindowToolbar:
         self._new_tab_btn = QPushButton("New Tab ▾")
         self._new_tab_btn.clicked.connect(self.show_new_tab_menu)
         self._layout.addWidget(self._new_tab_btn)
+        self._reload_btn = QPushButton("Reload experiments")
+        self._reload_btn.clicked.connect(lambda: self._host.reload_experiments())
+        self._layout.addWidget(self._reload_btn)
+        self._retry_tabs_btn = QPushButton("Retry skipped tabs")
+        self._retry_tabs_btn.clicked.connect(
+            lambda: self._host.retry_skipped_experiment_tabs()
+        )
+        self._retry_tabs_btn.setVisible(False)
+        self._layout.addWidget(self._retry_tabs_btn)
         self._layout.addStretch()
         self._add_dialog_button("Setup…", DialogName.SETUP)
         self._add_dialog_button("Devices…", DialogName.DEVICE)
@@ -80,6 +91,13 @@ class MainWindowToolbar:
 
     def set_new_tab_enabled(self, enabled: bool) -> None:
         self._new_tab_btn.setEnabled(enabled)
+
+    def set_reload_recovery(self, *, retry_catalog: bool, skipped_count: int) -> None:
+        self._reload_btn.setText(
+            "Retry reload" if retry_catalog else "Reload experiments"
+        )
+        self._retry_tabs_btn.setText(f"Retry skipped tabs ({skipped_count})")
+        self._retry_tabs_btn.setVisible(skipped_count > 0)
 
     def _add_dialog_button(self, label: str, name: DialogName) -> None:
         button = QPushButton(label)

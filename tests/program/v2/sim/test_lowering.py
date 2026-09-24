@@ -28,9 +28,12 @@ test asserts exact durations without depending on a real soccfg.
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
+from qick import QickConfig
 from qick.asm_v2 import QickParam
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.base import Module
@@ -585,6 +588,49 @@ class TestReadoutPlan:
             soccfg.reg2freq(freq_words[2], gen_ch=0) / 1e3
         )
 
+    def test_pulse_readout_load_word_rejects_partial_soccfg_double(self) -> None:
+        freq_words = [1]
+        pulse_cfg = PulseCfg(
+            waveform=ConstWaveformCfg(length=1.0),
+            ch=0,
+            nqz=1,
+            freq=6000.0,
+            gain=0.25,
+        )
+        ro = PulseReadout(
+            "ro",
+            PulseReadoutCfg(
+                pulse_cfg=pulse_cfg,
+                ro_cfg=DirectReadoutCfg(ro_ch=0, ro_length=1.5, ro_freq=6000.0),
+            ),
+            freq_val="freq_word",
+        )
+        partial_soccfg = cast(
+            QickConfig, SimpleNamespace(reg2freq=lambda word, *, gen_ch: float(word))
+        )
+
+        with pytest.raises(
+            UnsupportedModuleError,
+            match="requires soccfg methods: calc_mixer_freq",
+        ):
+            lower_point(
+                [
+                    LoadWord(
+                        "load_freq",
+                        freq_words,
+                        idx_reg="freq",
+                        val_reg="freq_word",
+                    ),
+                    ro,
+                ],
+                [("freq", len(freq_words))],
+                _SIM,
+                _F_QUBIT_GHZ,
+                {"freq": 0},
+                _identity_cycles2us,
+                soccfg=partial_soccfg,
+            )
+
     def test_pulse_readout_validates_paired_frequency_words(
         self,
     ) -> None:
@@ -1120,7 +1166,7 @@ class TestDeterministicBranch:
         assert idle.delta == pytest.approx(0.0)
 
     def test_three_way_branch_selects_each(self) -> None:
-        # Models reset/rabi_check's 3-way Branch; assert each index picks its body.
+        # Assert each index of a three-way Branch picks its own body.
         p1 = _const_pulse(gain=1.0, length=0.4, freq=4000.0)
         p2a = _const_pulse(gain=1.0, length=0.4, freq=4000.0)
         p2b = _const_pulse(gain=0.5, length=0.4, freq=4000.0)

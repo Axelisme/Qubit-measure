@@ -222,7 +222,8 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
             "Run after 'singleshot/ge'. Keep the gain sweep coarse (the inner "
             "length sweep multiplies the run time). Provide 'ac_stark_coeff' "
             "for a photon-number x-axis. 'uniform=True' (default) uses a linear "
-            "length sweep; set False for log-spaced delays."
+            "length sweep; set False to cluster points along the expected "
+            "exponential decay while preserving the configured window and count."
         ),
     )
 
@@ -265,7 +266,8 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
         recommended=(
             "Run after 'singleshot/ge'. Keep the frequency sweep coarse (the "
             "inner length sweep multiplies the run time). 'uniform=True' "
-            "(default) uses a linear length sweep; set False for log-spaced "
-            "delays."
+            "(default) uses a linear length sweep; set False to cluster points "
+            "along the expected exponential decay while preserving the configured "
+            "window and count."
         ),
     )

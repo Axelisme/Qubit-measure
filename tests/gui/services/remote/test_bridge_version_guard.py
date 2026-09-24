@@ -93,15 +93,15 @@ def test_run_start_declares_device_set_cardinality_key(wired):
 def test_save_depends_on_result_and_save_path_not_cfg(wired):
     sent = wired["sent"]
     mcp_server._LAST_SEEN.update(
-        {"tab:t:result": 7, "tab:t:save_path": 2, "tab:t:cfg": 9}
+        {"tab:t:result": 7, "tab:t:path:data": 2, "tab:t:cfg": 9}
     )
-    wired["tab.save_data"] = {"ok": True, "result": {}}
+    wired["tab.save_data"] = {"ok": True, "result": {"data_path": "/tmp/x.h5"}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
     mcp_server.send_gui_rpc("tab.save_data", {"tab_id": "t"})
 
     params = next(p for (m, p) in sent if m == "tab.save_data")
-    assert params["expected_versions"] == {"tab:t:result": 7, "tab:t:save_path": 2}
+    assert params["expected_versions"] == {"tab:t:result": 7, "tab:t:path:data": 2}
     assert "tab:t:cfg" not in params["expected_versions"]
 
 
@@ -134,24 +134,68 @@ def test_load_data_depends_on_tab_result_analyze_and_context_not_soc_or_cfg(wire
     }
 
 
-def test_writeback_apply_depends_on_result_analyze_and_context(wired):
+@pytest.mark.parametrize("method", ["tab.writeback_set", "tab.writeback_apply"])
+@pytest.mark.parametrize(
+    ("subtab_id", "pane_resource", "other_pane_resource"),
+    [
+        ("analysis", "analyze", "post_analyze"),
+        ("post_analysis", "post_analyze", "analyze"),
+    ],
+)
+def test_writeback_mutation_depends_on_selected_pane_version(
+    wired, method: str, subtab_id: str, pane_resource: str, other_pane_resource: str
+):
     sent = wired["sent"]
     mcp_server._LAST_SEEN.update(
-        {"tab:t:result": 7, "tab:t:analyze": 4, "context": 9, "tab:t:save_path": 2}
+        {
+            "tab:t:result": 7,
+            "tab:t:analyze": 4,
+            "tab:t:post_analyze": 6,
+            "context": 9,
+            "tab:t:save_path": 2,
+        }
     )
-    wired["tab.writeback_apply"] = {"ok": True, "result": {}}
+    wired[method] = {"ok": True, "result": {}}
     wired["resources.versions"] = _versions_reply(dict(mcp_server._LAST_SEEN))
 
-    mcp_server.send_gui_rpc("tab.writeback_apply", {"tab_id": "t", "selections": []})
+    mcp_server.send_gui_rpc(method, {"tab_id": "t", "subtab_id": subtab_id})
 
-    params = next(p for (m, p) in sent if m == "tab.writeback_apply")
+    params = next(p for (sent_method, p) in sent if sent_method == method)
     assert params["expected_versions"] == {
         "tab:t:result": 7,
-        "tab:t:analyze": 4,
+        f"tab:t:{pane_resource}": 4 if pane_resource == "analyze" else 6,
         "context": 9,
     }
-    # save_path is irrelevant to tab.writeback_apply.
+    assert f"tab:t:{other_pane_resource}" not in params["expected_versions"]
     assert "tab:t:save_path" not in params["expected_versions"]
+
+
+def test_post_writeback_replacement_rejects_stale_apply(wired):
+    sent = wired["sent"]
+    mcp_server._LAST_SEEN.update(
+        {"tab:t:result": 7, "tab:t:post_analyze": 6, "context": 9}
+    )
+    wired["tab.writeback_apply"] = {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION_FAILED",
+            "reason": "stale_version",
+            "data": {"stale": ["tab:t:post_analyze"]},
+        },
+    }
+    wired["resources.versions"] = _versions_reply(
+        {"tab:t:result": 7, "tab:t:post_analyze": 7, "context": 9}
+    )
+
+    with pytest.raises(RuntimeError, match="this tab's post-analysis"):
+        mcp_server.send_gui_rpc(
+            "tab.writeback_apply",
+            {"tab_id": "t", "subtab_id": "post_analysis"},
+        )
+
+    params = next(p for (method, p) in sent if method == "tab.writeback_apply")
+    assert params["expected_versions"]["tab:t:post_analyze"] == 6
+    assert mcp_server._LAST_SEEN["tab:t:post_analyze"] == 7
 
 
 def test_unguarded_op_attaches_nothing(wired):

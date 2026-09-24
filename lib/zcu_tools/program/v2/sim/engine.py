@@ -61,16 +61,13 @@ from typing import Any, cast
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
-from qick.asm_v2 import QickParam
 
 from zcu_tools.program.base import CancelFlagProtocol
-from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
     DirectReadout,
     PulseReadout,
 )
-from zcu_tools.program.v2.utils import is_qick_param
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from . import bloch
@@ -229,64 +226,6 @@ class _CooperativeYield:
         time.sleep(0)
         self.count += 1
         self._last = time.perf_counter()
-
-
-def _qick_param_spans(value: Any, seen: set[int] | None = None) -> set[str]:
-    """Return sweep-axis names referenced by QickParams inside ``value``."""
-
-    if seen is None:
-        seen = set()
-
-    if isinstance(value, QickParam):
-        if not is_qick_param(value):
-            raise TypeError(
-                f"unsupported QickParam implementation: {type(value).__name__}"
-            )
-        return set(value.spans)
-
-    if value is None or isinstance(value, str | bytes | int | float | bool):
-        return set()
-
-    obj_id = id(value)
-    if obj_id in seen:
-        return set()
-    seen.add(obj_id)
-
-    spans: set[str] = set()
-    if isinstance(value, dict):
-        items = value.values()
-    elif isinstance(value, list | tuple | set | frozenset):
-        items = value
-    elif hasattr(value, "__dict__"):
-        items = vars(value).values()
-    else:
-        return set()
-
-    for item in items:
-        spans.update(_qick_param_spans(item, seen))
-    return spans
-
-
-def _evolution_axis_names(modules: Sequence[Any]) -> set[str]:
-    """Sweep axes that can affect pre-readout qubit evolution.
-
-    Readout modules affect only the dispersive blobs/integration scale in this
-    density-only mock model. Excluding their axes lets a freq/gain readout sweep
-    reuse the same Bloch propagators while still computing a distinct readout
-    response for every point.
-    """
-
-    axes: set[str] = set()
-    for module in modules:
-        if isinstance(module, AbsReadout):
-            continue
-        if isinstance(module, Branch):
-            axes.add(module.compare_reg)
-            for branch in module.branches:
-                axes.update(_evolution_axis_names(branch))
-            continue
-        axes.update(_qick_param_spans(module))
-    return axes
 
 
 @lru_cache(maxsize=_SEGMENT_PROPAGATOR_CACHE_SIZE)
@@ -602,11 +541,6 @@ class SimEngine:
         noise_std_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
         gain_noise_std_scale_grid = np.empty((*sweep_dims, nreads), dtype=np.float64)
         population_items: list[tuple[tuple[int | slice, ...], bytes, _PointModel]] = []
-        evolution_axis_names = _evolution_axis_names(self.program.modules)
-        evolution_axis_order = [
-            name for name, _count in axes if name in evolution_axis_names
-        ]
-        evolution_cache: dict[tuple[int, ...], _EvolutionProps] = {}
         sequence_cache = _SequencePropagatorCache()
         gil_yield = _CooperativeYield()
 
@@ -624,17 +558,13 @@ class SimEngine:
                 sample_times_us,
             )
 
-            evolution_key = tuple(point[name] for name in evolution_axis_order)
-            evolution = evolution_cache.get(evolution_key)
-            if evolution is None:
-                evolution = self._point_evolution_props(
-                    point,
-                    f_qubit_ghz,
-                    zero_lowered,
-                    yield_hook=gil_yield,
-                    sequence_cache=sequence_cache,
-                )
-                evolution_cache[evolution_key] = evolution
+            evolution = self._point_evolution_props(
+                point,
+                f_qubit_ghz,
+                zero_lowered,
+                yield_hook=gil_yield,
+                sequence_cache=sequence_cache,
+            )
 
             model = self._point_model(readout, evolution, equilibrium_pop)
             gil_yield()
@@ -774,7 +704,7 @@ class SimEngine:
         yield_hook: Callable[[], None] | None = None,
         sequence_cache: _SequencePropagatorCache | None = None,
     ) -> _EvolutionProps:
-        """Return cached qubit-state propagators for one sweep point.
+        """Return qubit-state propagators for one sweep point.
 
         The Lorentzian quasi-static detune ensemble is a SimEngine concern: the
         point is lowered once at delta=0, then each quadrature node applies the

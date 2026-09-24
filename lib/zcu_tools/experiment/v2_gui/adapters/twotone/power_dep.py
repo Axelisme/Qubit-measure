@@ -28,7 +28,7 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE
+        analysis=AnalysisMode.NONE, load_data=True
     )
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

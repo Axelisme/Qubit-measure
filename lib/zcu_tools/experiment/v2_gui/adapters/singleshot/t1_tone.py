@@ -104,10 +104,11 @@ class SsT1ToneAdapter(
             "MetaDict 't1_with_tone' (us)."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. Use 'uniform=False' (default) for "
-            "log-spaced delays (better sampling of the decay); 'uniform=True' "
-            "for a linear sweep. The probe-tone gain and frequency are set "
-            "inside the probe_pulse module."
+            "Run after 'singleshot/ge'. Use 'uniform=False' (default) to "
+            "cluster points along the expected exponential decay while preserving "
+            "the configured window and point count; use 'uniform=True' for a "
+            "linear sweep. The probe-tone gain and frequency are set inside the "
+            "probe_pulse module."
         ),
     )
 

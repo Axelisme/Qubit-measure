@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabAddedPayload,
@@ -84,6 +86,9 @@ class RecordingHost:
     def focus_run_result_panel(self, tab_id: str) -> None:
         self._log.add("host", "focus_run_result_panel", tab_id)
 
+    def refresh_tab_cfg(self, tab_id: str) -> None:
+        self._log.add("host", "refresh_tab_cfg", tab_id)
+
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: object | None = None
     ) -> None:
@@ -131,6 +136,9 @@ class RecordingHost:
 
     def refresh_feedback_widget(self) -> None:
         self._log.add("host", "refresh_feedback_widget")
+
+    def handle_save_data_finished(self, payload: object) -> None:
+        self._log.add("host", "handle_save_data_finished", payload)
 
 
 def _coordinator(
@@ -256,6 +264,10 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
             TabInteractionFact.SAVE_FAILED,
             ["refresh_tab_interaction", "refresh_feedback_widget"],
         ),
+        (
+            TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
+            ["refresh_tab_writeback"],
+        ),
     ],
 )
 def test_interaction_fact_reaction_matrix(
@@ -313,17 +325,23 @@ def test_local_edit_facts_have_zero_qt_reaction(fact: TabInteractionFact) -> Non
             ],
         ),
         (
+            TabContentFact.CFG_REPLACED,
+            ["refresh_tab_cfg"],
+        ),
+        (
             TabContentFact.PRIMARY_ANALYSIS_COMMITTED,
             [
                 "refresh_tab_post_analyze_form",
                 "refresh_tab_writeback",
                 "refresh_tab_figure",
+                "refresh_tab_post_figure",
                 "refresh_tab_interaction",
             ],
         ),
         (
             TabContentFact.POST_ANALYSIS_COMMITTED,
             [
+                "refresh_tab_writeback",
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
                 "refresh_tab_interaction",
@@ -374,27 +392,63 @@ def test_bind_routes_events_and_close_unsubscribes() -> None:
     ]
 
 
-def test_run_finished_focuses_result_panel_only_for_finished_outcome() -> None:
+def test_run_finished_refreshes_without_focus_or_navigation() -> None:
     snapshot = _snapshot()
-    coordinator, log, _ctrl, _host = _coordinator(snapshot)
+    coordinator, log, ctrl, _host = _coordinator(snapshot)
 
+    # Terminal events are interpreted against the State-owned running identity,
+    # not against a cached/payload-derived marker value. Neither outcome may
+    # trigger a pane-selection reaction.
+    ctrl.running_tab_id = None
     coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="cancelled"))
+    ctrl.running_tab_id = None
     coordinator._on_run_finished(RunFinishedPayload("tab-1", outcome="finished"))
 
     assert log.calls == [
         call("host", "has_tab_widget", "tab-1"),
         call("ctrl", "get_tab_snapshot", "tab-1"),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
+        call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", None),
         call("host", "refresh_feedback_widget"),
         call("host", "has_tab_widget", "tab-1"),
         call("ctrl", "get_tab_snapshot", "tab-1"),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
+        call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", None),
         call("host", "refresh_feedback_widget"),
-        call("host", "has_tab_widget", "tab-1"),
-        call("host", "focus_run_result_panel", "tab-1"),
     ]
+    assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
+
+
+def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
+    from qtpy.QtWidgets import QTabWidget
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    bus = BaseEventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = None
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    ctrl.has_tab.return_value = True
+    ctrl.get_tab_snapshot.return_value = _snapshot(has_run_result=True)
+    window = MainWindow(ctrl)
+    tab = MagicMock()
+    tab._left_tabs = QTabWidget()
+    for label in ("Run", "Analysis", "Post", "Data", "Guide"):
+        tab._left_tabs.addTab(QWidget(), label)
+    window._tab_widgets["tab-1"] = tab
+
+    for index in range(tab._left_tabs.count()):
+        tab._left_tabs.setCurrentIndex(index)
+        bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
+        assert tab._left_tabs.currentIndex() == index
+
+    tab.focus_result_panel.assert_not_called()
+    window.deleteLater()
+    tab._left_tabs.deleteLater()
+    qapp.processEvents()
 
 
 def test_run_started_refreshes_invalidated_content_once() -> None:
@@ -410,9 +464,50 @@ def test_run_started_refreshes_invalidated_content_once() -> None:
         call("host", "refresh_tab_post_analyze_form", "tab-1", snapshot),
         call("host", "refresh_tab_writeback", "tab-1", snapshot),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
-        call("host", "refresh_run_lock", "tab-1"),
+        call("ctrl", "get_running_tab_id"),
+        call("host", "refresh_run_lock", "running-tab"),
         call("host", "refresh_feedback_widget"),
     ]
+
+
+def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    ctrl = MagicMock()
+    ctrl.get_bus.return_value = BaseEventBus()
+    ctrl.get_running_tab_id.return_value = "tab-a"
+    ctrl.get_active_tab_id.return_value = None
+    ctrl.active_operation_count.return_value = 0
+    ctrl.has_agent_connected.return_value = False
+    ctrl.has_tab.return_value = True
+
+    class _TabStub(QWidget):
+        def update_interaction_state(self, _snapshot: object) -> None:
+            pass
+
+    window = MainWindow(ctrl)
+    tab_a = _TabStub()
+    tab_b = _TabStub()
+    window._tab_widgets["tab-a"] = tab_a  # type: ignore[assignment]
+    window._tab_widgets["tab-b"] = tab_b  # type: ignore[assignment]
+    window._tabs.addTab(tab_a, "A")
+    window._tabs.addTab(tab_b, "B")
+
+    window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
+
+    tab_bar = window._tabs.tabBar()
+    assert tab_bar is not None
+    assert window._tabs.tabText(0) == "● A"
+    assert window._tabs.tabText(1) == "B"
+    assert tab_bar.tabTextColor(0).name() == "#286ac7"
+    assert tab_bar.tabToolTip(0) == "Run in progress"
+
+    ctrl.get_running_tab_id.return_value = None
+    window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
+
+    assert window._tabs.tabText(0) == "A"
+    assert window._tabs.tabText(1) == "B"
+    assert tab_bar.tabToolTip(0) == ""
 
 
 def test_context_event_refreshes_paths_and_interaction_without_writeback() -> None:
@@ -443,3 +538,21 @@ def test_ml_changed_has_no_main_window_reaction() -> None:
     bus.emit(MlChangedPayload(cast(Any, None)))
 
     assert log.calls == []
+
+
+def test_save_data_finished_payload_is_routed_with_exact_payload() -> None:
+    from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+
+    coordinator, log, _ctrl, _host = _coordinator()
+    bus = BaseEventBus()
+    coordinator.bind(bus)
+    payload = SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/a.h5", error=None)
+    bus.emit(payload)
+    assert log.calls == [call("host", "handle_save_data_finished", payload)]
+    # Verify error propagation is routed unchanged
+    log.calls.clear()
+    payload_failed = SaveDataFinishedPayload(
+        tab_id="tab-1", data_path="/tmp/b.h5", error="disk full"
+    )
+    bus.emit(payload_failed)
+    assert log.calls == [call("host", "handle_save_data_finished", payload_failed)]

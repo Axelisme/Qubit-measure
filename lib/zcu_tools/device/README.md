@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-07-07 — setup_devices cancel scope
+**Last updated:** 2026-08-18 — registry-owned disconnect (`close_device` / `close_all_devices`)
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -115,12 +115,34 @@ Process-wide registry（class-level `_devices` dict）：
 | API | 用途 |
 | --- | ---- |
 | `register_device(name, device)` | 註冊 `BaseDevice` 實例；非 `BaseDevice` 入口 `TypeError`，重名會 warn 並覆蓋 |
-| `drop_device(name, ignore_error=False)` | 移除 |
+| `drop_device(name, ignore_error=False)` | 移除 registry entry（不 close） |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
 | `setup_devices(dev_cfg: Mapping[str, DeviceInfo], *, progress=True, cancel_signal=None)` | 批次對已註冊裝置呼叫 `setup(cfg)` |
 | `get_info(name)` | 取得單一 device 的 `get_info()` 結果；找不到 `ValueError` |
 | `get_all_info()` | 把每個 device 的 `get_info()` 收成 dict，方便存檔 |
+| `close_device(name, *, ignore_missing=False)` | close 單一 device 並在成功後移除其 stale aliases |
+| `close_all_devices()` | close 所有 registered devices（identity 去重），聚合 named failures |
+
+**registry-owned disconnect（`close_device` / `close_all_devices`）**：manager 以
+`id(device)` 為 key 維護 private in-flight close claims（claim 持有 strong reference，防止
+identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup，actual
+`device.close()` 永遠在 lock 外執行。語義：
+
+- 同一 identity 已被任何 manager close API claim 時，第二個呼叫者立即收到
+  `DeviceCloseInProgressError`（fail-fast，不等待、不重複 close）。
+- close 成功後移除當下所有仍指向同一 identity 的 aliases（包含 close 進行中新增的同
+  identity alias）；同名不同 replacement（不同 identity）保留，close 後新註冊的不同 device
+  不屬正在進行的 batch。
+- ordinary failure 包裝為 `DeviceCloseFailure(names, cause)`（names 含 batch 中該 identity
+  的所有 aliases），release claim 且保留 entries 供重試；`BaseException` 不包裝、直接傳播，
+  但一樣 release claim。
+- `close_all_devices()` snapshot 後 identity 去重，嘗試 close 所有可 claim identities；
+  ordinary failures 與 in-progress identities 不阻斷其餘 entries，in-progress 以
+  `DeviceCloseInProgressError`（含該 identity 的所有 snapshot aliases）聚合，連同 named
+  failures 一起以 built-in `ExceptionGroup` 拋出；empty registry 是 no-op。
+- close 只 disconnect session，絕不執行 RF/current/voltage state mutation；也不會取代
+  `drop_device()` 或 GUI disconnect 語義。
 
 **使用慣例**：在 notebook / 實驗腳本啟動時一次 `register_device`，之後以名稱（如 `"flux"`, `"qubit_lo"`）在任何地方取用。`register_device` 只接受 `BaseDevice` instance，duck object 或裸 mock 會在入口 fail-fast。`setup_devices` 通常接受從 YAML / JSON 讀出的 config block。
 

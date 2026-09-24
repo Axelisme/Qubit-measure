@@ -18,7 +18,7 @@ def _adapter_with_params(params: OneToneFreqAnalyzeParams) -> MagicMock:
     control = MagicMock()
     control.has_tab.return_value = True
     control.get_tab_snapshot.return_value = SimpleNamespace(
-        analyze_params=params,
+        analysis=SimpleNamespace(params=params),
         interaction=None,
     )
     control.analyze.return_value = "op-1"

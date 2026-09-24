@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -107,7 +106,7 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
                         .build_and_acquire(
                             raw2signal_fn=lambda raw: snr_as_signal(
                                 [tracker],
-                                ge_axis=0,
+                                ge_axis=1,
                                 skew_penalty=sched.cfg.skew_penalty,
                             ),
                             trackers=[tracker],

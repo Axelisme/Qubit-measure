@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode, AnalyzeRequest
+from zcu_tools.gui.app.main.catalog import ExperimentAccess
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
+from zcu_tools.gui.expected_error import FailedPreconditionError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import InteractiveHost, InteractiveSession
@@ -25,9 +30,13 @@ if TYPE_CHECKING:
 
 
 class RunAnalyzeRenderHost(Protocol):
-    """Render surface needed by run/analyze operations."""
+    """Render surface needed by run/analyze operations (per-pane, S2)."""
 
-    def make_live_container(self, tab_id: str) -> FigureContainer | None: ...
+    def make_run_container(self, tab_id: str) -> FigureContainer | None: ...
+
+    def make_analysis_container(self, tab_id: str) -> FigureContainer | None: ...
+
+    def make_post_analysis_container(self, tab_id: str) -> FigureContainer | None: ...
 
     def mount_interactive_analysis(
         self,
@@ -75,6 +84,7 @@ class RunAnalyzeControlFacet:
         analyze: AnalyzeService,
         post_analyze: PostAnalyzeService,
         render_host: Callable[[], RunAnalyzeRenderHost | None],
+        access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
         self._bus = bus
@@ -85,6 +95,7 @@ class RunAnalyzeControlFacet:
         self._analyze = analyze
         self._post_analyze = post_analyze
         self._render_host = render_host
+        self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
@@ -96,12 +107,15 @@ class RunAnalyzeControlFacet:
         return self._tab.get_snapshot(tab_id)
 
     def start_run(self, tab_id: str) -> int:
+        self._access.require_available()
         permit = self._guard.acquire_run_permit(tab_id)
+        self._ensure_tab_idle(tab_id)
         host = self._render_host()
-        live_container = host.make_live_container(tab_id) if host is not None else None
+        live_container = host.make_run_container(tab_id) if host is not None else None
         return self._run.start_run(permit, live_container)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
+        self._access.require_available()
         permit = self._guard.acquire_load_permit(tab_id)
         outcome = self._load.load_result(permit, data_path)
         tab = self._state.get_tab(tab_id)
@@ -130,7 +144,9 @@ class RunAnalyzeControlFacet:
         return self._tab.get_tab_analyze_result(tab_id)
 
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
+        self._access.require_available()
         permit = self._guard.acquire_analyze_permit(tab_id)
+        self._ensure_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         if tab.adapter.capabilities.analysis is AnalysisMode.INTERACTIVE:
             return self._start_interactive_analyze(
@@ -138,7 +154,7 @@ class RunAnalyzeControlFacet:
             )
         host = self._render_host()
         figure_container = (
-            host.make_live_container(tab_id) if host is not None else None
+            host.make_analysis_container(tab_id) if host is not None else None
         )
         return self._analyze.start_analyze(
             permit, analyze_params_instance, figure_container
@@ -150,32 +166,57 @@ class RunAnalyzeControlFacet:
         tab = self._state.get_tab(tab_id)
         ctx = self._state.exp_context
         req = AnalyzeRequest(
-            run_result=tab.run_result,
+            run_result=tab.run.result,
             analyze_params=analyze_params_instance,
             md=ctx.md,
             ml=ctx.ml,
             predictor=ctx.predictor,
         )
-        token = self._analyze.start_interactive(permit)
         host = self._render_host()
-        if host is not None:
+        if host is None:
+            raise FailedPreconditionError(
+                "interactive analysis requires an attached render host"
+            )
+        self._tab.update_tab_analyze_param_instance(tab_id, analyze_params_instance)
+        token = self._analyze.start_interactive(permit)
+        try:
             host.mount_interactive_analysis(
                 tab_id,
                 lambda ihost: tab.adapter.setup_interactive_analysis(req, ihost),
                 lambda session: self._analyze.finish_interactive(tab_id, session),
             )
+        except Exception:
+            try:
+                host.unmount_interactive_analysis(tab_id)
+            except Exception:
+                logger.exception(
+                    "failed to unmount interactive analysis after setup failure: tab_id=%r",
+                    tab_id,
+                )
+            if not self._analyze.cancel_interactive(tab_id):
+                logger.error(
+                    "interactive analysis setup failed without an active operation: tab_id=%r",
+                    tab_id,
+                )
+            raise
         return token
 
     def start_post_analyze(
         self, tab_id: str, post_analyze_params_instance: object
     ) -> int:
+        self._ensure_tab_idle(tab_id)
         host = self._render_host()
         figure_container = (
-            host.make_live_container(tab_id) if host is not None else None
+            host.make_post_analysis_container(tab_id) if host is not None else None
         )
         return self._post_analyze.start_post_analyze(
             tab_id, post_analyze_params_instance, figure_container
         )
+
+    def _ensure_tab_idle(self, tab_id: str) -> None:
+        self._access.require_available()
+        if self._state.is_tab_busy(tab_id):
+            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
     def get_post_analyze_result(self, tab_id: str) -> object | None:
         return self._tab.get_tab_post_analyze_result(tab_id)

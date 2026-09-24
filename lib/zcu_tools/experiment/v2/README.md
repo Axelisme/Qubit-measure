@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-07-15 — homophasal native-style table sweep
+**Last updated:** 2026-09-23 — singleshot Rabi fit models
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -37,7 +37,7 @@ experiment/v2/
 ├── singleshot/              # 單次讀取相關（ge, check, len_rabi, ac_stark, mist, t1）
 ├── fastflux/                # 快速 flux 掃描（t1, mist, twotone, distortion）
 ├── mist/                    # MIST（measurement-induced state transition）flux/power dep
-├── jpa/                     # JPA 校準（flux/freq/power/自動最佳化）
+├── jpa/                     # JPA 校準（freq/flux/power/auto_optimize/flux_onetone/check）
 ├── overnight/               # 隔夜穩定度量測（OvernightExecutor + measurement leaves）
 └── autofluxdep/             # FluxDepExecutor：多 measurement 自動 flux 掃描（搭配 FluxoniumPredictor）
 ```
@@ -60,6 +60,13 @@ class AbsExperiment(Generic[T_Result, T_Config]):
 - **`last_result` 記帳由 decorator DRY**：`record_result`（套在 `run` / `load`）把回傳值寫入 `self.last_result`；`retrieve_result`（套在 `analyze` / `save`）在 `result` 參數為 `None` 時回退到 `self.last_result`（依參數名定位，與其在簽名中的位置無關）。
 - **解包與存取**：所有對 Result 物件的存取均採用屬性存取（Property access，例如 `result.freqs`、`result.signals`），不可直接解包為 tuple。
 
+CKP numeric analysis先從ground/excited maps抽取resonance trace，再透過
+`utils.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance
+frequency維持local，兩個slope各自固定為零。Chi/kappa uncertainty直接由named global
+covariance投影，包含local frequency cross-covariance；analysis不重建per-trace covariance
+blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
+`(chi, kappa, resonator frequency, Figure)`。
+
 ---
 
 ## 持久化：PersistableExperiment + AxesSpec（ADR-0027）
@@ -74,10 +81,21 @@ class AbsExperiment(Generic[T_Result, T_Config]):
 - **inner-first 軸序慣例**：`axes` 以 inner-first 排列，`z.shape == tuple(len(ax) for ax in reversed(axes))`（inner 軸恆為 z 的最後一維）。**`load` 是 `save` 的恒等逆，兩邊都不做 caller-side transpose**。`load()` 只接受 canonical 檔案：axis count/name/unit、z channel name/unit 與 z shape 都必須符合 `AXES_SPEC`。legacy 單檔案的 label/unit 差異不放寬 runtime loader，而是在 `zcu_tools.experiment.legacy_migration` converter 邊界轉成 canonical HDF5；GUI adapter fallback 也只呼這個 converter 後再走同一個 strict `load()`。
 - **單位反轉與 cfg**：`save()` 對每個 axis 乘 `scale` 後寫盤；`load()` 除回 `scale` 並 cast 回 `dtype`，是 `save()` 的逐欄逆運算。cfg snapshot 透過 comment channel 走 `make_comment` / `parse_comment`（`load()` 以 `cfg_type.validate_or_warn` 還原），不佔 axes / z。`save()` 在 `cfg_snapshot` 為 `None` 時拋 `ValueError`。
 - **save path ownership**：`PersistableExperiment.save()` 寫入 caller 傳入的 final path；既有 path 由 datasaver writer fast-fail，不自動 suffix、不提供 overwrite 參數。GUI / runner / notebook 若需要 unique filename，必須在呼叫 `save()` 前用 `reserve_labber_filepath` 或自己的 orchestration policy 決定 final path。
-- **grouped experiment dataset**：單一 Experiment Result 若含多個 peer Dataset Role，仍只產生一個 grouped `.hdf5` Experiment Data File。`GroupedAxesSpec` / `RoleSpec` 是 experiment 層的 semantic schema：每個 role 宣告 role name、inner-first axes、z/data field mapping、dtype、unit 與 scale；common helper 依 spec 組 `GroupedLabberData` payload、驗證 required roles / axis metadata / z shape、重建 comment/cfg snapshot，再交 typed builder 還原 Result。`RoleSpec` 只描述 mechanical mapping，不攜帶 arbitrary transform callback；需要把多個 role array 合成既有 Result 欄位（例如 auto-optimize 的 `params`）時，在 `GroupedAxesSpec` 的 typed builder 邊界完成。
-- **grouped experiment roles**：`CPMG_Exp` 使用 roles `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 roles `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 roles `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 都只接受 complete grouped HDF5；legacy `.npz` 或 sidecar 只屬 migration input，需用 `script/migrate_experiment_data.py` 轉換。
+- **grouped experiment dataset**：單一 Experiment Result 若含多個 peer Dataset Role，仍只產生一個 grouped `.hdf5` Experiment Data File。canonical one-shot grouped v2 要求所有 roles 共享完全相同的 inner-first axes、shape 與 timestamps，並在 root Labber log 內以平行 scalar channels 表達。`GroupedAxesSpec` / `RoleSpec` 是 experiment 層的 semantic schema：每個 role 宣告 role name、inner-first axes、z/data field mapping、dtype、unit 與 scale；common helper 依 spec 組 `GroupedLabberData` payload、驗證 required roles / axis metadata / z shape、重建 comment/cfg snapshot，再交 typed builder 還原 Result。`RoleSpec` 只描述 mechanical mapping，不攜帶 arbitrary transform callback；需要把多個 role array 合成既有 Result 欄位（例如 auto-optimize 的 `params`）時，在 `GroupedAxesSpec` 的 typed builder 邊界完成。異質 autofluxdep workflow 使用 marker-qualified streaming grouped v1，不進 one-shot v2 saver。
+- **grouped experiment roles**：`CPMG_Exp` 使用 roles `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 roles `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 roles `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` role unit 為 `A` 屬 migration input，用 `script/migrate_experiment_data.py --experiment jpa/jpa_auto_optimize/legacy_a` 原值重寫成 `a.u.` canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 都只接受 complete grouped HDF5；legacy `.npz` 或 sidecar 只屬 migration input，需用 `script/migrate_experiment_data.py` 轉換。
 - **legacy single-file converters**：第一批共用 converter 支援 `onetone/freq`、`onetone/flux_dep`、`twotone/freq`、`twotone/flux_dep`（含 `twotone/flux_dep/freq` alias），把舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸與 `ADC unit` signal channel 重寫成當前 `AXES_SPEC`。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
-- **single-role 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`、MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy artifact 只透過 `script/migrate_experiment_data.py` 轉換，舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向只在 converter 邊界重排。
+- **single-role 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡的zero-phase Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，migration command明確拒絕而不虛構canonical data；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy artifact 只透過 `script/migrate_experiment_data.py` 轉換，舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向只在 converter 邊界重排。
+
+Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個program只擷取
+單一length的`shots`筆raw IQ，再寫入sweep-first Result row，避免FPGA同時配置完整
+`Nlength × Nshot` raw buffer。stop保留已完成rows，其餘維持partial-result NaN。
+
+Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
+
+Singleshot Rabi joint fit依analysis選擇有衰減或純cosine population dynamics：
+`len_rabi`預設擬合衰減包絡，`amp_rabi`固定使用純cosine。純cosine模型不擬合
+`t_r`，結果以`None`表示該參數不適用；兩種模式共用raw-IQ calibration與confusion
+matrix的估計流程。
 
 詳見 [[0027]]。
 
@@ -140,6 +158,18 @@ circle 參數產生非等距 frequency array，再把 gen/readout raw frequency 
 回繞第一點供下一個 outer repetition 使用。這條路徑不重置 DDS phase accumulator，更新
 位置與 QICK native `QickParam` sweep 一致。非等距模式仍先把點 round 到硬體格點，並在
 相鄰點 collapse 時 fast-fail。
+
+`utils/t1_sampling.py` 擁有 T1 family 的 non-uniform sampling contract，供
+`twotone/time_domain/t1` 與 singleshot `t1`、`t1_with_tone`、`t1_with_tone_sweep` 共用：
+在硬體量化前沿 normalized T1 decay curve 等弧長配置 delay，保留 configured window 與 point
+count。各路徑依 delay 或 probe-pulse 所屬的硬體 grid 量化；任何 collision 或非嚴格遞增都
+fast-fail，不以 sorting、`unique` 或自動減點掩蓋。Direct delay list 走相同 conversion
+contract，但不重新採樣。Singleshot `t1_with_tone` 的 zero-length 點略過 probe pulse，避免
+建立硬體不接受的 zero-cycle pulse；`t1_with_tone_sweep` 則要求完整 time axis 嚴格大於
+零，並在 device setup 前 fast-fail。其 uniform 與 non-uniform time axis 都由
+`TableLengthPulse` 在板上執行：外層 gain/frequency 維持 host scan，內層 length loop 從
+dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem template，readout
+依每點真實 pulse 結束時間對齊，不把短 pulse 補到最長點。
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
@@ -258,3 +288,5 @@ executor leaf contract 由 `runner/task.py` 擁有：`Acquirer`、`TaskPlotter`�
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`AXES_SPEC.tag` 取有層次的 on-disk 名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
 7. 如果要在 Experiment 外層疊 flux / time sweep，優先讓 Executor 使用 `ResultTree` 作為 `BufferProtocol` result buffer 並傳入 root `Schedule`，外層用 `scan` / `repeat` / `batch`，leaf 用 `state.child(..., cfg=program_cfg).buffer(...)` 建立 result slot 與 program cfg scope；plot update 透過 `ResultUpdateEvent`，不要解析 `ScheduleStep.path`。
+
+Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分類可使用更大 radius。Raw IQ 投影 likelihood 不依賴 radius；derived confusion 與 population 使用圓內且最近中心的互斥區域。GE `consider_other` 僅控制 radius 選擇的 midpoint-other 懲罰模型，回傳校正矩陣維持 isolated-other row。

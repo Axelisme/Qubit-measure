@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-07-12 — Qt UI adapter boundaries
+**Last updated:** 2026-09-23 — Load result Config backfill validation
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -21,15 +21,96 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
-- `state.py`：tab/device/result/save-path/version-table SSOT 與主線程 mutators；
-  `running_tab_id` 是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。
-- `ui/`：Qt widgets、MainWindow top-level façade、tab-local `ExpTabWidget`、
+- `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
+  Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。`running_tab_id`
+  是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。MainWindow
+  also projects that identity directly onto exactly one top-level tab as a compact blue
+  `●` marker while Run is active; Run start/terminal EventBus reactions and tab insertion
+  repaint from State, so the marker is never persisted or cached as a second busy state.
+- `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
-  `ExpTabWidget` owns tab-local rendering and receives tab actions through a
-  narrow `TabActions` port; `MainWindow` adapts those actions to top-level
-  handlers. Top-level orchestration invokes behavior-oriented tab methods for
-  result focus, plot hosting, interactive-widget lifecycle, figure reads, and
-  persisted panel geometry; the tab does not expose its Qt containers.
+  `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
+  Analysis | Post-Analysis | Data | Guide, with optional Analysis/Post only when
+  the adapter declares the capability) and per-pane `FigureContainer` routing
+  (stable identity per (tab, pane) for the widget lifetime; refresh never replaces
+  the container; busy tabs cannot close or rebuild, so the captured worker target
+  outlives the operation without a lease). It receives tab actions through a narrow
+  `TabActions` port with pane-qualified writeback (`apply_post_writeback`);
+  `MainWindow` adapts those actions to top-level handlers. Run uses the sole
+  shared cfg tree (S1 corrected: 13 px, root at 0, descendants at 10 px with
+  connectors, five depth colors `#5b8dc6`/`#6aae8a`/`#b8942f`/`#8a6bc9`/`#4fb3a8`
+  cycle on guide lines stable under horizontal scroll, rows no longer use depth
+  backgrounds, whole-row folding, reference shape elision, viewport follows
+  available panel height with scrolling only when content exceeds viewport);
+  Run action row is status-free with Reset 20% / Run 80% of available width；
+  idle Reset與Run同高，Reset為green secondary、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
+  settled後恢復20/80（A5）； Analysis uses an app-local single-column 13 px ledger with
+  whole-header folding for `Analysis parameters` and `Writeback preview` and a
+  full-width `Analyze` immediately after parameters and before Writeback preview
+  (A6). Presentation
+  Modules do not invoke operation services directly. Each `WritebackWidget`
+  is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
+  draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
+  `WritebackService` remains stage-agnostic and owns the display-only baseline
+  capture (S2): at draft creation it snapshots the destination `ExpContext` and
+  exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
+  compact unified ledger: draft-owned unapplied items以粗體`target*`與`* = not applied`
+  legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
+  apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
+  centered Current → Proposed columns on a shared-background continuous-boundary
+  panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions。
+  Scalar MetaDict與editable module/waveform items使用Edit；non-scalar MetaDict的
+  current/proposed headings使用一致的bounded summary（例如`3 × 3 matrix`）。small
+  proposed matrix另外顯示read-only matrix view，current value維持summary-only；Copy會把
+  complete proposed JSON放入clipboard。其它arbitrary long values只顯示bounded summary，
+  因此ledger never widens. The widget owns a ~450 px breakpoint: wide rows stay
+  single-line, narrow rows reflow to target/action above centered
+  Current → Proposed, the bordered ledger hugs its rendered rows with Apply
+  Selected immediately after it; long content grows naturally and delegates
+  vertical scrolling to the existing Analysis pane rather than owning a nested
+  scroll/cap lifecycle.
+  `RenderHost` is pane-aware (run | analysis | post_analysis) and the worker
+  captures its pane's container at start — switching the visible subtab never
+  retargets the worker (ADR-0017). Run terminal reactions refresh canonical
+  presentation without selecting a subtab; Analysis remains an explicit user
+  selection. `ExpTabWidget` delegates the Data pane to an
+  internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
+  action row放在`Measurement data`card之前，同時擁有capability-driven artifact rows、
+  high-contrast status rendering and the tab-local status lifecycle derived from
+  result availability, path/comment edits and true terminal save outcomes (not
+  persisted across process), with figure-gated save enablement while status still
+  tracks result lifecycle. The center owns the saveability decision and the ordered
+  Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
+  successes); tracker/invariant failures Fast Fail and operational failures are
+  presented centrally, and async data completion is routed to the center. The center
+  also owns the tab-local unsaved-data decision; `MainWindow` consults it before
+  user-triggered tab/app closes, combines app-close data-loss and active-operation
+  risks into one confirmation, and keeps programmatic RPC shutdown non-interactive.
+  Save All updates that center in place: terminal status updates do not replace the Data
+  pane or its widgets, and the data-path editor retains focus, cursor and selection.
+  Analysis/Post panes no longer own image-path/Save Image; Run's live figure
+  remains view-only (display + screenshot, no canonical Save). Data's right pane
+  is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
+  construction (Run always, Analysis/Post only when supported), viewport-driven
+  mosaic reflow — narrow single-column vertical vs wide three-card Run-left
+  spanning two rows with Analysis/Post on the right, two-card side-by-side,
+  and single full-width at the two-minimum-width-cards-plus-spacing breakpoint
+  (gallery's own viewport, not window, no persisted toggle) — scrollable cards
+  with named empty/unavailable states, raster-only presentation cache (pixmap/text)
+  fed by an injected `Figure -> PNG bytes` adapter — production uses the Data
+  Preview renderer with saved-image logical geometry and size restore — per-card render caches the
+  original pixmap and aspect-fits with `KeepAspectRatio` and smooth transformation
+  inside the image viewport without cropping; per-card failure is isolated and
+  logged without blocking other cards or save controls, and no Figure/canvas
+  ownership, timer, or per-draw subscription is introduced. `ExpTabWidget` remains the sole `FigureContainer` and
+  current-figure authority: Data activation and Data-visible
+  prepare/clear/show lifecycle refresh the gallery snapshot, while
+  Data-invisible mutations postpone PNG rendering until the next activation;
+  the gallery never attaches or reparents a canvas. Subtab routing keeps
+  Run/Analysis/Post on their source stacks, Data on the gallery, and Guide on
+  its placeholder. Top-level orchestration invokes behavior-oriented tab methods
+  for result presentation, plot hosting, interactive-widget lifecycle, figure
+  reads, and persisted panel geometry; the tab does not expose its Qt containers.
 - `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
@@ -88,23 +169,26 @@ this facet instead of the giant `Controller` surface. `WritebackControlPort` /
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
-`Controller` surface. Cfg-editor remains a separate domain, and `Controller`
-keeps thin compatibility forwards for UI surfaces that have not migrated yet.
+`Controller` surface. Cfg-editor remains a separate domain. Qt and remote
+writeback forwards are pane-qualified; no flat writeback forward remains.
 
-Inside the Qt view, `MainWindow` remains the top-level View / RenderHost facade
-while `MainWindowEventCoordinator` owns EventBus subscription and payload routing.
-The coordinator speaks to `MainWindow` through a narrow host protocol: it decides
-which refresh sequence a payload requires, but the window keeps widget ownership
-and concrete rendering methods.
+Inside the Qt view, `MainWindow` remains the top-level View / `RenderHost` facade
+while `MainWindowEventCoordinator` owns EventBus subscription and pane-specific
+payload routing (ADR-0048). The coordinator speaks to `MainWindow` through a narrow
+host protocol: it decides which refresh sequence a closed domain fact requires,
+but the window keeps widget ownership and concrete rendering methods. Producers
+emit only closed facts (run/analysis/post lifecycle or committed resources) — no
+widget refresh flags — and the coordinator owns the ordered fact-to-reaction
+matrix, fetching at most one `TabSnapshot` when a reaction needs it.
+Operation start clears only the affected pane's presentation while retaining the
+previous canonical pane for failure recovery; success shows the new pane's figure
+and draft, failure/cancel restores the retained pane (primary failure restores
+primary then post). Save/Guide show a placeholder and never borrow another pane's
+figure. Local analyze/post/save-path edits keep synchronous State commit timing
+but have no Qt reaction.
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
-Tab interaction/content payloads carry mandatory closed domain facts. Producers
-describe lifecycle outcomes or committed resources; the coordinator owns the
-ordered reaction matrix and fetches one snapshot only when a reaction needs it.
-Local analyze/post/save-path edits keep synchronous State commit timing but have
-no Qt reaction. Failed/cancelled/start-rejected analysis restores retained
-primary then post figures; successful terminals wait for the content-commit fact.
 `MainWindowToolbar` owns the top toolbar widgets and slash-grouped new-tab menu;
 it reports selected actions back through a narrow `MainWindowToolbarHost` surface
 instead of reaching into `Controller` directly.
@@ -117,8 +201,11 @@ Key ownership rules:
   ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
   （ADR-0047）。
 - `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
-  contents.
-- `State` owns tab/device/result/save-path resource state and resource versions.
+  contents. Its ModuleLibrary schema-replacement interface validates names and
+  lowers before mutation, then emits one `ML_CHANGED` fact and bumps `context`
+  once; failures leave the live entry untouched.
+- `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
+  happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns static preconditions and returns typed permits for
   run/save/analyze/writeback.
 - `OperationGate` is the app-local thin wrapper over the shared
@@ -131,10 +218,41 @@ Key ownership rules:
   an `OperationSpec` policy and narrow write ports. Terminal policy exceptions
   are contained in the shared runner so handles settle and exclusion leases release.
 
+## Experiment reload
+
+`ExperimentReloadService` 擁有 RAM-only snapshot 與重載／恢復狀態，透過注入的
+`ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
+重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
+和 failure/recovery presentation。Role catalog、hardware context 與 framework 不重建。
+依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
+確切限制見 `experiment/v2_gui/README.md`。此取捨不放寬資料丟棄確認或 lifecycle 保護。
+
+Retry 的 prepare/load 皆保留 typed error disposition；要求 restart 後不再提供可 retry 狀態。
+Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消，MainWindow 呼叫
+`Controller.abort_shutdown()` 恢復入口，不自動重啟已取消的 operations，也不重新啟用失敗的
+catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
+
+Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
+共同阻止 reload，包含非 handle-backed data save。共用 `ExperimentAccess` 阻止 local/remote
+experiment driving facets 在切換時重入。確認等待期間 tab identity、resource versions 或 run
+result 改變會使確認失效。重新建立的 tabs 使用新 id，舊 RPC locator 不可沿用。
+
+Snapshot 只保留既有 `PersistedSession` 的名稱、cfg、順序與 active index，沒有 result、figure、
+analysis params 或 path overrides。Reload 不呼叫 caretaker，不新增 checkpoint 檔案；正常
+跨重啟 persistence policy 不變。Import cache 的一般 bytecode 清理不是 session persistence。
+Catalog load 失敗時保留 snapshot、停用 experiment entry，受控失敗允許 Retry reload；fixed-state
+integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Retry skipped tabs 只附加仍未
+成功的 entries、不重複還原或改變使用者選取；下一次完整 reload 需確認丟棄先前 skipped entries。
+所有 RAM recovery 在 process 結束後遺失。
+
 ## Run / Analyze Workflow
 
 1. A tab is created from a registered experiment adapter.
 2. The tab owns a service-managed cfg editor session backed by `CfgDraft`.
+   Run renders that draft through the sole shared cfg tree (S1); Analysis
+   renders its params through the app-local 13 px ledger with whole-header
+   folding and a full-width `Analyze` immediately below parameters.
+
 3. `GuardService` validates static preconditions and materializes a permit.
 4. The operation policy builds worker thunks with the needed ambient scopes:
    plotting, progress, `Schedule` cancellation, and device setup cancellation.
@@ -143,11 +261,63 @@ Key ownership rules:
 6. Run/analyze services depend on narrow State ports (`RunStatePort` /
    `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
 7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit.
+   cfg-editor machinery before commit; `WritebackService.create_draft` snapshots
+   the destination `ExpContext` at creation and the ledger shows
+   `current_summary` → `proposed_summary` per item (S2). Scalar MetaDict items
+   show concrete values; module/waveform items show bounded change summaries and
+   keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
+   the Writeback service remains stage-free.
 
-`tab.load_data` is the analysis-only entry for canonical result files. It installs
-the loaded result into an existing adapter tab, clears stale analysis/writeback
-state, and does not backfill the Config tab.
+`tab.load_data` installs a canonical result into an existing adapter tab and clears
+stale analysis/writeback state. When the result carries a compatible execution
+snapshot, Load best-effort projects its concrete values into the current tab Config.
+It validates a complete detached candidate, replaces the service-owned editor and
+State Config once, and reports `cfg_backfill=applied|not_applied` to Qt and remote.
+Failed backfill keeps Config and its draft unchanged without undoing the loaded
+result. Fields without a reliable runtime inverse keep the current draft value;
+dynamic selectors must match live options and the new complete draft must be valid
+before publication. A failed lookup or malformed option list rejects the entire
+backfill rather than silently skipping that selector. Module/waveform references
+become custom values rather than guessed library keys.
+The Guard and LoadService both enforce the adapter's import-validated
+`capabilities.load_data` gate.
+
+### Pane-owned lifecycle
+
+`Session` is the aggregate root and its fixed pane carriers are the resource owners:
+Run stores only the run result/source, Analysis and Post-Analysis each store params,
+result, canonical figure and an opaque writeback draft (with S2 baseline snapshot),
+and Save stores the data-path override. Analysis and Post-Analysis image-path
+overserides are independent resources; the read model projects data, analysis-image
+and post-analysis-image paths separately. Run live figures remain view-only and
+are not stored in State. Writeback baseline is a display-only draft-creation
+snapshot；同一opaque draft另擁有per-item applied state，只有成功write包含的items才標記applied，
+selection本身不改狀態，retarget或內容修改會重設；同kind items不得指向重複destination，
+避免batch覆寫卻誤標applied。狀態不跨draft/process持久化，也不提供
+concurrent-write detection或apply-conflict policy。
+
+Analysis/Post result services prepare proposals, figures and drafts before calling one
+owner-thread State swap. The swap returns every retired pane resource; services tear
+down retired drafts only after commit and never roll back a committed pane when cleanup
+fails. A failed proposal/editor build leaves the previous canonical pane intact.
+Primary analysis replacement invalidates Post-Analysis, Post replacement leaves
+Analysis untouched, and a successful run/load clears both downstream panes.
+
+State and `TabSnapshot` expose only the explicit Run, Analysis, Post-Analysis, Save
+and path carriers; there are no flat tab result/writeback/path projections. Callers
+name the pane they consume. Operation-start request/context inputs are captured and
+reused by analysis and proposal hooks, without context-identity checks or terminal
+active-context reads.
+
+Data preview never owns pane resources: `ExpTabWidget` reads current figures from
+the fixed `FigureContainer`s and pushes a transient `Figure` snapshot to
+`DataFigurePreviewGallery` only on Data activation or while Data is visible;
+the gallery renders to a 640×480 PNG using the same 12×9 inch logical canvas as
+Save，restores the live size，holds only the raster cache (original pixmap) and isolates per-card failures with
+aspect-fit scaling (`KeepAspectRatio`) that never exceeds the image viewport.
+Viewport-driven mosaic reflow (gallery's own width vs two-minimum-width-cards
+threshold) is presentation-only and never moves figure ownership, adds a second
+canvas, or changes ADR-0048 reactions. No competing state owner is introduced.
 
 ## Tab Lifecycle And Ordering
 
@@ -228,39 +398,44 @@ The framework protocol does not expose a static spec query. Shared
 knowledge (ADR-0012、ADR-0045).
 
 `CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
-每個form使用自己的frozen exact renderer registry；固定renderer factory接收immutable
-presentation context，root與recursive section/reference共享該instance，沒有consumer-side
-constructor dispatch、global decorator registration或inheritance fallback。attach在成功build
-root後才訂閱draft，detach會解除change/validity callbacks但不close draft。`CfgFormWidget`
-accepts an optional field decoration provider keyed by full value
-tree path. The shared widget owns only generic presentation metadata
-(`hidden`/`enabled`/tone/badge/tooltip/label suffix) and computes the default
-decoration from the spec; app-specific policy such as generated fields stays in
-the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider
-can explicitly reveal them as framed read-only values for generated or locked
-review fields. Decoration is a view contract only: domain enforcement remains in
-the owning controller/runtime.
+每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
+`default_cfg_renderers()` 為五個 non-section exact field types
+（`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
+`FieldRenderer(field, context)`，`SectionField` 不在 registry 而由 sole tree
+（`TreeCfgWidget`）直接建立 `QTreeWidgetItem` 結構。immutable `FieldRenderContext` 只攜帶 path、
+top-level 標記、label width、decoration resolver、text enhancer 與同一 frozen registry；leaf 與
+reference header 走 registry `render()`，而 section 結構由 tree 直接建立，沒有 consumer-side
+constructor dispatch、global decorator registration 或 inheritance fallback。attach 在成功 build
+tree root 後才訂閱 draft，detach 會解除 change/validity callbacks 但不 close draft。`CfgFormWidget`
+accepts an optional field decoration provider keyed by full value tree path. The shared widget
+owns only generic presentation metadata (`hidden`/`enabled`/tone/badge/tooltip/label suffix) and
+computes the default decoration from the spec; app-specific policy such as generated fields stays in
+the caller. `LiteralSpec` fields stay hidden by default, but a decoration provider can explicitly
+reveal them as framed read-only values for generated or locked review fields. Decoration is a view
+contract only: domain enforcement remains in the owning controller/runtime.
 
 `CfgFormWidget.set_editing_enabled()` locks only the rendered form content, not
 the widget shell or its `QScrollArea`. Busy/read-only hosts keep the cfg pane
 scrollable while child editor controls are disabled, and the desired editing
 state persists across `detach()` / `attach()` swaps of the service-owned draft.
 
-Nested `CfgSectionSpec` fields render as full-width collapsible sections and do
-not get an additional parent-row label. The section header is the label, which
-keeps grouped forms such as autofluxdep Generation overrides from showing
-duplicated text like `Frequency recovery:` next to a second `Frequency recovery`
-header.
+Nested `CfgSectionSpec` fields render as tree items with whole-row folding
+(`QTreeWidgetItem` at 10 px indentation, 13 px text, classic connectors); the section header
+is the item label and does not create an additional parent-row label. This keeps grouped forms
+such as autofluxdep Generation overrides from showing duplicated text like `Frequency recovery:`
+next to a second `Frequency recovery` header, and keeps the single tree presentation consistent
+across Run, autofluxdep, and module/waveform editors.
 
 `ChoiceSectionSpec` is the shared selector-driven display contract for sections
 whose fields depend on a local mode/strategy. The section still owns a complete
 union `CfgSectionValue`; each `ChoiceBinding` names the selector field and the
 fields rendered for each selector value. `CfgFormWidget` refreshes only the
-affected section subtree when a selector changes, while hidden inactive fields
-keep their values in the model and lower/persist through the normal section
-path. Decoration-provider changes follow the same section-local refresh path
-instead of reattaching the full `CfgDraft`-backed form. Field widgets expose a
-typed `refresh_section(path) -> bool` surface, and decoration state is consumed
+affected section subtree (including reference-elided subtree owner, e.g.
+`modules.qub_pulse` for `modules.qub_pulse.gain`) when a selector or decoration changes,
+while hidden inactive fields keep their values in the model and lower/persist through the
+normal section path. Decoration-provider changes follow the same section-local (section or
+reference) refresh path instead of reattaching the full `CfgDraft`-backed form. Field widgets
+expose a typed `refresh_section(path) -> bool` surface, and decoration state is consumed
 through the shared `FieldDecoration` surface rather than ad-hoc attribute probing.
 Unknown `ChoiceSectionSpec` selector values fast-fail instead of hiding all
 controlled fields.
@@ -295,7 +470,7 @@ operation outcomes instead of cancelled.
 
 Progress is operation-scoped:
 
-- Workers emit Qt-free `ProgressEvent` objects through a `ProgressTransport`.
+- Workers emit Qt-free `ProgressEvent` objects through a `ProgressTransport`; QICK accumulated acquisition的內部reps也經`progress_bar.make_pbar`進入同一ambient factory，因此GE每次g/e acquire共用operation-scoped transport而不另建progress model。
 - `ProgressService` owns per-operation containers and owner-to-operation mapping.
 - GUI widgets attach by owner id (`tab_id` or device name) through the relevant
   control facet; run tabs use `ProgressControlPort`, device panels use
@@ -307,7 +482,9 @@ Progress is operation-scoped:
 Plotting uses the shared `gui.plotting` backend. Worker-created matplotlib
 figures attach to the active `FigureContainer` through routing context; refresh,
 activate, and close resolve through the figure registry. Figure export uses fixed
-logical sizes so saved images and agent screenshots do not depend on window size.
+logical sizes so outputs do not depend on window size: saved images use a 12×9 inch
+4:3 canvas at 150 DPI；Data Preview沿用同一logical canvas並以約53.33 DPI產生
+640×480 WYSIWYG raster；agent screenshots維持6.4×4.8 inch at 100 DPI。
 Analysis start leaves plot teardown to the render host. Terminal domain facts
 restore retained figures only after failure, cancellation, or start rejection;
 successful content commits attach new figures once. Run failure keeps the
@@ -346,12 +523,59 @@ remote named-dialog surface delegate reference retention and `finished` /
 
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
-controller only for measure-only CfgEditor create/modify and role-catalog actions.
+controller only for measure-only CfgEditor and role-catalog actions. Measure owns
+the dense two-column Parameters property grid and a separate Modules composition:
+the Modules tree exposes only New/Delete collection actions, while the right pane
+embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
+Apply on one row (there is no Raw pane or Modify/Rename action). Selecting an entry
+opens one `gc=False` editor session; field and Name edits stay in that draft.
+Apply calls the replacement write interface, which validates and lowers before the
+single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
+the resulting selection. Collision, invalid, or lowering failures leave the live
+entry and draft intact. Each existing-entry editor retains its source
+ModuleLibrary identity and fast-fails replacement after a context switch, leaving
+that draft for explicit Revert/Discard. A pending refresh is consumed after a
+dirty selection transaction so the tree reflects the resulting names. Revert
+reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
+New remains a retained non-blocking role catalog dialog; the Modules tree Delete
+key is direct only at the tree focus boundary, while the button confirms.
+Autofluxdep keeps the base presentation and its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the
 shared dialog can refresh cached device values on every reopen without depending
 on the concrete controller.
+
+## Interactive Analysis Seam
+
+`adapter.types` owns the Qt-free closed control vocabulary
+`InteractiveControl = ButtonControl | ToggleControl` (`ControlKey` as stable
+identity, `label`, typed callback, and for toggles an exact `bool initial`)
+and the `InteractiveSession` Protocol (`controls() -> tuple[InteractiveControl, ...]`,
+pointer hooks, `info_text()` and `finish()`). Concrete sessions such as
+`FluxPickSession` own the domain callback mapping (`Conjugate Line` toggle →
+`TwoLinePicker.set_conjugate`, `Auto Align` → background alignment,
+`Swap Lines` → swap+redraw) in declaration order; they cache the terminal
+`finish()` result and ignore subsequent domain input and late background
+completions. `InteractiveAnalysisWidget` is the generic host: it validates the
+declaration and lowers it to Qt (`ButtonControl` → `QPushButton`,
+`ToggleControl` → `QCheckBox`) without comparing domain keys, applies a
+toggle's `initial` before connecting its signal so construction never fires the
+callback, and reads the surface only once at bind.
+
+Ordering: control surface is bound once; toggle `initial` is set before signal
+connection. Errors: bind validates the whole surface before mounting — empty or
+whitespace-only `key`/`label`, duplicate `key`, unsupported variant,
+non-callable callback, or non-`bool` toggle `initial` Fast Fail with no partial
+mount; construction-time `ButtonControl`/`ToggleControl` invariants also Fast
+Fail; repeat `bind()` Fast Fails. Lifecycle: `Done` closes the input gate
+first — it disables the checkbox, all buttons, the Done button itself and canvas
+pointer forwarding, then invokes `on_done` exactly once; subsequent control or
+pointer events are ignored, and a finished session's late background completion
+does not mutate the picker or result. Variation is closed: new kinds are added
+only for a real need, as a new `InteractiveControl` union member with an
+exhaustive renderer; no generic widget factory, registry, dynamic surface or
+cross-process/serialization representation exists.
 
 ## Adapter-Facing Rules
 
@@ -363,8 +587,18 @@ on the concrete controller.
   must not touch devices or mutate cfg/state.
 - Adapter `run()` receives a concrete config and performs the experiment.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
-- `get_writeback_items()` returns domain writeback candidates; writeback commit is
-  framework-owned.
+- `get_writeback_items()` and `get_post_writeback_items()` return domain writeback
+  candidates for their owning analysis pane; the base post hook returns no candidates,
+  and writeback commit is framework-owned.
+- `WritebackService.create_draft()` accepts those candidates and returns an opaque,
+  service-owned draft. Item-local cfg-editor sessions and their identities stay
+  inside the service; draft creation cleans every session on failure, teardown is
+  idempotent, and `apply_draft()` sends selected entries through one
+  `ContextWritePort` batch. `WritebackWidget` is pane-bound and the Qt-only
+  `Controller`/`WritebackControl` pane-qualified forwarding (`*_for_pane` with
+  `pane` in `analysis|post_analysis`) resolves the pane's opaque draft before
+  calling the stage-agnostic service. Remote/MCP writeback operations use the same
+  required pane locator; no tab-level draft adapter or wire editor identity exists.
 
 Import direction stays one-way: `experiment/v2_gui -> gui.app.main`, never the
 reverse.

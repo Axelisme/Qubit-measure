@@ -229,6 +229,100 @@ def _make_active_state() -> tuple[State, ContextService]:
 
 
 # ---------------------------------------------------------------------------
+# create_md_attr / rename_md_attr
+# ---------------------------------------------------------------------------
+
+
+def _md_changed_events(svc: ContextService) -> list[object]:
+    from zcu_tools.gui.session.events import MdChangedPayload
+
+    return [
+        call.args[0]
+        for call in svc._bus.emit.call_args_list  # type: ignore[attr-defined]
+        if isinstance(call.args[0], MdChangedPayload)
+    ]
+
+
+def test_create_md_attr_commits_once_and_emits_one_fact():
+    state, svc = _make_active_state()
+    before = state.version.get("context")
+
+    svc.create_md_attr("new_key", 3.5)
+
+    assert dict(state.exp_context.md.items()) == {"new_key": 3.5}
+    assert state.version.get("context") == before + 1
+    assert len(_md_changed_events(svc)) == 1
+
+
+def test_create_md_attr_collision_leaves_md_and_version_unchanged():
+    state, svc = _make_active_state()
+    state.exp_context.md.existing = 1
+    svc._bus.reset_mock()  # type: ignore[attr-defined]
+    before = state.version.get("context")
+
+    with pytest.raises(FailedPreconditionError, match="already has attribute"):
+        svc.create_md_attr("existing", 2)
+
+    assert dict(state.exp_context.md.items()) == {"existing": 1}
+    assert state.version.get("context") == before
+    svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
+
+
+def test_create_md_attr_invalid_key_leaves_md_and_version_unchanged():
+    state, svc = _make_active_state()
+    before_data = dict(state.exp_context.md.items())
+    before = state.version.get("context")
+
+    with pytest.raises(FailedPreconditionError, match="must not be empty"):
+        svc.create_md_attr("   ", 2)
+
+    assert dict(state.exp_context.md.items()) == before_data
+    assert state.version.get("context") == before
+    svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
+
+
+def test_rename_md_attr_commits_once_and_emits_one_fact():
+    state, svc = _make_active_state()
+    state.exp_context.md.old_key = 3.5
+    before = state.version.get("context")
+    svc._bus.reset_mock()  # type: ignore[attr-defined]
+
+    svc.rename_md_attr("old_key", "new_key")
+
+    assert dict(state.exp_context.md.items()) == {"new_key": 3.5}
+    assert state.version.get("context") == before + 1
+    assert len(_md_changed_events(svc)) == 1
+
+
+def test_rename_md_attr_collision_leaves_md_and_version_unchanged():
+    state, svc = _make_active_state()
+    state.exp_context.md.old_key = 3.5
+    state.exp_context.md.existing = 7
+    before_data = dict(state.exp_context.md.items())
+    before = state.version.get("context")
+    svc._bus.reset_mock()  # type: ignore[attr-defined]
+
+    with pytest.raises(FailedPreconditionError, match="already has attribute"):
+        svc.rename_md_attr("old_key", "existing")
+
+    assert dict(state.exp_context.md.items()) == before_data
+    assert state.version.get("context") == before
+    svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
+
+
+def test_md_set_and_delete_each_emit_one_fact():
+    state, svc = _make_active_state()
+    svc.set_md_attr("key", 1)
+    assert state.version.get("context") == 1
+    assert len(_md_changed_events(svc)) == 1
+
+    svc._bus.reset_mock()  # type: ignore[attr-defined]
+    svc.del_md_attr("key")
+    assert state.version.get("context") == 2
+    assert len(_md_changed_events(svc)) == 1
+
+
+# ---------------------------------------------------------------------------
 # del_md_attr
 # ---------------------------------------------------------------------------
 

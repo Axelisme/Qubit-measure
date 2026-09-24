@@ -63,6 +63,11 @@ from zcu_tools.experiment.v2.lookback import (
     LookbackModuleCfg,
 )
 from zcu_tools.experiment.v2.singleshot.ge import GE_Cfg, GE_Exp, GEModuleCfg
+from zcu_tools.experiment.v2.singleshot.t1 import t1 as singleshot_t1
+from zcu_tools.experiment.v2.singleshot.t1 import t1_with_tone as singleshot_t1_tone
+from zcu_tools.experiment.v2.singleshot.t1 import (
+    t1_with_tone_sweep as singleshot_t1_tone_sweep,
+)
 from zcu_tools.experiment.v2.twotone.freq import (
     FreqCfg,
     FreqExp,
@@ -99,6 +104,9 @@ from zcu_tools.experiment.v2.twotone.time_domain.t2ramsey import (
     T2RamseyModuleCfg,
     T2RamseySweepCfg,
 )
+from zcu_tools.experiment.v2.utils import sweep2array, t1_delay_axis
+from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
+from zcu_tools.gui.session.services.progress import BoundProgressFactory
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -112,6 +120,7 @@ from zcu_tools.program.v2.sim.readout import (
     resonator_freqs,
     s21,
 )
+from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 # Fixed operating point: reduced flux = 1.0 (R-3, matches the engine constant).
@@ -353,42 +362,367 @@ def test_len_rabi_recovers_gain_scaling() -> None:
 # --------------------------------------------------------------- T1
 
 
-def test_t1_recovers_t1() -> None:
-    """T1 fit recovers the injected SimParams.T1.
-
-    Injected: sim.T1 = 20 µs.  A pi pulse excites the qubit, a swept delay lets
-    it relax, and T1Exp.analyze fits the exponential decay; the fitted T1 must
-    equal the injected value.
-    """
-
-    soc, soccfg = make_mock_soc(sim=_SIM)
-    f_qubit = _f_qubit_mhz()
-
+def _t1_cfg(length: SweepCfg | list[float]) -> T1Cfg:
     # gain * length == pi_gain_len (1.0 * 0.4) is an exact pi rotation.
     pi_pulse = PulseCfg(
         ch=0,
         nqz=1,
         gain=1.0,
-        freq=f_qubit,
+        freq=_f_qubit_mhz(),
         phase=0.0,
         waveform=ConstWaveformCfg(length=0.4),
     )
-    cfg = T1Cfg(
+    return T1Cfg(
         reps=120,
         rounds=2,
         modules=T1ModuleCfg(reset=None, pi_pulse=pi_pulse, readout=_readout()),
-        sweep=T1SweepCfg(
-            length=SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
+        sweep=T1SweepCfg(length=length),
+        relax_delay=_RESET_RELAX_DELAY,
+    )
+
+
+def _quantized_times(soccfg, delays: np.ndarray | list[float]) -> np.ndarray:
+    return np.asarray(
+        [soccfg.cycles2us(int(soccfg.us2cycles(float(delay)))) for delay in delays],
+        dtype=np.float64,
+    )
+
+
+@pytest.mark.parametrize("uniform", [True, False])
+def test_t1_recovers_t1(uniform: bool) -> None:
+    """T1 fit recovers the injected SimParams.T1 and reports physical times."""
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
+    cfg = _t1_cfg(length_sweep)
+
+    exp = T1Exp()
+    result = exp.run(soc, soccfg, cfg, uniform=uniform)
+    t1, _t1err, _fig = exp.analyze(result)
+
+    if uniform:
+        expected_times = sweep2array(length_sweep, "time", {"soccfg": soccfg})
+    else:
+        ideal_times = t1_delay_axis(
+            start=length_sweep.start,
+            stop=length_sweep.stop,
+            expts=length_sweep.expts,
+            uniform=False,
+            model_t1=0.2 * length_sweep.stop,
+        )
+        expected_times = _quantized_times(soccfg, ideal_times)
+
+    assert len(result.times) == length_sweep.expts
+    assert result.signals.shape == result.times.shape
+    np.testing.assert_array_equal(result.times, expected_times)
+    assert result.times[0] == expected_times[0]
+    assert result.times[-1] == expected_times[-1]
+    assert np.all(np.diff(result.times) > 0.0)
+    assert t1 == pytest.approx(_SIM.T1, rel=0.05)
+
+
+def test_t1_nonuniform_preserves_direct_delay_list() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    direct_times = [0.0, 0.7, 4.3, 17.2, 80.0]
+    cfg = _t1_cfg(direct_times)
+
+    result = T1Exp().run(soc, soccfg, cfg, uniform=False)
+
+    expected_times = _quantized_times(soccfg, direct_times)
+    np.testing.assert_array_equal(result.times, expected_times)
+    assert result.signals.shape == expected_times.shape
+    assert np.all(np.diff(result.times) > 0.0)
+
+
+def _singleshot_pi_pulse() -> PulseCfg:
+    return PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=1.0,
+        freq=_f_qubit_mhz(),
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=_SIM.pi_gain_len),
+    )
+
+
+def _singleshot_tone_pulse() -> PulseCfg:
+    return PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.05,
+        freq=_f_qubit_mhz(),
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=1.0),
+    )
+
+
+def _singleshot_t1_cfg(
+    length: SweepCfg | list[float],
+) -> singleshot_t1.T1Cfg:
+    return singleshot_t1.T1Cfg(
+        reps=20,
+        rounds=1,
+        modules=singleshot_t1.T1ModuleCfg(
+            reset=None,
+            pi_pulse=_singleshot_pi_pulse(),
+            readout=_ge_readout(),
+        ),
+        sweep=singleshot_t1.T1SweepCfg(length=length),
+        relax_delay=_RESET_RELAX_DELAY,
+    )
+
+
+def _singleshot_t1_tone_cfg(
+    length: SweepCfg | list[float],
+) -> singleshot_t1_tone.T1WithToneCfg:
+    return singleshot_t1_tone.T1WithToneCfg(
+        reps=20,
+        rounds=1,
+        modules=singleshot_t1_tone.T1WithToneModuleCfg(
+            reset=None,
+            init_pulse=None,
+            pi_pulse=_singleshot_pi_pulse(),
+            probe_pulse=_singleshot_tone_pulse(),
+            readout=_ge_readout(),
+        ),
+        sweep=singleshot_t1_tone.T1WithToneSweepCfg(length=length),
+        relax_delay=_RESET_RELAX_DELAY,
+    )
+
+
+def _singleshot_t1_tone_sweep_cfg(
+    length: SweepCfg | list[float],
+) -> singleshot_t1_tone_sweep.T1WithToneSweepCfg:
+    return singleshot_t1_tone_sweep.T1WithToneSweepCfg(
+        reps=20,
+        rounds=1,
+        modules=singleshot_t1_tone_sweep.T1WithToneSweepModuleCfg(
+            reset=None,
+            pi_pulse=_singleshot_pi_pulse(),
+            probe_pulse=_singleshot_tone_pulse(),
+            readout=_ge_readout(),
+        ),
+        sweep=singleshot_t1_tone_sweep.T1WithToneSweepSweepCfg(
+            length=length,
+            gain=SweepCfg(start=0.05, stop=0.1, expts=2, step=0.05),
         ),
         relax_delay=_RESET_RELAX_DELAY,
     )
 
-    exp = T1Exp()
-    result = exp.run(soc, soccfg, cfg)
-    t1, _t1err, _fig = exp.analyze(result)
 
-    # Recovered T1 == injected sim.T1 (20 µs).
-    assert t1 == pytest.approx(_SIM.T1, rel=0.05)
+def test_singleshot_t1_nonuniform_uses_shared_delay_axis() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.0, stop=80.0, expts=30, step=80.0 / 29)
+    cfg = _singleshot_t1_cfg(length_sweep)
+    g_center, e_center = _expected_ge_centers()
+
+    result = singleshot_t1.T1Exp().run(
+        soc,
+        soccfg,
+        cfg,
+        g_center,
+        e_center,
+        0.4 * abs(g_center - e_center),
+        uniform=False,
+    )
+
+    ideal_times = t1_delay_axis(
+        start=length_sweep.start,
+        stop=length_sweep.stop,
+        expts=length_sweep.expts,
+        uniform=False,
+        model_t1=0.2 * length_sweep.stop,
+    )
+    expected_times = _quantized_times(soccfg, ideal_times)
+    np.testing.assert_array_equal(result.lengths, expected_times)
+    assert len(result.lengths) == length_sweep.expts
+    assert result.signals.shape == (length_sweep.expts, 2, 2)
+
+
+def test_singleshot_t1_nonuniform_rejects_quantized_collisions() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _singleshot_t1_cfg([0.0, 0.0001, 1.0])
+    g_center, e_center = _expected_ge_centers()
+
+    with pytest.raises(
+        ValueError,
+        match="delay sweep collapsed after cycle quantization",
+    ):
+        singleshot_t1.T1Exp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            0.4 * abs(g_center - e_center),
+            uniform=False,
+        )
+
+
+@pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
+def test_singleshot_t1_tone_nonuniform_uses_shared_delay_axis(variant: str) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    if variant == "tone":
+        cfg = _singleshot_t1_tone_cfg(length_sweep)
+        result = singleshot_t1_tone.T1WithToneExp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            radius,
+            uniform=False,
+        )
+        expected_signal_shape = (length_sweep.expts, 2, 2)
+    else:
+        cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
+        result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            radius,
+            uniform=False,
+        )
+        expected_signal_shape = (2, 2, length_sweep.expts, 2)
+
+    ideal_times = t1_delay_axis(
+        start=length_sweep.start,
+        stop=length_sweep.stop,
+        expts=length_sweep.expts,
+        uniform=False,
+        model_t1=0.2 * length_sweep.stop,
+    )
+    expected_times = sweep2array(
+        ideal_times,
+        "time",
+        {"soccfg": soccfg, "gen_ch": cfg.modules.probe_pulse.ch},
+        allow_array=True,
+    )
+    np.testing.assert_array_equal(result.lengths, expected_times)
+    assert len(result.lengths) == length_sweep.expts
+    assert result.signals.shape == expected_signal_shape
+
+
+def test_singleshot_t1_tone_sweep_nonuniform_acquires_once_per_outer_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.1, stop=8.0, expts=6, step=1.58)
+    cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
+    cfg.rounds = 2
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+    acquire_count = 0
+    next_seed = soc.next_sim_acquire_seed
+
+    def counted_next_seed():
+        nonlocal acquire_count
+        acquire_count += 1
+        return next_seed()
+
+    monkeypatch.setattr(soc, "next_sim_acquire_seed", counted_next_seed)
+
+    singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+        soc,
+        soccfg,
+        cfg,
+        g_center,
+        e_center,
+        radius,
+        uniform=False,
+    )
+
+    assert cfg.sweep.gain is not None
+    assert acquire_count == cfg.sweep.gain.expts
+
+
+def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires() -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    length_sweep = SweepCfg(start=0.1, stop=0.6, expts=6, step=0.1)
+    cfg = _singleshot_t1_tone_sweep_cfg(length_sweep)
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    result = singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+        soc,
+        soccfg,
+        cfg,
+        g_center,
+        e_center,
+        radius,
+        uniform=True,
+    )
+
+    assert result.signals.shape == (2, 2, length_sweep.expts, 2)
+
+
+@pytest.mark.parametrize("uniform", [False, True])
+def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
+    uniform: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    cfg = _singleshot_t1_tone_sweep_cfg(
+        SweepCfg(start=0.0, stop=0.5, expts=6, step=0.1)
+    )
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    monkeypatch.setattr(
+        singleshot_t1_tone_sweep,
+        "setup_devices",
+        lambda *_args, **_kwargs: pytest.fail("device setup must not run"),
+    )
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+            soc,
+            soccfg,
+            cfg,
+            g_center,
+            e_center,
+            radius,
+            uniform=uniform,
+        )
+
+
+@pytest.mark.parametrize("variant", ["tone", "tone_sweep"])
+def test_singleshot_t1_tone_nonuniform_rejects_quantized_collisions(
+    variant: str,
+) -> None:
+    soc, soccfg = make_mock_soc(sim=_SIM)
+    direct_times = [0.008, 0.009, 1.0]
+    g_center, e_center = _expected_ge_centers()
+    radius = 0.4 * abs(g_center - e_center)
+
+    with pytest.raises(
+        ValueError,
+        match="delay sweep collapsed after cycle quantization",
+    ):
+        if variant == "tone":
+            singleshot_t1_tone.T1WithToneExp().run(
+                soc,
+                soccfg,
+                _singleshot_t1_tone_cfg(direct_times),
+                g_center,
+                e_center,
+                radius,
+                uniform=False,
+            )
+        else:
+            singleshot_t1_tone_sweep.T1WithToneSweepExp().run(
+                soc,
+                soccfg,
+                _singleshot_t1_tone_sweep_cfg(direct_times),
+                g_center,
+                e_center,
+                radius,
+                uniform=False,
+            )
 
 
 # --------------------------------------------------------------- T2 Ramsey / echo runners
@@ -655,6 +989,101 @@ def _run_ge(
     result = exp.run(soc, soccfg, cfg)
     fid, pops, fit, _fig = exp.analyze(result, backend="pca")
     return fid, pops, fit["g_center"], fit["e_center"]
+
+
+class _RecordingProgressBar(BaseProgressBar):
+    def __init__(self, *, total: int | float | None = None, **_: object) -> None:
+        self._total = total
+        self._n: int | float = 0
+        self._desc = ""
+        self.closed = False
+
+    def __enter__(self) -> _RecordingProgressBar:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def set_description(self, description: str) -> None:
+        self._desc = description
+
+    def update(self, value: int | float = 1) -> None:
+        self._n += value
+
+    def set_progress(self, value: int | float) -> None:
+        self._n = value
+
+    def reset(self) -> None:
+        self._n = 0
+
+    def refresh(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+    @property
+    def total(self) -> int | float | None:
+        return self._total
+
+    @total.setter
+    def total(self, value: int | float | None) -> None:
+        self._total = value
+
+    @property
+    def n(self) -> int | float:
+        return self._n
+
+    @property
+    def desc(self) -> str:
+        return self._desc
+
+
+def test_ge_run_routes_each_accumulated_reps_progress_through_factory() -> None:
+    bars: list[_RecordingProgressBar] = []
+    factory_calls: list[dict[str, object]] = []
+
+    def factory(**kwargs: object) -> _RecordingProgressBar:
+        factory_calls.append(kwargs)
+        total = kwargs.get("total")
+        assert total is None or isinstance(total, (int, float))
+        bar = _RecordingProgressBar(total=total)
+        bars.append(bar)
+        return bar
+
+    with use_pbar_factory(factory):
+        _run_ge(snr=5.0, shots=500)
+
+    reps_bars = [bar for bar in bars if bar.total == 500]
+    assert len(reps_bars) == 2
+    assert [bar.n for bar in reps_bars] == [500, 500]
+    assert all(bar.closed for bar in reps_bars)
+    reps_calls = [call for call in factory_calls if call.get("total") == 500]
+    assert [call.get("leave") for call in reps_calls] == [False, False]
+
+
+def test_ge_inner_reps_emit_close_through_gui_progress_factory() -> None:
+    events: list[ProgressEvent] = []
+
+    class RecordingTransport:
+        def emit(self, event: ProgressEvent) -> None:
+            events.append(event)
+
+        def set_receiver(self, receiver: object) -> None:
+            del receiver
+
+    factory = BoundProgressFactory(RecordingTransport(), operation_id=7)  # type: ignore[arg-type]
+    with use_pbar_factory(factory):
+        _run_ge(snr=5.0, shots=500)
+
+    reps_events = [event for event in events if event.total == 500]
+    reps_handles = {event.handle_id for event in reps_events}
+    assert len(reps_handles) == 2
+    for handle_id in reps_handles:
+        kinds = [event.kind for event in reps_events if event.handle_id == handle_id]
+        assert kinds[0] is ProgressEventKind.CREATE
+        assert ProgressEventKind.UPDATE in kinds
+        assert kinds[-1] is ProgressEventKind.CLOSE
 
 
 def _expected_ge_centers() -> tuple[complex, complex]:

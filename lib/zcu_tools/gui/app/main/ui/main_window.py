@@ -10,17 +10,31 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
+from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+
+_SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
+    ArtifactKind.DATA: "Save data failed",
+    ArtifactKind.ANALYSIS: "Save image failed",
+    ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
+}
 from zcu_tools.gui.plotting import set_shutting_down
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
 
+_ACTIVITY_MARKER_PREFIX = "● "
+_ACTIVITY_MARKER_COLOR = "#286ac7"
+_ACTIVITY_MARKER_TOOLTIP = "Run in progress"
 
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
+
+from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+from qtpy.QtGui import QCloseEvent, QColor  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFileDialog,
     QHBoxLayout,
@@ -43,6 +57,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.controller import Controller
     from zcu_tools.gui.app.main.services import TabSnapshot
+    from zcu_tools.gui.app.main.services.writeback_control import WritebackPane
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +87,10 @@ class _MainWindowTabActions:
         self._window._on_post_analyze_clicked(tab_id)
 
     def apply_writeback(self, tab_id: str) -> None:
-        self._window._on_writeback_inline_apply(tab_id)
+        self._window._on_writeback_inline_apply(tab_id, pane="analysis")
+
+    def apply_post_writeback(self, tab_id: str) -> None:
+        self._window._on_writeback_inline_apply(tab_id, pane="post_analysis")
 
     def save_data(self, tab_id: str) -> None:
         self._window._on_save_data_clicked(tab_id)
@@ -80,11 +98,11 @@ class _MainWindowTabActions:
     def save_image(self, tab_id: str) -> None:
         self._window._on_save_image_clicked(tab_id)
 
-    def save_result(self, tab_id: str) -> None:
-        self._window._on_save_result_clicked(tab_id)
-
     def save_post_image(self, tab_id: str) -> None:
         self._window._on_post_save_image_clicked(tab_id)
+
+    def save_all(self, tab_id: str) -> None:
+        self._window._on_save_all_clicked(tab_id)
 
 
 class MainWindow(QMainWindow):
@@ -112,6 +130,12 @@ class MainWindow(QMainWindow):
         # closeEvent (triggered by _perform_close's self.close()) passes straight
         # through instead of re-entering the cancel-and-wait coordination.
         self._closing = False
+        self._close_prompt_open = False
+        self._reload_prompt_open = False
+        self._shutdown_requested = False
+        self._programmatic_shutdown_requested = False
+        self._post_shutdown_prompt_open = False
+        self._pending_tab_closes: set[str] = set()
         self.setWindowTitle("ZCU Qubit Measure — v2 GUI")
         self.resize(1280, 750)
 
@@ -176,22 +200,32 @@ class MainWindow(QMainWindow):
             return
 
         tab_label = adapter_name
+        # Construct the tab from the same immutable capabilities snapshot used
+        # for its initial attach, so optional panes never need dynamic rebuilds.
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        caps = snapshot.capabilities
+        if caps is None:
+            raise RuntimeError(
+                f"render snapshot for tab {tab_id!r} has no capabilities"
+            )
         tab_w = ExpTabWidget(
-            tab_id, self._ctrl, dialog_presenter=self._dialog_presenter
+            tab_id, self._ctrl, caps, dialog_presenter=self._dialog_presenter
         )
         self._tab_widgets[tab_id] = tab_w
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
 
-        # Bring the whole tab widget to life from one render snapshot (seed every
-        # sub-view + wire controller signals) — the whole-tab analogue of
-        # CfgFormWidget.attach.
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        # Reuse the snapshot already fetched for capabilities (avoid second fetch).
         self._toolbar.set_new_tab_enabled(True)
         tab_w.attach(snapshot, self._tab_actions)
+        # A tab can be added while another tab is running. Project the current
+        # State-owned running identity immediately instead of waiting for a new
+        # lifecycle event.
+        self._set_tab_activity_marker(tab_id, self._ctrl.get_running_tab_id() == tab_id)
 
     def remove_tab_widget(self, tab_id: str) -> None:
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
+        self._pending_tab_closes.discard(tab_id)
         tab_w = self._tab_widgets.pop(tab_id, None)
         if tab_w is not None:
             tab_w.detach()
@@ -232,6 +266,15 @@ class MainWindow(QMainWindow):
     # ViewProtocol implementation
     # ------------------------------------------------------------------
 
+    def refresh_tab_cfg(self, tab_id: str) -> None:
+        widget = self._resolve_tab_widget(tab_id, "refresh_tab_cfg")
+        if widget is None:
+            return
+        editor_id = self._ctrl.editor_id_for_owner(tab_id)
+        if editor_id is None:
+            raise RuntimeError(f"Tab {tab_id!r} has no replacement cfg editor")
+        widget.attach_cfg_editor(editor_id)
+
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -241,19 +284,15 @@ class MainWindow(QMainWindow):
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.interaction is not None  # render snapshot fills live fields
         assert current.capabilities is not None  # render snapshot fills live fields
-        # Non-analysis adapters (flux_dep / power_dep 2D sweeps) intentionally
-        # have no analyze params after a run — there is no analyze form to fill,
-        # so skip before the Fast-Fail below (which guards the *analysis* adapter
-        # contract: a run result must carry initialized params).
+        # Branch from declared capabilities and never touch absent controls.
         if current.capabilities.analysis is AnalysisMode.NONE:
-            tab_w.analyze_form.sync(None)
             return
         if not current.interaction.has_run_result:
             tab_w.analyze_form.sync(None)
             return
-        if current.analyze_params is None:
+        if current.analysis is None or current.analysis.params is None:
             raise RuntimeError("Run result has no initialized analyze parameters")
-        tab_w.analyze_form.sync(current.analyze_params)
+        tab_w.analyze_form.sync(current.analysis.params)
 
     def refresh_tab_post_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -263,17 +302,13 @@ class MainWindow(QMainWindow):
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
         assert current.capabilities is not None  # render snapshot fills live fields
-        # Only post-analysis adapters have a post form; for the rest there is
-        # nothing to fill. When the primary analyze result is invalidated the post
-        # params are cleared (State), so there is no instance to populate — the
-        # gate (update_interaction_state) disables the empty form.
+        # Branch from capabilities; never touch absent post controls.
         if not current.capabilities.post_analysis:
-            tab_w.post_analyze_form.sync(None)
             return
-        if current.post_analyze_params is None:
-            tab_w.post_analyze_form.sync(None)
+        if current.post_analysis is None or current.post_analysis.params is None:
+            tab_w.sync_post_analyze_params(None)
             return
-        tab_w.post_analyze_form.sync(current.post_analyze_params)
+        tab_w.sync_post_analyze_params(current.post_analysis.params)
 
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -282,7 +317,16 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        tab_w.update_writeback_items(list(current.writeback_items))
+        assert current.analysis is not None
+        assert current.post_analysis is not None
+        assert current.capabilities is not None
+        # Pane-qualified: only touch present panes.
+        if current.capabilities.analysis is not AnalysisMode.NONE:
+            tab_w.update_writeback_items(list(current.analysis.writeback_items))
+        if current.capabilities.post_analysis:
+            tab_w.update_post_writeback_items(
+                list(current.post_analysis.writeback_items)
+            )
 
     def refresh_tab_save_paths(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -291,9 +335,13 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        save_paths = current.save_paths
-        if save_paths is not None:
-            tab_w.set_save_paths(save_paths.data_path, save_paths.image_path)
+        assert current.paths is not None
+        assert current.capabilities is not None
+        tab_w.set_data_path(current.paths.data.path or "")
+        if current.capabilities.analysis is not AnalysisMode.NONE:
+            tab_w.set_analysis_image_path(current.paths.analysis_image.path or "")
+        if current.capabilities.post_analysis:
+            tab_w.set_post_image_path(current.paths.post_analysis_image.path or "")
 
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -302,7 +350,11 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        figure = current.figure
+        assert current.analysis is not None
+        assert current.capabilities is not None
+        if current.capabilities.analysis is AnalysisMode.NONE:
+            return
+        figure = current.analysis.figure
         if figure is not None:
             self.show_analysis_image(tab_id, figure)
 
@@ -313,23 +365,52 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        post_figure = current.post_figure
-        if post_figure is not None:
-            # Post + analyze share one container; ``refresh_tab_figure`` runs just
-            # before this and renders ``tab.figure``, so when a post figure exists
-            # it is drawn last and the shared container shows the most recent
-            # (post) figure. On invalidation (post_figure is None) there is nothing
-            # to do: the shared container already shows the primary figure.
+        assert current.post_analysis is not None
+        assert current.capabilities is not None
+        if not current.capabilities.post_analysis:
+            return
+        post_figure = current.post_analysis.figure
+        if post_figure is None:
+            tab_w.clear_post_figure()
+        else:
             self.show_post_analysis_image(tab_id, post_figure)
 
     def clear_tab_plot(self, tab_id: str) -> None:
         """Clear stale canvases after loading content with no analysis figure."""
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is not None:
-            tab_w.reset_plot()
+            tab_w.clear_all_figures()
+
+    def _set_tab_activity_marker(self, tab_id: str, active: bool) -> None:
+        """Project Run activity on one top-level tab without storing busy state."""
+        tab_w = self._tab_widgets.get(tab_id)
+        if not isinstance(tab_w, QWidget):
+            return
+        index = self._tabs.indexOf(tab_w)
+        if index < 0:
+            return
+
+        tab_bar = self._tabs.tabBar()
+        assert tab_bar is not None
+        label = self._tabs.tabText(index)
+        if label.startswith(_ACTIVITY_MARKER_PREFIX):
+            label = label[len(_ACTIVITY_MARKER_PREFIX) :]
+        self._tabs.setTabText(
+            index, f"{_ACTIVITY_MARKER_PREFIX}{label}" if active else label
+        )
+        tab_bar.setTabTextColor(
+            index, QColor(_ACTIVITY_MARKER_COLOR) if active else QColor()
+        )
+        tab_bar.setTabToolTip(index, _ACTIVITY_MARKER_TOOLTIP if active else "")
+
+    def _refresh_tab_activity_markers(self, running_tab_id: str | None) -> None:
+        """Derive every tab marker from the current State running identity."""
+        for tab_id in self._tab_widgets:
+            self._set_tab_activity_marker(tab_id, tab_id == running_tab_id)
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
+        self._refresh_tab_activity_markers(running_tab_id)
         self._toolbar.set_new_tab_enabled(True)
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
@@ -389,11 +470,35 @@ class MainWindow(QMainWindow):
             self._predictor_label.setText(f"loaded (flux_bias={flux_bias:.4g})")
             self._predictor_label.setStyleSheet("color: green;")
 
-    def make_live_container(self, tab_id: str) -> Any:
+    def make_run_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return None
-        return tab_w.prepare_live_container()
+        return tab_w.prepare_run_container()
+
+    def make_analysis_container(self, tab_id: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        return tab_w.prepare_analysis_container()
+
+    def make_post_analysis_container(self, tab_id: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        return tab_w.prepare_post_container()
+
+    def get_figure_container(self, tab_id: str, pane: str) -> Any:
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return None
+        if pane == "run":
+            return tab_w.get_run_container()
+        if pane == "analysis":
+            return tab_w.get_analysis_container()
+        if pane == "post_analysis":
+            return tab_w.get_post_container()
+        raise ValueError(f"unknown pane {pane!r}")
 
     def mount_interactive_analysis(
         self,
@@ -413,7 +518,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.reset_plot()
+        tab_w.prepare_analysis_container()
         # The Controller satisfies InteractiveHostEnv (run_background via bg's
         # pool); the widget pulls only that one capability through the port.
         widget = InteractiveAnalysisWidget(self._ctrl)
@@ -424,8 +529,8 @@ class MainWindow(QMainWindow):
     def unmount_interactive_analysis(self, tab_id: str) -> None:
         """RenderHost impl: remove the tab's mounted interactive picker (dual of
         ``mount_interactive_analysis``). The picker widget is added straight to the
-        plot stack (it is not a FigureContainer canvas), so ``reset_plot`` cannot
-        reach it — this is the only teardown path for a cancelled interactive
+        Analysis stack (it is not a FigureContainer canvas), so pane canvas cleanup
+        cannot reach it — this is the only teardown path for a cancelled interactive
         analyze. A no-op when no picker is mounted, and idempotent."""
         from zcu_tools.gui.app.main.ui.interactive_analysis import (
             InteractiveAnalysisWidget,
@@ -470,14 +575,11 @@ class MainWindow(QMainWindow):
         tab_w.show_analysis_figure(fig)
 
     def show_post_analysis_image(self, tab_id: str, fig: Any) -> None:
-        # Post figures share the primary right-pane container (the container shows
-        # the most recently produced figure), so this routes through the same
-        # render path as the analyze figure.
         logger.debug("show_post_analysis_image: tab_id=%r", tab_id)
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.show_analysis_figure(fig)
+        tab_w.show_post_analysis_figure(fig)
 
     # ------------------------------------------------------------------
     # Internal event handlers
@@ -489,13 +591,132 @@ class MainWindow(QMainWindow):
     def create_tab(self, adapter_name: str) -> None:
         self._ctrl.new_tab(adapter_name)
 
+    def reload_experiments(self) -> None:
+        if (
+            self._reload_prompt_open
+            or self._close_prompt_open
+            or self._pending_tab_closes
+            or self._shutdown_requested
+            or self._closing
+        ):
+            return
+        try:
+            if self._ctrl.can_retry_experiment_reload():
+                self._present_reload_report(self._ctrl.retry_experiment_reload())
+                return
+            preview = self._ctrl.prepare_experiment_reload()
+        except Exception as exc:
+            logger.exception("experiment reload preparation/retry failed")
+            self.show_error_dialog("Experiment reload failed", str(exc))
+            return
+        names = "\n".join(name for _, name in preview.tabs)
+        unsaved = sum(
+            widget.has_unsaved_data() for widget in self._tab_widgets.values()
+        )
+        message = (
+            f"Rebuild all {len(preview.tabs)} experiment tabs using the latest code?\n\n"
+            "Only configuration and tab order are restored. Results, figures, analysis "
+            "parameters and save-path overrides are discarded.\n"
+            f"Tabs with unsaved measurement data: {unsaved}.\n\n{names}"
+        )
+        if preview.skipped_count:
+            message += f"\n\nDiscard {preview.skipped_count} previously skipped tab configurations from RAM?"
+        self._reload_prompt_open = True
+
+        def on_decision(confirmed: bool) -> None:
+            self._reload_prompt_open = False
+            if not confirmed or self._shutdown_requested or self._closing:
+                return
+            try:
+                self._present_reload_report(self._ctrl.reload_experiments(preview))
+            except Exception as exc:
+                logger.exception("confirmed experiment reload failed")
+                self.show_error_dialog("Experiment reload failed", str(exc))
+
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "Reload experiments",
+            message,
+            action_text="Discard Results and Reload",
+            on_decision=on_decision,
+            default=False,
+        )
+
+    def retry_skipped_experiment_tabs(self) -> None:
+        if (
+            self._reload_prompt_open
+            or self._close_prompt_open
+            or self._shutdown_requested
+            or self._closing
+        ):
+            return
+        try:
+            self._present_reload_report(self._ctrl.retry_skipped_experiment_tabs())
+        except Exception as exc:
+            logger.exception("skipped-tab recovery failed")
+            self.show_error_dialog("Tab recovery failed", str(exc))
+
+    def _present_reload_report(self, report: ReloadReport) -> None:
+        self._toolbar.set_reload_recovery(
+            retry_catalog=self._ctrl.can_retry_experiment_reload(),
+            skipped_count=self._ctrl.skipped_experiment_tab_count(),
+        )
+        active = self._ctrl.get_active_tab_id()
+        if active is not None and active in self._tab_widgets:
+            self._tabs.setCurrentWidget(self._tab_widgets[active])
+        if report.catalog_error:
+            action = (
+                "Restart is required; the RAM snapshot will be lost."
+                if report.restart_required
+                else "Fix the source and use Retry reload. Tab configurations remain in RAM."
+            )
+            self.show_error_dialog(
+                "Experiment reload failed", f"{report.catalog_error}\n\n{action}"
+            )
+        elif report.rejected_tabs:
+            issues = "\n".join(
+                f"{item.subject}: {item.message}" for item in report.rejected_tabs
+            )
+            self.show_error_dialog("Some tabs were not restored", issues)
+        else:
+            self.show_status_message(f"Restored {report.restored_tabs} experiment tabs")
+
     def _on_tab_close_requested(self, index: int) -> None:
         tab_w = self._tabs.widget(index)
         if not isinstance(tab_w, ExpTabWidget):
             return
         tab_id = tab_w.tab_id
-        logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
-        self._ctrl.close_tab(tab_id)
+        if (
+            self._pending_tab_closes
+            or self._close_prompt_open
+            or self._shutdown_requested
+            or self._closing
+        ):
+            return
+
+        if not tab_w.has_unsaved_data():
+            logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
+            self._ctrl.close_tab(tab_id)
+            return
+
+        self._pending_tab_closes.add(tab_id)
+
+        def _on_decision(confirmed: bool) -> None:
+            self._pending_tab_closes.discard(tab_id)
+            if not confirmed or self._shutdown_requested or self._closing:
+                return
+            if self._tab_widgets.get(tab_id) is tab_w and self._ctrl.has_tab(tab_id):
+                logger.info("_on_tab_close_requested confirmed: tab_id=%r", tab_id)
+                self._ctrl.close_tab(tab_id)
+
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "Unsaved measurement data",
+            "Measurement data in this tab has not been saved. Discard unsaved data and close tab?",
+            action_text="Discard and Close",
+            on_decision=_on_decision,
+            default=False,
+        )
 
     def _on_tab_moved(self, from_index: int, to_index: int) -> None:
         logger.debug("_on_tab_moved: from=%d to=%d", from_index, to_index)
@@ -575,7 +796,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            self._ctrl.load_tab_result(tab_id, path)
+            outcome = self._ctrl.load_tab_result(tab_id, path)
         except LoadDataError as exc:
             logger.warning(
                 "_on_load_data_clicked rejected data file: tab_id=%r path=%r reason=%s",
@@ -589,7 +810,10 @@ class MainWindow(QMainWindow):
             logger.exception("_on_load_data_clicked failed: tab_id=%r", tab_id)
             self.show_error_dialog("Load data failed", str(exc))
             return
-        self.show_status_message(f"Loaded data from {path}")
+        message = f"Loaded data from {path}"
+        if outcome.cfg_backfill == "not_applied":
+            message += "; Config was not backfilled"
+        self.show_status_message(message)
 
     def _on_post_analyze_clicked(self, tab_id: str) -> None:
         logger.info("_on_post_analyze_clicked: tab_id=%r", tab_id)
@@ -598,24 +822,65 @@ class MainWindow(QMainWindow):
             return
         self._ctrl.start_post_analyze(tab_id, tab_w.read_post_analyze_params())
 
-    def _on_writeback_inline_apply(self, tab_id: str) -> None:
-        logger.info("_on_writeback_inline_apply: tab_id=%r", tab_id)
+    def _on_writeback_inline_apply(
+        self, tab_id: str, pane: WritebackPane = "analysis"
+    ) -> None:
+        logger.info("_on_writeback_inline_apply: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
             logger.warning(
                 "_on_writeback_inline_apply: unknown tab_id=%r — ignoring", tab_id
             )
             return
-        applied_ids = self._ctrl.apply_writeback(tab_id)
+        result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        applied_ids = (
+            result.get("applied_ids", []) if isinstance(result, dict) else result
+        )
         if applied_ids:
             self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")
+
+    # -- centralized save dispatch (S2) --------------------------
+
+    def _present_save_error(self, kind: ArtifactKind, exc: Exception) -> None:
+        title = _SAVE_ERROR_TITLES.get(kind)
+        if title is None:
+            raise RuntimeError(f"unknown artifact {kind!r}")
+        self.show_error_dialog(title, str(exc))
+
+    def _dispatch_artifact_save(
+        self, tab_w: ExpTabWidget, kind: ArtifactKind, save_call: Callable[[], object]
+    ) -> bool:
+        """One artifact's lifecycle: notify start, controller call, sync success/failure.
+
+        Tracker/invariant failures propagate (Fast Fail). Operational/file failures
+        are presented via dialog and return False for Fast Fail; no silent suppression.
+        For image artifacts, sync success is promoted immediately; data async
+        success arrives via :meth:`handle_save_data_finished`.
+        """
+        tab_w.notify_save_started(kind)
+        try:
+            save_call()
+        except (ExpectedError, OSError, ValueError) as exc:
+            tab_w.notify_save_failed(kind)
+            self._present_save_error(kind, exc)
+            return False
+        else:
+            if kind in (ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS):
+                tab_w.notify_save_succeeded(kind)
+            return True
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
         tab_w = self._resolve_tab_widget(tab_id, "_on_save_data_clicked")
         if tab_w is None:
             return
+        # Path/comment read is invariant; let exception propagate (Fast Fail)
         path = tab_w.get_data_path()
-        self._ctrl.save_data(tab_id, path, comment=tab_w.get_comment())
+        comment = tab_w.get_comment()
+        self._dispatch_artifact_save(
+            tab_w,
+            ArtifactKind.DATA,
+            lambda: self._ctrl.save_data(tab_id, path, comment=comment),
+        )
 
     def _on_save_image_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_image_clicked: tab_id=%r", tab_id)
@@ -623,7 +888,9 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_image_path()
-        self._ctrl.save_image(tab_id, path)
+        self._dispatch_artifact_save(
+            tab_w, ArtifactKind.ANALYSIS, lambda: self._ctrl.save_image(tab_id, path)
+        )
 
     def _on_post_save_image_clicked(self, tab_id: str) -> None:
         logger.info("_on_post_save_image_clicked: tab_id=%r", tab_id)
@@ -631,18 +898,57 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         path = tab_w.get_post_image_path()
-        self._ctrl.save_post_image(tab_id, path)
+        self._dispatch_artifact_save(
+            tab_w,
+            ArtifactKind.POST_ANALYSIS,
+            lambda: self._ctrl.save_post_image(tab_id, path),
+        )
 
-    def _on_save_result_clicked(self, tab_id: str) -> None:
-        logger.info("_on_save_result_clicked: tab_id=%r", tab_id)
-        tab_w = self._resolve_tab_widget(tab_id, "_on_save_result_clicked")
+    def _on_save_all_clicked(self, tab_id: str) -> None:
+        logger.info("_on_save_all_clicked: tab_id=%r", tab_id)
+        tab_w = self._resolve_tab_widget(tab_id, "_on_save_all_clicked")
         if tab_w is None:
             return
-        data_path = tab_w.get_data_path()
-        image_path = tab_w.get_image_path()
-        self._ctrl.save_result(
-            tab_id, data_path, image_path, comment=tab_w.get_comment()
-        )
+        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        if snapshot.capabilities is None:
+            raise RuntimeError(
+                f"render snapshot for tab {tab_id!r} has no capabilities"
+            )
+        artifacts = tab_w.ordered_saveable_kinds(snapshot)
+        if not artifacts:
+            return
+        for kind in artifacts:
+            if kind == ArtifactKind.DATA:
+                path = tab_w.get_data_path()
+                comment = tab_w.get_comment()
+                ok = self._dispatch_artifact_save(
+                    tab_w,
+                    kind,
+                    lambda p=path, c=comment: self._ctrl.save_data(
+                        tab_id, p, comment=c
+                    ),
+                )
+            elif kind == ArtifactKind.ANALYSIS:
+                path = tab_w.get_image_path()
+                ok = self._dispatch_artifact_save(
+                    tab_w, kind, lambda p=path: self._ctrl.save_image(tab_id, p)
+                )
+            elif kind == ArtifactKind.POST_ANALYSIS:
+                path = tab_w.get_post_image_path()
+                ok = self._dispatch_artifact_save(
+                    tab_w, kind, lambda p=path: self._ctrl.save_post_image(tab_id, p)
+                )
+            else:
+                raise RuntimeError(f"unknown artifact {kind!r}")
+            if not ok:
+                break
+
+    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
+        tab_id = payload.tab_id
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        tab_w.handle_save_data_finished(payload)
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control
@@ -711,22 +1017,48 @@ class MainWindow(QMainWindow):
             "open_dialogs": [name.value for name in self.list_open_dialogs()],
         }
 
-    def take_figure_screenshot(self, tab_id: str) -> bytes:
-        """Render a tab's figure to PNG bytes at the fixed export size.
-
-        Renders the live figure via savefig (not ``canvas.grab()``) so the
-        screenshot has the same window-independent geometry as a saved image,
-        rather than tracking the current widget pixel size.
-        """
+    def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
+        """Pane-qualified figure PNG (run|analysis|post_analysis)."""
+        from zcu_tools.gui.app.main.adapter import AnalysisMode
         from zcu_tools.gui.app.main.figure_export import render_figure_png
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             raise FailedPreconditionError(f"unknown tab_id: {tab_id!r}")
-        figure = tab_w.current_figure()
-        if figure is None:
-            raise FailedPreconditionError(f"tab {tab_id!r} has no figure yet")
-        return render_figure_png(figure)
+        if subtab_id not in {"run", "analysis", "post_analysis"}:
+            raise FailedPreconditionError(f"invalid subtab_id {subtab_id!r}")
+        if subtab_id == "run":
+            fig = tab_w.get_current_figure_for_pane("run")
+            if fig is None:
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} run pane has no figure yet"
+                )
+            return render_figure_png(fig)
+        snap = self._ctrl.get_tab_snapshot(tab_id)
+        if snap.capabilities is None:
+            raise FailedPreconditionError("snapshot has no capabilities")
+        if subtab_id == "analysis":
+            if snap.capabilities.analysis is AnalysisMode.NONE:
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} does not support analysis"
+                )
+            fig = snap.analysis.figure if snap.analysis is not None else None
+            if fig is None:
+                raise FailedPreconditionError(
+                    f"tab {tab_id!r} analysis has no figure yet"
+                )
+            return render_figure_png(fig)  # type: ignore[arg-type]
+        # post_analysis
+        if not snap.capabilities.post_analysis:
+            raise FailedPreconditionError(
+                f"tab {tab_id!r} does not support post_analysis"
+            )
+        fig = snap.post_analysis.figure if snap.post_analysis is not None else None
+        if fig is None:
+            raise FailedPreconditionError(
+                f"tab {tab_id!r} post_analysis has no figure yet"
+            )
+        return render_figure_png(fig)  # type: ignore[arg-type]
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""
@@ -766,9 +1098,124 @@ class MainWindow(QMainWindow):
         The cancel-and-wait is deferred to the next event-loop turn so the
         triggering RPC's reply is written back before the remote service tears
         down (else the agent's app.shutdown would race the socket teardown)."""
-        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+        if self._closing:
+            return
+        self._programmatic_shutdown_requested = True
+        if self._shutdown_requested:
+            if self._post_shutdown_prompt_open:
+                self._post_shutdown_prompt_open = False
+                self._close_prompt_open = False
+                QTimer.singleShot(0, self._perform_close)
+            return
+        self._close_prompt_open = False
+        self._schedule_shutdown(self._perform_close)
 
-        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
+    def _current_close_risks(self) -> tuple[bool, int]:
+        has_unsaved = any(tab.has_unsaved_data() for tab in self._tab_widgets.values())
+        return has_unsaved, self._ctrl.active_operation_count()
+
+    def _schedule_shutdown(self, on_closed: Callable[[], None]) -> None:
+        if self._closing or self._shutdown_requested:
+            return
+        self._shutdown_requested = True
+
+        def _begin_shutdown() -> None:
+            try:
+                self._ctrl.begin_shutdown(on_closed)
+            except Exception:
+                self._shutdown_requested = False
+                self._programmatic_shutdown_requested = False
+                raise
+
+        QTimer.singleShot(0, _begin_shutdown)
+
+    def _finish_user_shutdown(self, *, unsaved_warning_accepted: bool) -> None:
+        """Recheck data after cancelled operations settle, then close or ask again."""
+        if self._programmatic_shutdown_requested:
+            self._perform_close()
+            return
+
+        has_unsaved, _active = self._current_close_risks()
+        if unsaved_warning_accepted or not has_unsaved:
+            self._perform_close()
+            return
+
+        self._close_prompt_open = True
+        self._post_shutdown_prompt_open = True
+
+        def _on_decision(confirmed: bool) -> None:
+            self._close_prompt_open = False
+            self._post_shutdown_prompt_open = False
+            if self._programmatic_shutdown_requested or self._closing:
+                return
+            if confirmed:
+                self._perform_close()
+                return
+            self._ctrl.abort_shutdown()
+            self._shutdown_requested = False
+
+        self._dialog_presenter.destructive_confirm(
+            self,
+            "Unsaved measurement data",
+            "An operation completed with unsaved measurement data while the app "
+            "was closing. Discard unsaved data and close?",
+            action_text="Discard and Close",
+            on_decision=_on_decision,
+            default=False,
+        )
+
+    def _present_app_close_confirmation(
+        self, *, has_unsaved: bool, active: int
+    ) -> None:
+        self._close_prompt_open = True
+
+        def _on_decision(confirmed: bool) -> None:
+            if not confirmed or self._shutdown_requested or self._closing:
+                self._close_prompt_open = False
+                return
+
+            current_unsaved, current_active = self._current_close_risks()
+            uncovered_unsaved = current_unsaved and not has_unsaved
+            uncovered_active = current_active > 0 and active == 0
+            if uncovered_unsaved or uncovered_active:
+                self._present_app_close_confirmation(
+                    has_unsaved=current_unsaved, active=current_active
+                )
+                return
+
+            self._close_prompt_open = False
+            self._schedule_shutdown(
+                lambda: self._finish_user_shutdown(unsaved_warning_accepted=has_unsaved)
+            )
+
+        if has_unsaved and active > 0:
+            self._dialog_presenter.destructive_confirm(
+                self,
+                "Unsaved data and operations in progress",
+                f"There is unsaved measurement data and {active} operation(s) "
+                "in progress. Discard unsaved data, cancel active operation(s), "
+                "and close?",
+                action_text="Discard and Close",
+                on_decision=_on_decision,
+                default=False,
+            )
+        elif has_unsaved:
+            self._dialog_presenter.destructive_confirm(
+                self,
+                "Unsaved measurement data",
+                "There is unsaved measurement data. Discard unsaved data and close?",
+                action_text="Discard and Close",
+                on_decision=_on_decision,
+                default=False,
+            )
+        else:
+            self._dialog_presenter.confirm_async(
+                self,
+                "Operations in progress",
+                f"Cancel {active} operation(s) in progress and close once they stop?",
+                on_decision=_on_decision,
+                default=False,
+            )
 
     def _perform_close(self, a0: QCloseEvent | None = None) -> None:
         """The actual teardown: persist session, stop remote, accept the close.
@@ -797,33 +1244,22 @@ class MainWindow(QMainWindow):
             if a0 is not None:
                 super().closeEvent(a0)
             return
-        # A user window-close cancels every live operation, then closes once they
-        # stop (or a timeout forces it). Confirm first if work is in progress —
-        # closing will interrupt it. The wait is asynchronous, so ignore this
-        # event now; the coordinator drives _perform_close when ready.
-        active = self._ctrl.active_operation_count()
-        if active > 0:
-            if a0 is None:
-                return
-            confirmed = self._dialog_presenter.confirm(
-                self,
-                "Operations in progress",
-                f"Cancel {active} operation(s) in progress and close once they stop?",
-                default=False,
-            )
-            if not confirmed:
-                a0.ignore()
-                return
-            a0.ignore()
-        elif a0 is not None:
-            a0.ignore()
-        # Defer begin_shutdown to the next event-loop turn (mirrors
-        # request_shutdown). When idle, the shutdown coordinator settles
-        # synchronously and calls _perform_close → self.close(), which would
-        # otherwise re-enter this closeEvent within its own stack — Qt does not
-        # honour a self.close() issued from inside a closeEvent handler, so the
-        # first click would appear to do nothing. The singleShot breaks out of
-        # this stack first.
-        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 
-        QTimer.singleShot(0, lambda: self._ctrl.begin_shutdown(self._perform_close))
+        if a0 is not None:
+            a0.ignore()
+
+        if (
+            self._close_prompt_open
+            or self._shutdown_requested
+            or self._pending_tab_closes
+        ):
+            return
+
+        has_unsaved, active = self._current_close_risks()
+        if not has_unsaved and active == 0:
+            self._schedule_shutdown(
+                lambda: self._finish_user_shutdown(unsaved_warning_accepted=False)
+            )
+            return
+
+        self._present_app_close_confirmation(has_unsaved=has_unsaved, active=active)

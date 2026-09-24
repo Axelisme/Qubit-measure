@@ -346,7 +346,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
     assert outcome is not None
     assert outcome.status == "failed"
     assert outcome.error == "RuntimeError: builder boom"
-    assert state.get_tab(tab_id).run_result is None
+    assert state.get_tab(tab_id).run.result is None
     assert not state.is_tab_running(tab_id)
 
 
@@ -402,7 +402,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
-    assert state.get_tab(tab_id).run_result is partial
+    assert state.get_tab(tab_id).run.result is partial
     assert not state.is_tab_running(tab_id)
 
 
@@ -418,7 +418,7 @@ def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
-    assert state.get_tab(tab_id).run_result is None
+    assert state.get_tab(tab_id).run.result is None
     assert not state.is_tab_running(tab_id)
 
 
@@ -433,7 +433,7 @@ def test_bg_done_without_cancel_reports_finished():
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "finished"
-    assert state.get_tab(tab_id).run_result is result
+    assert state.get_tab(tab_id).run.result is result
 
 
 def test_bg_done_after_cancel_reports_cancelled_with_partial():
@@ -448,7 +448,7 @@ def test_bg_done_after_cancel_reports_cancelled_with_partial():
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
-    assert state.get_tab(tab_id).run_result is partial
+    assert state.get_tab(tab_id).run.result is partial
 
 
 def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
@@ -470,7 +470,7 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
-    assert state.get_tab(tab_id).run_result is partial
+    assert state.get_tab(tab_id).run.result is partial
     outcome = handles.poll(token)
     assert outcome is not None
     assert outcome.status == "cancelled"
@@ -500,4 +500,4 @@ def test_bg_error_after_cancel_reports_cancelled_without_result():
 
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
-    assert state.get_tab(tab_id).run_result is None
+    assert state.get_tab(tab_id).run.result is None

@@ -53,9 +53,9 @@ def _h_tab_get_analyze_params(
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = control.get_tab_snapshot(tab_id)
-    if snap.analyze_params is None:
+    ap = None if snap.analysis is None else snap.analysis.params
+    if ap is None:
         return {"analyze_params": None}
-    ap = snap.analyze_params
     if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
         return {"analyze_params": {}}
     return {"analyze_params": dataclasses.asdict(ap)}
@@ -83,10 +83,10 @@ def _h_tab_analyze(
             "No run result available to analyze.",
             reason="no_run_result",
         )
-    if snap.analyze_params is None:
+    ap = None if snap.analysis is None else snap.analysis.params
+    if ap is None:
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
     raw_updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
-    ap = snap.analyze_params
     if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
         raise RemoteError(
             ErrorCode.INTERNAL, "analyze_params is not a dataclass instance"
@@ -128,9 +128,9 @@ def _h_tab_get_post_analyze_params(
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = control.get_tab_snapshot(tab_id)
-    if snap.post_analyze_params is None:
+    pp = None if snap.post_analysis is None else snap.post_analysis.params
+    if pp is None:
         return {"post_analyze_params": None}
-    pp = snap.post_analyze_params
     if not dataclasses.is_dataclass(pp) or isinstance(pp, type):
         return {"post_analyze_params": {}}
     return {"post_analyze_params": dataclasses.asdict(pp)}
@@ -157,12 +157,12 @@ def _h_tab_post_analyze(
             "No primary analyze result available to post-analyze.",
             reason="no_analyze_result",
         )
-    if snap.post_analyze_params is None:
+    pp = None if snap.post_analysis is None else snap.post_analysis.params
+    if pp is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED, "no post-analysis params available"
         )
     raw_updates = cast(dict, params["updates"])  # ParamSpec(_obj)-validated
-    pp = snap.post_analyze_params
     if not dataclasses.is_dataclass(pp) or isinstance(pp, type):
         raise RemoteError(
             ErrorCode.INTERNAL, "post_analyze_params is not a dataclass instance"

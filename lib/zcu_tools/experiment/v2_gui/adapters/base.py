@@ -19,12 +19,14 @@ from zcu_tools.gui.app.main.adapter import (
     NoAnalyzeParams,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
+    PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
     SavePaths,
     T_AnalyzeParams,
     T_AnalyzeResult,
     T_Cfg,
+    T_PostAnalyzeResult,
     T_Result,
     WritebackItem,
     WritebackRequest,
@@ -103,7 +105,9 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     """
 
     exp_cls: ClassVar[type[Any]]
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
+    # Most registered adapters use the canonical PersistableExperiment loader;
+    # concrete no-load adapters declare ``load_data=False`` explicitly.
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
     guide_text: ClassVar[AdapterGuide] = _NO_GUIDE
     legacy_migration_experiment: ClassVar[str | None] = None
 
@@ -137,6 +141,15 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def _validate_capability_contract(cls) -> None:
         """Fail fast when declared capabilities and implemented hooks disagree."""
         caps = cls.capabilities
+        if not isinstance(caps, AdapterCapabilities):
+            raise TypeError(
+                f"{cls.__name__}.capabilities must be an AdapterCapabilities instance"
+            )
+        if not isinstance(caps.load_data, bool):
+            raise TypeError(
+                f"{cls.__name__}.capabilities.load_data must be bool, "
+                f"got {type(caps.load_data).__name__}"
+            )
         analysis = caps.analysis
 
         if analysis is AnalysisMode.FIT:
@@ -219,6 +232,36 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
                 "post_analyze",
                 "declares post_analysis=False",
                 "remove post_analyze() or set post_analysis=True",
+            )
+            cls._forbid_method(
+                "get_post_writeback_items",
+                "declares post_analysis=False",
+                "remove get_post_writeback_items() or set post_analysis=True",
+            )
+
+        # Loading is a capability gate, not a runtime probe. A concrete adapter
+        # may provide its own loader, or it may opt into BaseAdapter.load when the
+        # experiment class can be constructed without arguments and exposes a
+        # canonical callable loader. A disabled capability must not hide an
+        # accidental adapter override.
+        if caps.load_data:
+            if not cls._is_method_implemented("load"):
+                exp_cls = getattr(cls, "exp_cls", None)
+                has_canonical_loader = isinstance(exp_cls, type) and (
+                    _can_construct_without_args(exp_cls)
+                    and callable(getattr(exp_cls, "load", None))
+                )
+                if not has_canonical_loader:
+                    raise TypeError(
+                        f"{cls.__name__} declares load_data=True but has neither "
+                        "a concrete load() override nor a no-argument exp_cls with "
+                        "a callable canonical loader"
+                    )
+        else:
+            cls._forbid_method(
+                "load",
+                "declares load_data=False",
+                "remove load() or set load_data=True",
             )
 
     # -- experiment-specific contract (subclass must fill) -----------------
@@ -468,6 +511,19 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        del req
+        return []
+
+    def get_post_writeback_items(
+        self,
+        req: PostWritebackRequest[T_Result, T_AnalyzeResult, T_PostAnalyzeResult],
+    ) -> Sequence[WritebackItem]:
+        """Return optional proposals owned by a post-analysis pane.
+
+        The default keeps post-analysis useful without a writeback surface. The
+        workflow owns primary/post semantics; WritebackService only receives the
+        returned items and never sees this request or a stage selector.
+        """
         del req
         return []
 

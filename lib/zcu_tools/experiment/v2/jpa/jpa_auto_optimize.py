@@ -35,8 +35,8 @@ from zcu_tools.experiment.utils import (
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot
-from zcu_tools.liveplot.backend.jupyter import instant_plot
+from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,
@@ -190,7 +190,11 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
             z=RoleZSpec(
                 field_name="params",
                 label="JPA Flux",
-                unit="A",
+                # Canonical flux unit is the neutral device-native value: the
+                # generic set_flux knob carries no physical-unit guarantee, so
+                # a.u. is the only honest cross-device contract (identity
+                # scale; legacy 'A' grouped files migrate, never load).
+                unit="a.u.",
                 dtype=np.float64,
                 index=0,
                 index_axis=1,
@@ -251,7 +255,17 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 
 
 class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
+    # Auto-optimize needs at least 4 iterations to produce valid samples: reject
+    # smaller budgets before any sampling (JPAOptimizer construction) or device
+    # setup (setup_devices inside the scan loop) begins.
+    MIN_NUM_POINTS = 4
+
     def run(self, soc, soccfg, cfg: JPAOptCfg, num_points: int) -> JPAOptimizeResult:
+        if num_points < self.MIN_NUM_POINTS:
+            raise ValueError(
+                "JPA auto-optimize requires num_points >= "
+                f"{self.MIN_NUM_POINTS} to produce valid samples, got {num_points}"
+            )
         orig_cfg = deepcopy(cfg)
         flux_sweep = cfg.sweep.jpa_flux
         freq_sweep = cfg.sweep.jpa_freq
@@ -285,7 +299,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     "Iteration", "SNR (a.u.)", existed_axes=[[ax_iter]]
                 ),
                 flux_scatter=LivePlotScatter(
-                    "JPA Flux (mA)", "SNR (a.u.)", existed_axes=[[ax_flux]]
+                    "JPA Flux value (a.u.)", "SNR (a.u.)", existed_axes=[[ax_flux]]
                 ),
                 freq_scatter=LivePlotScatter(
                     "JPA Frequency (MHz)", "SNR (a.u.)", existed_axes=[[ax_freq]]
@@ -304,7 +318,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 cur_flux, cur_freq, cur_gain = params[idx, :]
 
                 fig.suptitle(
-                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
+                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {cur_flux:.2g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
                 )
 
                 colors = phases.astype(np.float64)
@@ -313,7 +327,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     point_indices, snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("flux_scatter").update(
-                    1e3 * params[:, 0], snrs, colors=colors, refresh=False
+                    params[:, 0], snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("freq_scatter").update(
                     params[:, 1], snrs, colors=colors, refresh=False
@@ -338,8 +352,11 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     cur_params = optimizer.next_params(idx, last_snr)
 
                     if cur_params is None:
-                        sched.set_stop()
-                        break
+                        raise RuntimeError(
+                            "JPA optimizer exhausted before consuming its budget: "
+                            f"iteration={idx}, num_points={num_points}, "
+                            f"phase={optimizer.phase}"
+                        )
 
                     params[idx, :] = cur_params
                     phases[idx] = optimizer.phase
@@ -363,7 +380,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                         .build_and_acquire(
                             raw2signal_fn=lambda raw: snr_as_signal(
                                 [tracker],
-                                ge_axis=0,
+                                ge_axis=1,
                                 skew_penalty=sched.cfg.skew_penalty,
                             ),
                             trackers=[tracker],
@@ -371,7 +388,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     )
                 signals = signals_buffer.array
 
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = JPAOptimizeResult(
             params=params, phases=phases, signals=signals, cfg_snapshot=orig_cfg

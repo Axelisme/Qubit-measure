@@ -13,7 +13,7 @@ from .computed_pulse import ComputedPulse
 from .control import Branch, Repeat
 from .delay import Delay, DelayAuto, Join, SoftDelay
 from .dmem import LoadValue, LoadWord, ScanWith
-from .pulse import Pulse, PulseCfg
+from .pulse import Pulse, PulseCfg, TableLengthPulse
 from .readout import (
     AbsReadout,
     AbsReadoutCfg,

@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-07-14 — runtime frequency-word decoding
+**Last updated:** 2026-08-17 — semantic per-point evolution caching
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -81,17 +81,18 @@ because the flux is fixed *for that acquire*; a per-point operating flux would h
 to move that call back into the loop.
 
 **Simulation caches stay internal to `SimEngine`.** Within one signal-grid build,
-the engine separates per-point readout blobs/scales from qubit-state evolution.
-Resolved Bloch `Segment` propagators live in a bounded process-local hot cache,
-while cumulative sequence prefixes are cached only for the current signal-grid
-build. Sweep points that change only readout centers reuse the same
-pre-readout/inter-shot evolution and, when `q_post` is unchanged, the same
-rep-resolved `P_e` chain. PulseReadout gain or duration sweeps that change
-readout-induced post-state damping get distinct population chains because the
-population cache includes `q_post`; qubit-drive sweeps also compute distinct
-chains because their propagators differ. These readout/evolution/population
-caches are private `SimEngine` implementation details, not seams exposed to
-callers or sibling modules.
+the engine lowers and evolves every concrete sweep point instead of inferring
+physical dependencies from source-level sweep names. Resolved Bloch `Segment`
+propagators live in a bounded process-local hot cache, while cumulative sequence
+prefixes are cached only for the current signal-grid build. This preserves common
+prefix work without allowing an omitted dependency to substitute another point's
+physics. When the resulting propagators and `q_post` are identical, a separate
+population-chain cache still reuses the rep-resolved `P_e` chain. PulseReadout
+gain or duration sweeps that change readout-induced post-state damping get
+distinct population chains because the population cache includes `q_post`;
+qubit-drive sweeps also compute distinct chains because their propagators differ.
+These readout/evolution/population caches are private `SimEngine` implementation
+details, not seams exposed to callers or sibling modules.
 
 **Mocksim CPU loops yield the process GIL cooperatively.** Autofluxdep RUN work is
 submitted to a dedicated `QThread`, but a Python/C-extension-heavy mock simulator

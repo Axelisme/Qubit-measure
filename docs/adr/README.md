@@ -12,6 +12,7 @@
 - [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合。
 - [0025 — Cross-thread interaction channel](0025-cross-thread-interaction-channel.md)：operation/user prompt 使用單一有序 channel 傳遞 settle、message、stop。
 - [0026 — OperationRunner + scope ports](0026-operation-abstraction-runner-scope-ports.md)：OperationRunner 擁有通用生命週期；各 operation 只提供 policy 與窄 write port。
+- [0058 — Registry-owned VISA session disconnect](0058-registry-owned-visa-session-disconnect.md)：GlobalDeviceManager 以 identity claims 統一擁有 disconnect；close I/O 在 registry lock 外、失敗聚合且保留重試。
 
 ## GUI Service Architecture
 
@@ -21,19 +22,19 @@
 - [0007 — Device state lives in State](0007-device-state-to-state-ssot.md)：Device live state 由 State 擁有，DeviceService 保持 driver/worker 邊界。
 - [0020 — Shared session core](0020-session-core-shared-layer.md)：measure 與 autofluxdep 共用 context、SoC、device、dialog、operation/session primitive。
 - [0021 — Event ownership domain modules](0021-event-ownership-domain-modules.md)：事件 enum 與 payload 由 domain module 擁有，app 只組裝 bus 與 serializer。
-- [0048 — Domain event facts and View reactions](0048-domain-event-facts-and-view-reactions.md)：producer 發布 closed domain fact；coordinator 擁有 lazy-snapshot reaction matrix與figure restore政策。
+- [0048 — Domain event facts and View reactions](0048-domain-event-facts-and-view-reactions.md)：producer發布closed domain fact；pane-owned State先commit完整resource並於commit後回收retired draft，coordinator擁有lazy-snapshot reaction matrix與figure restore政策。
 - [0037 — Value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session value source 提供少量 default / md-write escape hatch；`ValueRef` 立即 materialize。
 - [0044 — GUI process runtime](0044-gui-process-runtime.md)：GUI app 用 static runtime spec + behavior ABC 宣告 process startup contract。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：core 以 `OwnerScheduler` port 取代 Qt main-thread 隱含假設，service completion 全走 EventBus；hardware gate lease 附 origin_kind/note/since 供多前端 presence。
 
 ## Cfg / Value Model
 
-- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI widget 與 agent 共用 service-owned `CfgDraft`。
+- [0008 — CfgEditor session](0008-cfg-editor-session.md)：GUI widget與agent共用service-owned `CfgDraft`；Analysis/Post各自持有不洩漏`editor_id`的opaque writeback draft。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec tree 靜態、Value tree 可變；locked literal 只在 spec 宣告。
 - [0010 — Complete value tree + None for empty](0010-value-tree-complete-none-for-empty.md)：Value tree 永遠完整；optional empty 統一用 `None`。
 - [0011 — CfgSchema validate boundary](0011-cfgschema-validate-boundary.md)：成品邊界做靜態結構驗證。
 - [0012 — Context-free measure cfg definition](0012-cfgbuilder-value-layer-fluent-assembly.md)：adapter以單一definition宣告static shape、domain verbs與deferred typed defaults。
-- [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter 顯式宣告 capabilities，import-time validation 抓宣告與 hook 不一致。
+- [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter顯式宣告capabilities，import-time validation抓宣告與hook不一致，Load所有driving paths共用`load_data` gate。
 - [0043 — Autofluxdep runtime cfg override plan](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、runtime patch enforcement、remote/artifact exposure 與 cfg form decoration。
 - [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有Qt-free core，`gui.widgets.cfg`擁有instance-registry Qt renderer，measure adapter與autoflux cfg barrel只暴露app-owned API；lowering ports見 [[0046]]。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：finished-cfg algorithm由shared core擁有，app以expression/reference/range三個窄port提供runtime policy。
@@ -51,9 +52,10 @@
 ## Persistence
 
 - [0015 — PersistenceCaretaker](0015-persistence-caretaker-memento-single-file.md)：GUI app-state 用單一 memento file，由 caretaker 管理讀寫時機。
-- [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、grouped dataset roles。
+- [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、strict grouped dataset roles；legacy artifacts 只經 explicit migration 進入 canonical 格式。
 - [0039 — QubitParams owns params.json](0039-qubit-params-json-owner.md)：`meta_tool.QubitParams` 是 result-scope `params.json` 的 typed 讀寫權威。
 - [0040 — Autofluxdep run result artifact](0040-autofluxdep-run-result-artifact.md)：autofluxdep run output 以 run directory、journal 與 per-node streaming Labber-readable HDF5 作 canonical artifact。
+- [0057 — Flat SampleTable v2 coordinate contract](0057-flat-sampletable-v2-coordinate-contract.md)：五欄平鋪 coordinate（flux/dev_value/dev_unit/flux_int/flux_period）與 A/V base unit、explicit provenance precedence；legacy 只經 operator migration 進入。
 
 ## Experiment Runtime
 

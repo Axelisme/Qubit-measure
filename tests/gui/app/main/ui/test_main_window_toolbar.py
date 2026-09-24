@@ -51,6 +51,12 @@ class _RecordingToolbarHost:
     def open_dialog(self, name: DialogName) -> None:
         self.opened.append(name)
 
+    def reload_experiments(self) -> None:
+        pass
+
+    def retry_skipped_experiment_tabs(self) -> None:
+        pass
+
 
 def test_toolbar_dialog_buttons_open_expected_dialogs(qapp) -> None:  # noqa: ANN001
     parent = QWidget()

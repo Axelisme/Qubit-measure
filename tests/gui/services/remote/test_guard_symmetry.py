@@ -47,7 +47,7 @@ def _make_controller(readiness: ContextReadiness) -> Controller:
     if not registry.has("fake"):
         registry.register("fake", FakeAdapter)
     view = MagicMock()
-    view.make_live_container = MagicMock(return_value=None)
+    view.make_run_container = MagicMock(return_value=None)
     io_manager = IOManager()
     io_manager._em = MagicMock()
     bus = EventBus()

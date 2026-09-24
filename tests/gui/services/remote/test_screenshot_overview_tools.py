@@ -23,12 +23,12 @@ def _clear_mcp_policy_state():
 
 
 # ---------------------------------------------------------------------------
-# Figure/screenshot consolidation (WIRE 24) — run/analyze replies NO LONGER fold
-# figure_path; looking at a plot is a separate gui_tab_get_current_figure call.
+# Figure/screenshot consolidation — each plot is retrieved explicitly from its
+# pane with gui_tab_get_figure(tab_id, subtab_id).
 # ---------------------------------------------------------------------------
 
 
-def test_get_current_figure_omitted_out_path_writes_temp_file(monkeypatch):
+def test_get_figure_omitted_out_path_writes_temp_file(monkeypatch):
     """Omitting out_path must drive the wire in out_path mode (synthesised temp
     path) and return {saved_to, bytes} with NO inline base64."""
     from tempfile import gettempdir
@@ -44,20 +44,27 @@ def test_get_current_figure_omitted_out_path_writes_temp_file(monkeypatch):
         return {"bytes": 1234, "saved_to": params["out_path"]}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_get_current_figure"]["handler"](
-        {"tab_id": "fake-freq-1"}
+    out = mcp_server.TOOLS["gui_tab_get_figure"]["handler"](
+        {"tab_id": "fake-freq-1", "subtab_id": "analysis"}
     )
 
-    expected_path = str(Path(gettempdir()) / "measure_fig_fake-freq-1.png")
+    expected_path = str(Path(gettempdir()) / "measure_fig_fake-freq-1_analysis.png")
     assert out == {"bytes": 1234, "saved_to": expected_path}
     assert "png_b64" not in out
     # The convenience layer forwarded an out_path so the wire never returns base64.
     assert calls == [
-        ("tab.get_current_figure", {"tab_id": "fake-freq-1", "out_path": expected_path})
+        (
+            "tab.get_figure",
+            {
+                "tab_id": "fake-freq-1",
+                "subtab_id": "analysis",
+                "out_path": expected_path,
+            },
+        )
     ]
 
 
-def test_get_current_figure_explicit_out_path_is_forwarded(monkeypatch):
+def test_get_figure_explicit_out_path_is_forwarded(monkeypatch):
     from zcu_tools.mcp.measure import server as mcp_server
 
     calls: list[tuple[str, dict]] = []
@@ -68,13 +75,16 @@ def test_get_current_figure_explicit_out_path_is_forwarded(monkeypatch):
         return {"bytes": 1234, "saved_to": params["out_path"]}
 
     monkeypatch.setattr(mcp_server, "send_gui_rpc", fake_send)
-    out = mcp_server.TOOLS["gui_tab_get_current_figure"]["handler"](
-        {"tab_id": "t1", "out_path": "/tmp/custom.png"}
+    out = mcp_server.TOOLS["gui_tab_get_figure"]["handler"](
+        {"tab_id": "t1", "subtab_id": "run", "out_path": "/tmp/custom.png"}
     )
 
     assert out == {"bytes": 1234, "saved_to": "/tmp/custom.png"}
     assert calls == [
-        ("tab.get_current_figure", {"tab_id": "t1", "out_path": "/tmp/custom.png"})
+        (
+            "tab.get_figure",
+            {"tab_id": "t1", "subtab_id": "run", "out_path": "/tmp/custom.png"},
+        )
     ]
 
 

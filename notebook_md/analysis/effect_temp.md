@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.4
   kernelspec:
-    display_name: Python 3
+    display_name: zcu-tools (3.13.11.final.0)
     language: python
     name: python3
   language_info:
@@ -21,189 +21,110 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.11
 ---
 
-```python
-import os
+# Effective Temperature
 
-%matplotlib widget
-import matplotlib.pyplot as plt
+This notebook estimates output-referred thermal noise from a passive attenuator chain.
+
+```python
+%load_ext autoreload
+
+%matplotlib inline
+%autoreload 2
+
+from pathlib import Path
+
 import numpy as np
-import scipy.optimize as opt
-import scipy.special as sp
-import scipy.constants as sc
+
+import zcu_tools.notebook.analysis.fit_tools as zfit
 ```
 
 ```python
-os.makedirs("../../result/Eff_T", exist_ok=True)
+output_dir = Path("../../result/Eff_T")
+output_dir.mkdir(parents=True, exist_ok=True)
+```
+
+# User Settings
+
+```python
+probe_frequency_hz = 5.79313e9
+impedance_ohm = 50.0
+
+frequency_axis_hz = np.geomspace(1e6, 100e9, 1000)
+temperature_axis_hz = np.linspace(10e6, 10e9, 1000)
+highlight_frequency_range_hz = (0.4e9, 4.5e9)
 ```
 
 ```python
-s_f = 7.48675e9  # GHz
-R = 50  # attenuator impedence
-log_fpts = np.linspace(6, 11, 1000)  # 1MHz to 100GHz
-fpts = np.power(10, log_fpts)
+input_temperature_K = 300.0
 
-att_4K = 20  # dB
-att_100mK = 20  # dB
-att_20mK = 20  # dB
-
-length_in_4K = 0.2  # m
-length_in_100mK = 0.2  # m
-length_in_20mK = 0.2  # m
-```
-
-```python
-# use attenuation at 4K as reference
-# Reference: http://www.coax.co.jp/en/product/sc/086-50-cn-cn.html
-SC086_4K_att_tb = [  # (Hz, dB/m)
-    (0.5e9, 4.1),
-    (1.0e9, 5.7),
-    (5.0e9, 12.8),
-    (10.0e9, 18.1),
-    (20.0e9, 25.7),
-]
-SC086_att = np.interp(fpts, *zip(*SC086_4K_att_tb))  # type: ignore
-
-# for freq out of data table range, use A ~ sqrt(f)
-first_f, first_att = SC086_4K_att_tb[0]
-last_f, last_att = SC086_4K_att_tb[-1]
-SC086_att[fpts < first_f] = first_att * np.sqrt(fpts[fpts < first_f] / first_f)
-# SC086_att[fpts > last_f] = last_att * np.sqrt(fpts[fpts > last_f] / last_f)
-
-
-plt.figure()
-plt.plot(fpts, SC086_att, label="4K SC086")
-plt.axvline(s_f, color="red", label="s_f")
-plt.xscale("log")
-plt.title("SC086 Cable Attenuation")
-plt.xlabel("Frequency [Hz]")
-plt.ylabel("Cable Attenuation [dB/m]")
-plt.legend()
-plt.tight_layout()
-plt.grid()
-plt.show()
-```
-
-```python
-A_in_4K = att_4K + SC086_att * length_in_4K
-A_in_100mK = att_100mK + SC086_att * length_in_100mK
-A_in_20mK = att_20mK + SC086_att * length_in_20mK
-
-A_300K = A_in_4K + A_in_100mK + A_in_20mK
-A_4K = A_in_100mK + A_in_20mK
-A_100mK = A_in_20mK
-A_20mK = 0
-```
-
-```python
-def log_expm1(x):  # avoid overflow in expm1 for very large x
-    result = np.copy(x)
-
-    mask = x < 20
-    result[mask] = np.log(np.expm1(x[mask]))
-    result[~mask] += np.log1p(-np.exp(-x[~mask]))
-
-    return result
-
-
-# PSD = 4kTR * (hf / kT) / expm1(hf / kT)
-def logPSD(log_fpt, R, T):
-    log_n = np.log10(sc.h / (sc.k * T)) + log_fpt
-    return np.log10(4 * sc.k * T * R) + log_n - log_expm1(10**log_n) / np.log(10)
-
-
-def find_eff_T(fpt, R, fpts, logSvv_total) -> float:
-    # first use interpolation to find the effective PSD at the given frequency
-    # then use opt.bisect to find the effective temperature
-    logSvv = np.interp(fpt, fpts, logSvv_total)
-    return opt.bisect(lambda T: logPSD(np.log10(fpt), R, T) - logSvv, 1e-6, 1e3)  # type: ignore
-
-
-def photonNum(T, f):
-    return 1 / (np.exp((sc.h * f) / (sc.k * T)) - 1)
-```
-
-```python
-fig, ax = plt.subplots(figsize=(9, 6))
-
-logSvv_300K = logPSD(log_fpts, R, 300)
-logSvv_4K = logPSD(log_fpts, R, 4)
-logSvv_100mK = logPSD(log_fpts, R, 0.1)
-logSvv_20mK = logPSD(log_fpts, R, 0.02)
-
-logSvv_300K_attn = logSvv_300K - A_300K / 10
-logSvv_4K_attn = logSvv_4K - A_4K / 10
-logSvv_100mK_attn = logSvv_100mK - A_100mK / 10
-logSvv_20mK_attn = logSvv_20mK - A_20mK / 10
-logSvv_total = sp.logsumexp(
-    [logSvv_300K_attn, logSvv_4K_attn, logSvv_100mK_attn, logSvv_20mK_attn], axis=0
+stages = (
+    zfit.ThermalAttenuatorStage("50K", Temp_K=50.0, attenuation_db=13.0),
+    zfit.ThermalAttenuatorStage("4K", Temp_K=4.0, attenuation_db=13.0),
+    zfit.ThermalAttenuatorStage("100mK", Temp_K=0.1, attenuation_db=13.0),
+    zfit.ThermalAttenuatorStage("20mK", Temp_K=0.02, attenuation_db=23.0),
 )
+```
 
-ax.plot(fpts, logSvv_300K, label="300K")
-ax.plot(fpts, logSvv_4K, label="4K")
-ax.plot(fpts, logSvv_100mK, label="100mK")
-ax.plot(fpts, logSvv_20mK, label="20mK")
-ax.plot(fpts, logSvv_total, label="Effective")
+# Calculate
 
-if s_f is not None:
-    eff_T = find_eff_T(s_f, R, fpts, logSvv_total)
+```python
+noise = zfit.calculate_thermal_chain(
+    frequency_axis_hz,
+    stages,
+    input_temperature_K=input_temperature_K,
+    impedance_ohm=impedance_ohm,
+)
+probe = noise.probe(probe_frequency_hz)
 
-    logSvv_eff = logPSD(log_fpts, R, eff_T)
-    ax.vlines(
-        s_f,
-        -50,
-        -10,
-        colors="k",
-        linestyles="dashed",
-        label=f"freq = {s_f * 1e-9:.2f}GHz",
-    )
-    ax.plot(fpts, logSvv_eff, label=f"T_eff = {eff_T * 1e3:.1f}mK", linestyle="dashed")
+print(
+    f"T_eff({probe.frequency_hz * 1e-9:.4g} GHz) = "
+    f"{probe.effective_temperature_K * 1e3:.2f} mK"
+)
+print(f"n_photon({probe.frequency_hz * 1e-9:.4g} GHz) = {probe.photon_number:.4g}")
+```
 
-    photonN = photonNum(eff_T, s_f)
-    ax.set_title(f"T_eff = {eff_T * 1e3:.1f}mK, n_photon = {photonN:.3g}")
+# PSD
 
+```python
+fig, _ = zfit.plot_thermal_chain_psd(
+    noise,
+    probe_frequency_hz=probe_frequency_hz,
+    ylim=(-30.5, -17.5),
+)
+fig.savefig(
+    output_dir / f"{probe_frequency_hz * 1e-9:.3f}GHz_01.png",
+    bbox_inches="tight",
+)
+```
 
-ax.set_xlabel("Frequency [Hz]")
-ax.set_ylabel("PSD [V^2/Hz]")
-ax.set_xscale("log")
-ax.set_xlim(fpts[0], fpts[-1])
-ax.set_ylim(-30.5, -17.5)
-fig.legend(bbox_to_anchor=(1.00, 0.7))
-fig.tight_layout()
-fig.subplots_adjust(right=0.75)
+# Effective Temperature
 
-fig.savefig(f"../../result/Eff_T/{s_f * 1e-9:.3f}GHz_01.png")
-
-plt.show()
+```python
+temperature_curve = zfit.calculate_thermal_chain(
+    temperature_axis_hz,
+    stages,
+    input_temperature_K=input_temperature_K,
+    impedance_ohm=impedance_ohm,
+)
 ```
 
 ```python
-t_fpts = np.linspace(10e6, 10e9, 1000)
-
-T_effs = np.array([find_eff_T(f, R, fpts, logSvv_total) for f in t_fpts])
-
-fig, ax = plt.subplots()
-ax.plot(t_fpts, T_effs * 1e3)
-
-ax.set_xscale("log")
-ax.grid()
-
-ax.set_title("Effective Temperature vs Frequency")
-ax.set_xlabel("Frequency [Hz]")
-ax.set_ylabel("Effective Temp [mK]")
-
-fig.savefig("../../result/Eff_T/Eff_T_vs_Freq.png")
-
-plt.show()
+fig, _ = zfit.plot_effective_temperature_vs_frequency(
+    temperature_curve,
+    probe_frequency_hz=probe_frequency_hz,
+    highlight_range_hz=highlight_frequency_range_hz,
+)
+fig.savefig(output_dir / "Eff_T_vs_Freq.png", bbox_inches="tight")
 ```
 
 ```python
-savepath = "../../result/Eff_T/Eff_T_vs_Freq.npz"
-np.savez(savepath, fpts=t_fpts, T_effs=T_effs)
-```
-
-```python
-
+np.savez(
+    output_dir / "Eff_T_vs_Freq.npz",
+    fpts=temperature_curve.frequencies_hz,
+    T_effs=temperature_curve.effective_temperature_K,
+    n_photons=temperature_curve.effective_photon_number,
+)
 ```

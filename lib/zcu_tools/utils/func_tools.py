@@ -31,6 +31,14 @@ class MinIntervalFunc(Generic[P]):
             self.last_call_time = cur_call_time
             self.last_exec_end = time.time()
 
+    def flush(self, *args: P.args, **kwargs: P.kwargs) -> None:
+        """Invoke immediately and restart duty-cycle accounting."""
+
+        cur_call_time = time.time()
+        self.func(*args, **kwargs)
+        self.last_call_time = cur_call_time
+        self.last_exec_end = time.time()
+
 
 @overload
 def min_interval(func: None, min_interval: float | None = None) -> None: ...

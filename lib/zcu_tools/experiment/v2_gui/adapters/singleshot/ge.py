@@ -3,12 +3,11 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
-import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.figure import Figure
 
-from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.singleshot import GE_Cfg, GE_Exp
 from zcu_tools.experiment.v2.singleshot.ge import GE_Result
 from zcu_tools.experiment.v2_gui.adapters._support import (
@@ -28,6 +27,8 @@ from zcu_tools.gui.app.main.adapter import (
     ParamMeta,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
+    PostWritebackRequest,
+    T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
 )
@@ -37,12 +38,14 @@ GERunResult: TypeAlias = GE_Result
 
 @dataclass
 class GEAnalyzeParams:
-    # ``backend`` selects the rotation/threshold method. This phase ships the
-    # primary analysis fixed to PCA (the domain default); the other backends are
-    # the post-analysis (multi-method) phase, so only the two implemented choices
-    # are offered (the Literal supplies the form's choices) and the default is
-    # "pca".
+    # ``backend`` selects the primary rotation/threshold fit. Post-analysis uses
+    # the resulting centres and does not choose or run another fit backend.
     backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
+    logscale: Annotated[bool, ParamMeta(label="Log Scale")] = False
+    align_t1: Annotated[bool, ParamMeta(label="Align T1")] = True
+    length_ratio: Annotated[
+        float | None, ParamMeta(label="Length Ratio", decimals=4)
+    ] = None
 
 
 @dataclass
@@ -56,51 +59,28 @@ class GEAnalyzeResult(AnalyzeResultBase):
     ge_s: float
     g_center: complex
     e_center: complex
-    # ``ge_radius`` is the optimised classification radius (writeback-safe float;
-    # the per-qubit calibration downstream single-shot experiments consume).
-    # ``confusion`` is the 3×3 prepared→measured confusion matrix as a nested
-    # ``list[list[float]]`` so ``to_summary_dict`` carries it JSON-safe (the
-    # domain returns a numpy array). Both come from
-    # ``GE_Exp.calc_confusion_matrix`` over the primary fit's populations.
-    ge_radius: float
-    confusion: list[list[float]]
+    init_pops: list[list[float]]
     figure: Figure
 
 
 @dataclass
 class GEPostAnalyzeParams:
-    # The post-analysis (multi-method) layer: re-runs the discrimination with a
-    # user-chosen ``backend``, or — when ``angle`` is supplied — a manual rotation
-    # (``angle`` overrides ``backend`` in the domain fitter). ``regression`` is
-    # intentionally NOT offered here (it is excluded from this adapter's surface).
-    backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
-    # ``angle`` (radians): when set, the domain ignores ``backend`` and rotates by
-    # this fixed angle (manual discrimination). Optional → blank means "use
-    # backend".
-    angle: Annotated[float | None, ParamMeta(label="Manual angle (rad)")] = None
+    """The GE confusion diagnostic has no independent operator parameters."""
 
 
 @dataclass
 class GEPostAnalyzeResult(PostAnalyzeResultBase):
-    # Same float scalars as the primary result (JSON-safe via to_summary_dict).
-    # ``g_center`` / ``e_center`` are complex and auto-skipped from the summary.
-    backend: str
-    fidelity: float
-    theta: float
-    threshold: float
-    ge_s: float
-    g_center: complex
-    e_center: complex
+    ge_radius: float
+    confusion: list[list[float]]
     figure: Figure
 
 
 class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
     exp_cls = GE_Exp
     ExpCfg_cls: ClassVar[Any] = GE_Cfg
-    # FIT primary analysis + opt-in post-analysis (the multi-backend
-    # discrimination layer).
+    # FIT primary analysis + a confusion-diagnostic post-analysis layer.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
     )
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
@@ -127,17 +107,22 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             "exists."
         ),
         typical_writeback=(
-            "Proposes the fitted assignment fidelity into MetaDict 'fid', the "
-            "cluster width into 'ge_s', the complex discrimination centres into "
-            "'g_center' / 'e_center', the optimised classification radius into "
-            "'ge_radius', and the 3x3 confusion matrix (nested list) into "
-            "'confusion_matrix' (a non-scalar, read-only writeback item)."
+            "Primary proposes the fitted assignment fidelity into MetaDict 'fid', the "
+            "cluster width into 'ge_s', and the complex discrimination centres into "
+            "'g_center' / 'e_center'. Post-Analysis proposes the optimised "
+            "classification radius into 'ge_radius' and the 3x3 confusion matrix "
+            "(nested list) into 'confusion_matrix' (a non-scalar, read-only "
+            "writeback item)."
         ),
         recommended=(
             "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
-            "the default analysis backend is 'pca'. Run once the qubit pi-pulse "
+            "the default analysis backend is 'pca'. Analysis also exposes histogram "
+            "log scale, T1 alignment, and an optional shared length ratio; advanced "
+            "population priors remain internal. Run once the qubit pi-pulse "
             "and the readout are both calibrated — a clean two-cluster IQ "
-            "scatter indicates good discrimination."
+            "scatter indicates good discrimination. Use Post-Analysis to inspect "
+            "the classified shots and 3x3 confusion diagnostic derived from the "
+            "primary fit."
         ),
     )
 
@@ -162,35 +147,20 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         params = req.analyze_params
         exp = GE_Exp()
         fidelity, pops, fit_result, fig = exp.analyze(
-            req.run_result, backend=params.backend
+            req.run_result,
+            backend=params.backend,
+            logscale=params.logscale,
+            align_t1=params.align_t1,
+            length_ratio=params.length_ratio,
         )
-        g_center = fit_result["g_center"]
-        e_center = fit_result["e_center"]
-        # ``pops`` (the fit's 2×2 [[p0_gg, p0_ge], [p0_eg, p0_ee]]) is the
-        # ``init_pops`` the confusion calc needs — fully derived from the primary
-        # fit, so no extra analyze parameter. ``radius=None`` lets the domain
-        # optimise ``ge_radius``. ``consider_other=False`` mirrors the notebook
-        # single-shot flow. The confusion figure is discarded here: the result
-        # displays the primary fit figure, and the matrix is shown via the JSON
-        # summary (closing it avoids leaking an open Figure).
-        confusion, ge_radius, confusion_fig = exp.calc_confusion_matrix(
-            pops,
-            g_center,
-            e_center,
-            radius=None,
-            result=req.run_result,
-            consider_other=False,
-        )
-        plt.close(confusion_fig)
         return GEAnalyzeResult(
             fidelity=fidelity,
             theta=fit_result["theta"],
             threshold=fit_result["threshold"],
             ge_s=fit_result["s"],
-            g_center=g_center,
-            e_center=e_center,
-            ge_radius=ge_radius,
-            confusion=confusion.tolist(),
+            g_center=fit_result["g_center"],
+            e_center=fit_result["e_center"],
+            init_pops=pops.tolist(),
             figure=fig,
         )
 
@@ -198,33 +168,33 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         self, analyze_result: GEAnalyzeResult, ctx: ExpContext
     ) -> GEPostAnalyzeParams:
         del analyze_result, ctx
-        # Default the post-analysis to the same backend the primary uses (pca),
-        # no manual angle.
-        return GEPostAnalyzeParams(backend="pca", angle=None)
+        return GEPostAnalyzeParams()
 
     def post_analyze(
         self,
         req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeParams],
     ) -> GEPostAnalyzeResult:
-        params = req.post_analyze_params
-        # ``singleshot_ge_analysis`` ignores ``backend`` when ``angle`` is given
-        # (manual rotation), so pass both through verbatim — the domain owns the
-        # precedence. ``effective_backend`` records which path actually ran.
-        fidelity, _pops, fit_result, fig = singleshot_ge_analysis(
-            req.run_result.signals,
-            angle=params.angle,
-            backend=params.backend,
+        primary = req.analyze_result
+        exp = GE_Exp()
+        confusion = exp.calc_confusion_matrix(
+            np.asarray(primary.init_pops, dtype=np.float64),
+            primary.g_center,
+            primary.e_center,
+            primary.ge_s,
+            radius=None,
+            result=req.run_result,
+            consider_other=False,
         )
-        effective_backend = "manual" if params.angle is not None else params.backend
+        figure = exp.plot_confusion_matrix(
+            confusion,
+            primary.g_center,
+            primary.e_center,
+            result=req.run_result,
+        )
         return GEPostAnalyzeResult(
-            backend=effective_backend,
-            fidelity=fidelity,
-            theta=fit_result["theta"],
-            threshold=fit_result["threshold"],
-            ge_s=fit_result["s"],
-            g_center=fit_result["g_center"],
-            e_center=fit_result["e_center"],
-            figure=fig,
+            ge_radius=confusion.radius,
+            confusion=confusion.matrix.tolist(),
+            figure=figure,
         )
 
     def get_writeback_items(
@@ -257,20 +227,19 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
                 description="Single-shot |e> IQ cluster centre (complex)",
                 proposed_value=result.e_center,
             ),
-            # ``ge_radius`` is the per-qubit classification radius downstream
-            # single-shot experiments consume — a clean scalar, mirrors the
-            # notebook's md.ge_radius.
+        ]
+
+    def get_post_writeback_items(
+        self,
+        req: PostWritebackRequest[GERunResult, GEAnalyzeResult, T_PostAnalyzeResult],
+    ) -> Sequence[WritebackItem]:
+        result = cast(GEPostAnalyzeResult, req.post_analyze_result)
+        return [
             MetaDictWriteback(
                 target_name="ge_radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
             ),
-            # ``confusion_matrix`` is the 3×3 prepared→measured confusion matrix
-            # as a nested ``list[list[float]]`` (md key mirrors the notebook's
-            # md.confusion_matrix). It is a non-scalar md value: MetaDict already
-            # stores nested lists (it cannot hold ndarray — dumps tolist(), loads
-            # raw), the value is JSON-safe so the wire carries it as-is, and the
-            # writeback UI renders it read-only (derived value, applied verbatim).
             MetaDictWriteback(
                 target_name="confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",

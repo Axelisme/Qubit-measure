@@ -1,21 +1,47 @@
-"""Per-experiment tab widget for the measure-gui main window."""
+"""Per-experiment tab widget for the measure-gui main window - capability driven."""
 
 from __future__ import annotations
 
+import dataclasses
 import logging
-from typing import TYPE_CHECKING, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from zcu_tools.gui.app.main.adapter import AnalysisMode
+from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.ui.artifact_save_center import (
+    ArtifactKind,
+    ArtifactSaveCenter,
+)
 from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.cfg.fields import _CollapsibleSection
+from zcu_tools.gui.widgets.cfg.fields.containers import _CollapsibleSection
 
 logger = logging.getLogger(__name__)
 
+# Approved prototype blue primary treatment (A3)
+_BLUE_PRIMARY_STYLESHEET = (
+    "QPushButton#primaryButton { background-color: #286ac7; color: white; "
+    "font-weight: 600; border: 1px solid #205aa9; border-radius: 4px; }"
+    "QPushButton#primaryButton:disabled { background-color: #a0b8d9; color: #e6edf7; border-color: #8da6c9; }"
+    "QPushButton#primaryButton:hover:!disabled { background-color: #2f76dc; }"
+)
+_RED_STOP_STYLESHEET = (
+    "background-color: #f44336; color: white; font-weight: bold; "
+    "border: 1px solid #d32f2f; border-radius: 4px;"
+)
+_GREEN_RESET_STYLESHEET = (
+    "QPushButton#resetButton { background-color: #2e8b57; color: white; "
+    "font-weight: 600; border: 1px solid #246f46; border-radius: 4px; }"
+    "QPushButton#resetButton:hover:!disabled { background-color: #369d65; }"
+    "QPushButton#resetButton:pressed:!disabled { background-color: #226b43; }"
+    "QPushButton#resetButton:disabled { background-color: #9dbdaa; color: #eef5f0; "
+    "border-color: #8eab99; }"
+)
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
@@ -25,22 +51,22 @@ from qtpy.QtGui import (  # type: ignore[attr-defined]
     QPen,
 )
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QTabWidget,
-    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from .analyze_form import AnalyzeFormWidget
+from .data_figure_preview_gallery import DataFigurePreviewGallery
 from .writeback_widget import WritebackWidget
 
 if TYPE_CHECKING:
@@ -48,6 +74,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import WritebackItem
     from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
     from zcu_tools.gui.app.main.services import TabSnapshot
 
 
@@ -66,13 +93,15 @@ class TabActions(Protocol):
 
     def apply_writeback(self, tab_id: str) -> None: ...
 
+    def apply_post_writeback(self, tab_id: str) -> None: ...
+
     def save_data(self, tab_id: str) -> None: ...
 
     def save_image(self, tab_id: str) -> None: ...
 
-    def save_result(self, tab_id: str) -> None: ...
-
     def save_post_image(self, tab_id: str) -> None: ...
+
+    def save_all(self, tab_id: str) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -132,27 +161,123 @@ class _PanelEdgeHandle(QToolButton):
             painter.drawLine(center_x + 2, center_y + 7, center_x - 2, center_y)
 
 
+class _LedgerSection(QWidget):
+    """App-local single-column ledger section with whole-row folding.
+
+    Header row (blank or text area) toggles the body; the action bar stays
+    fixed outside the scroll area. Presentation is app-local; the shared tree
+    adapter remains the only cross-module structural seam (S1).
+    """
+
+    def __init__(
+        self,
+        title: str,
+        parent: QWidget | None = None,
+        *,
+        collapsed: bool = False,
+    ) -> None:
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Header — whole row is clickable (S1/A2).
+        self._header = QWidget()
+        self._header.setCursor(Qt.PointingHandCursor)  # type: ignore[attr-defined]
+        self._header.setObjectName("ledgerHeader")
+        header_row = QHBoxLayout(self._header)
+        header_row.setContentsMargins(4, 4, 4, 4)
+        header_row.setSpacing(6)
+
+        self._toggle_btn = QPushButton("▼" if not collapsed else "▶")
+        self._toggle_btn.setFixedWidth(16)
+        self._toggle_btn.setFlat(True)
+        self._toggle_btn.setCheckable(True)
+        self._toggle_btn.setChecked(not collapsed)
+        header_row.addWidget(self._toggle_btn)
+
+        self._title_label = QLabel(f"<b>{title}</b>")
+        font = self._title_label.font()
+        font.setPixelSize(13)
+        self._title_label.setFont(font)
+        header_row.addWidget(self._title_label, stretch=1)
+
+        # Body
+        self._body = QWidget()
+        self.body_layout = QVBoxLayout(self._body)
+        self.body_layout.setContentsMargins(8, 2, 0, 2)
+        self.body_layout.setSpacing(2)
+
+        outer.addWidget(self._header)
+        outer.addWidget(self._body)
+
+        self._collapsed = collapsed
+        self._body.setVisible(not collapsed)
+
+        # Whole header row toggles; button also toggles (no double toggle because
+        # click on button goes to button widget, not header).
+        self._toggle_btn.clicked.connect(self._toggle)
+        # Install header click handler via event filter on header.
+        self._header.mouseReleaseEvent = self._on_header_mouse_release  # type: ignore[method-assign]
+
+    def _on_header_mouse_release(self, event) -> None:
+        try:
+            if event.button() == Qt.LeftButton:  # type: ignore[attr-defined]
+                self._toggle()
+                event.accept()
+                return
+        except Exception:
+            pass
+        # Fallback to default
+        QWidget.mouseReleaseEvent(self._header, event)
+
+    def _toggle(self, *_: object) -> None:
+        self._collapsed = not self._collapsed
+        self._body.setVisible(not self._collapsed)
+        self._toggle_btn.setText("▶" if self._collapsed else "▼")
+        self._toggle_btn.setChecked(not self._collapsed)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if bool(collapsed) == self._collapsed:
+            return
+        self._toggle()
+
+    def is_collapsed(self) -> bool:
+        return self._collapsed
+
+
 class ExpTabWidget(QWidget):
-    """A single experiment tab: Config | Plot | Result areas."""
+    """A single experiment tab with capability-driven subtabs and independent figure panes."""
 
     def __init__(
         self,
         tab_id: str,
         ctrl: Controller,
+        capabilities: AdapterCapabilities,
         parent: QWidget | None = None,
         *,
         dialog_presenter: DialogPresenter | None = None,
+        preview_renderer: Any | None = None,
     ) -> None:
         super().__init__(parent)
+        if not isinstance(capabilities, AdapterCapabilities):
+            raise TypeError(
+                f"ExpTabWidget requires AdapterCapabilities, got {type(capabilities).__name__!r}"
+            )
         self.tab_id = tab_id
         self._ctrl = ctrl
+        self._capabilities = capabilities
+        self._has_analysis = capabilities.analysis is not AnalysisMode.NONE
+        self._has_post = bool(capabilities.post_analysis)
         self._dialog_presenter = dialog_presenter or QtDialogPresenter()
         self._progress_control = ctrl.progress_control
-        # editor_id of this tab's shared cfg-editor session (set on bind, when
-        # the cfg_form's live model exists). Exposed to agents via tab.snapshot.
+        # editor_id of this tab's shared cfg-editor session
         self._cfg_editor_id: str | None = None
+        self._schema_cb: Callable[[CfgSchema], None] | None = None
         # The action boundary is retained for Reset; button slots close over it.
         self._actions: TabActions | None = None
+        # Optional injected Figure->PNG renderer for Data preview (tests)
+        self._preview_renderer = preview_renderer
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -169,9 +294,7 @@ class ExpTabWidget(QWidget):
         self.progress_stack = ProgressStack()
         root_layout.addWidget(self.progress_stack, stretch=0)
 
-        # Subscribe once by our own tab_id (the run operation's owner); the
-        # listener re-reads the live bars on every change and follows the tab
-        # across successive runs. Disposed in teardown.
+        # Subscribe once by our own tab_id
         self._progress_unsub = self._progress_control.attach_progress(
             self.tab_id, self._on_progress_changed
         )
@@ -186,173 +309,162 @@ class ExpTabWidget(QWidget):
         self._left_panel_collapsed = False
         self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
-        # ── Left pane: QTabWidget with Config tab and Analysis tab ───────
+        # ── Left pane: QTabWidget with capability-driven tabs ──────
         self._left_tabs = QTabWidget()
 
         self._left_edge_handle = _PanelEdgeHandle(self._content_widget)
         self._left_edge_handle.clicked.connect(self._toggle_left_panel)
 
-        # ── Tab 0: Config ────────────────────────────────────────────────
-        config_panel = QWidget()
-        config_layout = QVBoxLayout(config_panel)
-        config_layout.setContentsMargins(4, 4, 4, 4)
-        config_layout.setSpacing(2)
-
-        # Thin top strip: Reset sits right-aligned at the top of the cfg area,
-        # visually de-emphasised (flat, small font) to reduce accidental clicks.
-        # A spacer pushes it to the right; the strip adds only minimal height.
-        cfg_top_strip = QHBoxLayout()
-        cfg_top_strip.setContentsMargins(0, 0, 0, 0)
-        cfg_top_strip.addStretch()
-        self.reset_btn = QPushButton("Reset")
-        self.reset_btn.setFlat(True)
-        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
-        # Smaller font signals secondary action (Run is the primary action below).
-        reset_font = self.reset_btn.font()
-        reset_font.setPointSize(max(reset_font.pointSize() - 1, 7))
-        self.reset_btn.setFont(reset_font)
-        cfg_top_strip.addWidget(self.reset_btn)
-        config_layout.addLayout(cfg_top_strip)
+        # ── Tab: Run (always) ──────────────────────────────────────
+        run_panel = QWidget()
+        run_layout = QVBoxLayout(run_panel)
+        run_layout.setContentsMargins(4, 4, 4, 4)
+        run_layout.setSpacing(2)
 
         self.cfg_form = CfgFormWidget(
-            text_input_enhancer=make_value_source_input_enhancer(ctrl)
+            text_input_enhancer=make_value_source_input_enhancer(ctrl),
         )
-        config_layout.addWidget(self.cfg_form, stretch=1)
+        run_layout.addWidget(self.cfg_form, stretch=1)
 
+        # Run action row: idle Reset 20% / Run 80%; running hides Reset and
+        # lets Stop fill the row. Presentation changes do not alter commands.
+        self._run_action_bar = QFrame()
+        self._run_action_bar.setObjectName("runActionBar")
+        self._run_action_bar.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
+        bar_layout = QHBoxLayout(self._run_action_bar)
+        self._run_action_layout = bar_layout
+        bar_layout.setContentsMargins(8, 6, 8, 6)
+        bar_layout.setSpacing(6)
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setObjectName("resetButton")
+        self.reset_btn.setStyleSheet(_GREEN_RESET_STYLESHEET)
+        self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
+        self.reset_btn.setFixedHeight(30)
+        self.reset_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )  # type: ignore[attr-defined]
+        bar_layout.addWidget(self.reset_btn, stretch=20)
         self.run_btn = QPushButton("Run")
+        self.run_btn.setObjectName("primaryButton")
         self.run_btn.setFixedHeight(30)
-        config_layout.addWidget(self.run_btn)
-        self._left_tabs.addTab(config_panel, "Config")
+        self.run_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )  # type: ignore[attr-defined]
+        self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+        bar_layout.addWidget(self.run_btn, stretch=80)
+        run_layout.addWidget(self._run_action_bar)
+        self._run_panel = run_panel
+        self._left_tabs.addTab(run_panel, "Run")
 
-        # ── Tab 1: Analysis ──────────────────────────────────────────────
-        analysis_scroll = QScrollArea()
-        analysis_scroll.setWidgetResizable(True)
-        analysis_inner = QWidget()
-        analysis_layout = QVBoxLayout(analysis_inner)
-        analysis_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+        # ── Tab: Analysis (only when analysis capability present) ──
+        if self._has_analysis:
+            # Single-column 13 px ledger with whole-header folding; Analyze sits
+            # immediately after params and before Writeback preview (A4).
+            analysis_container = QWidget()
+            analysis_outer = QVBoxLayout(analysis_container)
+            analysis_outer.setContentsMargins(0, 0, 0, 0)
+            analysis_outer.setSpacing(0)
 
-        self.load_data_btn = QPushButton("Load Data...")
-        analysis_layout.addWidget(self.load_data_btn)
+            analysis_scroll = QScrollArea()
+            analysis_scroll.setWidgetResizable(True)
+            analysis_scroll.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
+            analysis_inner = QWidget()
+            analysis_layout = QVBoxLayout(analysis_inner)
+            analysis_layout.setContentsMargins(4, 4, 4, 4)
+            analysis_layout.setSpacing(4)
+            analysis_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
-        # Analyze params group
-        self._analyze_section = _CollapsibleSection(
-            "Analysis", collapsible=True, collapsed=False
-        )
-        self.analyze_form = AnalyzeFormWidget()
-        self._analyze_section.body_layout.addWidget(self.analyze_form)
-        analysis_layout.addWidget(self._analyze_section)
-        self.analyze_btn = QPushButton("Analyze")
-        analysis_layout.addWidget(self.analyze_btn)
+            self._analyze_section = _LedgerSection(
+                "Analysis parameters", collapsed=False
+            )
+            self.analyze_form = AnalyzeFormWidget()
+            font = self.analyze_form.font()
+            font.setPixelSize(13)
+            self.analyze_form.setFont(font)
+            self._analyze_section.body_layout.addWidget(self.analyze_form)
+            analysis_layout.addWidget(self._analyze_section)
 
-        self.writeback_section = _CollapsibleSection(
-            "Writeback", collapsible=True, collapsed=False
-        )
-        self.writeback_widget = WritebackWidget(self._ctrl)
-        self.writeback_section.body_layout.addWidget(self.writeback_widget)
-        self.writeback_section.setVisible(False)
-        analysis_layout.addWidget(self.writeback_section)
+            # Analyze immediately below params and before Writeback preview,
+            # occupying 100% of available content width (A6). Stays enabled
+            # per availability/busy and retains blue primary when idle.
+            self.analyze_btn = QPushButton("Analyze")
+            self.analyze_btn.setObjectName("primaryButton")
+            self.analyze_btn.setFixedHeight(30)
+            self.analyze_btn.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )  # type: ignore[attr-defined]
+            self.analyze_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+            analysis_layout.addWidget(self.analyze_btn)
 
-        # Save group
-        save_section = _CollapsibleSection("Save", collapsible=True, collapsed=False)
-        save_layout = save_section.form
+            self.writeback_section = _LedgerSection(
+                "Writeback preview", collapsed=False
+            )
+            self.writeback_widget = WritebackWidget(
+                self._ctrl, tab_id=self.tab_id, pane="analysis"
+            )
+            self.writeback_section.body_layout.addWidget(self.writeback_widget)
+            self.writeback_section.setVisible(False)
+            analysis_layout.addWidget(self.writeback_section)
 
-        data_path_row = QHBoxLayout()
-        self._data_path_edit = QLineEdit()
-        self._data_path_edit.setPlaceholderText("/tmp/data")
-        data_path_row.addWidget(self._data_path_edit)
-        browse_data_btn = QPushButton("Browse…")
-        browse_data_btn.clicked.connect(self._on_browse_data_path)
-        data_path_row.addWidget(browse_data_btn)
-        save_layout.addRow("Data path:", data_path_row)
+            analysis_layout.addStretch()
+            analysis_scroll.setWidget(analysis_inner)
+            analysis_outer.addWidget(analysis_scroll, stretch=1)
 
-        image_path_row = QHBoxLayout()
-        self._image_path_edit = QLineEdit()
-        self._image_path_edit.setPlaceholderText("/tmp/image.png")
-        image_path_row.addWidget(self._image_path_edit)
-        browse_image_btn = QPushButton("Browse…")
-        browse_image_btn.clicked.connect(self._on_browse_image_path)
-        image_path_row.addWidget(browse_image_btn)
-        save_layout.addRow("Image path:", image_path_row)
+            self._analysis_panel = analysis_container
+            self._analysis_tab_index = self._left_tabs.addTab(
+                analysis_container, "Analysis"
+            )
+        # ── Tab: Post-Analysis (only when post capability true) ────
+        if self._has_post:
+            post_scroll = QScrollArea()
+            post_scroll.setWidgetResizable(True)
+            post_inner = QWidget()
+            post_layout = QVBoxLayout(post_inner)
+            post_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
 
-        self._comment_edit = QTextEdit()
-        self._comment_edit.setPlaceholderText("Optional comment…")
-        self._comment_edit.setFixedHeight(60)
-        save_layout.addRow("Comment:", self._comment_edit)
+            self._post_analyze_section = _CollapsibleSection(
+                "Post-Analysis", collapsible=True, collapsed=False
+            )
+            self.post_analyze_form = AnalyzeFormWidget()
+            self._post_analyze_section.body_layout.addWidget(self.post_analyze_form)
+            post_layout.addWidget(self._post_analyze_section)
 
-        btn_row = QHBoxLayout()
-        self.save_data_btn = QPushButton("Save Data")
-        self.save_image_btn = QPushButton("Save Image")
-        self.save_result_btn = QPushButton("Save Result")
-        btn_row.addWidget(self.save_data_btn)
-        btn_row.addWidget(self.save_image_btn)
-        btn_row.addWidget(self.save_result_btn)
-        save_layout.addRow("", btn_row)
+            # Gate hint shown until a primary analyze result exists (form/Run disabled).
+            self._post_gate_label = QLabel("Run analyze first to enable post-analysis.")
+            self._post_gate_label.setWordWrap(True)
+            self._post_gate_label.setStyleSheet("color: gray;")
+            post_layout.addWidget(self._post_gate_label)
 
-        analysis_layout.addWidget(save_section)
-        analysis_layout.addStretch()
+            self.post_analyze_btn = QPushButton("Run Post-Analysis")
+            post_layout.addWidget(self.post_analyze_btn)
 
-        analysis_scroll.setWidget(analysis_inner)
-        self._left_tabs.addTab(analysis_scroll, "Analysis")
+            # Post writeback
+            self.post_writeback_section = _CollapsibleSection(
+                "Writeback", collapsible=True, collapsed=False
+            )
+            self.post_writeback_widget = WritebackWidget(
+                self._ctrl, tab_id=self.tab_id, pane="post_analysis"
+            )
+            self.post_writeback_section.body_layout.addWidget(
+                self.post_writeback_widget
+            )
+            self.post_writeback_section.setVisible(False)
+            post_layout.addWidget(self.post_writeback_section)
 
-        # ── Tab 2: Post-Analysis ─────────────────────────────────────────
-        # A second analysis layer that runs on top of the primary analyze result
-        # (e.g. single-shot multi-backend discrimination). Only adapters declaring
-        # ``capabilities.post_analysis`` enable it; for the rest the whole sub-tab
-        # is hidden. The post figure renders into the *shared* right-pane container
-        # (the same one run/analyze use) — the container shows the most recently
-        # produced figure, so the post layer never gets a private plot stack.
-        post_scroll = QScrollArea()
-        post_scroll.setWidgetResizable(True)
-        post_inner = QWidget()
-        post_layout = QVBoxLayout(post_inner)
-        post_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+            post_layout.addStretch()
+            post_scroll.setWidget(post_inner)
+            self._post_panel = post_scroll
+            self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
 
-        self._post_analyze_section = _CollapsibleSection(
-            "Post-Analysis", collapsible=True, collapsed=False
-        )
-        self.post_analyze_form = AnalyzeFormWidget()
-        self._post_analyze_section.body_layout.addWidget(self.post_analyze_form)
-        post_layout.addWidget(self._post_analyze_section)
+        # ── Tab: Data (always) — save center ──────────────────────
+        self._save_center = ArtifactSaveCenter(self.tab_id, capabilities)
+        save_scroll = QScrollArea()
+        save_scroll.setWidgetResizable(True)
+        save_scroll.setWidget(self._save_center)
+        self._save_panel = save_scroll
+        self._left_tabs.addTab(save_scroll, "Data")
 
-        # Gate hint shown until a primary analyze result exists (form/Run disabled).
-        self._post_gate_label = QLabel("Run analyze first to enable post-analysis.")
-        self._post_gate_label.setWordWrap(True)
-        self._post_gate_label.setStyleSheet("color: gray;")
-        post_layout.addWidget(self._post_gate_label)
-
-        self.post_analyze_btn = QPushButton("Run Post-Analysis")
-        post_layout.addWidget(self.post_analyze_btn)
-
-        # Save group for the post layer — mirrors the primary Save section but
-        # image-only: the post figure (``tab.post_figure``) is the thing to save;
-        # there is no separate post data file (it shares the run result's data).
-        post_save_section = _CollapsibleSection(
-            "Save", collapsible=True, collapsed=False
-        )
-        post_save_layout = post_save_section.form
-
-        post_image_path_row = QHBoxLayout()
-        self._post_image_path_edit = QLineEdit()
-        self._post_image_path_edit.setPlaceholderText("/tmp/post_image.png")
-        post_image_path_row.addWidget(self._post_image_path_edit)
-        browse_post_image_btn = QPushButton("Browse…")
-        browse_post_image_btn.clicked.connect(self._on_browse_post_image_path)
-        post_image_path_row.addWidget(browse_post_image_btn)
-        post_save_layout.addRow("Image path:", post_image_path_row)
-
-        self.post_save_image_btn = QPushButton("Save Image")
-        post_save_layout.addRow("", self.post_save_image_btn)
-
-        post_layout.addWidget(post_save_section)
-        post_layout.addStretch()
-
-        post_scroll.setWidget(post_inner)
-        self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
-
-        # ── Tab 3: Guide ─────────────────────────────────────────────────
-        # Read-only orientation for this adapter (behavior / expects / writeback
-        # / recommended). Static content — filled once at tab creation from the
-        # adapter's AdapterGuide; no subscription/refresh needed.
+        # ── Tab: Guide (always) ──────────────────────────────────
         guide_scroll = QScrollArea()
         guide_scroll.setWidgetResizable(True)
         guide_label = QLabel()
@@ -362,45 +474,91 @@ class ExpTabWidget(QWidget):
         guide_label.setContentsMargins(8, 8, 8, 8)
         guide_label.setText(self._render_guide_html())
         guide_scroll.setWidget(guide_label)
+        self._guide_panel = guide_scroll
         self._left_tabs.addTab(guide_scroll, "Guide")
 
         splitter.addWidget(self._left_tabs)
 
-        # ── Right pane: Plot ─────────────────────────────────────────────
+        # ── Right pane: per-pane figure containers ────────────────
         plot_panel = QWidget()
-        # Kept as an attribute so the feedback dock host can insert the panel
-        # below the figure (mount_feedback_panel inserts it at index 1, directly
-        # under the plot stack).
         self._plot_layout = QVBoxLayout(plot_panel)
         self._plot_layout.setContentsMargins(0, 0, 0, 0)
+        self._right_stack = QStackedWidget()
 
-        self._plot_stack = QStackedWidget()
+        # Run figure pane (always)
+        self._run_stack = QStackedWidget()
+        self._run_placeholder = QLabel("(no plot yet)")
+        self._run_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._run_stack.addWidget(self._run_placeholder)
+        self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
 
-        self._plot_placeholder = QLabel("(no plot yet)")
-        self._plot_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-        self._plot_stack.addWidget(self._plot_placeholder)
-        self._figure_container = FigureContainer(
-            self._plot_stack, self._plot_placeholder
+        # Analysis figure pane (only when analysis present)
+        if self._has_analysis:
+            self._analysis_stack = QStackedWidget()
+            self._analysis_placeholder = QLabel("(no plot yet)")
+            self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+            self._analysis_stack.addWidget(self._analysis_placeholder)
+            self._analysis_container = FigureContainer(
+                self._analysis_stack, self._analysis_placeholder
+            )
+
+        # Post figure pane (only when post present)
+        if self._has_post:
+            self._post_stack = QStackedWidget()
+            self._post_placeholder = QLabel("(no plot yet)")
+            self._post_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+            self._post_stack.addWidget(self._post_placeholder)
+            self._post_container = FigureContainer(
+                self._post_stack, self._post_placeholder
+            )
+
+        # Data preview gallery — Variant A stacked rail (S1, S3)
+        self._data_gallery = DataFigurePreviewGallery(
+            self._capabilities,
+            renderer=self._preview_renderer,  # type: ignore[arg-type]
         )
 
-        self._plot_layout.addWidget(self._plot_stack, stretch=1)
+        # Placeholder for Guide (no figure) — Data now shows gallery (S4)
+        self._right_placeholder = QLabel("(no plot yet)")
+        self._right_placeholder.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+
+        self._right_stack.addWidget(self._run_stack)
+        if self._has_analysis:
+            self._right_stack.addWidget(self._analysis_stack)
+        if self._has_post:
+            self._right_stack.addWidget(self._post_stack)
+        self._right_stack.addWidget(self._data_gallery)
+        self._right_stack.addWidget(self._right_placeholder)
+
+        self._plot_layout.addWidget(self._right_stack, stretch=1)
         splitter.addWidget(plot_panel)
 
         splitter.setCollapsible(0, True)
         self._update_left_panel_controls()
         self._schedule_handle_layout()
+        # Right pane follows left selection
+        self._left_tabs.currentChanged.connect(self._on_left_tab_changed)
+        # Initially show Run
+        self._on_left_tab_changed(self._left_tabs.currentIndex())
+
+    # ------------------------------------------------------------------
+    # Capability helpers
+    # ------------------------------------------------------------------
+
+    def _require_analysis(self) -> None:
+        if not self._has_analysis:
+            raise RuntimeError(f"tab {self.tab_id!r} does not support analysis")
+
+    def _require_post(self) -> None:
+        if not self._has_post:
+            raise RuntimeError(f"tab {self.tab_id!r} does not support post-analysis")
 
     # ------------------------------------------------------------------
     # Docked feedback panel host (ADR-0025 C3)
     # ------------------------------------------------------------------
 
     def mount_feedback_panel(self, panel: QWidget) -> None:
-        """Dock the feedback panel directly below the figure (idempotent).
-
-        Inserts ``panel`` into the plot column at index 1 — right under the plot
-        stack (index 0). Re-mounting the same panel is a no-op; mounting a
-        different panel first unmounts the current one.
-        """
+        """Dock the feedback panel directly below the figure (idempotent)."""
         if self._plot_layout.indexOf(panel) != -1:
             return
         self._plot_layout.insertWidget(1, panel)
@@ -419,12 +577,7 @@ class ExpTabWidget(QWidget):
         self._schedule_handle_layout()
 
     def _render_guide_html(self) -> str:
-        """Render this adapter's static AdapterGuide as read-only rich text.
-
-        Pulled once at construction from the adapter (no tab/context needed).
-        Empty sections are dropped; a guide with no content at all falls back to
-        an honest 'not written yet' line.
-        """
+        """Render this adapter's static AdapterGuide as read-only rich text."""
         import html
 
         adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
@@ -508,8 +661,6 @@ class ExpTabWidget(QWidget):
         if not self._left_panel_collapsed:
             sizes = self._splitter.sizes()
             if sizes[0] > 0:
-                # In-memory only — persisted to disk at close (the caretaker
-                # captures the active tab's width via current_left_panel_width).
                 self._splitter_left_saved = sizes[0]
         self._schedule_handle_layout()
 
@@ -519,28 +670,49 @@ class ExpTabWidget(QWidget):
     # ── attach / detach (whole-tab, snapshot-driven) ──────────────────────
 
     def attach(self, snapshot: TabSnapshot, actions: TabActions) -> None:
-        """Bring this tab widget to life from one snapshot (mirrors
-        ``CfgFormWidget.attach`` at the whole-tab scale): seed every sub-view
-        from the snapshot's live fields, then wire the controller signals.
-        Paired with :meth:`detach`. The snapshot is always a render snapshot
-        (live fields populated)."""
-        self._populate_cfg(snapshot.cfg_schema, self._ctrl)
-        if snapshot.analyze_params is not None and self.has_analyze_params():
-            self.analyze_form.populate_values(snapshot.analyze_params)
-        if snapshot.post_analyze_params is not None and self.has_post_analyze_params():
-            self.post_analyze_form.populate_values(snapshot.post_analyze_params)
-        if snapshot.save_paths is not None:
-            self.set_save_paths(
-                snapshot.save_paths.data_path, snapshot.save_paths.image_path
+        """Bring this tab widget to life from one snapshot."""
+        if snapshot.capabilities is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no capabilities"
             )
+        if snapshot.capabilities != self._capabilities:
+            raise RuntimeError(
+                f"capability mismatch for tab {self.tab_id!r}: "
+                f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
+            )
+        self._populate_cfg(snapshot.cfg_schema, self._ctrl)
+        if (
+            self._has_analysis
+            and snapshot.analysis is not None
+            and snapshot.analysis.params is not None
+            and self.has_analyze_params()
+        ):
+            self.analyze_form.populate_values(snapshot.analysis.params)
+        if self._has_post:
+            post_params = (
+                snapshot.post_analysis.params
+                if snapshot.post_analysis is not None
+                else None
+            )
+            self.sync_post_analyze_params(post_params)
+        else:
+            if (
+                snapshot.post_analysis is not None
+                and snapshot.post_analysis.params is not None
+            ):
+                raise RuntimeError(
+                    f"tab {self.tab_id!r} received post params but does not support post-analysis"
+                )
+        assert snapshot.paths is not None
+        self.set_data_path(snapshot.paths.data.path or "")
+        if self._has_analysis:
+            self.set_analysis_image_path(snapshot.paths.analysis_image.path or "")
+        if self._has_post:
+            self.set_post_image_path(snapshot.paths.post_analysis_image.path or "")
         self.update_interaction_state(snapshot)
         self._bind_to_controller(actions)
 
     def _populate_cfg(self, schema: CfgSchema, ctrl: Controller) -> None:
-        # The cfg LiveModel is owned by the CfgEditorService (ADR-0008): open a
-        # gc=False session seeded from the committed schema, then attach the
-        # widget to the service-owned model. tab_id is the owner key so the
-        # editor_id is discoverable (tab.snapshot) and the agent can drive it.
         editor_id, _ = ctrl.open_seeded_cfg_editor(
             schema, gc=False, owner_key=self.tab_id
         )
@@ -550,149 +722,234 @@ class ExpTabWidget(QWidget):
     # ── populate / refresh helpers ────────────────────────────────────────
 
     def populate_analyze_params(self, instance: object) -> None:
+        self._require_analysis()
         self.analyze_form.populate(instance)
 
     def read_analyze_params(self) -> object:
+        self._require_analysis()
         return self.analyze_form.read_params()
 
     def has_analyze_params(self) -> bool:
+        if not self._has_analysis:
+            return False
         return self.analyze_form.has_params()
 
     def populate_post_analyze_params(self, instance: object) -> None:
-        self.post_analyze_form.populate(instance)
+        self._require_post()
+        self.sync_post_analyze_params(instance)
+
+    def sync_post_analyze_params(self, instance: object | None) -> None:
+        self._require_post()
+        self.post_analyze_form.sync(instance)
+        has_fields = instance is not None and bool(
+            dataclasses.fields(cast(Any, instance))
+        )
+        self._post_analyze_section.setVisible(has_fields)
 
     def read_post_analyze_params(self) -> object:
+        self._require_post()
         return self.post_analyze_form.read_params()
 
     def has_post_analyze_params(self) -> bool:
+        if not self._has_post:
+            return False
         return self.post_analyze_form.has_params()
 
     def update_writeback_items(self, items: list[WritebackItem]) -> None:
+        self._require_analysis()
         self.writeback_widget.populate(items)
         self.writeback_section.setVisible(len(items) > 0)
 
-    def _on_browse_data_path(self) -> None:
-        # The GUI save path helper reserves .hdf5 destinations, so show that
-        # here — a .h5 filter would mislead.
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save data file", "", "HDF5 files (*.hdf5);;All files (*)"
-        )
-        if path:
-            self._data_path_edit.setText(path)
+    def update_post_writeback_items(self, items: list[WritebackItem]) -> None:
+        self._require_post()
+        self.post_writeback_widget.populate(items)
+        self.post_writeback_section.setVisible(len(items) > 0)
 
-    def _on_browse_image_path(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save image file", "", "PNG files (*.png);;All files (*)"
-        )
-        if path:
-            self._image_path_edit.setText(path)
+    def set_data_path(self, data_path: str) -> None:
+        self._save_center.set_data_path(data_path)
 
-    def _on_browse_post_image_path(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save post-analysis image file",
-            "",
-            "PNG files (*.png);;All files (*)",
-        )
-        if path:
-            self._post_image_path_edit.setText(path)
+    def set_analysis_image_path(self, image_path: str) -> None:
+        self._require_analysis()
+        self._save_center.set_analysis_path(image_path)
 
-    def set_save_paths(self, data_path: str, image_path: str) -> None:
-        if data_path:
-            self._data_path_edit.blockSignals(True)
-            self._data_path_edit.setText(data_path)
-            self._data_path_edit.blockSignals(False)
-        if image_path:
-            self._image_path_edit.blockSignals(True)
-            self._image_path_edit.setText(image_path)
-            self._image_path_edit.blockSignals(False)
-            # Seed the post image path from the same suggestion when the user has
-            # not typed their own — the post layer saves to its own field, which
-            # follows the tab's image path until overridden.
-            if not self._post_image_path_edit.text():
-                self._post_image_path_edit.setText(image_path)
+    def set_post_image_path(self, image_path: str) -> None:
+        self._require_post()
+        self._save_center.set_post_analysis_path(image_path)
 
     def get_data_path(self) -> str:
-        return self._data_path_edit.text()
+        return self._save_center.get_data_path()
 
     def get_image_path(self) -> str:
-        return self._image_path_edit.text()
+        self._require_analysis()
+        return self._save_center.get_analysis_path()
 
     def get_post_image_path(self) -> str:
-        return self._post_image_path_edit.text()
+        self._require_post()
+        return self._save_center.get_post_analysis_path()
 
     def get_comment(self) -> str:
-        return self._comment_edit.toPlainText()
+        return self._save_center.get_comment()
+
+    # -- Data save center status delegation (S3) ------------------
+
+    def notify_save_started(self, kind: ArtifactKind) -> None:
+        """Capture pending signature for ``kind``."""
+        self._save_center.notify_save_started(kind)
+
+    def notify_save_succeeded(self, kind: ArtifactKind) -> None:
+        self._save_center.notify_save_succeeded(kind)
+
+    def notify_save_failed(self, kind: ArtifactKind) -> None:
+        self._save_center.notify_save_failed(kind)
+
+    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
+        """Apply async data terminal outcome (error None => success)."""
+        self._save_center.handle_data_finished(payload.error)
+
+    def has_unsaved_data(self) -> bool:
+        """Return True if this tab contains unsaved measurement data."""
+        return self._save_center.has_unsaved_data()
+
+    def ordered_saveable_kinds(self, snapshot: TabSnapshot) -> list[ArtifactKind]:
+        """Ordered saveable artifacts for Save All (snapshot single-fetch)."""
+        return self._save_center.ordered_saveable_kinds(snapshot)
 
     def focus_result_panel(self) -> None:
-        """Show the Analysis/Save panel for this tab."""
-        self._left_tabs.setCurrentIndex(1)
+        """Focus Analysis when supported, otherwise focus Save."""
+        if self._has_analysis:
+            self._left_tabs.setCurrentWidget(self._analysis_panel)
+            return
+        self._left_tabs.setCurrentWidget(self._save_panel)
 
-    def prepare_live_container(self) -> FigureContainer:
-        """Clear stale plot content and return the live-plot host."""
-        self.reset_plot()
-        return self._figure_container
+    # ── Figure container helpers (stable per-subtab identity S2) ──────────
+
+    def get_run_container(self) -> FigureContainer:
+        return self._run_container
+
+    def get_analysis_container(self) -> FigureContainer:
+        self._require_analysis()
+        return self._analysis_container
+
+    def get_post_container(self) -> FigureContainer:
+        self._require_post()
+        return self._post_container
+
+    def prepare_run_container(self) -> FigureContainer:
+        """Clear Run and every downstream presentation for a new run."""
+        self._run_container.clear_dynamic_canvases()
+        if self._has_analysis:
+            self._analysis_container.clear_dynamic_canvases()
+        if self._has_post:
+            self._post_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
+        return self._run_container
+
+    def prepare_analysis_container(self) -> FigureContainer:
+        """Clear Analysis presentation and return its container."""
+        self._require_analysis()
+        self._analysis_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
+        return self._analysis_container
+
+    def prepare_post_container(self) -> FigureContainer:
+        """Clear Post presentation and return its container."""
+        self.clear_post_figure()
+        return self._post_container
+
+    def clear_post_figure(self) -> None:
+        """Clear only the invalidated Post-Analysis presentation."""
+        self._require_post()
+        self._post_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
 
     def mount_interactive_widget(self, widget: QWidget) -> None:
-        """Mount an interactive analysis widget as the visible plot content."""
-        self._plot_stack.addWidget(widget)
-        self._plot_stack.setCurrentWidget(widget)
+        """Mount an interactive analysis widget as the visible plot content (analysis pane)."""
+        self._require_analysis()
+        self._analysis_stack.addWidget(widget)
+        self._analysis_stack.setCurrentWidget(widget)
+        self._right_stack.setCurrentWidget(self._analysis_stack)
 
     def unmount_interactive_widgets(self, widget_type: type[QWidget]) -> None:
-        """Remove interactive widgets of ``widget_type`` and show the placeholder."""
-        for index in reversed(range(self._plot_stack.count())):
-            widget = self._plot_stack.widget(index)
+        """Remove interactive widgets of ``widget_type`` and show placeholder in analysis pane."""
+        self._require_analysis()
+        for index in reversed(range(self._analysis_stack.count())):
+            widget = self._analysis_stack.widget(index)
             if isinstance(widget, widget_type):
-                self._plot_stack.removeWidget(widget)
+                self._analysis_stack.removeWidget(widget)
                 widget.deleteLater()
-        self._plot_stack.setCurrentWidget(self._plot_placeholder)
+        self._analysis_stack.setCurrentWidget(self._analysis_placeholder)
 
     def left_panel_width(self) -> int:
         """Return the latest expanded left-panel width for persistence."""
         return self._splitter_left_saved
 
-    def current_figure(self) -> Figure | None:
-        """Return the visible matplotlib figure, or ``None`` at the placeholder."""
+    def get_current_figure_for_pane(self, pane: str) -> Figure | None:
+        """Pane-specific figure read (run|analysis|post_analysis)."""
         from matplotlib.figure import Figure
 
-        canvas = self._plot_stack.currentWidget()
-        if canvas is None or canvas is self._plot_placeholder:
+        if pane == "run":
+            stack = self._run_stack
+            placeholder = self._run_placeholder
+        elif pane == "analysis":
+            self._require_analysis()
+            stack = self._analysis_stack  # type: ignore[attr-defined]
+            placeholder = self._analysis_placeholder  # type: ignore[attr-defined]
+        elif pane == "post_analysis":
+            self._require_post()
+            stack = self._post_stack  # type: ignore[attr-defined]
+            placeholder = self._post_placeholder  # type: ignore[attr-defined]
+        else:
+            raise ValueError(f"unknown pane {pane!r}")
+        canvas = stack.currentWidget()
+        if canvas is None or canvas is placeholder:
             return None
         figure = getattr(canvas, "figure", None)
         if not isinstance(figure, Figure):
             raise RuntimeError(f"tab {self.tab_id!r} canvas has no matplotlib figure")
         return figure
 
-    def reset_plot(self) -> None:
-        """Remove all canvases from plot_stack, revert to placeholder.
+    def clear_all_figures(self) -> None:
+        """Clear all figure panes (used for LoadData and Run start invalidation)."""
+        self._run_container.clear_dynamic_canvases()
+        if self._has_analysis:
+            self._analysis_container.clear_dynamic_canvases()
+        if self._has_post:
+            self._post_container.clear_dynamic_canvases()
+        self._refresh_data_gallery()
 
-        This is the genuine-invalidation teardown for BOTH the analyze and post
-        figures (they coexist in the same stack); it runs before each new
-        run/analyze so stale canvases never linger.
-        """
-        self._figure_container.clear_dynamic_canvases()
+    def show_run_figure(self, fig: Figure) -> None:
+        """Embed a matplotlib Figure in the Run pane."""
+        canvas = attach_existing_figure_to_container(fig, self._run_container)
+        draw = getattr(canvas, "draw", None)
+        if not callable(draw):
+            raise RuntimeError("Attached run canvas does not support draw()")
+        draw()
+        logger.debug("show_run_figure: tab_id=%r canvas set", self.tab_id)
+        self._refresh_data_gallery()
 
     def show_analysis_figure(self, fig: Figure) -> None:
-        """Embed a matplotlib Figure in the plot area and bring it to front.
-
-        The run/analyze figure (``tab.figure``) and the post-analysis figure
-        (``tab.post_figure``) are two distinct Figure objects sharing this one
-        container's QStackedWidget. They coexist as separate canvases; attaching
-        a figure only switches the stack to it (``attach_canvas`` setsCurrent),
-        it must NOT evict the other figure's canvas — doing so deletes a canvas
-        still owned by a live figure and the next attach reuses the dead wrapper.
-        Genuine teardown of both canvases happens in ``reset_plot`` (before a new
-        run/analyze) and on tab close.
-        """
-        canvas = attach_existing_figure_to_container(fig, self._figure_container)
+        """Embed a matplotlib Figure in the Analysis pane and bring it to front."""
+        self._require_analysis()
+        canvas = attach_existing_figure_to_container(fig, self._analysis_container)
         draw = getattr(canvas, "draw", None)
         if not callable(draw):
             raise RuntimeError("Attached analysis canvas does not support draw()")
         draw()
         logger.debug("show_analysis_figure: tab_id=%r canvas set", self.tab_id)
+        self._refresh_data_gallery()
+
+    def show_post_analysis_figure(self, fig: Figure) -> None:
+        """Embed a matplotlib Figure in the Post-Analysis pane."""
+        self._require_post()
+        canvas = attach_existing_figure_to_container(fig, self._post_container)
+        draw = getattr(canvas, "draw", None)
+        if not callable(draw):
+            raise RuntimeError("Attached post canvas does not support draw()")
+        draw()
+        logger.debug("show_post_analysis_figure: tab_id=%r canvas set", self.tab_id)
+        self._refresh_data_gallery()
 
     def _on_reset_cfg_clicked(self) -> None:
-        # Guard: ask before discarding — Reset is destructive (drops entire cfg).
         confirmed = self._dialog_presenter.confirm(
             self,
             "Reset config",
@@ -701,26 +958,12 @@ class ExpTabWidget(QWidget):
         )
         if not confirmed:
             return
-        # Controller regenerates + commits the adapter-default cfg (and gates a
-        # running tab); we just re-seed the form over the new committed schema.
         assert self._actions is not None, "reset clicked before bind"
         schema = self._ctrl.reset_tab_cfg(self.tab_id)
         self._reseed_cfg(schema)
         self._actions.refresh_interaction(self.tab_id)
 
     def _reseed_cfg(self, schema: CfgSchema) -> None:
-        """Swap the cfg form onto a fresh service-owned session for ``schema``.
-
-        The cfg_form widget itself is unchanged — only the LiveModel it views is
-        replaced — so the widget→controller bindings (``schema_changed`` →
-        ``_schema_cb``, ``validity_changed`` → ``_validity_cb`` set in
-        ``_bind_to_controller``) stay connected exactly once and must NOT be
-        re-connected here (that would double-fire ``update_tab_cfg``). Only the
-        model↔widget binding is rebuilt: ``detach`` drops the old one, ``attach``
-        wires the new model. ``attach`` re-emits only ``validity_changed`` (not
-        ``schema_changed``), so re-seeding does not write the default cfg back —
-        ``reset_tab_cfg`` already committed it.
-        """
         self.cfg_form.detach()
         if self._cfg_editor_id is not None:
             self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
@@ -728,26 +971,128 @@ class ExpTabWidget(QWidget):
         editor_id, _ = self._ctrl.open_seeded_cfg_editor(
             schema, gc=False, owner_key=self.tab_id
         )
-        self._cfg_editor_id = editor_id
+        self.attach_cfg_editor(editor_id)
+
+    def attach_cfg_editor(self, editor_id: str) -> None:
+        """Attach the owner's published session without creating another draft."""
+        if self._ctrl.editor_id_for_owner(self.tab_id) != editor_id:
+            raise RuntimeError("Cannot attach a retired cfg editor")
+        self.cfg_form.detach()
+        if self._schema_cb is not None:
+            self.cfg_form.schema_changed.disconnect(self._schema_cb)
+            self._schema_cb = None
+        self._cfg_editor_id = None
         self.cfg_form.attach(self._ctrl.get_cfg_editor_draft(editor_id))
+        self._cfg_editor_id = editor_id
+        if self._actions is not None:
+            self._connect_cfg_schema()
+
+    def _connect_cfg_schema(self) -> None:
+        editor_id = self._cfg_editor_id
+        assert editor_id is not None
+
+        def schema_cb(schema: CfgSchema) -> None:
+            if (
+                self._cfg_editor_id == editor_id
+                and self._ctrl.editor_id_for_owner(self.tab_id) == editor_id
+            ):
+                self._ctrl.update_tab_cfg(self.tab_id, schema)
+
+        self._schema_cb = schema_cb
+        self.cfg_form.schema_changed.connect(schema_cb)
+
+    def _is_data_visible(self) -> bool:
+        return self._left_tabs.currentWidget() is self._save_panel
+
+    def _refresh_data_gallery(self) -> None:
+        """Refresh Data gallery from current pane figures when Data is visible (S2)."""
+        if not hasattr(self, "_data_gallery"):
+            return
+        if not self._is_data_visible():
+            return
+        try:
+            run_fig = self.get_current_figure_for_pane("run")
+        except Exception:
+            run_fig = None
+        if self._has_analysis:
+            try:
+                ana_fig = self.get_current_figure_for_pane("analysis")
+            except Exception:
+                ana_fig = None
+        else:
+            ana_fig = None
+        if self._has_post:
+            try:
+                post_fig = self.get_current_figure_for_pane("post_analysis")
+            except Exception:
+                post_fig = None
+        else:
+            post_fig = None
+        try:
+            self._data_gallery.update_figures(run_fig, ana_fig, post_fig)
+        except Exception:
+            logger.exception("failed to refresh data gallery")
+
+    def _on_left_tab_changed(self, index: int) -> None:
+        """Switch right pane to match left subtab (S4).
+
+        Data → gallery (with snapshot refresh), Guide → placeholder,
+        Run/Analysis/Post → their source stacks.
+        """
+        widget = self._left_tabs.widget(index)
+        if widget is self._run_panel:
+            self._right_stack.setCurrentWidget(self._run_stack)
+            return
+        if self._has_analysis and widget is self._analysis_panel:
+            self._right_stack.setCurrentWidget(self._analysis_stack)
+            return
+        if self._has_post and widget is self._post_panel:
+            self._right_stack.setCurrentWidget(self._post_stack)
+            return
+        if widget is self._save_panel:
+            self._refresh_data_gallery()
+            self._right_stack.setCurrentWidget(self._data_gallery)
+            # Viewport-driven mosaic must reflow by gallery's own width (S1);
+            # QStackedWidget hides inactive pages so width changes while hidden
+            # would otherwise defer resize/show until next event.
+            try:
+                self._data_gallery._arrange_cards()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            return
+        # Guide
+        self._right_stack.setCurrentWidget(self._right_placeholder)
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
-        # A render snapshot (get_tab_snapshot) always fills the live fields; only
-        # the persist/restore form leaves them None, and that never reaches here.
         assert snapshot.interaction is not None
-        assert snapshot.capabilities is not None
+        if snapshot.capabilities is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no capabilities"
+            )
+        if snapshot.capabilities != self._capabilities:
+            raise RuntimeError(
+                f"capability mismatch for tab {self.tab_id!r}: "
+                f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
+            )
         state = snapshot.interaction
         capabilities = snapshot.capabilities
         local_busy = state.is_running or state.is_analyzing or state.is_saving_data
+        # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
+            self.reset_btn.setVisible(False)
+            self._run_action_layout.setStretch(0, 0)
+            self._run_action_layout.setStretch(1, 100)
             self.run_btn.setText("Stop")
             self.run_btn.setEnabled(True)
             self.run_btn.setToolTip("Running")
-            self.run_btn.setStyleSheet(
-                "background-color: #f44336; color: white; font-weight: bold;"
-            )
+            self.run_btn.setStyleSheet(_RED_STOP_STYLESHEET)
+            self.run_btn.setObjectName("")
         else:
+            self.reset_btn.setVisible(True)
+            self._run_action_layout.setStretch(0, 20)
+            self._run_action_layout.setStretch(1, 80)
             self.run_btn.setText("Run")
+            self.run_btn.setObjectName("primaryButton")
             cfg_valid = self.cfg_form.is_valid()
             can_run = (
                 not local_busy
@@ -774,135 +1119,134 @@ class ExpTabWidget(QWidget):
                 self.run_btn.setToolTip(
                     f"Config invalid: {reason}" if reason else "Config invalid"
                 )
-            self.run_btn.setStyleSheet("")
+            # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
+            self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+            # Force style refresh for objectName/stylesheet change
+            self.run_btn.style().unpolish(self.run_btn)  # type: ignore[attr-defined]
+            self.run_btn.style().polish(self.run_btn)  # type: ignore[attr-defined]
+            self.run_btn.update()
 
         idle = not local_busy
         self.cfg_form.set_editing_enabled(idle)
         self.reset_btn.setEnabled(idle)
 
-        # Non-analysis adapters (flux_dep / power_dep) hide only the analysis
-        # widgets, NOT the whole tab — the Save section lives in this same tab and
-        # must stay reachable so any run can be saved. (Writeback is already
-        # gated by item count in update_writeback_items; hide it here too so it
-        # never lingers from a previous analysis adapter on the same tab.)
-        has_analysis = capabilities.analysis is not AnalysisMode.NONE
-        self._analyze_section.setVisible(has_analysis)
-        self.load_data_btn.setVisible(has_analysis)
-        self.analyze_btn.setVisible(has_analysis)
-        if not has_analysis:
-            self.writeback_section.setVisible(False)
-        # The second tab carries analysis widgets + Save; when analysis is hidden
-        # only Save remains, so label it accordingly instead of "Analysis".
-        self._left_tabs.setTabText(1, "Analysis" if has_analysis else "Save")
-        self.load_data_btn.setEnabled(idle and has_analysis and state.has_context)
-        self.analyze_form.setEnabled(idle and has_analysis)
-        self.analyze_btn.setEnabled(
-            idle and has_analysis and state.has_context and state.has_run_result
-        )
+        # Capability is already enforced by conditional construction; no tab visibility toggling.
+        # Branch inner controls only for present panes.
 
-        self.save_data_btn.setEnabled(
-            idle and state.has_active_context and state.has_run_result
-        )
-        self.save_image_btn.setEnabled(
-            idle and state.has_active_context and state.has_figure
-        )
-        self.save_result_btn.setEnabled(
-            idle and state.has_active_context and state.has_figure
-        )
-        self.writeback_widget.setEnabled(
-            idle and state.has_context and state.has_analyze_result
-        )
-
-        # Post-analysis sub-tab: shown only for adapters that declare it. The form
-        # + Run are gated on a *primary* analyze result existing (the post layer
-        # builds on it); a hint label is shown while that gate is closed.
-        has_post = capabilities.post_analysis
-        self._left_tabs.setTabVisible(self._post_tab_index, has_post)
-        if has_post:
+        if self._has_analysis:
+            self.analyze_btn.setEnabled(
+                idle and state.has_context and state.has_run_result
+            )
+            self.analyze_form.setEnabled(idle)
+            self.writeback_widget.setEnabled(
+                idle and state.has_context and state.has_analyze_result
+            )
+        # Post pane controls (only if present)
+        if self._has_post:
             post_enabled = idle and state.has_analyze_result
             self.post_analyze_form.setEnabled(post_enabled)
             self.post_analyze_btn.setEnabled(post_enabled)
             self._post_gate_label.setVisible(not state.has_analyze_result)
-            # Post Save Image gates on a post result existing (its figure is the
-            # thing saved), mirroring the primary Save Image gate on has_figure.
-            self.post_save_image_btn.setEnabled(
-                idle and state.has_active_context and state.has_post_analyze_result
+            self.post_writeback_widget.setEnabled(
+                idle and state.has_context and state.has_post_analyze_result
             )
+        # Data save center owns all save-row enablement and status.
+        self._save_center.update_interaction(snapshot)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id
-        # Held so the Reset handler can refresh interaction state after re-seeding
-        # (the only post-bind path that needs the actions off a button slot).
         self._actions = actions
 
         def validity_cb(_valid: bool) -> None:
             actions.refresh_interaction(tab_id)
 
-        def schema_cb(schema_obj: CfgSchema) -> None:
-            self._ctrl.update_tab_cfg(tab_id, schema_obj)
-
-        def save_paths_cb(_text: str) -> None:
+        def data_path_cb(_text: str) -> None:
             data_path = self.get_data_path()
+            self._ctrl.update_tab_data_path(tab_id, data_path if data_path else None)
+
+        def analysis_image_cb(_text: str) -> None:
             image_path = self.get_image_path()
-            if bool(data_path) != bool(image_path):
-                return
-            self._ctrl.update_tab_save_paths(tab_id, data_path, image_path)
+            self._ctrl.update_tab_analysis_image_path(
+                tab_id, image_path if image_path else None
+            )
+
+        def post_image_cb(_text: str) -> None:
+            image_path = self.get_post_image_path()
+            self._ctrl.update_tab_post_analysis_image_path(
+                tab_id, image_path if image_path else None
+            )
 
         self.cfg_form.validity_changed.connect(validity_cb)
-        self.cfg_form.schema_changed.connect(schema_cb)
+        self._connect_cfg_schema()
 
-        # The cfg editor session + widget attach were already set up in
-        # populate_cfg (the service owns the model — ADR-0008). The agent reaches
-        # it via the tab's editor_id (exposed on tab.snapshot).
-        self.analyze_form.params_changed.connect(
-            lambda instance: self._ctrl.update_tab_analyze_param_instance(
-                tab_id, instance
+        self._save_center.bind_data_path_changed(data_path_cb)
+        if self._has_analysis:
+            self.analyze_form.params_changed.connect(
+                lambda instance: self._ctrl.update_tab_analyze_param_instance(
+                    tab_id, instance
+                )
             )
-        )
-        self.post_analyze_form.params_changed.connect(
-            lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
-                tab_id, instance
+            self._save_center.bind_analysis_path_changed(analysis_image_cb)
+        if self._has_post:
+            self.post_analyze_form.params_changed.connect(
+                lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
+                    tab_id, instance
+                )
             )
-        )
-        self._data_path_edit.textChanged.connect(save_paths_cb)
-        self._image_path_edit.textChanged.connect(save_paths_cb)
+            self._save_center.bind_post_path_changed(post_image_cb)
+
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
-        self.load_data_btn.clicked.connect(lambda: actions.load_data(tab_id))
-        self.analyze_btn.clicked.connect(lambda: actions.analyze(tab_id))
-        self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
-        self.writeback_widget.apply_requested.connect(
-            lambda: actions.apply_writeback(tab_id)
-        )
-        self.save_data_btn.clicked.connect(lambda: actions.save_data(tab_id))
-        self.save_image_btn.clicked.connect(lambda: actions.save_image(tab_id))
-        self.save_result_btn.clicked.connect(lambda: actions.save_result(tab_id))
-        self.post_save_image_btn.clicked.connect(
-            lambda: actions.save_post_image(tab_id)
+        if self._capabilities.load_data:
+            self._save_center.bind_load(lambda: actions.load_data(tab_id))
+        self._save_center.bind_save_all(lambda: actions.save_all(tab_id))
+        if self._has_analysis:
+            self.analyze_btn.clicked.connect(lambda: actions.analyze(tab_id))
+            self.writeback_widget.apply_requested.connect(
+                lambda: actions.apply_writeback(tab_id)
+            )
+            self._save_center.bind_save(
+                ArtifactKind.ANALYSIS, lambda: actions.save_image(tab_id)
+            )
+        if self._has_post:
+            self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
+            self.post_writeback_widget.apply_requested.connect(
+                lambda: actions.apply_post_writeback(tab_id)
+            )
+            self._save_center.bind_save(
+                ArtifactKind.POST_ANALYSIS, lambda: actions.save_post_image(tab_id)
+            )
+        self._save_center.bind_save(
+            ArtifactKind.DATA, lambda: actions.save_data(tab_id)
         )
 
         self._validity_cb = validity_cb
-        self._schema_cb = schema_cb
+        self._data_path_cb = data_path_cb
+        if self._has_analysis:
+            self._analysis_image_cb = analysis_image_cb
+        if self._has_post:
+            self._post_image_cb = post_image_cb
 
     def _on_progress_changed(self) -> None:
-        # Main-thread callback from ProgressService; re-render the live bars of
-        # this tab's current run (empty when no run is live).
         models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
         self.progress_stack.render_models(models)
 
     def detach(self) -> None:
-        """Tear this tab widget down (mirrors ``CfgFormWidget.detach`` at the
-        whole-tab scale): drop the controller signal bindings, detach the cfg
-        widget, and tell the service to tear down the model it owns (ADR-0008).
-        Paired with :meth:`attach`."""
-        if hasattr(self, "_validity_cb"):
-            self.cfg_form.validity_changed.disconnect(self._validity_cb)
-        if hasattr(self, "_schema_cb"):
+        """Tear this tab widget down."""
+        if self._actions is None:
+            raise RuntimeError(f"tab {self.tab_id!r} is not attached")
+        self.cfg_form.validity_changed.disconnect(self._validity_cb)
+        if self._schema_cb is not None:
             self.cfg_form.schema_changed.disconnect(self._schema_cb)
+            self._schema_cb = None
+        self._save_center.unbind_data_path_changed(self._data_path_cb)
+        if self._has_analysis:
+            self._save_center.unbind_analysis_path_changed(self._analysis_image_cb)
+        if self._has_post:
+            self._save_center.unbind_post_path_changed(self._post_image_cb)
         self._progress_unsub()
-        # Detach the widget first (drop its signal bindings + widget tree), then
-        # tell the service to tear down the model it owns (ADR-0008).
         self.cfg_form.detach()
         if self._cfg_editor_id is not None:
             self._ctrl.teardown_cfg_editor(self._cfg_editor_id)
             self._cfg_editor_id = None
+        self._actions = None

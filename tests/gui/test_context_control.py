@@ -74,6 +74,12 @@ class RecordingContext:
         self._log.add("context", "coerce_md_value", key, text)
         return 2.0
 
+    def create_md_attr(self, key: str, value: object) -> None:
+        self._log.add("context", "create_md_attr", key, value)
+
+    def rename_md_attr(self, old: str, new: str) -> None:
+        self._log.add("context", "rename_md_attr", old, new)
+
     def set_md_attr(self, key: str, value: object) -> None:
         self._log.add("context", "set_md_attr", key, value)
 
@@ -178,6 +184,18 @@ def test_context_control_facet_forwards_deliberate_context_contract() -> None:
             lambda: facet.coerce_md_value("r_f", "2.0"),
             2.0,
             call("context", "coerce_md_value", "r_f", "2.0"),
+        ),
+        (
+            "create_md_attr",
+            lambda: facet.create_md_attr("new", 2.0),
+            None,
+            call("context", "create_md_attr", "new", 2.0),
+        ),
+        (
+            "rename_md_attr",
+            lambda: facet.rename_md_attr("old", "new"),
+            None,
+            call("context", "rename_md_attr", "old", "new"),
         ),
         (
             "set_md_attr",

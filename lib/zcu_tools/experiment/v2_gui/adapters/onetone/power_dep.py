@@ -35,7 +35,7 @@ OneTonePowerDepRunResult: TypeAlias = PowerDepResult
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
     exp_cls = PowerDepExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE
+        analysis=AnalysisMode.NONE, load_data=True
     )
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

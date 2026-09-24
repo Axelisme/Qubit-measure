@@ -78,8 +78,9 @@ class SsT1Adapter(
         recommended=(
             "Run after 'singleshot/ge'. A delay sweep reaching ~5*T1 lets the "
             "decay flatten; with no prior 't1', the sweep spans 0–100 us. "
-            "Set 'uniform=True' to sweep linearly (slower, evenly spaced); "
-            "leave False for a log-spaced geomspace (better for wide T1 range)."
+            "Set 'uniform=True' to sweep linearly; leave False to cluster more "
+            "points along the expected exponential decay while preserving the "
+            "configured start/stop window and point count."
         ),
     )
 

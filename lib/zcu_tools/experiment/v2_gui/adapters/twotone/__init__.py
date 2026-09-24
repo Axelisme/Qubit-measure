@@ -1,3 +1,4 @@
+from .ckp import CKPAdapter
 from .flux_dep import FluxDepAdapter
 from .freq import FreqAdapter
 from .power_dep import PowerDepAdapter
@@ -16,6 +17,7 @@ from .reset import (
 from .time_domain import T1Adapter, T2EchoAdapter, T2RamseyAdapter
 
 __all__ = [
+    "CKPAdapter",
     "FreqAdapter",
     "PowerDepAdapter",
     "FluxDepAdapter",

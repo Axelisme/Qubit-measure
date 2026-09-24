@@ -32,10 +32,10 @@ def test_tab_save_path_query_is_pure_and_does_not_create_directories(
     svc = TabService(state, registry, MagicMock())
     tab_id = svc.new_tab("fake")
 
-    paths = svc.get_tab_save_paths(tab_id)
+    path = svc.get_tab_data_path(tab_id)
 
-    assert paths is not None
-    assert state.get_tab(tab_id).save_path_overrides is None
+    assert path is not None
+    assert state.get_tab(tab_id).save.data_path_override is None
     assert not (tmp_path / "database").exists()
     assert not (tmp_path / "result").exists()
 

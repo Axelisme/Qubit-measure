@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — strict experiment policy ownership
+**Last updated:** 2026-09-22 — reloadable adapters and fixed role composition
 
 # measure experiment adapters
 
@@ -6,14 +6,26 @@
 同時擁有該實驗的 cfg definition、run/analyze/writeback policy 與 operator guide；修改一個
 實驗時，主要閱讀範圍應維持在該檔案及其直接對應的 `experiment/v2/` implementation。
 
+Post-analysis adapters 以 `get_post_writeback_items()` 提出 post-owned proposal；framework 將
+primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Writeback 實作。
+
 ## Ownership
 
 - `base.py` 擁有所有 adapter 共用的 framework implementation，不含特定實驗 policy。
-- `lookback.py`、`onetone/`、`twotone/`、`singleshot/`、`fake/` 是 concrete experiment
+- `lookback.py`、`onetone/`、`twotone/`、`singleshot/`、`jpa/`、`fake/` 是 concrete experiment
   definitions；同一實驗專用的 helper 就近放在該檔案或同群組的 `_shared.py`。
+  `jpa/` 的六個 adapter（`freq` / `flux` / `power` / `auto_optimize` /
+  `flux_onetone` / `check`）是單一可發現的 JPA 校準 family，依 bring-up 順序
+  註冊於 `../registry.py`。六個 concrete adapters 各自擁有 notebook-derived
+  acquisition defaults，並共同暴露 `reps` / `rounds` / `relax_delay`；
+  `initial_delay` 維持 core-owned hidden default。auto optimizer 的 sweep `expts`
+  是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
+  契約見 `../README.md`。
 - `_support/` 是 private package，只放至少被兩個 concrete adapters 共用的 mechanics；它
   不擁有 registry order，也不 import concrete adapter。
-- `../registry.py` 是 composition root，明確列出 adapter 與 role catalog 項目。
+- `../registry.py` 明確列出可重載的 adapter catalog；`../role_registry.py` 擁有 startup-only role composition。
+- Reload experiments 會重建 concrete adapters 及 family helpers，但保留 `base.py` 與 `_support/`。
+  修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
 `cfg_definition()` 使用 `_support` 提供的 measure-domain builder vocabulary，但結構與預設
 policy 留在 concrete adapter，因此使用者不必跨 `spec` / `default_value` 兩個方法理解同一

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import copy
 import logging
+import uuid
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import (
@@ -8,22 +12,21 @@ from zcu_tools.gui.app.main.adapter import (
     ModuleWriteback,
     WaveformWriteback,
     WritebackItem,
-    WritebackRequest,
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
-from .guard import WritebackPermit
 from .ports import CfgEdit, CfgEditorPort, ContextWrites
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.cfg.binding import CfgDraft
 
     from .ports import ContextWritePort
 
-# kind prefix for the stable per-item session_id (``<kind>-<n>``).
+# Kind prefixes are deliberately draft-local. Two independent drafts can both
+# expose ``md-1`` without sharing any editor session or mutable item state.
 _KIND_PREFIX = {
     MetaDictWriteback: "md",
     ModuleWriteback: "ml",
@@ -34,97 +37,61 @@ _KIND_PREFIX = {
 _UNSET: Any = object()
 
 
-class WritebackService:
-    """Owns the persistent writeback draft for each tab (ADR-0008).
+@dataclass
+class _DraftEntry:
+    """Writeback's private item/session association.
 
-    Writeback items are computed **once** when analyze finishes (``compute_items``)
-    and stored on ``Session.writeback_items``. Each module/waveform item gets a
-    gc=False cfg-editor model (seeded from its ``edit_schema``); the agent edits
-    it via this service's ``set_item_field(edits=...)`` (which writes through the
-    item's ``editor_id`` on ``CfgEditorPort``, ADR-0008) and the user's Edit
-    dialog attaches to the same model (WYSIWYG). ``get_tab_writeback_items`` is a
-    pure read of that persistent list — it never recomputes (which would discard
-    live edits).
+    ``WritebackItem`` is an adapter proposal and intentionally does not carry a
+    cfg-editor handle or presentation summaries. Handles and S2 display-only
+    baseline summaries stay here, behind ``WritebackDraft`` and
+    ``WritebackService`` (app/service-owned read model, not adapter contract).
     """
+
+    item: WritebackItem
+    editor_id: str | None = None
+    # S2 display-only baseline — not on WritebackItem, not persisted/wire.
+    current_summary: str | None = None
+    proposed_summary: str | None = None
+    applied: bool = False
+
+
+class WritebackDraft:
+    """Opaque, service-owned writeback draft.
+
+    A draft is the only handle a workflow needs after handing proposal items to
+    :class:`WritebackService`. Its item list is a read-model projection; cfg
+    editor identities and teardown bookkeeping remain private to the service.
+    Mutations should use the service (or the small forwarding methods below), so
+    the same draft is shared by the UI and remote editing surfaces.
+    """
+
+    __slots__ = ("_service", "_identity", "_entries", "_closed")
 
     def __init__(
         self,
-        state: State,
-        cfg_editor: CfgEditorPort,
-        write_port: ContextWritePort,
+        service: WritebackService,
+        identity: str,
+        entries: list[_DraftEntry],
     ) -> None:
-        self._state = state
-        self._cfg_editor = cfg_editor
-        self._write = write_port
+        self._service = service
+        self._identity = identity
+        self._entries = entries
+        self._closed = False
 
-    # ------------------------------------------------------------------
-    # Compute once (analyze sink) + read
-    # ------------------------------------------------------------------
+    @property
+    def items(self) -> tuple[WritebackItem, ...]:
+        """Current item projection, without any editor identity."""
+        return tuple(entry.item for entry in self._entries)
 
-    def compute_items_for_tab(
-        self, tab_id: str, analyze_result: Any
-    ) -> list[WritebackItem]:
-        """Compute the tab's writeback items once (analyze sink calls this).
+    @property
+    def is_active(self) -> bool:
+        return not self._closed
 
-        The fresh ``analyze_result`` is passed in explicitly (not read from
-        State): the analyze sink computes the draft *before* committing the
-        result through ``update_tab_analyze``, so State must not be written
-        early just to make this readable. Calls the adapter, stamps a stable
-        per-kind ``session_id``, and for each module/waveform item opens a
-        gc=False CfgEditorService model seeded from its ``edit_schema`` (storing
-        the ``editor_id``). The returned list is stored on
-        ``Session.writeback_items`` by the analyze sink.
-        """
-        tab = self._state.get_tab(tab_id)
-        run_result = tab.run_result
-        if run_result is None or analyze_result is None:
-            return []
-        items = list(
-            tab.adapter.get_writeback_items(
-                WritebackRequest(
-                    run_result=run_result,
-                    analyze_result=analyze_result,
-                    ctx=self._state.exp_context,
-                )
-            )
-        )
-        counter: dict[str, int] = {}
-        for item in items:
-            prefix = _KIND_PREFIX[type(item)]
-            counter[prefix] = counter.get(prefix, 0) + 1
-            item.session_id = f"{prefix}-{counter[prefix]}"
-            item.selected = True
-            if isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                if item.edit_schema is not None:
-                    editor_id, _ = self._cfg_editor.open_seeded(
-                        item.edit_schema,
-                        gc=False,
-                        owner_key=f"writeback:{tab_id}:{item.session_id}",
-                    )
-                    item.editor_id = editor_id
-        return items
+    def preview(self) -> list[WritebackItem]:
+        return self._service.preview_draft(self)
 
-    def teardown_tab_items(self, tab_id: str) -> None:
-        """Tear down every per-item editor model for a tab (on reanalyze/rerun)."""
-        tab = self._state.get_tab(tab_id)
-        for item in tab.writeback_items:
-            if (
-                isinstance(item, (ModuleWriteback, WaveformWriteback))
-                and item.editor_id
-            ):
-                self._cfg_editor.teardown(item.editor_id)
-
-    def get_tab_writeback_items(self, tab_id: str) -> list[WritebackItem]:
-        """Pure read of the persistent items (no recompute)."""
-        return list(self._state.get_tab(tab_id).writeback_items)
-
-    # ------------------------------------------------------------------
-    # Edit a persistent item (agent / UI tab.writeback_set)
-    # ------------------------------------------------------------------
-
-    def set_item_field(
+    def edit(
         self,
-        tab_id: str,
         session_id: str,
         *,
         selected: bool | None = None,
@@ -132,29 +99,140 @@ class WritebackService:
         proposed_value: Any = _UNSET,
         edits: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
-        """Edit a persistent writeback item by id.
+        return self._service.edit_draft(
+            self,
+            session_id,
+            selected=selected,
+            target_name=target_name,
+            proposed_value=proposed_value,
+            edits=edits,
+        )
 
-        ``selected`` / ``target_name`` apply to any item. ``proposed_value`` is a
-        metadict-only facet (the proposed md scalar). ``edits`` is the
-        module/waveform-only facet: an ORDERED list of ``{path, value}`` cfg edits
-        applied to the item's service-owned editor model via
-        ``CfgEditorPort.set_field`` — the agent never sees the ``editor_id``
-        (ADR-0008). Returns the aggregated ``{valid, removed, added}`` of the
-        applied edits (empty lists / valid=True when no ``edits`` are given), the
-        same shape as tab cfg's batch set. Edits are fail-fast and non-atomic:
-        a failing edit raises and earlier edits in the batch stay applied.
+    def apply(self) -> dict[str, Any]:
+        return self._service.apply_draft(self)
+
+    def teardown(self) -> None:
+        self._service.teardown_draft(self)
+
+
+class WritebackService:
+    """Own opaque transactional drafts and their cfg-editor sessions.
+
+    The primary interface is ``create_draft`` → ``preview_draft`` / ``edit_draft``
+    → ``apply_draft`` / ``teardown_draft``. It accepts already-computed proposal
+    items and has no knowledge of analysis stages, subtabs, figures, or adapter
+    hooks.
+    """
+
+    def __init__(
+        self,
+        cfg_editor: CfgEditorPort,
+        write_port: ContextWritePort,
+    ) -> None:
+        self._cfg_editor = cfg_editor
+        self._write = write_port
+
+    # ------------------------------------------------------------------
+    # Opaque draft lifecycle
+    # ------------------------------------------------------------------
+
+    def create_draft(self, items: Iterable[WritebackItem]) -> WritebackDraft:
+        """Create a draft and all item-local cfg sessions transactionally.
+
+        The input is a proposal collection, not an adapter or stage. Items are
+        shallow-copied so draft-local ``session_id``, selection, target and value
+        edits cannot mutate the adapter's proposal objects. If any editor session
+        fails to open, every session opened for this draft is torn down before the
+        original exception is re-raised; no partially-created draft escapes.
+
+        S2 — captures a display-only baseline from the destination context at
+        creation time (read-only, one owner, not persisted/wire). Scalar
+        MetaDict items show concrete current vs proposed values; module/waveform
+        items show bounded target/change summaries.
         """
-        item = self._find_item(tab_id, session_id)
+        identity = uuid.uuid4().hex
+        entries: list[_DraftEntry] = []
+        # Snapshot the destination context once at draft creation (read-only,
+        # S2). Summaries are stored in the service-owned _DraftEntry, not on
+        # the public WritebackItem (adapter contract unchanged).
+        ctx = self._snapshot_context()
+        try:
+            for raw_item in items:
+                item = self._copy_item(raw_item)
+                prefix = self._kind_prefix(item)
+                item.session_id = self._next_session_id(entries, prefix)
+                item.selected = True
+                entry = _DraftEntry(item)
+                # Baseline capture — display-only, app/service-owned.
+                self._capture_baseline(entry, ctx)
+                entries.append(entry)
+                if isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                    if item.edit_schema is None:
+                        continue
+                    editor_id, _ = self._cfg_editor.open_seeded(
+                        item.edit_schema,
+                        gc=False,
+                        owner_key=f"writeback:{identity}:{item.session_id}",
+                    )
+                    entry.editor_id = editor_id
+                    editor_draft = self._cfg_editor.get_draft(editor_id)
+                    editor_draft.on_change.connect(
+                        lambda *_args, draft_entry=entry: self._mark_unapplied(
+                            draft_entry
+                        )
+                    )
+        except BaseException:
+            # Cleanup is best-effort per session so one teardown failure cannot
+            # strand the remaining sessions. The creation failure remains the
+            # observable error and no draft is returned.
+            self._teardown_entries(entries)
+            raise
+        return WritebackDraft(self, identity, entries)
+
+    def preview_draft(self, draft: WritebackDraft) -> list[WritebackItem]:
+        self._require_draft(draft)
+        return list(draft.items)
+
+    def edit_draft(
+        self,
+        draft: WritebackDraft,
+        session_id: str,
+        *,
+        selected: bool | None = None,
+        target_name: str | None = None,
+        proposed_value: Any = _UNSET,
+        edits: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        """Apply one draft-local edit, preserving ordered fail-fast semantics."""
+        self._require_draft(draft)
+        entry = self._find_draft_entry(draft, session_id)
+        item = entry.item
         if selected is not None:
             item.selected = selected
-        if target_name is not None:
+        if target_name is not None and target_name != item.target_name:
             item.target_name = target_name
+            entry.applied = False
+            # Keep proposed summary in sync for module/waveform retarget (bounded)
+            if isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                # Preserve original current_summary; recompute proposed_summary
+                # from new target (still bounded, not full cfg).
+                base_current = entry.current_summary
+                is_update = base_current == "present"
+                action = "update" if is_update else "create"
+                role = getattr(item, "role_id", None)
+                if role:
+                    entry.proposed_summary = f"{action} {role}"
+                else:
+                    entry.proposed_summary = f"{action} → {item.target_name}"
         if proposed_value is not _UNSET:
             if not isinstance(item, MetaDictWriteback):
                 raise InvalidInputError(
                     f"{session_id!r} is not a metadict item; proposed_value invalid"
                 )
-            item.proposed_value = proposed_value
+            if not self._values_equal(proposed_value, item.proposed_value):
+                item.proposed_value = proposed_value
+                entry.proposed_summary = self._format_value_summary(proposed_value)
+                entry.applied = False
 
         result = None
         if edits is not None:
@@ -162,7 +240,7 @@ class WritebackService:
                 raise InvalidInputError(
                     f"{session_id!r} is not a module/waveform item; edits invalid"
                 )
-            if item.editor_id is None:
+            if entry.editor_id is None:
                 raise FailedPreconditionError(
                     f"{session_id!r} has no editable cfg model to apply edits to"
                 )
@@ -173,55 +251,57 @@ class WritebackService:
                         f"edits[{i}] must be an object with 'path' and 'value'"
                     )
                 typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-            result = self._cfg_editor.set_fields(item.editor_id, typed_edits)
+            result = self._cfg_editor.set_fields(entry.editor_id, typed_edits)
         if result is None:
             return {"valid": True, "removed": [], "added": []}
         return result.to_wire()
 
-    def _find_item(self, tab_id: str, session_id: str) -> WritebackItem:
-        for item in self._state.get_tab(tab_id).writeback_items:
-            if item.session_id == session_id:
-                return item
-        raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
+    def get_item_draft(self, draft: WritebackDraft, session_id: str) -> CfgDraft:
+        """Return an item model for a viewer without exposing its editor id."""
+        self._require_draft(draft)
+        entry = self._find_draft_entry(draft, session_id)
+        if entry.editor_id is None:
+            raise FailedPreconditionError(
+                f"{session_id!r} has no editable cfg model to attach"
+            )
+        return self._cfg_editor.get_draft(entry.editor_id)
 
-    # ------------------------------------------------------------------
-    # Apply (execute the persistent draft)
-    # ------------------------------------------------------------------
-
-    def apply_tab_writeback(self, permit: WritebackPermit) -> dict[str, Any]:
-        """Apply the tab's persistent draft and echo what was actually written.
-
-        Returns ``{applied_ids, written}`` where ``written`` lists the destination
-        names actually pushed to context, split by kind
-        (``{md, ml_modules, ml_waveforms}``). All lists are empty on a no-op draft
-        (nothing selected); ``applied_ids`` still reflects the selected item ids.
-        """
-        # Context + analyze-result preconditions are proven by the
-        # WritebackPermit. ADR-0006: writeback no longer writes ctx.md/ml itself —
-        # it collects the selected items into a ContextWrites batch and hands them
-        # to the single write authority (ContextService), which lowers + registers
-        # + bumps "context" once + emits at most one MD/ML_CHANGED. Writeback only
-        # owns the per-tab bookkeeping (applied ids). ContextService emits the
-        # resource facts for the actual MetaDict/ModuleLibrary mutations.
-        tab_id = permit.tab_id
-        logger.info("writeback apply: tab_id=%r", tab_id)
-        tab = self._state.get_tab(tab_id)
+    def apply_draft(self, draft: WritebackDraft) -> dict[str, Any]:
+        """Apply selected entries through exactly one ``ContextWritePort`` call."""
+        self._require_draft(draft)
         applied_ids: list[str] = []
         md: dict[str, Any] = {}
         ml_modules: dict[str, CfgSchema] = {}
         ml_waveforms: dict[str, CfgSchema] = {}
 
-        for item in tab.writeback_items:
-            if not item.selected:
-                continue
+        selected_entries = [entry for entry in draft._entries if entry.item.selected]
+        destinations: set[tuple[str, str]] = set()
+        for entry in selected_entries:
+            item = entry.item
+            if isinstance(item, MetaDictWriteback):
+                destination_kind = "md"
+            elif isinstance(item, ModuleWriteback):
+                destination_kind = "ml_modules"
+            elif isinstance(item, WaveformWriteback):
+                destination_kind = "ml_waveforms"
+            else:
+                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
+            destination = (destination_kind, item.target_name)
+            if destination in destinations:
+                raise InvalidInputError(
+                    f"duplicate {destination_kind} writeback destination: "
+                    f"{item.target_name!r}"
+                )
+            destinations.add(destination)
+
+        for entry in selected_entries:
+            item = entry.item
             if isinstance(item, MetaDictWriteback):
                 md[item.target_name] = item.proposed_value
             elif isinstance(item, ModuleWriteback):
-                ml_modules[item.target_name] = self._item_schema(item)
+                ml_modules[item.target_name] = self._entry_schema(entry)
             elif isinstance(item, WaveformWriteback):
-                ml_waveforms[item.target_name] = self._item_schema(item)
-            else:
-                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
+                ml_waveforms[item.target_name] = self._entry_schema(entry)
             applied_ids.append(item.session_id)
 
         written = {
@@ -229,33 +309,247 @@ class WritebackService:
             "ml_modules": list(ml_modules),
             "ml_waveforms": list(ml_waveforms),
         }
-        if not (md or ml_modules or ml_waveforms):
-            return {"applied_ids": applied_ids, "written": written}
-
-        self._write.apply_writes(
-            ContextWrites(md=md, ml_modules=ml_modules, ml_waveforms=ml_waveforms)
-        )
-        logger.info(
-            "writeback applied: tab_id=%r md=%d ml_modules=%d ml_waveforms=%d",
-            tab_id,
-            len(md),
-            len(ml_modules),
-            len(ml_waveforms),
-        )
+        if md or ml_modules or ml_waveforms:
+            self._write.apply_writes(
+                ContextWrites(
+                    md=md,
+                    ml_modules=ml_modules,
+                    ml_waveforms=ml_waveforms,
+                )
+            )
+            applied_id_set = set(applied_ids)
+            for entry in draft._entries:
+                if entry.item.session_id in applied_id_set:
+                    entry.applied = True
         return {"applied_ids": applied_ids, "written": written}
 
-    def _item_schema(self, item: ModuleWriteback | WaveformWriteback) -> CfgSchema:
-        """The live draft to apply: snapshot the item's editor model if present.
+    def teardown_draft(self, draft: WritebackDraft) -> None:
+        """Tear down a draft at most once; cleanup errors never cause a retry."""
+        self._require_draft(draft, allow_closed=True)
+        if draft._closed:
+            return
+        # Mark closed before calling driven cleanup. This makes teardown
+        # idempotent even if a cfg editor's close implementation raises.
+        draft._closed = True
+        self._teardown_entries(draft._entries)
 
-        The persistent draft lives in the service-owned model (``editor_id``); a
-        snapshot of it is the authoritative edited schema. Falls back to
-        ``edit_schema`` when there is no model.
-        """
-        if item.editor_id is not None:
-            return self._cfg_editor.get_draft(item.editor_id).snapshot()
-        schema = item.edit_schema
+    # Short behavior-oriented aliases for callers that already hold the opaque
+    # draft. They keep the public surface independent of stage/subtab vocabulary.
+    def preview(self, draft: WritebackDraft) -> list[WritebackItem]:
+        return self.preview_draft(draft)
+
+    def edit(
+        self, draft: WritebackDraft, session_id: str, **changes: Any
+    ) -> dict[str, object]:
+        return self.edit_draft(draft, session_id, **changes)
+
+    def apply(self, draft: WritebackDraft) -> dict[str, Any]:
+        return self.apply_draft(draft)
+
+    def teardown(self, draft: WritebackDraft) -> None:
+        self.teardown_draft(draft)
+
+    def _require_draft(
+        self, draft: WritebackDraft, *, allow_closed: bool = False
+    ) -> None:
+        if not isinstance(draft, WritebackDraft) or draft._service is not self:
+            raise InvalidInputError("unknown writeback draft")
+        if draft._closed and not allow_closed:
+            raise FailedPreconditionError("writeback draft has been torn down")
+
+    @staticmethod
+    def _copy_item(item: WritebackItem) -> WritebackItem:
+        copied = copy.copy(item)
+        # Proposal items never carry cfg-editor identity. Treat a dynamic
+        # attribute as an invalid caller contract instead of silently lowering it.
+        if "editor_id" in vars(item):
+            raise InvalidInputError("writeback proposal must not expose editor_id")
+        copied.session_id = ""
+        copied.selected = True
+        if isinstance(copied, MetaDictWriteback):
+            copied.proposed_value = copy.deepcopy(copied.proposed_value)
+        return copied
+
+    @staticmethod
+    def _kind_prefix(item: WritebackItem) -> str:
+        for item_type, prefix in _KIND_PREFIX.items():
+            if isinstance(item, item_type):
+                return prefix
+        raise InvalidInputError(
+            f"unsupported writeback item type: {type(item).__name__}"
+        )
+
+    @staticmethod
+    def _next_session_id(entries: list[_DraftEntry], prefix: str) -> str:
+        count = sum(entry.item.session_id.startswith(f"{prefix}-") for entry in entries)
+        return f"{prefix}-{count + 1}"
+
+    def _find_draft_entry(self, draft: WritebackDraft, session_id: str) -> _DraftEntry:
+        for entry in draft._entries:
+            if entry.item.session_id == session_id:
+                return entry
+        raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
+
+    def _entry_schema(self, entry: _DraftEntry) -> CfgSchema:
+        if entry.editor_id is not None:
+            return self._cfg_editor.get_draft(entry.editor_id).snapshot()
+        schema = getattr(entry.item, "edit_schema", None)
         if schema is None:
             raise FailedPreconditionError(
-                f"writeback '{item.session_id}' has no editable schema"
+                f"writeback '{entry.item.session_id}' has no editable schema"
             )
         return schema
+
+    # ------------------------------------------------------------------
+    # S2 — display-only baseline capture (read-only, single owner)
+    # ------------------------------------------------------------------
+
+    def _snapshot_context(self) -> Any | None:
+        """Best-effort read of the live destination ExpContext.
+
+        In production ``_write`` is the Controller, which exposes
+        ``get_exp_context``. In tests it is a MagicMock, so we probe
+        defensively and return None when unavailable — the draft remains
+        usable with fallback summaries.
+        """
+        for attr in ("get_exp_context",):
+            if hasattr(self._write, attr):
+                try:
+                    getter = getattr(self._write, attr)
+                    ctx = getter() if callable(getter) else getter
+                    if ctx is not None and hasattr(ctx, "md") and hasattr(ctx, "ml"):
+                        return ctx
+                except Exception:
+                    continue
+        return None
+
+    @staticmethod
+    def _format_value_summary(value: Any) -> str:
+        if value is None:
+            return "—"
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        if isinstance(value, complex):
+            return f"{value.real:.4g}{value.imag:+.4g}j"
+        if isinstance(value, (list, tuple)):
+            if value and all(isinstance(row, (list, tuple)) for row in value):
+                row_lengths = {len(row) for row in value}
+                scalar_cells = all(
+                    not isinstance(cell, (list, tuple, dict))
+                    for row in value
+                    for cell in row
+                )
+                if (
+                    len(row_lengths) == 1
+                    and next(iter(row_lengths)) > 0
+                    and scalar_cells
+                ):
+                    return f"{len(value)} × {next(iter(row_lengths))} matrix"
+            return f"list[{len(value)}]"
+        if isinstance(value, dict):
+            return f"map[{len(value)}]"
+        text = repr(value)
+        return text if len(text) <= 48 else f"{text[:45]}..."
+
+    def _capture_baseline(self, entry: _DraftEntry, ctx: Any | None) -> None:
+        """Populate entry.current_summary / entry.proposed_summary.
+
+        Stored in service-owned _DraftEntry, not on public WritebackItem.
+        When ``ctx`` is unavailable (tests or early init), fall back to a
+        neutral placeholder so the draft remains displayable. The summaries are
+        display-only and never alter persistence/wire/MCP/adapter contracts.
+        """
+        item = entry.item
+        try:
+            if isinstance(item, MetaDictWriteback):
+                # Current from live md
+                has_current = False
+                current: Any = None
+                if ctx is not None:
+                    try:
+                        has_current = item.target_name in ctx.md.keys()  # type: ignore[attr-defined]
+                        current = ctx.md.get(item.target_name, None)  # type: ignore[attr-defined]
+                    except Exception:
+                        has_current = False
+                        current = None
+                if has_current:
+                    entry.current_summary = self._format_value_summary(current)
+                else:
+                    entry.current_summary = "—"
+                entry.proposed_summary = self._format_value_summary(item.proposed_value)
+            elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+                exists = False
+                if ctx is not None:
+                    try:
+                        if isinstance(item, ModuleWriteback):
+                            exists = item.target_name in ctx.ml.modules  # type: ignore[attr-defined]
+                        else:
+                            exists = item.target_name in ctx.ml.waveforms  # type: ignore[attr-defined]
+                    except Exception:
+                        exists = False
+                entry.current_summary = "present" if exists else "— not present"
+                action = "update" if exists else "create"
+                role = getattr(item, "role_id", None)
+                if role:
+                    entry.proposed_summary = f"{action} {role}"
+                else:
+                    entry.proposed_summary = f"{action} → {item.target_name}"
+            else:
+                entry.current_summary = None
+                entry.proposed_summary = None
+        except Exception:
+            logger.debug(
+                "baseline capture failed for %r", item.target_name, exc_info=True
+            )
+            entry.current_summary = None
+            entry.proposed_summary = None
+
+    # App-local Qt presentation projection (S2) — not wire/persistence.
+    def get_summaries(
+        self, draft: WritebackDraft, session_id: str
+    ) -> tuple[str | None, str | None]:
+        """Return (current_summary, proposed_summary) for one item."""
+        self._require_draft(draft)
+        entry = self._find_draft_entry(draft, session_id)
+        return entry.current_summary, entry.proposed_summary
+
+    def get_all_summaries(
+        self, draft: WritebackDraft
+    ) -> dict[str, tuple[str | None, str | None]]:
+        """Return mapping session_id -> (current, proposed) for the draft."""
+        self._require_draft(draft)
+        return {
+            e.item.session_id: (e.current_summary, e.proposed_summary)
+            for e in draft._entries
+        }
+
+    def get_all_applied(self, draft: WritebackDraft) -> dict[str, bool]:
+        """Return the draft-owned applied state for presentation."""
+        self._require_draft(draft)
+        return {entry.item.session_id: entry.applied for entry in draft._entries}
+
+    @staticmethod
+    def _values_equal(left: Any, right: Any) -> bool:
+        if left is right:
+            return True
+        try:
+            return bool(left == right)
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _mark_unapplied(entry: _DraftEntry) -> None:
+        entry.applied = False
+
+    def _teardown_entries(self, entries: Iterable[_DraftEntry]) -> None:
+        for entry in reversed(list(entries)):
+            editor_id = entry.editor_id
+            entry.editor_id = None
+            if editor_id is None:
+                continue
+            try:
+                self._cfg_editor.teardown(editor_id)
+            except Exception:
+                logger.exception(
+                    "writeback draft editor teardown failed: %s", editor_id
+                )

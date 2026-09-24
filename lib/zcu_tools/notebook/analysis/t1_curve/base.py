@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from functools import partial
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,16 +15,49 @@ from zcu_tools.notebook.analysis.t1_curve.utils import format_exponent
 from zcu_tools.simulate import flux2value, value2flux
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
 
+DEFAULT_TEMP_LOWER_BOUND = 10e-3
+DEFAULT_TEMP_UPPER_BOUND = 300e-3
+TempBounds = tuple[float | None, float]
+
+
+def resolve_Temp_bounds(
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
+) -> tuple[float, float]:
+    """Return concrete positive finite Temp bounds for optimizers.
+
+    Purcell-based estimates can constrain the upper bound, but they do not provide a
+    physically meaningful lower bound. Passing ``None`` for the lower bound keeps the
+    existing default positive floor.
+    """
+    lower_raw, upper = Temp_bounds
+    lower = DEFAULT_TEMP_LOWER_BOUND if lower_raw is None else lower_raw
+    if (
+        not np.isfinite(lower)
+        or not np.isfinite(upper)
+        or lower <= 0.0
+        or upper <= lower
+    ):
+        raise ValueError("Temp_bounds must be (positive finite lower or None, upper)")
+    return float(lower), float(upper)
+
 
 def find_proper_Temp(
-    guess_Temp: float, calc_Q_fn: Callable[[float], NDArray[np.float64]]
+    guess_Temp: float,
+    calc_Q_fn: Callable[[float], NDArray[np.float64]],
+    *,
+    Temp_bounds: TempBounds = (DEFAULT_TEMP_LOWER_BOUND, DEFAULT_TEMP_UPPER_BOUND),
 ) -> float:
     """use scipy.optimize.minimize to find the proper Temp, the proper Temp is the one that minimizes the difference between all Q values"""
+    resolved_bounds = resolve_Temp_bounds(Temp_bounds)
+
+    def objective(candidate: NDArray[np.float64]) -> float:
+        candidate_Temp = float(np.ravel(candidate)[0])
+        return float(np.std(calc_Q_fn(candidate_Temp)))
 
     res = minimize(
-        lambda T: np.std(calc_Q_fn(T)),
+        objective,
         x0=[guess_Temp],
-        bounds=[(10e-3, 300e-3)],
+        bounds=[resolved_bounds],
         method="L-BFGS-B",
     )
 
@@ -156,6 +190,8 @@ def plot_sample_t1(
     flux_half: float,
     flux_period: float,
     xlabel: str = "Current (mA)",
+    *,
+    show_value_axis: bool = False,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
@@ -171,16 +207,17 @@ def plot_sample_t1(
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
 
-    ax2 = ax.secondary_xaxis(
-        "top",
-        functions=(  # type: ignore[arg-type]
-            # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-            # is inferred from the float overload; runtime is correct (vectorises).
-            partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-            partial(value2flux, flux_half=flux_half, flux_period=flux_period),
-        ),
-    )
-    ax2.set_xlabel(xlabel, fontsize=14)
+    if show_value_axis:
+        ax2 = ax.secondary_xaxis(
+            "top",
+            functions=(  # type: ignore[arg-type]
+                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
+                # is inferred from the float overload; runtime is correct (vectorises).
+                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
+                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            ),
+        )
+        ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
 
@@ -201,6 +238,7 @@ def plot_t1_with_sample(
     ],
     Temp: float,
     xlabel: str = "Current (mA)",
+    show_value_axis: bool = False,
     **other_noise_options,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
@@ -220,7 +258,6 @@ def plot_t1_with_sample(
     ]
 
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
-    fig.suptitle(f"Temperature = {Temp * 1e3:.2f} mK")
 
     ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
@@ -242,16 +279,17 @@ def plot_t1_with_sample(
     ax.legend(fontsize="small")
     ax.grid()
 
-    ax2 = ax.secondary_xaxis(
-        "top",
-        functions=(  # type: ignore[arg-type]
-            # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-            # is inferred from the float overload; runtime is correct (vectorises).
-            partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-            partial(value2flux, flux_half=flux_half, flux_period=flux_period),
-        ),
-    )
-    ax2.set_xlabel(xlabel, fontsize=14)
+    if show_value_axis:
+        ax2 = ax.secondary_xaxis(
+            "top",
+            functions=(  # type: ignore[arg-type]
+                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
+                # is inferred from the float overload; runtime is correct (vectorises).
+                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
+                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            ),
+        )
+        ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
 
@@ -269,7 +307,11 @@ def plot_eff_t1_with_sample(
     title: str | None = None,
     xlabel: str = "Current (mA)",
     component_t1s: Mapping[str, NDArray[np.float64]] | None = None,
+    component_bands: (
+        Mapping[str, tuple[NDArray[np.float64], NDArray[np.float64]]] | None
+    ) = None,
     parameter_text: str | None = None,
+    show_value_axis: bool = False,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
@@ -284,7 +326,54 @@ def plot_eff_t1_with_sample(
     s_fluxs = np.asarray(
         value2flux(s_dev_values, flux_half, flux_period), dtype=np.float64
     )
-    ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
+    ax.errorbar(
+        s_fluxs,
+        s_T1s,
+        yerr=s_T1errs,
+        fmt=".",
+        label="T1",
+        color="tab:blue",
+        zorder=5,
+    )
+
+    if component_bands is not None:
+        for band_label, (band_lower, band_upper) in component_bands.items():
+            lower_arr = np.asarray(band_lower, dtype=np.float64)
+            upper_arr = np.asarray(band_upper, dtype=np.float64)
+            if lower_arr.shape != t_fluxs.shape or upper_arr.shape != t_fluxs.shape:
+                raise ValueError(
+                    f"component_bands[{band_label!r}] must have the same shape as t_fluxs"
+                )
+            band_low = np.minimum(lower_arr, upper_arr)
+            band_high = np.maximum(lower_arr, upper_arr)
+            valid = (
+                np.isfinite(band_low)
+                & np.isfinite(band_high)
+                & (band_low > 0.0)
+                & (band_high > 0.0)
+            )
+            ax.fill_between(
+                t_fluxs,
+                band_low,
+                band_high,
+                where=valid.tolist(),
+                interpolate=True,
+                label="_nolegend_",
+                color="0.25",
+                alpha=0.10,
+                linewidth=0.0,
+                zorder=1,
+            )
+
+    ax.plot(
+        t_fluxs,
+        t1_effs,
+        label=label,
+        color="black",
+        linestyle="-",
+        linewidth=2.3,
+        zorder=4,
+    )
 
     if component_t1s is not None:
         for component_label, component_t1 in component_t1s.items():
@@ -293,9 +382,12 @@ def plot_eff_t1_with_sample(
                 raise ValueError(
                     f"component_t1s[{component_label!r}] must have the same shape as t_fluxs"
                 )
-            ax.plot(t_fluxs, component_arr, label=component_label, linestyle=":")
-
-    ax.plot(t_fluxs, t1_effs, label=label, linestyle="--")
+            ax.plot(
+                t_fluxs,
+                component_arr,
+                label=component_label,
+                **_t1_component_style(component_label),
+            )
 
     range = np.ptp(s_fluxs)
     ax.set_xlim(s_fluxs.min() - 0.01 * range, s_fluxs.max() + 0.01 * range)
@@ -330,18 +422,52 @@ def plot_eff_t1_with_sample(
             clip_on=False,
         )
 
-    ax2 = ax.secondary_xaxis(
-        "top",
-        functions=(  # type: ignore[arg-type]
-            # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
-            # is inferred from the float overload; runtime is correct (vectorises).
-            partial(flux2value, flux_half=flux_half, flux_period=flux_period),
-            partial(value2flux, flux_half=flux_half, flux_period=flux_period),
-        ),
-    )
-    ax2.set_xlabel(xlabel, fontsize=14)
+    if show_value_axis:
+        ax2 = ax.secondary_xaxis(
+            "top",
+            functions=(  # type: ignore[arg-type]
+                # mpl stubs require Callable[[ArrayLike], ArrayLike] but partial[float]
+                # is inferred from the float overload; runtime is correct (vectorises).
+                partial(flux2value, flux_half=flux_half, flux_period=flux_period),
+                partial(value2flux, flux_half=flux_half, flux_period=flux_period),
+            ),
+        )
+        ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
+
+
+def _t1_component_style(label: str) -> dict[str, Any]:
+    if label == "Purcell":
+        return {
+            "color": "tab:red",
+            "linestyle": "-.",
+            "linewidth": 2.0,
+            "alpha": 0.95,
+            "zorder": 3,
+        }
+    if (
+        label.endswith(" lower")
+        or label.endswith(" upper")
+        or label
+        in {
+            "- lower",
+            "- upper",
+        }
+    ):
+        return {
+            "color": "0.35",
+            "linestyle": "--",
+            "linewidth": 1.0,
+            "alpha": 0.70,
+            "zorder": 2,
+        }
+    return {
+        "linestyle": ":",
+        "linewidth": 1.5,
+        "alpha": 0.85,
+        "zorder": 2,
+    }
 
 
 def _t1_plot_ylim(

@@ -16,7 +16,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from zcu_tools.gui.app.main.adapter import SavePaths
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.services.startup import (
     PersistedDeviceEntry as PersistedDeviceEntry,  # noqa: F401  (re-export)
@@ -41,7 +40,6 @@ class PersistedTab(BaseModel):
     # Opaque lowered cfg (raw dict) — WorkspaceService owns the raw↔live codec;
     # the memento and Caretaker never look inside.
     cfg_raw: dict[str, Any]
-    save_paths_override: SavePaths | None = None
 
 
 class PersistedSession(BaseModel):

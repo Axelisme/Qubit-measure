@@ -33,6 +33,7 @@ from .modules import (
     ResetCfg,
     ScanWith,
     SoftDelay,
+    TableLengthPulse,
     TablePulseReadout,
     TwoPulseReset,
     TwoPulseResetCfg,

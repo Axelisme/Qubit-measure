@@ -290,7 +290,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
             "reply folds the live progress bars (active, bars[token/format/percent]) "
             "— no separate progress tool. Reports only the status: the op's product "
             "(figure/summary/snapshot) comes from the START finished reply or the "
-            "matching typed getter (e.g. gui_tab_get_current_figure, "
+            "matching typed getter (e.g. gui_tab_get_figure, "
             "gui_tab_get_analyze_result, gui_device_snapshot)."
         ),
         "inputSchema": {

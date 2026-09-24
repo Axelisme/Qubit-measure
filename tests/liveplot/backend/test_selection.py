@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import Mock
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -11,6 +12,9 @@ from zcu_tools.liveplot.backend import (
     JupyterBackend,
     LivePlotBackend,
     active_backend,
+    close_figure,
+    instant_plot,
+    refresh_figure,
     set_default_liveplot_backend,
     set_liveplot_backend,
 )
@@ -36,6 +40,20 @@ def test_registered_backend_takes_priority():
     stub = _StubBackend()
     with set_liveplot_backend(stub):
         assert active_backend() is stub
+
+
+def test_figure_lifecycle_dispatches_to_registered_backend():
+    fig = Figure()
+    backend = Mock(spec=LivePlotBackend)
+
+    with set_liveplot_backend(backend):
+        instant_plot(fig)
+        refresh_figure(fig)
+        close_figure(fig)
+
+    backend.instant_plot.assert_called_once_with(fig)
+    backend.refresh_figure.assert_called_once_with(fig)
+    backend.close_figure.assert_called_once_with(fig)
 
 
 def test_set_liveplot_backend_restores_after_block():

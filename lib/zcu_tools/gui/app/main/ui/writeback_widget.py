@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QApplication,
     QCheckBox,
     QDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -30,22 +37,243 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.controller import Controller
+    from zcu_tools.gui.app.main.services.writeback_control import WritebackPane
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Presentation helpers for non-scalar MetaDict values (S2)
+# ---------------------------------------------------------------------------
+
+
+def _is_matrix_value(value: Any) -> bool:
+    if not isinstance(value, (list, tuple)):
+        return False
+    if len(value) == 0:
+        return False
+    if not all(isinstance(row, (list, tuple)) for row in value):
+        return False
+    first_len = len(value[0])  # type: ignore[arg-type]
+    if first_len == 0:
+        return False
+    if not all(len(row) == first_len for row in value):  # type: ignore[arg-type]
+        return False
+    for row in value:  # type: ignore[assignment]
+        for cell in row:
+            if isinstance(cell, (list, tuple, dict)):
+                return False
+    return True
+
+
+def _should_show_table(value: Any) -> bool:
+    if not _is_matrix_value(value):
+        return False
+    rows = len(value)  # type: ignore[arg-type]
+    cols = len(value[0])  # type: ignore[arg-type]
+    return rows <= 5 and cols <= 5
+
+
+def _bounded_summary(value: Any) -> str:
+    if _is_matrix_value(value):
+        return f"{len(value)} \u00d7 {len(value[0])} matrix"  # type: ignore[arg-type]
+    if isinstance(value, (list, tuple)):
+        return f"list[{len(value)}]"
+    if isinstance(value, dict):
+        return f"map[{len(value)}]"
+    text = repr(value)
+    if len(text) > 48:
+        return text[:45] + "..."
+    return text
+
+
+def _make_matrix_table(matrix: Sequence[Sequence[Any]]) -> QTableWidget:
+    rows = len(matrix)
+    cols = len(matrix[0]) if rows > 0 else 0
+    table = QTableWidget(rows, cols)
+    table.setObjectName("writebackProposedMatrixTable")
+    table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # type: ignore[attr-defined]
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # type: ignore[attr-defined]
+    vertical_header = table.verticalHeader()
+    if vertical_header is not None:
+        vertical_header.setVisible(False)
+        vertical_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # type: ignore[attr-defined]
+        vertical_header.setDefaultSectionSize(22)
+    horizontal_header = table.horizontalHeader()
+    if horizontal_header is not None:
+        horizontal_header.setVisible(False)
+        horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)  # type: ignore[attr-defined]
+    for row in range(rows):
+        for column in range(cols):
+            value = matrix[row][column]
+            text = f"{value:.4f}" if isinstance(value, float) else str(value)
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # type: ignore[attr-defined]
+            table.setItem(row, column, item)
+    table.setFixedHeight(rows * 22 + 4)
+    table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # type: ignore[attr-defined]
+    table.setMinimumWidth(120)
+    return table
+
+
+# ---------------------------------------------------------------------------
+# Private row helper — owns responsive arrangement for one item
+# ---------------------------------------------------------------------------
+
+
+class _WritebackRow(QFrame):
+    """Compact ledger row with responsive reflow (S1/S3).
+
+    Owns checkbox, current → proposed labels, arrow, action button, and an
+    optional proposed-value matrix table. :meth:`set_narrow` moves those widgets
+    between a single-line wide layout and a two-line narrow layout without
+    duplicating widgets.
+    """
+
+    def __init__(
+        self,
+        cb: QCheckBox,
+        current: QLabel,
+        arrow: QLabel,
+        proposed: QLabel,
+        action: QWidget,
+        proposed_table: QTableWidget | None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("writebackRow")
+        self.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # type: ignore[attr-defined]
+        self._cb = cb
+        self._cur = current
+        self._arrow = arrow
+        self._prop = proposed
+        self._btn = action
+        self._proposed_table = proposed_table
+        self._narrow = False
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(8, 4, 8, 4)
+        self._outer.setSpacing(2)
+        # initial wide layout
+        self.set_narrow(False)
+
+    def set_narrow(self, narrow: bool) -> None:
+        if narrow == self._narrow and self._outer.count() != 0:
+            return
+        self._narrow = narrow
+        # Clear outer without deleting the row's owned widgets.
+        while self._outer.count():
+            item = self._outer.takeAt(0)
+            if item is None:
+                continue
+            w = item.widget()
+            if w is not None:
+                w.setParent(self)
+                continue
+            lay = item.layout()
+            if lay is not None:
+                while lay.count():
+                    sub = lay.takeAt(0)
+                    if sub is None:
+                        continue
+                    sw = sub.widget()
+                    if sw is not None:
+                        sw.setParent(self)
+                        continue
+                    inner = sub.layout()
+                    if inner is not None:
+                        while inner.count():
+                            sj = inner.takeAt(0)
+                            if sj is None:
+                                continue
+                            sjw = sj.widget()
+                            if sjw is not None:
+                                sjw.setParent(self)
+                        inner.deleteLater()
+                lay.deleteLater()
+        if not narrow:
+            primary = QHBoxLayout()
+            primary.setSpacing(7)
+            primary.addWidget(self._cb, 3)
+            self._cur.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            primary.addWidget(self._cur, 2)
+            primary.addWidget(self._arrow)
+            self._prop.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            primary.addWidget(self._prop, 2)
+            primary.addWidget(self._btn)
+            self._outer.addLayout(primary)
+        else:
+            heading = QHBoxLayout()
+            heading.setSpacing(7)
+            heading.addWidget(self._cb)
+            heading.addStretch(1)
+            heading.addWidget(self._btn)
+            self._outer.addLayout(heading)
+
+            change = QHBoxLayout()
+            change.setSpacing(7)
+            self._cur.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            change.addWidget(self._cur, 1)
+            change.addWidget(self._arrow)
+            self._prop.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            change.addWidget(self._prop, 1)
+            self._outer.addLayout(change)
+        if self._proposed_table is not None:
+            self._outer.addWidget(self._proposed_table)
+        self.updateGeometry()
+        self.update()
+
 
 class WritebackWidget(QWidget):
+    """Compact unified writeback ledger (S1–S3).
+
+    Presentation is app-local; no data-model or wire contract is introduced.
+
+    - Draft-owned applied state projected as bold ``target*`` vs normal ``target``.
+    - Centered Current → Proposed columns on a shared-background,
+      continuous-boundary panel.
+    - Equal 56×26 Edit/Copy actions; non-scalar MetaDict values use bounded
+      summaries, while small proposed matrices also show a read-only matrix view.
+      Current values remain summary-only and Copy retains the proposed JSON.
+    - Width breakpoint near 450 px: wide rows single-line, narrow rows
+      reflow to target/action above Current → Proposed.
+    - Bordered ledger hugs its rendered rows; Apply Selected sits directly
+      above the panel. Long content grows naturally and delegates
+      vertical scrolling to the existing Analysis-pane outer scroll.
+    """
+
     apply_requested: Signal = Signal()  # apply the persistent draft as-is
 
     def __init__(
         self,
         ctrl: Controller,
         parent: QWidget | None = None,
+        *,
+        tab_id: str,
+        pane: WritebackPane = "analysis",
     ) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._tab_id = tab_id
+        self._pane: WritebackPane = pane
         self._items: list[WritebackItem] = []
         self._checks: dict[str, QCheckBox] = {}
+        self._applied_states: dict[str, bool] = {}
+
+        # 13 px ledger per spec — item rows show current → proposed.
+        font = self.font()
+        font.setPixelSize(13)
+        self.setFont(font)
+
+        # Ledger panel stylesheet — unified backgrounds/borders (S1).
+        self.setStyleSheet(
+            "QFrame#writebackPanel { background: white; border: 1px solid #d7dde7; border-radius: 7px; }"
+            "QFrame#writebackPanel QLabel, QFrame#writebackPanel QCheckBox { background: transparent; }"
+            "QFrame#writebackRow { background: white; border: none; border-bottom: 1px solid #e8ecf2; }"
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -55,18 +283,40 @@ class WritebackWidget(QWidget):
             "Select the items to write back. Use Edit to adjust values first."
         )
         self._hint.setWordWrap(True)
+        self._hint.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
+        )
         layout.addWidget(self._hint)
 
-        self._rows_container = QWidget()
-        self._rows_layout = QVBoxLayout(self._rows_container)
-        self._rows_layout.setContentsMargins(0, 0, 0, 0)
-        self._rows_layout.setSpacing(6)
-        layout.addWidget(self._rows_container)
-
+        # Apply sits above the ledger so it stays close to the analyze output.
         self._apply_btn = QPushButton("Apply Selected")
+        self._apply_btn.setObjectName("writebackApply")
         self._apply_btn.setFixedHeight(30)
         self._apply_btn.clicked.connect(self._on_apply_clicked)
         layout.addWidget(self._apply_btn)
+
+        self._applied_legend = QLabel("* = not applied")
+        self._applied_legend.setObjectName("writebackAppliedLegend")
+        self._applied_legend.setStyleSheet("color: #6b7688;")
+        layout.addWidget(self._applied_legend)
+
+        self._rows_container = QFrame()
+        self._rows_container.setObjectName("writebackPanel")
+        self._rows_container.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
+        self._rows_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,  # type: ignore[attr-defined]
+        )
+        self._rows_layout = QVBoxLayout(self._rows_container)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(0)
+        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # type: ignore[attr-defined]
+        layout.addWidget(self._rows_container)
+        layout.addStretch(1)
+
+        self._row_widgets: dict[str, tuple[QLabel, QLabel, QCheckBox]] = {}
+        self._rows: list[_WritebackRow] = []
 
         self._refresh_apply_enabled()
 
@@ -83,34 +333,140 @@ class WritebackWidget(QWidget):
         # edits (checkbox, value, cfg via the editor model) land on the same
         # objects the agent and apply read.
         self._items = list(items)
+        self._applied_states = self._get_applied_states()
+        self._applied_legend.setVisible(bool(items))
         self._checks.clear()
+        self._row_widgets.clear()
+        self._rows.clear()
 
         for item in self._items:
-            row = QWidget(self)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-
-            label = self._make_label_text(item)
-            cb = QCheckBox(label)
+            # Selection — target identity only (S1); description moves to tooltip.
+            cb = QCheckBox()
             cb.setChecked(item.selected)
+            cb.setToolTip(item.description)
+            self._update_applied_presentation(item, cb)
             cb.stateChanged.connect(lambda _state, it=item: self._on_check_toggled(it))
-            row_layout.addWidget(cb, 1)
             self._checks[item.session_id] = cb
 
+            current_text = self._display_current(item)
+            proposed_text = self._display_proposed(item)
+
+            current_label = QLabel(current_text)
+            current_label.setObjectName("writebackCurrent")
+            current_label.setStyleSheet("color: #5e6b7d;")
+            current_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            current_label.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+            )  # type: ignore[attr-defined]
+            current_label.setWordWrap(False)
+
+            arrow = QLabel("\u2192")
+            arrow.setObjectName("writebackArrow")
+            arrow.setStyleSheet("color: #8a94a3; font-weight: 700;")
+            arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            arrow.setFixedWidth(18)
+
+            is_md = isinstance(item, MetaDictWriteback)
+            is_nonscalar_md = is_md and not _is_scalar_md_value(item.proposed_value)  # type: ignore[attr-defined]
+            is_matrix = (
+                is_md and _is_matrix_value(item.proposed_value) and is_nonscalar_md
+            )  # type: ignore[attr-defined]
+
+            proposed_label = QLabel(proposed_text)
+            if is_matrix:
+                proposed_label.setObjectName("writebackProposedChip")
+                proposed_label.setStyleSheet(
+                    "background: #eaf2fd; color: #1f5fae; border-radius: 8px; padding: 3px 7px; font-weight: 700;"
+                )
+            else:
+                proposed_label.setObjectName("writebackProposed")
+                proposed_label.setStyleSheet("color: #1f5fae; font-weight: 700;")
+            proposed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # type: ignore[attr-defined]
+            proposed_label.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+            )  # type: ignore[attr-defined]
+            proposed_label.setWordWrap(False)
+
+            # Action — equal 56×26 geometry (S1). Editable → Edit, non-scalar md → Copy.
+            action: QWidget
             if self._is_editable(item):
-                edit_btn = QPushButton("Edit")
-                edit_btn.clicked.connect(
+                btn = QPushButton("Edit")
+                btn.setFixedSize(56, 26)
+                btn.clicked.connect(
                     lambda _=False, it=item, chk=cb: self._edit_item(it, chk)
                 )
-                row_layout.addWidget(edit_btn)
+                action = btn
+            elif isinstance(item, MetaDictWriteback) and not _is_scalar_md_value(
+                item.proposed_value
+            ):
+                btn = QPushButton("Copy")
+                btn.setFixedSize(56, 26)
+                md_val = item.proposed_value  # type: ignore[attr-defined]
+                btn.clicked.connect(lambda _=False, val=md_val: self._copy_value(val))
+                action = btn
+            else:
+                placeholder = QLabel("")
+                placeholder.setFixedSize(56, 26)
+                placeholder.setStyleSheet("background: transparent;")
+                action = placeholder
+
+            proposed_table: QTableWidget | None = None
+            if is_matrix and _should_show_table(item.proposed_value):  # type: ignore[attr-defined]
+                proposed_table = _make_matrix_table(item.proposed_value)  # type: ignore[arg-type]
+
+            row = _WritebackRow(
+                cb,
+                current_label,
+                arrow,
+                proposed_label,
+                action,
+                proposed_table,
+            )
+            row.setToolTip(item.description)
 
             self._rows_layout.addWidget(row)
+            self._rows.append(row)
+
+            self._row_widgets[item.session_id] = (
+                current_label,
+                proposed_label,
+                cb,
+            )
 
         self._refresh_apply_enabled()
+        self._update_responsive()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._update_responsive()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._update_responsive()
+
+    def _update_responsive(self) -> None:
+        is_narrow = self.width() < 450
+        for row in self._rows:
+            row.set_narrow(is_narrow)
+
+    def _copy_value(self, value: Any) -> None:
+        try:
+            text = json.dumps(value)
+            clipboard = QApplication.clipboard()
+            if clipboard is not None:
+                clipboard.setText(text)
+        except Exception:
+            logger.exception("failed to copy writeback value")
 
     def _on_check_toggled(self, item: WritebackItem) -> None:
-        # The persistent item's selected flag follows the checkbox directly.
-        item.selected = self._checks[item.session_id].isChecked()
+        selected = self._checks[item.session_id].isChecked()
+        assert self._tab_id is not None
+        self._ctrl.set_writeback_item_for_pane(
+            self._tab_id,
+            self._pane,
+            item.session_id,
+            selected=selected,
+        )
         self._refresh_apply_enabled()
 
     def _refresh_apply_enabled(self, *_: int) -> None:
@@ -132,14 +488,65 @@ class WritebackWidget(QWidget):
             return item.edit_schema is not None
         return False
 
-    def _make_label_text(self, item: WritebackItem) -> str:
+    def _get_applied_states(self) -> dict[str, bool]:
+        getter = getattr(self._ctrl, "get_writeback_applied_for_pane", None)
+        if getter is None or not callable(getter):
+            return {}
+        result = getter(self._tab_id, self._pane)
+        if not isinstance(result, dict):
+            return {}
+        return {str(key): bool(value) for key, value in result.items()}
+
+    def _update_applied_presentation(
+        self, item: WritebackItem, checkbox: QCheckBox
+    ) -> None:
+        applied = self._applied_states.get(item.session_id, False)
+        checkbox.setText(item.target_name if applied else f"{item.target_name}*")
+        font = checkbox.font()
+        font.setBold(not applied)
+        checkbox.setFont(font)
+        checkbox.setStyleSheet("background: transparent;")
+
+    def _refresh_item_applied_presentation(
+        self, item: WritebackItem, checkbox: QCheckBox
+    ) -> None:
+        self._applied_states = self._get_applied_states()
+        self._update_applied_presentation(item, checkbox)
+
+    def _get_service_summaries(self, session_id: str) -> tuple[str | None, str | None]:
+        """Fetch S2 summaries from the service-owned draft (app-local)."""
+        getter = getattr(self._ctrl, "get_writeback_summaries_for_pane", None)
+        if getter is None or not callable(getter):
+            return (None, None)
+        result = getter(self._tab_id, self._pane)  # type: ignore[call-arg]
+        if isinstance(result, dict) and session_id in result:
+            cur, prop = result[session_id]
+            return cur, prop
+        return (None, None)
+
+    def _display_current(self, item: WritebackItem) -> str:
+        cur, _ = self._get_service_summaries(item.session_id)
+        if cur is not None:
+            return str(cur)
         if isinstance(item, MetaDictWriteback):
-            return (
-                f"{item.target_name} -> {item.proposed_value!r}\n  {item.description}"
-            )
+            return "\u2014"
+        return "\u2014"
+
+    def _display_proposed(self, item: WritebackItem) -> str:
+        # Non-scalar MetaDict values use a bounded structural summary (S2)
+        # so the ledger never widens; the full JSON is available via Copy.
+        if isinstance(item, MetaDictWriteback) and not _is_scalar_md_value(
+            item.proposed_value
+        ):
+            return _bounded_summary(item.proposed_value)
+        _, prop = self._get_service_summaries(item.session_id)
+        if prop is not None:
+            return str(prop)
+        if isinstance(item, MetaDictWriteback):
+            return repr(item.proposed_value)
         if isinstance(item, (ModuleWriteback, WaveformWriteback)):
-            return f"{item.target_name}\n  {item.description}"
-        return f"{item.target_name}\n  {item.description}"
+            return f"\u2192 {item.target_name}"
+        return f"{item.target_name}"
 
     def _edit_item(self, item: WritebackItem, cb: QCheckBox) -> None:
         if isinstance(item, MetaDictWriteback):
@@ -153,12 +560,17 @@ class WritebackWidget(QWidget):
         layout = QVBoxLayout(dialog)
 
         form = QFormLayout()
+        # Current is read-only (S2); target and proposed are editable.
+        current_label = QLabel(self._display_current(item))
+        current_label.setObjectName("writebackCurrentReadonly")
+        current_label.setStyleSheet("color: #6b7688;")
+        form.addRow("Current:", current_label)
         # target_name is the apply destination, decoupled from the stable
         # session_id (ADR-0008) — editable here so the user can retarget.
         name_edit = QLineEdit(item.target_name)
         form.addRow("Apply as:", name_edit)
         value_edit = QLineEdit(str(item.proposed_value))
-        form.addRow("Value:", value_edit)
+        form.addRow("Proposed:", value_edit)
         layout.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -172,18 +584,32 @@ class WritebackWidget(QWidget):
         def save() -> None:
             try:
                 new_name = _require_target_name(name_edit.text())
-                item.proposed_value = _coerce_scalar_input(
+                new_value = _coerce_scalar_input(
                     value_edit.text(),
                     item.proposed_value,
                 )
+                assert self._tab_id is not None
+                self._ctrl.set_writeback_item_for_pane(
+                    self._tab_id,
+                    self._pane,
+                    item.session_id,
+                    target_name=new_name,
+                    proposed_value=new_value,
+                )
                 item.target_name = new_name
-                cb.setText(self._make_label_text(item))
+                item.proposed_value = new_value
+                self._refresh_item_applied_presentation(item, cb)
+                # Update ledger row from service-owned summary (S2)
+                row_tuple_md = self._row_widgets.get(item.session_id)
+                if row_tuple_md is not None:
+                    _cur_md, proposed_label_md, _cb_md = row_tuple_md
+                    proposed_label_md.setText(self._display_proposed(item))
                 dialog.accept()
             except Exception as exc:
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
 
         save_btn.clicked.connect(save)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
         dialog.open()
 
     def _edit_cfg_item(
@@ -191,11 +617,16 @@ class WritebackWidget(QWidget):
         item: ModuleWriteback | WaveformWriteback,
         cb: QCheckBox,
     ) -> None:
-        # The item carries a persistent, service-owned cfg model (editor_id,
-        # ADR-0008). Attach the dialog widget to *that* model — the user's edits
-        # land on the same model the agent edits and apply reads. On close the
-        # widget detaches but the model persists (torn down only on reanalyze).
-        if item.editor_id is None:
+        assert self._tab_id is not None
+        try:
+            draft = self._ctrl.get_writeback_item_draft_for_pane(
+                self._tab_id, self._pane, item.session_id
+            )
+        except Exception as exc:
+            logger.exception(
+                "failed to resolve writeback draft item %s", item.session_id
+            )
+            QMessageBox.critical(self, "Unable to edit writeback", str(exc))
             return
 
         dialog = QDialog(self)
@@ -222,6 +653,15 @@ class WritebackWidget(QWidget):
             if not text:
                 name_edit.setText(item.target_name)  # revert, no blank target
                 return
+            if text == item.target_name:
+                return
+            assert self._tab_id is not None
+            self._ctrl.set_writeback_item_for_pane(
+                self._tab_id,
+                self._pane,
+                item.session_id,
+                target_name=text,
+            )
             item.target_name = text
 
         name_edit.editingFinished.connect(_commit_name)
@@ -231,7 +671,12 @@ class WritebackWidget(QWidget):
         form_widget = CfgFormWidget(
             text_input_enhancer=make_value_source_input_enhancer(self._ctrl)
         )
-        form_widget.attach(self._ctrl.get_cfg_editor_draft(item.editor_id))
+        form_widget.attach(draft)
+
+        def _on_draft_changed(*_: Any) -> None:
+            self._refresh_item_applied_presentation(item, cb)
+
+        draft.on_change.connect(_on_draft_changed)
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
@@ -242,11 +687,20 @@ class WritebackWidget(QWidget):
         close_btn.clicked.connect(dialog.accept)
 
         def _on_finished(*_: Any) -> None:
-            _commit_name()
-            form_widget.detach()
-            cb.setText(self._make_label_text(item))
+            try:
+                _commit_name()
+            finally:
+                draft.on_change.disconnect(_on_draft_changed)
+                form_widget.detach()
+            self._refresh_item_applied_presentation(item, cb)
+            # Refresh bounded summary after cfg edits (proposed may have changed)
+            row_tuple = self._row_widgets.get(item.session_id)
+            if row_tuple is not None:
+                _cur_cfg, proposed_label_cfg, _cb_cfg = row_tuple
+                # For cfg items, proposed_summary stays bounded; keep existing
+                proposed_label_cfg.setText(self._display_proposed(item))
 
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
         dialog.finished.connect(_on_finished)
         dialog.open()
 

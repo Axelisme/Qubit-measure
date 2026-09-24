@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.events.completion import SaveFinishedPayload
+from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -58,9 +58,11 @@ def _record_facts(svc: SaveService) -> list[TabInteractionFact]:
     return facts
 
 
-def _record_outcomes(svc: SaveService) -> list[SaveFinishedPayload]:
-    outcomes: list[SaveFinishedPayload] = []
-    svc._bus.subscribe(SaveFinishedPayload, outcomes.append)  # type: ignore[attr-defined]
+def _record_outcomes(svc: SaveService) -> list[SaveDataFinishedPayload]:
+    outcomes: list[SaveDataFinishedPayload] = []
+    svc._bus.subscribe(  # type: ignore[attr-defined]
+        SaveDataFinishedPayload, outcomes.append
+    )
     return outcomes
 
 
@@ -132,7 +134,7 @@ def test_save_image_creates_parent_at_command_boundary(
 ) -> None:
     svc, state, _ = _make_service()
     figure = _make_figure()
-    state.get_tab("tab").figure = figure
+    state.get_tab("tab").analysis.figure = figure
     image_path = tmp_path / "images" / "plot.png"
 
     svc.save_image_sync(SavePermit(tab_id="tab"), str(image_path))
@@ -141,59 +143,45 @@ def test_save_image_creates_parent_at_command_boundary(
     _assert_saved_fixed_size(figure, str(image_path))
 
 
-# ---------------------------------------------------------------------------
-# start_save_result
-# ---------------------------------------------------------------------------
-
-
-def test_start_save_result_saves_image_and_starts_data_save(
+@pytest.mark.parametrize(
+    "entrypoint",
+    ("start_save_data", "save_image_sync", "save_post_image_sync"),
+)
+def test_save_entrypoints_reject_busy_tab_before_side_effects(
     qapp,
     tmp_path: Path,
+    entrypoint: str,
 ) -> None:
     svc, state, bg = _make_service()
     figure = _make_figure()
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
+    tab = state.get_tab("tab")
+    tab.analysis.figure = figure
+    tab.post_analysis.figure = figure
+    state.set_tab_analyzing("tab", True)
+    permit = SavePermit(tab_id="tab")
+    data_path = str(tmp_path / "data" / "measurement")
+    image_path = str(tmp_path / "images" / "plot.png")
 
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
+    with pytest.raises(FailedPreconditionError, match="busy"):
+        if entrypoint == "start_save_data":
+            svc.start_save_data(permit, data_path)
+        elif entrypoint == "save_image_sync":
+            svc.save_image_sync(permit, image_path)
+        else:
+            svc.save_post_image_sync(permit, image_path)
 
-    _assert_saved_fixed_size(figure, str(image_path))
-    bg.submit.assert_called_once()
-
-
-def test_start_save_result_captures_image_error_and_continues_data(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, bg = _make_service()
-    figure = _make_figure()
-    figure.savefig.side_effect = OSError("disk full")
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    # Should not raise — image error is captured, data save continues
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-
-    bg.submit.assert_called_once()
-
-
-def test_start_save_result_raises_if_no_figure(qapp) -> None:  # noqa: ARG001
-    svc, _, _ = _make_service()
-    with pytest.raises(FailedPreconditionError, match="No figure") as exc_info:
-        svc.start_save_result(SavePermit(tab_id="tab"), "/data", "/img")
-
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert exc_info.value.reason_code == ""
+    bg.submit.assert_not_called()
+    figure.savefig.assert_not_called()
+    assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "images").exists()
 
 
 # ---------------------------------------------------------------------------
-# _on_save_finished without pending_image
+# Save Data completion
 # ---------------------------------------------------------------------------
 
 
-def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
+def test_on_save_data_finished_emits_completion(qapp) -> None:  # noqa: ARG001
     svc, _, _ = _make_service()
     facts = _record_facts(svc)
     permit = SavePermit(tab_id="tab")
@@ -202,7 +190,7 @@ def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
 
     # Stage the active path as start_save_data would
     svc.start_save_data(permit, "/tmp/data")
-    svc._on_save_finished("tab")
+    svc._on_save_data_finished("tab")
 
     assert len(finished) == 1
     assert finished[0].tab_id == "tab"
@@ -210,52 +198,6 @@ def test_on_save_finished_emits_save_finished(qapp) -> None:  # noqa: ARG001
         TabInteractionFact.SAVE_STARTED,
         TabInteractionFact.SAVE_SUCCEEDED,
     ]
-
-
-# ---------------------------------------------------------------------------
-# _on_save_finished with pending_image (save_result flow)
-# ---------------------------------------------------------------------------
-
-
-def test_on_save_finished_with_pending_image_emits_save_result_finished(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, _ = _make_service()
-    figure = _make_figure()
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    outcomes = _record_outcomes(svc)
-
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-    svc._on_save_finished("tab")
-
-    assert len(outcomes) == 1
-    assert outcomes[0].data_error is None
-    assert outcomes[0].image_error is None
-
-
-def test_on_save_finished_with_pending_image_error_propagates(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, _ = _make_service()
-    figure = _make_figure()
-    figure.savefig.side_effect = OSError("disk full")
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    outcomes = _record_outcomes(svc)
-
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-    svc._on_save_finished("tab")
-
-    assert len(outcomes) == 1
-    assert outcomes[0].image_error == "disk full"
-    assert outcomes[0].data_error is None
 
 
 # ---------------------------------------------------------------------------
@@ -276,29 +218,8 @@ def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
 
     assert len(failed) == 1
     assert failed[0].tab_id == "tab"
-    assert failed[0].data_error == str(error)
+    assert failed[0].error == str(error)
     assert facts == [
         TabInteractionFact.SAVE_STARTED,
         TabInteractionFact.SAVE_FAILED,
     ]
-
-
-def test_on_save_failed_with_pending_image_emits_save_result_finished(
-    qapp,
-    tmp_path: Path,
-) -> None:
-    svc, state, _ = _make_service()
-    figure = _make_figure()
-    state.get_tab("tab").figure = figure
-    data_path = tmp_path / "data" / "meas"
-    image_path = tmp_path / "img" / "plot.png"
-
-    outcomes = _record_outcomes(svc)
-
-    svc.start_save_result(SavePermit(tab_id="tab"), str(data_path), str(image_path))
-    error = OSError("data write failed")
-    svc._on_save_failed("tab", error)
-
-    assert len(outcomes) == 1
-    assert outcomes[0].data_error == str(error)
-    assert outcomes[0].image_error is None

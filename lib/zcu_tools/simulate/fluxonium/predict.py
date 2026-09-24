@@ -29,11 +29,38 @@ class FluxoniumPredictor:
             flux_period=flux_period,
             flux_bias=flux_bias,
         )
-        self.params = self._engine.params
-        self.flux_half = self._engine.affine.flux_half
-        self.flux_period = self._engine.affine.flux_period
-        self.flux_bias = self._engine.affine.flux_bias
-        self._affine = self._engine.affine
+
+    @property
+    def params(self) -> tuple[float, float, float]:
+        return self._engine.params
+
+    @params.setter
+    def params(self, new_params: tuple[float, float, float]) -> None:
+        self._engine.params = new_params
+
+    @property
+    def flux_half(self) -> float:
+        return self._engine.flux_half
+
+    @flux_half.setter
+    def flux_half(self, new_flux_half: float) -> None:
+        self._engine.flux_half = new_flux_half
+
+    @property
+    def flux_period(self) -> float:
+        return self._engine.flux_period
+
+    @flux_period.setter
+    def flux_period(self, new_flux_period: float) -> None:
+        self._engine.flux_period = new_flux_period
+
+    @property
+    def flux_bias(self) -> float:
+        return self._engine.flux_bias
+
+    @flux_bias.setter
+    def flux_bias(self, new_flux_bias: float) -> None:
+        self._engine.flux_bias = new_flux_bias
 
     @classmethod
     def from_file(cls, result_path: str, flux_bias: float = 0.0) -> FluxoniumPredictor:
@@ -146,8 +173,6 @@ class FluxoniumPredictor:
             flux_period=self.flux_period,
             flux_bias=flux_bias,
         )
-        self.flux_bias = self._engine.affine.flux_bias
-        self._affine = self._engine.affine
 
     def _predict_freq(self, cur_value: float, transition: tuple[int, int]) -> float:
         values = np.array([cur_value], dtype=np.float64)

@@ -20,8 +20,12 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils import sweep2array
+from zcu_tools.experiment.v2.utils import (
+    materialize_nonuniform_t1_delays,
+    sweep2array,
+)
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
@@ -197,7 +201,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                     )
                 )
             populations = buffer.array
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = T1Result(
             lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
@@ -217,21 +221,12 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         orig_cfg = deepcopy(cfg)
         setup_devices(cfg, progress=True)
 
-        length_sweep = cfg.sweep.length
-
-        if isinstance(length_sweep, SweepCfg):
-            lengths = np.geomspace(
-                length_sweep.start, length_sweep.stop, length_sweep.expts
-            )
-        else:
-            lengths = np.asarray(length_sweep)
-        length_cycles = np.asarray(
-            [int(soccfg.us2cycles(t)) for t in lengths], dtype=np.int64
+        delay_table = materialize_nonuniform_t1_delays(
+            cfg.sweep.length,
+            soccfg=soccfg,
         )
-        length_cycles = np.unique(length_cycles)
-        lengths = np.asarray(
-            [soccfg.cycles2us(int(cycle)) for cycle in length_cycles], dtype=np.float64
-        )
+        length_cycles = delay_table.cycles
+        lengths = delay_table.times_us
 
         fig, viewer = self._make_viewer_ctx()
 
@@ -263,6 +258,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                             values=list(length_cycles),
                             idx_reg="length_idx",
                             val_reg="t1_delay_cycle",
+                            auto_compress=False,
                         ),
                         Reset("reset", modules.reset),
                         Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
@@ -279,7 +275,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                     )
                 )
             populations = buffer.array
-        plt.close(fig)
+        close_figure(fig)
 
         self.last_result = T1Result(
             lengths=lengths, signals=populations, cfg_snapshot=orig_cfg
@@ -326,11 +322,11 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
 
-        rate, _, fit_pops1, fit_pops2, *_ = fit_dual_transition_rates(
-            lens, populations1, populations2
-        )
+        fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
-        lambdas, _ = calc_lambdas(rate)
+        lambdas, _ = calc_lambdas(fit_result.rates)
+        fit_pops1 = fit_result.fitted_populations1
+        fit_pops2 = fit_result.fitted_populations2
 
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]

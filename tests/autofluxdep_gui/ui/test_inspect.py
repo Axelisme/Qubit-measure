@@ -96,6 +96,8 @@ def test_controller_exposes_context_control_port(ctrl):
         "get_current_md",
         "get_current_ml",
         "coerce_md_value",
+        "create_md_attr",
+        "rename_md_attr",
         "set_md_attr",
         "del_md_attr",
         "rename_ml_module",

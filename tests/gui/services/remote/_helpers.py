@@ -48,8 +48,8 @@ def make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
-    view.make_live_container = MagicMock(return_value=None)
-    # shaped View surface so Controller.open_dialog / take_figure_screenshot
+    view.make_run_container = MagicMock(return_value=None)
+    # shaped View surface so Controller.open_dialog / take_figure_screenshot_for_subtab
     # / get_view_snapshot have somewhere to land in tests.
     view._open_dialogs = []
 
@@ -81,7 +81,7 @@ def make_view() -> MagicMock:
         b"\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cb"
         b"\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
-    view.take_figure_screenshot = MagicMock(return_value=_PNG)
+    view.take_figure_screenshot_for_subtab = MagicMock(return_value=_PNG)
     view.take_dialog_screenshot = MagicMock(return_value=_PNG)
     view.take_window_screenshot = MagicMock(return_value=_PNG)
     return view
@@ -186,6 +186,7 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
         RemoteControlAdapter,
         SimpleNamespace(
             ctrl=ctrl,
+            tab_control=_facet_or_self("tab_control"),
             run_analyze_control=_facet_or_self("run_analyze_control"),
             operation_control=_facet_or_self("operation_control"),
             save_control=_facet_or_self("save_control"),
@@ -193,6 +194,7 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
             context_control=_facet_or_self("context_control"),
             device_control=_facet_or_self("device_control"),
             predictor_control=_facet_or_self("predictor_control"),
+            render_view=_facet_or_self("render_view"),
         ),
     )
     try:
