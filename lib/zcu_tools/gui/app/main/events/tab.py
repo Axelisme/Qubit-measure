@@ -50,6 +50,7 @@ class TabContentFact(str, Enum):
 
     RUN_RESULT_COMMITTED = "run_result_committed"
     LOADED_RESULT_COMMITTED = "loaded_result_committed"
+    CFG_REPLACED = "cfg_replaced"
     PRIMARY_ANALYSIS_COMMITTED = "primary_analysis_committed"
     POST_ANALYSIS_COMMITTED = "post_analysis_committed"
 

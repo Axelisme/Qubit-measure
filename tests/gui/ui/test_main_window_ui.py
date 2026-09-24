@@ -1296,6 +1296,9 @@ def _editor_wiring_ctrl() -> MagicMock:
         CfgSchema(spec, make_default_value(spec))
     )
     ctrl.open_seeded_cfg_editor.return_value = ("editor-tab1", [])
+    ctrl.editor_id_for_owner.side_effect = lambda _owner: (
+        ctrl.open_seeded_cfg_editor.return_value[0]
+    )
     ctrl.get_cfg_editor_draft.return_value = draft
     return ctrl
 

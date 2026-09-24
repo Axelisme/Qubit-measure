@@ -40,6 +40,8 @@ class MainWindowEventHost(Protocol):
     def has_tab_widget(self, tab_id: str) -> bool: ...
     def view_tab_ids(self) -> list[str]: ...
 
+    def refresh_tab_cfg(self, tab_id: str) -> None: ...
+
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
@@ -71,6 +73,7 @@ class MainWindowEventHost(Protocol):
 
 
 class _TabReaction(Enum):
+    CFG = auto()
     ANALYZE_FORM = auto()
     POST_ANALYZE_FORM = auto()
     WRITEBACK = auto()
@@ -154,6 +157,7 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
 }
 
 _CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {
+    TabContentFact.CFG_REPLACED: (_TabReaction.CFG,),
     TabContentFact.RUN_RESULT_COMMITTED: (
         _TabReaction.ANALYZE_FORM,
         _TabReaction.POST_ANALYZE_FORM,
@@ -307,7 +311,9 @@ class MainWindowEventCoordinator:
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         for reaction in reactions:
-            if reaction is _TabReaction.ANALYZE_FORM:
+            if reaction is _TabReaction.CFG:
+                self._host.refresh_tab_cfg(tab_id)
+            elif reaction is _TabReaction.ANALYZE_FORM:
                 self._host.refresh_tab_analyze_form(tab_id, snapshot)
             elif reaction is _TabReaction.POST_ANALYZE_FORM:
                 self._host.refresh_tab_post_analyze_form(tab_id, snapshot)

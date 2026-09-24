@@ -41,7 +41,11 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
     emit = MagicMock()
     bus.emit = emit  # type: ignore[method-assign]
     writeback = MagicMock()
-    return LoadService(state, writeback), emit, writeback
+    return (
+        LoadService(state, writeback, cfg_editor=MagicMock(), bus=bus),
+        emit,
+        writeback,
+    )
 
 
 def test_load_result_replaces_run_result_and_invalidates_dependents() -> None:

@@ -172,7 +172,7 @@ def build_app_services(
         access=access,
     )
     guard = GuardService(state)
-    load = LoadService(state, writeback)
+    load = LoadService(state, writeback, cfg_editor=cfg_editor, bus=bus)
     run = RunService(state, runner, bus, handles, writeback)
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)

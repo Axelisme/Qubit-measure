@@ -46,6 +46,7 @@ def test_tab_load_data_dispatch_returns_serializable_outcome() -> None:
         "has_cfg_snapshot": True,
         "has_analyze_params": True,
         "source_kind": "loaded",
+        "cfg_backfill": "not_applied",
         "has_run_result": True,
         "analyze_params": {"threshold": 0.25},
     }

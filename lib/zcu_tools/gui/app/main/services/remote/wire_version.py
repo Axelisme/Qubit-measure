@@ -90,7 +90,9 @@ from __future__ import annotations
 # (tab_id, subtab_id) with closed values run|analysis|post_analysis (save_image
 # only analysis|post_analysis); removes tab.get_current_figure, tab.save_post_image
 # and tab.save_result; preview/apply replies project destination_context.
-WIRE_VERSION = 55
+# v56: tab.load_data reply includes cfg_backfill applied/not_applied; successful
+# result load does not fail when best-effort Config projection cannot apply.
+WIRE_VERSION = 56
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -116,4 +118,6 @@ WIRE_VERSION = 55
 # resolution allocation, and uses one neutral flux device-value contract.
 # v78: capability-driven experiment subtabs own independent pane resources;
 # figure/writeback/save-image routing uses the v55 subtab-qualified wire contract.
-GUI_VERSION = 78
+# v79: Load projects execution snapshot values into the current tab Config and
+# replaces the owner editor session without reviving stale client handles.
+GUI_VERSION = 79
