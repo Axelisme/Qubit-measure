@@ -66,6 +66,30 @@ class GEAnalyzeResult(AnalyzeResultBase):
     init_pops: list[list[float]]
     figure: Figure
 
+    def validate_calibration(self) -> None:
+        populations = np.asarray(self.init_pops, dtype=np.float64)
+        scalars = [
+            self.fidelity,
+            self.theta,
+            self.threshold,
+            self.ge_s,
+            self.g_center,
+            self.e_center,
+        ]
+        if (
+            not np.isfinite(scalars).all()
+            or not 0.0 <= self.fidelity <= 1.0
+            or self.ge_s <= 0
+            or np.isclose(self.g_center, self.e_center)
+            or populations.shape != (2, 2)
+            or not np.isfinite(populations).all()
+            or np.any(populations < 0)
+            or np.any(populations.sum(axis=1) > 1 + 1e-12)
+        ):
+            raise ValueError(
+                "Invalid GE calibration: check centers, width and populations"
+            )
+
 
 @dataclass
 class GEPostAnalyzeParams:
@@ -183,6 +207,7 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeParams],
     ) -> GEPostAnalyzeResult:
         primary = req.analyze_result
+        primary.validate_calibration()
         exp = GE_Exp()
         confusion = exp.calc_confusion_matrix(
             np.asarray(primary.init_pops, dtype=np.float64),
@@ -211,6 +236,7 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         self, req: WritebackRequest[GERunResult, GEAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
+        result.validate_calibration()
         # Float scalars plus the complex discrimination centres. complex md
         # values round-trip end-to-end now (in-process apply + MetaDict str
         # persistence both speak complex; the wire carries {"__complex__": [...]}

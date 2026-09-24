@@ -44,13 +44,19 @@ from .util import classify_result, plot_with_classified, raw_shots_to_signal
 
 
 def make_init_matrix(init_pops: NDArray[np.float64]) -> NDArray[np.float64]:
-    p_gg_init = init_pops[0, 0]
-    p_ge_init = init_pops[0, 1]
-    # Symmetric preparation model: the pi pulse maps g<->e with the same leakage rate.
-    p_eg_init = p_ge_init
-    p_ee_init = p_gg_init
-    p_go_init = 1.0 - p_gg_init - p_ge_init
-    p_eo_init = p_go_init
+    # Each acquisition has its own refined preparation populations. Retaining
+    # both rows makes the diagnostic equivariant under g/e relabeling.
+    if (
+        init_pops.shape != (2, 2)
+        or not np.isfinite(init_pops).all()
+        or np.any(init_pops < 0)
+        or np.any(init_pops.sum(axis=1) > 1 + 1e-12)
+    ):
+        raise ValueError("GE initial populations must be a valid 2x2 probability array")
+    p_gg_init, p_ge_init = init_pops[0]
+    p_eg_init, p_ee_init = init_pops[1]
+    p_go_init = max(0.0, 1.0 - p_gg_init - p_ge_init)
+    p_eo_init = max(0.0, 1.0 - p_eg_init - p_ee_init)
 
     return np.array(
         [

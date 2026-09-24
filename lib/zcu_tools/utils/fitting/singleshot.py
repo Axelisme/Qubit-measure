@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import cast
 
 import numpy as np
 import scipy.stats as stats
 from numpy.typing import NDArray
+from scipy.optimize import curve_fit
 from scipy.special import iv, ndtr
 
 _QUADRATURE_NODES, _QUADRATURE_WEIGHTS = np.polynomial.legendre.leggauss(48)
@@ -14,7 +15,7 @@ _TRANSITION_WEIGHTS = 0.5 * _QUADRATURE_WEIGHTS
 
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
-from .base import assign_init_p, fit_func
+from .base import assign_init_p
 
 
 def calc_fc(x: NDArray[np.float64], rA: float, rB: float) -> NDArray[np.float64]:
@@ -185,6 +186,96 @@ def gauss_func(xs: NDArray[np.float64], x_c: float, s: float) -> NDArray[np.floa
     return f / np.sum(f)
 
 
+def _fit_population_simplex(
+    xs: NDArray[np.float64],
+    data: NDArray[np.float64],
+    model: Callable[..., NDArray[np.float64]],
+    initial: Sequence[float],
+    bounds: tuple[Sequence[float], Sequence[float]],
+    fixed: Sequence[float | None],
+    population_indices: tuple[int, int],
+    sigma: NDArray[np.float64] | None = None,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Fit legal populations and return covariance in physical coordinates.
+
+    Free populations use total occupancy and conditional excited fraction.
+    A single free population instead uses the remaining probability mass.
+    Optimizer failures propagate; an initial guess is never a fit result.
+    """
+    g, e = population_indices
+    values = np.asarray(initial, dtype=np.float64).copy()
+    lower, upper = np.asarray(bounds, dtype=np.float64).copy()
+    locked = np.array([value is not None for value in fixed])
+    for index, value in enumerate(fixed):
+        if value is not None:
+            if not np.isfinite(value) or not lower[index] <= value <= upper[index]:
+                raise ValueError("Fixed GE parameters must be finite and within bounds")
+            values[index] = value
+    if sum(values[index] for index in (g, e) if locked[index]) > 1.0:
+        raise ValueError("Fixed GE populations must sum to at most one")
+    if locked[g] and locked[e] and values[g] + values[e] == 0.0:
+        raise ValueError("GE calibration requires positive modeled population")
+    if not locked[g] and not locked[e]:
+        total = max(float(values[g] + values[e]), np.finfo(float).eps)
+        values[g], values[e] = min(total, 1.0), np.clip(values[e] / total, 0.0, 1.0)
+    elif locked[g] != locked[e]:
+        free_pop, fixed_pop = (e, g) if locked[g] else (g, e)
+        remainder = 1.0 - values[fixed_pop]
+        if remainder == 0.0:
+            values[free_pop] = 0.0
+            locked[free_pop] = True
+        else:
+            values[free_pop] = np.clip(values[free_pop] / remainder, 0.0, 1.0)
+    free = np.flatnonzero(~locked)
+
+    def decode(encoded: NDArray[np.float64]) -> NDArray[np.float64]:
+        physical = encoded.copy()
+        if not locked[g] and not locked[e]:
+            physical[g] = encoded[g] * (1.0 - encoded[e])
+            physical[e] = encoded[g] * encoded[e]
+        elif locked[g] != locked[e]:
+            free_pop, fixed_pop = (e, g) if locked[g] else (g, e)
+            physical[free_pop] = encoded[free_pop] * (1.0 - encoded[fixed_pop])
+        return physical
+
+    def wrapped(x: NDArray[np.float64], *args: float) -> NDArray[np.float64]:
+        encoded = values.copy()
+        encoded[free] = args
+        return model(x, *decode(encoded))
+
+    covariance = np.zeros((values.size, values.size), dtype=np.float64)
+    if free.size:
+        fitted, free_cov = curve_fit(
+            wrapped,
+            xs,
+            data,
+            p0=np.clip(values[free], lower[free], upper[free]),
+            bounds=(lower[free], upper[free]),
+            sigma=sigma,
+            max_nfev=5000,
+        )
+        if not np.isfinite(fitted).all() or not np.isfinite(free_cov).all():
+            raise RuntimeError("GE fit returned non-finite parameters or covariance")
+        values[free] = fitted
+        covariance[np.ix_(free, free)] = free_cov
+    jacobian = np.eye(values.size)
+    if not locked[g] and not locked[e]:
+        jacobian[g, g], jacobian[g, e] = 1.0 - values[e], -values[g]
+        jacobian[e, g], jacobian[e, e] = values[e], values[g]
+    elif locked[g] != locked[e]:
+        free_pop, fixed_pop = (e, g) if locked[g] else (g, e)
+        jacobian[free_pop, free_pop] = 1.0 - values[fixed_pop]
+    return decode(values), jacobian @ covariance @ jacobian.T
+
+
+def _swap_ge_parameters(values: Sequence[float | None]) -> list[float | None]:
+    swapped = list(values)
+    swapped[0], swapped[1] = swapped[1], swapped[0]
+    if swapped[5] is not None:
+        swapped[5] = 1.0 - swapped[5]
+    return swapped
+
+
 def fit_singleshot(
     xs: NDArray[np.float64],
     g_pdfs: NDArray[np.float64],
@@ -193,10 +284,25 @@ def fit_singleshot(
     fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[tuple[float, float, float, float, float, float, float], NDArray[np.float64]]:
     """fitparams: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"""
+    if (
+        xs.ndim != 1
+        or xs.size < 3
+        or g_pdfs.shape != xs.shape
+        or e_pdfs.shape != xs.shape
+        or not np.isfinite([xs, g_pdfs, e_pdfs]).all()
+        or np.any(np.diff(xs) <= 0)
+        or np.any(g_pdfs < 0)
+        or np.any(e_pdfs < 0)
+        or g_pdfs.sum() <= 0
+        or e_pdfs.sum() <= 0
+    ):
+        raise ValueError(
+            "GE fit requires finite nonnegative histograms on an increasing axis"
+        )
     if fixedparams is not None:
         if len(fixedparams) != 7:
             raise ValueError(
-                "Fixed parameters must be a list of six elements: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"
+                "Fixed parameters must be a list of seven elements: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"
             )
 
         fixedparams = list(fixedparams)
@@ -205,6 +311,27 @@ def fit_singleshot(
         if length_ratio == 0.0:
             # p_avg not affecting the result
             fixedparams[5] = 0.5 if fixedparams[5] is None else fixedparams[5]
+
+    if fitparams is not None and len(fitparams) != 7:
+        raise ValueError("GE fit requires seven initial parameters")
+    # Canonical numerical ordering makes exchanging physical labels exactly
+    # equivalent, including starts, bounds and optimizer trajectories.
+    if float(xs @ g_pdfs) > float(xs @ e_pdfs):
+        fitted, covariance = fit_singleshot(
+            xs,
+            e_pdfs,
+            g_pdfs,
+            fitparams=None if fitparams is None else _swap_ge_parameters(fitparams),
+            fixedparams=None
+            if fixedparams is None
+            else _swap_ge_parameters(fixedparams),
+        )
+        transform = np.eye(7)[[1, 0, 2, 3, 4, 5, 6]]
+        transform[5, 5] = -1.0
+        return cast(
+            tuple[float, float, float, float, float, float, float],
+            tuple(_swap_ge_parameters(fitted)),
+        ), transform @ covariance @ transform.T
 
     if fitparams is None:
         fitparams = [None] * 7
@@ -240,9 +367,10 @@ def fit_singleshot(
         g_tran_pop = np.sum(g_pdfs[e_idxs])
         e_tran_pop = np.sum(e_pdfs[g_idxs])
 
-        p0_g = min(0.5 * (g_tran_pop + e_tran_pop), 0.5)
-        p0_e = 1 - p0_g
-        p_avg = min(e_tran_pop / (g_tran_pop + e_tran_pop), 0.5)
+        p0_e = min(0.5 * (g_tran_pop + e_tran_pop), 0.5)
+        p0_g = 1 - p0_e
+        transition_mass = g_tran_pop + e_tran_pop
+        p_avg = float(g_tran_pop / transition_mass) if transition_mass > 0 else 0.5
         length_ratio = 0.01
 
         assign_init_p(
@@ -258,6 +386,10 @@ def fit_singleshot(
             ],
         )
     fitparams = cast(list[float], fitparams)
+    if fixedparams is not None:
+        for index, value in enumerate(fixedparams):
+            if value is not None:
+                fitparams[index] = value
 
     sg, se, s, p0_g, p0_e, p_avg, length_ratio = fitparams
     bounds = (
@@ -276,7 +408,7 @@ def fit_singleshot(
             xs[-1] - xs[0],
             1.0,
             1.0,
-            0.5,
+            1.0,
             3.0,
         ],
     )
@@ -304,17 +436,33 @@ def fit_singleshot(
         e_pdf = calc_population_pdf(cat_xs[len(xs) :], *e_args)
         return np.concatenate([g_pdf, e_pdf])
 
-    pOpt, pCov = fit_func(
-        cat_xs,
-        cat_pdfs,
-        calc_cat_pdf,
-        init_p=fitparams,
-        bounds=bounds,
-        fixedparams=fixedparams,
-    )
-    pOpt = cast(tuple[float, float, float, float, float, float, float], pOpt)
-
-    return pOpt, pCov
+    fixed = list(fixedparams) if fixedparams is not None else [None] * 7
+    # Include both transition directions and multiple transition durations.
+    candidates = []
+    for avg_start, ratio_start in (
+        (p_avg, length_ratio),
+        (0.2, 0.5),
+        (0.8, 0.5),
+        (0.5, 1.5),
+    ):
+        initial = [float(value) for value in cast(list[float], fitparams)]
+        initial[5], initial[6] = avg_start, ratio_start
+        try:
+            fitted, covariance = _fit_population_simplex(
+                cat_xs, cat_pdfs, calc_cat_pdf, initial, bounds, fixed, (3, 4)
+            )
+        except RuntimeError:
+            continue
+        residual = calc_cat_pdf(cat_xs, *fitted) - cat_pdfs
+        if not np.isfinite(residual).all():
+            continue
+        candidates.append((float(residual @ residual), fitted, covariance))
+    if not candidates:
+        raise RuntimeError("GE fit did not converge from any initial parameters")
+    _, fitted, covariance = min(candidates, key=lambda item: item[0])
+    return cast(
+        tuple[float, float, float, float, float, float, float], tuple(fitted)
+    ), covariance
 
 
 def fit_singleshot_p0(
@@ -326,30 +474,35 @@ def fit_singleshot_p0(
     fit_length_ratio: bool = False,
 ) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
     sg, se, s, _, _, p_avg, length_ratio = ge_params
+    if sg > se:
+        swapped = cast(
+            tuple[float, float, float, float, float, float, float],
+            tuple(_swap_ge_parameters(ge_params)),
+        )
+        fitted, covariance = fit_singleshot_p0(
+            xs, pdfs, init_p0_e, init_p0_g, swapped, fit_length_ratio=fit_length_ratio
+        )
+        order = [1, 0, 2]
+        return (fitted[1], fitted[0], fitted[2]), covariance[np.ix_(order, order)]
 
     def calc_pdf(
-        xs: NDArray[np.float64], p0_g: float, p0_e: float, length_ratio: float
+        xs: NDArray[np.float64], p0_g: float, p0_e: float, ratio: float
     ) -> NDArray[np.float64]:
-        return calc_population_pdf(xs, sg, se, s, p0_g, p0_e, p_avg, length_ratio)
+        return calc_population_pdf(xs, sg, se, s, p0_g, p0_e, p_avg, ratio)
 
-    fixedparams: list[float | None] = [None, None, None]
-    if not fit_length_ratio:
-        fixedparams[2] = length_ratio
-
+    fixed: list[float | None] = [None, None, None]
+    if not fit_length_ratio or length_ratio == 0.0:
+        fixed[2] = length_ratio
     weights = init_p0_g * gauss_func(xs, sg, s) + init_p0_e * gauss_func(xs, se, s)
-    sigmas = 1 / np.sqrt(weights)
-
-    pOpt, pCov = fit_func(
+    sigmas = 1 / np.sqrt(np.maximum(weights, np.finfo(float).tiny))
+    fitted, covariance = _fit_population_simplex(
         xs,
         pdfs,
         calc_pdf,
-        init_p=[init_p0_g, init_p0_e, length_ratio],
-        bounds=([0.0, 0.0, 0.5 * length_ratio], [1.0, 1.0, 2.0 * length_ratio]),
+        [init_p0_g, init_p0_e, length_ratio],
+        ([0.0, 0.0, 0.5 * length_ratio], [1.0, 1.0, max(2.0 * length_ratio, 1e-12)]),
+        fixed,
+        (0, 1),
         sigma=sigmas,
-        absolute_sigma=False,
     )
-    pOpt = cast(tuple[float, float, float], pOpt)
-
-    p0_g, p0_e, length_ratio = pOpt
-
-    return (p0_g, p0_e, length_ratio), pCov
+    return (float(fitted[0]), float(fitted[1]), float(fitted[2])), covariance

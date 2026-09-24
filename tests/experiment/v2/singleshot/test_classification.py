@@ -67,7 +67,7 @@ def test_ge_optimizer_can_exceed_half_separation() -> None:
     # Both prepared clouds lie outside their old radius limit, but on their own side.
     g = np.full(100, -1 + 1.4j)
     e = np.full(100, 1 + 1.4j)
-    radius = optimize_ge_radius(g, e, -1, 1, np.eye(3)[:2], 0.3, consider_other=False)
+    radius = optimize_ge_radius(g, e, -1, 1, np.eye(2), 0.3, consider_other=False)
     assert 1.4 < radius <= 2
 
 

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-25 — singleshot initial state
+**Last updated:** 2026-09-25 — GE fit symmetry and population constraints
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -339,3 +339,5 @@ review 後執行，不屬於 adapter code。
   writeback 全略過，只剩既有 md item。
 
 三個 singleshot 分析（ge / len_rabi / amp_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 對應零 length/gain，不是第一個掃描點。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。
+
+GE 的主分析與 writeback/post 邊界拒絕非有限 centers/width、重合 centers 與不合法 populations。Optimizer 未收斂不會回傳 initial guess 當作 calibration；失敗不產生新的校準 proposal。

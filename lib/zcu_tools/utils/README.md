@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-09-23 — nearest-center singleshot regions
+**Last updated:** 2026-09-25 — GE fit symmetry and population constraints
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 實驗資料持久化的 public API 收斂在 `zcu_tools.utils.datasaver` package
@@ -144,3 +144,5 @@ exception；若 exception 來自 Pyro 且包含 `_pyroTraceback`，會把 remote
 Python 運算子更容易讓 numpy stub 維持 dtype 關係，也避免用 `cast()` 補洞。
 
 Program 與離線分析共用 `shot_classification` 的互斥分類；等距與 radius 邊界不納入 g/e。Gaussian region 積分使用相同的圓與半平面交集。
+
+GE histogram fitting 使用 `p_avg ∈ [0, 1]` 允許兩種 readout-transition 方向，以固定數值方向與多組初值維持 g/e label symmetry。Population 以 total occupancy / conditional fraction 參數化，保證非負且總和不超過一；fixed population 與 covariance 皆轉回公開物理座標。GE 使用 strict optimizer，不沿用通用 fit_func 的初值 fallback；`Align T1` 真正固定 shared length ratio，零 ratio 也是可用的固定模型。
