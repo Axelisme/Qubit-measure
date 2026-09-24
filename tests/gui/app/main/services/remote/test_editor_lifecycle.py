@@ -450,16 +450,19 @@ def test_failed_editor_closed_encoding_keeps_subscription(
     assert f"failed to build editor push {editor_id}/editor_closed" in caplog.text
 
 
-def test_editor_subscription_survives_other_client_disconnect(
+def test_editor_can_subscribe_after_other_client_disconnect(
     connections: Connections,
 ) -> None:
     a, b = connections.connect(), connections.connect()
-    a.open_editor()
+    a_id = a.open_editor()
     editor_id = b.open_editor()
-    b.result("editor.subscribe", editor_id=editor_id)
     a.close()
     connections.wait(lambda: bool(connections.reclaimed))
+    b.assert_missing(a_id)
 
+    assert b.result("editor.subscribe", editor_id=editor_id) == {
+        "subscribed_editors": [editor_id]
+    }
     b.result("editor.set_field", editor_id=editor_id, path="length", value=0.5)
     event = b.next_event("editor_changed")
     payload = event["payload"]
