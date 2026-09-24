@@ -176,23 +176,3 @@ def test_signal_buffer_flush_keeps_public_update_shape() -> None:
 
     assert len(updates) == 2
     np.testing.assert_allclose(updates[-1], np.array([1.0, 2.0]))
-
-
-def test_signal_buffer_flush_keeps_public_update_shape() -> None:
-    from zcu_tools.experiment.v2.runner import SignalBuffer
-
-    updates: list[np.ndarray] = []
-    buffer = SignalBuffer(
-        (2,),
-        dtype=np.float64,
-        on_update=lambda data: updates.append(data.copy()),
-        update_interval=None,
-    )
-
-    cfg: dict[str, object] = {}
-    with Schedule(cfg, buffer) as sched:
-        for value, step in sched.scan("point", [0.0, 1.0]):
-            step.set_data(value + 1.0, flush=True)
-
-    assert len(updates) == 2
-    np.testing.assert_allclose(updates[-1], np.array([1.0, 2.0]))
