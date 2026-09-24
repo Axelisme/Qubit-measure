@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-08-26 — remove stale repo-local agent tooling tests
+**Last updated:** 2026-09-24 — measure MCP test ownership
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -298,7 +298,13 @@ invariant failure不被handler降級；`test_remote_contract_surface.py`以AST�
 `RuntimeError`/`Exception`/bare catch。unexpected dispatch測試同時要求controller error log保留
 traceback。
 
-`tests/gui/services/remote/test_remote_mcp_toolchain.py` 保留 remote MCP startup/device/schema/wrapper 與 base async contract；bundle/stage tools 放在 `test_bundle_tools.py`，screenshot/debug/overview 放在 `test_screenshot_overview_tools.py`。新增 remote MCP 測試時優先放到對應 focused file；只有真正跨 toolchain 的行為才放回 `test_remote_mcp_toolchain.py`。
+`tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
+view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
+透過recording Transport觀察RPC，不patch server globals或私有helpers。
+`tests/gui/services/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
+handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
+Shared exposure policy的建構驗證屬於`tests/gui/remote/`。Schema文字、tool inventory與
+script flags用直接review，不納入pytest。
 
 `tests/gui/_control_fakes.py` 提供 control facet tests 的 typed recording fakes。新增 `test_*_control.py` contract 時，偏好 recording fake + 表驅動 public forwarding contract；只在需要 Qt signal / event bus behavior 時測 event disposer、signal rebind 或 state transition，不把 `MagicMock.assert_called_once_with` 當成主要測試內容。
 
@@ -453,8 +459,8 @@ load-result feature 的 targeted tests 分散在對應 ownership：
 `tests/gui/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
 `tests/gui/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
-同目錄也覆蓋 measure MCP 的 operation handle 與 RPC timeout policy：bounded
-GUI handler timeout 應回傳狀態，transport timeout 應被視為連線異常。
+`tests/mcp/measure/`覆蓋operation handle與RPC timeout policy：bounded
+GUI handler timeout應回傳狀態，transport timeout應被視為連線異常。
 
 **新增整合測試**：在 `test_modules_integration.py` 加入新的 test class / method，  
 用 `_make_prog(modules=[...])` 建構程式，斷言 `prog.binprog is not None`。

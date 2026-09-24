@@ -5,12 +5,6 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.mcp.measure import server as mcp_server
-from zcu_tools.mcp.measure.session_policy import (
-    GUARD_DEPS,
-    READ_REVEALS,
-    describe_stale_keys,
-)
 
 from ._helpers import Fixture, dispatch_handler
 
@@ -133,29 +127,3 @@ def test_set_invalid_recipe_reports_reason(
     assert exc.value.code is ErrorCode.INVALID_PARAMS
     assert exc.value.reason == "invalid_recipe"
     assert fixture.state.version.get("arb_waveforms") == 0
-
-
-def test_mcp_tools_have_requested_names_and_hidden_guard() -> None:
-    for name in (
-        "list_arb_waveform",
-        "get_arb_waveform_preview",
-        "set_arb_waveform",
-    ):
-        assert name in mcp_server.TOOLS
-
-    assert "gui_arb_waveform_list" not in mcp_server.TOOLS
-    assert "gui_arb_waveform_preview" not in mcp_server.TOOLS
-    assert "gui_arb_waveform_set" not in mcp_server.TOOLS
-
-    schema = mcp_server.TOOLS["set_arb_waveform"]["inputSchema"]
-    assert set(schema["required"]) == {"name", "recipe"}
-    assert set(schema["properties"]) == {"name", "recipe", "overwrite"}
-
-
-def test_arb_waveform_version_policy() -> None:
-    assert GUARD_DEPS["arb_waveform.set"] == ("arb_waveforms",)
-    assert READ_REVEALS["arb_waveform.list"] == ("arb_waveforms",)
-    assert READ_REVEALS["arb_waveform.preview"] == ("arb_waveforms",)
-    assert describe_stale_keys(["arb_waveforms"]) == [
-        "the arbitrary waveform asset store"
-    ]

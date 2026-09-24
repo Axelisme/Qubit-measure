@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import (
-    METHOD_SPECS,
     MeasureToolContext,
     _is_timeout_error,
-    bind_context,
-    send_gui_rpc,
 )
 
 _SOC_CONNECT_TIMEOUT_SLACK = 0.25
@@ -19,8 +17,8 @@ _SOC_CONNECT_TIMEOUT_SLACK = 0.25
 _SOC_CONNECT_RECONCILE_TIMEOUT = 1.0
 
 
-def _soc_connect_rpc_timeout() -> float:
-    return METHOD_SPECS["soc.connect"].timeout_seconds + _SOC_CONNECT_TIMEOUT_SLACK
+def _soc_connect_rpc_timeout(ctx: MeasureToolContext) -> float:
+    return ctx.method_specs["soc.connect"].timeout_seconds + _SOC_CONNECT_TIMEOUT_SLACK
 
 
 def _is_soc_connect_timeout(exc: Exception) -> bool:
@@ -43,10 +41,12 @@ def _soc_timeout_message(timeout: float, detail: str) -> str:
     )
 
 
-def _reconcile_soc_connect_timeout(timeout: float, exc: Exception) -> dict[str, Any]:
+def _reconcile_soc_connect_timeout(
+    ctx: MeasureToolContext, timeout: float, exc: Exception
+) -> dict[str, Any]:
     try:
         has_soc = bool(
-            send_gui_rpc("state.has_soc", {}, _SOC_CONNECT_RECONCILE_TIMEOUT).get(
+            ctx.send_gui_rpc("state.has_soc", {}, _SOC_CONNECT_RECONCILE_TIMEOUT).get(
                 "value", False
             )
         )
@@ -64,7 +64,7 @@ def _reconcile_soc_connect_timeout(timeout: float, exc: Exception) -> dict[str, 
             )
         ) from exc
     try:
-        info = send_gui_rpc("soc.info", {}, _SOC_CONNECT_RECONCILE_TIMEOUT)
+        info = ctx.send_gui_rpc("soc.info", {}, _SOC_CONNECT_RECONCILE_TIMEOUT)
     except Exception as info_exc:
         raise TimeoutError(
             _soc_timeout_message(
@@ -81,7 +81,9 @@ def _reconcile_soc_connect_timeout(timeout: float, exc: Exception) -> dict[str, 
     }
 
 
-def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_soc_connect(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Connect the SoC SYNCHRONOUSLY and return its hardware summary.
 
     Unlike run / analyze / device ops, connect is no longer a degrading async
@@ -102,12 +104,12 @@ def tool_gui_soc_connect(arguments: dict[str, Any]) -> dict[str, Any]:
         params["port"] = int(arguments["port"])
     # Use the wire spec's 3s budget plus a tiny transport slack so the GUI-side
     # handler budget fires first; do NOT fall back to the 30s generic default.
-    timeout = _soc_connect_rpc_timeout()
+    timeout = _soc_connect_rpc_timeout(ctx)
     try:
-        result = send_gui_rpc("soc.connect", params, timeout)
+        result = ctx.send_gui_rpc("soc.connect", params, timeout)
     except Exception as exc:
         if _is_soc_connect_timeout(exc):
-            return _reconcile_soc_connect_timeout(timeout, exc)
+            return _reconcile_soc_connect_timeout(ctx, timeout, exc)
         raise
     return {"soc": result.get("soc")}
 
@@ -138,5 +140,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

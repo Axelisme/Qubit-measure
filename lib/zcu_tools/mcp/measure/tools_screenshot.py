@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
     MeasureToolContext,
-    bind_context,
-    send_gui_rpc,
 )
 
 _SCREENSHOT_DIALOGS = ("setup", "device", "predictor", "inspect", "startup")
@@ -18,7 +17,9 @@ _SCREENSHOT_DIALOGS = ("setup", "device", "predictor", "inspect", "startup")
 _SCREENSHOT_TARGETS = frozenset({"window", *_SCREENSHOT_DIALOGS})
 
 
-def tool_gui_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_screenshot(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Capture the main window OR a named dialog as a PNG FILE; return its path.
 
     ``target`` switches what is grabbed:
@@ -55,7 +56,7 @@ def tool_gui_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
         if out_path_arg is not None
         else str(Path(gettempdir()) / default_name)
     )
-    res = send_gui_rpc(method, params)
+    res = ctx.send_gui_rpc(method, params)
     png = base64.b64decode(res["png_b64"])
     Path(out_path).write_bytes(png)
     return {"bytes": res.get("bytes", len(png)), "saved_to": out_path}
@@ -117,5 +118,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

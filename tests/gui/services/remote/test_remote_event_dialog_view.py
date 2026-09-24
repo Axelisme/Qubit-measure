@@ -13,10 +13,10 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -49,8 +49,7 @@ from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
-from zcu_tools.mcp.core.bridge import McpBridge
-from zcu_tools.mcp.measure import server as mcp_server
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 
 from ._helpers import (
@@ -649,13 +648,25 @@ def _run_mcp_call(qapp: object, fn: Callable[[], Any]) -> Any:
     return result[0]
 
 
-def test_real_mcp_bridge_piggybacks_agent_run_origin(fx, qapp, monkeypatch) -> None:
+def test_real_mcp_bridge_receives_agent_run_origin(fx, qapp, tmp_path: Path) -> None:
+    config = MCPBridgeConfig(
+        tool_prefix="gui_",
+        server_display_name="measure-test",
+        server_instructions="",
+        app_name="gui",
+        default_port=fx.service.port,
+        mcp_version=74,
+        wire_version=56,
+        pid_file=tmp_path / "unused.pid",
+        log_file=tmp_path / "unused.log",
+        run_script_name="run_measure_gui.py",
+    )
     session = MeasureMcpSession(
-        mcp_server._CONFIG,
+        config,
         resolve_connect_port=lambda _config, _requested: fx.service.port,
         port_is_open=lambda _port: True,
     )
-    bridge = McpBridge(mcp_server._CONFIG, on_event=session.deliver_event)
+    bridge = McpBridge(config, on_event=session.deliver_event)
     session.attach_bridge(bridge)
     try:
         _run_mcp_call(qapp, session.ensure_connected)
@@ -679,16 +690,9 @@ def test_real_mcp_bridge_piggybacks_agent_run_origin(fx, qapp, monkeypatch) -> N
             time.sleep(0.005)
         assert fx.state.get_tab(tab_id).run.result is not None
 
-        # Model the next successful MCP tool reply: the stdio loop invokes this
-        # hook only after a handler succeeds.
+        # Synchronize the wire reader before draining the session's event queue.
         _run_mcp_call(qapp, lambda: session.send_gui_rpc("state.has_soc", {}))
-        monkeypatch.setattr(mcp_server, "_drain_pending", session.drain_pending)
-        blocks = mcp_server._piggyback_blocks()
-
-        event_block = next(
-            block for block in blocks if block["text"].startswith("events since")
-        )
-        events = json.loads(event_block["text"].split("\n", 1)[1])
+        events = session.drain_pending()["events"]
         finished = next(event for event in events if event["event"] == "run_finished")
         assert finished["origin"] == {
             "kind": "agent",

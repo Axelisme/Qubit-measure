@@ -11,6 +11,8 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QBuffer,
     QByteArray,
+    QCoreApplication,
+    QEvent,
     QIODevice,
     QRect,
     QSize,
@@ -197,15 +199,12 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
 def exp_tab_widget(qapp, monkeypatch):
     import zcu_tools.gui.app.main.ui.exp_tab_widget as mod
 
-    orig_pop = mod.ExpTabWidget._populate_cfg
-
     def stub(self, schema, ctrl):
         self._cfg_editor_id = "probe-editor"
         self.cfg_form.is_valid = lambda: True  # type: ignore[method-assign]
         self.cfg_form.first_invalid_reason = lambda: None  # type: ignore[method-assign]
 
     monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", stub)
-    orig_attach = mod.attach_existing_figure_to_container
 
     def mock_attach(fig, container):
         from qtpy.QtWidgets import QWidget
@@ -217,9 +216,23 @@ def exp_tab_widget(qapp, monkeypatch):
         return w
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
-    yield mod.ExpTabWidget
-    monkeypatch.setattr(mod.ExpTabWidget, "_populate_cfg", orig_pop)
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
+    owned_tabs: list[mod.ExpTabWidget] = []
+
+    def create_tab(tab_id, ctrl, capabilities, *, preview_renderer=None):
+        tab = mod.ExpTabWidget(
+            tab_id, ctrl, capabilities, preview_renderer=preview_renderer
+        )
+        owned_tabs.append(tab)
+        return tab
+
+    try:
+        yield create_tab
+    finally:
+        for tab in owned_tabs:
+            tab.close()
+            tab.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        owned_tabs.clear()
 
 
 # ---------------------------------------------------------------------------

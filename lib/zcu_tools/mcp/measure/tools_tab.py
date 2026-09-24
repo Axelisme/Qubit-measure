@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
@@ -9,24 +10,24 @@ from zcu_tools.mcp.measure.tool_context import (
     _fold_finished_figure,
     _render_tab_figure,
     _start_op_with_short_wait,
-    bind_context,
-    send_gui_rpc,
 )
 from zcu_tools.mcp.measure.tools_cfg import _fold_tab_editing_context
 
 
-def _run_tab_summary(tab_id: str) -> dict[str, Any]:
+def _run_tab_summary(ctx: MeasureToolContext, tab_id: str) -> dict[str, Any]:
     """A run-finished tab summary: only {tab_id, interaction}. The full
     tab.snapshot also carries adapter_name / editor_id / save_paths, none of
     which change across a run — re-sending them every run is wasted tokens
     (the agent already has them from gui_tab_snapshot). To see the plot, call
     gui_tab_get_figure(tab_id, subtab_id='run')."""
-    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})["tabs"][0]
+    snap = ctx.send_gui_rpc("tab.snapshot", {"tab_id": tab_id})["tabs"][0]
     interaction = snap.get("interaction", {}) if isinstance(snap, dict) else {}
     return {"tab_id": tab_id, "interaction": interaction}
 
 
-def tool_gui_tab_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_tab_run_start(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Start a run, waiting briefly for a fast (small reps/rounds) run to finish.
 
     A run has both modes — a tiny sweep finishes in well under a second, a big
@@ -41,12 +42,13 @@ def tool_gui_tab_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     tab_id = str(arguments["tab_id"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    send_gui_rpc("tab.run_start", {"tab_id": tab_id})
+    ctx.send_gui_rpc("tab.run_start", {"tab_id": tab_id})
     reply = _start_op_with_short_wait(
+        ctx,
         f"tab:{tab_id}",
         f"Run on tab {tab_id!r}",
         wait_seconds,
-        lambda: {"tab": _run_tab_summary(tab_id)},
+        lambda: {"tab": _run_tab_summary(ctx, tab_id)},
         "poll/wait the returned handle with gui_op_poll / gui_op_wait; "
         "see the plot when finished with gui_tab_get_figure"
         f"(tab_id={tab_id!r}, subtab_id='run').",
@@ -54,10 +56,12 @@ def tool_gui_tab_run_start(arguments: dict[str, Any]) -> dict[str, Any]:
     # The figure is this op's OWN visual result — fold it on FINISHED only
     # (a pending run has no settled plot yet). Failure is swallowed so a
     # plotting hiccup never masks an otherwise-good run reply.
-    return _fold_finished_figure(tab_id, reply, subtab_id="run")
+    return _fold_finished_figure(ctx, tab_id, reply, subtab_id="run")
 
 
-def _fold_analyze_params(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
+def _fold_analyze_params(
+    ctx: MeasureToolContext, tab_id: str, reply: dict[str, Any]
+) -> dict[str, Any]:
     """Fold the tab's analyze-params spec into a FINISHED run reply, in place.
 
     After a run the agent's next decision is analyze, whose knobs come from
@@ -71,7 +75,7 @@ def _fold_analyze_params(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
     if reply.get("status") != "finished":
         return reply
     try:
-        reply["analyze_params"] = send_gui_rpc(
+        reply["analyze_params"] = ctx.send_gui_rpc(
             "tab.get_analyze_params", {"tab_id": tab_id}
         ).get("analyze_params")
     except Exception:
@@ -79,12 +83,18 @@ def _fold_analyze_params(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
     return reply
 
 
-def _analyze_summary_product(result_method: str, tab_id: str) -> dict[str, Any]:
+def _analyze_summary_product(
+    ctx: MeasureToolContext, result_method: str, tab_id: str
+) -> dict[str, Any]:
     """Fold the analyze (or post-analyze) summary into a finished short-wait reply."""
-    return {"summary": send_gui_rpc(result_method, {"tab_id": tab_id}).get("summary")}
+    return {
+        "summary": ctx.send_gui_rpc(result_method, {"tab_id": tab_id}).get("summary")
+    }
 
 
-def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_tab_analyze(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Start analyze, waiting briefly (degrades like a run).
 
     Analyze has both modes — a FIT computes on a worker (usually finishes in well
@@ -108,20 +118,23 @@ def tool_gui_tab_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     params: dict[str, Any] = {"tab_id": tab_id}
     if "updates" in arguments and arguments["updates"] is not None:
         params["updates"] = arguments["updates"]
-    send_gui_rpc("tab.analyze", params)
+    ctx.send_gui_rpc("tab.analyze", params)
     reply = _start_op_with_short_wait(
+        ctx,
         f"analyze:{tab_id}",
         f"Analyze on tab {tab_id!r}",
         wait_seconds,
-        lambda: _analyze_summary_product("tab.get_analyze_result", tab_id),
+        lambda: _analyze_summary_product(ctx, "tab.get_analyze_result", tab_id),
         "poll/wait the returned handle with gui_op_poll / gui_op_wait; for an "
         "INTERACTIVE pick, prompt the user to mark the lines + click Done first, "
         f"then read gui_tab_get_analyze_result(tab_id={tab_id!r}).",
     )
-    return _fold_finished_figure(tab_id, reply, subtab_id="analysis")
+    return _fold_finished_figure(ctx, tab_id, reply, subtab_id="analysis")
 
 
-def tool_gui_tab_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_tab_post_analyze(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Start the second-layer (post) analysis, waiting briefly (degrades like a run).
 
     Post-analysis runs on top of the tab's PRIMARY analyze result (e.g.
@@ -144,27 +157,28 @@ def tool_gui_tab_post_analyze(arguments: dict[str, Any]) -> dict[str, Any]:
     params: dict[str, Any] = {"tab_id": tab_id}
     if "updates" in arguments and arguments["updates"] is not None:
         params["updates"] = arguments["updates"]
-    send_gui_rpc("tab.post_analyze", params)
+    ctx.send_gui_rpc("tab.post_analyze", params)
     reply = _start_op_with_short_wait(
+        ctx,
         f"post_analyze:{tab_id}",
         f"Post-analysis on tab {tab_id!r}",
         wait_seconds,
-        lambda: _analyze_summary_product("tab.get_post_analyze_result", tab_id),
+        lambda: _analyze_summary_product(ctx, "tab.get_post_analyze_result", tab_id),
         "poll/wait the returned handle with gui_op_poll / gui_op_wait, then read "
         f"gui_tab_get_post_analyze_result(tab_id={tab_id!r}).",
     )
     # Fold post figure on finished (pane-specific)
-    return _fold_finished_figure(tab_id, reply, subtab_id="post_analysis")
+    return _fold_finished_figure(ctx, tab_id, reply, subtab_id="post_analysis")
 
 
 def _fold_writeback_preview(
-    tab_id: str, reply: dict[str, Any], *, subtab_id: str
+    ctx: MeasureToolContext, tab_id: str, reply: dict[str, Any], *, subtab_id: str
 ) -> dict[str, Any]:
     """Fold the pane's writeback preview into a FINISHED analyze reply, in place."""
     if reply.get("status") != "finished":
         return reply
     try:
-        reply["writeback_preview"] = send_gui_rpc(
+        reply["writeback_preview"] = ctx.send_gui_rpc(
             "tab.writeback_preview", {"tab_id": tab_id, "subtab_id": subtab_id}
         )
     except Exception:
@@ -172,16 +186,18 @@ def _fold_writeback_preview(
     return reply
 
 
-def tool_gui_tab_open(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_tab_open(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """open (step 1): create a tab for ``adapter_name`` and fold its editing
     context + the adapter guide into one reply."""
     adapter_name = str(arguments["adapter_name"])
     skip_guide = bool(arguments.get("skip_guide", False))
-    tab_id = str(send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
+    tab_id = str(ctx.send_gui_rpc("tab.new", {"adapter_name": adapter_name})["tab_id"])
     reply: dict[str, Any] = {"tab_id": tab_id, "adapter": adapter_name}
-    _fold_tab_editing_context(tab_id, reply)
+    _fold_tab_editing_context(ctx, tab_id, reply)
     if not skip_guide:
-        reply["guide"] = send_gui_rpc(
+        reply["guide"] = ctx.send_gui_rpc(
             "adapter.guide", {"adapter_name": adapter_name}
         ).get("guide")
     else:
@@ -189,7 +205,9 @@ def tool_gui_tab_open(arguments: dict[str, Any]) -> dict[str, Any]:
     return reply
 
 
-def tool_gui_tab_run(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_tab_run(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """run (step 2): apply ``edits`` then run the existing ``tab_id``, STOPPING
     before analyze."""
     tab_id = str(arguments["tab_id"])
@@ -198,23 +216,27 @@ def tool_gui_tab_run(arguments: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(edits, list):
         raise ValueError("'edits' must be an ordered list of {path, value} objects")
     if edits:
-        send_gui_rpc(
+        ctx.send_gui_rpc(
             "tab.set_cfg",
             {
                 "tab_id": tab_id,
                 "edits": [{"path": str(e["path"]), "value": e["value"]} for e in edits],
             },
         )
-    reply = tool_gui_tab_run_start({"tab_id": tab_id, "wait_seconds": wait_seconds})
+    reply = tool_gui_tab_run_start(
+        ctx, {"tab_id": tab_id, "wait_seconds": wait_seconds}
+    )
     if reply.get("status") != "finished":
         reply["owed"] = (
             "figure (gui_tab_get_figure subtab_id='run' after the handle finishes)"
         )
         return reply
-    return _fold_analyze_params(tab_id, reply)
+    return _fold_analyze_params(ctx, tab_id, reply)
 
 
-def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_tab_analyze_review(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """analyze_review (step 3): analyze ``tab_id`` and fold the fit review into
     one reply (pane-specific analysis)."""
     tab_id = str(arguments["tab_id"])
@@ -224,7 +246,7 @@ def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
     }
     if arguments.get("updates") is not None:
         analyze_args["updates"] = arguments["updates"]
-    reply = tool_gui_tab_analyze(analyze_args)
+    reply = tool_gui_tab_analyze(ctx, analyze_args)
     if reply.get("status") != "finished":
         reply["owed"] = (
             "summary (gui_tab_get_analyze_result), figure "
@@ -232,10 +254,12 @@ def tool_gui_tab_analyze_review(arguments: dict[str, Any]) -> dict[str, Any]:
             "(gui_tab_writeback_list subtab_id='analysis') after the handle finishes"
         )
         return reply
-    return _fold_writeback_preview(tab_id, reply, subtab_id="analysis")
+    return _fold_writeback_preview(ctx, tab_id, reply, subtab_id="analysis")
 
 
-def tool_gui_tab_get_figure(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_tab_get_figure(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Render a pane's figure to a PNG FILE and return its path.
 
     Requires (tab_id, subtab_id) with closed values run|analysis|post_analysis.
@@ -252,7 +276,7 @@ def tool_gui_tab_get_figure(arguments: dict[str, Any]) -> dict[str, Any]:
         )
     out_path_arg = arguments.get("out_path")
     return _render_tab_figure(
-        tab_id, subtab_id, str(out_path_arg) if out_path_arg is not None else None
+        ctx, tab_id, subtab_id, str(out_path_arg) if out_path_arg is not None else None
     )
 
 
@@ -522,5 +546,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }
