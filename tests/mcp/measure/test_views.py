@@ -39,7 +39,7 @@ def test_figure_forwards_a_file_destination_and_the_requested_pane(
     ]
 
 
-@pytest.mark.parametrize("target", ["setup", "device", "window"])
+@pytest.mark.parametrize("target", ["setup", "device", "arb_waveform", "window"])
 @pytest.mark.parametrize("explicit_path", [False, True])
 def test_screenshot_decodes_png_into_its_destination(
     tmp_path: Path,
@@ -76,6 +76,19 @@ def test_screenshot_decodes_png_into_its_destination(
     assert [
         call for call in client.transport.sent if call[0] != "resources.versions"
     ] == [expected_rpc]
+
+
+def test_screenshot_rejects_unknown_target_before_rpc(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    destination = tmp_path / "unexpected.png"
+
+    with pytest.raises(ValueError, match="target must be one of"):
+        client.call(
+            "gui_screenshot", {"target": "unknown", "out_path": str(destination)}
+        )
+
+    assert client.transport.sent == []
+    assert not destination.exists()
 
 
 def test_debug_versions_returns_the_full_resource_table(tmp_path: Path) -> None:

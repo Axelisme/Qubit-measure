@@ -11,7 +11,14 @@ from zcu_tools.mcp.measure.tool_context import (
     MeasureToolContext,
 )
 
-_SCREENSHOT_DIALOGS = ("setup", "device", "predictor", "inspect", "startup")
+_SCREENSHOT_DIALOGS = (
+    "setup",
+    "device",
+    "predictor",
+    "inspect",
+    "arb_waveform",
+    "startup",
+)
 
 
 _SCREENSHOT_TARGETS = frozenset({"window", *_SCREENSHOT_DIALOGS})
