@@ -1,10 +1,12 @@
 """Guide and editing-context behavior through the shipped MCP tool table."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
-from zcu_tools.mcp.measure import server
+
+from ._support import MeasureClient, make_client
 
 
 @dataclass
@@ -33,21 +35,24 @@ class TabRpc:
 
 
 @pytest.fixture
-def tab_rpc(monkeypatch: pytest.MonkeyPatch) -> TabRpc:
-    rpc = TabRpc()
-    monkeypatch.setattr(server, "send_gui_rpc", rpc)
-    return rpc
+def tab_rpc() -> TabRpc:
+    return TabRpc()
+
+
+@pytest.fixture
+def client(tmp_path: Path, tab_rpc: TabRpc) -> MeasureClient:
+    return make_client(tmp_path, tab_rpc)
 
 
 @pytest.mark.parametrize("skip_guide", [None, False, True])
 def test_open_returns_editing_context_and_requested_guide(
-    tab_rpc: TabRpc, skip_guide: bool | None
+    client: MeasureClient, tab_rpc: TabRpc, skip_guide: bool | None
 ) -> None:
     arguments: dict[str, Any] = {"adapter_name": "onetone"}
     if skip_guide is not None:
         arguments["skip_guide"] = skip_guide
 
-    result = server.TOOLS["gui_tab_open"]["handler"](arguments)
+    result = client.call("gui_tab_open", arguments)
 
     expected: dict[str, Any] = {
         "tab_id": "tab-1",
@@ -66,9 +71,9 @@ def test_open_returns_editing_context_and_requested_guide(
 
 @pytest.mark.parametrize("adapters", [("onetone", "onetone"), ("onetone", "rabi")])
 def test_each_open_returns_its_guide_regardless_of_prior_calls(
-    tab_rpc: TabRpc, adapters: tuple[str, str]
+    client: MeasureClient, tab_rpc: TabRpc, adapters: tuple[str, str]
 ) -> None:
-    open_tab = server.TOOLS["gui_tab_open"]["handler"]
+    open_tab = client.tools["gui_tab_open"]["handler"]
 
     results = [open_tab({"adapter_name": name}) for name in adapters]
 
