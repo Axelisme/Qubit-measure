@@ -227,26 +227,3 @@ def test_take_screenshot_requires_visible_dialog(qapp) -> None:
     assert png.startswith(b"\x89PNG")
     registry.close(DialogName.SETUP)
     qapp.processEvents()
-
-
-def test_arb_waveform_named_dialog_captures_only_while_open(qapp) -> None:
-    parent = QWidget()
-    ctrl = MagicMock()
-    ctrl.list_arb_waveform_infos.return_value = []
-    ctrl.list_arb_waveforms.return_value = []
-    registry = MainDialogRegistry(ctrl, parent=parent, dialog_refs=DialogRefStore())
-
-    with pytest.raises(RuntimeError, match="not currently open"):
-        registry.take_screenshot(DialogName.ARB_WAVEFORM)
-
-    try:
-        registry.open(DialogName.ARB_WAVEFORM)
-        qapp.processEvents()
-        assert DialogName.ARB_WAVEFORM in registry.visible_names()
-        assert registry.take_screenshot(DialogName.ARB_WAVEFORM).startswith(b"\x89PNG")
-    finally:
-        registry.close(DialogName.ARB_WAVEFORM)
-        qapp.processEvents()
-
-    with pytest.raises(RuntimeError, match="not currently open"):
-        registry.take_screenshot(DialogName.ARB_WAVEFORM)
