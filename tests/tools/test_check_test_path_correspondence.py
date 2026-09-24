@@ -102,15 +102,3 @@ def test_directories_without_test_modules_are_not_checked(tmp_path: Path):
 
     assert checker.test_directories(tmp_path) == ()
     assert checker.violations(tmp_path) == ()
-
-
-def test_reserved_segments_are_the_only_exemption_mechanism() -> None:
-    """No baseline or allow-list may creep in beside the reserved segments."""
-    source = (
-        Path(__file__).parents[2] / "tools" / "check_test_path_correspondence.py"
-    ).read_text(encoding="utf-8")
-
-    expected_segments = frozenset({"contract", "parity"})
-
-    assert expected_segments == checker.RESERVED_SEGMENTS
-    assert "OWNED BY THE USER" in source

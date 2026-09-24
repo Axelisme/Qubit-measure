@@ -24,7 +24,7 @@ from typing import Final
 # Reserved segments name test groupings that legitimately span modules, so no single
 # module owns them. THIS LIST IS OWNED BY THE USER. Adding a segment is an
 # architecture decision and needs explicit user consent, for the same reason the
-# .importlinter contracts do (ADR-0088): a writer who may widen the exemption will
+# .importlinter contracts do: a writer who may widen the exemption will
 # reach for it whenever something is awkward to place, and the rule stops biting.
 RESERVED_SEGMENTS: Final = frozenset({"contract", "parity"})
 

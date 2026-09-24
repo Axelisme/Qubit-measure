@@ -6,6 +6,10 @@ from pathlib import Path
 import gate
 import pytest
 
+# gate.measure runs a real command and reads its output; the measure cases hand it
+# a trivial `python -c` child as the command under test.
+pytestmark = pytest.mark.requires_subprocess
+
 
 def test_formatting_runs_before_anything_measures_the_code() -> None:
     """Measuring first would report a state the formatter is about to replace."""
@@ -77,7 +81,7 @@ class _StubRatchet:
 
 def _run_gate_with_ratchet_outcome(
     monkeypatch: pytest.MonkeyPatch, ratchet: gate.Outcome
-) -> tuple[int, str]:
+) -> tuple[int, list[str]]:
     monkeypatch.setattr(gate._support, "load_tool", lambda _name: _StubRatchet)
 
     def fake_run_step(step: gate.Step, _root: Path) -> gate.Outcome:
@@ -91,7 +95,7 @@ def _run_gate_with_ratchet_outcome(
         "builtins.print", lambda *a, **_k: lines.append(" ".join(map(str, a)))
     )
     code = gate.main(["--base", "abcdef1234", "--no-fix"])
-    return code, "\n".join(lines)
+    return code, lines
 
 
 def test_a_failing_ratchet_names_the_rule_that_rose(
@@ -113,8 +117,9 @@ def test_a_failing_ratchet_names_the_rule_that_rose(
 
     assert code == 1
     assert "FAIL ratchet" in output
-    assert "lib/a.py C901 1 -> 2" in output
-    assert "1 changed Python file(s)" in output
+    joined = "\n".join(output)
+    assert "lib/a.py C901 1 -> 2" in joined
+    assert "1 changed Python file(s)" in joined
 
 
 def test_an_unreadable_ratchet_report_falls_back_to_its_error(
@@ -131,7 +136,9 @@ def test_an_unreadable_ratchet_report_falls_back_to_its_error(
     code, output = _run_gate_with_ratchet_outcome(monkeypatch, outcome)
 
     assert code == 1
-    assert "ratchet failed: git merge-base failed" in output
+    assert output.index("FAIL ratchet") + 1 == output.index(
+        "ratchet failed: git merge-base failed"
+    )
 
 
 def test_a_json_receipt_reading_comes_from_its_named_key(tmp_path: Path):

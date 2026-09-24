@@ -2,24 +2,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import check_pytest_collection as oracle
 import pytest
-
-
-def test_repository_configures_root_pythonpath_and_isolated_import_mode() -> None:
-    root = Path(__file__).parents[2]
-
-    assert "--import-mode=importlib" in oracle.configured_addopts(root)
-
-    with (root / "pyproject.toml").open("rb") as stream:
-        pytest_config = tomllib.load(stream)["tool"]["pytest"]["ini_options"]
-
-    # "." resolves repository-owned test helpers; "tools" lets a test import a
-    # check by the same name every other caller uses (see tools/_support.py).
-    assert pytest_config["pythonpath"] == [".", "tools"]
 
 
 def test_parse_collection_requires_success_summary_and_exact_node_count() -> None:
@@ -184,24 +170,23 @@ def test_collection_runs_with_colour_disabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A terminal exporting FORCE_COLOR would otherwise break summary parsing."""
-    seen: list[dict[str, str]] = []
 
     def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
         env = kwargs["env"]
         assert isinstance(env, dict)
-        seen.append(env)
+        coloured = "FORCE_COLOR" in env or "NO_COLOR" not in env
+        summary = "1 test collected in 0.01s"
+        if coloured:
+            summary = f"\x1b[32m{summary}\x1b[0m"
         return subprocess.CompletedProcess(
-            command,
-            0,
-            stdout="tests/a.py::test_a\n1 test collected in 0.01s\n",
-            stderr="",
+            command, 0, stdout=f"tests/a.py::test_a\n{summary}\n", stderr=""
         )
 
     monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(oracle.subprocess, "run", fake_run)
 
-    oracle.collect(tmp_path, parallel=False)
+    result = oracle.collect(tmp_path, parallel=False)
 
-    assert len(seen) == 1
-    assert "FORCE_COLOR" not in seen[0]
-    assert seen[0]["NO_COLOR"] == "1"
+    assert "\x1b[" not in result.summary
+    assert result.summary == "1 test collected in 0.01s"

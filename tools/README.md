@@ -5,9 +5,11 @@
 `tools/` 放 repo 內部的品質檢查。`script/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
 
-本目錄的腳本都是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，輸出一份 JSON receipt
-到 stdout、人類可讀的違規行到 stderr。它們可以被 import，`tools/check_ratchet.py` 就是這樣
-使用其他幾支的。
+本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
+stdout。`check_file_size.py`、`check_suppressions.py`、`check_test_capabilities.py`、
+`check_test_path_correspondence.py` 另把人類可讀的違規行輸出到 stderr；`check_ratchet.py` 與
+`check_pytest_collection.py` 只在工具本身失敗時寫 stderr。`gate.py` 是給人看的入口，輸出純文字。
+它們可以被 import，`tools/check_ratchet.py` 就是這樣使用其他幾支的。
 
 `_support.py` 放它們共用的機制——走訪樹、讀 attribute chain、透過 import 解析呼叫、載入另一支
 檢查。各支檢查**判斷什麼**仍各自獨立，共用的只有這些。它假設 `tools/` 在 `sys.path` 上，這在三種
