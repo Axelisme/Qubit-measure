@@ -33,6 +33,14 @@ def test_the_rewriting_steps_receive_only_the_changed_files() -> None:
     assert found[1].command[-2:] == ("lib/a.py", "tests/b.py")
 
 
+def test_deleted_files_are_not_handed_to_the_rewriters(tmp_path: Path) -> None:
+    """A retirement candidate deletes files; ruff fails on a path that is gone."""
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "kept.py").write_text("x = 1\n")
+
+    assert gate.present(tmp_path, ("lib/gone.py", "lib/kept.py")) == ("lib/kept.py",)
+
+
 def test_the_ratchet_is_given_the_resolved_base() -> None:
     ratchet = next(
         step for step in gate.steps("deadbeef", (), fix=True) if step.name == "ratchet"

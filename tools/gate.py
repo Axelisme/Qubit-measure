@@ -108,6 +108,15 @@ class Outcome:
         return self.returncode == 0
 
 
+def present(root: Path, files: tuple[str, ...]) -> tuple[str, ...]:
+    """The changed files that still exist, which are all a rewriter can take.
+
+    A deleted file is still a change the ratchet judges against the base, but
+    handing its path to ruff fails the whole step.
+    """
+    return tuple(name for name in files if (root / name).is_file())
+
+
 def steps(base: str, files: tuple[str, ...], *, fix: bool) -> tuple[Step, ...]:
     """Return the commands to run, in order.
 
@@ -230,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     ratchet = _support.load_tool("check_ratchet")
     try:
         base = ratchet.resolve_base(root, arguments.base)
-        files = ratchet.changed_python_files(root, base)
+        files = present(root, ratchet.changed_python_files(root, base))
     except ratchet.RatchetError as error:
         print(f"gate failed: {error}", file=sys.stderr)
         return 2
