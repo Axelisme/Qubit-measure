@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
     MeasureToolContext,
-    bind_context,
-    send_gui_rpc,
 )
 
 
-def _assemble_overview() -> dict[str, Any]:
+def _assemble_overview(
+    ctx: MeasureToolContext,
+) -> dict[str, Any]:
     """One-shot situational overview of the live GUI, fanned out over existing
     read RPCs (no new wire method).
 
@@ -32,14 +33,14 @@ def _assemble_overview() -> dict[str, Any]:
     while connected (soc.info fast-fails without a SoC), so a not-yet-set-up GUI
     still yields a well-formed overview.
     """
-    has_proj = send_gui_rpc("state.has_project", {}).get("value", False)
-    has_ctx = send_gui_rpc("state.has_context", {}).get("value", False)
-    has_act = send_gui_rpc("state.has_active_context", {}).get("value", False)
-    has_soc = send_gui_rpc("state.has_soc", {}).get("value", False)
+    has_proj = ctx.send_gui_rpc("state.has_project", {}).get("value", False)
+    has_ctx = ctx.send_gui_rpc("state.has_context", {}).get("value", False)
+    has_act = ctx.send_gui_rpc("state.has_active_context", {}).get("value", False)
+    has_soc = ctx.send_gui_rpc("state.has_soc", {}).get("value", False)
 
     project: dict[str, Any] | None = None
     if has_proj:
-        info = send_gui_rpc("project.info", {})
+        info = ctx.send_gui_rpc("project.info", {})
         # Mirror the full project.info wire shape (long keys also match the other
         # tool-GUIs: fluxdep/dispersive/autofluxdep). Folding result_dir +
         # database_path here makes the overview the single orientation SSOT,
@@ -54,9 +55,9 @@ def _assemble_overview() -> dict[str, Any]:
 
     soc: dict[str, Any] = {"connected": has_soc, "is_mock": None}
     if has_soc:
-        soc["is_mock"] = send_gui_rpc("soc.info", {}).get("is_mock")
+        soc["is_mock"] = ctx.send_gui_rpc("soc.info", {}).get("is_mock")
 
-    tab_snaps = send_gui_rpc("tab.snapshot", {}).get("tabs", [])
+    tab_snaps = ctx.send_gui_rpc("tab.snapshot", {}).get("tabs", [])
     tabs = [
         {
             "tab_id": snap.get("tab_id"),
@@ -74,19 +75,23 @@ def _assemble_overview() -> dict[str, Any]:
             "has_soc": has_soc,
         },
         "project": project,
-        "context": send_gui_rpc("context.active", {}).get("label"),
+        "context": ctx.send_gui_rpc("context.active", {}).get("label"),
         "soc": soc,
-        "hardware_gate": send_gui_rpc("state.hardware_gate", {}),
+        "hardware_gate": ctx.send_gui_rpc("state.hardware_gate", {}),
         "tabs": tabs,
-        "running_tab": send_gui_rpc("run.running_tab", {}).get("tab_id"),
-        "active_tab": send_gui_rpc("view.snapshot", {}).get("active_tab_id"),
+        "running_tab": ctx.send_gui_rpc("run.running_tab", {}).get("tab_id"),
+        "active_tab": ctx.send_gui_rpc("view.snapshot", {}).get("active_tab_id"),
     }
 
 
-def tool_gui_overview(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_overview(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Situational overview of the live GUI (see _assemble_overview)."""
     del arguments
-    return _assemble_overview()
+    return _assemble_overview(
+        ctx,
+    )
 
 
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
@@ -115,5 +120,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

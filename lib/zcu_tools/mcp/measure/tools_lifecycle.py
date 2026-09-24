@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from zcu_tools.mcp.measure.tool_context import (
-    _BRIDGE,
-    _CONFIG,
-    _SESSION,
-    MeasureToolContext,
-    _assemble_overview,
-    bind_context,
-    resolve_connect_port,
-)
+from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.tools_overview import _assemble_overview
 
 
-def tool_gui_connect(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_connect(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     # connect attaches to a GUI that is ALREADY running (launch starts a new one),
     # so a missing GUI is the error case here. Omitting 'port' auto-discovers the
     # running GUI via its session file (covers the ephemeral-fallback case where
@@ -24,27 +20,31 @@ def tool_gui_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     requested = arguments.get("port")
     if requested is not None and not isinstance(requested, int):
         raise ValueError("Invalid 'port' argument (must be integer)")
-    port = resolve_connect_port(_CONFIG, requested)
-    note = _BRIDGE.connect(port, arguments.get("token"))
-    _SESSION.initialize_event_stream()
+    port = ctx.resolve_connect_port(ctx.config, requested)
+    note = ctx.bridge.connect(port, arguments.get("token"))
+    ctx.session.initialize_event_stream()
     # Fold the situational overview into the connect reply so attaching alone
     # gives the agent the current picture (the same data gui_overview returns),
     # saving a follow-up probe. The socket is live by here, so the fan-out reads
     # resolve against the just-attached GUI.
-    return {"note": note, "overview": _assemble_overview()}
+    return {"note": note, "overview": _assemble_overview(ctx)}
 
 
-def tool_gui_disconnect(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_disconnect(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     del arguments
-    note = _BRIDGE.disconnect()
+    note = ctx.bridge.disconnect()
     # App-specific housekeeping: drop any buffered diagnostics — they belong to
     # the connection that just closed.
-    _SESSION.clear_pending()
+    ctx.session.clear_pending()
     return {"note": note}
 
 
-def tool_gui_launch(arguments: dict[str, Any]) -> dict[str, Any]:
-    port = int(arguments.get("port", _CONFIG.default_port))
+def tool_gui_launch(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    port = int(arguments.get("port", ctx.config.default_port))
     token: str | None = arguments.get("token")
     auto_connect = bool(arguments.get("auto_connect", True))
     clean = bool(arguments.get("clean", False))
@@ -52,29 +52,31 @@ def tool_gui_launch(arguments: dict[str, Any]) -> dict[str, Any]:
     repo_root = Path(__file__).parents[4]
     # clean → run_measure_gui --clean (skip restoring the persisted session).
     extra_args = ["--clean"] if clean else None
-    note = _BRIDGE.launch(repo_root, port, token, auto_connect, extra_args=extra_args)
+    note = ctx.bridge.launch(
+        repo_root, port, token, auto_connect, extra_args=extra_args
+    )
     # Fold the situational overview only when auto_connect actually attached the
     # bridge — the fan-out reads need a live socket. With auto_connect=false the
     # GUI is up but not yet attached, so there is no live state to read.
-    if _BRIDGE.is_connected:
-        _SESSION.initialize_event_stream()
-        return {"note": note, "overview": _assemble_overview()}
+    if ctx.bridge.is_connected:
+        ctx.session.initialize_event_stream()
+        return {"note": note, "overview": _assemble_overview(ctx)}
     return {"note": note}
 
 
-def tool_gui_stop(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_stop(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     # Graceful close over the existing RPC channel (app.shutdown runs the GUI's
     # normal window-close path on its main thread, no OS signal), then await /
     # optionally force-kill. timeout_kill defaults False here (measure-gui prefers
     # leaving a slow-closing GUI alone for a retry rather than killing it).
     timeout = float(arguments.get("timeout", 10.0))
     timeout_kill = bool(arguments.get("timeout_kill", False))
-    result = _BRIDGE.stop(
+    result = ctx.bridge.stop(
         timeout=timeout, timeout_kill=timeout_kill, shutdown_rpc="app.shutdown"
     )
     # The bridge's disconnect does not clear measure-gui's diagnostic queue; do it
     # here so a later session does not see the previous one's buffered messages.
-    _SESSION.clear_pending()
+    ctx.session.clear_pending()
     # Branch on the bridge's machine-readable outcome (no prose string-matching).
     return {"stopped": result["exited"], "note": result["note"]}
 
@@ -191,5 +193,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

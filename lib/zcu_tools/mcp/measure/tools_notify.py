@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
     _WAIT_TRANSPORT_SLACK_SECONDS,
     MeasureToolContext,
-    bind_context,
-    send_gui_rpc,
 )
 
 _NOTIFY_CONSUMER_SLACK: float = 10.0
 
 
-def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_prompt_user(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Blocking request-reply prompt to the user. BLOCKS the turn until they respond.
 
     Serially composes notify.open (main thread: mint token + open dialog) and
@@ -33,7 +34,7 @@ def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
     timeout = max(float(arguments.get("timeout", 600.0)), 1.0)
     # Step 1: main-thread open — mints token + opens dialog (QTimer fires at
     # `timeout`; the dialog is the timeout SSOT, ADR-0025).
-    open_result = send_gui_rpc(
+    open_result = ctx.send_gui_rpc(
         "notify.open", {"message": message, "timeout": timeout}, 30.0
     )
     token = int(open_result["token"])
@@ -42,7 +43,7 @@ def tool_gui_prompt_user(arguments: dict[str, Any]) -> dict[str, Any]:
     # the dialog fires first and enqueues Timeout; a reply landing in the gap
     # would otherwise be lost.
     await_timeout = timeout + _NOTIFY_CONSUMER_SLACK
-    await_result = send_gui_rpc(
+    await_result = ctx.send_gui_rpc(
         "notify.await",
         {"token": token, "timeout": await_timeout},
         await_timeout + _WAIT_TRANSPORT_SLACK_SECONDS,
@@ -100,5 +101,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

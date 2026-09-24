@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import time
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
     _WAIT_TRANSPORT_SLACK_SECONDS,
     MeasureToolContext,
     _is_timeout_error,
-    bind_context,
-    send_gui_rpc,
 )
 
 
 def _await_operation_by_handle(
-    operation_id: int | None, what: str, timeout: float
+    ctx: MeasureToolContext, operation_id: int | None, what: str, timeout: float
 ) -> dict[str, Any]:
     """Block on a wire ``operation_id`` until it settles, or ``timeout`` s elapse;
     semantic result. The op-agnostic core of the generic gui_op_wait (ADR-0026 §8).
@@ -45,7 +44,7 @@ def _await_operation_by_handle(
         # Allow the bridge RPC a little slack beyond the op timeout so the
         # GUI-side timeout (a clean 'still running' signal) is what fires first,
         # not the socket round-trip ceiling.
-        res = send_gui_rpc(
+        res = ctx.send_gui_rpc(
             "operation.await",
             {"operation_id": operation_id, "timeout": timeout},
             timeout + _WAIT_TRANSPORT_SLACK_SECONDS,
@@ -120,7 +119,9 @@ def _slim_progress(progress: dict[str, Any]) -> dict[str, Any]:
 _POLL_DRAIN_CAP = 4096
 
 
-def _poll_operation_by_handle(operation_id: int | None, what: str) -> dict[str, Any]:
+def _poll_operation_by_handle(
+    ctx: MeasureToolContext, operation_id: int | None, what: str
+) -> dict[str, Any]:
     """Non-blocking status of a wire ``operation_id`` (no event needed). The
     op-agnostic core of the generic gui_op_poll (ADR-0026 §8).
 
@@ -145,7 +146,7 @@ def _poll_operation_by_handle(operation_id: int | None, what: str) -> dict[str, 
     drained: list[str] = []
     for _ in range(_POLL_DRAIN_CAP):
         try:
-            res = send_gui_rpc(
+            res = ctx.send_gui_rpc(
                 "operation.await",
                 {"operation_id": operation_id, "timeout": 0.0},
                 _WAIT_TRANSPORT_SLACK_SECONDS,
@@ -156,7 +157,7 @@ def _poll_operation_by_handle(operation_id: int | None, what: str) -> dict[str, 
                 # progress bars into the reply (slimmed to {token, format, percent};
                 # Qt-scaled counters dropped here) so the agent watches progress
                 # without a separate tool call. Mirror of today's running branch.
-                progress = send_gui_rpc(
+                progress = ctx.send_gui_rpc(
                     "operation.progress", {"operation_id": operation_id}
                 )
                 return _with_feedback(
@@ -239,7 +240,9 @@ def _with_feedback(reply: dict[str, Any], drained: list[str]) -> dict[str, Any]:
     return reply
 
 
-def tool_gui_op_poll(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_op_poll(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Non-blocking status of any in-flight operation, by ``handle`` (ADR-0026 §8).
 
     ``handle`` is the opaque token a START tool (gui_tab_run_start /
@@ -259,10 +262,12 @@ def tool_gui_op_poll(arguments: dict[str, Any]) -> dict[str, Any]:
     from the START finished reply or the matching typed getter.
     """
     handle = int(arguments["handle"])
-    return _poll_operation_by_handle(handle, "operation")
+    return _poll_operation_by_handle(ctx, handle, "operation")
 
 
-def tool_gui_op_wait(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_op_wait(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Block until any in-flight operation settles, by ``handle`` (ADR-0026 §8).
 
     ``handle`` is the opaque token a START tool returned. Blocks up to ``timeout``
@@ -275,7 +280,7 @@ def tool_gui_op_wait(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     handle = int(arguments["handle"])
     timeout = float(arguments.get("timeout", 120.0))
-    return _await_operation_by_handle(handle, "operation", timeout)
+    return _await_operation_by_handle(ctx, handle, "operation", timeout)
 
 
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
@@ -338,5 +343,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

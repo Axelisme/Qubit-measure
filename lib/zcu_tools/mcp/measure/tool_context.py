@@ -51,59 +51,7 @@ class MeasureToolContext:
         return self.session.send_gui_rpc(method, params, float(timeout_seconds))
 
 
-_CONTEXT: MeasureToolContext | None = None
-
-
-def bind_context(ctx: MeasureToolContext) -> None:
-    global _CONTEXT
-    _CONTEXT = ctx
-
-
-def _ctx() -> MeasureToolContext:
-    if _CONTEXT is None:
-        raise RuntimeError("measure MCP tool context is not bound")
-    return _CONTEXT
-
-
-class _BoundAttrProxy:
-    def __init__(self, attr_name: str) -> None:
-        self._attr_name = attr_name
-
-    def _target(self) -> Any:
-        return getattr(_ctx(), self._attr_name)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._target(), name)
-
-    def __getitem__(self, key: object) -> Any:
-        return self._target()[key]
-
-
-_CONFIG: Any = _BoundAttrProxy("config")
-_SESSION: Any = _BoundAttrProxy("session")
-_BRIDGE: Any = _BoundAttrProxy("bridge")
-METHOD_SPECS: Any = _BoundAttrProxy("method_specs")
-
-
 _WAIT_TRANSPORT_SLACK_SECONDS = 1.0
-
-
-def send_gui_rpc(
-    method: str,
-    params: dict[str, Any],
-    timeout_seconds: float | None = None,
-) -> dict[str, Any]:
-    return _ctx().send_gui_rpc(method, params, timeout_seconds)
-
-
-def _assemble_overview() -> dict[str, Any]:
-    from zcu_tools.mcp.measure.tools_overview import _assemble_overview as overview
-
-    return overview()
-
-
-def resolve_connect_port(config: MCPBridgeConfig, requested: int | None) -> int:
-    return _ctx().resolve_connect_port(config, requested)
 
 
 def _coerce_pairs(
@@ -138,6 +86,7 @@ def _is_timeout_error(exc: Exception) -> bool:
 
 
 def _start_op_with_short_wait(
+    ctx: MeasureToolContext,
     key: str,
     what: str,
     wait_seconds: float,
@@ -160,12 +109,12 @@ def _start_op_with_short_wait(
     gui_op_wait. Shared by device connect/disconnect/setup and tab.run_start.
     (soc.connect is excluded: it is synchronous and returns its product directly.)
     """
-    operation_id = _SESSION.operation_handle_for_key(key)
+    operation_id = ctx.session.operation_handle_for_key(key)
     if operation_id is None:
         # No handle captured (op already settled synchronously) — report product.
         return {"status": "finished", **product()}
     try:
-        send_gui_rpc(
+        ctx.send_gui_rpc(
             "operation.await",
             {"operation_id": operation_id, "timeout": wait_seconds},
             wait_seconds + _WAIT_TRANSPORT_SLACK_SECONDS,
@@ -182,7 +131,7 @@ def _start_op_with_short_wait(
 
 
 def _render_tab_figure(
-    tab_id: str, subtab_id: str, out_path: str | None = None
+    ctx: MeasureToolContext, tab_id: str, subtab_id: str, out_path: str | None = None
 ) -> dict[str, Any]:
     """Render a specific pane's figure to a PNG FILE (never inline base64).
 
@@ -198,14 +147,14 @@ def _render_tab_figure(
     resolved = out_path or str(
         Path(gettempdir()) / f"measure_fig_{tab_id}_{subtab_id}.png"
     )
-    return send_gui_rpc(
+    return ctx.send_gui_rpc(
         "tab.get_figure",
         {"tab_id": tab_id, "subtab_id": subtab_id, "out_path": resolved},
     )
 
 
 def _fold_finished_figure(
-    tab_id: str, reply: dict[str, Any], *, subtab_id: str
+    ctx: MeasureToolContext, tab_id: str, reply: dict[str, Any], *, subtab_id: str
 ) -> dict[str, Any]:
     """Fold a pane's figure into a FINISHED run/analyze reply, in place.
 
@@ -217,7 +166,7 @@ def _fold_finished_figure(
     if reply.get("status") != "finished":
         return reply
     try:
-        reply["figure"] = _render_tab_figure(tab_id, subtab_id).get("saved_to")
+        reply["figure"] = _render_tab_figure(ctx, tab_id, subtab_id).get("saved_to")
     except Exception:
         reply["figure"] = None
     return reply

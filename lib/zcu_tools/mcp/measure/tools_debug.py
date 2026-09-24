@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
-    _SESSION,
     MeasureToolContext,
-    bind_context,
-    send_gui_rpc,
 )
 
 
-def tool_gui_debug_resource_versions(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_debug_resource_versions(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Dump the full per-resource version table (DEV — debugging stale-guard).
 
     Reads resources.versions verbatim — the same table _refresh_versions consumes
@@ -29,11 +29,13 @@ def tool_gui_debug_resource_versions(arguments: dict[str, Any]) -> dict[str, Any
     lives in gui_launch / gui_bridge_connect's 'note' field — not in this table.
     """
     del arguments
-    res = send_gui_rpc("resources.versions", {})
+    res = ctx.send_gui_rpc("resources.versions", {})
     return res.get("versions", {})
 
 
-def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_debug_operations(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Dump the mcp-side per-key operation-handle cache (DEV).
 
     The ONLY source is the session's semantic-key -> latest operation_id projection
@@ -50,7 +52,7 @@ def tool_gui_debug_operations(arguments: dict[str, Any]) -> dict[str, Any]:
     Returns {handles: {key: {operation_id: int}}}.
     """
     del arguments
-    return _SESSION.debug_operations()
+    return ctx.session.debug_operations()
 
 
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
@@ -98,5 +100,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

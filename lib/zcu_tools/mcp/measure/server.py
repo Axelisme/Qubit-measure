@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import logging
 import runpy
-from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any
@@ -66,39 +65,11 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
     McpBridge,
     MCPBridgeConfig,
     _port_is_open,
-    assemble_tools,
-    generate_tools,
-    generated_rpc_timeout_seconds,
     resolve_connect_port,
     run_stdio_loop,
 )
-from zcu_tools.mcp.core.call_log import wrap_handler  # noqa: E402
-from zcu_tools.mcp.measure import (  # noqa: E402
-    tool_context,
-    tools_cfg,
-    tools_context,
-    tools_debug,
-    tools_device,
-    tools_lifecycle,
-    tools_notify,
-    tools_operation,
-    tools_overview,
-    tools_screenshot,
-    tools_soc,
-    tools_tab,
-)
 from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
-from zcu_tools.mcp.measure.exposure import (  # noqa: E402
-    build_mcp_exposure_plan,
-)
-from zcu_tools.mcp.measure.session import (  # noqa: E402
-    GuiRpcError,
-    MeasureMcpSession,
-)
-from zcu_tools.mcp.measure.session_policy import (  # noqa: E402
-    describe_stale_keys,
-    expand_pattern_keys,
-)
+from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
 # ``MCP_VERSION`` is this MCP bridge's own code revision (the mcp_server / tool
@@ -275,268 +246,6 @@ _CONFIG = MCPBridgeConfig(
 )
 
 
-def _session_resolve_connect_port(
-    config: MCPBridgeConfig, requested: int | None
-) -> int:
-    return resolve_connect_port(config, requested)
-
-
-def _session_port_is_open(port: int) -> bool:
-    return _port_is_open(port)
-
-
-_SESSION = MeasureMcpSession(
-    _CONFIG,
-    resolve_connect_port=_session_resolve_connect_port,
-    port_is_open=_session_port_is_open,
-)
-_BRIDGE = McpBridge(_CONFIG, on_event=_SESSION.deliver_event)
-_SESSION.attach_bridge(_BRIDGE)
-
-# Compatibility aliases for internal tests and debugging helpers.  Ownership is
-# still in MeasureMcpSession; these names reference its live mutable maps.
-_LAST_SEEN: MutableMapping[str, int] = _SESSION.last_seen_versions
-_GUARD_DEPS: Mapping[str, tuple[str, ...]] = _SESSION.policy.guard_deps
-_READ_REVEALS: Mapping[str, tuple[str, ...]] = _SESSION.policy.read_reveals
-_OP_BY_KEY: MutableMapping[str, int] = _SESSION.operation_handles
-
-
-def _deliver_event(msg: dict[str, Any]) -> None:
-    _SESSION.deliver_event(msg)
-
-
-def _drain_pending() -> dict[str, list[dict[str, Any]]]:
-    return _SESSION.drain_pending()
-
-
-def _read_version_table() -> dict[str, int] | None:
-    return _SESSION.read_version_table()
-
-
-def _refresh_versions() -> None:
-    _SESSION.refresh_versions()
-
-
-def _expand_pattern_keys(
-    patterns: tuple[str, ...], params: dict[str, Any], source_table: dict[str, int]
-) -> dict[str, int]:
-    return expand_pattern_keys(patterns, params, source_table)
-
-
-def _build_expected_versions(method: str, params: dict[str, Any]) -> dict[str, int]:
-    return _SESSION.build_expected_versions(method, params)
-
-
-def _refresh_revealed_versions(method: str, params: dict[str, Any]) -> None:
-    _SESSION.refresh_revealed_versions(method, params)
-
-
-def _describe_stale_keys(keys: list) -> list[str]:
-    return describe_stale_keys(keys)
-
-
-def _ensure_connected() -> None:
-    _SESSION.ensure_connected()
-
-
-_EXPLICIT_TIMEOUT_METHODS = frozenset({"operation.await", "notify.await"})
-
-
-def _default_rpc_timeout_seconds(method: str) -> float:
-    if method in _EXPLICIT_TIMEOUT_METHODS:
-        raise ValueError(f"{method!r} requires explicit timeout_seconds")
-    return generated_rpc_timeout_seconds(METHOD_SPECS[method])
-
-
-def send_gui_rpc(
-    method: str,
-    params: dict[str, Any],
-    timeout_seconds: float | None = None,
-) -> dict[str, Any]:
-    timeout = (
-        _default_rpc_timeout_seconds(method)
-        if timeout_seconds is None
-        else float(timeout_seconds)
-    )
-    return _SESSION.send_gui_rpc(method, params, timeout)
-
-
-# ---------------------------------------------------------------------------
-# Tool context + compatibility exports
-# ---------------------------------------------------------------------------
-
-
-def _send_gui_rpc_late(
-    method: str,
-    params: dict[str, Any],
-    timeout_seconds: float | None = None,
-) -> dict[str, Any]:
-    # Override handlers intentionally resolve through the current server-level
-    # symbol so tests and debuggers can monkeypatch ``server.send_gui_rpc``.
-    if timeout_seconds is None:
-        return send_gui_rpc(method, params)
-    return send_gui_rpc(method, params, timeout_seconds)
-
-
-def _overview_late() -> dict[str, Any]:
-    # Lifecycle tools call this provider so monkeypatching server._assemble_overview
-    # still affects gui_bridge_connect / gui_launch after the handler move.
-    return _assemble_overview()
-
-
-def _resolve_connect_port_late(config: MCPBridgeConfig, requested: int | None) -> int:
-    # Preserve the old module-global lookup path for tests/debuggers that patch
-    # server.resolve_connect_port.
-    return resolve_connect_port(config, requested)
-
-
-_TOOL_CTX = MeasureToolContext(
-    config=_CONFIG,
-    session=_SESSION,
-    method_specs=METHOD_SPECS,
-    resolve_connect_port=resolve_connect_port,
-)
-tool_context.bind_context(_TOOL_CTX)
-
-# Shared helper compatibility aliases. Ownership is in tool_context / domain
-# modules; server.py keeps these names as the stable import facade.
-_WAIT_TRANSPORT_SLACK_SECONDS = tool_context._WAIT_TRANSPORT_SLACK_SECONDS
-_coerce_pairs = tool_context._coerce_pairs
-_is_timeout_error = tool_context._is_timeout_error
-_start_op_with_short_wait = tool_context._start_op_with_short_wait
-_render_tab_figure = tool_context._render_tab_figure
-_fold_finished_figure = tool_context._fold_finished_figure
-
-# Domain helper / handler compatibility aliases.
-tool_gui_connect = tools_lifecycle.tool_gui_connect
-tool_gui_disconnect = tools_lifecycle.tool_gui_disconnect
-tool_gui_launch = tools_lifecycle.tool_gui_launch
-tool_gui_stop = tools_lifecycle.tool_gui_stop
-
-_assemble_overview = tools_overview._assemble_overview
-tool_gui_overview = tools_overview.tool_gui_overview
-
-_resolve_editor_id = tools_cfg._resolve_editor_id
-_fold_tab_editing_context = tools_cfg._fold_tab_editing_context
-tool_gui_editor_open = tools_cfg.tool_gui_editor_open
-tool_gui_editor_get_cfg = tools_cfg.tool_gui_editor_get_cfg
-tool_gui_editor_set = tools_cfg.tool_gui_editor_set
-tool_gui_tab_set_cfg = tools_cfg.tool_gui_tab_set_cfg
-
-tool_gui_context_md_write = tools_context.tool_gui_context_md_write
-tool_gui_context_md_read = tools_context.tool_gui_context_md_read
-tool_gui_context_md_delete = tools_context.tool_gui_context_md_delete
-tool_gui_context_list = tools_context.tool_gui_context_list
-tool_gui_context_ml_inspect = tools_context.tool_gui_context_ml_inspect
-
-_await_operation_by_handle = tools_operation._await_operation_by_handle
-_poll_operation_by_handle = tools_operation._poll_operation_by_handle
-tool_gui_op_poll = tools_operation.tool_gui_op_poll
-tool_gui_op_wait = tools_operation.tool_gui_op_wait
-
-_device_snapshot = tools_device._device_snapshot
-tool_gui_device_connect = tools_device.tool_gui_device_connect
-tool_gui_device_disconnect = tools_device.tool_gui_device_disconnect
-tool_gui_device_setup = tools_device.tool_gui_device_setup
-
-_run_tab_summary = tools_tab._run_tab_summary
-_fold_analyze_params = tools_tab._fold_analyze_params
-_analyze_summary_product = tools_tab._analyze_summary_product
-_fold_writeback_preview = tools_tab._fold_writeback_preview
-tool_gui_tab_run_start = tools_tab.tool_gui_tab_run_start
-tool_gui_tab_analyze = tools_tab.tool_gui_tab_analyze
-tool_gui_tab_post_analyze = tools_tab.tool_gui_tab_post_analyze
-tool_gui_tab_open = tools_tab.tool_gui_tab_open
-tool_gui_tab_run = tools_tab.tool_gui_tab_run
-tool_gui_tab_analyze_review = tools_tab.tool_gui_tab_analyze_review
-tool_gui_tab_get_figure = tools_tab.tool_gui_tab_get_figure
-
-_SOC_CONNECT_TIMEOUT_SLACK = tools_soc._SOC_CONNECT_TIMEOUT_SLACK
-_SOC_CONNECT_RECONCILE_TIMEOUT = tools_soc._SOC_CONNECT_RECONCILE_TIMEOUT
-_soc_connect_rpc_timeout = tools_soc._soc_connect_rpc_timeout
-tool_gui_soc_connect = tools_soc.tool_gui_soc_connect
-
-_SCREENSHOT_DIALOGS = tools_screenshot._SCREENSHOT_DIALOGS
-_SCREENSHOT_TARGETS = tools_screenshot._SCREENSHOT_TARGETS
-tool_gui_screenshot = tools_screenshot.tool_gui_screenshot
-
-tool_gui_debug_resource_versions = tools_debug.tool_gui_debug_resource_versions
-tool_gui_debug_operations = tools_debug.tool_gui_debug_operations
-
-_NOTIFY_CONSUMER_SLACK = tools_notify._NOTIFY_CONSUMER_SLACK
-tool_gui_prompt_user = tools_notify.tool_gui_prompt_user
-
-
-def _fold_tab_editing_context_late(
-    tab_id: str, reply: dict[str, Any]
-) -> dict[str, Any]:
-    # gui_tab_open historically called the server-level symbol, and tests patch
-    # that symbol directly. Keep the moved tab handler on the same late-bound path.
-    return _fold_tab_editing_context(tab_id, reply)
-
-
-tools_tab._fold_tab_editing_context = _fold_tab_editing_context_late
-
-
-# ---------------------------------------------------------------------------
-# Generated tools — derived from dispatch.METHOD_REGISTRY (the wire SSOT)
-# ---------------------------------------------------------------------------
-
-_TOOL_MODULES = (
-    tools_lifecycle,
-    tools_overview,
-    tools_cfg,
-    tools_context,
-    tools_operation,
-    tools_device,
-    tools_tab,
-    tools_soc,
-    tools_screenshot,
-    tools_debug,
-    tools_notify,
-)
-
-
-def _merge_override_tools() -> dict[str, dict[str, Any]]:
-    merged: dict[str, dict[str, Any]] = {}
-    for module in _TOOL_MODULES:
-        for name, entry in module.build_override_tools(_TOOL_CTX).items():
-            if name in merged:
-                raise RuntimeError(f"duplicate MCP override tool {name!r}")
-            merged[name] = entry
-    return merged
-
-
-_OVERRIDE_TOOLS: dict[str, dict[str, Any]] = _merge_override_tools()
-_OVERRIDE_NAMES = frozenset(_OVERRIDE_TOOLS)
-_MCP_EXPOSURE = build_mcp_exposure_plan(_CONFIG, METHOD_SPECS, _OVERRIDE_TOOLS)
-_NON_GENERATED_METHODS = _MCP_EXPOSURE.non_generated_methods
-
-
-# Generated tools (schema from the ParamSpec SSOT, forwarding through the guarded
-# send_gui_rpc) overlaid with the hand-written override subset (lifecycle /
-# fan-out / file-write / coercion). assemble_tools fails fast on a name collision.
-TOOLS = build_measure_tools(_TOOL_CTX)
-
-
-def _cleanup_on_exit() -> None:
-    """Stop the GUI when the MCP host disconnects (stdin EOF) — only if WE launched it.
-
-    An attach-only server (lazy auto-connect, e.g. the external-terminal agent's
-    loopback MCP server) must NOT shut down a GUI it merely connected to: that GUI
-    belongs to whoever launched it. Without this guard, closing the agent window
-    would terminate the user's GUI via the shared pid-file fallback in stop().
-    """
-    if not _BRIDGE.launched_gui:
-        return
-    try:
-        # Best-effort graceful close on host disconnect; force-kill on timeout so
-        # we don't leak a GUI process when the bridge goes away.
-        tool_gui_stop({"timeout_kill": True})
-    except Exception:
-        logger.debug("gui_stop on exit failed", exc_info=True)
-
-
 def _setup_logging() -> None:
     """Attach the MCP server process's per-session file logging.
 
@@ -573,40 +282,57 @@ def _format_diagnostic(msg: dict[str, Any]) -> str:
     return f"{head} — {message}" if message else head
 
 
-def _piggyback_blocks() -> list[dict[str, Any]]:
-    """Buffered diagnostics and events as compact extra content blocks.
-
-    Piggyback (ADR-0013): drain GUI diagnostics onto every successful tool reply
-    so the agent gets GUI feedback without a dedicated poll. Diagnostics render
-    one per line; event envelopes stay intact in compact JSON so seq/origin are
-    machine-visible.
-    """
-    pending = _drain_pending()
-    diagnostics = pending["diagnostics"]
-    events = pending["events"]
-    blocks: list[dict[str, Any]] = []
-    if diagnostics:
-        lines = "\n".join(_format_diagnostic(m) for m in diagnostics)
-        blocks.append(
-            {"type": "text", "text": "notifications since last call:\n" + lines}
-        )
-    if events:
-        blocks.append(
-            {
-                "type": "text",
-                "text": "events since last call:\n"
-                + json.dumps(events, separators=(",", ":")),
-            }
-        )
-    return blocks
-
-
 def main() -> None:
+    session = MeasureMcpSession(
+        _CONFIG,
+        resolve_connect_port=resolve_connect_port,
+        port_is_open=_port_is_open,
+    )
+    bridge = McpBridge(_CONFIG, on_event=session.deliver_event)
+    session.attach_bridge(bridge)
+    context = MeasureToolContext(
+        config=_CONFIG,
+        session=session,
+        method_specs=METHOD_SPECS,
+        resolve_connect_port=resolve_connect_port,
+    )
+    tools = build_measure_tools(context)
+
+    def cleanup_on_exit() -> None:
+        # An attach-only server must not stop somebody else's GUI.
+        if not bridge.launched_gui:
+            return
+        try:
+            tools["gui_stop"]["handler"]({"timeout_kill": True})
+        except Exception:
+            logger.debug("gui_stop on exit failed", exc_info=True)
+
+    def piggyback_blocks() -> list[dict[str, Any]]:
+        """Drain diagnostics and events on each successful tool reply."""
+        pending = session.drain_pending()
+        diagnostics = pending["diagnostics"]
+        events = pending["events"]
+        blocks: list[dict[str, Any]] = []
+        if diagnostics:
+            lines = "\n".join(_format_diagnostic(m) for m in diagnostics)
+            blocks.append(
+                {"type": "text", "text": "notifications since last call:\n" + lines}
+            )
+        if events:
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": "events since last call:\n"
+                    + json.dumps(events, separators=(",", ":")),
+                }
+            )
+        return blocks
+
     run_stdio_loop(
         _CONFIG,
-        TOOLS,
-        on_cleanup=_cleanup_on_exit,
-        on_each_reply=_piggyback_blocks,
+        tools,
+        on_cleanup=cleanup_on_exit,
+        on_each_reply=piggyback_blocks,
         on_start=_setup_logging,
         on_error=logger.exception,
         server_version="1.1.0",
