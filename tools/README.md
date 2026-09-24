@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-09-17 — 九項檢查與 ratchet 判準
+**Last updated:** 2026-09-24 — 移植到 main：現況與既存失敗
 
 `tools/` 放 repo 內部的品質檢查。`script/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
@@ -99,17 +99,17 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 
 ## 九項檢查
 
-| 檢查 | 守什麼 | 判讀 | 現況（2026-09-17） |
+| 檢查 | 守什麼 | 判讀 | 現況（2026-09-24） |
 | --- | --- | --- | --- |
-| `lint-imports` | 模組間的依賴方向，契約在 `.importlinter`，理由在 [ADR-0088](../docs/adr/0088-import-direction-contracts.md) | 硬性 | 綠 |
+| `lint-imports` | 模組間的依賴方向，契約在 `.importlinter`（目前只有 C1：experiment 不依賴 gui） | 硬性 | 綠 |
 | `check_pytest_collection.py` | 四種 pytest entrypoint／並行組合收集到相同的測試集 | 硬性 | 綠 |
-| `ruff check` | 結構：函式複雜度、分支數、statement 數、參數數、死碼、boolean trap | ratchet | 2001 |
-| `pyright` | 型別，以及跨模組存取 private 造成的封裝破口 | ratchet | 3620 |
-| `check_file_size.py` | 單檔行數上限 1000 | ratchet | 100 |
-| `check_test_path_correspondence.py` | 每個測試目錄的路徑對應一個實際存在的模組 | ratchet | 19 |
-| `check_test_capabilities.py` | 測試模組宣告它用的 socket／subprocess／sleep | ratchet | 60 |
-| `check_suppressions.py` | 逃生口計量 | ratchet | 4966 |
-| `pytest -n auto` | 行為，以及 module-level state 污染（`tests/_state_guard.py`） | 硬性 | **紅**，見下 |
+| `ruff check` | 結構：函式複雜度、分支數、statement 數、參數數、死碼、boolean trap | ratchet | 1492 |
+| `pyright` | 型別，以及跨模組存取 private 造成的封裝破口 | ratchet | 3871 |
+| `check_file_size.py` | 單檔行數上限 1000 | ratchet | 41 |
+| `check_test_path_correspondence.py` | 每個測試目錄的路徑對應一個實際存在的模組 | ratchet | 20 |
+| `check_test_capabilities.py` | 測試模組宣告它用的 socket／subprocess／sleep | ratchet | 34 |
+| `check_suppressions.py` | 逃生口計量 | ratchet | 2349 |
+| `pytest -n auto` | 行為 | 硬性 | **紅**，見下 |
 
 前兩項已全綠，紅了就是這次改動造成的。
 
@@ -127,9 +127,9 @@ ratchet 會把它讀成進步。
 `cast()`、per-file-ignore，以及在 `pyproject.toml` 裡被關掉的規則。經過 ratchet，消音變成拿一個
 計數換另一個計數，總數不落。它自己永遠 exit 0，不判定任何事。
 
-**它不禁止抑制。** 抑制有時是對的：pyright 看不見 pytest 的 fixture registry，所以
-`tests/conftest.py` 刻意關掉 `reportUnusedFunction`。禁止只會把人推去寫不需要抑制的更差的
-程式碼。計量的作用是讓那筆交易在 review 時看得見。
+**它不禁止抑制。** 抑制有時是對的：`pyproject.toml` 關掉的 `reportUnknown*` 規則，
+診斷幾乎都來自無型別的第三方套件（qick、pyvisa、scqubits、qtpy），不是本 repo 的程式。禁止只會把人推去寫
+不需要抑制的更差的程式碼。計量的作用是讓那筆交易在 review 時看得見。
 
 同樣的理由，`check_test_capabilities.py` 的 marker 命名的是**能力**而不是「我可以慢」的許可：
 標錯了測試會變成錯的，而不是被豁免。時間門檻量的是症狀且可以用 marker 交易掉；能力量的是原因。
@@ -141,24 +141,12 @@ ratchet 會把它讀成進步。
 
 ## pytest 目前是紅的
 
-`tests/_state_guard.py` 會在測試模組留下 `zcu_tools` module-level state 變更時指名該模組。
-全套件目前回報 4 筆真實污染（涉及兩個 global），並引出一個既有的順序依賴失敗；另有一筆與此
-無關的既有失敗 `test_c22_feed_lifecycle`。
+在 main＋Load 起點（`18f22e46a`）與加入這套工具後的分支上，`pytest -n auto` 都有同樣三類既存失敗：
 
-四筆都登記在 candidate backlog，等待獨立的清理 task。在那之前這個紅是已知狀態，判讀看的是
-「有沒有多出這份清單以外的失敗」。
+- `tests/gui/ui/test_writeback_widget.py` 的三個 layout 測試每次失敗。
+- 每次執行約有一次 xdist worker 以 `Fatal Python error: Aborted`／`node down` 終止，發生在 Qt 物件的 GC
+  期間；被記為失敗的是當時在該 worker 上的舊 UI 測試，依排程而異，單獨重跑會通過。
+- `tests/gui/plotting/test_plotting.py::test_registry_evicts_gc_collected_figure` 間歇失敗：它比較全域
+  `WeakKeyDictionary` 的絕對筆數，同一 worker 上其他測試的 figure 在期間被 GC 就會改變計數。
 
-## 新增一項檢查時
-
-1. 腳本放本目錄，形狀比照現有的：純函式加 `main()`、JSON receipt、exit code。走訪樹、讀 attribute
-   chain、透過 import 解析呼叫這幾件事用 `_support.py`，不要各自再寫一份——那會讓「怎麼解析 import」
-   這種未來的修正變成要改兩個地方。
-2. 提供一個可接受 `paths` 的查詢函式，讓 ratchet 只掃改動的檔案。成本必須與改動成正比。
-3. 在 `check_ratchet.py` 的 `_DETECTORS` 註冊，除非它已經全綠且自帶 baseline 機制
-   （`lint-imports` 與 `check_pytest_collection.py` 屬於這種）。
-4. 測試放 `tests/tools/`。
-5. 更新本檔的表格與數字。
-
-新檢查交付時回報非零是正常的，那是既有債務。**不要在腳本裡內建既有違規的豁免清單**——
-那會讓規則第一天就退化成描述現況。豁免只能是明確宣告的機制（例如路徑對應的保留名稱），
-而那種機制的清單屬於使用者的決定。
+在它們修好之前，判讀看的是「有沒有多出這三類以外的失敗」。

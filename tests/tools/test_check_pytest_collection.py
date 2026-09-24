@@ -8,10 +8,6 @@ from pathlib import Path
 import check_pytest_collection as oracle
 import pytest
 
-# oracle.collect() spawns real pytest child processes. The static check cannot
-# see a spawn reached through a helper, so this declaration is made by hand.
-pytestmark = pytest.mark.requires_subprocess
-
 
 def test_repository_configures_root_pythonpath_and_isolated_import_mode() -> None:
     root = Path(__file__).parents[2]
@@ -184,10 +180,28 @@ def test_compare_collections_rejects_set_drift_in_any_matrix_member() -> None:
         oracle.compare_collections(baseline, same, drift)
 
 
-def test_collection_runs_with_colour_disabled() -> None:
+def test_collection_runs_with_colour_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A terminal exporting FORCE_COLOR would otherwise break summary parsing."""
-    root = Path(__file__).parents[2]
+    seen: list[dict[str, str]] = []
 
-    result = oracle.collect(root, parallel=False)
+    def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        seen.append(env)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="tests/a.py::test_a\n1 test collected in 0.01s\n",
+            stderr="",
+        )
 
-    assert "\x1b[" not in result.summary
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setattr(oracle.subprocess, "run", fake_run)
+
+    oracle.collect(tmp_path, parallel=False)
+
+    assert len(seen) == 1
+    assert "FORCE_COLOR" not in seen[0]
+    assert seen[0]["NO_COLOR"] == "1"

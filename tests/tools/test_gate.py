@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import gate
+import pytest
 
 
 def test_formatting_runs_before_anything_measures_the_code() -> None:
@@ -59,7 +60,43 @@ def test_the_slow_checks_are_named_rather_than_folded_in() -> None:
     assert any("check_pytest_collection" in s for s in gate.SEPARATE_CHECKS)
 
 
-def test_a_regression_summary_names_the_rule_that_rose() -> None:
+class _StubRatchet:
+    """Stands in for the loaded check_ratchet tool: a fixed base, one changed file."""
+
+    class RatchetError(Exception):
+        pass
+
+    @staticmethod
+    def resolve_base(_root: Path, base: str) -> str:
+        return base
+
+    @staticmethod
+    def changed_python_files(_root: Path, _base: str) -> tuple[str, ...]:
+        return ()
+
+
+def _run_gate_with_ratchet_outcome(
+    monkeypatch: pytest.MonkeyPatch, ratchet: gate.Outcome
+) -> tuple[int, str]:
+    monkeypatch.setattr(gate._support, "load_tool", lambda _name: _StubRatchet)
+
+    def fake_run_step(step: gate.Step, _root: Path) -> gate.Outcome:
+        if step.name == "ratchet":
+            return ratchet
+        return gate.Outcome(step.name, step.command, 0, "", "")
+
+    monkeypatch.setattr(gate, "run_step", fake_run_step)
+    lines: list[str] = []
+    monkeypatch.setattr(
+        "builtins.print", lambda *a, **_k: lines.append(" ".join(map(str, a)))
+    )
+    code = gate.main(["--base", "abcdef1234", "--no-fix"])
+    return code, "\n".join(lines)
+
+
+def test_a_failing_ratchet_names_the_rule_that_rose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     outcome = gate.Outcome(
         name="ratchet",
         command=("x",),
@@ -72,13 +109,17 @@ def test_a_regression_summary_names_the_rule_that_rose() -> None:
         stderr="",
     )
 
-    summary = gate._ratchet_summary(outcome)
+    code, output = _run_gate_with_ratchet_outcome(monkeypatch, outcome)
 
-    assert "lib/a.py C901 1 -> 2" in summary
-    assert "1 changed Python file(s)" in summary
+    assert code == 1
+    assert "FAIL ratchet" in output
+    assert "lib/a.py C901 1 -> 2" in output
+    assert "1 changed Python file(s)" in output
 
 
-def test_an_unreadable_ratchet_report_falls_back_to_its_error() -> None:
+def test_an_unreadable_ratchet_report_falls_back_to_its_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     outcome = gate.Outcome(
         name="ratchet",
         command=("x",),
@@ -87,7 +128,10 @@ def test_an_unreadable_ratchet_report_falls_back_to_its_error() -> None:
         stderr="ratchet failed: git merge-base failed\n",
     )
 
-    assert gate._ratchet_summary(outcome) == "ratchet failed: git merge-base failed"
+    code, output = _run_gate_with_ratchet_outcome(monkeypatch, outcome)
+
+    assert code == 1
+    assert "ratchet failed: git merge-base failed" in output
 
 
 def test_a_json_receipt_reading_comes_from_its_named_key(tmp_path: Path):

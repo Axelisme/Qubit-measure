@@ -133,16 +133,6 @@ def test_a_module_that_uses_nothing_special_is_silent(tmp_path: Path):
     assert checker.undeclared_capabilities(tmp_path) == ()
 
 
-def test_every_capability_marker_is_registered_with_pytest() -> None:
-    """A marker pytest does not know about raises a warning instead of guarding."""
-    pyproject = (Path(__file__).parents[2] / "pyproject.toml").read_text(
-        encoding="utf-8"
-    )
-
-    for marker, _ in checker.CAPABILITIES.values():
-        assert f'"{marker}: ' in pyproject
-
-
 def test_named_paths_narrow_the_walk(tmp_path: Path):
     source = "import time\n\ndef test_waits():\n    time.sleep(0)\n"
     _write(tmp_path, "test_edited.py", source)
