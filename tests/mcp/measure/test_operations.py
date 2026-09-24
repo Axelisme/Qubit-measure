@@ -57,13 +57,15 @@ def test_latest_operation_handle_is_reported_only_by_its_own_session(
 
 
 @pytest.mark.parametrize("settled", [True, False])
-def test_device_connect_short_wait_returns_product_or_pending_handle(
+@pytest.mark.parametrize("apply", [False, True])
+def test_device_start_short_wait_returns_product_or_pending_handle(
     client: MeasureClient,
     settled: bool,
+    apply: bool,
 ) -> None:
     client.transport.replies.update(
         {
-            "device.connect": ok({"operation_id": 9}),
+            "device.setup" if apply else "device.connect": ok({"operation_id": 9}),
             "operation.await": ok({"status": "finished"})
             if settled
             else timeout_reply(),
@@ -73,13 +75,24 @@ def test_device_connect_short_wait_returns_product_or_pending_handle(
         }
     )
     result = client.call(
-        "gui_device_connect",
-        {
+        "gui_device_apply" if apply else "gui_device_connect",
+        {"name": "flux", "updates": {"value": 1.0}}
+        if apply
+        else {
             "type_name": "FakeDevice",
             "name": "flux",
             "address": "addr",
         },
     )
+    if apply:
+        setup = next(
+            params
+            for method, params in client.transport.sent
+            if method == "device.setup"
+        )
+        assert {
+            key: value for key, value in setup.items() if key != "expected_versions"
+        } == {"name": "flux", "updates": {"value": 1.0}}
     if settled:
         assert result["status"] == "finished"
         assert result["snapshot"] == {"name": "flux", "status": "connected"}

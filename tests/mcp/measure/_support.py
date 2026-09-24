@@ -8,7 +8,11 @@ from typing import Any
 from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
-from zcu_tools.mcp.measure.session import MeasureMcpSession
+from zcu_tools.mcp.measure.session import (
+    MeasureMcpSession,
+    PortIsOpenFn,
+    ResolveConnectPortFn,
+)
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 RpcResponder = Callable[[str, dict[str, Any]], dict[str, Any]]
@@ -76,7 +80,13 @@ class MeasureClient:
         self.transport.sent.clear()
 
 
-def make_client(tmp_path: Path, responder: RpcResponder | None = None) -> MeasureClient:
+def make_client(
+    tmp_path: Path,
+    responder: RpcResponder | None = None,
+    *,
+    resolve_connect_port: ResolveConnectPortFn | None = None,
+    port_is_open: PortIsOpenFn | None = None,
+) -> MeasureClient:
     config = MCPBridgeConfig(
         tool_prefix="gui_",
         server_display_name="measure-test",
@@ -87,12 +97,17 @@ def make_client(tmp_path: Path, responder: RpcResponder | None = None) -> Measur
         wire_version=55,
         pid_file=tmp_path / "unused.pid",
         log_file=tmp_path / "unused.log",
-        run_script_name="unused.py",
+        run_script_name="run_measure_gui.py",
+    )
+    resolver = resolve_connect_port or (
+        lambda config, requested: (
+            config.default_port if requested is None else requested
+        )
     )
     session = MeasureMcpSession(
         config,
-        resolve_connect_port=lambda config, requested: config.default_port,
-        port_is_open=lambda port: False,
+        resolve_connect_port=resolver,
+        port_is_open=port_is_open or (lambda port: False),
     )
     bridge = McpBridge(config, on_event=session.deliver_event)
     session.attach_bridge(bridge)
@@ -102,6 +117,6 @@ def make_client(tmp_path: Path, responder: RpcResponder | None = None) -> Measur
         config,
         session,
         METHOD_SPECS,
-        resolve_connect_port=lambda config, requested: config.default_port,
+        resolve_connect_port=resolver,
     )
     return MeasureClient(context, transport, build_measure_tools(context))

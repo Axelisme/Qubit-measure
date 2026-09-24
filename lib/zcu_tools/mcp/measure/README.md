@@ -1,4 +1,4 @@
-**Last updated:** 2026-08-27 (subtab-qualified remote/MCP contract WIRE 55 / MCP 74)
+**Last updated:** 2026-09-24 — instance-owned MCP assembly
 
 # `zcu_tools/mcp/measure/`
 
@@ -12,19 +12,19 @@ Cfg agent直接複製`gui_tab_get_cfg`/`gui_editor_get_cfg`列出的canonical le
 
 Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, subtab_id=run|analysis|post_analysis)`讀對應pane figure（run為live container截圖，analysis/post為canonical State figure）；`gui_tab_writeback_list`、`gui_tab_writeback_set_item`與`gui_tab_writeback_apply`以`(tab_id, subtab_id=analysis|post_analysis)`定址pane draft；`gui_tab_save_data`（tab-only）與`gui_tab_save_image(tab_id, subtab_id=analysis|post_analysis)`分離，無`gui_tab_save` bundle與`gui_tab_commit`。舊`gui_tab_get_current_figure`、`tab.save_result`/`save_post_image`及其bundle均已移除；寫入/預覽回覆投影`destination_context`（當下active ExpContext）；operation期間同pane的remote edit/apply被gate。
 
-- `server.py` 是 MCP bootstrap / aggregation facade：保留 standalone preflight、
-  server instructions/config、session/bridge setup、guarded `send_gui_rpc`、
-  compatibility exports、domain tool table aggregation、stdio loop hooks。
+- `server.py` 是 bootstrap／stdio entry：`main()`建立同次呼叫專屬的session、
+  bridge、context與tool table。Cleanup及piggyback hooks綁定該次session，不暴露
+  測試用compatibility aliases。
 - `zcu_tools.mcp._standalone.bootstrap_standalone_server()` 是所有 standalone
   MCP entry server 共用的最小啟動 helper：在 entry import `zcu_tools.*` 前把
   repo `lib` 加進 `sys.path`，並用一致的 stderr + `SystemExit(1)` 做 dependency
   preflight。各 app server 只保留自己的 required modules 與錯誤訊息。
-- `tool_context.py` 提供 override handlers 的 late-bound runtime context 與共用 helper。
-  hand-written override handlers 透過 context provider 解析目前的
-  `server.send_gui_rpc`；generated tools 仍由 `generate_tools(..., send_gui_rpc)`
-  維持 import-time capture。
-- `tools_*.py` 依 domain 共置 hand-written handler、override schema 與
-  manual MCP tool schema；`server.py` 只聚合這些 manual tool tables。
+- `tool_context.py` 的frozen `MeasureToolContext`顯式持有config、session、method specs
+  與port resolver。Generated及override handlers共用該context的guarded sender，
+  不經module-global provider或反向查找server。
+- `assembly.py::build_measure_tools(context)`每次建立fresh tool table，先驗證exposure
+  再合併generated及override tools並加上call logging。不同assembly的handlers不串線。
+- `tools_*.py`依domain共置hand-written handler與schema；domain factory綁定傳入context。
 - `exposure.py` 從 GUI wire contract 的 `METHOD_SPECS[*].mcp` 推導 generated /
   internal / override exposure plan，並在 assembly 時 fail-fast 檢查 generated
   tool collision、manual/generated collision、override tool 缺漏，以及
@@ -73,6 +73,11 @@ Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, 
   MCP-only lifecycle/bundle/debug tools 不硬塞進 method policy。
 
 ## 測試注意
+
+`tests/mcp/measure/`透過factory、真實session／bridge及recording Transport驗證tool行為；
+stdio以`server.main()`覆蓋成功回覆piggyback及cleanup。GUI handler與真socket事件整合
+留在`tests/gui/services/remote/`，shared policy construction留在`tests/gui/remote/`。
+Schema文字及tool inventory以直接review確認，不用私有alias或靜態pytest維護。
 
 Remote/MCP 測試會建立 loopback socket；受限 sandbox 可能需要 unsandboxed execution。
 headless 測試環境通常需要 `QT_QPA_PLATFORM=offscreen`、

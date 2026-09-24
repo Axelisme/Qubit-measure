@@ -162,6 +162,55 @@ def test_stale_error_translates_and_refreshes_the_next_request(
     assert retry["expected_versions"]["context"] == 10
 
 
+def test_stale_error_identifies_changed_resources_through_the_rpc_boundary(
+    client: MeasureClient,
+) -> None:
+    client.transport.replies["tab.run_start"] = {
+        "ok": False,
+        "error": {
+            "code": "precondition_failed",
+            "reason": "stale_version",
+            "message": "stale",
+            "data": {
+                "stale": [
+                    "context",
+                    "soc",
+                    "tab:abc123:cfg",
+                    "device:flux",
+                    "devices:__set__",
+                    "arb_waveforms",
+                ]
+            },
+        },
+    }
+    with pytest.raises(RuntimeError) as error:
+        client.context.send_gui_rpc("tab.run_start", {"tab_id": "abc123"})
+    message = str(error.value)
+    for resource in [
+        "the active context (md/ml)",
+        "the SoC connection",
+        "this tab's cfg",
+        "device 'flux'",
+        "the set of devices (one added/removed)",
+        "the arbitrary waveform asset store",
+    ]:
+        assert resource in message
+    assert "abc123" not in message
+
+
+@pytest.mark.parametrize("read_method", ["arb_waveform.list", "arb_waveform.preview"])
+def test_asset_reads_reveal_the_guard_baseline_for_asset_writes(
+    client: MeasureClient,
+    read_method: str,
+) -> None:
+    client.observe_versions({"arb_waveforms": 2, "context": 1})
+    set_versions(client, {"arb_waveforms": 3, "context": 1})
+    send(client, read_method, {"name": "pulse"})
+    set_versions(client, {"arb_waveforms": 4, "context": 2})
+    params = send(client, "arb_waveform.set", {"name": "pulse", "recipe": {}})
+    assert params["expected_versions"] == {"arb_waveforms": 3}
+
+
 def test_unguarded_read_does_not_attach_versions(client: MeasureClient) -> None:
     assert send(client, "tab.snapshot", {"tab_id": "t"}) == {"tab_id": "t"}
 
