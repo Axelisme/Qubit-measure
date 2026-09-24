@@ -36,7 +36,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
-from zcu_tools.utils.func_tools import min_interval
+from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
 
 from ._path import get_path, set_target, writable_view
 
@@ -250,8 +250,13 @@ class SignalBuffer:
     def trigger_update(
         self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
     ) -> None:
-        if self._throttled_update is not None:
-            self._throttled_update(self.array)
+        callback = self._throttled_update
+        if callback is None:
+            return
+        if flush and isinstance(callback, MinIntervalFunc):
+            callback.flush(self.array)
+        else:
+            callback(self.array)
 
 
 @dataclass(frozen=True)
