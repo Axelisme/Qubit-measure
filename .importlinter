@@ -1,0 +1,24 @@
+# Executable projection of this repository's layering ADRs.
+#
+# OWNERSHIP. This file states architecture, not implementation. Loosening it --
+# adding an ignore_imports entry, deleting or weakening a contract, changing a
+# layer order -- is an architecture decision and requires explicit user consent. Tightening it -- removing an
+# ignore_imports entry, adding a contract -- needs no consent and is encouraged.
+#
+# ignore_imports is the ratchet baseline. It may shrink. It may not grow.
+
+[importlinter]
+root_package = zcu_tools
+
+[importlinter:contract:experiment-no-gui]
+name = C1: the experiment domain does not depend on the GUI
+type = forbidden
+source_modules =
+    zcu_tools.experiment
+forbidden_modules =
+    zcu_tools.gui
+# zcu_tools.experiment.v2_gui is a GUI adapter that happens to live under
+# experiment/. It is expected to import zcu_tools.gui; the domain modules beside
+# it are not. Its 517 edges are excluded here rather than treated as debt.
+ignore_imports =
+    zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**

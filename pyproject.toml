@@ -68,6 +68,7 @@ dev = [
   "pytest-xdist",
   "pyright",
   "ruff",
+  "import-linter>=2.15",
 ]
 
 [build-system]
@@ -85,31 +86,119 @@ packages = ["zcu_tools"]
 # is allowed only in __init__.py barrel files (intentional re-exports); every other
 # file must keep its imports live, so dead imports surface.
 ignore = ["E402"]
-extend-select = ["UP006", "UP007", "UP035", "UP037", "UP045"]
+# Structural gates. These constrain shape, not style: function size, branch count,
+# parameter count, dead code and import direction. They are enforced as a ratchet
+# against a baseline (existing violations are tolerated, new ones are not), so the
+# thresholds below state the standard rather than describing the current tree.
+extend-select = [
+  "UP006",
+  "UP007",
+  "UP035",
+  "UP037",
+  "UP045",
+  "C901",    # function is too complex
+  "PLR0911", # too many return statements
+  "PLR0912", # too many branches
+  "PLR0913", # too many arguments
+  "PLR0915", # too many statements
+  "B",       # flake8-bugbear: likely bugs
+  "ARG001",  # unused function argument — the signature is lying
+  "ARG002",  # unused method argument
+  "ARG003",  # unused class-method argument
+  "ARG004",  # unused static-method argument
+  "SIM",     # redundant control flow
+  "RET",     # redundant return flow
+  "ERA",     # commented-out code
+  "FBT001",  # boolean trap: positional bool parameter
+  "FBT002",  # boolean trap: positional bool default
+]
+# Deliberately excluded:
+#   FBT003  reports the call site rather than the API that caused it; FBT001/FBT002
+#           already carry that signal at the definition.
+#   ARG005  fires on callback-shaping lambdas (`lambda raw: ...`) where the ignored
+#           parameter is dictated by the caller's signature, not by this code.
+#   TID252  all 680 hits are `from ..x import y` inside a package, which is this
+#           repo's deliberate convention. Import DIRECTION is a real concern, but it
+#           is import-linter's job (see .importlinter), which judges the dependency
+#           edge rather than the syntax used to write it.
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-args = 6
 
 [tool.ruff.lint.per-file-ignores]
 "script/start_server.py" = ["UP"]
 "lib/zcu_tools/remote/pyro.py" = ["UP"]
 "__init__.py" = ["F401"]
+# Fixtures legitimately take many parameters and accept ones they only activate;
+# `assert False` (B011) is a normal marker for a branch a test asserts is unreachable.
+"tests/**" = ["PLR0913", "ARG001", "ARG002", "FBT001", "FBT002", "B011"]
 
 [tool.pyright]
-include = ["lib", "tests", "script"]
-typeCheckingMode = "standard"
+include = ["lib", "tests", "script", "tools"]
+executionEnvironments = [
+  { root = "lib", extraPaths = ["lib"] },
+  { root = "tests", extraPaths = ["lib"] },
+  { root = "script", extraPaths = ["lib"] },
+  { root = "tools", extraPaths = ["lib"] },
+]
+# strict, minus the rules whose diagnostics are produced by untyped third-party
+# packages (qick, pyvisa, scqubits, qtpy) rather than by this repository. Measured
+# on lib/: the reportUnknown* family is 59% of strict output and is almost entirely
+# third-party in origin; with it disabled every remaining diagnostic is own-code.
+typeCheckingMode = "strict"
 reportMissingImports = "none"
+reportMissingTypeStubs = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+reportUnknownParameterType = "none"
+reportMissingParameterType = "none"
+reportUntypedFunctionDecorator = "none"
+reportUntypedBaseClass = "none"
+# Ruff owns unused imports (F401, with __init__.py barrels exempted); a second
+# authority on the same rule would only disagree about the barrels.
+reportUnusedImport = "none"
+# reportPrivateUsage stays ON everywhere, including tests. In lib/ its 327 hits are
+# encapsulation breaks across module boundaries, which is the signal this gate
+# exists to surface. In tests/ its 2663 hits are tests reaching into internals,
+# which the test contract (tests validate observable behaviour and Interfaces)
+# already forbids; the ratchet drains them rather than the config hiding them.
+#
+# Pre-existing override that narrows strict; a candidate for removal as the ratchet
+# drains.
 reportIncompatibleVariableOverride = "none"
 
 [tool.pytest.ini_options]
+# tools/ is listed so tests import a check by name, the same way running it
+# directly or loading it from another check does; see tools/_support.py.
+pythonpath = [".", "tools"]
 # Tests live under tests/ (project convention). Scoping collection here keeps
 # pytest from walking into scratch/ helper scripts (named test_*.py with plain
 # helper functions like test(label, ...) that pytest would mis-collect as cases).
 testpaths = ["tests"]
+# Import test modules by their full path-derived name. This keeps equal basenames
+# in unrelated test domains isolated in both serial and xdist collection.
+# Pin the temporary-file root to the invoking worktree so no caller has to create
+# a basetemp parent first. `uv run --directory <worktree>` fixes the cwd, so parallel
+# lanes stay isolated. pytest clears this directory at session start.
+addopts = "--import-mode=importlib --basetemp=.pytest-tmp"
 filterwarnings = [
   "ignore::DeprecationWarning:matplotlib.*",
   "ignore:invalid escape sequence.*:SyntaxWarning:qick\\..*",
   "ignore:invalid escape sequence.*:SyntaxWarning:scqubits\\..*",
 ]
 markers = [
+  "requires_loopback: integration tests that bind or connect a real loopback socket",
   "slow: slow tests (e.g. qutip cross-validation)",
+  # Capability markers. A module declares what it uses; tools/check_test_capabilities.py
+  # checks the declaration. These name a capability, not permission to be slow, so
+  # mismarking makes a test wrong rather than exempt.
+  "requires_subprocess: tests that spawn a real child process",
+  "uses_wall_clock: tests that sleep instead of synchronising on an event",
 ]
 
 [tool.jupytext]
