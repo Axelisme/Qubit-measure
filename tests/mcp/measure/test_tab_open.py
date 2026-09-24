@@ -76,4 +76,5 @@ def test_each_open_returns_its_guide_regardless_of_prior_calls(
         f"Guide for {name}" for name in adapters
     ]
     assert [result["tab_id"] for result in results] == ["tab-1", "tab-2"]
+    assert all("guide_omitted" not in result for result in results)
     assert tab_rpc.guides == list(adapters)
