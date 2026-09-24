@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-24 — measure MCP test ownership
+**Last updated:** 2026-09-24 — measure MCP／remote test ownership
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -293,10 +293,10 @@ explicit concrete opt-in/exclusion；`tests/gui/services/remote/test_expected_er
 
 `test_expected_error_dispatch.py`走實際shared dispatch reply path，鎖定main/off-main category
 mapping、direct structured `RemoteError` passthrough、generic `data=None`與translator failure
-containment。`test_unexpected_handler_errors.py`證ordinary RuntimeError、ProviderError、I/O與
-invariant failure不被handler降級；`test_remote_contract_surface.py`以AST禁止request handlers新增
-`RuntimeError`/`Exception`/bare catch。unexpected dispatch測試同時要求controller error log保留
-traceback。
+containment。`test_unexpected_handler_errors.py`以既有handler樣本確認ordinary RuntimeError、ProviderError、I/O與
+invariant failure不被降級；unexpected dispatch測試另確認controller error log保留traceback。
+新增request handler或修改分類時，直接審閱catch範圍與method entry的靜態宣告，
+再用公開request／reply測試確認對外錯誤碼；不以AST測試重建一份handler規則。
 
 `tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
 view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
