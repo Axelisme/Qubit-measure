@@ -28,6 +28,8 @@ test asserts exact durations without depending on a real soccfg.
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
