@@ -4,6 +4,7 @@ import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from numbers import Real
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -325,12 +326,17 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         result: LenRabiResult | None = None,
         *,
         decay: bool = True,
+        initial_state: Literal["ground", "excited"] = "ground",
         max_calls: int | None = None,
     ) -> tuple[RabiJointFitResult, Figure]:
         assert result is not None, "no result found"
 
         fit = fit_rabi_joint(
-            result.lengths, result.signals, decay=decay, max_calls=max_calls
+            result.lengths,
+            result.signals,
+            decay=decay,
+            max_calls=max_calls,
+            initial_state=initial_state,
         )
         width, height = config.figsize
         fig = plt.figure(figsize=(width, height * 1.6), layout="constrained")

@@ -161,8 +161,22 @@ def _default_prepared_states() -> NDArray[np.int64]:
     return np.array([0, 1], dtype=np.int64)
 
 
+def ge_signals_by_state(
+    signals: NDArray[np.complex128],
+    initial_state: Literal["ground", "excited"],
+) -> NDArray[np.complex128]:
+    """Map acquisition rows (probe off/on) to predominantly ground/excited."""
+    if initial_state == "ground":
+        return signals
+    if initial_state == "excited":
+        return signals[::-1]
+    raise ValueError(f"Unknown initial state: {initial_state!r}")
+
+
 @dataclass(frozen=True)
 class GE_Result:
+    """Raw probe-off/on rows; prepared_states=[0, 1] records that acquisition order."""
+
     signals: NDArray[np.complex128]
     shot_indices: NDArray[np.int64]
     prepared_states: NDArray[np.int64]
@@ -264,11 +278,17 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         self,
         result: GE_Result | None = None,
         backend: Literal["center", "regression", "pca"] = "pca",
+        initial_state: Literal["ground", "excited"] = "ground",
         **kwargs,
     ) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
+        """Analyze with populations ordered by predominant g/e preparation.
+
+        ``initial_state`` labels the state before the probe, after reset/init.
+        Pass the same state to subsequent confusion calculation and plotting.
+        """
         assert result is not None, "no result found"
 
-        signals = result.signals
+        signals = ge_signals_by_state(result.signals, initial_state)
 
         return singleshot_ge_analysis(signals, backend=backend, **kwargs)
 
@@ -282,10 +302,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         radius: float | None = None,
         result: GE_Result | None = None,
         consider_other: bool = True,
+        initial_state: Literal["ground", "excited"] = "ground",
     ) -> GEConfusionResult:
         assert result is not None, "no result found"
 
-        g_signals, e_signals = result.signals
+        g_signals, e_signals = ge_signals_by_state(result.signals, initial_state)
         init_matrix = make_init_matrix(init_pops)
 
         if radius is None:
@@ -337,10 +358,11 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
         g_center: complex,
         e_center: complex,
         result: GE_Result | None = None,
+        initial_state: Literal["ground", "excited"] = "ground",
     ) -> Figure:
         assert result is not None, "no result found"
 
-        g_signals, e_signals = result.signals
+        g_signals, e_signals = ge_signals_by_state(result.signals, initial_state)
         fig, ((ax1, ax4), (ax2, ax3)) = plt.subplots(2, 2, figsize=(8, 8))
 
         g_label = r"$|0\rangle$"

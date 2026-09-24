@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-23 — reset/check figure analysis
+**Last updated:** 2026-09-25 — singleshot initial state
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -150,7 +150,7 @@ capabilities 控制：Base 提供 no-op default，Protocol/Base exact signature 
 conformance tests 共同鎖定 framework mandatory surface。
 
 `singleshot/ge` 的 primary analysis 只產生 fit 產物：operator可選 backend、histogram log scale、
-T1 alignment與nullable shared length ratio；advanced population priors不進GUI。所選 backend擬合
+T1 alignment、nullable shared length ratio 與 Initial State（ground / excited，預設 ground）；advanced population priors不進GUI。所選 backend擬合
 centres、`ge_s`與initial populations，右側顯示IQ distribution，並經`get_writeback_items()`提出
 `fid`、`ge_s`、`g_center`、`e_center`。它的零參數post-analysis是sole confusion路徑：使用primary
 fit資料計算`ge_radius`與3×3 confusion matrix，顯示完整confusion diagnostic，並經
@@ -337,3 +337,5 @@ review 後執行，不屬於 adapter code。
 - **D5**：length / 部分掃描是「看曲線」型，analyze 只渲圖、不抽純量 → 無 md writeback。
 - **graceful without snapshot**：`cfg_snapshot is None`（如從檔載入）時，module
   writeback 全略過，只剩既有 md item。
+
+三個 singleshot 分析（ge / len_rabi / amp_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 對應零 length/gain，不是第一個掃描點。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。

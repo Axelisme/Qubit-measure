@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -28,7 +28,7 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeResultBase,
     ExpContext,
     MetaDictWriteback,
-    NoAnalyzeParams,
+    ParamMeta,
     RunRequest,
     WritebackItem,
     WritebackRequest,
@@ -48,6 +48,13 @@ SsAmpRabiRunResult: TypeAlias = AmpRabiResult
 
 
 @dataclass
+class SsAmpRabiAnalyzeParams:
+    initial_state: Annotated[
+        Literal["ground", "excited"], ParamMeta(label="Initial State")
+    ] = "ground"
+
+
+@dataclass
 class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
     # The full numeric fit is intentionally non-JSON-safe and therefore omitted
     # from the GUI summary. The operator reviews the population/fit Figure while
@@ -57,7 +64,9 @@ class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
 
 
 class SsAmpRabiAdapter(
-    BaseAdapter[AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[
+        AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
+    ]
 ):
     exp_cls = AmpRabiExp
     ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
@@ -88,6 +97,8 @@ class SsAmpRabiAdapter(
             "independent items. The four-item proposal is all-or-none."
         ),
         recommended=(
+            "Set Initial State to the predominant state before the swept drive pulse "
+            "(at zero length/gain), even when the first sweep point is nonzero. "
             "Run after 'singleshot/ge'. A sweep spanning a few pi gains "
             "captures a full oscillation. Review the measured population curves "
             "and overlaid joint-fit curves before applying all four calibration "
@@ -132,9 +143,11 @@ class SsAmpRabiAdapter(
         return AmpRabiExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
-        self, req: AnalyzeRequest[SsAmpRabiRunResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeParams]
     ) -> SsAmpRabiAnalyzeResult:
-        fit_result, figure = AmpRabiExp().analyze(req.run_result)
+        fit_result, figure = AmpRabiExp().analyze(
+            req.run_result, initial_state=req.analyze_params.initial_state
+        )
         return SsAmpRabiAnalyzeResult(fit_result=fit_result, figure=figure)
 
     def get_writeback_items(
