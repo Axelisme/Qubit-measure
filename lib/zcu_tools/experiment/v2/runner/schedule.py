@@ -250,13 +250,11 @@ class SignalBuffer:
     def trigger_update(
         self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
     ) -> None:
-        callback = self._throttled_update
-        if callback is None:
-            return
-        if flush and isinstance(callback, MinIntervalFunc):
-            callback.flush(self.array)
-        else:
-            callback(self.array)
+        if self._throttled_update is not None:
+            if flush and isinstance(self._throttled_update, MinIntervalFunc):
+                self._throttled_update.flush(self.array)
+            else:
+                self._throttled_update(self.array)
 
 
 @dataclass(frozen=True)
