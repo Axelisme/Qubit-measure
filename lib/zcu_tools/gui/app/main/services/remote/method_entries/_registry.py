@@ -25,6 +25,8 @@ class AgentMethodPolicy:
     tool_names: tuple[str, ...] = ()
     guard_deps: tuple[str, ...] = ()
     reveals: tuple[str, ...] = ()
+    # Only a successful write may advance the whole observed baseline.
+    refresh_after_write: bool = False
     operation_key: str | None = None
 
     def __post_init__(self) -> None:
@@ -71,6 +73,7 @@ def build_agent_catalog(
             "tool_names": list(entry.agent.tool_names),
             "guard_deps": list(entry.agent.guard_deps),
             "reveals": list(entry.agent.reveals),
+            "refresh_after_write": entry.agent.refresh_after_write,
             "operation_key": entry.agent.operation_key,
         }
         for entry in entries

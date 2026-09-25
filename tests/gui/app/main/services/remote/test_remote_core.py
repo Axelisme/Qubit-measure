@@ -190,6 +190,8 @@ def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
         assert methods["adapter.guide"]["params"]["required"] == ["adapter_name"]
         assert methods["soc.info"]["exposure"] == "rpc"
         assert methods["soc.info"]["timeout_seconds"] == 5.0
+        assert methods["soc.info"]["refresh_after_write"] is False
+        assert methods["tab.run_start"]["refresh_after_write"] is True
         assert methods["tab.run_start"]["exposure"] == "rpc"
         assert methods["tab.run_start"]["tool_names"] == []
         assert "tab:{tab_id}:cfg" in methods["tab.run_start"]["guard_deps"]

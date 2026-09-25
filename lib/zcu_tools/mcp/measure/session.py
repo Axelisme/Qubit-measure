@@ -38,6 +38,7 @@ class CatalogEntry(TypedDict):
     tool_names: list[str]
     guard_deps: tuple[str, ...]
     reveals: tuple[str, ...]
+    refresh_after_write: bool
     operation_key: str | None
 
 
@@ -61,6 +62,7 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
         tools = value.get("tool_names")
         schema = value.get("params")
         operation_key = value.get("operation_key")
+        refresh_after_write = value.get("refresh_after_write")
         if (
             not isinstance(method, str)
             or not method
@@ -77,6 +79,7 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             or any(not isinstance(tool, str) or not tool for tool in tools)
             or (exposure == "tool") != bool(tools)
             or (operation_key is not None and not isinstance(operation_key, str))
+            or not isinstance(refresh_after_write, bool)
         ):
             raise GuiRpcError(
                 "invalid or duplicate GUI rpc.catalog entry", reason="incompatible_wire"
@@ -100,6 +103,7 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             tool_names=cast(list[str], tools),
             guard_deps=tuple(cast(list[str], deps)),
             reveals=tuple(cast(list[str], reveals)),
+            refresh_after_write=refresh_after_write,
             operation_key=operation_key,
         )
     return methods
@@ -122,6 +126,9 @@ class MeasureMcpSession:
         self._port_is_open = port_is_open
         self._last_seen: dict[str, int] = {}
         self._operation_handles: dict[str, int] = {}
+        # GUI IDs restart at 1. Agent handles stay unique within this MCP session.
+        self._gui_operations: dict[int, int] = {}
+        self._next_operation_handle = 1
         self._catalog: dict[str, CatalogEntry] = {}
         self._connected_port: int | None = None
         self._requested_port: int | None = None
@@ -156,6 +163,7 @@ class MeasureMcpSession:
         self._catalog = {}
         self._last_seen.clear()
         self._operation_handles.clear()
+        self._gui_operations.clear()
         self._connected_port = None
         self._requested_port = None
         self._versions = {}
@@ -235,6 +243,11 @@ class MeasureMcpSession:
             )
         launched = launch == "new" or (launch == "if_missing" and not existing)
         if launched:
+            if self.bridge.launched_gui:
+                raise GuiRpcError(
+                    "this MCP process already launched a GUI; attach to its port or close it before launching another",
+                    reason="busy",
+                )
             repo_root = Path(__file__).resolve().parents[4]
             self.bridge.launch(
                 repo_root,
@@ -285,7 +298,11 @@ class MeasureMcpSession:
             raise GuiRpcError(
                 f"invalid GUI reply for {method}", reason="incompatible_wire"
             )
-        self.refresh_versions()
+        # The catalog is the sole owner of read-reveal policy, including reads
+        # used internally by status (such as device membership).
+        entry = self._catalog.get(method)
+        if entry is not None and entry["reveals"]:
+            self.refresh_revealed_versions(method, params)
         return result
 
     def read_version_table(self) -> dict[str, int] | None:
@@ -326,6 +343,15 @@ class MeasureMcpSession:
                 expand_pattern_keys(self._catalog[method]["reveals"], params, versions)
             )
 
+    def _record_successful_versions(
+        self, entry: CatalogEntry, method: str, params: dict[str, Any]
+    ) -> None:
+        """A declared write refreshes baseline; a read reveals only its keys."""
+        if entry["reveals"]:
+            self.refresh_revealed_versions(method, params)
+        elif entry["refresh_after_write"]:
+            self.refresh_versions()
+
     def send_gui_rpc(
         self,
         method: str,
@@ -361,7 +387,6 @@ class MeasureMcpSession:
         if not resp.get("ok", False):
             err = resp.get("error", {})
             if err.get("reason") == "stale_version":
-                self.refresh_versions()
                 stale = describe_stale_keys((err.get("data") or {}).get("stale", []))
                 detail = f" ({', '.join(stale)})" if stale else ""
                 raise GuiRpcError(
@@ -377,24 +402,40 @@ class MeasureMcpSession:
             raise GuiRpcError(
                 f"GUI Error ({code}): {err.get('message')}", reason=reason, code=code
             )
-        if entry["reveals"]:
-            self.refresh_revealed_versions(method, params)
-        else:
-            self.refresh_versions()
         result = resp.get("result")
         if not isinstance(result, dict):
             raise GuiRpcError(
                 f"invalid GUI reply for {method}", reason="incompatible_wire"
             )
+        self._record_successful_versions(entry, method, params)
         result = dict(result)
         pattern = entry["operation_key"]
         if pattern is not None and "operation_id" in result:
-            handle = int(result.pop("operation_id"))
+            handle = self.expose_operation(result.pop("operation_id"))
             keys = expand_pattern_keys((pattern,), params, {})
             key = next(iter(keys))
             self._operation_handles[key] = handle
             result["handle"] = handle
         return result
+
+    def expose_operation(self, gui_id: object) -> int:
+        """Issue one stable integer handle for a GUI operation in this connection."""
+        if isinstance(gui_id, bool) or not isinstance(gui_id, int) or gui_id <= 0:
+            raise GuiRpcError("invalid GUI operation id", reason="incompatible_wire")
+        handle = self._gui_operations.get(gui_id)
+        if handle is None:
+            handle = self._next_operation_handle
+            self._next_operation_handle += 1
+            self._gui_operations[gui_id] = handle
+        return handle
+
+    def gui_operation_id(self, handle: int) -> int:
+        """Reject handles from an earlier GUI before sending wait or cancel."""
+        self.ensure_connected()
+        for gui_id, exposed in self._gui_operations.items():
+            if exposed == handle:
+                return gui_id
+        raise GuiRpcError("unknown or expired operation", reason="unknown_op")
 
     def operation_handle_for_key(self, key: str) -> int | None:
         return self._operation_handles.get(key)

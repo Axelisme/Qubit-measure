@@ -87,7 +87,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:{writeback_resource}",
                 "context",
-            )
+            ),
+            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -114,7 +115,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:{writeback_resource}",
                 "context",
-            )
+            ),
+            refresh_after_write=True,
         ),
     ),
 )

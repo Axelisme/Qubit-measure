@@ -10,7 +10,7 @@ from ._params import (
     _num_default,
     _str,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -26,6 +26,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _num_default("flux_bias", 0.0, "Flux bias"),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "predictor.set_model_params",
@@ -50,6 +51,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _num_default("flux_bias", 0.0, "Flux bias correction (device units)"),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "predictor.clear",
@@ -59,6 +61,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Unload the current predictor (idempotent — succeeds with no predictor "
             "loaded). Returns {loaded: false}.",
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "predictor.predict",

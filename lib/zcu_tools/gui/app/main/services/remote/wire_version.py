@@ -95,7 +95,8 @@ from __future__ import annotations
 # v57: rpc.catalog exposes the GUI-owned agent method/policy projection.
 # v58: operation.active and operation.cancel expose GUI-owned handles; await
 # distinguishes failed, timeout and unknown handles; progress includes eta_s.
-WIRE_VERSION = 58
+# v59: rpc.catalog marks successful writes that refresh the MCP version baseline.
+WIRE_VERSION = 59
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -125,4 +126,5 @@ WIRE_VERSION = 58
 # replaces the owner editor session without reviving stale client handles.
 # v80: serve the live agent catalog on the existing remote adapter.
 # v81: project all-origin operations and route cancellation through domain owners.
-GUI_VERSION = 81
+# v82: declare catalog write baseline policy separately from read-reveal policy.
+GUI_VERSION = 82

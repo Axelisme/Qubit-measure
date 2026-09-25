@@ -51,6 +51,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _expected_versions(),
             ),
         ),
-        agent=AgentMethodPolicy(guard_deps=("arb_waveforms",)),
+        agent=AgentMethodPolicy(
+            guard_deps=("arb_waveforms",), refresh_after_write=True
+        ),
     ),
 )

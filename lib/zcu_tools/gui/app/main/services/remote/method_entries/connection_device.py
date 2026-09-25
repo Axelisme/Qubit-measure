@@ -34,6 +34,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _int_opt("port", "Board port (required when kind='remote')"),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "startup.apply",
@@ -56,6 +57,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "device.connect",
@@ -78,7 +80,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(operation_key="device:{name}"),
+        agent=AgentMethodPolicy(
+            operation_key="device:{name}", refresh_after_write=True
+        ),
     ),
     method_entry(
         "device.disconnect",
@@ -97,7 +101,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(operation_key="device:{name}"),
+        agent=AgentMethodPolicy(
+            operation_key="device:{name}", refresh_after_write=True
+        ),
     ),
     method_entry(
         "device.reconnect",
@@ -110,7 +116,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "gui_device_connect with type_name/address omitted.",
             (_str("name", "Device name"),),
         ),
-        agent=AgentMethodPolicy(operation_key="device:{name}"),
+        agent=AgentMethodPolicy(
+            operation_key="device:{name}", refresh_after_write=True
+        ),
     ),
     method_entry(
         "device.forget",
@@ -120,6 +128,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Forget a memory-only device (synchronous). Echoes {forgotten: name}.",
             (_str("name", "Device name"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "device.setup",
@@ -129,7 +138,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Setup device",
             (_str("name", "Device name"), _obj("updates", "Field updates")),
         ),
-        agent=AgentMethodPolicy(operation_key="device:{name}"),
+        agent=AgentMethodPolicy(
+            operation_key="device:{name}", refresh_after_write=True
+        ),
     ),
     method_entry(
         "device.setup_spec",

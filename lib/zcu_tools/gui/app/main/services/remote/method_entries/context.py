@@ -22,6 +22,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "applied project fails with precondition_failed.",
             (_str("label", "Context label to switch to"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.new",
@@ -42,6 +43,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.labels",
@@ -123,6 +125,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Set one MetaDict attribute",
             (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.md_del_attr",
@@ -132,6 +135,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Delete one MetaDict attribute",
             (_str("key", "MetaDict key"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_del_module",
@@ -143,6 +147,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "to re-link, edit them.",
             (_str("name", "Module name"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_del_waveform",
@@ -154,6 +159,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "to re-link, edit them.",
             (_str("name", "Waveform name"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_rename_module",
@@ -165,6 +171,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "kept inline, not lost); to re-link, edit them.",
             (_str("old", "Current module name"), _str("new", "New module name")),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_rename_waveform",
@@ -176,6 +183,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "kept inline, not lost); to re-link, edit them.",
             (_str("old", "Current waveform name"), _str("new", "New waveform name")),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_list_roles",
@@ -204,5 +212,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("name", "new ml entry name"),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

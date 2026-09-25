@@ -20,11 +20,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create a new tab for the named adapter. Returns {tab_id}.",
             (_str("adapter_name", "Adapter to instantiate"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "tab.close",
         "tab:_h_tab_close",
         MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "tab.set_active",
@@ -116,5 +118,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _json("edits", "Ordered list of {path, value} edits"),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

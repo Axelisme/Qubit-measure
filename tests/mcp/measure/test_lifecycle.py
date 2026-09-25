@@ -18,6 +18,7 @@ CATALOG = [
         "tool_names": [],
         "guard_deps": [],
         "reveals": [],
+        "refresh_after_write": False,
         "operation_key": None,
     },
     {
@@ -33,6 +34,7 @@ CATALOG = [
         "tool_names": ["guide"],
         "guard_deps": [],
         "reveals": [],
+        "refresh_after_write": False,
         "operation_key": None,
     },
 ]
@@ -330,6 +332,41 @@ def test_connect_launch_modes_do_not_start_hardware_or_kill_an_existing_gui(
     with pytest.raises(RuntimeError) as error:
         busy.call("connect", {"launch": "new"})
     assert getattr(error.value, "reason", None) == "port_in_use"
+
+
+@pytest.mark.parametrize("launch", ["new", "if_missing"])
+def test_connect_refuses_second_port_while_launched_gui_is_alive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, launch: str
+) -> None:
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: False)
+    first = client.transport
+    client.context.bridge.set_transport(None)
+    launches: list[int] = []
+
+    def fake_launch(
+        repo_root: Path,
+        port: int,
+        token: str | None = None,
+        auto_connect: bool = True,
+        extra_args: list[str] | None = None,
+    ) -> str:
+        launches.append(port)
+        if len(launches) == 1:
+            client.context.bridge.set_transport(first)
+            return "launched"
+        return "GUI already running"
+
+    monkeypatch.setattr(client.context.bridge, "launch", fake_launch)
+    assert client.call("connect", {"port": 9911, "launch": "new"})["port"] == 9911
+    monkeypatch.setattr(
+        type(client.context.bridge), "launched_gui", property(lambda _: True)
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        client.call("connect", {"port": 9912, "launch": launch})
+    assert getattr(exc_info.value, "reason", None) == "busy"
+    assert launches == [9911]
+    assert client.context.bridge.is_connected
+    assert client.call("connect", {"port": 9911})["port"] == 9911
 
 
 @pytest.mark.parametrize(

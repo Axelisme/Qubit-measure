@@ -81,11 +81,10 @@ class MeasureClient:
             "ok": True,
             "result": {"versions": versions},
         }
-        self.transport.replies["state.has_soc"] = {
-            "ok": True,
-            "result": {"value": False},
-        }
-        self.context.session.read_internal("state.has_soc", {})
+        # Seed a prior caller observation; the tests exercise subsequent RPCs.
+        self.context.session.ensure_connected()
+        self.context.session.last_seen_versions.clear()
+        self.context.session.last_seen_versions.update(versions)
         self.transport.sent.clear()
 
 

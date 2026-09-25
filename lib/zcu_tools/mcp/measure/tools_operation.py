@@ -58,7 +58,10 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "predictor": {"loaded": session.read_internal("predictor.info", {})["loaded"]},
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
-        "running": session.read_internal("operation.active", {})["operations"],
+        "running": [
+            {**operation, "op": session.expose_operation(operation["op"])}
+            for operation in session.read_internal("operation.active", {})["operations"]
+        ],
     }
 
 
@@ -80,10 +83,11 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
         or not 0 <= timeout <= 300
     ):
         raise ValueError("timeout must be between 0 and 300 seconds")
+    gui_id = ctx.session.gui_operation_id(op)
     start = time.monotonic()
     reply = ctx.send_gui_rpc(
         "operation.await",
-        {"operation_id": op, "timeout": timeout},
+        {"operation_id": gui_id, "timeout": timeout},
         timeout_seconds=float(timeout) + 2.0,
     )
     result: dict[str, Any] = {"elapsed_s": max(0.0, time.monotonic() - start)}
@@ -99,7 +103,7 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     result["status"] = "running"
     if "feedback" in reply:
         result["feedback"] = reply["feedback"]
-    progress = ctx.session.read_internal("operation.progress", {"operation_id": op})
+    progress = ctx.session.read_internal("operation.progress", {"operation_id": gui_id})
     if progress["active"]:
         bars = progress["bars"]
         result["progress"] = bars
@@ -112,7 +116,8 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
 def cancel(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Ask the GUI's domain owner to stop, then await a bounded terminal."""
     op = _operation_id(arguments)
-    response = ctx.session.read_internal("operation.cancel", {"operation_id": op})
+    gui_id = ctx.session.gui_operation_id(op)
+    response = ctx.session.read_internal("operation.cancel", {"operation_id": gui_id})
     if response["status"] != "cancelling":
         return {"status": response["status"]}
     outcome = wait(ctx, {"op": op, "timeout": 0.25})

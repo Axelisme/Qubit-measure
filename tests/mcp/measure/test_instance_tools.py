@@ -28,6 +28,7 @@ def test_fixed_rpc_tools_keep_their_own_transport_and_catalog(tmp_path: Path) ->
                         "tool_names": [],
                         "guard_deps": [],
                         "reveals": [],
+                        "refresh_after_write": False,
                         "operation_key": None,
                     }
                 ],

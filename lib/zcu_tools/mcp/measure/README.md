@@ -1,45 +1,16 @@
-**Last updated:** 2026-09-26 — GUI-owned operation status and wait
+**Last updated:** 2026-09-26 — live catalog and reconnect-safe operations
 
 # `zcu_tools/mcp/measure/`
 
-This package is the measure-gui MCP server. The shared `zcu_tools.mcp.core`
-bridge owns socket and stdio transport; this package owns measure-specific
-connection, guarded requests and fixed tool handlers. GUI core does not import
-this package.
+這是 measure-gui 的 MCP driving adapter。它只透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態；GUI core 不 import MCP。GUI remote method entries 擁有每個 wire method 的 exposure、guard、read-reveal、成功寫入刷新 baseline 與 operation policy。MCP 連線時載入 live `rpc.catalog`，不維護第二份 method/policy 表，也不根據 catalog 動態建立 tools。
 
-## Boundaries
+## 連線與操作
 
-- `server.py` creates one bridge, session and tool table per stdio session.
-  Exiting MCP closes only its socket. Starting and stopping the GUI are
-  separate, explicit operations.
-- `assembly.py` registers handwritten tools. Wire methods never generate a
-  dynamic MCP tool inventory. The connection ticket registers `connect` and
-  `rpc_list` / `rpc_describe` / `rpc_call`; later tickets add the remaining
-  specialized tools.
-- `session.py` validates `wire.version`, loads `rpc.catalog` from the live GUI
-  on each connection and caches that connection's policy, observed resource
-  versions. Reconnecting discards the old observations.
-  A failed or timed-out mutation is not automatically sent again.
-- The GUI's `services.remote.method_entries` own each method's agent exposure,
-  version guard dependencies, revealed resources and operation key. The MCP
-  does not keep a separate method or guard table. `session_policy.py` only
-  expands resource patterns and describes stale keys.
-- `tool_context.py` binds fixed handlers to their session. Ordinary RPC
-  timeouts come from the live catalog; wait methods supply their own deadline.
-  GUI handlers validate parameter values and return stable error reasons.
-- `tools_operation.py` reads current orientation and GUI-owned live operation
-  handles for `status` and the `connect` reply. `wait` and `cancel` address known
-  GUI handles, including GUI-started operations. Unknown or evicted handles
-  fail; failed work is a returned outcome. Internal methods are not available
-  through `rpc_call`.
+- `assembly.py` 建立固定手寫工具表。`connect`、`status`、`wait`、`cancel` 與三個 `rpc_*` 是首批入口；其餘 domain tools 依各自 ticket 接入。`rpc_call` 只能呼叫 catalog 標為 `rpc` 的 method。
+- `session.py` 擁有單一 MCP session 的 catalog、guard observation、bridge 與 opaque integer operation handles。明確重連或 socket 重建時清 catalog/observations/舊 handle 對應；下一個 GUI incarnation 可重用 wire operation ID，但不重用此 MCP session 曾向 agent 外露的 handle。GUI-origin operation 由 `status` 收錄，與 agent-started operation 使用同一映射；wait/cancel 先驗 handle，才把 GUI ID 送到 wire。這不是第二個 operation outcome store。
+- 資源版本由 GUI owner bump。MCP 只在 read 完整揭露 catalog 指定的資源後更新相應 baseline；status 的 orientation reads 不吸收其他資源。成功寫入是否刷新 baseline 也由 GUI catalog 明確宣告。stale 拒絕不刷新 baseline，需重讀資源後才由呼叫者決定是否重試；transport timeout 不自動重送。
+- `bridge` 只管 socket/GUI subprocess。`connect(launch=...)` 對已由此 bridge 啟動且仍活著的 GUI 不會在另一個空 port 假裝再次啟動；MCP 清理只斷線，不殺 GUI。所有硬體 gate、取消與 operation 結果都仍歸 GUI owners。
 
-There is no measure MCP event subscription, diagnostic queue or reply
-piggyback. The GUI's own EventBus and wire event transport remain available
-to other consumers. Operation state is read through request/reply methods.
+## 驗證
 
-## Tests
-
-`tests/mcp/measure/` uses in-process recording transports. GUI control-socket
-contract tests live in `tests/gui/app/main/services/remote/`; headless Qt
-runs use `QT_QPA_PLATFORM=offscreen`, `QT_QPA_PLATFORMTHEME=` and
-`MPLBACKEND=Agg`. Tool inventory and module boundaries are reviewed directly.
+`tests/mcp/measure/` 以 public tools/session、recording transport 驗證 catalog、連線、guard、operation。GUI remote/service 測試驗證真 socket 與 GUI-origin path。離線選集只用 fake/mock，不啟動真儀器；測試路徑與 fixture 見 `tests/README.md`。

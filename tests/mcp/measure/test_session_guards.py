@@ -134,7 +134,7 @@ def test_writeback_guards_only_the_selected_pane(
         ("tab.run_start", {"tab_id": "t"}, "tab:t:cfg", "PRECONDITION_FAILED"),
     ],
 )
-def test_stale_error_translates_and_refreshes_the_next_request(
+def test_stale_error_requires_a_new_read_before_refreshing_observed_versions(
     client: MeasureClient,
     method: str,
     params: dict[str, Any],
@@ -157,9 +157,31 @@ def test_stale_error_translates_and_refreshes_the_next_request(
     assert resource not in str(error.value)
     first = next(p for name, p in client.transport.sent if name == method)
     assert first["expected_versions"][resource] == 6
-    retry = send(client, method, params)
-    assert retry["expected_versions"][resource] == 7
-    assert retry["expected_versions"]["context"] == 10
+    with pytest.raises(RuntimeError):
+        client.context.send_gui_rpc(method, params)
+    retry = [p for name, p in client.transport.sent if name == method][-1]
+    assert retry["expected_versions"][resource] == 6
+    assert retry["expected_versions"]["context"] == 9
+
+
+def test_cfg_snapshot_after_stale_refreshes_only_cfg(client: MeasureClient) -> None:
+    client.observe_versions({"tab:t:cfg": 6, "context": 9})
+    client.transport.replies["tab.run_start"] = {
+        "ok": False,
+        "error": {
+            "code": "precondition_failed",
+            "reason": "stale_version",
+            "message": "stale",
+            "data": {"stale": ["tab:t:cfg"]},
+        },
+    }
+    set_versions(client, {"tab:t:cfg": 7, "context": 10})
+    with pytest.raises(RuntimeError):
+        client.context.send_gui_rpc("tab.run_start", {"tab_id": "t"})
+    send(client, "tab.get_cfg", {"tab_id": "t"})
+    retried = send(client, "tab.run_start", {"tab_id": "t"})
+    assert retried["expected_versions"]["tab:t:cfg"] == 7
+    assert retried["expected_versions"]["context"] == 9
 
 
 def test_stale_error_identifies_changed_resources_through_the_rpc_boundary(
@@ -211,6 +233,58 @@ def test_asset_reads_reveal_the_guard_baseline_for_asset_writes(
     assert params["expected_versions"] == {"arb_waveforms": 3}
 
 
+def test_status_and_unrelated_catalog_read_do_not_accept_unread_gui_cfg_edit(
+    client: MeasureClient,
+) -> None:
+    def respond(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        replies = {
+            "state.has_project": {"value": False},
+            "state.has_active_context": {"value": False},
+            "state.has_soc": {"value": False},
+            "context.active": {"label": None},
+            "device.list": {"devices": []},
+            "predictor.info": {"loaded": False},
+            "tab.snapshot": {"tabs": []},
+            "operation.active": {"operations": []},
+            "soc.info": {"is_mock": True},
+            "tab.get_cfg": {"cfg": {}},
+        }
+        return replies[method]
+
+    client.transport.responder = respond
+    set_versions(client, {"tab:t:cfg": 3})
+    client.call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": "t"}})
+    set_versions(client, {"tab:t:cfg": 4})  # GUI user changed the cfg after the read.
+    client.call("status", {})
+    client.call("rpc_call", {"method": "soc.info"})
+
+    def guarded_run(params: dict[str, Any]) -> dict[str, Any]:
+        if params["expected_versions"]["tab:t:cfg"] != 4:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "stale_version",
+                    "message": "cfg changed",
+                    "data": {"stale": ["tab:t:cfg"]},
+                },
+            }
+        return {"ok": True, "result": {"operation_id": 1}}
+
+    client.transport.replies["tab.run_start"] = guarded_run
+    with pytest.raises(RuntimeError) as error:
+        client.context.send_gui_rpc("tab.run_start", {"tab_id": "t"})
+    assert getattr(error.value, "reason", None) == "stale_version"
+    assert (
+        next(
+            params
+            for method, params in reversed(client.transport.sent)
+            if method == "tab.run_start"
+        )["expected_versions"]["tab:t:cfg"]
+        == 3
+    )
+
+
 def test_unguarded_read_does_not_attach_versions(client: MeasureClient) -> None:
     assert send(client, "tab.snapshot", {"tab_id": "t"}) == {"tab_id": "t"}
 
@@ -251,10 +325,19 @@ def test_device_list_refreshes_membership_without_masking_device_edit(
     assert expected["devices:__set__"] == 3
 
 
+def test_successful_declared_write_refreshes_baseline(client: MeasureClient) -> None:
+    client.observe_versions({"context": 7, "tab:t:cfg": 1})
+    set_versions(client, {"context": 8, "tab:t:cfg": 9, "soc": 4})
+    send(client, "editor.commit", {"editor_id": "e", "name": "m"})
+    expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
+    assert expected["context"] == 8
+    assert expected["tab:t:cfg"] == 9
+    assert expected["soc"] == 4
+
+
 @pytest.mark.parametrize(
     ("method", "params"),
     [
-        ("editor.commit", {"editor_id": "e", "name": "m"}),
         ("soc.info", {}),
         ("context.md_get", {}),
         ("context.md_get_attr", {"key": "x", "attr": "y"}),
@@ -264,25 +347,23 @@ def test_device_list_refreshes_membership_without_masking_device_edit(
         ("value.read", {"key": "x"}),
     ],
 )
-def test_write_or_unmapped_read_refreshes_the_whole_baseline(
-    client: MeasureClient,
-    method: str,
-    params: dict[str, Any],
+def test_unmapped_read_keeps_unrelated_baseline(
+    client: MeasureClient, method: str, params: dict[str, Any]
 ) -> None:
     client.observe_versions({"context": 7, "tab:t:cfg": 1, "device:removed": 3})
     set_versions(client, {"context": 8, "tab:t:cfg": 9, "soc": 4})
     send(client, method, params)
     expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
-    assert expected["context"] == 8
-    assert expected["tab:t:cfg"] == 9
-    assert expected["soc"] == 4
-    assert "device:removed" not in expected
+    assert expected["context"] == 7
+    assert expected["tab:t:cfg"] == 1
+    assert expected["soc"] == 0
+    assert expected["device:removed"] == 3
 
 
 def test_context_read_keeps_its_baseline_when_context_changes_later(
     client: MeasureClient,
 ) -> None:
-    set_versions(client, {"context": 7})
+    client.observe_versions({"context": 7})
     send(client, "context.md_get", {})
     set_versions(client, {"context": 8})
     assert (

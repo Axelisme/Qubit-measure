@@ -31,6 +31,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "devices:__set__",
             ),
             operation_key="tab:{tab_id}",
+            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -55,7 +56,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:analyze",
                 "context",
-            )
+            ),
+            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -96,7 +98,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             guard_deps=(
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:path:data",
-            )
+            ),
+            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -120,7 +123,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:post_analyze",
                 "tab:{tab_id}:path:analysis_image",
                 "tab:{tab_id}:path:post_analysis_image",
-            )
+            ),
+            refresh_after_write=True,
         ),
     ),
 )

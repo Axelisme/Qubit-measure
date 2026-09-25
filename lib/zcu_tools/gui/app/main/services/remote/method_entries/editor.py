@@ -29,6 +29,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("from_name", "Existing ml entry name to load for editing"),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "editor.set_field",
@@ -66,6 +67,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "editor.get",
@@ -117,7 +119,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _expected_versions(),
             ),
         ),
-        agent=AgentMethodPolicy(guard_deps=("editor:{editor_id}", "context")),
+        agent=AgentMethodPolicy(
+            guard_deps=("editor:{editor_id}", "context"), refresh_after_write=True
+        ),
     ),
     method_entry(
         "editor.discard",
@@ -128,5 +132,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "ModuleLibrary. Returns {}.",
             (_str("editor_id"),),
         ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

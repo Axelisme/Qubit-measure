@@ -52,7 +52,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read the fit summary with gui_tab_get_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
         ),
-        agent=AgentMethodPolicy(operation_key="analyze:{tab_id}"),
+        agent=AgentMethodPolicy(
+            operation_key="analyze:{tab_id}", refresh_after_write=True
+        ),
     ),
     method_entry(
         "tab.get_post_analyze_result",
@@ -80,6 +82,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "fit summary with gui_tab_get_post_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
         ),
-        agent=AgentMethodPolicy(operation_key="post_analyze:{tab_id}"),
+        agent=AgentMethodPolicy(
+            operation_key="post_analyze:{tab_id}", refresh_after_write=True
+        ),
     ),
 )

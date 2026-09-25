@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — all-origin operation requests (WIRE 58)
+**Last updated:** 2026-09-26 — catalog write/read baseline policy (WIRE 59)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -114,10 +114,10 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 58`, `GUI_VERSION = 81`, and
-`MCP_VERSION = 76` (defined in `zcu_tools.mcp.measure.server`). WIRE 58 adds
-GUI-owned operation indexing and cancellation, strict wait outcomes and progress
-ETA. GUI 81 projects operations from their domain owners.
+Current measure-gui values are `WIRE_VERSION = 59`, `GUI_VERSION = 82`, and
+`MCP_VERSION = 77` (defined in `zcu_tools.mcp.measure.server`). WIRE 59 adds
+`rpc.catalog.refresh_after_write` so successful mutations and read-reveal policy
+are distinct. WIRE 58 added GUI-owned operation indexing and cancellation.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -133,9 +133,11 @@ the State owner thread before calling the controller.
 MCP owns the agent baseline:
 
 - guarded mutations send expected versions derived from the live catalog;
-- successful writes refresh the baseline;
-- pure reads refresh only keys they fully reveal;
-- stale rejection is translated into semantic tool errors for the agent.
+- catalog-declared successful writes refresh the baseline;
+- pure reads refresh only keys named by their `reveals` policy; reads with no
+  `reveals` preserve unrelated observations;
+- stale rejection preserves the baseline and becomes a semantic tool error;
+  the agent re-snapshots the affected resource before retrying.
 
 Version numbers are a bridge concern. Agents see stale-resource descriptions, not
 raw counters.
@@ -201,12 +203,14 @@ before editing.
 
 ## Operation Handles
 
-Start methods return operation ids on the wire. The GUI projects active run,
-analyze and device handles from their owners, regardless of who started them.
-`operation.await` reads the shared handle channel off-main and rejects unknown
-or evicted ids. `operation.cancel` runs on the owner thread and uses the domain
-cancel hook; a non-cancellable operation fails with `not_cancellable`. The MCP
-`wait` tool reports status, progress, user feedback, timeout or failure as data;
+Start methods return GUI-local operation ids on the wire. The GUI projects active
+run, analyze and device ids from their owners, regardless of who started them.
+MCP assigns session-local opaque integer handles to both started and discovered
+operations; a GUI restart can reuse a wire id but cannot reuse an exposed MCP
+handle. `operation.await` reads the shared handle channel off-main and rejects
+unknown or evicted GUI ids. `operation.cancel` runs on the owner thread and uses
+the domain cancel hook; a non-cancellable operation fails with `not_cancellable`.
+MCP `wait` reports status, progress, user feedback, timeout or failure as data;
 figures, summaries and device snapshots come from typed getters after completion.
 
 `soc.connect` is synchronous and does not enter the operation-handle table.
