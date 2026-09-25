@@ -44,12 +44,13 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
 from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
-MCP_VERSION = 79
+MCP_VERSION = 80
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
 this action). An existing GUI can be attached, or launch='if_missing'/'new' can
-start one. Inspect connect.status and refresh the GUI state before acting; the
+start one. Pass token to connect if the GUI requires its control token; keep it
+secret. Inspect connect.status and refresh the GUI state before acting; the
 user may also be editing it. When the GUI restarts, the next connection reloads
 the live catalog. Incompatible wire versions fail before an action is forwarded.
 

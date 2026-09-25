@@ -22,9 +22,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "operation:_h_operation_await",
         MethodSpec(
             130.0,
-            "Wait for a known operation. Unknown/evicted ids fail; terminal failure is returned as status/error.",
+            "Wait for a known operation with the fixed wait(op) tool. MCP translates "
+            "the exposed op handle to a GUI-local operation_id. Unknown or evicted "
+            "ids fail; terminal failure and Stop feedback are returned as data.",
             (
-                _int("operation_id", "Operation handle returned by the start op"),
+                _int(
+                    "operation_id", "GUI-local operation id mapped from an MCP handle"
+                ),
                 _num_default("timeout", 120.0, "Seconds to wait"),
             ),
             off_main_thread=True,
@@ -36,8 +40,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "operation:_h_operation_cancel",
         MethodSpec(
             5.0,
-            "Request cancellation of an operation by id",
-            (_int("operation_id", "Known operation handle"),),
+            "Request cancellation of a GUI-local operation by id (MCP exposes "
+            "the fixed cancel(op) tool instead of this internal method).",
+            (_int("operation_id", "Known GUI-local operation id"),),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -51,7 +56,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "(human-readable e.g. 'Rounds 23/100 [0:25<1:15]'), maximum/value "
             "(Qt-scaled), percent (0-100, null when total unknown), eta_s "
             "(null when unknown), raw n/total. Agents read progress through wait.",
-            (_int("operation_id", "Operation handle returned by the start op"),),
+            (_int("operation_id", "Known GUI-local operation id"),),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

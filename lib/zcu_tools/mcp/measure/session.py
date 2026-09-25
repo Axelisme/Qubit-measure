@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict, cast
 
 from zcu_tools.mcp.core.bridge import (
+    GuiAuthenticationError,
     GuiTransportTimeoutError,
     McpBridge,
     MCPBridgeConfig,
@@ -135,6 +136,7 @@ class MeasureMcpSession:
         self._catalog: dict[str, CatalogEntry] = {}
         self._connected_port: int | None = None
         self._requested_port: int | None = None
+        self._auth_token: str | None = None
         self._versions: dict[str, int] = {}
         self._launched = False
 
@@ -201,6 +203,13 @@ class MeasureMcpSession:
                 )
             reply = self.bridge.send_rpc_raw("rpc.catalog", {}, 5.0)
             if not reply.get("ok"):
+                error = reply.get("error")
+                if isinstance(error, dict) and error.get("code") == "unauthorized":
+                    raise GuiRpcError(
+                        "GUI authentication is required; provide its control token",
+                        reason="unauthorized",
+                        code="unauthorized",
+                    )
                 raise GuiRpcError("GUI rpc.catalog failed", reason="incompatible_wire")
             self._catalog = _parse_catalog(reply.get("result"))
             self._connected_port = port
@@ -215,10 +224,11 @@ class MeasureMcpSession:
         except Exception:  # Any failed handshake invalidates this socket.
             self.bridge.disconnect()
             self._clear_connection()
+            self._auth_token = None
             raise
 
     def connect_to_gui(
-        self, *, port: int | None, launch: str, clean: bool
+        self, *, port: int | None, launch: str, clean: bool, token: str | None = None
     ) -> dict[str, Any]:
         """Attach or launch once; incompatible GUI contracts fail before mutations.
 
@@ -230,6 +240,7 @@ class MeasureMcpSession:
             and self.bridge.is_connected
             and self._catalog
             and (port is None or port == self._connected_port)
+            and (token is None or token == self._auth_token)
         ):
             return {
                 "launched": self._launched,
@@ -255,6 +266,7 @@ class MeasureMcpSession:
             self.bridge.launch(
                 repo_root,
                 selected,
+                token=token,
                 auto_connect=True,
                 extra_args=["--clean"] if clean else None,
             )
@@ -264,10 +276,27 @@ class MeasureMcpSession:
                 )
         else:
             try:
-                self.bridge.connect(selected)
+                self.bridge.connect(selected, token=token)
+            except GuiAuthenticationError as exc:
+                self.bridge.disconnect()
+                self._clear_connection()
+                self._auth_token = None
+                reason = (
+                    "unauthorized" if exc.code == "unauthorized" else "auth_disabled"
+                )
+                raise GuiRpcError(
+                    f"GUI authentication failed: {exc}", reason=reason, code=exc.code
+                ) from exc
             except RuntimeError as exc:
+                self.bridge.disconnect()
+                self._clear_connection()
+                self._auth_token = None
                 raise GuiRpcError(f"GUI attach failed: {exc}", reason="no_gui") from exc
-        return self._load_catalog(selected, launched=launched, requested_port=port)
+        connection = self._load_catalog(
+            selected, launched=launched, requested_port=port
+        )
+        self._auth_token = token
+        return connection
 
     def ensure_connected(self) -> None:
         """A lazy attach always reloads catalog/observations after GUI restart."""
@@ -279,7 +308,12 @@ class MeasureMcpSession:
                 selected, launched=False, requested_port=self._requested_port
             )
             return
-        self.connect_to_gui(port=self._requested_port, launch="never", clean=False)
+        self.connect_to_gui(
+            port=self._requested_port,
+            launch="never",
+            clean=False,
+            token=self._auth_token,
+        )
 
     def read_internal(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Read a known GUI orientation method without exporting it to rpc_call.

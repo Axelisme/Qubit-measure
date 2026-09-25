@@ -37,8 +37,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Gracefully close the GUI: runs the normal window-close path (persist "
             "session, disconnect devices, cleanup) — the same as a user closing the "
-            "window. Returns immediately; the close happens just after. No OS kill. "
-            "Prefer this over gui_stop's force path to stop a GUI cleanly.",
+            "window. Returns immediately; the close happens just after. No OS kill.",
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

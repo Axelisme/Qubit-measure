@@ -133,4 +133,5 @@ WIRE_VERSION = 61
 # v82: declare catalog write baseline policy separately from read-reveal policy.
 # v83: declare partial cfg read policy in the live agent catalog.
 # v84: attach only this handler's changed resource versions to declared writes.
-GUI_VERSION = 84
+# v85: live agent method descriptions name the currently available tools and wait path.
+GUI_VERSION = 85

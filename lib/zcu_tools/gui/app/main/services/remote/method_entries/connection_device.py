@@ -65,8 +65,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Connect a hardware device by driver type, friendly name, and address. "
-            "Returns an operation_id; the connection runs asynchronously. "
-            "'remember' persists the device across sessions (default true).",
+            "The connection runs asynchronously. The GUI returns operation_id; "
+            "rpc_call maps it to a handle. Call wait(op=handle) to observe terminal "
+            "status before reading device.snapshot. 'remember' persists the "
+            "device across sessions (default true).",
             (
                 _str(
                     "type_name", "Driver class name, e.g. 'YOKOGS200' or 'FakeDevice'"
@@ -89,9 +91,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:_h_device_disconnect",
         MethodSpec(
             30.0,
-            "Disconnect a registered device by name. Returns an operation_id; the "
-            "disconnection runs asynchronously. 'remember' keeps the device in "
-            "persistent storage so it can be reconnected next session (default true).",
+            "Disconnect a registered device by name via rpc_call. The call starts "
+            "an asynchronous operation and returns an MCP handle; use "
+            "wait(op=handle) for the terminal status. 'remember' keeps the "
+            "device in persistent storage (default true).",
             (
                 _str("name", "Device name"),
                 _bool_default(
@@ -111,9 +114,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Reconnect a remembered (memory-only) device by name, reusing its stored "
-            "type/address. Returns an operation_id; the reconnection runs "
-            "asynchronously. Wire-only: the MCP layer reaches this via "
-            "gui_device_connect with type_name/address omitted.",
+            "type/address. Call via rpc_call with name; the asynchronous "
+            "operation returns an MCP handle. Use wait(op=handle) for its "
+            "terminal status, then rpc_call on device.snapshot for state.",
             (_str("name", "Device name"),),
         ),
         agent=AgentMethodPolicy(
@@ -135,7 +138,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:_h_device_setup",
         MethodSpec(
             30.0,
-            "Setup device",
+            "Apply 'updates' to a connected device by name via rpc_call. "
+            "The GUI starts an asynchronous setup operation; MCP returns a "
+            "handle. Use wait(op=handle) for terminal status and Stop feedback, "
+            "then rpc_call on device.snapshot for current values.",
             (_str("name", "Device name"), _obj("updates", "Field updates")),
         ),
         agent=AgentMethodPolicy(
@@ -147,12 +153,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:_h_device_setup_spec",
         MethodSpec(
             5.0,
-            "List the fields settable via gui_device_apply's 'updates' for a connected "
+            "List the fields accepted by device.setup's 'updates' for a connected "
             "device: {fields: [{name, type, current, settable, choices?}, ...]} — each "
             "field's name, type, choices (for enum/Literal fields like output/mode), "
             "current value, and whether it is settable (the protected type/address are "
-            "reported settable=false). This is the input source for gui_device_apply. "
-            "The device must be connected.",
+            "reported settable=false). Use this RPC before rpc_call on "
+            "device.setup. The device must be connected.",
             (_str("name", "Device name"),),
         ),
     ),
@@ -176,9 +182,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "List EVERY in-flight device operation (connect / disconnect / apply run "
             "concurrently): {operations: [{handle, device_name, kind, type_name, "
             "address, status, error}, ...]} (empty list if none), sorted by device "
-            "name. 'handle' is the operation id accepted by wait(op); 'kind' is "
-            "device_connect / device_disconnect / device_setup. Use wait(op) "
-            "to observe completion.",
+            "name. 'handle' here is a GUI-local id, not the MCP op. Use "
+            "status() to obtain MCP handles before wait(op). 'kind' is "
+            "device_connect / device_disconnect / device_setup.",
         ),
     ),
     method_entry(

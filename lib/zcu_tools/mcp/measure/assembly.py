@@ -17,5 +17,14 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
         for name, entry in source.items():
             if name in tools:
                 raise RuntimeError(f"duplicate MCP tool {name!r}")
-            tools[name] = {**entry, "handler": wrap_handler(name, entry["handler"])}
+            tools[name] = {
+                **entry,
+                "handler": wrap_handler(
+                    name,
+                    entry["handler"],
+                    redact_inputs=frozenset({"token"})
+                    if name == "connect"
+                    else frozenset(),
+                ),
+            }
     return tools

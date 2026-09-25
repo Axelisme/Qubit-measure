@@ -108,7 +108,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "editor:_h_editor_commit",
         MethodSpec(
             10.0,
-            "Save the editing session (from gui_editor_open) as a ModuleLibrary "
+            "Save the editing session (from rpc_call on editor.new) as a ModuleLibrary "
             "module/waveform: lower the session (eval expressions resolved against "
             "MetaDict to concrete numbers) and register it into the ModuleLibrary "
             "under 'name'. This is NOT 'apply a tab cfg edit' — tab cfg edits are "
@@ -130,7 +130,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "editor:_h_editor_discard",
         MethodSpec(
             5.0,
-            "Discard an editing session (from gui_editor_open) without writing to the "
+            "Discard an editing session (from rpc_call on editor.new) without writing to the "
             "ModuleLibrary. Returns {}.",
             (_str("editor_id"),),
         ),

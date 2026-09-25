@@ -19,13 +19,18 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     clean = arguments.get("clean", False)
     if not isinstance(clean, bool):
         raise ValueError("clean must be a boolean")
-    connection = ctx.session.connect_to_gui(port=port, launch=launch, clean=clean)
+    token = arguments.get("token")
+    if token is not None and (not isinstance(token, str) or not token):
+        raise ValueError("token must be a non-empty string")
+    connection = ctx.session.connect_to_gui(
+        port=port, launch=launch, clean=clean, token=token
+    )
     return {**connection, "status": status(ctx, {})}
 
 
 CONNECT_TOOL: dict[str, Any] = {
     "handler": tool_connect,
-    "description": "Attach to the live GUI or launch one when requested. Never connects hardware; incompatible wire contracts fail before catalog load.",
+    "description": "Attach to the live GUI or launch one when requested. Supply token if the GUI requires authentication; reconnect reuses it. Never connects hardware; authentication failures and incompatible wire contracts are distinct errors.",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -36,6 +41,11 @@ CONNECT_TOOL: dict[str, Any] = {
                 "default": "never",
             },
             "clean": {"type": "boolean", "default": False},
+            "token": {
+                "type": "string",
+                "minLength": 1,
+                "description": "GUI control token, if configured. Treat as a secret.",
+            },
         },
     },
 }

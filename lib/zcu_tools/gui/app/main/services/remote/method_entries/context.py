@@ -114,7 +114,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{modules: [{name, kind}], waveforms: [{name, style}]}, sorted by name. "
             "'kind' is the module type tag (e.g. 'pulse', 'reset/bath'); 'style' is the "
             "waveform style (e.g. 'gauss', 'const'). Read one entry's full cfg with "
-            "gui_context_ml_inspect.",
+            "rpc_call on editor.new(item_kind, from_name); discard that editor "
+            "when done reading its returned tree.",
         ),
     ),
     method_entry(
@@ -190,7 +191,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_ml_list_roles",
         MethodSpec(
             5.0,
-            "List experiment-role templates for gui_context_ml_create_from_role. Returns "
+            "List experiment-role templates for context.ml_create_from_role. Returns "
             "{roles: [{role_id, label, item_kind, default_name}]}. Each role seeds a "
             "blank module/waveform with md-linked defaults (e.g. 'res_probe', "
             "'bath_reset'); 'default_name' is the suggested entry name.",
@@ -202,13 +203,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Create a blank ModuleLibrary module/waveform from a named role "
-            "(gui_context_ml_list_roles) and register it under 'name'. The item kind "
+            "(from context.ml_list_roles) and register it under 'name'. The item kind "
             "(module/waveform) is derived from 'role_id'. One-shot: seeds the role's "
             "md-linked defaults (lowered to the md's current values) — it does NOT open "
             "an editing session. Echoes {created: name}. To then change the entry use "
-            "gui_editor_open(from_name=name).",
+            "rpc_call on editor.new(item_kind, from_name=name).",
             (
-                _str("role_id", "role id from gui_context_ml_list_roles"),
+                _str("role_id", "role id from context.ml_list_roles"),
                 _str("name", "new ml entry name"),
             ),
         ),

@@ -157,6 +157,14 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
+class GuiAuthenticationError(RuntimeError):
+    """The GUI rejected a control-token authentication request."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(f"GUI auth failed ({code}): {message}")
+
+
 class GuiTransportTimeoutError(TimeoutError):
     """The GUI socket did not return an RPC reply before the transport deadline."""
 
@@ -533,10 +541,13 @@ class McpBridge:
         if token:
             resp = self.send_rpc_raw("auth", {"token": token}, 30.0)
             if not resp.get("ok", False):
-                err = resp.get("error", {})
-                raise RuntimeError(
-                    f"GUI auth failed ({err.get('code')}): {err.get('message')}"
-                )
+                err = resp.get("error")
+                if not isinstance(err, dict):
+                    err = {}
+                code = str(err.get("code", "unauthorized"))
+                message = str(err.get("message", "authentication rejected"))
+                self.disconnect()
+                raise GuiAuthenticationError(code, message)
             return (
                 f"Connected to {cfg.server_display_name} on 127.0.0.1:{port} "
                 f"with token auth." + self.wire_version_note()
@@ -1044,6 +1055,7 @@ def run_stdio_loop(
 
 
 __all__ = [
+    "GuiAuthenticationError",
     "GuiTransportTimeoutError",
     "McpBridge",
     "MCPBridgeConfig",

@@ -30,7 +30,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "may include role_id when the proposal corresponds to a ModuleLibrary "
             "role. A complex metadict proposed_value is carried as "
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
-            "gui_tab_writeback_set_item; the user's Edit dialog renders the same "
+            "rpc_call on tab.writeback_set; the user's Edit dialog renders the same "
             "model (WYSIWYG).",
             (_str("tab_id"), _str("subtab_id", "Pane: analysis|post_analysis")),
         ),
@@ -97,7 +97,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Apply a pane's persistent writeback draft as-is (edit it first via "
-            "gui_tab_writeback_set_item). Requires (tab_id, subtab_id) with closed "
+            "rpc_call on tab.writeback_set). Requires (tab_id, subtab_id) with closed "
             "values analysis|post_analysis. Applies items currently selected. Returns "
             "{applied_ids, written, context_version, destination_context}: written lists the destination "
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "

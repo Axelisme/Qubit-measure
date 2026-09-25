@@ -21,7 +21,10 @@ from ._support import make_client
 class LoopbackGui:
     """One disposable GUI wire incarnation, without a process or instrument."""
 
-    def __init__(self, catalog: dict[str, Any], port: int = 0) -> None:
+    def __init__(
+        self, catalog: dict[str, Any], port: int = 0, *, token: str | None = None
+    ) -> None:
+        self._token = token
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server.bind(("127.0.0.1", port))
@@ -46,6 +49,7 @@ class LoopbackGui:
                 except OSError:
                     return
                 self._socket = conn
+                authenticated = self._token is None
                 with conn, conn.makefile("rb") as stream:
                     for line in stream:
                         if self._stop.is_set():
@@ -55,11 +59,33 @@ class LoopbackGui:
                         self.sent.append(method)
                         if method == self.close_on:
                             return
-                        reply = {
-                            "id": request["id"],
-                            "ok": True,
-                            "result": self._result(method, request["params"]),
-                        }
+                        if (
+                            method == "auth"
+                            and request["params"].get("token") == self._token
+                        ):
+                            authenticated = True
+                            reply = {"id": request["id"], "ok": True, "result": {}}
+                        elif method == "auth" or (
+                            method != "wire.version" and not authenticated
+                        ):
+                            reply = {
+                                "id": request["id"],
+                                "ok": False,
+                                "error": {
+                                    "code": (
+                                        "precondition_failed"
+                                        if method == "auth" and self._token is None
+                                        else "unauthorized"
+                                    ),
+                                    "message": "auth required",
+                                },
+                            }
+                        else:
+                            reply = {
+                                "id": request["id"],
+                                "ok": True,
+                                "result": self._result(method, request["params"]),
+                            }
                         try:
                             conn.sendall((json.dumps(reply) + "\n").encode())
                         except OSError:
@@ -246,6 +272,141 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
         gui_a.stop()
         if gui_b is not None:
             gui_b.stop()
+
+
+def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_after_restart(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path, port_is_open=lambda port: True)
+    client.context.bridge.set_transport(None)
+    catalog = {"methods": build_agent_catalog(METHOD_ENTRIES)}
+    gui_a = LoopbackGui(
+        {**catalog, "wire": client.context.config.wire_version}, token="test-secret"
+    )
+    gui_b: LoopbackGui | None = None
+    try:
+        with pytest.raises(RuntimeError) as exc_info:
+            client.call("connect", {"port": gui_a.port})
+        assert getattr(exc_info.value, "reason", None) == "unauthorized"
+        with pytest.raises(RuntimeError) as exc_info:
+            client.call("connect", {"port": gui_a.port, "token": "wrong"})
+        assert getattr(exc_info.value, "reason", None) == "unauthorized"
+        # The no-token attempt reaches catalog and is denied; bad auth never does.
+        assert gui_a.sent.count("rpc.catalog") == 1
+
+        connected = client.call("connect", {"port": gui_a.port, "token": "test-secret"})
+        assert connected["port"] == gui_a.port
+        assert client.call("rpc_list", {"domain": "adapter"})["methods"]
+        gui_a.stop()
+        gui_b = LoopbackGui(
+            {**catalog, "wire": client.context.config.wire_version},
+            gui_a.port,
+            token="test-secret",
+        )
+        deadline = time.monotonic() + 2
+        while client.context.bridge.is_connected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not client.context.bridge.is_connected
+        assert client.call("rpc_list", {"domain": "adapter"})["methods"]
+        assert gui_b.sent.count("auth") == 1
+        assert gui_b.sent.count("rpc.catalog") == 1
+    finally:
+        client.context.bridge.disconnect()
+        gui_a.stop()
+        if gui_b is not None:
+            gui_b.stop()
+
+
+def test_failed_second_launch_preserves_credential_for_reconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = make_client(tmp_path, port_is_open=lambda port: port == gui_a.port)
+    client.context.bridge.set_transport(None)
+    catalog = {"methods": build_agent_catalog(METHOD_ENTRIES)}
+    gui_a = LoopbackGui(
+        {**catalog, "wire": client.context.config.wire_version}, token="original"
+    )
+    gui_b: LoopbackGui | None = None
+    try:
+        client.call("connect", {"port": gui_a.port, "token": "original"})
+        monkeypatch.setattr(
+            type(client.context.bridge), "launched_gui", property(lambda _: True)
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            client.call(
+                "connect",
+                {"port": gui_a.port + 1, "launch": "new", "token": "replacement"},
+            )
+        assert getattr(exc_info.value, "reason", None) == "busy"
+        gui_a.stop()
+        gui_b = LoopbackGui(
+            {**catalog, "wire": client.context.config.wire_version},
+            gui_a.port,
+            token="original",
+        )
+        deadline = time.monotonic() + 2
+        while client.context.bridge.is_connected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not client.context.bridge.is_connected
+        assert client.call("rpc_list", {"domain": "adapter"})["methods"]
+        assert gui_b.sent.count("auth") == 1
+    finally:
+        client.context.bridge.disconnect()
+        gui_a.stop()
+        if gui_b is not None:
+            gui_b.stop()
+
+
+def test_token_on_unprotected_gui_reports_auth_disabled(tmp_path: Path) -> None:
+    client = make_client(tmp_path, port_is_open=lambda port: True)
+    client.context.bridge.set_transport(None)
+    gui = LoopbackGui(
+        {
+            "methods": build_agent_catalog(METHOD_ENTRIES),
+            "wire": client.context.config.wire_version,
+        }
+    )
+    try:
+        with pytest.raises(RuntimeError) as exc_info:
+            client.call("connect", {"port": gui.port, "token": "unneeded"})
+        assert getattr(exc_info.value, "reason", None) == "auth_disabled"
+        assert client.call("connect", {"port": gui.port})["port"] == gui.port
+    finally:
+        client.context.bridge.disconnect()
+        gui.stop()
+
+
+@pytest.mark.parametrize("token", ["", False, 23, []])
+def test_connect_rejects_invalid_token_before_network(
+    tmp_path: Path, token: Any
+) -> None:
+    client = make_client(tmp_path, port_is_open=lambda port: True)
+    client.context.bridge.set_transport(None)
+    with pytest.raises(ValueError, match="token must be a non-empty string"):
+        client.call("connect", {"port": 9912, "token": token})
+    assert not client.context.bridge.is_connected
+
+
+def test_explicit_port_switch_does_not_send_previous_gui_token(tmp_path: Path) -> None:
+    client = make_client(tmp_path, port_is_open=lambda port: True)
+    client.context.bridge.set_transport(None)
+    catalog = {"methods": build_agent_catalog(METHOD_ENTRIES)}
+    protected = LoopbackGui(
+        {**catalog, "wire": client.context.config.wire_version}, token="test-secret"
+    )
+    unprotected = LoopbackGui({**catalog, "wire": client.context.config.wire_version})
+    try:
+        client.call("connect", {"port": protected.port, "token": "test-secret"})
+        assert (
+            client.call("connect", {"port": unprotected.port})["port"]
+            == unprotected.port
+        )
+        assert "auth" not in unprotected.sent
+        assert client.call("rpc_list", {"domain": "adapter"})["methods"]
+    finally:
+        client.context.bridge.disconnect()
+        protected.stop()
+        unprotected.stop()
 
 
 def test_incompatible_wire_refuses_catalog_and_mutation(
@@ -439,7 +600,7 @@ def test_connect_launch_modes_do_not_start_hardware_or_kill_an_existing_gui(
         "ok": True,
         "result": {"methods": CATALOG},
     }
-    calls: list[tuple[int, list[str] | None]] = []
+    calls: list[tuple[int, list[str] | None, str | None]] = []
 
     def launch(
         repo_root: Path,
@@ -448,7 +609,7 @@ def test_connect_launch_modes_do_not_start_hardware_or_kill_an_existing_gui(
         auto_connect: bool = True,
         extra_args: list[str] | None = None,
     ) -> str:
-        calls.append((port, extra_args))
+        calls.append((port, extra_args, token))
         client.context.bridge.set_transport(client.transport)
         return "launched"
 
@@ -457,9 +618,11 @@ def test_connect_launch_modes_do_not_start_hardware_or_kill_an_existing_gui(
         client.call("connect", {})
     assert getattr(error.value, "reason", None) == "no_gui"
     assert calls == []
-    result = client.call("connect", {"launch": "if_missing", "clean": True})
+    result = client.call(
+        "connect", {"launch": "if_missing", "clean": True, "token": "test-secret"}
+    )
     assert result["launched"] is True
-    assert calls == [(8765, ["--clean"])]
+    assert calls == [(8765, ["--clean"], "test-secret")]
     assert all(method != "soc.connect" for method, _ in client.transport.sent)
 
     busy = make_client(tmp_path, port_is_open=lambda port: True)

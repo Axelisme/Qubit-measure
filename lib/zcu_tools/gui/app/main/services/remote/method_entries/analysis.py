@@ -20,9 +20,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "cancelled and clear is_analyzing so the tab can then be closed. This is "
             "the agent-side counterpart of the GUI 'Done' button for an interactive "
             "picker — interactive analyze is a separate operation from run, so "
-            "gui_tab_run_cancel does NOT settle it. This cancel is op-specific (an "
-            "interactive analyze needs View teardown that no generic handle cancel can "
-            "do — ADR-0026 §8). Returns {ok, cancelled}: ok is always true (the call "
+            "run cancellation does NOT settle it. Call this via rpc_call for "
+            "interactive View teardown that generic handle cancellation cannot "
+            "do (ADR-0026 §8). Returns {ok, cancelled}: ok is always true (the call "
             "succeeded); cancelled is true when an interactive analyze was settled, or "
             "false (a graceful no-op) when none was in flight.",
             (_str("tab_id"),),
@@ -43,13 +43,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "analysis:_h_tab_analyze",
         MethodSpec(
             30.0,
-            "Start analyzing the tab's run result. Analyze runs on a worker thread "
-            "and returns an operation_id (like run/connect/device); the mcp "
-            "gui_tab_analyze_start tool awaits it so the agent sees one synchronous "
-            "call. 'updates' optionally overrides analyze params (read the current "
-            "ones with gui_tab_get_analyze_params). Makes the tab busy while it runs; "
-            "a concurrent save/edit returns precondition_failed until it settles. "
-            "Read the fit summary with gui_tab_get_analyze_result.",
+            "Start analyzing the tab's run result via rpc_call. Runs on a worker "
+            "thread; the GUI returns a raw operation_id, which MCP exposes as a "
+            "handle, not a completed result. Call wait(op=handle) for the terminal "
+            "status, error and Stop feedback. 'updates' optionally overrides "
+            "analyze params (read current values with rpc_call on "
+            "tab.get_analyze_params). Makes the tab busy while it runs; a "
+            "concurrent save/edit returns precondition_failed until it settles. "
+            "Read the fit summary with rpc_call on tab.get_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
         ),
         agent=AgentMethodPolicy(
@@ -73,13 +74,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "analysis:_h_tab_post_analyze",
         MethodSpec(
             30.0,
-            "Start the second-layer (post) analysis on the tab's PRIMARY analyze "
-            "result. Runs on a worker thread and returns an operation_id (like "
-            "tab.analyze); the mcp gui_tab_post_analyze_start tool awaits it so the "
-            "agent sees one synchronous call. Fast-fails with precondition_failed when the "
-            "tab has no primary analyze result to build on. 'updates' optionally "
-            "overrides post params (see gui_tab_get_post_analyze_params). Read the "
-            "fit summary with gui_tab_get_post_analyze_result.",
+            "Start post analysis on the tab's PRIMARY analyze result via "
+            "rpc_call. Runs on a worker thread; MCP maps the GUI operation_id "
+            "to a handle. Call wait(op=handle) for the terminal status, error and "
+            "Stop feedback; start alone does not mean completion. Fast-fails "
+            "with precondition_failed when no primary result exists. 'updates' "
+            "overrides post params (read current values with rpc_call on "
+            "tab.get_post_analyze_params). Read the fit summary with rpc_call on "
+            "tab.get_post_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
         ),
         agent=AgentMethodPolicy(

@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — owner-thread write receipts (WIRE 61)
+**Last updated:** 2026-09-26 — live catalog guidance (GUI 85, WIRE 61)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -48,7 +48,9 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
 - Line size is bounded by UTF-8 byte length.
 - Error codes are closed and typed in `gui.remote.errors`.
 - `wire.version` is available before auth; all other methods require auth when a
-  token is configured.
+  token is configured. MCP `connect(token=...)` authenticates before catalog
+  loading and reuses the credential after a GUI restart; failed auth is not a
+  wire-version mismatch.
 - Loopback without token means any same-user local process can control the GUI.
 
 ## Dispatch And Threads
@@ -114,8 +116,9 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 84`, and
-`MCP_VERSION = 79` (defined in `zcu_tools.mcp.measure.server`). WIRE 61 adds
+Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 85`, and
+`MCP_VERSION = 80` (defined in `zcu_tools.mcp.measure.server`). GUI 85 corrects
+live method descriptions without changing the wire schema. WIRE 61 adds
 `__agent_write_versions` to replies for catalog-declared writes: each changed
 resource carries its versions before and after that handler on the owner thread.
 WIRE 60 adds `rpc.catalog.reveals_without` for partial reads; MCP samples the
@@ -180,7 +183,9 @@ Subtab locator is required and closed (`run|analysis|post_analysis`); save_image
 only accepts `analysis|post_analysis`. `method_entries/` owns the wire method
 name, handler ref, schema, agent exposure and guard/reveal/operation policy.
 Adding a wire method requires one entry; MCP receives the projection through
-`rpc.catalog` after its version handshake. No tool inventory is generated from
+`rpc.catalog` after its version handshake. Descriptions direct the caller to
+currently available `rpc_call` methods and to `wait(op)` for asynchronous
+terminal status, not removed aliases. No tool inventory is generated from
 `MethodSpec`.
 
 ## Cfg Editing
