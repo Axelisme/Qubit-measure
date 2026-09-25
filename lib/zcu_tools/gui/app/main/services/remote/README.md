@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — live agent catalog（WIRE 57）
+**Last updated:** 2026-09-26 — all-origin operation requests (WIRE 58)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -114,9 +114,10 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 57`, `GUI_VERSION = 80`, and
-`MCP_VERSION = 75` (defined in `zcu_tools.mcp.measure.server`). WIRE 57 adds
-`rpc.catalog`; GUI 80 projects the live agent method schema and policy.
+Current measure-gui values are `WIRE_VERSION = 58`, `GUI_VERSION = 81`, and
+`MCP_VERSION = 76` (defined in `zcu_tools.mcp.measure.server`). WIRE 58 adds
+GUI-owned operation indexing and cancellation, strict wait outcomes and progress
+ETA. GUI 81 projects operations from their domain owners.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -163,7 +164,7 @@ The wire surface is grouped by ownership:
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active ExpContext projection at reply time).
 - `editor.*`：headless cfg-editor session lifecycle.
-- `operation.*` / `notify.*`：generic waits, polls, progress, prompt replies.
+- `operation.*` / `notify.*`：live operation indexing, bounded wait, domain-owned cancellation, progress and prompt replies.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
@@ -200,10 +201,13 @@ before editing.
 
 ## Operation Handles
 
-Start methods return operation ids on the wire. MCP captures those ids and
-returns opaque handles to the agent. Generic poll/wait reports status, progress,
-user feedback, cancellation, timeout, or failure; figures, summaries, and device
-snapshots are read through typed getters after completion.
+Start methods return operation ids on the wire. The GUI projects active run,
+analyze and device handles from their owners, regardless of who started them.
+`operation.await` reads the shared handle channel off-main and rejects unknown
+or evicted ids. `operation.cancel` runs on the owner thread and uses the domain
+cancel hook; a non-cancellable operation fails with `not_cancellable`. The MCP
+`wait` tool reports status, progress, user feedback, timeout or failure as data;
+figures, summaries and device snapshots come from typed getters after completion.
 
 `soc.connect` is synchronous and does not enter the operation-handle table.
 

@@ -63,12 +63,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:_h_tab_run_cancel",
         MethodSpec(
             5.0,
-            "Request cancellation of the current run (op-specific cancel; there is no "
-            "generic cancel — see ADR-0026 §8). Returns {ok, cancelled}: ok is always "
+            "Request cancellation of the current run. Returns {ok, cancelled}: ok is always "
             "true (the call succeeded); cancelled is BEST-EFFORT — true when a live run "
             "was signalled to stop, false (a graceful no-op) when no run was in flight. "
             "It does NOT mean the worker has stopped: the run's true terminal "
-            "('cancelled') is observed by gui_op_wait/gui_op_poll on the run handle.",
+            "('cancelled') is observed by wait(op) on the run handle.",
         ),
     ),
     method_entry(

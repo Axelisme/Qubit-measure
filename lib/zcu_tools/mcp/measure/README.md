@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-26 — live GUI catalog and fixed connection tools
+**Last updated:** 2026-09-26 — GUI-owned operation status and wait
 
 # `zcu_tools/mcp/measure/`
 
@@ -18,7 +18,7 @@ this package.
   specialized tools.
 - `session.py` validates `wire.version`, loads `rpc.catalog` from the live GUI
   on each connection and caches that connection's policy, observed resource
-  versions and operation handles. Reconnecting discards the old observations.
+  versions. Reconnecting discards the old observations.
   A failed or timed-out mutation is not automatically sent again.
 - The GUI's `services.remote.method_entries` own each method's agent exposure,
   version guard dependencies, revealed resources and operation key. The MCP
@@ -27,8 +27,11 @@ this package.
 - `tool_context.py` binds fixed handlers to their session. Ordinary RPC
   timeouts come from the live catalog; wait methods supply their own deadline.
   GUI handlers validate parameter values and return stable error reasons.
-- `tools_overview.py` reads known GUI orientation methods for the `connect`
-  reply. Internal methods are not available through `rpc_call`.
+- `tools_operation.py` reads current orientation and GUI-owned live operation
+  handles for `status` and the `connect` reply. `wait` and `cancel` address known
+  GUI handles, including GUI-started operations. Unknown or evicted handles
+  fail; failed work is a returned outcome. Internal methods are not available
+  through `rpc_call`.
 
 There is no measure MCP event subscription, diagnostic queue or reply
 piggyback. The GUI's own EventBus and wire event transport remain available

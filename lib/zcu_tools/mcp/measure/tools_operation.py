@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import time
 from functools import partial
 from typing import Any
 
@@ -48,32 +50,77 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     return {
         "project": project,
         "soc": soc,
-        "context": {
-            "active": session.read_internal("context.active", {})["label"]
-        },
+        "context": {"active": session.read_internal("context.active", {})["label"]},
         "devices": [
             {"name": device["name"], "connected": device["status"] == "connected"}
             for device in session.read_internal("device.list", {})["devices"]
         ],
-        "predictor": {
-            "loaded": session.read_internal("predictor.info", {})["loaded"]
-        },
+        "predictor": {"loaded": session.read_internal("predictor.info", {})["loaded"]},
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
         "running": session.read_internal("operation.active", {})["operations"],
     }
 
 
+def _operation_id(arguments: dict[str, Any]) -> int:
+    op = arguments.get("op")
+    if isinstance(op, bool) or not isinstance(op, int) or op <= 0:
+        raise ValueError("op must be a positive integer")
+    return op
+
+
 def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Wait on a known GUI operation, reporting its outcome as data."""
-    del ctx, arguments
-    raise NotImplementedError("wait projection is not implemented")
+    """Wait on a known GUI operation. elapsed_s measures this wait call."""
+    op = _operation_id(arguments)
+    timeout = arguments.get("timeout", 60)
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or not 0 <= timeout <= 300
+    ):
+        raise ValueError("timeout must be between 0 and 300 seconds")
+    start = time.monotonic()
+    reply = ctx.send_gui_rpc(
+        "operation.await",
+        {"operation_id": op, "timeout": timeout},
+        timeout_seconds=float(timeout) + 2.0,
+    )
+    result: dict[str, Any] = {"elapsed_s": max(0.0, time.monotonic() - start)}
+    if reply["reason"] == "completed":
+        result["status"] = reply["status"]
+        if "error" in reply:
+            result["error"] = reply["error"]
+        if "feedback" in reply:
+            result["feedback"] = reply["feedback"]
+        return result
+    if reply["reason"] not in ("timeout", "user_feedback"):
+        raise ValueError(f"unexpected operation await reason: {reply['reason']!r}")
+    result["status"] = "running"
+    if "feedback" in reply:
+        result["feedback"] = reply["feedback"]
+    progress = ctx.session.read_internal("operation.progress", {"operation_id": op})
+    if progress["active"]:
+        bars = progress["bars"]
+        result["progress"] = bars
+        estimates = [bar["eta_s"] for bar in bars if bar.get("eta_s") is not None]
+        if estimates:
+            result["eta_s"] = max(estimates)
+    return result
 
 
 def cancel(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Request cancellation of a known cancellable GUI operation."""
-    del ctx, arguments
-    raise NotImplementedError("cancel projection is not implemented")
+    """Ask the GUI's domain owner to stop, then await a bounded terminal."""
+    op = _operation_id(arguments)
+    response = ctx.session.read_internal("operation.cancel", {"operation_id": op})
+    if response["status"] != "cancelling":
+        return {"status": response["status"]}
+    outcome = wait(ctx, {"op": op, "timeout": 0.25})
+    if outcome["status"] == "cancelled":
+        return {"status": "cancelled"}
+    if outcome["status"] in ("finished", "failed"):
+        return {"status": "finished"}
+    return {"status": "cancelling"}
 
 
 def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
@@ -90,7 +137,12 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
                 "type": "object",
                 "properties": {
                     "op": {"type": "integer"},
-                    "timeout": {"type": "number", "default": 60, "minimum": 0, "maximum": 300},
+                    "timeout": {
+                        "type": "number",
+                        "default": 60,
+                        "minimum": 0,
+                        "maximum": 300,
+                    },
                 },
                 "required": ["op"],
             },
@@ -99,7 +151,9 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
             "handler": partial(cancel, ctx),
             "description": "Cancel a known operation when it has a cancel hook.",
             "inputSchema": {
-                "type": "object", "properties": {"op": {"type": "integer"}}, "required": ["op"]
+                "type": "object",
+                "properties": {"op": {"type": "integer"}},
+                "required": ["op"],
             },
         },
     }

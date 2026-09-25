@@ -93,7 +93,9 @@ from __future__ import annotations
 # v56: tab.load_data reply includes cfg_backfill applied/not_applied; successful
 # result load does not fail when best-effort Config projection cannot apply.
 # v57: rpc.catalog exposes the GUI-owned agent method/policy projection.
-WIRE_VERSION = 57
+# v58: operation.active and operation.cancel expose GUI-owned handles; await
+# distinguishes failed, timeout and unknown handles; progress includes eta_s.
+WIRE_VERSION = 58
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -122,4 +124,5 @@ WIRE_VERSION = 57
 # v79: Load projects execution snapshot values into the current tab Config and
 # replaces the owner editor session without reviving stale client handles.
 # v80: serve the live agent catalog on the existing remote adapter.
-GUI_VERSION = 80
+# v81: project all-origin operations and route cancellation through domain owners.
+GUI_VERSION = 81

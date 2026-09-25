@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-24 — writeback Apply placement
+**Last updated:** 2026-09-26 — GUI operation ownership
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -212,7 +212,7 @@ Key ownership rules:
 - `OperationGate` is the app-local thin wrapper over the shared
   `RunBlocksHardwareGate` hardware exclusion policy。active lease另投影captured
   origin、domain note與duration；`state.hardware_gate`是read-only internal RPC，
-  `gui_overview.hardware_gate.active`提供MCP orientation snapshot。
+  MCP 需要時透過 live catalog 讀取。
 - `OperationHandles` owns async handles, cancellation hooks, and feedback/stop
   channel state.
 - `OperationRunner` owns the generic operation lifecycle; each operation supplies
@@ -451,8 +451,11 @@ controlled fields.
 - `FeedbackDockController` owns the docked feedback panel, target-tab
   resolution, and op-count plus agent-presence gate; `MainWindow` keeps the
   public render-view refresh façade.
-- Generic `operation.await` / `operation.poll` report only status and progress;
-  products such as figures or fit summaries are read through typed getters.
+- GUI domain owners project live run/analyze/device handles for `status`, including
+  GUI-started work. Shared `OperationHandles` own the wait channel; unknown or
+  evicted handles are errors to measure MCP, not finished operations. `wait`
+  reports status, progress and feedback but no result payload. Figures and fit
+  summaries are read through typed getters.
 
 Cancellation is operation-specific through the registered cancel hook. Run
 cancellation sets the operation `stop_event`; worker thunks expose it to
@@ -503,10 +506,10 @@ use `PredictorControlPort` for predictor load/query/compute. SoC/startup
 handlers remain on the app controller façade because they span project setup and
 connection policy rather than a single session-control domain.
 
-`zcu_tools.mcp.measure` is the agent-facing bridge: tool declarations,
-short-wait wrappers, diagnostics piggyback, operation-handle bookkeeping, stale
-guard baseline, and generated/override tool mapping. New GUI RPC methods that
-should be agent-accessible need MCP tool mapping and tests.
+`zcu_tools.mcp.measure` is the agent-facing bridge: fixed tool declarations,
+short waits, live catalog, and stale guard baseline. The GUI owns operation
+handles; MCP does not keep a second operation registry. New GUI RPC methods
+that should be agent-accessible need a live catalog policy and tests.
 
 ## Dialog Rules
 

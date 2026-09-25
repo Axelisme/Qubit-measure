@@ -58,7 +58,7 @@ def _h_tab_list_all(
         for tid in adapter.tab_control.list_tab_ids()
     ]
     # active_tab_id is a view projection (which tab the user is focused on),
-    # sourced from the same RenderView snapshot _assemble_overview reads.
+    # sourced from the RenderView snapshot, separate from the status tool.
     active_tab_id = render_view(adapter).get_view_snapshot().get("active_tab_id")
     return {
         "tabs": tabs,

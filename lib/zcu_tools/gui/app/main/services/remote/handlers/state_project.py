@@ -70,7 +70,7 @@ def _h_project_info(
 ) -> Mapping[str, object]:
     # Project identity (the chip / qubit / resonator names + their output roots).
     # It lives only on the in-process ExpContext, so this is the sole wire query
-    # that exposes it — _assemble_overview folds {chip, qub, res} from here. The
+    # that exposes it; status projects {chip, qubit, resonator} from here. The
     # res_name field is measure-specific (the other GUIs' shared project.info
     # carries only chip/qub/result_dir/database_path).
     del params

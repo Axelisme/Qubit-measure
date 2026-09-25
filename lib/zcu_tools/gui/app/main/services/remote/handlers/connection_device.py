@@ -230,7 +230,7 @@ def _h_device_active_operations(
     dev = adapter.device_control
     # Phase C concurrency: enumerate *every* in-flight device operation (sorted
     # by name), each tagged with its kind (connect / disconnect / setup) and its
-    # operation 'handle' so the agent can drive gui_op_poll / gui_op_wait per op.
+    # operation 'handle' so the agent can wait on each operation id.
     # device_name is the SSOT key; the duplicate snapshot.name field is dropped.
     return {
         "operations": [

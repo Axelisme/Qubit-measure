@@ -165,9 +165,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "List EVERY in-flight device operation (connect / disconnect / apply run "
             "concurrently): {operations: [{handle, device_name, kind, type_name, "
             "address, status, error}, ...]} (empty list if none), sorted by device "
-            "name. 'handle' is the operation handle for gui_op_poll / gui_op_wait; "
-            "'kind' is device_connect / device_disconnect / device_setup. Use "
-            "gui_op_poll(handle) / gui_op_wait(handle) to track each one.",
+            "name. 'handle' is the operation id accepted by wait(op); 'kind' is "
+            "device_connect / device_disconnect / device_setup. Use wait(op) "
+            "to observe completion.",
         ),
     ),
     method_entry(
@@ -178,8 +178,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "List registered devices with their current lifecycle status: "
             "{devices: [{name, type_name, status}, ...]} where status is one of "
             "memory_only | connecting | connected | disconnecting | setting_up "
-            "(same status vocabulary as gui_device_snapshot and "
-            "gui_device_list_operations). 'memory_only' means remembered but not "
+            "(same status vocabulary as device.snapshot and "
+            "device.active_operations). 'memory_only' means remembered but not "
             "live (no driver).",
         ),
         agent=AgentMethodPolicy(reveals=("devices:__set__",)),
@@ -192,7 +192,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read one device's full cached snapshot — the richest single-device read: "
             "{snapshot: {name, type_name, address, status, error, info}} where 'info' "
             "is the live device parameter dict (or null when not connected) and "
-            "'status' uses the same vocabulary as gui_device_list. An unknown device "
+            "'status' uses the same vocabulary as device.list. An unknown device "
             "name raises INVALID_PARAMS.",
             (_str("name", "Device name"),),
         ),

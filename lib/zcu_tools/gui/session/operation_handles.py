@@ -458,6 +458,25 @@ class OperationHandles:
             return AwaitResult(reason="completed", outcome=OperationOutcome("finished"))
         return record.channel.consume(timeout)
 
+    def await_known_outcome(self, token: int, timeout: float) -> AwaitResult:
+        """Await one known handle. Unknown/evicted tokens are errors, not success.
+
+        Resolve the record once before blocking so LRU eviction of other done
+        handles cannot turn a valid in-flight wait into an invented outcome.
+        The older await_outcome/poll contract remains available to other apps.
+        """
+        record = self._record(token)
+        if record is None:
+            raise KeyError(f"unknown or evicted operation token: {token}")
+        return record.channel.consume(timeout)
+
+    def known_outcome(self, token: int) -> OperationOutcome | None:
+        """Non-blocking pending/terminal read that rejects unknown handles."""
+        record = self._record(token)
+        if record is None:
+            raise KeyError(f"unknown or evicted operation token: {token}")
+        return record.channel.settled_outcome()
+
     def poll(self, token: int) -> OperationOutcome | None:
         """Non-blocking: outcome if settled, None if still pending, default
         'finished' if unknown. Reads the channel's set-once ``_settled`` (the

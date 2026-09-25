@@ -8,7 +8,9 @@ import pytest
 from ._support import make_client
 
 
-def test_status_indexes_gui_origin_operations_without_an_agent_start(tmp_path: Path) -> None:
+def test_status_indexes_gui_origin_operations_without_an_agent_start(
+    tmp_path: Path,
+) -> None:
     replies: dict[str, dict[str, Any]] = {
         "state.has_project": {"value": True},
         "project.info": {"chip_name": "chip", "qub_name": "qubit", "res_name": "res"},
@@ -19,8 +21,21 @@ def test_status_indexes_gui_origin_operations_without_an_agent_start(tmp_path: P
         "soc.info": {"is_mock": True},
         "device.list": {"devices": [{"name": "flux", "status": "connected"}]},
         "predictor.info": {"loaded": False},
-        "tab.snapshot": {"tabs": [{"tab_id": "gui-tab", "adapter_name": "ramsey", "interaction": {"is_running": False}}]},
-        "operation.active": {"operations": [{"op": 31, "tab": "gui-tab", "kind": "analyze"}, {"op": 32, "tab": None, "kind": "device"}]},
+        "tab.snapshot": {
+            "tabs": [
+                {
+                    "tab_id": "gui-tab",
+                    "adapter_name": "ramsey",
+                    "interaction": {"is_running": False},
+                }
+            ]
+        },
+        "operation.active": {
+            "operations": [
+                {"op": 31, "tab": "gui-tab", "kind": "analyze"},
+                {"op": 32, "tab": None, "kind": "device"},
+            ]
+        },
     }
     client = make_client(tmp_path, lambda method, params: replies[method])
 
@@ -32,14 +47,20 @@ def test_status_indexes_gui_origin_operations_without_an_agent_start(tmp_path: P
         "predictor": {"loaded": False},
         "ready": {"can_run": True, "missing": []},
         "tabs": [{"tab": "gui-tab", "experiment": "ramsey", "running": False}],
-        "running": [{"op": 31, "tab": "gui-tab", "kind": "analyze"}, {"op": 32, "tab": None, "kind": "device"}],
+        "running": [
+            {"op": 31, "tab": "gui-tab", "kind": "analyze"},
+            {"op": 32, "tab": None, "kind": "device"},
+        ],
     }
     assert ("operation.active", {}) in client.transport.sent
 
 
 def test_wait_timeout_and_feedback_are_running_results(tmp_path: Path) -> None:
     client = make_client(tmp_path)
-    for wire, feedback in (({"reason": "timeout"}, None), ({"reason": "user_feedback", "feedback": "check frequency"}, "check frequency")):
+    for wire, feedback in (
+        ({"reason": "timeout"}, None),
+        ({"reason": "user_feedback", "feedback": "check frequency"}, "check frequency"),
+    ):
         client.transport.replies["operation.await"] = {"ok": True, "result": wire}
         client.transport.replies["operation.progress"] = {
             "ok": True,
@@ -53,18 +74,28 @@ def test_wait_timeout_and_feedback_are_running_results(tmp_path: Path) -> None:
         assert result.get("feedback") == feedback
 
 
-def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(tmp_path: Path) -> None:
+def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
+    tmp_path: Path,
+) -> None:
     client = make_client(tmp_path)
     client.transport.replies["operation.await"] = {
         "ok": True,
-        "result": {"reason": "completed", "status": "failed", "error": {"reason": "failed", "message": "ramp failed"}},
+        "result": {
+            "reason": "completed",
+            "status": "failed",
+            "error": {"reason": "failed", "message": "ramp failed"},
+        },
     }
     result = client.call("wait", {"op": 32})
     assert result["status"] == "failed"
     assert result["error"] == {"reason": "failed", "message": "ramp failed"}
     client.transport.replies["operation.await"] = {
         "ok": False,
-        "error": {"code": "invalid_params", "reason": "unknown_op", "message": "unknown or evicted op"},
+        "error": {
+            "code": "invalid_params",
+            "reason": "unknown_op",
+            "message": "unknown or evicted op",
+        },
     }
     with pytest.raises(RuntimeError) as exc_info:
         client.call("wait", {"op": 999})
@@ -72,17 +103,38 @@ def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(tmp_path: Path
     assert ("operation.progress", {"operation_id": 999}) not in client.transport.sent
 
 
-def test_cancel_short_wait_observes_stop_and_respects_non_cancellable(tmp_path: Path) -> None:
+def test_wait_rejects_bad_timeout_without_sending_an_operation(tmp_path: Path) -> None:
     client = make_client(tmp_path)
-    client.transport.replies["operation.cancel"] = {"ok": True, "result": {"status": "cancelling"}}
+    for timeout in (-1, 301, float("nan"), True):
+        with pytest.raises(ValueError, match="timeout"):
+            client.call("wait", {"op": 1, "timeout": timeout})
+    assert not any(method == "operation.await" for method, _ in client.transport.sent)
+
+
+def test_cancel_short_wait_observes_stop_and_respects_non_cancellable(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    client.transport.replies["operation.cancel"] = {
+        "ok": True,
+        "result": {"status": "cancelling"},
+    }
     client.transport.replies["operation.await"] = {
         "ok": True,
-        "result": {"reason": "completed", "status": "cancelled", "feedback": "Stop requested"},
+        "result": {
+            "reason": "completed",
+            "status": "cancelled",
+            "feedback": "Stop requested",
+        },
     }
     assert client.call("cancel", {"op": 31}) == {"status": "cancelled"}
     client.transport.replies["operation.cancel"] = {
         "ok": False,
-        "error": {"code": "precondition_failed", "reason": "not_cancellable", "message": "post/save cannot cancel"},
+        "error": {
+            "code": "precondition_failed",
+            "reason": "not_cancellable",
+            "message": "post/save cannot cancel",
+        },
     }
     with pytest.raises(RuntimeError) as exc_info:
         client.call("cancel", {"op": 32})

@@ -5,8 +5,8 @@ operation_control.await_operation(operation_id, timeout) and shapes the AwaitRes
 a wire result (ADR-0025 §cancelled-wire):
   - completed/cancelled → structured {reason:'completed', status:'cancelled',
     feedback?} (NOT a raise; feedback present only when a Stop reason was latched).
-  - completed/failed → RemoteError(PRECONDITION_FAILED, reason='failed').
-  - timeout → RemoteError(TIMEOUT).
+  - completed/failed → structured failed/error, not a failed tool call.
+  - timeout → structured timeout/running signal.
   - user_feedback → {reason:'user_feedback', feedback:<str>} (non-terminal).
   - completed/finished → {reason:'completed', status:'finished'}.
 """
@@ -18,13 +18,19 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.services.operation_control import OperationControlFacet
 from zcu_tools.gui.app.main.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.main.services.remote.handlers.operation import (
     _h_operation_progress,
 )
 from zcu_tools.gui.app.main.services.remote.service import RemoteControlAdapter
+from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.operation_handles import AwaitResult, OperationOutcome
+from zcu_tools.gui.session.operation_handles import (
+    AwaitResult,
+    OperationHandles,
+    OperationOutcome,
+)
 
 
 def _HANDLER(ctrl, params):
@@ -59,6 +65,38 @@ def test_progress_uses_operation_control_without_ctrl():
 # ---------------------------------------------------------------------------
 
 
+def test_unknown_and_evicted_handle_do_not_become_finished():
+    handles = OperationHandles()
+    control = OperationControlFacet(
+        handles=handles,
+        progress=cast(Any, SimpleNamespace()),
+        run_analyze=cast(Any, SimpleNamespace()),
+        device=cast(Any, SimpleNamespace()),
+    )
+    for op in (777,):
+        with pytest.raises(RemoteError) as exc_info:
+            _HANDLER(control, {"operation_id": op, "timeout": 0})
+        assert exc_info.value.code == ErrorCode.INVALID_PARAMS
+        assert exc_info.value.reason == "unknown_op"
+
+    first = handles.create(origin=EventOrigin(kind="user"))
+    handles.settle(first, OperationOutcome("failed", "original failure"))
+    for _ in range(40):
+        op = handles.create(origin=EventOrigin(kind="user"))
+        handles.settle(op, OperationOutcome("finished"))
+    with pytest.raises(RemoteError) as exc_info:
+        _HANDLER(control, {"operation_id": first, "timeout": 0})
+    assert exc_info.value.reason == "unknown_op"
+
+
+def test_invalid_timeout_fails_before_await():
+    with pytest.raises(RemoteError) as exc_info:
+        _HANDLER(
+            _ctrl(AwaitResult(reason="timeout")), {"operation_id": 1, "timeout": 301}
+        )
+    assert exc_info.value.reason == "invalid_timeout"
+
+
 def test_finished_returns_reason_and_status():
     ctrl = _ctrl(AwaitResult(reason="completed", outcome=OperationOutcome("finished")))
     out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
@@ -66,17 +104,17 @@ def test_finished_returns_reason_and_status():
     ctrl.await_operation.assert_called_once_with(7, 5.0)
 
 
-def test_failed_raises_precondition():
+def test_failed_returns_status_and_error():
     ctrl = _ctrl(
         AwaitResult(
             reason="completed", outcome=OperationOutcome("failed", "hardware boom")
         )
     )
-    with pytest.raises(RemoteError) as ei:
-        _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert ei.value.code == ErrorCode.PRECONDITION_FAILED
-    assert ei.value.reason == "failed"
-    assert "hardware boom" in ei.value.message
+    assert _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0}) == {
+        "reason": "completed",
+        "status": "failed",
+        "error": {"reason": "failed", "message": "hardware boom"},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -133,11 +171,9 @@ def test_cancelled_does_not_raise():
 # ---------------------------------------------------------------------------
 
 
-def test_timeout_raises_timeout():
+def test_timeout_returns_running_signal():
     ctrl = _ctrl(AwaitResult(reason="timeout"))
-    with pytest.raises(RemoteError) as ei:
-        _HANDLER(ctrl, {"operation_id": 7, "timeout": 0.1})
-    assert ei.value.code == ErrorCode.TIMEOUT
+    assert _HANDLER(ctrl, {"operation_id": 7, "timeout": 0.1}) == {"reason": "timeout"}
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +208,8 @@ def test_finished_not_affected_by_cancelled_change():
     assert "feedback" not in out
 
 
-def test_failed_still_raises_not_structured():
+def test_failed_after_another_completed_read_stays_structured():
     ctrl = _ctrl(
         AwaitResult(reason="completed", outcome=OperationOutcome("failed", "boom"))
     )
-    with pytest.raises(RemoteError):
-        _HANDLER(ctrl, {"operation_id": 42, "timeout": 1.0})
+    assert _HANDLER(ctrl, {"operation_id": 42, "timeout": 1.0})["status"] == "failed"

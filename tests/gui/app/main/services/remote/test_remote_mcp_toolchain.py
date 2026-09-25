@@ -63,6 +63,92 @@ def test_device_setup_started_and_finished_push(fx):
         sock.close()
 
 
+def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
+    fx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+    from zcu_tools.experiment.v2_gui.adapters.fake.stub import FakeAnalyzeParams
+
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    entered = threading.Event()
+    release = threading.Event()
+    original_analyze = FakeAdapter.analyze
+
+    def held_analyze(self, request):
+        entered.set()
+        if not release.wait(4):
+            raise TimeoutError("fake analysis release was not signalled")
+        return original_analyze(self, request)
+
+    try:
+        run_id = fx.ctrl.start_run(tab_id)  # GUI path, not an MCP start.
+        run_result = call(
+            sock, "operation.await", {"operation_id": run_id, "timeout": 2}
+        )
+        assert run_result["ok"] is True
+        assert run_result["result"]["status"] == "finished"
+        monkeypatch.setattr(FakeAdapter, "analyze", held_analyze)
+        analysis_id = fx.ctrl.analyze(tab_id, FakeAnalyzeParams())
+        assert entered.wait(1)
+        active = call(sock, "operation.active")
+        assert active["ok"] is True
+        assert active["result"]["operations"] == [
+            {"op": analysis_id, "tab": tab_id, "kind": "analyze"}
+        ]
+        pending = call(
+            sock, "operation.await", {"operation_id": analysis_id, "timeout": 0}
+        )
+        assert pending["result"] == {"reason": "timeout"}
+        release.set()
+        completed = call(
+            sock, "operation.await", {"operation_id": analysis_id, "timeout": 2}
+        )
+        assert completed["result"] == {"reason": "completed", "status": "finished"}
+        assert call(sock, "operation.active")["result"]["operations"] == []
+    finally:
+        release.set()
+        sock.close()
+
+
+def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
+    fx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    entered = threading.Event()
+    release = threading.Event()
+    original_run = FakeAdapter.run
+
+    def held_run(self, request, schema):
+        entered.set()
+        if not release.wait(4):
+            raise TimeoutError("fake run release was not signalled")
+        return original_run(self, request, schema)
+
+    try:
+        monkeypatch.setattr(FakeAdapter, "run", held_run)
+        run_id = fx.ctrl.start_run(tab_id)
+        assert entered.wait(1)
+        assert fx.ctrl.send_feedback("please stop", stop=True) == "run"
+        release.set()
+        reply = call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})
+        assert reply["result"] == {
+            "reason": "completed",
+            "status": "cancelled",
+            "feedback": "please stop",
+        }
+    finally:
+        release.set()
+        sock.close()
+
+
 def test_device_active_operations_enumerate_with_kind(fx):
     # Phase C: active_operations lists EVERY in-flight op, each tagged with its
     # kind + device_name so the agent knows which device and which operation.
@@ -146,6 +232,7 @@ def test_operation_progress_device_setup_bars(fx):
         assert bar["token"] == 1
         assert bar["maximum"] == 10 and bar["value"] == 3
         assert bar["n"] == 3 and bar["total"] == 10
+        assert bar["eta_s"] is not None and bar["eta_s"] >= 0
         assert "Ramp" in bar["format"]
         fx.service.operation_control.get_operation_progress.assert_called_once_with(7)
         fx.ctrl.get_operation_progress.assert_not_called()
