@@ -18,7 +18,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:_h_tab_run_start",
         MethodSpec(
             5.0,
-            "Start a run (fire-and-forget)",
+            "Start a tab run via rpc_call; use wait(op=handle) for terminal "
+            "status, failure/cancellation and Send & Stop feedback. The GUI "
+            "returns an operation_id, which MCP exposes as {handle}; starting "
+            "is not completion. After completion, read result state with "
+            "rpc_call on tab.snapshot, or the run figure with rpc_call on "
+            "tab.get_figure using subtab_id=run.",
             (_str("tab_id"), _expected_versions()),
         ),
         agent=AgentMethodPolicy(

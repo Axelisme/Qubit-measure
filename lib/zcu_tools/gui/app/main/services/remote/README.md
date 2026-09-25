@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — live catalog guidance (GUI 85, WIRE 61)
+**Last updated:** 2026-09-26 — run start catalog guidance (GUI 86, WIRE 61)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -116,9 +116,9 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 85`, and
-`MCP_VERSION = 80` (defined in `zcu_tools.mcp.measure.server`). GUI 85 corrects
-live method descriptions without changing the wire schema. WIRE 61 adds
+Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 86`, and
+`MCP_VERSION = 80` (defined in `zcu_tools.mcp.measure.server`). GUI 86 corrects
+`tab.run_start` live catalog guidance without changing the wire schema. WIRE 61 adds
 `__agent_write_versions` to replies for catalog-declared writes: each changed
 resource carries its versions before and after that handler on the owner thread.
 WIRE 60 adds `rpc.catalog.reveals_without` for partial reads; MCP samples the

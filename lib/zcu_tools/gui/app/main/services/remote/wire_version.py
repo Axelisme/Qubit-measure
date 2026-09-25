@@ -134,4 +134,5 @@ WIRE_VERSION = 61
 # v83: declare partial cfg read policy in the live agent catalog.
 # v84: attach only this handler's changed resource versions to declared writes.
 # v85: live agent method descriptions name the currently available tools and wait path.
-GUI_VERSION = 85
+# v86: tab.run_start live catalog describes its MCP handle and wait path.
+GUI_VERSION = 86
