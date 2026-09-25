@@ -16,6 +16,7 @@ from quality_report import (
     Snapshot,
     compare,
     normalize_diagnostics,
+    normalize_tool_version,
     observe,
     summarize,
 )
@@ -23,6 +24,7 @@ from quality_report import (
 
 def snapshot(*findings: Finding) -> Snapshot:
     return Snapshot(
+        schema_version=1,
         captured_at="2026-09-25T00:00:00+00:00",
         candidate=Candidate(
             commit="base", tree="tree", status="", source_digest="source"
@@ -169,6 +171,7 @@ def test_missing_observations_are_not_zero_counts(state: str) -> None:
         "state": state,
         "selection": "whole tree",
         "reason": "not measured",
+        "findings": [],
     }
     after = Snapshot.model_validate_json(json.dumps(data))
     with pytest.raises(ReportError, match="selection/state differs"):
@@ -280,6 +283,90 @@ def test_observation_failure_remains_distinct_from_empty_success() -> None:
     assert failed.reason == "ReportError: malformed upstream report"
     assert clean.state == "completed"
     assert clean.findings == ()
+
+
+@pytest.mark.parametrize("missing", ["schema_version", "findings"])
+def test_incomplete_receipt_cannot_default_to_a_clean_observation(missing: str) -> None:
+    data = json.loads(snapshot().model_dump_json())
+    owner = data if missing == "schema_version" else data["detectors"]["ruff"]
+    del owner[missing]
+    with pytest.raises(ValidationError, match="Field required"):
+        Snapshot.model_validate_json(json.dumps(data))
+
+
+def test_completed_observation_rejects_a_not_measured_reason() -> None:
+    with pytest.raises(
+        ValidationError, match="completed observations cannot carry a reason"
+    ):
+        DetectorResult(
+            state="completed",
+            selection="whole tree",
+            findings=(),
+            reason="Pyright not requested",
+        )
+
+
+def test_directory_findings_own_the_reported_module_in_summary_and_comparison() -> None:
+    before = snapshot()
+    data = json.loads(before.model_dump_json())
+    data["detectors"]["test-paths"]["findings"] = [
+        {"path": "tests/tools/ghost", "rule": "test-path"}
+    ]
+    after = Snapshot.model_validate_json(json.dumps(data))
+    assert summarize(after)["module"] == {"tests/tools/ghost": 1}
+    groups = compare(before, after)["groups"]
+    assert isinstance(groups, dict)
+    assert groups["module"] == {
+        "tests/tools/ghost": {
+            "before": 0,
+            "after": 1,
+            "introduced_count": 1,
+            "resolved_count": 0,
+            "net": 1,
+        }
+    }
+
+
+def test_update_announcements_do_not_change_method_but_installed_versions_do() -> None:
+    data = json.loads(snapshot().model_dump_json())
+    data["method"]["tool_versions"]["pyright"] = normalize_tool_version(
+        "pyright", "pyright 1.1.411\nWARNING: new version available 1.1.414"
+    )
+    before = Snapshot.model_validate_json(json.dumps(data))
+    data["method"]["tool_versions"]["pyright"] = normalize_tool_version(
+        "pyright", "pyright 1.1.411\nWARNING: new version available 1.1.415"
+    )
+    after = Snapshot.model_validate_json(json.dumps(data))
+    assert compare(before, after)["status"] == "comparable"
+    data["method"]["tool_versions"]["pyright"] = normalize_tool_version(
+        "pyright", "pyright 1.1.414"
+    )
+    changed = Snapshot.model_validate_json(json.dumps(data))
+    with pytest.raises(ReportError, match="method.tool_versions differs"):
+        compare(before, changed)
+
+
+@pytest.mark.parametrize(
+    "tool, output, expected",
+    [
+        ("ruff", "ruff 0.15.20\n", "0.15.20"),
+        ("lint-imports", "import-linter 2.15\n", "2.15"),
+    ],
+)
+def test_upstream_version_labels_are_normalized(
+    tool: str, output: str, expected: str
+) -> None:
+    assert normalize_tool_version(tool, output) == expected
+
+
+@pytest.mark.parametrize(
+    "output", ["", "WARNING: pyright 1.1.411", "pyright 1.1.411\npyright 1.1.414"]
+)
+def test_missing_or_ambiguous_installed_version_is_not_fingerprinted(
+    output: str,
+) -> None:
+    with pytest.raises(ReportError, match="expected one installed version"):
+        normalize_tool_version("pyright", output)
 
 
 def test_candidate_changes_are_allowed_and_gate_failure_is_separate() -> None:

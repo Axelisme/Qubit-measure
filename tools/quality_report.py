@@ -7,6 +7,7 @@ import hashlib
 import importlib.metadata
 import json
 import platform
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -74,12 +75,16 @@ class Finding(Record):
 class DetectorResult(Record):
     state: Literal["completed", "skipped", "error"]
     selection: str = Field(min_length=1)
-    findings: tuple[Finding, ...] = ()
+    findings: tuple[Finding, ...]
     reason: str | None = None
 
     @model_validator(mode="after")
     def consistent_state(self) -> Self:
-        if self.state != "completed" and (self.findings or not self.reason):
+        if self.state == "completed" and self.reason is not None:
+            raise ValueError("completed observations cannot carry a reason")
+        if self.state != "completed" and (
+            self.findings or not self.reason or not self.reason.strip()
+        ):
             raise ValueError("skipped/error needs a reason and cannot carry findings")
         return self
 
@@ -106,7 +111,7 @@ class Candidate(Record):
 
 
 class Snapshot(Record):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1]
     captured_at: str
     candidate: Candidate
     method: Method
@@ -211,6 +216,12 @@ def selected_findings(
     ]
 
 
+def module_for(detector: str, path: str) -> str:
+    if scope_for(path) == "configuration":
+        return "configuration"
+    return path if detector == "test-paths" else str(PurePosixPath(path).parent)
+
+
 def summarize(
     snapshot: Snapshot, parent: str | None = None
 ) -> dict[str, dict[str, int]]:
@@ -219,11 +230,7 @@ def summarize(
         key: Counter() for key in ("detector", "scope", "module", "rule", "file")
     }
     for name, item in selected_findings(snapshot, parent):
-        module = (
-            "configuration"
-            if scope_for(item.path) == "configuration"
-            else str(PurePosixPath(item.path).parent)
-        )
+        module = module_for(name, item.path)
         keys = {
             "detector": name,
             "scope": scope_for(item.path),
@@ -284,9 +291,7 @@ def compare(before: Snapshot, after: Snapshot) -> dict[str, JsonValue]:
         labels = {
             "detector": detector,
             "scope": scope_for(path),
-            "module": "configuration"
-            if scope_for(path) == "configuration"
-            else str(PurePosixPath(path).parent),
+            "module": module_for(detector, path),
             "rule": f"{detector}:{rule}",
         }
         for group, label in labels.items():
@@ -365,6 +370,20 @@ def candidate(root: Path) -> Candidate:
     )
 
 
+def normalize_tool_version(tool: str, output: str) -> str:
+    """Keep the installed version line, excluding update announcements."""
+    label = "import-linter" if tool == "lint-imports" else tool
+    pattern = rf"{re.escape(label)} ([0-9]+(?:\.[0-9]+)+(?:[a-zA-Z0-9.+-]*))"
+    matches = [
+        match.group(1)
+        for line in output.splitlines()
+        if (match := re.fullmatch(pattern, line.strip()))
+    ]
+    if len(matches) != 1:
+        raise ReportError(f"expected one installed version for {tool}")
+    return matches[0]
+
+
 def measurement_method(root: Path) -> Method:
     tools_dir = Path(__file__).resolve().parent
     versions: dict[str, str] = {}
@@ -372,7 +391,7 @@ def measurement_method(root: Path) -> Method:
         result = command(root, (name, "--version"))
         if result.returncode:
             raise ReportError(f"cannot identify {name}: {result.stderr.strip()}")
-        versions[name] = result.stdout.strip()
+        versions[name] = normalize_tool_version(name, result.stdout)
     return Method(
         python=sys.version,
         platform=platform.platform(),
@@ -473,6 +492,7 @@ def observe(
     ) as error:
         return DetectorResult(
             state="error",
+            findings=(),
             selection=selection,
             reason=f"{type(error).__name__}: {error}",
         )
@@ -505,7 +525,10 @@ def collect_snapshot(root: Path, *, with_pyright: bool = False) -> Snapshot:
         )
         if name == "pyright" and not with_pyright:
             results[name] = DetectorResult(
-                state="skipped", selection=selection, reason="Pyright not requested"
+                state="skipped",
+                findings=(),
+                selection=selection,
+                reason="Pyright not requested",
             )
         elif name in ("ruff", "pyright"):
             results[name] = observe(
@@ -519,6 +542,7 @@ def collect_snapshot(root: Path, *, with_pyright: bool = False) -> Snapshot:
     if before != candidate(root) or method != measurement_method(root):
         raise ReportError("source or measurement method changed during snapshot")
     return Snapshot(
+        schema_version=1,
         captured_at=datetime.now(timezone.utc).isoformat(),
         candidate=before,
         method=method,
