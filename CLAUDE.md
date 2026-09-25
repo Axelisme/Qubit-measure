@@ -72,7 +72,7 @@ uv run --directory <worktree> --no-sync -- <command>
 
 優先使用內建工具；沒有合適工具且使用者核准時才用 Shell。子字串替換先用 function 或 MCP 工具，其次用 Python script，不用 `sed`。
 
-測試遵循以下契約：
+測試遵循以下契約；新增 regression、拆分或搬遷測試前，先讀 [tests/README.md](tests/README.md) 的套件結構、fixture 與搬遷規則，找出既有行為的 owner：
 
 - 測試位於 root `tests/`，檔名使用 `test_*.py`，以 `pytest` 涵蓋本次變更的主要行為與邏輯。
 - 測試目錄的路徑對應被測模組：含 `test_*.py` 的目錄必須對應一個實際存在的模組目錄。對應是模組層級，檔名不受約束。`script` 與 `tools` 對應 repo root 的同名目錄，其餘對應 `lib/zcu_tools/` 之下。`contract` 與 `parity` 為保留名稱，豁免該段及其以下，但其前的路徑前綴仍須對應；新增保留名稱需使用者同意。
