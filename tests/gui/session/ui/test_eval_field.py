@@ -1,8 +1,7 @@
 """Unit tests for EvalNumericField (session/ui/eval_field.py).
 
-Test patterns borrowed from tests/gui/ui/test_cfg_form.py (ScalarWidget ghost /
-context-menu / eval↔direct switching). MetaDict is constructed inline following
-the pattern in tests/gui/test_expression.py.
+MetaDict is constructed inline following the pattern in
+tests/gui/test_expression.py.
 """
 
 from __future__ import annotations
