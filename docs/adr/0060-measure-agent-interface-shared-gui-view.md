@@ -270,12 +270,18 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 
 ### H. 畫面（1）
 
-**`screenshot(target = "window" | tab | dialog)`**
-回 PNG 路徑；用於 agent 自己確認 GUI 呈現，或在 session 中給使用者看。
+**`screenshot(target = "window" | "setup" | "device" | "predictor" | "inspect" | "arb_waveform")`**
+回傳 `{path}`（PNG）。讀取類，不切換 GUI；用於 agent 確認 GUI 實際呈現（表單是否更新、是否有錯誤對話框），或在 session 中給使用者看。`setup` 涵蓋啟動時的 startup 實例與工具列開啟的實例（同一個 `SetupDialog`），截取目前開著的那個。不支援截取未顯示的 tab：寫入類操作已讓 GUI 跟隨到對應畫面，此時截 `window` 即可。
 
 ### I. RPC channel（3）
 
-`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]。承接低頻但必要的操作：context 列表、MetaDict 刪除、ModuleLibrary 建立／改名／刪除、cfg editor session、arb waveform、value source、device forget／取消、analyze cancel、GUI prompt 對話框（agent 不在使用者身邊時）等。已特化的 method 由 RPC 呼叫時回 `reason="use_tool"`。
+`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]；走同一條 guarded sender，參數由 GUI 端驗證。
+
+- `rpc_list` 列出所有非 internal 的 wire method，包含已有特化 tool 者（標示對應的 tool），為之後的批次呼叫保留一致的清單。
+- 已特化的 method 經 `rpc_call` 呼叫時回 `reason="use_tool"` 並指名 tool；internal method（例如 `app.shutdown`、`state.*`）不開放。
+- 目前經 RPC 的低頻操作：MetaDict 刪除、ModuleLibrary 建立／改名／刪除與 editor 修改（ml 寫入特化 tool 定案前）、result scope 清單、`device.active_operations`、`predictor.clear`、arb waveform、value source、GUI prompt 對話框。
+
+mock 模式（mock SoC 與 fake device）由開發用 tool（例如 `dev_mock_mode`）提供，只在開發模式出現，不在量測介面與 RPC 清單中。
 
 ## 情境演練
 
