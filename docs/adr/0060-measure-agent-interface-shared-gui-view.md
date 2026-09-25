@@ -30,7 +30,7 @@
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 | P9 | **能機械推導的就提供** | 可由現有資料直接算出的值（例如 `eta_s`、正規化後的 sweep 實際值）由介面算好回傳，不留給 agent 推算。 |
 
-## Decision：Tool 集合（31 特化 + 3 RPC）
+## Decision：Tool 集合（32 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -108,7 +108,7 @@ context 索引：`{active, labels}`。
 
 ModuleLibrary 的寫入（由 role 建立、改名、刪除、修改欄位）屬常用操作，應有特化 tool；支援方式另行討論，定案前暫經 RPC。
 
-### D. 實驗與 tab（12）
+### D. 實驗與 tab（13）
 
 #### 資訊從哪裡取得
 
@@ -186,7 +186,21 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 讀取 run 的狀態：`{running, progress: [{label, percent}], elapsed_s, eta_s, figure}`。`figure` 是 run pane live plot 的 PNG 路徑；`eta_s` 由已耗時間與進度推算。agent 據此決定繼續等、`cancel` 後 `tab_edit` 重來，或讓它跑完。run 結束後 `running=false`，`figure` 為最終的 run pane 圖；沒有 run 也沒有結果時回 `reason="no_run"`。
 
 **`tab_analyze(tab, stage = "primary" | "post", params?)`**
-以 `params` 對目前資料分析，結果寫入 GUI 的 analysis／post pane；可用不同 `params` 反覆呼叫直到滿意。回傳 summary 與 figure 路徑；分析較久時回傳 `{op}`。互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。
+以 `params` 對目前資料分析，結果寫入 GUI 的 analysis／post pane；可用不同 `params` 反覆呼叫直到滿意。
+
+- `params` 是部分覆寫，寫入 GUI 的分析參數表單並沿用到下次分析；目前參數以 `tab_get(tab, include=["analyze_params"])` 讀取，不會觸發分析。未知參數或型別不符時報錯並列出合法參數。
+- 擬合類分析內部短暫等待，完成時回傳 `{status: "finished", summary, figure, params, invalidated}`；逾時回傳 `{status: "running", op}`。
+- 互動式分析立即回傳 `{status: "interactive", op}`，由 `tab_interact` 操作，完成後 `wait(op)`。
+- `invalidated` 列出被這次分析取代的內容：新的 primary 分析取代 writeback 草稿（含已做的勾選與修改）並清除 post 結果。
+- post 需要先有 primary 結果；擬合失敗時報錯並附 `reason`，不回傳空結果。
+
+**`tab_interact(tab, payload?)`**
+操作互動式分析。介面對外掛行為無知，只把子命令轉給互動分析外掛註冊的方法。
+
+- 不帶 `payload`：讀取 `{plugin, info, state, commands, figure}`，不切換 GUI。`commands` 為外掛註冊的子命令與參數定義（沿用 `ParamSpec`）；`state` 為外掛目前的結構化選取狀態，每個外掛必須提供。
+- `payload = {command, args}`：執行一個子命令，參數先依外掛宣告驗證再呼叫；回傳 `{info, state, figure}`，GUI 切到 analysis 子 tab。一次呼叫執行一個子命令。
+- `done` 屬於互動分析的生命週期（對應 `finish()`），所有外掛共有；結果經原本的 op 送出。取消一律用 `cancel(op)`。
+- 除 `done` 外，不提供介面層的通用命令（例如指標事件或控制項）；外掛需要的操作都由外掛自己註冊。
 
 **`writeback(tab, stage = "primary" | "post", items?, apply = false)`**
 不帶 `items` 時只讀取草稿。`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}` 與目的地 context。
@@ -205,11 +219,11 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 | --- | --- |
 | `tab_open` | 新 tab 的 run 子 tab |
 | `tab_edit`、`tab_run` | run（cfg 表單與 live plot 所在） |
-| `tab_analyze` | analysis 或 post |
+| `tab_analyze`、`tab_interact`（帶 `payload`） | analysis 或 post |
 | `writeback`（帶 `items` 或 `apply`） | analysis 或 post（writeback 清單所在） |
 | `tab_save` | data |
 
-讀取類 tool（`tab_get`、`tab_live`、`data`、不帶 `items` 的 `writeback`）不切換，避免在 agent 反覆讀取時打斷使用者的畫面。
+讀取類 tool（`tab_get`、`tab_live`、`data`、不帶 `items` 的 `writeback`、不帶 `payload` 的 `tab_interact`）不切換，避免在 agent 反覆讀取時打斷使用者的畫面。
 
 ### E. 非同步（2）
 
@@ -353,6 +367,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `tab_run` | `tab.run_start` |
 | `tab_live` | `operation.progress` + run pane 截圖（`tab.get_figure(run)`） |
 | `tab_analyze` | `tab.analyze`／`tab.post_analyze` + short-wait |
+| `tab_interact` | **新增** wire method，轉送子命令至互動分析外掛註冊的方法 |
 | `writeback` | `tab.writeback_preview` + `tab.writeback_set` + `tab.writeback_apply` |
 | `tab_save` | `tab.save_data`（`data_path`、`comment`）+ `tab.save_image` |
 | `wait`／`cancel` | `operation.await`；各類 cancel 合一 |
@@ -366,6 +381,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 - cfg 格式投影：`tab.get_cfg` 目前回傳值與路徑種類，需補上型別、ref 可選項與鎖定狀態。
 - cfg 編輯語法：sweep 整體修改與衝突檢查、sweep 端點接受 md 表達式、錯誤清單。
 - `context.new` 接受自訂 `label`。
+- 互動分析的子命令註冊：`InteractiveSession` 改為宣告 `{name, description, args, handler}` 子命令與結構化 `state`，GUI host 只轉送子命令。現有外掛直接處理指標事件與控制項，是外掛領域邏輯與 GUI 過度耦合的歷史債務；此重構位於 MCP 之外，另案處理，GUI 自身的互動元件也應改經同一組子命令。
 
 ## 後續（基礎介面穩定後再評估）
 
@@ -384,7 +400,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 31 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 32 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
