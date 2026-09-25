@@ -15,79 +15,25 @@ keep identical.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any, cast
-from unittest.mock import MagicMock
+from typing import Any
 
 import pytest
 from zcu_tools.experiment.v2_gui.adapters._support.defaults.role_factories import (
     ROLE_FACTORIES,
 )
-from zcu_tools.gui.cfg import (
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
-    ReferenceValue,
-    SweepValue,
+
+from ._role_characterization import (
+    POPULATED_MD as _POPULATED_MD,
 )
-
-_GOLDEN_PATH = Path(__file__).with_name("_role_default_golden.json")
-
-# A representative populated MetaDict: every md key the role factories read, so
-# present keys lower to EvalValue and absent keys to their DirectValue fallback.
-_POPULATED_MD = {
-    "q_f": 4200.0,
-    "qub_ch": 4,
-    "r_f": 6500.0,
-    "res_ch": 3,
-    "ro_ch": 1,
-    "timeFly": 0.7,
-    "best_ro_freq": 6300.0,
-    "best_ro_gain": 0.22,
-    "best_ro_length": 2.0,
-}
-
-
-def _mk_ctx(md: dict[str, Any]) -> MagicMock:
-    """A ctx whose md answers from ``md`` and whose ml is empty (no adoption —
-    the library-lookup selector is exercised by test_role_factories / kept
-    verbatim; this snapshot pins the blank-seed payload)."""
-    ctx = MagicMock()
-    ctx.md.get.side_effect = lambda k, d=None: md.get(k, d)
-    ctx.md.__contains__ = lambda _self, k: k in md
-    ml = MagicMock()
-    ml.modules = {}
-    ml.waveforms = {}
-    ctx.ml = ml
-    return ctx
-
-
-def _serialize(node: object) -> Any:
-    """Normalize a value-tree node to a JSON-comparable structure that keeps the
-    DirectValue/EvalValue distinction and ref/section nesting."""
-    if node is None:
-        return None
-    if isinstance(node, DirectValue):
-        direct = cast(DirectValue, node)
-        return {"D": direct.value}
-    if isinstance(node, EvalValue):
-        eval_value = cast(EvalValue, node)
-        return {"E": eval_value.expr, "r": eval_value.resolved}
-    if isinstance(node, SweepValue):
-        sweep = cast(SweepValue, node)
-        return {"sweep": [sweep.start, sweep.stop, sweep.expts, round(sweep.step, 9)]}
-    if isinstance(node, ReferenceValue):
-        ref = cast(ReferenceValue, node)
-        return {
-            "ref": ref.chosen_key,
-            "ov": ref.is_overridden,
-            "v": _serialize(ref.value),
-        }
-    if isinstance(node, CfgSectionValue):
-        section = cast(CfgSectionValue, node)
-        return {k: _serialize(v) for k, v in section.fields.items()}
-    return repr(node)
+from ._role_characterization import (
+    load_golden as _load_golden,
+)
+from ._role_characterization import (
+    make_context as _mk_ctx,
+)
+from ._role_characterization import (
+    serialize as _serialize,
+)
 
 
 def _compute_role(role_id: str) -> dict[str, Any]:
@@ -102,10 +48,6 @@ def _compute_role(role_id: str) -> dict[str, Any]:
                 spec.ref(_mk_ctx(md), optional=True)
             )
     return entry
-
-
-def _load_golden() -> dict[str, Any]:
-    return json.loads(_GOLDEN_PATH.read_text())
 
 
 def test_golden_covers_exactly_the_registered_roles() -> None:
