@@ -124,14 +124,14 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 
 #### Tools
 
-**`experiments()`**
-列出可用實驗：名稱、一行說明、分析階段（primary／post）與模式（fit／interactive）。
+**`experiments(prefix?)`**
+實驗索引：`[{name, summary}]`。`summary` 取 guide behavior 的第一句；`prefix` 用於過濾（例如 `"twotone/reset"`）。
 
 **`guide(experiment)`**
-回傳該實驗的 guide 全文。開 tab 前後都可讀。
+回傳該實驗的 guide：`{behavior, expects_md, expects_ml, typical_writeback, recommended}`，維持分段。開 tab 前後都可讀；只含 adapter 自己宣告的內容。
 
 **`tab_open(experiment, from_file?)`**
-在 GUI 開新 tab；`from_file` 載入既有資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg 摘要。
+在 GUI 開新 tab；`from_file` 載入既有資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg 摘要；不附 guide。
 
 **`tab_close(tab)`**
 關閉 tab；執行中的 tab 回 `reason="busy"`。
@@ -316,7 +316,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `project` | `project.info`、`startup.apply` |
 | `soc_connect` | `soc.connect(kind=remote)` |
 | `soc_info` | `soc.info` |
-| `experiments` | `adapter.list` + adapter capabilities |
+| `experiments` | `adapter.list` + guide behavior 首句 |
 | `guide` | `adapter.guide` |
 | `tab_open` | `tab.new`（+ `tab.load_data`）+ `tab.set_active` |
 | `tab_close` | `tab.close` |
