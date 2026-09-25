@@ -8,7 +8,7 @@ from zcu_tools.gui.session.ports import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 
-from ._progress_fakes import DirectProgressTransport
+from tests.gui._progress_fakes import DirectProgressTransport
 
 
 def _create(svc, op, handle, label="", total=None):

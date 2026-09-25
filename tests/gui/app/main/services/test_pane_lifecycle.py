@@ -32,7 +32,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from tests.gui.services._progress_fakes import DirectProgressTransport
+from tests.gui._progress_fakes import DirectProgressTransport
 
 
 @dataclass

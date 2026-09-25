@@ -34,8 +34,8 @@ from zcu_tools.gui.session.services.connection import (
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
-from ._completion_helpers import on_connection_failed, on_connection_finished
-from ._progress_fakes import DirectProgressTransport
+from tests.gui._completion_helpers import on_connection_failed, on_connection_finished
+from tests.gui._progress_fakes import DirectProgressTransport
 
 # ---------------------------------------------------------------------------
 # Fakes (from test_operation_runner.py pattern)

@@ -54,7 +54,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
-from ._progress_fakes import DirectProgressTransport
+from tests.gui._progress_fakes import DirectProgressTransport
 
 
 def _empty_schema() -> CfgSchema:

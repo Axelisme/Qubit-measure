@@ -22,13 +22,13 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
 from zcu_tools.gui.session.services.progress import ProgressService
 
-from tests.gui.services._completion_helpers import (
+from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )
-from tests.gui.services._device_fakes import FakeDeviceRegistry
+from tests.gui.session.services._device_fakes import FakeDeviceRegistry
 
-# See tests/gui/services/test_device.py for why test-created BackgroundRunners must
+# See tests/gui/session/services/test_device.py for why test-created BackgroundRunners must
 # be quiesced before GC: a queued main-thread delivery to a GC'd runner segfaults.
 _LIVE_BG: list[BackgroundRunner] = []
 

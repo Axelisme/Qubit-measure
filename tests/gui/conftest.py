@@ -39,7 +39,7 @@ def _drain_qt_events(qapp):
     spawns a real worker must call ``BackgroundRunner.quiesce`` (join the worker
     threads, then flush their queued deliveries) BEFORE its owning object goes
     out of scope — see ``tests/gui/test_controller.py`` (the ``cf`` fixture) and
-    ``tests/gui/services/test_device*.py`` (the ``_LIVE_BG`` quiesce fixtures).
+    ``tests/gui/session/services/test_device*.py`` (the ``_LIVE_BG`` quiesce fixtures).
     This per-test drain is only a cheap best-effort flush of any stray queued
     event so it lands while the QApplication is healthy; it does NOT join worker
     threads and is not sufficient on its own.

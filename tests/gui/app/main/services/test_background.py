@@ -23,7 +23,7 @@ from zcu_tools.gui.session.scopes import progress_ambient
 # Every BackgroundRunner created by a test is registered here so that the
 # autouse quiesce fixture can drain it before its QObjects are GC'd.  A queued
 # cross-thread delivery dispatched onto a freed C++ object segfaults (same
-# pattern as tests/gui/services/test_device.py).
+# pattern as tests/gui/session/services/test_device.py).
 _LIVE_BG: list[BackgroundRunner] = []
 
 

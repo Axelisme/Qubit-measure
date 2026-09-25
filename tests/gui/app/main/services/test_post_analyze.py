@@ -1,6 +1,6 @@
 """Unit tests for PostAnalyzeService.
 
-Mirrors tests/gui/services/test_analyze.py: a real State + real EventBus, with
+Mirrors tests/gui/app/main/services/test_analyze.py: a real State + real EventBus, with
 BackgroundRunner mocked. Covers the gate (no primary analyze result), the
 submit-to-bg path, and the finished/failed terminal paths.
 
@@ -33,9 +33,8 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
-from tests.gui.services._completion_helpers import on_post_analyze_failed
-
-from ._progress_fakes import DirectProgressTransport
+from tests.gui._completion_helpers import on_post_analyze_failed
+from tests.gui._progress_fakes import DirectProgressTransport
 
 
 def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:

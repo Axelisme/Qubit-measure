@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-25 — GUI remote test paths
+**Last updated:** 2026-09-25 — GUI service test ownership
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -46,7 +46,7 @@ thread worker 的物件，都必須在 teardown 呼叫 `quiesce()`，**才** `de
 
 ```python
 # pattern（見 tests/gui/test_controller.py 的 ControllerFixture.quiesce()
-#           和 tests/gui/services/test_device_manager.py 的 _quiesce_services fixture）
+#           和 tests/gui/session/services/test_device_manager.py 的 _quiesce_services fixture）
 @pytest.fixture
 def my_widget(qapp):
     w = SomeWidgetThatOwnsBackgroundRunner(...)
@@ -339,7 +339,7 @@ UI mechanics tests 的 `make_measurement_builder("qubit_freq")` 仍使用 produc
 ### GUI device service tests
 
 `GlobalDeviceManager` 是 production singleton，入口只接受 `BaseDevice` instance。GUI service unit tests 若用
-`MagicMock` driver 來驗證 call interaction，應注入 `tests/gui/services/_device_fakes.py::FakeDeviceRegistry`，
+`MagicMock` driver 來驗證 call interaction，應注入 `tests/gui/session/services/_device_fakes.py::FakeDeviceRegistry`，
 不要把 mock driver 註冊進 global singleton。需要測 singleton CRUD 時改用真 `FakeDevice`。
 
 `DeviceService.poll_device_info(name)` 測試應視為 best-effort off-main live-read contract：memory-only、
@@ -456,7 +456,7 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 load-result feature 的 targeted tests 分散在對應 ownership：
 `tests/experiment/v2_gui/adapters/test_base_load.py` 鎖 adapter default load contract；
 `tests/experiment/v2_gui/adapters/test_legacy_load.py` 鎖 adapter legacy single-file fallback；
-`tests/gui/services/test_load.py` 鎖 state invalidation / version bump；
+`tests/gui/app/main/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/app/main/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
 `tests/gui/app/main/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
 `tests/mcp/measure/`覆蓋operation handle與RPC timeout policy：bounded

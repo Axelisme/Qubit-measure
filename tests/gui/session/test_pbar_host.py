@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from zcu_tools.gui.session.services.progress import ProgressService
 
-from ._progress_fakes import DirectProgressTransport
+from tests.gui._progress_fakes import DirectProgressTransport
 
 
 def _service_and_factory(operation_id: int = 1, owner_id: str = "tab-1"):

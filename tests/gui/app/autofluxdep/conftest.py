@@ -8,7 +8,7 @@ at construction, and establishing a mock SoC goes through ConnectionService's
 to pump the connect loop. The ``qapp`` fixture is therefore ``autouse`` — it is
 created once at session start, ahead of every test. This is the same ``qapp`` +
 ``QEventLoop`` pattern measure-gui's tests use (``tests/gui/conftest.py`` /
-``tests/gui/services/test_connection.py``).
+``tests/gui/session/services/test_connection.py``).
 """
 
 from __future__ import annotations
