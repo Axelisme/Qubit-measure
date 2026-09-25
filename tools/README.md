@@ -84,6 +84,46 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 `--dist=worksteal` 維持 command-level，因 parity intentionally disables pytest plugin autoload；
 不設定 pytest 全域預設，因此未帶旗標的 `pytest -n auto` 語意不變。
 
+## 品質快照與熱點報表
+
+三個主要入口各有責任：`gate.py` 串接日常檢查，`check_ratchet.py` 判定相對 base 的
+regression，`quality_report.py` 保存現況並解讀債務分布。新報表不取代 gate，也不重做 detector
+規則。`check_pytest_collection.py` 與 pytest 仍另外執行，快照不代表行為測試通過。
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/quality_report.py snapshot --with-pyright --output .agent_state/quality/before.json
+uv run --directory <worktree> --no-sync -- python tools/quality_report.py snapshot --with-pyright --output .agent_state/quality/after.json
+uv run --directory <worktree> --no-sync -- python tools/quality_report.py compare .agent_state/quality/before.json .agent_state/quality/after.json --output .agent_state/quality/comparison.json
+```
+
+沒有 `--output` 時 JSON 寫 stdout；指定檔案必須不存在，避免覆寫證據。snapshot 的 stderr
+列出完整計數與各類 top 10，`--top N` 可調整顯示筆數。完整 finding、來源提供的 line/message
+及額外量值保留在 JSON；可 import `summarize(snapshot, parent="lib/zcu_tools/gui")` 取得完整
+分布或限定父目錄。分組為 production、tests、scripts、tools、configuration、other，以及
+所屬目錄、規則與檔案。不把跨 detector 的總數當品質分數。
+
+Pyright 為 opt-in，未指定時記錄 skipped；啟用時只計 errors，但保留非 error 診斷為 uncounted。
+測試結構的 advisory 也保留但不計入違規。零筆只能是 completed 的觀察；detector 失敗記錄
+error 與原因，不能轉成零。Import contracts 獨立記錄 pass/fail/error，不混入診斷數。
+
+Snapshot 保存 commit、HEAD tree、tracked/untracked status、被量測 Python source digest、
+Python/platform、已安裝 distribution 版本、工具版本、repo 設定與工具實作檔案指紋。
+掃描前後來源或方法有變即拒絕輸出，避免把兩棵樹混成一次觀察。它是目前 worktree 的快照，
+不是重建任意歷史 commit 的工具；外部 SDK、硬體、未安裝 runtime profile 與外部設定不在涵蓋內。
+同版本套件的原地修改不由 distribution 版本指紋辨識；detector 自身的靜態分析限制仍適用。
+
+Compare 要求相同方法與 detector selection/state；任一 error 或方法不同會拒絕比較，
+列出理由。不同 commit/source 是允許的。設定、工具或環境更新後應以同一方法重量兩側，
+或建立新的 baseline，沒有 force-comparable 開關。
+
+比較按精確 `(detector, path, rule)` 列出 before/after、introduced_count、resolved_count、net，
+並彙整到 scope/module/rule。introduced/resolved 指計數變化，不是逐條診斷的身分追蹤。
+搬檔會出現舊路徑減少與新路徑增加，報表不把它解讀為修復；正式 rename 判定仍由 ratchet
+擁有。既有 suppression 的設定項目歸 configuration，不假裝有來源行號。
+
+Exit 0 只表示報表成功，不表示品質合格；即使有診斷或 import gate fail 也可成功產生報表。
+工具錯誤、無效 receipt 或不可比條件 exit 2。規則沒有新門檻，既有 gate 輸出與 exit 語意不變。
+
 ## ratchet 是判準，不是另一個檢查
 
 `check_ratchet.py` 把七項檢查對照 base 判讀：逐 (檔案, 規則) 比較 base tree 與 candidate，
