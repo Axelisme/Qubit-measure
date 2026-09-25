@@ -18,12 +18,6 @@ def test_formatting_runs_before_anything_measures_the_code() -> None:
     assert names == ["ruff import sort", "ruff format", "import contracts", "ratchet"]
 
 
-def test_the_rewriting_steps_can_be_turned_off() -> None:
-    names = [step.name for step in gate.steps("abc", ("lib/a.py",), fix=False)]
-
-    assert names == ["import contracts", "ratchet"]
-
-
 def test_the_ratchet_runs_even_when_no_python_file_changed() -> None:
     """A candidate can widen a per-file-ignore without touching any Python."""
     names = [step.name for step in gate.steps("abc", (), fix=True)]

@@ -22,3 +22,56 @@ forbidden_modules =
 # it are not. Its 517 edges are excluded here rather than treated as debt.
 ignore_imports =
     zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
+
+# ADR-0020: shared session primitives cannot import app policy.
+[importlinter:contract:session-no-app]
+name = C2: shared session does not depend on apps
+type = forbidden
+source_modules =
+    zcu_tools.gui.session
+forbidden_modules =
+    zcu_tools.gui.app
+
+# ADR-0045: app-independent cfg core owns data and generic algorithms.
+[importlinter:contract:cfg-core-no-domain]
+name = C3: cfg core does not depend on app or experiment domain
+type = forbidden
+source_modules =
+    zcu_tools.gui.cfg
+forbidden_modules =
+    zcu_tools.gui.app
+    zcu_tools.experiment
+    zcu_tools.meta_tool
+
+# ADR-0045: shared renderers receive policy through ports.
+[importlinter:contract:cfg-widgets-no-runtime]
+name = C4: cfg widgets do not depend on runtime policy
+type = forbidden
+source_modules =
+    zcu_tools.gui.widgets.cfg
+forbidden_modules =
+    zcu_tools.gui.app
+    zcu_tools.experiment
+    zcu_tools.meta_tool
+    zcu_tools.gui.session
+    zcu_tools.device
+    zcu_tools.notebook
+
+# ADR-0045: autofluxdep consumes shared owners, not the measure app.
+[importlinter:contract:autofluxdep-no-main]
+name = C5: autofluxdep does not depend on the measure app
+type = forbidden
+source_modules =
+    zcu_tools.gui.app.autofluxdep
+forbidden_modules =
+    zcu_tools.gui.app.main
+
+# ADR-0028: notebook and GUI are adapters of the analysis kernel.
+[importlinter:contract:fluxdep-kernel-no-adapters]
+name = C6: fluxdep kernel does not depend on its adapters
+type = forbidden
+source_modules =
+    zcu_tools.analysis.fluxdep
+forbidden_modules =
+    zcu_tools.gui
+    zcu_tools.notebook

@@ -71,6 +71,11 @@ STATUS_CHECKS: Final = (
         "violation_count",
     ),
     Check(
+        "test structure",
+        (sys.executable, str(_TOOLS_DIR / "check_test_structure.py")),
+        "violation_count",
+    ),
+    Check(
         "test capabilities",
         (sys.executable, str(_TOOLS_DIR / "check_test_capabilities.py")),
         "violation_count",
@@ -125,13 +130,16 @@ def steps(base: str, files: tuple[str, ...], *, fix: bool) -> tuple[Step, ...]:
     one line of Python.
     """
     found: list[Step] = []
-    if fix and files:
+    if files:
+        import_flags = ("--fix",) if fix else ()
+        format_flags = () if fix else ("--check",)
         found.append(
             Step(
-                "ruff import sort", ("ruff", "check", "--select", "I", "--fix", *files)
+                "ruff import sort",
+                ("ruff", "check", "--select", "I", *import_flags, *files),
             )
         )
-        found.append(Step("ruff format", ("ruff", "format", *files)))
+        found.append(Step("ruff format", ("ruff", "format", *format_flags, *files)))
     found.append(Step("import contracts", ("lint-imports",)))
     found.append(
         Step(
@@ -249,6 +257,16 @@ def main(argv: list[str] | None = None) -> int:
         outcome = run_step(step, root)
         mark = "ok  " if outcome.ok else "FAIL"
         print(f"{mark} {outcome.name}")
+        if outcome.name == "ratchet" and outcome.stdout:
+            try:
+                changes = json.loads(outcome.stdout).get("configuration_changes", [])
+            except json.JSONDecodeError:
+                changes = []
+            for change in changes:
+                print(
+                    f"REVIEW {change['path']}: "
+                    f"{json.dumps(change['before'])} -> {json.dumps(change['after'])}"
+                )
         if outcome.ok:
             continue
         failed = True
