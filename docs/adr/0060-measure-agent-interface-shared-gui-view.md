@@ -281,7 +281,7 @@ tab_analyze("t3") → writeback("t3", apply=true) → tab_save("t3")
 ```text
 connect(launch="never")
 status()                                   → t4 twotone/freq, active, analysis: failed
-tab_get("t4", include=["cfg", "analysis", "figures"])
+tab_get("t4", include=["cfg", "analysis"])
 data("t4", max_points=150)                 → 峰貼在掃描邊緣
 tab_edit("t4", [{path: "sweep.freq.start", value: 838.0}, {path: "sweep.freq.stop", value: 858.0}])
 tab_run("t4") → wait → tab_live("t4")
@@ -302,7 +302,7 @@ data("t9", export=true)                    → .npz，agent 自行擬合比較
 ### 情境二 c：排查問題
 
 ```text
-tab_get("t4", include=["cfg", "figures"])
+tab_get("t4", include=["cfg", "analysis"])
 devices()                                  → jpa_sgs output=false
 （在 session 問使用者：JPA pump 目前關閉，要打開嗎？）
 device_set("jpa_sgs", values={output: true})
