@@ -29,7 +29,7 @@
 | P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 
-## Decision：Tool 集合（28 特化 + 3 RPC）
+## Decision：Tool 集合（31 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -85,16 +85,27 @@
 
 mock 模式（mock SoC 與 fake device）屬於開發用途，不在量測介面中，經 RPC 或開發工具啟動。context 的建立與切換見 C 類；儀器連線見 F 類。
 
-### C. 知識庫（3）
+### C. Context 與知識庫（6）
 
-**`context_get(keys?)`**
-讀 MetaDict；不帶 `keys` 回傳全部。
+**`contexts()`**
+context 索引：`{active, labels}`。
 
-**`context_set(values: {key: value})`**
-寫 MetaDict；回傳 `{key: {before, after}}`。刪除與 ModuleLibrary 的建立、改名、刪除走 RPC。
+**`context_use(label)`**
+切換 context；未知 label 報錯並列出可用的 label。
 
-**`library(name?)`**
-不帶 `name` 列出 modules 與 waveforms；帶 `name` 回傳該項 cfg。
+**`context_create(label?, bind_device?, clone_from = "current")`**
+建立並切換到新 context，回傳 label。`label` 可自由指定；未指定時由 `bind_device` 的目前值與單位產生預設 label（沿用現有規則），兩者皆無時使用預設命名。`clone_from` 預設從目前 context 複製 ml／md，`null` 表示空白 context。
+
+**`md_get(keys?)`**
+讀 MetaDict，回傳 `{values: {key: value}}`。不帶 `keys` 時回傳全部，非純量值（矩陣、長陣列）只回摘要（例如 `"3 × 3 matrix"`）；以 `keys` 指定時回完整值。
+
+**`md_set(values: {key: value})`**
+依序寫入，遇錯即停、不回滾（沿用現有語意）；回傳 `{key: {before, after}}`。刪除走 RPC。
+
+**`ml_get(name?)`**
+不帶 `name` 列出 modules 與 waveforms（名稱、種類、描述）；帶 `name` 回傳該項 cfg。
+
+ModuleLibrary 的寫入（由 role 建立、改名、刪除、修改欄位）屬常用操作，應有特化 tool；支援方式另行討論，定案前暫經 RPC。
 
 ### D. 實驗與 tab（12）
 
@@ -213,12 +224,12 @@ agent 操作某個 tab 的某個階段時，GUI 一律切到該 tab 與對應的
 connect()
 project(chip="Q5_2D", qubit="Q1", resonator="R1")
 soc_connect("192.168.10.179", 8887)
-（建立 context，見 C 類）
+context_create(bind_device="flux_yoko")
 device_set("flux_yoko", connect={type: "YOKOGS200", address: "USB0::…"}, values={value: 2e-3})  → op o1
 wait("o1")
 predictor("load", path="result/Q5_2D/Q1/params.json")
 predict(2e-3)                                   → 842.7 MHz
-context_set({q_f: 842.7, qf_w: 15})             → 作為掃描種子
+md_set({q_f: 842.7, qf_w: 15})             → 作為掃描種子
 
 # twotone：guide → cfg → run → live plot → 分析 → 寫回 → 存檔
 guide("twotone/freq")                           → 先寬掃找真實的峰，再窄掃擬合；predictor 只當種子
@@ -297,6 +308,11 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | Tool | 組合的現有能力 |
 | --- | --- |
 | `status` | `gui_overview` + tab 清單 |
+| `contexts` | `context.labels`、`context.active` |
+| `context_use` | `context.use` |
+| `context_create` | `context.new`，**新增** `label` 參數 |
+| `md_get`／`md_set` | `context.md_get`／`md_get_attr`／`md_set_attr` |
+| `ml_get` | `context.ml_get` + editor 讀取 |
 | `project` | `project.info`、`startup.apply` |
 | `soc_connect` | `soc.connect(kind=remote)` |
 | `soc_info` | `soc.info` |
@@ -338,7 +354,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 28 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 31 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
