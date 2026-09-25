@@ -5,6 +5,7 @@ from __future__ import annotations
 from ._registry import RemoteMethodEntry
 from .analysis import METHODS as ANALYSIS_METHODS
 from .arb_waveform import METHODS as ARB_WAVEFORM_METHODS
+from .catalog import METHODS as CATALOG_METHODS
 from .connection_device import METHODS as CONNECTION_DEVICE_METHODS
 from .context import METHODS as CONTEXT_METHODS
 from .editor import METHODS as EDITOR_METHODS
@@ -18,6 +19,7 @@ from .view import METHODS as VIEW_METHODS
 from .writeback import METHODS as WRITEBACK_METHODS
 
 METHOD_ENTRIES: tuple[RemoteMethodEntry, ...] = (
+    *CATALOG_METHODS,
     *TAB_METHODS,
     *RUN_SAVE_METHODS,
     *ANALYSIS_METHODS,

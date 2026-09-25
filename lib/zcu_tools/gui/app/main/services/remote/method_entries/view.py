@@ -8,7 +8,7 @@ from ._params import (
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -29,6 +29,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "is your call. Empty fields mean the adapter has no guide written yet.",
             (_str("adapter_name", "Adapter to introspect"),),
         ),
+        agent=AgentMethodPolicy(exposure="tool", tool_names=("guide",)),
     ),
     method_entry(
         "app.shutdown",
@@ -41,6 +42,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Prefer this over gui_stop's force path to stop a GUI cleanly.",
             mcp=McpMethodPolicy.internal("used only by gui_stop lifecycle shutdown"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "dialog.screenshot",

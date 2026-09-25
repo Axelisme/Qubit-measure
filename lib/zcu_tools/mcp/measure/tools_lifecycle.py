@@ -7,7 +7,21 @@ from pathlib import Path
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-from zcu_tools.mcp.measure.tools_overview import _assemble_overview
+from zcu_tools.mcp.measure.tools_overview import assemble_overview
+
+
+def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    port = arguments.get("port")
+    if port is not None and (isinstance(port, bool) or not isinstance(port, int)):
+        raise ValueError("port must be an integer")
+    launch = arguments.get("launch", "never")
+    if launch not in ("never", "if_missing", "new"):
+        raise ValueError("launch must be never, if_missing or new")
+    clean = arguments.get("clean", False)
+    if not isinstance(clean, bool):
+        raise ValueError("clean must be a boolean")
+    connection = ctx.session.connect_to_gui(port=port, launch=launch, clean=clean)
+    return {**connection, "status": assemble_overview(ctx)}
 
 
 def tool_gui_connect(
@@ -27,7 +41,7 @@ def tool_gui_connect(
     # gives the agent the current picture (the same data gui_overview returns),
     # saving a follow-up probe. The socket is live by here, so the fan-out reads
     # resolve against the just-attached GUI.
-    return {"note": note, "overview": _assemble_overview(ctx)}
+    return {"note": note, "overview": assemble_overview(ctx)}
 
 
 def tool_gui_disconnect(
@@ -60,7 +74,7 @@ def tool_gui_launch(
     # GUI is up but not yet attached, so there is no live state to read.
     if ctx.bridge.is_connected:
         ctx.session.initialize_event_stream()
-        return {"note": note, "overview": _assemble_overview(ctx)}
+        return {"note": note, "overview": assemble_overview(ctx)}
     return {"note": note}
 
 
@@ -82,6 +96,22 @@ def tool_gui_stop(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[st
 
 
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
+    "connect": {
+        "handler": tool_connect,
+        "description": "Attach to the live GUI or launch one when requested. Never connects hardware; incompatible wire contracts fail before catalog load.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "port": {"type": "integer"},
+                "launch": {
+                    "type": "string",
+                    "enum": ["never", "if_missing", "new"],
+                    "default": "never",
+                },
+                "clean": {"type": "boolean", "default": False},
+            },
+        },
+    },
     "gui_bridge_connect": {
         "handler": tool_gui_connect,
         "description": (

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.main.services.remote.wire_version import WIRE_VERSION
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import (
@@ -46,6 +47,11 @@ class WireTransport:
             reply = response(params) if callable(response) else response
         elif method == "resources.versions":
             reply = {"ok": True, "result": {"versions": {}}}
+        elif method == "wire.version":
+            reply = {
+                "ok": True,
+                "result": {"wire_version": WIRE_VERSION, "gui_version": 79},
+            }
         elif self.responder is not None:
             reply = {"ok": True, "result": self.responder(method, params)}
         else:
@@ -94,7 +100,7 @@ def make_client(
         app_name="gui",
         default_port=8765,
         mcp_version=74,
-        wire_version=55,
+        wire_version=WIRE_VERSION,
         pid_file=tmp_path / "unused.pid",
         log_file=tmp_path / "unused.log",
         run_script_name="run_measure_gui.py",

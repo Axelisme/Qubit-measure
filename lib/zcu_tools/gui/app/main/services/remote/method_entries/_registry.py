@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import import_module
-from typing import cast
+from typing import Literal, cast
 
 from zcu_tools.gui.remote.method_spec import (
     BoundMethod,
@@ -12,6 +12,28 @@ from zcu_tools.gui.remote.method_spec import (
     MethodSpec,
     build_method_registry,
 )
+from zcu_tools.gui.remote.param_spec import build_input_schema
+
+AgentExposure = Literal["rpc", "tool", "internal"]
+
+
+@dataclass(frozen=True, slots=True)
+class AgentMethodPolicy:
+    """Measure-only exposure and concurrency contract for one wire method."""
+
+    exposure: AgentExposure = "rpc"
+    tool_names: tuple[str, ...] = ()
+    guard_deps: tuple[str, ...] = ()
+    reveals: tuple[str, ...] = ()
+    operation_key: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.exposure not in ("rpc", "tool", "internal"):
+            raise ValueError(f"unknown agent exposure {self.exposure!r}")
+        if (self.exposure == "tool") != bool(self.tool_names):
+            raise ValueError("tool exposure requires tool_names only")
+        if len(set(self.tool_names)) != len(self.tool_names):
+            raise ValueError("duplicate tool names")
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,10 +43,39 @@ class RemoteMethodEntry:
     method: str
     handler_ref: str
     spec: MethodSpec
+    agent: AgentMethodPolicy = field(default_factory=AgentMethodPolicy)
 
 
-def method_entry(method: str, handler_ref: str, spec: MethodSpec) -> RemoteMethodEntry:
-    return RemoteMethodEntry(method=method, handler_ref=handler_ref, spec=spec)
+def method_entry(
+    method: str,
+    handler_ref: str,
+    spec: MethodSpec,
+    *,
+    agent: AgentMethodPolicy | None = None,
+) -> RemoteMethodEntry:
+    return RemoteMethodEntry(method, handler_ref, spec, agent or AgentMethodPolicy())
+
+
+def build_agent_catalog(
+    entries: tuple[RemoteMethodEntry, ...],
+) -> list[dict[str, object]]:
+    """Project the live GUI's agent-facing method contract, never its handlers."""
+    build_method_specs(entries)  # Reject duplicates at the same boundary as dispatch.
+    return [
+        {
+            "method": entry.method,
+            "description": entry.spec.description,
+            "params": build_input_schema(entry.spec.params),
+            "timeout_seconds": entry.spec.timeout_seconds,
+            "exposure": entry.agent.exposure,
+            "tool_names": list(entry.agent.tool_names),
+            "guard_deps": list(entry.agent.guard_deps),
+            "reveals": list(entry.agent.reveals),
+            "operation_key": entry.agent.operation_key,
+        }
+        for entry in entries
+        if entry.agent.exposure != "internal"
+    ]
 
 
 def build_method_specs(

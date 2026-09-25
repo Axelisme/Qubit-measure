@@ -8,6 +8,35 @@ import pytest
 
 from ._support import MeasureClient, make_client
 
+CATALOG = [
+    {
+        "method": "adapter.list",
+        "description": "List adapters",
+        "params": {"type": "object", "properties": {}},
+        "timeout_seconds": 5.0,
+        "exposure": "rpc",
+        "tool_names": [],
+        "guard_deps": [],
+        "reveals": [],
+        "operation_key": None,
+    },
+    {
+        "method": "adapter.guide",
+        "description": "Read a guide",
+        "params": {
+            "type": "object",
+            "properties": {"adapter_name": {"type": "string"}},
+            "required": ["adapter_name"],
+        },
+        "timeout_seconds": 5.0,
+        "exposure": "tool",
+        "tool_names": ["guide"],
+        "guard_deps": [],
+        "reveals": [],
+        "operation_key": None,
+    },
+]
+
 
 def overview_rpc(method: str, params: dict[str, Any]) -> dict[str, Any]:
     replies: dict[str, dict[str, Any]] = {
@@ -22,6 +51,122 @@ def overview_rpc(method: str, params: dict[str, Any]) -> dict[str, Any]:
         "view.snapshot": {"active_tab_id": None},
     }
     return replies[method]
+
+
+def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = make_client(tmp_path, overview_rpc)
+    client.context.bridge.set_transport(None)
+    client.transport.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {"methods": CATALOG},
+    }
+    client.transport.replies["adapter.list"] = {
+        "ok": True,
+        "result": {"adapters": ["fake"]},
+    }
+
+    def connect(port: int, token: str | None = None) -> str:
+        client.context.bridge.set_transport(client.transport)
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    result = client.call("connect", {"port": 9912})
+    assert result["port"] == 9912
+    assert result["launched"] is False
+    assert result["versions"]["wire"] == client.context.config.wire_version
+    assert result["status"]
+    assert client.transport.sent[:2] == [("wire.version", {}), ("rpc.catalog", {})]
+    assert client.call("rpc_list", {"domain": "adapter"})["methods"] == [
+        {"method": "adapter.list", "description": "List adapters", "tool_names": []},
+        {
+            "method": "adapter.guide",
+            "description": "Read a guide",
+            "tool_names": ["guide"],
+        },
+    ]
+    assert client.call("rpc_describe", {"method": "adapter.list"})["params"] == {
+        "type": "object",
+        "properties": {},
+    }
+    assert client.call("rpc_call", {"method": "adapter.list", "params": {}}) == {
+        "adapters": ["fake"]
+    }
+    with pytest.raises(RuntimeError) as error:
+        client.call(
+            "rpc_call", {"method": "adapter.guide", "params": {"adapter_name": "fake"}}
+        )
+    assert getattr(error.value, "reason", None) == "use_tool"
+    with pytest.raises(RuntimeError) as error:
+        client.call("rpc_describe", {"method": "rpc.catalog"})
+    assert getattr(error.value, "reason", None) == "unknown_method"
+    assert all(
+        method not in {"adapter.guide", "rpc.catalog"}
+        for method, _ in client.transport.sent[2:]
+    )
+
+
+def test_incompatible_wire_refuses_catalog_and_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = make_client(tmp_path)
+    client.context.bridge.set_transport(None)
+    client.transport.replies["wire.version"] = {
+        "ok": True,
+        "result": {"wire_version": -1, "gui_version": 100},
+    }
+
+    def connect(port: int, token: str | None = None) -> str:
+        client.context.bridge.set_transport(client.transport)
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    with pytest.raises(RuntimeError, match="wire"):
+        client.call("connect", {"port": 9912})
+    assert client.transport.sent == [("wire.version", {})]
+    assert not client.context.bridge.is_connected
+
+
+def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = make_client(tmp_path, overview_rpc)
+    first = client.transport
+    first.replies["rpc.catalog"] = {"ok": True, "result": {"methods": CATALOG}}
+    first.replies["adapter.list"] = {"ok": True, "result": {"adapters": ["old"]}}
+    client.context.bridge.set_transport(None)
+    next_transport = type(first)(overview_rpc)
+    next_transport.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {
+            "methods": [{**CATALOG[0], "method": "project.info"}],
+        },
+    }
+    next_transport.replies["project.info"] = {"ok": True, "result": {"chip": "new"}}
+    transports = iter((first, next_transport))
+
+    def connect(port: int, token: str | None = None) -> str:
+        client.context.bridge.set_transport(next(transports))
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    client.call("connect", {"port": 9912})
+    assert client.call("rpc_call", {"method": "adapter.list", "params": {}}) == {
+        "adapters": ["old"]
+    }
+    client.context.bridge.disconnect()
+    assert client.call("rpc_call", {"method": "project.info", "params": {}}) == {
+        "chip": "new"
+    }
+    with pytest.raises(RuntimeError) as error:
+        client.call("rpc_call", {"method": "adapter.list"})
+    assert getattr(error.value, "reason", None) == "unknown_method"
+    assert [method for method, _ in first.sent].count("adapter.list") == 1
+    assert all(method != "adapter.list" for method, _ in next_transport.sent)
 
 
 def configure_events(client: MeasureClient) -> None:

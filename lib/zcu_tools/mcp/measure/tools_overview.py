@@ -10,7 +10,7 @@ from zcu_tools.mcp.measure.tool_context import (
 )
 
 
-def _assemble_overview(
+def assemble_overview(
     ctx: MeasureToolContext,
 ) -> dict[str, Any]:
     """One-shot situational overview of the live GUI, fanned out over existing
@@ -87,9 +87,9 @@ def _assemble_overview(
 def tool_gui_overview(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    """Situational overview of the live GUI (see _assemble_overview)."""
+    """Situational overview of the live GUI (see assemble_overview)."""
     del arguments
-    return _assemble_overview(
+    return assemble_overview(
         ctx,
     )
 

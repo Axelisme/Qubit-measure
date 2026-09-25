@@ -92,7 +92,8 @@ from __future__ import annotations
 # and tab.save_result; preview/apply replies project destination_context.
 # v56: tab.load_data reply includes cfg_backfill applied/not_applied; successful
 # result load does not fail when best-effort Config projection cannot apply.
-WIRE_VERSION = 56
+# v57: rpc.catalog exposes the GUI-owned agent method/policy projection.
+WIRE_VERSION = 57
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -120,4 +121,5 @@ WIRE_VERSION = 56
 # figure/writeback/save-image routing uses the v55 subtab-qualified wire contract.
 # v79: Load projects execution snapshot values into the current tab Config and
 # replaces the owner editor session without reviving stale client handles.
-GUI_VERSION = 79
+# v80: serve the live agent catalog on the existing remote adapter.
+GUI_VERSION = 80

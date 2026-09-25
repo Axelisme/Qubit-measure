@@ -11,6 +11,7 @@ from zcu_tools.mcp.measure import (
     tools_notify,
     tools_operation,
     tools_overview,
+    tools_rpc,
     tools_screenshot,
     tools_soc,
     tools_tab,
@@ -44,6 +45,10 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
             if name in overrides:
                 raise RuntimeError(f"duplicate MCP override tool {name!r}")
             overrides[name] = dict(entry)
+    for name, entry in tools_rpc.build_rpc_tools(context).items():
+        if name in overrides:
+            raise RuntimeError(f"duplicate MCP tool {name!r}")
+        overrides[name] = dict(entry)
     exposure = build_mcp_exposure_plan(context.config, context.method_specs, overrides)
     tools = assemble_tools(
         generate_tools(

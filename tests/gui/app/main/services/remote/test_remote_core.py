@@ -178,6 +178,26 @@ def test_unknown_method_returns_error_code(fx):
         sock.close()
 
 
+def test_catalog_exposes_live_params_and_tool_routing_on_the_control_socket(fx):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(sock, {"id": "catalog", "method": "rpc.catalog", "params": {}})
+        reply = _recv_response(sock)
+        assert reply["ok"] is True
+        methods = {entry["method"]: entry for entry in reply["result"]["methods"]}
+        assert "rpc.catalog" not in methods
+        assert methods["adapter.guide"]["exposure"] == "tool"
+        assert methods["adapter.guide"]["tool_names"] == ["guide"]
+        assert methods["adapter.guide"]["params"]["required"] == ["adapter_name"]
+        assert methods["soc.info"]["exposure"] == "rpc"
+        assert methods["soc.info"]["timeout_seconds"] == 5.0
+
+        _send(sock, {"id": "bad", "method": "adapter.guide", "params": {}})
+        assert _recv_response(sock)["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
 def test_tab_new_list_close_roundtrip(fx):
     sock = _open_client(fx.service.port)
     try:

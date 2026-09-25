@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Callable, MutableMapping
-from typing import Any
+from collections.abc import Callable, Mapping, MutableMapping
+from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.bridge import (
     GuiTransportTimeoutError,
@@ -35,6 +35,18 @@ class GuiRpcError(RuntimeError):
         super().__init__(message)
         self.reason = reason
         self.code = code
+
+
+class CatalogEntry(TypedDict):
+    method: str
+    description: str
+    params: dict[str, object]
+    timeout_seconds: float
+    exposure: Literal["rpc", "tool"]
+    tool_names: list[str]
+    guard_deps: tuple[str, ...]
+    reveals: tuple[str, ...]
+    operation_key: str | None
 
 
 ResolveConnectPortFn = Callable[[MCPBridgeConfig, int | None], int]
@@ -67,6 +79,22 @@ class MeasureMcpSession:
         self._pending_cond = threading.Condition()
         self._last_seen: dict[str, int] = {}
         self._operation_handles: dict[str, int] = {}
+        self._catalog: dict[str, CatalogEntry] = {}
+
+    @property
+    def catalog(self) -> Mapping[str, CatalogEntry]:
+        """Validated methods from this GUI connection, not a server-side method table."""
+        return self._catalog
+
+    def connect_to_gui(
+        self, *, port: int | None, launch: str, clean: bool
+    ) -> dict[str, Any]:
+        """Attach/launch, verify wire compatibility and load the live catalog.
+
+        Returns launched, port and versions. A failed handshake disconnects and
+        never sends a pending mutation to the new GUI.
+        """
+        raise NotImplementedError
 
     @property
     def policy(self) -> MeasureMcpPolicy:
