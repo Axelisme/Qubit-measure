@@ -1,88 +1,39 @@
-# ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
+# ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view（基礎版）
 
 **狀態：** proposed（設計草稿；決定後取代 [[0059]] 的 workflow tool 清單，[[0059]] 的 RPC channel 保留並對量測 agent 開放）
 **關聯：** [[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（user feedback wakeup）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context
 
-使用者需要即時看到 agent 在做什麼，也可能隨時自己動手、再交還給 agent。因此 agent 不能在 GUI 之外另開一條「看不見的」執行路徑：它的每個操作都必須落在 GUI 正在顯示的同一份狀態上。
+使用者需要即時看到 agent 在做什麼，也可能自己動手後再交給 agent。因此 agent 的每個操作都落在 GUI 正在顯示的同一份狀態上（[[0013]]：remote adapter 與 MainWindow 平級，操作同一個 Controller／State）。
 
-現有 measure-gui MCP 已經是這個架構（[[0013]]：remote adapter 與 MainWindow 平級，操作同一個 Controller／State），問題在介面本身：81 個 tool 多數是 wire method 的 1:1 投影，agent 要自己把 tab、subtab、editor_id、handle 串起來；cfg 只能設常數；寫回只能整批套用；工作點、predictor 校正、跨工作點彙總都沒有入口（見附錄 A）。
+現有 measure-gui MCP 的問題在介面形狀：81 個 tool 多數是 wire method 的 1:1 投影，agent 要自己串起 tab、subtab、editor_id、handle，同一件事又有 bundle 與細粒度兩條路。本 ADR 先定義一組穩定的**基礎介面**；進階能力等基礎介面穩定後再逐項加入（見「後續」）。
 
 ## 範圍與前提
 
-- **不改 GUI 的 UIUX。** 不加 agent 專用面板、不標示改動者、不改變存檔等既有行為。
-- **不區分改動者。** agent 與使用者的改動對彼此而言都只是「狀態變了」。
-- **agent 介面只是另一個 view。** 它的「UIUX」是結構化的讀取與操作：用 agent 讀得快的形式呈現同一份狀態，用 agent 好表達的形式送出操作。
-- 需要的後端補充（例如 tab 的 run 歷史、狀態變更摘要）只存在於 GUI 的 service／State 層與 agent 介面，不出現在 GUI 畫面上。
+- **不改 GUI 的 UIUX。** GUI 畫面與既有行為不變。
+- **agent 介面是另一個 view。** agent 的操作改變 GUI 的同一物件，使用者即時看到；使用者的改動 agent 透過讀取狀態得知。不推送變更通知、不區分改動者；使用者改了東西通常也會直接告訴 agent。
+- **基礎介面只包裝現有能力。** 每個 tool 對應 GUI 已有的 service／wire 行為，只做組合與整理回傳，不引入新的領域功能。
 
 ## 設計原則
 
 | # | 原則 | 具體做法 |
 | --- | --- | --- |
-| P1 | **同一份狀態，兩個 view** | agent 的每個操作都改 GUI 的同一物件（tab、cfg 草稿、pane 結果、writeback 草稿、context、device、predictor），GUI 自然即時反映；使用者的操作改變同一狀態，agent 讀得到。 |
-| P2 | **名詞沿用 GUI 物件** | tab、cfg、run、analysis／post、writeback、context、library、device、predictor、work point。agent 與使用者談論的是同一個「Twotone 2」。 |
-| P3 | **草稿先於提交** | cfg 編輯與 writeback 編輯先落在 GUI 的草稿上（使用者看得到），run／apply 才提交。這是 GUI 既有模型（[[0008]]），agent 介面不繞過它。 |
-| P4 | **看得見別人的改動** | 每個讀取回傳目前狀態；`status` 與 `wait` 附上自上次讀取以來的狀態變更摘要；guard 衝突的錯誤直接附上最新值。 |
-| P5 | **一次回覆足以做下一個決定** | run 完成回傳擬合、品質、圖檔路徑、寫回草稿；讀 cfg 時每個值標出來源。 |
-| P6 | **常用操作特化，低頻操作走 RPC** | 約 30 個特化 tool 涵蓋 single_qubit 流程；其餘 wire method 經 RPC channel（[[0059]]）。 |
-| P7 | **非同步只有一種** | 所有長操作回傳 operation id；一個 `wait`、一個 `cancel`。 |
-| P8 | **錯誤可行動、變更可重試** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；會改狀態的 tool 接受 `request_id`，重送不重複執行。 |
-| P9 | **省 context** | 預設精簡，細節用 `include=`；圖一律回檔案路徑；陣列預設降採樣或匯出。 |
+| P1 | **同一份狀態，兩個 view** | agent 操作 GUI 的 tab、cfg 草稿、pane 結果、writeback 草稿、context、device、predictor；需要知道現況就讀狀態。 |
+| P2 | **名詞沿用 GUI 物件** | agent 與使用者談論的是同一個 tab、同一份 writeback 清單。 |
+| P3 | **草稿先於提交** | cfg 與 writeback 的編輯先落在 GUI 草稿上，run／apply 才提交（[[0008]]）。 |
+| P4 | **一次回覆足以做下一個決定** | run 完成回傳擬合摘要、圖檔路徑與 writeback 草稿，不需再串 getter。 |
+| P5 | **一件事一條路** | 常用操作特化成 tool；其餘 wire method 只經 RPC channel；已特化的 method 不能經 RPC 重複呼叫。 |
+| P6 | **非同步只有一種** | 長操作回傳 operation id；一個 `wait`、一個 `cancel`。 |
+| P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
+| P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 
-## Decision：agent 看到的狀態
+## Decision：Tool 集合（24 特化 + 3 RPC）
 
-### cfg 葉子帶來源
-
-讀取 cfg（`tab_get`、`experiments(name)`、`library(name)`）時，每個葉子回傳值與來源，對應 GUI 既有的 value 類型：
-
-```text
-"qub_pulse.freq":        {value: 845.1, source: "expr", expr: "q_f"}
-"sweep.freq":            {start: 815.1, stop: 875.1, expts: 301, source: "expr", expr: "q_f ± 1.5*qf_w"}
-"readout":               {source: "ref", ref: "readout_dpm", overrides: {}}
-"reset":                 {source: "disabled", choices: ["reset_10", "reset_bath"]}
-"relax_delay":           {value: 10.5, source: "const"}
-```
-
-agent 因此知道改了 md 的 `q_f` 之後哪些值會跟著變，也知道哪些模組可以切換。
-
-### cfg 編輯操作
-
-所有編輯 cfg 的 tool 接受同一種操作清單，路徑沿用 [[0050]] 的 canonical path：
-
-```text
-{path: "relax_delay", value: 30.5}                                  設常數
-{path: "sweep.freq", expr: {center: "q_f", span: "40"}}             連結 md 表達式
-{path: "readout", ref: "readout_rf", overrides: {"pulse_cfg.gain": 0.02}}   參照 library 並覆寫
-{path: "reset", enabled: false}                                     關閉選用模組
-{path: "reset", ref: "reset_bath"}                                  開啟並指定模組
-```
-
-### 狀態變更摘要
-
-GUI 端把 EventBus 上的領域事件整理成精簡的變更摘要，`status` 與 `wait` 附上自 agent 上次讀取以來的項目：
-
-```text
-changes: [
-  {what: "tab", tab: "t3", detail: "cfg changed: sweep.freq, relax_delay"},
-  {what: "context", detail: "md.q_f 845.1 → 848.3"},
-  {what: "device", name: "flux", detail: "value 0.5e-3 → 0.52e-3"},
-  {what: "tab", tab: "t4", detail: "opened (twotone)"}
-]
-```
-
-不記錄改動者；摘要只描述狀態變了什麼。
-
-### tab 的 run 歷史
-
-每個 tab 保留自己的 run 歷史（`t3#1`、`t3#2`…），每筆含當次 cfg 快照、環境快照（所有儀器狀態、context label、predictor 狀態）、分析結果與資料檔路徑。GUI 畫面仍只顯示最新結果；歷史只供 agent 介面讀取、比較與重跑。
-
-## Decision：Tool 集合
-
-### A. 連線與全局狀態（4）
+### A. 連線與狀態（3）
 
 **`connect(port?, launch = "if_missing" | "never" | "new", clean = false)`**
-接上 GUI。`"never"` 用於接手使用者正在用的 GUI；`"new"` 用於開發驗證。回傳 `status()` 內容與程式碼版本。
+接上 GUI；`"never"` 用於接手使用者正在用的 GUI，`"new"` 用於開發驗證。回傳 `status()` 內容與程式碼版本。
 
 **`shutdown()`**
 只關閉由本 MCP 啟動的 GUI；接上的 GUI 回 `reason="not_owner"`。
@@ -91,255 +42,224 @@ changes: [
 
 ```text
 {
-  environment: {project, soc, context, work_point, devices: [{name, value, unit, output}], predictor},
+  environment: {project, soc, context, devices: [{name, value, unit, output}], predictor: {loaded}},
   ready: {can_run: bool, missing: [...]},
   tabs: [{tab: "t3", experiment: "twotone/freq", active: true, running: false,
-          last_run: "t3#2", analysis: "ok" | "failed" | null, writeback_pending: 2}],
-  running: [{op, tab, kind, progress, eta_s}],
-  changes: [...自上次讀取以來],
-  prompts: [尚未回覆的 ask_user]
+          has_result: true, analysis: "ok" | "failed" | null, writeback_pending: 2}],
+  running: [{op, tab, kind, progress}]
 }
 ```
 
-`tabs[].active` 是使用者目前在 GUI 上選中的 tab，接手時由此得知使用者正在看什麼。
+`tabs[].active` 是 GUI 上目前選中的 tab。
 
-**`activity(limit = 30, since?)`**
-GUI 端保存的領域事件紀錄，涵蓋 agent 連線之前的操作（開 tab、改 cfg、run、分析失敗、寫回、儀器變動）。接手時用來了解之前發生了什麼。
+### B. 環境（1）
 
-### B. 環境與工作點（3）
-
-**`setup(project?, soc?, wiring?, devices?, request_id?)`** — 宣告期望狀態，冪等：
+**`setup(project?, soc?, context?)`**
+套用給定的部分，未給的不動；回傳 `status()`。
 
 ```text
-setup(
-  project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
-  soc = {kind: "remote", address: "192.168.10.179", port: 8887},
-  wiring = {res_ch: 0, ro_ch: 0, qub_ch: {"4-5": 1, "1-4": 2}},
-  devices = {
-    flux_yoko: {type: "YOKOGS200", address: "USB0::…::INSTR", mode: "current", rampstep: 1e-6},
-    jpa_sgs:   {type: "SGS100A", address: "TCPIP0::192.168.10.89::inst0::INSTR"},
-  },
-)
-→ {changed: ["soc", "devices.flux_yoko"], unchanged: ["project"], problems: []}
+setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
+      soc = {kind: "remote", address: "192.168.10.179"},
+      context = {use: "051115_2.000mA"} | {create: {bind_device: "flux_yoko", clone_from: "current"}})
 ```
 
-已相同的部分不動作；會影響進行中操作的改變回 `reason="busy"`。`wiring` 寫入 md 的通道鍵。`devices.<name> = null` 表示斷線。
+儀器連線走 `device_set`／`devices`（F 類）。
 
-**`work_point(value? | expr? | label?, device = "flux_yoko", clone_from = "current", request_id?)`**
-移到一個工作點：依 `value` 或 md 表達式（例如 `"flx_half + 0.5*(flx_int - flx_half)"`）移動 flux 源，並建立綁定該值的 context（從 `clone_from` 複製 ml／md），或以 `label` 切回既有 context。回傳 context label、實際儀器值與 predictor 在此點的預測（若已載入）。ramp 較久時回傳 operation id。
+### C. 知識庫（3）
 
-**`work_points(fields = ["q_f", "t1", "t2r"], labels?)`**
-跨工作點表格：每個 context 一列，欄位取自各自的 md。
+**`context_get(keys?)`**
+讀 MetaDict；不帶 `keys` 回傳全部。
 
-### C. 知識庫（4）
-
-**`context_get(paths?, history = false)`**
-路徑語法 `md.<key>`、`ml.<module>.<path>`，支援萬用字元。`history=true` 附上該值過去的變動（時間、舊值、新值、若由寫回產生則附 run id）。
-
-**`context_set(values: {path: value | {expr}}, request_id?)`**
-直接寫 md 或 ml 欄位；`{expr: "r_f - q_f"}` 由目前 md 求值後寫入常數。回傳 `{path: {before, after}}`。對應 notebook 中 `md.reset_f = md.r_f - md.q_f` 這類衍生寫入。
+**`context_set(values: {key: value})`**
+寫 MetaDict；回傳 `{key: {before, after}}`。刪除與 ModuleLibrary 的建立、改名、刪除走 RPC。
 
 **`library(name?)`**
-不帶 `name` 列出 modules 與 waveforms（名稱、種類、描述）；帶 `name` 回傳該項 cfg（葉子帶來源）。
-
-**`library_define(name, kind = "module" | "waveform", from, edits?, mode = "create" | "update", request_id?)`**
-`from` 可為 role 模板（`{role: "qub_probe"}`）、某次 run 的 cfg 內模組（`{run: "t3#2", module: "qub_pulse"}`）或既有 library 項目（`{library: "readout_rf"}`）；`edits` 用 cfg 編輯操作。`mode="update"` 只改列出的欄位。對應 notebook 的 `register_module(pi_len=qub_pulse.with_updates(...))` 與 `update_module("readout_dpm", {...})`。
+不帶 `name` 列出 modules 與 waveforms；帶 `name` 回傳該項 cfg。
 
 ### D. 實驗與 tab（9）
 
 **`experiments(name?)`**
-不帶 `name`：列出實驗 `{name, summary, reads_md, writes, ready}`。帶 `name`：guide、cfg（以目前 context 解析、葉子帶來源）、`run_options` schema、`analyze_params` schema（primary 與 post）、分析模式（fit／interactive）、典型耗時。
+不帶 `name`：列出可用實驗與一行說明。帶 `name`：adapter guide、以目前 context 解析的預設 cfg、analyze params（primary 與 post）、分析模式（fit／interactive）。
 
-**`tab_open(experiment, from_tab? | from_run? | from_file?, edits?, request_id?)`**
-在 GUI 開一個新 tab（使用者立即看到）。`from_run="t3#2"` 複製該 run 的 cfg；`from_file` 載入舊資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg 摘要。
+**`tab_open(experiment, from_file?)`**
+在 GUI 開新 tab；`from_file` 載入既有資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg。
 
 **`tab_get(tab, include = ["summary"])`**
-`include` 可選 `cfg`、`result`、`analysis`、`post`、`writeback`、`runs`、`figures`。這是 agent 讀取使用者在某個 tab 做了什麼的方式。
+`include` 可選 `cfg`、`result`、`analysis`、`post`、`writeback`、`figures`。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
 
-**`tab_edit(tab, edits, request_id?)`**
-套用 cfg 編輯操作到該 tab 的 cfg 草稿，GUI 表單即時更新。回傳改變的葉子與其新來源。使用者同時修改同一欄位時回 `reason="conflict"` 並附最新 cfg。
+**`tab_edit(tab, edits)`**
+依序套用 cfg 編輯到該 tab 的 cfg 草稿，GUI 表單即時更新。沿用現有編輯語法（[[0050]]）：
 
-**`tab_run(tab, edits?, run_options?, analyze = "auto" | "none", wait_s = 10, request_id?)`**
-先套 `edits`，再執行；`analyze="auto"` 在 run 完成後做 primary 分析。`wait_s` 內完成回傳 `{run: "t3#3", status, analysis: {fit, quality, figure}, writeback: [...]}`；否則回傳 `{op, run, status: "running", eta_s}`。
+```text
+{path: "relax_delay", value: 30.5}                          常數
+{path: "qub_pulse.freq", value: {__kind: "eval", expr: "q_f"}}   連結 md 表達式
+{path: "sweep.freq.start", value: 815.0}                    sweep 端點
+{path: "readout.ref", value: "readout_rf"}                  切換參照的 library 模組
+```
 
-**`tab_analyze(tab, stage = "primary" | "post", params?, run?)`**
-對目前或指定 run 的資料（重新）分析，結果寫入 GUI 的 analysis／post pane。互動式分析（flux dep 選線）可直接給數值（`params={flx_half, flx_int}`）或 `params={mode: "auto_align"}` 取得候選。回傳 fit、quality、figure 與 writeback 草稿。
+回傳套用數量與草稿是否有效。
 
-**`writeback(tab, stage = "primary" | "post", select?, retarget?, edits?, apply = false, destination?, request_id?)`**
-編輯 GUI 上的 writeback 草稿：`select` 勾選項目、`retarget={"md-2": "qf_w_old"}` 改名、`edits` 改 md 值或模組欄位（cfg 編輯操作）；`apply=true` 寫入 `destination` context（預設目前 context）。回傳每個項目的 `{target, kind, current, proposed, selected, applied}`。
+**`tab_run(tab, edits?, analyze = "auto" | "none", wait_s = 10)`**
+先套 `edits`，再執行；`analyze="auto"` 在 run 完成後做 primary 分析。`wait_s` 內完成回傳 `{status: "finished", analysis: {summary, figure}, writeback: [...]}`；否則回傳 `{op, status: "running"}`。
 
-**`tab_save(tab, data = true, images = ["analysis"], note?)`**
-沿用 GUI 的存檔路徑與檔名規則；`note` 寫入資料檔註解（對應 notebook 的 `save(comment=...)`）。
+**`tab_analyze(tab, stage = "primary" | "post", params?, wait_s = 10)`**
+對目前資料（重新）分析，結果寫入 GUI 的 analysis／post pane。回傳 summary、figure 與 writeback 草稿；互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。
 
-**`data(tab | run, role?, max_points = 200, export = false)`**
-回傳降採樣的軸與數值；`export=true` 回 `.npz` 路徑供 agent 用 Python 自行分析。
+**`writeback(tab, stage = "primary" | "post", items?, apply = false)`**
+編輯 GUI 上的 writeback 草稿：`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}`。
+
+**`tab_save(tab, data = true, images = ["analysis"])`**
+沿用 GUI 的存檔路徑與檔名規則。
+
+**`data(tab, role?, max_points = 200, export = false)`**
+回傳目前結果的降採樣軸與數值；`export=true` 回 `.npz` 路徑供 agent 自行分析。
 
 ### E. 非同步（2）
 
-**`wait(ops?, timeout = 60)`**
-以下任一發生即返回：operation 結束、`ask_user` 得到回覆、出現 error 診斷、相關狀態變更（例如 agent 正在用的 tab 或 context 被改）、timeout。回傳 `{settled: [...], running: [...], changes: [...], prompts: [...]}`；timeout 不是錯誤。
+**`wait(op, timeout = 60)`**
+等待 operation 結束；timeout 不是錯誤，回傳目前進度。使用者在 GUI 送出 feedback 時提早返回（[[0025]]）。結束後回傳該操作的產物（run／analyze 的摘要與 figure、device 的快照），不需再呼叫 getter。
 
 **`cancel(op)`**
-取消任何 operation（run、互動式分析、device ramp）。
+取消任何 operation（run、互動式分析、device 操作）。
 
 ### F. 儀器（2）
 
 **`devices(name?)`**
-清單或單一儀器的完整欄位與最近錯誤。
+清單或單一儀器的欄位與狀態。
 
-**`device_set(name, values, request_id?)`**
-例如 `{value: 0.5e-3}`、`{output: true}`、`{power: -20}`；ramp 類回傳 operation id。
+**`device_set(name, connect? , values?)`**
+`connect = {type, address}` 連線（已連線則略過），`connect = false` 斷線；`values` 例如 `{value: 0.5e-3}`、`{output: true}`。ramp 類回傳 operation id。
 
 ### G. Predictor（2）
 
-**`predictor(action = "info" | "load" | "set_params" | "align" | "calibrate" | "clear", ...)`**
-- `load(path)`：`params.json` 或 fluxdep 結果；
-- `align()`：以 md 的 `flx_half`／`flx_period` 對齊；
-- `calibrate(run | {value, freq_mhz}, transition = [0,1])`：以量測值校正 `flux_bias`（GUI 端 `calibrate_flux_bias` 已存在，補上 wire method）；
-- `info()`：EJ／EC／EL、對齊與 bias 狀態。
+**`predictor(action = "info" | "load" | "set_params" | "clear", ...)`**
+對應現有 predictor wire method。
 
-**`predict(at: {value} | {work_point}, transitions = [[0,1]], kind = "freq" | "curve" | "matrix")`**
-`curve` 回傳一段 flux 範圍的頻率（檔案或降採樣）；可給 sideband 組合（例如 `r_f - f01`）。預測值只當掃描種子，說明中標示 `extrapolated` 等可信度。
+**`predict(value, transition = [0, 1])`**
+回傳預測頻率。只當掃描種子，不當結果寫回。
 
-### H. 使用者與排查（4）
+### H. 使用者（2）
 
-**`ask_user(question, choices?, blocking = true, timeout = 600)`**
-沿用 GUI 既有的 prompt 對話框；`blocking=false` 時答案之後出現在 `status`／`wait` 的 `prompts`。
+**`ask_user(question, timeout = 600)`**
+沿用 GUI 既有的 prompt 對話框。
 
 **`screenshot(target = "window" | tab | dialog)`**
 回 PNG 路徑。
 
-**`diagnose(target? = tab | run | device | "soc", compare_to? = run)`**
-彙整最近錯誤、GUI log 尾段路徑、SoC 與儀器健康狀態；給 `compare_to` 時比較兩個 run 的 cfg、環境快照與分析參數。
-
-**`record_sample(fields? , from_context = true, note?)`**
-把目前工作點的結果（`q_f`、`t1`、`t2r`…與儀器值）加進 result dir 的 `samples.csv`（SampleTable v2，[[0057]]），並保存儀器資訊。
-
 ### I. RPC channel（3）
 
-`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]。對量測 agent 開放，承接低頻但必要的操作：tab 關閉與切換、arb waveform、ModuleLibrary 刪除與改名、MetaDict 刪除、predictor 以外的 value source 讀取、device forget 等。已特化成 tool 的 wire method 由 RPC 呼叫時回 `reason="use_tool"`。
-
-合計 33 個 tool（30 特化 + 3 RPC）。
+`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]。承接低頻但必要的操作：tab 關閉與切換、context 列表、MetaDict 刪除、ModuleLibrary 建立／改名／刪除、cfg editor session、arb waveform、value source、device forget／取消、analyze cancel 等。已特化的 method 由 RPC 呼叫時回 `reason="use_tool"`。
 
 ## 情境演練
 
-### 情境一：給環境參數，多輪量測到取得 T1
-
-使用者：「Q1、SoC 192.168.10.179、flux 用那台 Yoko，偏到 2 mA，量 T1。」
+### 情境一：給環境參數，量到 T1
 
 ```text
 connect()
-setup(project={...}, soc={...}, wiring={...}, devices={flux_yoko: {...}})
-work_point(value=2e-3, clone_from="current")          → context "051115_2.000mA", predictor 0-1: 842.7 MHz
-predictor("align")
-experiments()                                         → twotone/freq ready；time_domain/t1 缺 ml.pi_amp
-tab_open("twotone/freq", edits=[{path: "sweep.freq", expr: {center: "q_f", span: "40"}}])   → t1
-tab_run("t1")                                         → t1#1 fit q_f=845.1 MHz, quality ok
-writeback("t1", apply=true)                           → md.q_f 842.7 → 845.1, md.qf_w → 0.8
-predictor("calibrate", run="t1#1")
-tab_open("rabi/amp_rabi")                             → t2（cfg: qub_pulse.freq expr "q_f"）
-tab_run("t2")                                         → t2#1 quality flags: ["under_sampled"]
-tab_run("t2", edits=[{path: "sweep.gain", value: {start: 0, stop: 0.4, expts: 101}}])
-                                                      → t2#2 pi_gain=0.213
-writeback("t2", select=["md-1", "ml-1", "ml-2"], apply=true)   → md.pi_gain、ml.pi_amp、ml.pi2_amp
-tab_open("time_domain/t1")                            → t3（cfg: pi_pulse ref "pi_amp", relax_delay expr "5*t1"）
-tab_run("t3", wait_s=5)                               → op o7 running, eta 240 s
-wait(["o7"], timeout=300)                             → t3#1 t1=35.4±1.2 us
+setup(project={...}, soc={...}, context={create: {bind_device: "flux_yoko"}})
+device_set("flux_yoko", connect={type: "YOKOGS200", address: "USB0::…"}, values={value: 2e-3})  → op o1
+wait("o1")
+predictor("load", path="result/Q5_2D/Q1/params.json")
+predict(2e-3)                                             → 842.7 MHz
+context_set({q_f: 842.7, qf_w: 15})                       → 作為掃描種子
+tab_open("twotone/freq")                                  → t1（sweep 以 q_f ± 1.5*qf_w 連結）
+tab_run("t1")                                             → fit q_f=845.1 MHz
+writeback("t1", apply=true)
+tab_open("rabi/amp_rabi")                                 → t2
+tab_run("t2")                                             → 掃描範圍不足
+tab_run("t2", edits=[{path: "sweep.gain.stop", value: 0.4}, {path: "sweep.gain.expts", value: 101}])
+writeback("t2", apply=true)                               → md.pi_gain、ml.pi_amp、ml.pi2_amp
+tab_open("time_domain/t1")                                → t3
+tab_run("t3", wait_s=5)                                   → op o2 running
+wait("o2", timeout=300)                                   → t1 = 35.4 us
 writeback("t3", apply=true)
-tab_save("t3", note="t1 = 35.4 us")
-record_sample()
+tab_save("t3")
 ```
 
-使用者在 GUI 上依序看到三個 tab 開啟、表單欄位被改、圖出現、writeback 清單被勾選與套用。
-
-### 情境一'：沿 flux 掃多個工作點
-
-```text
-for v in [1.8e-3, 1.9e-3, 2.0e-3]:
-    work_point(value=v)                              → predictor 預測 q_f
-    tab_run("t1", edits=[{path: "sweep.freq", expr: {center: "q_f", span: "20"}}]) → writeback → predictor("calibrate", ...)
-    tab_run("t2") → writeback → tab_run("t3") → writeback → record_sample()
-work_points(fields=["q_f", "pi_gain", "t1"])
-```
-
-同一組 tab 在每個工作點重跑；cfg 以 md 表達式連結，切換 context 後自動取用該點的值。
-
-### 情境二 a：使用者做到一半，請 agent 接手
-
-使用者：「我在調 twotone，你接著做完到 rabi。」
+### 情境二 a：接手使用者的 tab
 
 ```text
 connect(launch="never")
-status()          → tabs: [{tab: "t4", experiment: "twotone/freq", active: true, analysis: "failed"}]
-activity(limit=10) → t4 run 兩次，第二次分析失敗 fit_diverged
-tab_get("t4", include=["cfg", "runs", "figures"])
-data("t4#2", max_points=150)                  → 峰貼在掃描邊緣
-tab_edit("t4", [{path: "sweep.freq", value: {center: 848.0, span: 20, expts: 201}}])
-tab_run("t4")                                 → t4#3 fit ok
-ask_user("t4#3 找到 q_f=848.3 MHz（見 GUI 圖），要寫回並繼續做 rabi 嗎？", choices=["是", "否"])
-writeback("t4", apply=true) → tab_open("rabi/amp_rabi") → …
+status()                                   → t4 twotone/freq, active, analysis: failed
+tab_get("t4", include=["cfg", "analysis", "figures"])
+data("t4", max_points=150)                 → 峰貼在掃描邊緣
+tab_edit("t4", [{path: "sweep.freq.start", value: 838.0}, {path: "sweep.freq.stop", value: 858.0}])
+tab_run("t4")                              → fit ok
+ask_user("找到 q_f=848.3 MHz（見 GUI 圖），要寫回並繼續做 rabi 嗎？")
+writeback("t4", apply=true)
 ```
-
-agent 接手的是使用者自己的 tab；接手期間使用者若改了 t4 的 cfg，下一次 `wait`／`status` 的 `changes` 會列出。
 
 ### 情境二 b：分析舊資料
 
 ```text
 tab_open("time_domain/t1", from_file="Database/Q5_2D/Q1/…/Q1_t1_0918.hdf5")   → t9
 tab_analyze("t9", params={dual_exp: true})
-data("t9", export=true)                       → .npz，agent 自行擬合比較
-diagnose("t9", compare_to="t3#1")             → readout gain 與 flux 值不同
+data("t9", export=true)                    → .npz，agent 自行擬合比較
 ```
 
 ### 情境二 c：排查問題
 
 ```text
-diagnose("t4")
-  → soc ok；jpa_sgs output=false；與上次成功的 t1#1 相比：jpa_sgs.output true → false
+tab_get("t4", include=["cfg", "figures"])
+devices()                                  → jpa_sgs output=false
 ask_user("JPA pump 目前關閉，要打開嗎？")
-device_set("jpa_sgs", {output: true})
-tab_run("t4")                                 → 峰值恢復
+device_set("jpa_sgs", values={output: true})
+tab_run("t4")
 ```
 
 ## 對現有架構的需求
 
-全部位於 GUI service／State 層與 MCP，GUI 畫面不變。
+基礎介面只組合現有能力：
 
-| 需求 | 現況 | 需要做的事 |
-| --- | --- | --- |
-| cfg 葉子來源投影 | value 類型已有（`EvalValue`、`ReferenceValue`、optional module） | 讀取時投影成 `{value, source}` |
-| cfg 編輯操作 | `editor.set_field` 以 canonical path 設值 | 支援 expr、ref + overrides、enable／disable |
-| 狀態變更摘要 | EventBus 事件已由 MCP piggyback | GUI 端整理成精簡摘要，依 agent 上次讀取位置提供 |
-| activity 紀錄 | 無持久紀錄 | GUI 端保存近期領域事件 |
-| tab run 歷史 | 每個 tab 只有最新結果 | 保留歷史 run 的 cfg 與環境快照、分析結果、資料檔路徑 |
-| writeback 部分更新模組 | `ModuleWriteback` 覆寫整個模組 | 支援 update 模式 |
-| 衍生寫入 | 無 | `context_set` 的 expr |
-| library 由 run cfg 建立 | writeback 內部已有 `module_cfg_to_value` | 開放為獨立操作 |
-| work point 組合操作 | context 綁定儀器值已有（`context.new(bind_device)`） | flux 移動 + context 建立的組合；跨 context 表格 |
-| predictor 校正與曲線 | `calibrate_flux_bias`、`predict_freq_curve` 在 service 層 | 補 wire method |
-| 互動式分析數值入口 | 只能在 GUI 拖線 | adapter 接受數值參數或 auto-align 候選 |
-| 存檔註解 | 無 | 資料檔 comment |
-| 樣品表 | main GUI 無 | `record_sample` 寫 SampleTable v2 |
-| `request_id` 冪等 | 無 | MCP session 記錄近期 request_id 與結果 |
+| Tool | 組合的現有能力 |
+| --- | --- |
+| `status` | `gui_overview` + tab 清單 |
+| `setup` | `startup.apply`、`soc.connect`、`context.new`／`context.use` |
+| `experiments` | `adapter.list`、`adapter.guide` 與預設 cfg |
+| `tab_open` | `tab.new`（+ `tab.load_data`） |
+| `tab_get` | `tab.snapshot`、`tab.get_cfg`、analyze／post result、writeback preview、figure |
+| `tab_edit` | `tab.set_cfg`（既有編輯語法） |
+| `tab_run` | `tab.set_cfg` + `tab.run_start` + short-wait + `tab.analyze` |
+| `tab_analyze` | `tab.analyze`／`tab.post_analyze` + short-wait |
+| `writeback` | `tab.writeback_set` + `tab.writeback_apply` |
+| `wait`／`cancel` | `operation.await`；各類 cancel 合一 |
+| `device_set` | `device.connect`／`disconnect`／`setup` |
+| `predictor`／`predict` | 既有 predictor wire method |
+
+唯一新增的讀取是 `data`（run result 的降採樣與匯出）。
+
+## 後續（基礎介面穩定後再評估）
+
+附錄 A 的分析指出以下能力有需要，但都屬進階介面，暫不納入：
+
+- 讀 cfg 時每個葉子標出來源（常數、表達式、參照、關閉），以及開關選用模組的編輯操作
+- writeback 以更新模式寫入模組部分欄位；由 run cfg 建立 library 模組
+- 衍生值寫入（`reset_f = r_f - q_f`）
+- 工作點操作與跨工作點表格
+- predictor 校正 flux bias、曲線與 matrix element
+- 互動式分析的數值入口
+- tab 的 run 歷史、排查用的 run 比較
+- 狀態變更摘要、activity 紀錄
+- 存檔註解、樣品表（SampleTable）
+- `request_id` 冪等重試
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 30 個特化 tool 取代。
-- [[0059]] 的 RPC channel（`rpc.catalog`、guard policy 宣告、`rpc_*`）保留並對量測 agent 開放，承接低頻操作；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 24 個特化 tool 取代。
+- [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
 
-- **以量測為名詞、原子化的 `measure()`（本 ADR 初版）**：中間步驟（改參數、挑寫回）不落在 GUI 草稿上，使用者只看到結果突然出現，無法即時跟隨或中途介入。
-- **在 GUI 加 agent 專用 UI（標示改動者、agent 面板、自主程度開關）**：需要改 GUI UIUX；共用狀態加上變更摘要已足以讓雙方看見彼此的改動。
-- **維持現有 81 個 tool**：名詞正確但粒度太細，缺 cfg 表達式、寫回審核、工作點、predictor 校正等能力。
-- **Code execution**：繞過 permit、guard 與硬體互斥，不可接受；`data(export=true)` 提供離線分析的出口。
+- **以量測為名詞、原子化的 `measure()`**：中間步驟不落在 GUI 草稿，使用者無法即時跟隨或中途介入。
+- **在 GUI 加 agent 專用 UI 或推送變更通知**：需要改 GUI，且 agent 讀狀態即可得知改動。
+- **維持現有 81 個 tool**：名詞正確但粒度太細、雙路徑多。
+- **Code execution**：繞過 permit、guard 與硬體互斥，不可接受。
 
 ## 待決問題
 
-1. tab run 歷史的保存範圍與上限（只在記憶體，或隨 session 持久化）。
-2. 狀態變更摘要的粒度：每個 cfg 欄位一筆，或每個 tab 合併成一筆。
-3. `work_point` 是否在切換前自動關閉或保留目前的 tab（目前設計為保留，cfg 以表達式跟著新 context）。
-4. 實作分期：建議先做 cfg 來源投影與編輯操作、`tab_run`／`tab_analyze`／`writeback`、狀態變更摘要，再做 work point、predictor、run 歷史、activity、diagnose。
+1. `tab_run` 預設 `analyze="auto"` 是否合適，或預設只跑不分析。
+2. `wait` 回傳產物的大小上限（例如 figure 只回路徑、summary 截斷長度）。
+3. 實作順序：建議先做 `status`、`tab_*`、`writeback`、`wait`，再做 `setup`、`experiments`、`data`、`devices`、`predictor`。
 
 ## 附錄 A：使用者流程分析（`notebook_md/single_qubit.md` 與 measure-gui）
 
@@ -408,7 +328,7 @@ tab_run("t4")                                 → 峰值恢復
 11. **工作點彙總（W11）** 與存檔註解（W10）缺席：需要 `record_sample` 與 measurement 的 `note`。
 12. **輔助儀器狀態（JPA pump 開關）** 直接影響讀取品質；每個 measurement 的環境快照需包含所有儀器，`diff` 才抓得到。
 
-### A.5 修正（已併入上方 Decision）
+### A.5 修正方向（基礎部分已併入 Decision，其餘列於「後續」）
 
 | 修正 | 內容 |
 | --- | --- |
