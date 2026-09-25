@@ -25,25 +25,34 @@ measure-gui MCP 目前暴露 81 個 tool：50 個由 `METHOD_SPECS` 1:1 generate
 
 一個 wire method 對 agent 恰好只有一個入口：綁定到某個 workflow tool、經 RPC channel 呼叫，或 `internal`（agent 不可達）。三者互斥，不存在雙路徑。
 
-**Workflow tool 的收錄準則**，至少符合其一：
+Workflow tool 依七類主要操作組織。每類只特化常用操作，其餘能力留在 RPC channel；一個操作被特化，須至少符合其一：
 
-- 屬於 run-measure-gui skill 教的 primary flow；
-- 是 MCP-only 組合（bundle、lifecycle、operation wait），wire 上沒有單一對應；
-- 直接改變硬體狀態，typed schema 與說明文字本身是安全措施。
+- 屬於 run-measure-gui skill 教的 primary flow，或是該類別中最常用的讀取；
+- 是 MCP-only 組合（bundle、lifecycle、operation wait、short-wait START），wire 上沒有單一對應；
+- 直接改變或停止硬體狀態，typed schema 與說明文字本身是安全措施。
 
-依此準則的初始清單（約 26 個，最終以待決問題 1 的使用數據校正）：
+初始清單（35 個 workflow tool，加上 RPC channel 3 個與 dev 1 個；最終以待決問題 1 的使用數據校正）：
 
-| 類別 | Tools |
-| --- | --- |
-| Lifecycle / orient | `gui_launch`、`gui_stop`、`gui_bridge_connect`、`gui_bridge_detach`、`gui_overview`、`gui_screenshot` |
-| Setup | `gui_soc_connect`、`gui_project_apply`、`gui_context_create`、`gui_context_switch` |
-| Tab workflow | `gui_tab_open`、`gui_tab_run`、`gui_tab_analyze_review`、`gui_tab_get_cfg`、`gui_tab_set_cfg`、`gui_tab_get_figure`、`gui_tab_writeback_apply`、`gui_tab_save_data`、`gui_tab_save_image` |
-| Operation | `gui_op_wait`（吸收 `gui_op_poll`：`timeout=0` 即 poll） |
-| Hardware | `gui_device_connect`、`gui_device_apply` |
-| User | `gui_prompt_user` |
-| RPC channel | `gui_rpc_list`、`gui_rpc_describe`、`gui_rpc_call` |
+| 類別 | 特化的 workflow tools | 留在 RPC channel 的能力 |
+| --- | --- | --- |
+| **GUI 生命週期** | `gui_launch`、`gui_stop`、`gui_bridge_connect`、`gui_bridge_detach` | — |
+| **Overview 讀取** | `gui_overview`、`gui_screenshot` | `resources.versions`、`tab.list_all`、`tab.snapshot`、`soc.info`、`result_scope.list` |
+| **Project 操作** | `gui_project_apply`、`gui_soc_connect`、`gui_context_list`、`gui_context_switch`、`gui_context_create` | — |
+| **Tab 操作** | open：`gui_tab_open`<br>cfg：`gui_tab_get_cfg`、`gui_tab_set_cfg`<br>run：`gui_tab_run`、`gui_tab_run_cancel`<br>analyze：`gui_tab_analyze_review`<br>post：`gui_tab_post_analyze_review`<br>writeback：`gui_tab_writeback_apply`<br>save：`gui_tab_save_data`、`gui_tab_save_image`<br>figure：`gui_tab_get_figure`<br>operation：`gui_op_wait` | `tab.new`、`tab.close`、`tab.set_active`、`tab.load_data`、`analyze.cancel`、`tab.get_analyze_params`、`tab.get_analyze_result`、`tab.get_post_analyze_params`、`tab.get_post_analyze_result`、`tab.writeback_preview`、`tab.writeback_set`、`adapter.list`、`adapter.guide` |
+| **Inspect 操作** | `gui_context_ml_list`、`gui_context_ml_inspect`、`gui_context_md_read` | `value.list`、`value.read`、`context.ml_list_roles`、`arb_waveform.list`、`arb_waveform.preview` |
+| **Device 操作** | `gui_device_list`、`gui_device_connect`、`gui_device_apply`、`gui_device_disconnect` | `device.snapshot`、`device.setup_spec`、`device.active_operations`、`device.cancel_operation`、`device.forget` |
+| **Predictor 操作** | `gui_predictor_info`、`gui_predictor_predict` | `predictor.load`、`predictor.set_model_params`、`predictor.clear` |
+| 使用者互動 | `gui_prompt_user` | — |
 
-其餘能力（context ml/md、editor、predictor、arb waveform、value、device 查詢與取消、tab 細粒度讀寫、post-analyze 等）改經 RPC channel。原本只為包裝單一 wire method 而存在的 hand-written tool 移除；仍帶 MCP 端組合邏輯者（例如 `gui_context_ml_inspect` 的 open/read/discard）在遷移時逐一判定：升為 workflow tool，或把組合下放為 GUI 端 wire method。
+不屬於七類的寫入能力全部只經 RPC channel：ModuleLibrary 建立、改名、刪除（`context.ml_*`）、MetaDict 寫入與刪除（`context.md_set_attr`、`context.md_del_attr`）、cfg editor session（`editor.*`）、arbitrary waveform 寫入（`arb_waveform.set`）。
+
+與現況相比的變動：
+
+- `gui_op_wait` 吸收 `gui_op_poll`，`timeout=0` 即 poll。
+- `gui_tab_post_analyze_review` 是新組合，對稱於 `gui_tab_analyze_review`：post-analyze START 加上 `post_analysis` pane 的 writeback 預覽。
+- `gui_tab_run_start`、`gui_tab_analyze_start`、`gui_tab_post_analyze_start` 的 short-wait START 由對應 bundle 承接，不再另列 tool。
+- `gui_context_md_write`、`gui_context_md_delete`、`gui_editor_*`、`gui_debug_resource_versions` 與 50 個 generated tool 中未列上表者移除，改經 RPC channel。
+- 名稱沿用現有 tool；`gui_context_ml_list`、`gui_device_list`、`gui_predictor_info`、`gui_predictor_predict` 由 generated 轉為 `TOOL` exposure。
 
 ### 2. `rpc.catalog`：catalog 由 live GUI 提供
 
@@ -77,9 +86,110 @@ GUI 新增 wire method `rpc.catalog`，回傳每個非 `internal` method 的 `me
 
 不提供在 GUI process 執行任意 Python 的 tool。所有 agent 動作都經 wire method、permit、version guard 與 operation handle；這是 measure-gui 與 Blender 類 app 在安全模型上的根本差異。
 
+## 使用範例
+
+以下回傳內容為示意。
+
+### GUI 生命週期與 Overview
+
+```text
+gui_launch(port=8765, clean=true)          → {note, overview}
+gui_overview()                             → {state: {has_project, has_context, has_active_context, has_soc}, tabs, running, ...}
+gui_screenshot(target="window")            → {path}
+gui_stop()                                 → {stopped: true}
+```
+
+### Project 操作
+
+```text
+gui_project_apply(chip_name="Q12_2D", qub_name="Q1", res_name="R1")
+gui_soc_connect(kind="mock")
+gui_context_list()                         → {active: "flux_0p5", labels: [...]}
+gui_context_switch(label="flux_0p5")
+```
+
+### Tab 操作：run → analyze → post → writeback → save
+
+```text
+gui_tab_open(adapter_name="t1_rabi")                               → {tab_id: "t1", cfg, guide}
+gui_tab_run(tab_id="t1", edits={"gain.sweep.stop": 0.8})           → {status: "finished", handle, figure}
+gui_tab_analyze_review(tab_id="t1")                                → {summary, writeback: [...]}
+gui_tab_post_analyze_review(tab_id="t1", updates={})               → {status: "pending", handle: 17}
+gui_op_wait(handle=17, timeout=60)                                 → {status: "finished", summary, writeback: [...]}
+gui_tab_writeback_apply(tab_id="t1", subtab_id="analysis")         → {applied, destination_context}
+gui_tab_save_data(tab_id="t1")
+gui_tab_save_image(tab_id="t1", subtab_id="analysis")
+gui_tab_get_figure(tab_id="t1", subtab_id="post_analysis")         → {path}
+```
+
+`gui_tab_run_cancel()` 在任何時點停止目前的 run（同一時間只有一個 run）；已綁定 workflow tool 的 method 不可經 RPC channel 繞過：
+
+```text
+gui_rpc_call(method="tab.run_start", params={tab_id: "t1"})
+→ tool error reason="use_tool": "tab.run_start is bound to workflow tool gui_tab_run"
+```
+
+### Inspect 操作
+
+```text
+gui_context_ml_list()                                          → {modules: [{name, kind}], waveforms: [...]}
+gui_context_ml_inspect(item_kind="module", name="pi_q")        → {cfg}
+gui_context_md_read(keys=["r_f", "q_f"])                       → {values: {r_f: 5923.1, q_f: 842.7}}
+gui_rpc_call(method="value.read", params={key: "device.flux.value", type: "float"})
+```
+
+### Device 操作
+
+```text
+gui_device_list()                                                      → [{name, type_name, connected, ...}]
+gui_device_connect(name="flux", type_name="YOKOGS200", address="GPIB0::1::INSTR")
+gui_device_apply(name="flux", updates={"value": 0.5e-3})               → {status: "pending", handle: 21}
+gui_op_wait(handle=21, timeout=30)
+gui_device_disconnect(name="flux")
+```
+
+### Predictor 操作
+
+```text
+gui_predictor_info()                                           → {loaded: true, ...}
+gui_predictor_predict(device_value=0.5e-3, from_level=0, to_level=1)   → {freq_mhz: 842.7}
+```
+
+安裝 predictor 屬低頻操作，經 RPC channel：
+
+```text
+gui_rpc_describe(method="predictor.load")                      → {params: {path: string, flux_bias?: number}}
+gui_rpc_call(method="predictor.load", params={path: "params/Q1_predictor.json"})
+```
+
+### RPC channel 的長尾操作
+
+```text
+gui_rpc_list(domain="context")                                 → [{method: "context.ml_rename_module", summary}, ...]
+gui_rpc_describe(method="context.ml_rename_module")            → {params: {old: string, new: string}}
+gui_rpc_call(method="context.ml_rename_module", params={old: "pi_q", new: "pi_q_v2"})
+```
+
+參數型別錯誤由 GUI 端 `validate_params` 以 `invalid_params` 回報；宣告了 guard deps 的 method 在資源被 GUI 端改動後回報 `stale_version`，行為與 workflow tool 相同。
+
+### 開發時的 e2e 循環
+
+agent 在 lane 裡新增 GUI 端 wire method `tab.duplicate` 後，不重啟 MCP server 即可驗證：
+
+```text
+gui_stop()
+gui_launch(worktree="/path/to/lane", clean=true)      # worktree 參數另案處理
+gui_soc_connect(kind="mock")
+gui_rpc_describe(method="tab.duplicate")               # 新 method 已在 catalog 中
+gui_rpc_call(method="tab.duplicate", params={tab_id: "t1"})   → {tab_id: "t2"}
+gui_screenshot()
+```
+
+改動落在 workflow tool 或 MCP 端程式碼時，仍需重啟 MCP server。
+
 ## Consequences
 
-- agent 預設面對約 26 個 tool，primary flow 沒有替代路徑；長尾能力經 `gui_rpc_list` 按需發現。
+- agent 預設面對 39 個 tool（35 workflow + 3 RPC channel + 1 dev），依七類操作組織，primary flow 沒有替代路徑；長尾能力經 `gui_rpc_list` 按需發現。
 - GUI 端 wire method 的新增與修改，經 `gui_stop` + `gui_launch` 即可由 agent 以 `gui_rpc_call` e2e 驗證；只有 workflow tool 與 MCP 端程式碼的改動仍需重啟 MCP server。搭配 `gui_launch` 指定 worktree（另案）即可覆蓋 lane 開發。
 - 長尾操作多一次 `gui_rpc_describe` 往返；MCP 端失去長尾 method 的 JSON schema 型別提示，錯誤延後到 GUI 端 `INVALID_PARAMS`。
 - wire 新增 `rpc.catalog`，`WIRE_VERSION` 遞增。
