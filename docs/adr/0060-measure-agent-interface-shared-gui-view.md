@@ -358,11 +358,13 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `device_set` | `device.connect`／`disconnect`／`setup` |
 | `predictor`／`predict` | 既有 predictor wire method |
 
-需要補的只有三項，都不改 GUI 畫面：
+需要補的項目，都不改 GUI 畫面：
 
 - `data`：run result 的降採樣與匯出。
 - 子 tab 切換：view-only wire method（與 `tab.set_active` 同性質），供各階段 tool 讓 GUI 跟隨到對應子 tab。
 - cfg 格式投影：`tab.get_cfg` 目前回傳值與路徑種類，需補上型別、ref 可選項與鎖定狀態。
+- cfg 編輯語法：sweep 整體修改與衝突檢查、sweep 端點接受 md 表達式、錯誤清單。
+- `context.new` 接受自訂 `label`。
 
 ## 後續（基礎介面穩定後再評估）
 
