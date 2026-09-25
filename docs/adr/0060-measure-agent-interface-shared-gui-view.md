@@ -1,6 +1,6 @@
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view（基礎版）
 
-**狀態：** proposed（設計草稿；決定後取代 [[0059]] 的 workflow tool 清單，[[0059]] 的 RPC channel 保留並對量測 agent 開放）
+**狀態：** accepted（未實作）；取代 [[0059]] 的 workflow tool 清單，[[0059]] 的 RPC channel 保留並對量測 agent 開放。
 **關聯：** [[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context

@@ -48,6 +48,8 @@
 - [0047 — Typed expected-error taxonomy](0047-typed-expected-error-taxonomy.md)：caller-correctable failure 由 producer 以 closed category 顯式 opt in，transport 只投影。
 - [0049 — Subscriber-aware lazy push](0049-subscriber-aware-lazy-push.md)：endpoint以two-phase recipient transaction在matching subscriber存在時才materialize/encode一次，並維持unsubscribe/disconnect線性化。
 - [0052 — Event meta 與多前端 attribution](0052-event-meta-and-frontend-attribution.md)：bus 為事件蓋章 `EventMeta(seq, origin)`，origin 由 dispatch 邊界宣告、operation 記錄顯式攜帶；coalescing 屬 subscriber-side；wire 封套 additive 加 seq/origin。
+- [0059 — measure MCP RPC channel](0059-measure-mcp-workflow-tools-and-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；guard policy 隨 method 宣告；workflow tool 清單已由 [[0060]] 取代。
+- [0060 — Agent interface as second view](0060-measure-agent-interface-shared-gui-view.md)：量測 agent 經 35 個特化 tool 操作與 GUI 共用的狀態；一個判斷點一個 tool，寫入操作使 GUI 跟隨到對應子 tab。
 
 ## Persistence
 

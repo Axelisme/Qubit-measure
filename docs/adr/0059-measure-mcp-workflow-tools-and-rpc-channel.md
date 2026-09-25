@@ -1,6 +1,6 @@
 # ADR-0059：measure-gui MCP 以 workflow tools 加 live RPC channel 取代 1:1 generated tools
 
-**狀態：** proposed（草稿，待使用者決定「待決問題」後改為 accepted）
+**狀態：** accepted（未實作），部分被 [[0060]] 取代：決策 1 的 workflow tool 清單由 [[0060]] 的特化 tool 取代；決策 2–5（RPC channel、guard policy 宣告、exposure、不採用 code execution）沿用，RPC channel 對量測 agent 開放。
 **關聯：** 修訂 [[0014]] 決策 4 的工具生成方式；沿用 [[0002]]（version guard / operation handle）、[[0013]]（remote adapter 為第二個 View）、[[0035]] 與 [[0047]]（tool error 契約）。
 
 ## Context
@@ -206,6 +206,4 @@ gui_screenshot()
 
 ## 待決問題
 
-1. **Workflow tool 清單以實際使用數據校正。** `logs/mcp/measure/*-calls.jsonl`（本機 call log，未進 repo）統計各 tool 的呼叫次數與序列，確認初始清單有無遺漏或多收。
-2. **guard policy 移往 GUI 端是否接受。** 這改變 policy 的所在 process，但不改變 [[0014]] 的共用層邊界。
-3. **移除 tool 的過渡方式。** 本 repo 預設不加相容邏輯；若有外部腳本或 skill 版本依賴舊名，需要一次性切換的時間點。
+原待決問題 1（以使用數據校正 workflow tool 清單）與 3（移除 tool 的過渡）隨 [[0060]] 取代決策 1 而失效：tool 清單改由逐一討論定案，舊 tool 一次切換、不保留相容別名。原待決問題 2（guard policy 移往 GUI 端）依決策 3 接受。
