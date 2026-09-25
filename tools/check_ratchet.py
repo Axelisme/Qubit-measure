@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,22 +145,36 @@ def ruff_counts(tree: Path, files: Iterable[str]) -> Mapping[tuple[str, str], in
     return counts
 
 
-def pyright_counts(tree: Path, files: Iterable[str]) -> Mapping[tuple[str, str], int]:
-    """Return {(path, rule): count} from pyright over `files` that exist in `tree`."""
-    present = [name for name in files if (tree / name).exists()]
-    if not present:
+def pyright_counts(
+    tree: Path, files: Iterable[str] | None
+) -> Mapping[tuple[str, str], int]:
+    """Count errors in existing files, or the configured whole tree for None.
+
+    Both trees use the invoking worktree's interpreter and installed dependencies.
+    The extracted base has no environment of its own.
+    """
+    present = (
+        [name for name in files if (tree / name).exists()] if files is not None else []
+    )
+    if files is not None and not present:
         return {}
     completed = subprocess.run(
-        ("pyright", "--outputjson", *present),
+        ("pyright", "--pythonpath", sys.executable, "--outputjson", *present),
         cwd=tree,
         check=False,
         capture_output=True,
         text=True,
     )
-    if not completed.stdout:
-        raise RatchetError(f"pyright produced no output in {tree}")
+    if completed.returncode not in (0, 1):
+        raise RatchetError(f"pyright failed in {tree}: {completed.stderr.strip()}")
+    try:
+        diagnostics = json.loads(completed.stdout)["generalDiagnostics"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise RatchetError(f"pyright produced an invalid report in {tree}") from error
+    if not isinstance(diagnostics, list):
+        raise RatchetError(f"pyright produced invalid diagnostics in {tree}")
     counts: collections.Counter[tuple[str, str]] = collections.Counter()
-    for item in json.loads(completed.stdout)["generalDiagnostics"]:
+    for item in diagnostics:
         if item.get("severity") != "error":
             continue
         path = Path(item["file"])
@@ -262,7 +277,35 @@ def regressions(
     return tuple(sorted(found, key=lambda item: (-item.increase, item.path, item.rule)))
 
 
-def run(root: Path, base: str | None, detectors: Iterable[str]) -> dict[str, Any]:
+def quality_settings(tree: Path, filename: str) -> dict[str, Any]:
+    """Flatten quality settings for review, without guessing policy equivalence."""
+    with (tree / filename).open("rb") as stream:
+        tool = tomllib.load(stream).get("tool", {})
+    settings: dict[str, Any] = {}
+
+    def flatten(prefix: str, value: Any) -> None:
+        if isinstance(value, dict) and value:
+            for key, child in value.items():
+                flatten(f"{prefix}.{key}", child)
+        else:
+            settings[prefix] = value
+
+    for name in ("ruff", "pyright", "pytest"):
+        if name in tool:
+            flatten(f"pyproject.toml[tool.{name}]", tool[name])
+    imports = tree / ".importlinter"
+    if imports.is_file():
+        settings[".importlinter"] = imports.read_text(encoding="utf-8")
+    return settings
+
+
+def run(
+    root: Path,
+    base: str | None,
+    detectors: Iterable[str],
+    *,
+    full_pyright: bool = False,
+) -> dict[str, Any]:
     resolved = resolve_base(root, base)
     touched = changed_paths(root, resolved)
     files = tuple(
@@ -273,22 +316,48 @@ def run(root: Path, base: str | None, detectors: Iterable[str]) -> dict[str, Any
         )
     )
     found: dict[str, tuple[Regression, ...]] = {}
+    configuration_changes: list[dict[str, Any]] = []
+    selected = tuple(detectors)
+    if full_pyright and "pyright" not in selected:
+        raise RatchetError("--full-pyright requires the pyright detector")
 
     # pyproject.toml alone can widen a per-file-ignore or turn a Pyright rule off
     # repository-wide without touching one line of Python, so a candidate that
     # changes only the configuration still has to be judged.
-    if files or "pyproject.toml" in touched:
-        with tempfile.TemporaryDirectory(prefix="ratchet-") as scratch:
+    config_touched = bool({"pyproject.toml", ".importlinter"} & touched)
+    if files or config_touched or full_pyright:
+        scratch_root = root / ".agent_state" / "ratchet"
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="comparison-", dir=scratch_root
+        ) as scratch:
             destination = Path(scratch)
             extract_base_tree(root, resolved, destination)
             tree = destination / "tree"
-            for name in detectors:
-                detector = _DETECTORS[name]
-                found[name] = regressions(detector(tree, files), detector(root, files))
+            if config_touched:
+                before = quality_settings(tree, _BASE_CONFIG)
+                after = quality_settings(root, "pyproject.toml")
+                configuration_changes = [
+                    {"path": key, "before": before.get(key), "after": after.get(key)}
+                    for key in sorted(before.keys() | after.keys())
+                    if before.get(key) != after.get(key)
+                ]
+            for name in selected:
+                if name == "pyright" and full_pyright:
+                    found[name] = regressions(
+                        pyright_counts(tree, None), pyright_counts(root, None)
+                    )
+                else:
+                    detector = _DETECTORS[name]
+                    found[name] = regressions(
+                        detector(tree, files), detector(root, files)
+                    )
 
     return {
         "base": resolved,
         "changed_files": list(files),
+        "pyright_scope": "full" if full_pyright else "changed",
+        "configuration_changes": configuration_changes,
         "detectors": {
             name: {
                 "regression_count": len(items),
@@ -321,10 +390,20 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted(_DETECTORS),
         help="restrict to one detector; repeatable (default: all)",
     )
+    parser.add_argument(
+        "--full-pyright",
+        action="store_true",
+        help="compare whole-tree Pyright errors, including unchanged callers (slow)",
+    )
     arguments = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     try:
-        report = run(root, arguments.base, arguments.detector or sorted(_DETECTORS))
+        report = run(
+            root,
+            arguments.base,
+            arguments.detector or sorted(_DETECTORS),
+            full_pyright=arguments.full_pyright,
+        )
     except RatchetError as error:
         print(f"ratchet failed: {error}", file=sys.stderr)
         return 2

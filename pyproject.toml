@@ -70,6 +70,8 @@ dev = [
   "ruff",
   "import-linter>=2.15",
 ]
+# Opt-in diagnostics; ordinary development does not need audit/network tools.
+quality = ["pytest-randomly", "deptry", "pip-audit"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -81,16 +83,21 @@ package-dir = { "" = "lib" }
 packages = ["zcu_tools"]
 
 [tool.ruff.lint]
-# E402 stays global: several MCP server scripts inject the lib path before their
-# first import (a legitimate module-level ordering). F401 is no longer global — it
-# is allowed only in __init__.py barrel files (intentional re-exports); every other
-# file must keep its imports live, so dead imports surface.
-ignore = ["E402"]
+# E402 is checked incrementally like other existing debt. Entry points with
+# intentional import ordering retain their local, reviewable suppressions.
+# F401 is allowed only in __init__.py barrel files for intentional re-exports.
 # Structural gates. These constrain shape, not style: function size, branch count,
 # parameter count, dead code and import direction. They are enforced as a ratchet
 # against a baseline (existing violations are tolerated, new ones are not), so the
 # thresholds below state the standard rather than describing the current tree.
 extend-select = [
+  "I",      # keep import checks active when judging unused noqa directives
+  "PGH003", # blanket type: ignore hides unrelated type errors
+  "PGH004", # noqa must name the suppressed rule
+  "RUF100", # obsolete noqa directives
+  "PT011",  # broad pytest.raises needs a distinguishing message
+  "PT012",  # setup inside pytest.raises can satisfy the wrong expectation
+  "BLE001", # broad catches require review of isolation/recovery responsibility
   "UP006",
   "UP007",
   "UP035",
@@ -140,16 +147,18 @@ max-args = 6
 include = ["lib", "tests", "script", "tools"]
 executionEnvironments = [
   { root = "lib", extraPaths = ["lib"] },
-  { root = "tests", extraPaths = ["lib"] },
+  { root = "tests", extraPaths = ["lib", "tools"] },
   { root = "script", extraPaths = ["lib"] },
-  { root = "tools", extraPaths = ["lib"] },
+  { root = "tools", extraPaths = ["lib", "tools"] },
 ]
 # strict, minus the rules whose diagnostics are produced by untyped third-party
 # packages (qick, pyvisa, scqubits, qtpy) rather than by this repository. Measured
 # on lib/: the reportUnknown* family is 59% of strict output and is almost entirely
 # third-party in origin; with it disabled every remaining diagnostic is own-code.
 typeCheckingMode = "strict"
-reportMissingImports = "none"
+# Missing optional-profile packages remain visible debt in the ratchet; missing
+# imports and missing third-party stubs are different diagnostics.
+reportMissingImports = "error"
 reportMissingTypeStubs = "none"
 reportUnknownArgumentType = "none"
 reportUnknownVariableType = "none"
@@ -185,7 +194,9 @@ testpaths = ["tests"]
 # Pin the temporary-file root to the invoking worktree so no caller has to create
 # a basetemp parent first. `uv run --directory <worktree>` fixes the cwd, so parallel
 # lanes stay isolated. pytest clears this directory at session start.
-addopts = "--import-mode=importlib --basetemp=.pytest-tmp"
+# Installing the quality group must not randomize ordinary collection or runs.
+# Diagnostics opt in explicitly with `pytest -p randomly --randomly-seed=<seed>`.
+addopts = "--import-mode=importlib --basetemp=.pytest-tmp --strict-markers --strict-config -p no:randomly"
 filterwarnings = [
   "ignore::DeprecationWarning:matplotlib.*",
   "ignore:invalid escape sequence.*:SyntaxWarning:qick\\..*",
