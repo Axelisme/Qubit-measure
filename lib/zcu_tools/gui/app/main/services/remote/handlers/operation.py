@@ -37,6 +37,18 @@ def _progress_bars_wire(bars) -> Mapping[str, object]:
     }
 
 
+def _h_operation_active(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    return {
+        "operations": [
+            {"op": op.op, "tab": op.tab, "kind": op.kind}
+            for op in adapter.operation_control.active_operations()
+        ]
+    }
+
+
 def _h_operation_await(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:

@@ -6,7 +6,7 @@ from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-from zcu_tools.mcp.measure.tools_overview import assemble_overview
+from zcu_tools.mcp.measure.tools_operation import status
 
 
 def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -20,7 +20,7 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     if not isinstance(clean, bool):
         raise ValueError("clean must be a boolean")
     connection = ctx.session.connect_to_gui(port=port, launch=launch, clean=clean)
-    return {**connection, "status": assemble_overview(ctx)}
+    return {**connection, "status": status(ctx, {})}
 
 
 CONNECT_TOOL: dict[str, Any] = {

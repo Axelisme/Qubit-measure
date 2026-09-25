@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_handles import AwaitResult
@@ -22,6 +23,13 @@ class OperationProgressPort(Protocol):
     def bars_for_operation(self, operation_id: int, /) -> tuple: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ActiveOperation:
+    op: int
+    tab: str | None
+    kind: Literal["run", "analyze", "device", "save"]
+
+
 class OperationControlPort(Protocol):
     """App-facing op-agnostic operation handle/progress surface."""
 
@@ -31,6 +39,10 @@ class OperationControlPort(Protocol):
 
     def get_operation_progress(self, operation_id: int) -> tuple:
         """Return live progress bars for any operation id."""
+        ...
+
+    def active_operations(self) -> tuple[ActiveOperation, ...]:
+        """Owner-thread projection of every live operation, regardless of origin."""
         ...
 
 
@@ -48,3 +60,6 @@ class OperationControlFacet:
 
     def get_operation_progress(self, operation_id: int) -> tuple:
         return self._progress.bars_for_operation(operation_id)
+
+    def active_operations(self) -> tuple[ActiveOperation, ...]:
+        raise NotImplementedError("active operation projection is not implemented")

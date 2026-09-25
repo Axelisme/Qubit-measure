@@ -12,6 +12,12 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "operation.active",
+        "operation:_h_operation_active",
+        MethodSpec(5.0, "List all live operations from GUI domain owners."),
+        agent=AgentMethodPolicy(exposure="internal"),
+    ),
+    method_entry(
         "operation.await",
         "operation:_h_operation_await",
         MethodSpec(
