@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -49,6 +49,9 @@ SsLenRabiRunResult: TypeAlias = LenRabiResult
 
 @dataclass
 class SsLenRabiAnalyzeParams:
+    initial_state: Annotated[
+        Literal["ground", "excited"], ParamMeta(label="Initial State")
+    ] = "ground"
     decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
 
 
@@ -95,6 +98,8 @@ class SsLenRabiAdapter(
             "independent items. The four-item proposal is all-or-none."
         ),
         recommended=(
+            "Set Initial State to the predominant state before the swept drive pulse "
+            "(at zero length/gain), even when the first sweep point is nonzero. "
             "Run after 'singleshot/ge'. A sweep spanning a few pi lengths "
             "captures a full oscillation. Review the measured population curves "
             "and overlaid joint-fit curves before applying all four calibration "
@@ -142,7 +147,9 @@ class SsLenRabiAdapter(
         self, req: AnalyzeRequest[SsLenRabiRunResult, SsLenRabiAnalyzeParams]
     ) -> SsLenRabiAnalyzeResult:
         fit_result, figure = LenRabiExp().analyze(
-            req.run_result, decay=req.analyze_params.decay
+            req.run_result,
+            decay=req.analyze_params.decay,
+            initial_state=req.analyze_params.initial_state,
         )
         return SsLenRabiAnalyzeResult(fit_result=fit_result, figure=figure)
 

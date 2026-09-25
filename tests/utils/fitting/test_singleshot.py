@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from zcu_tools.utils.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,
@@ -78,3 +79,71 @@ def test_fit_singleshot_no_raise_when_sg_outside_se_bound():
 
     pOpt, pCov = fit_singleshot(xs, g_pdf, e_pdf, fitparams=fitparams)
     assert all(np.isfinite(p) for p in pOpt), f"Non-finite params: {pOpt}"
+
+
+@pytest.mark.parametrize("p_avg", [0.15, 0.85])
+def test_ge_strong_transition_fit_is_label_symmetric(p_avg):
+    xs = np.linspace(-4, 4, 401)
+    truth = (-1.0, 1.0, 0.3, 0.9, 0.1, p_avg, 1.2)
+    g = calc_population_pdf(xs, *truth)
+    e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
+    fitted, covariance = fit_singleshot(xs, g, e)
+    swapped, swapped_covariance = fit_singleshot(xs, e, g)
+    np.testing.assert_allclose(fitted, truth, atol=0.03)
+    expected = np.array(fitted)[[1, 0, 2, 3, 4, 5, 6]]
+    expected[5] = 1 - expected[5]
+    np.testing.assert_allclose(swapped, expected, atol=1e-10)
+    transform = np.eye(7)[[1, 0, 2, 3, 4, 5, 6]]
+    transform[5, 5] = -1
+    np.testing.assert_allclose(swapped_covariance, transform @ covariance @ transform.T)
+
+
+@pytest.mark.parametrize(
+    "fixed_populations", [(None, None), (0.25, None), (None, 0.65), (0.25, 0.65)]
+)
+def test_joint_ge_respects_fixed_populations_and_simplex(fixed_populations):
+    xs = np.linspace(-4, 4, 301)
+    truth = (-1.0, 1.0, 0.3, 0.25, 0.65, 0.8, 0.7)
+    g = calc_population_pdf(xs, *truth)
+    e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
+    fixed = [-1.0, 1.0, 0.3, *fixed_populations, 0.8, 0.7]
+    fitted, _ = fit_singleshot(xs, g, e, fixedparams=fixed)
+    np.testing.assert_allclose(fitted[3:5], truth[3:5], atol=1e-5)
+    assert sum(fitted[3:5]) <= 1
+
+
+@pytest.mark.parametrize("fit_length_ratio", [False, True])
+@pytest.mark.parametrize("length_ratio", [0.0, 0.5])
+def test_row_population_is_legal_and_shared_ratio_is_honored(
+    fit_length_ratio, length_ratio
+):
+    xs = np.linspace(-4, 4, 401)
+    params = (-1.0, 1.0, 0.3, 0.9, 0.1, 0.8, length_ratio)
+    # An over-normalized target used to produce a negative other population.
+    pdf = 1.2 * calc_population_pdf(xs, *params)
+    fitted, covariance = fit_singleshot_p0(xs, pdf, 0.8, 0.2, params, fit_length_ratio)
+    assert min(fitted[:2]) >= 0
+    assert sum(fitted[:2]) <= 1
+    if not fit_length_ratio or length_ratio == 0:
+        assert fitted[2] == length_ratio
+        assert np.all(covariance[2] == 0)
+
+
+def test_ge_does_not_return_initial_guess_on_optimizer_failure(monkeypatch):
+    from zcu_tools.utils.fitting import singleshot
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("optimizer exhausted")
+
+    monkeypatch.setattr(singleshot, "curve_fit", fail)
+    xs = np.linspace(-4, 4, 101)
+    g, e = _make_overlapping_histogram(xs, -1, 1, 0.3)
+    with pytest.raises(RuntimeError, match="did not converge"):
+        fit_singleshot(xs, g, e)
+
+
+def test_ge_rejects_impossible_fixed_populations():
+    xs = np.linspace(-4, 4, 101)
+    g, e = _make_overlapping_histogram(xs, -1, 1, 0.3)
+    with pytest.raises(ValueError, match="sum to at most one"):
+        fit_singleshot(xs, g, e, fixedparams=[None, None, None, 0.8, 0.8, None, None])

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from math import log
-from typing import cast
+from typing import Literal, cast
 
 import numpy as np
 from iminuit import Minuit
@@ -136,8 +136,8 @@ def project_rabi_iq(
     projected = (centered @ axis_vector).reshape(raw.shape)
 
     # PCA eigenvectors have arbitrary sign. Cluster the pooled projection, then
-    # assign the cluster that dominates the first length to ground and orient it
-    # below excited. This remains deterministic when row and pooled means tie.
+    # use the first row only to choose a deterministic candidate orientation.
+    # Joint fitting compares both orientations; this is not a ground-state label.
     cluster_centers, labels = _cluster_projected_iq(projected)
     initial_counts = np.bincount(labels[0], minlength=2)
     ground_cluster = int(np.argmax(initial_counts))
@@ -174,10 +174,16 @@ def rabi_excited_population(
     )
 
 
-def _unpack(values: NDArray[np.float64], *, decay: bool) -> RabiPhysicalParams:
+def _unpack(
+    values: NDArray[np.float64],
+    *,
+    decay: bool,
+    initial_state: Literal["ground", "excited"],
+) -> RabiPhysicalParams:
     separation = float(np.exp(values[3]))
     return RabiPhysicalParams(
-        p_e0=0.5 * float(expit(values[0])),
+        p_e0=0.5 * float(expit(values[0]))
+        + (0.5 if initial_state == "excited" else 0.0),
         p_inf=float(expit(values[1])),
         center_g=float(values[2] - 0.5 * separation),
         center_e=float(values[2] + 0.5 * separation),
@@ -236,7 +242,11 @@ def _logit(value: float) -> float:
 
 
 def _quantile_initial_values(
-    lengths: NDArray[np.float64], projection: RabiProjection, *, decay: bool
+    lengths: NDArray[np.float64],
+    projection: RabiProjection,
+    *,
+    decay: bool,
+    initial_state: Literal["ground", "excited"],
 ) -> NDArray[np.float64]:
     projected = projection.projected
     lower, upper = np.quantile(projected, [0.2, 0.8])
@@ -251,6 +261,7 @@ def _quantile_initial_values(
         separation=separation,
         sigma=sigma,
         decay=decay,
+        initial_state=initial_state,
     )
 
 
@@ -262,17 +273,39 @@ def _initial_values_from_crude_populations(
     separation: float,
     sigma: float,
     decay: bool,
+    initial_state: Literal["ground", "excited"],
 ) -> NDArray[np.float64]:
-    p_e0 = float(np.clip(crude_e[0], 0.02, 0.45))
-    p_inf = float(np.clip(np.mean(crude_e), 0.05, 0.95))
-
     span = float(np.ptp(lengths))
-    centered = crude_e - crude_e.mean()
     omega_grid = np.linspace(0.5 * np.pi / span, 8.0 * np.pi / span, 96)
-    scores = np.abs(np.exp(-1j * np.outer(omega_grid, lengths)) @ centered)
-    omega = float(omega_grid[int(np.argmax(scores))])
+    # Fit zero-phase candidates at the actual sweep coordinates, not at row zero.
+    # This also handles signed gains and sweeps starting after a population flip.
+    envelope = np.exp(-lengths / span) if decay else np.ones_like(lengths)
+    offset = 0.5 if initial_state == "excited" else 0.0
+    candidates = []
+    for omega_candidate in omega_grid:
+        wave = envelope * np.cos(omega_candidate * lengths)
+        design = np.column_stack((1.0 - wave, wave))
+        estimated_inf, estimated_initial = np.linalg.lstsq(design, crude_e, rcond=None)[
+            0
+        ]
+        estimated_initial = float(
+            np.clip(estimated_initial, offset + 0.02, offset + 0.48)
+        )
+        estimated_inf = float(
+            np.clip(estimated_inf, estimated_initial / 2, (1 + estimated_initial) / 2)
+        )
+        residual = design @ np.array([estimated_inf, estimated_initial]) - crude_e
+        candidates.append(
+            (
+                float(residual @ residual),
+                float(omega_candidate),
+                estimated_initial,
+                estimated_inf,
+            )
+        )
+    _, omega, p_e0, p_inf = min(candidates)
     values = [
-        _logit(2.0 * p_e0),
+        _logit(2.0 * (p_e0 - offset)),
         _logit(p_inf),
         center_mid,
         log(separation),
@@ -287,7 +320,11 @@ def _initial_values_from_crude_populations(
 
 
 def _initial_values(
-    lengths: NDArray[np.float64], projection: RabiProjection, *, decay: bool
+    lengths: NDArray[np.float64],
+    projection: RabiProjection,
+    *,
+    decay: bool,
+    initial_state: Literal["ground", "excited"],
 ) -> NDArray[np.float64]:
     projected = projection.projected
     cluster_centers, labels = _cluster_projected_iq(projected)
@@ -313,6 +350,7 @@ def _initial_values(
         separation=separation,
         sigma=sigma,
         decay=decay,
+        initial_state=initial_state,
     )
 
 
@@ -321,12 +359,15 @@ def _fit_backend(
     projection: RabiProjection,
     *,
     decay: bool,
+    initial_state: Literal["ground", "excited"],
     max_calls: int | None,
     initial: NDArray[np.float64] | None = None,
 ) -> tuple[RabiPhysicalParams, RabiBackendResult]:
     parameter_names = _PARAMETER_NAMES if decay else _NO_DECAY_PARAMETER_NAMES
     if initial is None:
-        initial = _initial_values(lengths, projection, decay=decay)
+        initial = _initial_values(
+            lengths, projection, decay=decay, initial_state=initial_state
+        )
     elif initial.shape != (len(parameter_names),) or np.any(~np.isfinite(initial)):
         raise ValueError("Rabi initial parameters must match the selected model")
     calls = 0
@@ -336,7 +377,9 @@ def _fit_backend(
         calls += 1
         values = np.asarray(args, dtype=np.float64)
         probabilities = model_bin_probabilities(
-            lengths, projection.bin_edges, _unpack(values, decay=decay)
+            lengths,
+            projection.bin_edges,
+            _unpack(values, decay=decay, initial_state=initial_state),
         )
         value = multinomial_nll(projection.counts, probabilities)
         return value if np.isfinite(value) else _PENALTY
@@ -399,7 +442,7 @@ def _fit_backend(
         nll=float(fval),
         calls=calls,
     )
-    return _unpack(values, decay=decay), backend
+    return _unpack(values, decay=decay, initial_state=initial_state), backend
 
 
 def _failed_backend(*, decay: bool) -> RabiBackendResult:
@@ -444,7 +487,11 @@ def _failed_result(
         measured_populations=np.full((rows, 3), np.nan),
         fitted_populations=np.full((rows, 3), np.nan),
         projection=projection,
-        backend=_failed_backend(decay=decay) if backend is None else backend,
+        backend=(
+            _failed_backend(decay=decay)
+            if backend is None
+            else replace(backend, valid=False)
+        ),
     )
 
 
@@ -526,8 +573,15 @@ def fit_rabi_joint(
     signals: NDArray[np.complex128],
     *,
     decay: bool = True,
+    initial_state: Literal["ground", "excited"] = "ground",
     max_calls: int | None = None,
 ) -> RabiJointFitResult:
+    """Fit both IQ orientations using the predominant state at zero drive.
+
+    ``max_calls`` bounds each candidate's Migrad call, not the combined search.
+    """
+    if initial_state not in ("ground", "excited"):
+        raise ValueError(f"Unknown initial state: {initial_state!r}")
     times = np.asarray(lengths, dtype=np.float64)
     if times.ndim != 1 or times.size < 2 or np.any(~np.isfinite(times)):
         raise ValueError("Len Rabi joint fit requires at least two finite lengths")
@@ -537,6 +591,44 @@ def fit_rabi_joint(
     if projection.projected.shape[0] != times.size:
         raise ValueError("Len Rabi length and raw-IQ row counts do not match")
 
+    # Mirror the same bins exactly so both likelihoods describe the same data.
+    reflected = replace(
+        projection,
+        projected=-projection.projected,
+        bin_edges=-projection.bin_edges[::-1],
+        counts=projection.counts[:, ::-1],
+        axis=-projection.axis,
+        perpendicular_offset=-projection.perpendicular_offset,
+    )
+    candidates = [
+        _fit_projected_rabi(
+            times,
+            candidate,
+            decay=decay,
+            initial_state=initial_state,
+            max_calls=max_calls,
+        )
+        for candidate in (projection, reflected)
+    ]
+    return min(
+        candidates,
+        key=lambda candidate: (
+            not candidate.backend.valid,
+            not np.isfinite(candidate.backend.nll),
+            candidate.backend.nll,
+        ),
+    )
+
+
+def _fit_projected_rabi(
+    times: NDArray[np.float64],
+    projection: RabiProjection,
+    *,
+    decay: bool,
+    initial_state: Literal["ground", "excited"],
+    max_calls: int | None,
+) -> RabiJointFitResult:
+
     backend: RabiBackendResult | None = None
     try:
         initial_candidates: list[NDArray[np.float64] | None] = [None]
@@ -545,13 +637,18 @@ def fit_rabi_joint(
             if coarse is not projection:
                 coarse_backends = []
                 for coarse_initial in (
-                    _initial_values(times, coarse, decay=decay),
-                    _quantile_initial_values(times, coarse, decay=decay),
+                    _initial_values(
+                        times, coarse, decay=decay, initial_state=initial_state
+                    ),
+                    _quantile_initial_values(
+                        times, coarse, decay=decay, initial_state=initial_state
+                    ),
                 ):
                     _, coarse_backend = _fit_backend(
                         times,
                         coarse,
                         decay=decay,
+                        initial_state=initial_state,
                         max_calls=None,
                         initial=coarse_initial,
                     )
@@ -569,6 +666,7 @@ def fit_rabi_joint(
             times,
             projection,
             decay=decay,
+            initial_state=initial_state,
             max_calls=max_calls,
             initial=initial_candidates[0],
         )
@@ -577,6 +675,7 @@ def fit_rabi_joint(
                 times,
                 projection,
                 decay=decay,
+                initial_state=initial_state,
                 max_calls=None,
                 initial=initial_candidates[1],
             )

@@ -29,6 +29,41 @@ def test_resolve_bool_field():
     assert optional is False
 
 
+@pytest.mark.parametrize("experiment", ["ge", "len_rabi", "amp_rabi"])
+def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> None:
+    from zcu_tools.experiment.v2_gui.adapters.singleshot.amp_rabi import (
+        SsAmpRabiAnalyzeParams,
+    )
+    from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import GEAnalyzeParams
+    from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import (
+        SsLenRabiAnalyzeParams,
+    )
+
+    cls = {
+        "ge": GEAnalyzeParams,
+        "len_rabi": SsLenRabiAnalyzeParams,
+        "amp_rabi": SsAmpRabiAnalyzeParams,
+    }[experiment]
+    spec = next(
+        field
+        for field in describe_analyze_params(cls)
+        if field["name"] == "initial_state"
+    )
+    assert spec == {
+        "name": "initial_state",
+        "type": "str",
+        "label": "Initial State",
+        "choices": ["ground", "excited"],
+        "default": "ground",
+    }
+    values = dataclasses.asdict(cls())
+    values["initial_state"] = "excited"
+    assert reconstruct_params(cls, values).initial_state == "excited"
+    values["initial_state"] = "unknown"
+    with pytest.raises(RuntimeError, match="must be one of"):
+        reconstruct_params(cls, values)
+
+
 def test_resolve_literal_field():
     @dataclass
     class P:

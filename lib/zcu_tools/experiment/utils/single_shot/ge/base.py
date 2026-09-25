@@ -198,32 +198,41 @@ def fitting_ge_and_plot(
     Ig, Qg = rotate(Ig, Qg, theta)
     Ie, Qe = rotate(Ie, Qe, theta)
 
-    fig, axs = plt.subplots(2, 2, figsize=(8, 8))
-
-    scatter_ge_plot(axs[0, 0], (Ig, Ie), (Qg, Qe), "Rotated")
-
-    g_pdfs, e_pdfs, bins = hist(Ig, Ie, numbins, axs[1, 0])
+    g_pdfs, e_pdfs, bins = hist(Ig, Ie, numbins)
 
     xs = 0.5 * (bins[:-1] + bins[1:])
-    axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
-    axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
     fixedparams = [None, None, None, init_p0_g, init_p0_e, avg_p, length_ratio]
     ge_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
-    sg, se, s, p0_gg, p0_ge, p_avg, length_ratio = ge_params
+    sg, se, s, joint_p0_gg, joint_p0_ge, p_avg, length_ratio = ge_params
     (p0_gg, p0_ge, l_ratio_g), _ = fit_singleshot_p0(
-        xs, g_pdfs, p0_gg, p0_ge, ge_params=ge_params, fit_length_ratio=not align_t1
+        xs,
+        g_pdfs,
+        joint_p0_gg,
+        joint_p0_ge,
+        ge_params=ge_params,
+        fit_length_ratio=not align_t1,
     )
     (p0_eg, p0_ee, l_ratio_e), _ = fit_singleshot_p0(
-        xs, e_pdfs, p0_ge, p0_gg, ge_params=ge_params, fit_length_ratio=not align_t1
+        xs,
+        e_pdfs,
+        joint_p0_ge,
+        joint_p0_gg,
+        ge_params=ge_params,
+        fit_length_ratio=not align_t1,
     )
-    # p0_eg = p0_ge
-    # p0_ee = p0_gg
-    # l_ratio_g = length_ratio
-    # l_ratio_e = length_ratio
+    populations = np.array([[p0_gg, p0_ge], [p0_eg, p0_ee]])
+    if (
+        not np.isfinite(populations).all()
+        or np.any(populations < 0)
+        or np.any(populations.sum(axis=1) > 1.0 + 1e-12)
+    ):
+        raise ValueError(
+            "GE fit returned invalid populations; calibration is unavailable"
+        )
 
-    p0_go = 1 - p0_gg - p0_ge
-    p0_eo = 1 - p0_eg - p0_ee
+    p0_go = max(0.0, 1 - p0_gg - p0_ge)
+    p0_eo = max(0.0, 1 - p0_eg - p0_ee)
 
     fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_gg, p0_ge, p_avg, l_ratio_g)
     fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_eg, p0_ee, p_avg, l_ratio_e)
@@ -237,8 +246,24 @@ def fitting_ge_and_plot(
 
     Qg_mask = (Ig > sg - 2 * s) & (Ig < sg + 2 * s)
     Qe_mask = (Ie > se - 2 * s) & (Ie < se + 2 * s)
+    if not Qg_mask.any() or not Qe_mask.any():
+        raise ValueError("GE fit centers have no supporting IQ samples")
     rotated_g_center = sg + 1j * np.median(Qg[Qg_mask])
     rotated_e_center = se + 1j * np.median(Qe[Qe_mask])
+
+    if (
+        not np.isfinite([rotated_g_center, rotated_e_center, s]).all()
+        or s <= 0
+        or np.isclose(rotated_g_center, rotated_e_center)
+    ):
+        raise ValueError(
+            "GE fit returned invalid centers or width; calibration is unavailable"
+        )
+    fig, axs = plt.subplots(2, 2, figsize=(8, 8))
+    scatter_ge_plot(axs[0, 0], (Ig, Ie), (Qg, Qe), "Rotated")
+    hist(Ig, Ie, numbins, axs[1, 0])
+    axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
+    axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
     plt_params = dict(linestyle=":", marker="o", markersize=5)
     axs[0, 0].plot(
