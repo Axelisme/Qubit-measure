@@ -28,6 +28,7 @@
 | P6 | **非同步只有一種** | 長操作回傳 operation id；一個 `wait`、一個 `cancel`。 |
 | P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
+| P9 | **能機械推導的就提供** | 可由現有資料直接算出的值（例如 `eta_s`、正規化後的 sweep 實際值）由介面算好回傳，不留給 agent 推算。 |
 
 ## Decision：Tool 集合（31 特化 + 3 RPC）
 
@@ -179,10 +180,10 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 同一套編輯語法也用於 `writeback` 中模組／波形項目的欄位修改。
 
 **`tab_run(tab)`**
-以該 tab 目前的 cfg 草稿開始 run，立即回傳 `{op}`；不附帶編輯、不自動分析。
+以該 tab 目前的 cfg 草稿開始 run，立即回傳 `{op}`；不附帶編輯、不自動分析。前置條件不足時報錯並列出 `missing`（`soc`、`active_context`、`valid_cfg`）；已有其他 run 時回 `reason="busy"` 並附正在跑的 tab 與 op。取消視同結束：取消時已取得的結果保留在 tab 上，可照常分析與存檔。
 
 **`tab_live(tab)`**
-讀取 run 進行中的狀態：進度、run pane 的 live plot（PNG 路徑）。agent 據此決定繼續等、`cancel` 後 `tab_edit` 重來，或讓它跑完。run 結束後回傳最終的 run pane 圖。
+讀取 run 的狀態：`{running, progress: [{label, percent}], elapsed_s, eta_s, figure}`。`figure` 是 run pane live plot 的 PNG 路徑；`eta_s` 由已耗時間與進度推算。agent 據此決定繼續等、`cancel` 後 `tab_edit` 重來，或讓它跑完。run 結束後 `running=false`，`figure` 為最終的 run pane 圖；沒有 run 也沒有結果時回 `reason="no_run"`。
 
 **`tab_analyze(tab, stage = "primary" | "post", params?)`**
 以 `params` 對目前資料分析，結果寫入 GUI 的 analysis／post pane；可用不同 `params` 反覆呼叫直到滿意。回傳 summary 與 figure 路徑；分析較久時回傳 `{op}`。互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。
@@ -198,17 +199,17 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 
 #### GUI 跟隨 agent 的操作
 
-agent 操作某個 tab 的某個階段時，GUI 一律切到該 tab 與對應的子 tab，讓使用者看到 agent 正在處理的畫面；這是各 tool 的固定行為，沒有開關參數：
+會改變 tab 狀態的 tool，一律把 GUI 切到該 tab 與對應的子 tab，讓使用者看到 agent 改了什麼；這是固定行為，沒有開關參數：
 
 | Tool | GUI 切到 |
 | --- | --- |
 | `tab_open` | 新 tab 的 run 子 tab |
-| `tab_edit`、`tab_run`、`tab_live` | run（cfg 表單與 live plot 所在） |
+| `tab_edit`、`tab_run` | run（cfg 表單與 live plot 所在） |
 | `tab_analyze` | analysis 或 post |
-| `writeback` | analysis 或 post（writeback 清單所在） |
+| `writeback`（帶 `items` 或 `apply`） | analysis 或 post（writeback 清單所在） |
 | `tab_save` | data |
 
-`tab_get` 與 `data` 可一次讀多個面向，不對應單一子 tab，因此不切換。
+讀取類 tool（`tab_get`、`tab_live`、`data`、不帶 `items` 的 `writeback`）不切換，避免在 agent 反覆讀取時打斷使用者的畫面。
 
 ### E. 非同步（2）
 
