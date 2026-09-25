@@ -7,6 +7,11 @@ import pytest
 from zcu_tools.utils.datasaver import save_labber_data
 
 
+@pytest.fixture(autouse=True)
+def _drain_qt_events() -> None:  # pyright: ignore[reportUnusedFunction]  # pytest fixture lookup
+    """Keep non-UI Fluxdep tests independent of QApplication."""
+
+
 @pytest.fixture
 def spectrum_hdf5(tmp_path):
     """Write a small 2D flux-dependence spectrum hdf5 via the native labber_io path.
