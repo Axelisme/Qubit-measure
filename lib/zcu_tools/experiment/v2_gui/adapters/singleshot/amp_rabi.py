@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar, Literal
 
 from matplotlib.figure import Figure
 
@@ -25,14 +26,24 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     ExpContext,
-    NoAnalyzeParams,
+    ParamMeta,
     RunRequest,
+    WritebackItem,
+    WritebackRequest,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import CfgSchema
 
+from ._rabi import rabi_calibration_writeback
 from ._shared import read_ge_centers
+
+
+@dataclass
+class SsAmpRabiAnalyzeParams:
+    initial_state: Annotated[
+        Literal["ground", "excited"], ParamMeta(label="Initial State")
+    ] = "ground"
 
 
 @dataclass
@@ -48,16 +59,18 @@ class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
 
 
 class SsAmpRabiAdapter(
-    BaseAdapter[AmpRabiCfg, AmpRabiResult, SsAmpRabiAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[
+        AmpRabiCfg, AmpRabiResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
+    ]
 ):
     exp_cls = AmpRabiExp
     ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior="Hardware gain sweep with G/E classification in the acquisition layer. Saves populations only. Live view shows Ground / Excited / Other; analysis fits a nondecaying ground-population Rabi curve.",
-        expects_md="Requires g_center / e_center / ge_radius from singleshot/ge. Optionally uses confusion_matrix for analysis correction. Reads pi_gain for the sweep range.",
+        behavior="Hardware gain sweep preserving every raw IQ shot. Live view classifies Ground / Excited / Other; analysis shares the Len Rabi joint IQ fit with no decay and fixed zero phase.",
+        expects_md="Requires g_center / e_center / ge_radius from singleshot/ge for live classification. Analysis jointly refits readout calibration without an external confusion matrix. Reads pi_gain for the sweep range.",
         expects_ml="Needs qub_pulse and readout; upstream reset is optional.",
-        typical_writeback="No writeback. Reports pi/pi2 gain, frequency and oscillation amplitude; IQ centers and readout calibration are not refitted.",
-        recommended="Sweep a full Rabi period with at least five gains. Reps are shots per gain per round; rounds average repeated hardware sweeps and update the live plot. Other is not calibrated leakage.",
+        typical_writeback="Reports pi/pi2 gain, frequency and amplitude. A valid joint fit proposes g_center, e_center, ge_radius and confusion_matrix using the same calibration gate as Len Rabi.",
+        recommended="Sweep a full Rabi period. Initial State describes the predominant state before the drive, at zero gain, even if the first gain is nonzero. Reps are shots per gain per round; rounds concatenate shots and update live populations. Population-only files cannot supply the raw IQ required for joint fitting.",
     )
 
     @classmethod
@@ -94,10 +107,10 @@ class SsAmpRabiAdapter(
         return AmpRabiExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
-        self, req: AnalyzeRequest[AmpRabiResult, NoAnalyzeParams]
+        self, req: AnalyzeRequest[AmpRabiResult, SsAmpRabiAnalyzeParams]
     ) -> SsAmpRabiAnalyzeResult:
         fit, figure = AmpRabiExp().analyze(
-            req.run_result, confusion_matrix=req.md.get("confusion_matrix")
+            req.run_result, initial_state=req.analyze_params.initial_state
         )
         return SsAmpRabiAnalyzeResult(
             fit.pi_gain,
@@ -109,6 +122,11 @@ class SsAmpRabiAdapter(
             fit,
             figure,
         )
+
+    def get_writeback_items(
+        self, req: WritebackRequest[AmpRabiResult, SsAmpRabiAnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        return rabi_calibration_writeback(req.analyze_result.fit_result.joint_fit)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_ss_amp_rabi_{time.strftime('%m%d')}"

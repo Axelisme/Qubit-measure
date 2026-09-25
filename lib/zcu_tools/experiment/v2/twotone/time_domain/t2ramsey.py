@@ -161,8 +161,13 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
 
     @retrieve_result
     def analyze(
-        self, result: T2RamseyResult | None = None, *, fit_fringe: bool = True
+        self,
+        result: T2RamseyResult | None = None,
+        *,
+        fit_fringe: bool = True,
+        fit_phase: bool = False,
     ) -> tuple[float, float, float, float, Figure]:
+        """fit_phase frees the fringe phase; decay-only fits ignore this option."""
         assert result is not None, "no result found"
 
         lengths, signals = result.times, result.signals
@@ -170,12 +175,14 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         real_signals = t2ramsey_signal2real(signals)
 
         if fit_fringe:
-            zero_signal = real_signals[np.argmin(np.abs(lengths))]
-            if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
-                init_phase = 0.0
-            else:
-                init_phase = 180.0
-            fixedparams = [None, None, None, init_phase, None]
+            fixedparams: list[float | None] | None = None
+            if not fit_phase:
+                zero_signal = real_signals[np.argmin(np.abs(lengths))]
+                if zero_signal > 0.5 * (np.max(real_signals) + np.min(real_signals)):
+                    init_phase = 0.0
+                else:
+                    init_phase = 180.0
+                fixedparams = [None, None, None, init_phase, None]
             t2r, t2rerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
                 lengths, real_signals, fixedparams=fixedparams
             )

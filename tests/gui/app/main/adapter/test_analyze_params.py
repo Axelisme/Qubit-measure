@@ -29,8 +29,39 @@ def test_resolve_bool_field():
     assert optional is False
 
 
-@pytest.mark.parametrize("experiment", ["ge", "len_rabi"])
+@pytest.mark.parametrize("singleshot", [False, True])
+def test_len_rabi_phase_form_and_wire_contract(singleshot: bool) -> None:
+    from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import (
+        SsLenRabiAnalyzeParams,
+    )
+    from zcu_tools.experiment.v2_gui.adapters.twotone.rabi.len_rabi import (
+        LenRabiAnalyzeParams,
+    )
+
+    cls = SsLenRabiAnalyzeParams if singleshot else LenRabiAnalyzeParams
+    spec = next(
+        field for field in describe_analyze_params(cls) if field["name"] == "fit_phase"
+    )
+    assert spec == {
+        "name": "fit_phase",
+        "type": "bool",
+        "label": "Fit phase offset",
+        "default": False,
+    }
+    values = dataclasses.asdict(cls())
+    assert reconstruct_params(cls, values).fit_phase is False
+    values["fit_phase"] = True
+    assert reconstruct_params(cls, values).fit_phase is True
+    values["fit_phase"] = "true"
+    with pytest.raises(RuntimeError, match="expects bool"):
+        reconstruct_params(cls, values)
+
+
+@pytest.mark.parametrize("experiment", ["ge", "len_rabi", "amp_rabi"])
 def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> None:
+    from zcu_tools.experiment.v2_gui.adapters.singleshot.amp_rabi import (
+        SsAmpRabiAnalyzeParams,
+    )
     from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import GEAnalyzeParams
     from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import (
         SsLenRabiAnalyzeParams,
@@ -39,6 +70,7 @@ def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> Non
     cls = {
         "ge": GEAnalyzeParams,
         "len_rabi": SsLenRabiAnalyzeParams,
+        "amp_rabi": SsAmpRabiAnalyzeParams,
     }[experiment]
     spec = next(
         field

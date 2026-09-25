@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-26 — hardware population sweeps for reset check and amp Rabi
+**Last updated:** 2026-09-26 — shared Rabi and optional T2 fringe phase analysis
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -166,7 +166,7 @@ opaque draft，adapter不接觸Writeback implementation。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
-`singleshot/amp_rabi`直接擬合已分類的population，不使用raw-IQ joint fit。
+`singleshot/amp_rabi`共用Len Rabi的raw-IQ joint fit，固定無衰減／零相位，提供Initial State與相同的IQ校準writeback。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，
@@ -290,13 +290,15 @@ reset-only殘餘振盪與offset、二次諧波振幅、各分支residual RMS，�
 writeback。cfg只設定一個`rabi_pulse`，兩次pulse使用相同波形與gain。
 
 `singleshot/reset_check`使用硬體gain／branch sweep，保存G/E populations；
-`singleshot/amp_rabi`也以硬體gain sweep保存G/E populations。Reps是每個gain／branch
-每round的shots，Rounds控制重複平均與live更新；不使用Shots或Shots per batch。
-兩者都要求MetaDict的g_center、e_center、ge_radius，analysis可讀取confusion_matrix修正。
-Live與analysis顯示G/E/Other；reset-check以三種線型區分階段，摘要列出reset-only
-平均／最大excited比例及最大Other比例。Amp Rabi分析回報無衰減cosine的振幅、
-頻率與pi/pi2 gain。兩者都不提供IQ校準writeback，也不從population重建raw IQ。
-Other不是校準後leakage，reset population不是reset-channel fidelity。
+analysis可讀取confusion_matrix修正，回報reset-only平均／最大excited及最大Other，
+不提供IQ校準writeback。Other不是校準後leakage，reset population不是reset-channel fidelity。
+
+`singleshot/amp_rabi`使用硬體gain sweep保存raw IQ。Reps是每gain每round的shots，
+Rounds的shots串接保存；不使用Shots或Shots per batch。MetaDict的g_center、e_center、
+ge_radius只供live分類，analysis與Len Rabi共用joint fit及三面板診斷圖，重新估計
+IQ centers與confusion matrix。Amp固定無衰減／零相位，提供Initial State，保留振幅、
+頻率與pi/pi2 gain摘要；四項校準writeback與Len Rabi共用有效性檢查。
+舊population-only檔案不符合raw-IQ axes契約，無法據此重建shots或執行joint fit。
 
 ### cfg → writeback 的兩種產出
 
@@ -350,6 +352,21 @@ Other不是校準後leakage，reset population不是reset-channel fidelity。
 - **graceful without snapshot**：`cfg_snapshot is None`（如從檔載入）時，module
   writeback 全略過，只剩既有 md item。
 
-兩個 singleshot 分析（ge / len_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 對應零 length/gain，不是第一個掃描點。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。
+三個 singleshot 分析（ge / len_rabi / amp_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 描述 pulse 前狀態，不是第一個掃描點；啟用 phase offset 時也不等同於模型外推的零 length population。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。
 
 GE 的主分析與 writeback/post 邊界拒絕非有限 centers/width、重合 centers 與不合法 populations。Optimizer 未收斂不會回傳 initial guess 當作 calibration；失敗不產生新的校準 proposal。
+
+
+`twotone/rabi/len_rabi` 與 `singleshot/len_rabi` 的 analysis pane 都提供
+`Fit phase offset`（`fit_phase: bool = False`）。一般 Len Rabi 啟用後自由擬合相位；
+singleshot 在所選 Initial State 方向附近擬合 ±90° offset，結果圖顯示相位。
+兩者都可獨立切換 decay；此參數只影響 analysis，不改 acquisition 或 raw data 格式。
+一般 Len Rabi 的預設由原本自由 phase 改為固定 0°/180°，校準長度 writeback 沿用
+本次模型的結果。Singleshot 保持 Figure-only summary，typed fit result 另提供
+`phase` 與 `zero_length_populations`；四項 IQ calibration writeback 仍須通過既有
+backend validity 與 finite calibration gate。
+
+`t2ramsey`與`t2echo`的analysis pane提供`Fit phase offset (fringe only)`
+（`fit_phase: bool = False`）。開啟時自由擬合fringe phase，關閉保留固定相位；
+Ramsey停用Fit fringe或Echo選擇decay時，此選項不影響分析。既有T2與detune相關
+writeback沿用本次分析結果，量測設定與資料格式不變。

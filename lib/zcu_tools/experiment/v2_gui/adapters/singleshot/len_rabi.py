@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
-import numpy as np
 from matplotlib.figure import Figure
 
 from zcu_tools.experiment.v2.singleshot.len_rabi import (
@@ -27,7 +26,6 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     ExpContext,
-    MetaDictWriteback,
     ParamMeta,
     RunRequest,
     WritebackItem,
@@ -39,6 +37,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
 )
 
+from ._rabi import rabi_calibration_writeback
 from ._shared import read_ge_centers
 
 # ``LenRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *length* and
@@ -53,6 +52,7 @@ class SsLenRabiAnalyzeParams:
         Literal["ground", "excited"], ParamMeta(label="Initial State")
     ] = "ground"
     decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
+    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
 
 
 @dataclass
@@ -99,7 +99,10 @@ class SsLenRabiAdapter(
         ),
         recommended=(
             "Set Initial State to the predominant state before the swept drive pulse "
-            "(at zero length/gain), even when the first sweep point is nonzero. "
+            "even when the first sweep point is nonzero. Fit phase offset "
+            "allows a correction within +/-90 degrees of that initial-state "
+            "direction; the extrapolated zero-length population can then differ "
+            "from the pre-pulse population. It is disabled by default. "
             "Run after 'singleshot/ge'. A sweep spanning a few pi lengths "
             "captures a full oscillation. Review the measured population curves "
             "and overlaid joint-fit curves before applying all four calibration "
@@ -149,6 +152,7 @@ class SsLenRabiAdapter(
         fit_result, figure = LenRabiExp().analyze(
             req.run_result,
             decay=req.analyze_params.decay,
+            fit_phase=req.analyze_params.fit_phase,
             initial_state=req.analyze_params.initial_state,
         )
         return SsLenRabiAnalyzeResult(fit_result=fit_result, figure=figure)
@@ -156,39 +160,7 @@ class SsLenRabiAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[SsLenRabiRunResult, SsLenRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
-        fit = req.analyze_result.fit_result
-        calibration_is_finite = (
-            fit.backend.valid
-            and np.isfinite([fit.g_center.real, fit.g_center.imag]).all()
-            and np.isfinite([fit.e_center.real, fit.e_center.imag]).all()
-            and np.isfinite(fit.radius)
-            and np.isfinite(fit.confusion_matrix).all()
-        )
-        if not calibration_is_finite:
-            return []
-
-        return [
-            MetaDictWriteback(
-                target_name="g_center",
-                description="Len Rabi fitted |g> IQ cluster centre (complex)",
-                proposed_value=fit.g_center,
-            ),
-            MetaDictWriteback(
-                target_name="e_center",
-                description="Len Rabi fitted |e> IQ cluster centre (complex)",
-                proposed_value=fit.e_center,
-            ),
-            MetaDictWriteback(
-                target_name="ge_radius",
-                description="Len Rabi fitted single-shot classification radius",
-                proposed_value=fit.radius,
-            ),
-            MetaDictWriteback(
-                target_name="confusion_matrix",
-                description="Len Rabi fitted 3x3 confusion matrix",
-                proposed_value=fit.confusion_matrix.tolist(),
-            ),
-        ]
+        return rabi_calibration_writeback(req.analyze_result.fit_result)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_ss_len_rabi_{time.strftime('%m%d')}"

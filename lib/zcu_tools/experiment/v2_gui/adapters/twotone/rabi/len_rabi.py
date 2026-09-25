@@ -45,6 +45,7 @@ LenRabiRunResult: TypeAlias = LenRabiResult
 @dataclass
 class LenRabiAnalyzeParams:
     decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
+    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
 
 
 @dataclass
@@ -107,6 +108,8 @@ class LenRabiAdapter(
             "skipped when no cfg_snapshot is available (e.g. loaded from file)."
         ),
         recommended=(
+            "Phase defaults to fixed 0/180 degrees; enable Fit phase offset "
+            "when pulse shaping shifts the length oscillation. "
             "Analysis defaults to fitting a decay envelope on the oscillation; "
             "keep it on when the Rabi oscillation visibly damps over the "
             "sweep, turn it off for a pure undamped cosine fit. A length sweep "
@@ -162,6 +165,7 @@ class LenRabiAdapter(
             LenRabiExp().analyze(
                 req.run_result,
                 decay=params.decay,
+                fit_phase=params.fit_phase,
             )
         )
         return LenRabiAnalyzeResult(

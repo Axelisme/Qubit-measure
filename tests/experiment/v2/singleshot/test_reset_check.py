@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event
-from typing import Any
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,6 +34,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.reset import NoneResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.utils.datasaver import save_labber_data
 
 
 def _cfg(reset: bool) -> ResetCheckCfg | AmpRabiCfg:
@@ -143,11 +144,11 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
     with schedule_stop_scope(StopSignal(event)):
         result = exp.run(soc, soccfg, cfg, -1, 1, 0.5)  # type: ignore[arg-type]
     assert cfg.model_dump() == before
-    assert len(programs) == 1
-    assert result.signals.shape == ((4, 3, 2) if reset else (4, 2))
+    assert len(programs) == (1 if reset or stop_after == 0 else 2)
+    assert result.signals.shape == ((4, 3, 2) if reset else (4, 12))
     if stop_after == 0:
         assert np.isnan(result.signals).all()
-    else:
+    elif reset:
         gains = np.arange(4)
         ground = (
             ((gains[:, None] + np.arange(3)) % 4 + 1) / 6 if reset else (gains + 1) / 6
@@ -156,12 +157,27 @@ def test_hardware_population_sweep_rounds_cancel_and_persistence(
             ground = ground + 0.5 / 6
         np.testing.assert_allclose(result.signals[..., 0], ground)
         np.testing.assert_allclose(result.signals[..., 1], 5 / 6 - ground)
+    else:
+        assert np.iscomplexobj(result.signals)
+        completed = 2 if stop_after is None else 1
+        for round_index in range(completed):
+            shot = np.arange(6)[None, :]
+            g_count = np.arange(4)[:, None] + 1 + round_index
+            expected = np.where(shot < g_count, -1.0, np.where(shot == 5, 5.0, 1.0))
+            np.testing.assert_array_equal(
+                result.signals[:, round_index * 6 : (round_index + 1) * 6], expected
+            )
+        if completed == 1:
+            assert np.isnan(result.signals[:, 6:]).all()
     assert result.cfg_snapshot is not None and result.cfg_snapshot.rounds == 2
     path = str(tmp_path / "population.hdf5")
     exp.save(path, result)  # type: ignore[arg-type]
     loaded = exp.load(path)
     np.testing.assert_array_equal(loaded.signals, result.signals)
-    np.testing.assert_array_equal(loaded.population_states, [0, 1])
+    if isinstance(loaded, ResetCheckResult):
+        np.testing.assert_array_equal(loaded.population_states, [0, 1])
+    else:
+        np.testing.assert_array_equal(loaded.shot_indices, np.arange(12))
 
 
 @pytest.mark.parametrize("correct", [False, True])
@@ -194,15 +210,50 @@ def test_reset_population_analysis_and_stage_styles(correct: bool) -> None:
         plt.close(figure)
 
 
-def test_amp_population_rabi_fit() -> None:
-    gains = np.linspace(0, 1, 51)
-    ground = 0.5 + 0.4 * np.cos(4 * np.pi * gains)
-    result = AmpRabiResult(gains, np.column_stack((ground, 0.95 - ground)))
-    fit, figure = AmpRabiExp().analyze(result)
+def test_amp_rejects_population_only_file(tmp_path: Path) -> None:
+    path = save_labber_data(
+        str(tmp_path / "old_amp.hdf5"),
+        ("Population", "a.u.", np.full((5, 2), 0.5)),
+        [("GE Population", "None", [0, 1]), ("Gain", "a.u.", np.linspace(0, 1, 5))],
+    )
+    with pytest.raises(ValueError, match="Shot Index|Signal|axis"):
+        AmpRabiExp().load(path)
+
+
+def test_amp_rejects_partial_raw_sweep() -> None:
+    signals = np.ones((5, 10), dtype=np.complex128)
+    signals[0, 0] = np.nan
+    result = AmpRabiResult(np.linspace(0, 1, 5), np.arange(10), signals)
+    with pytest.raises(ValueError, match="finite raw IQ"):
+        AmpRabiExp().analyze(result)
+
+
+@pytest.mark.parametrize("initial_state", ["ground", "excited"])
+def test_amp_raw_iq_rabi_fit(initial_state: Literal["ground", "excited"]) -> None:
+    rng = np.random.default_rng(238)
+    gains = np.linspace(-0.3, 1.2, 25)[::-1]
+    p_e0 = 0.1 if initial_state == "ground" else 0.9
+    p_e = 0.5 + (p_e0 - 0.5) * np.cos(4 * np.pi * gains)
+    excited = rng.random((gains.size, 1000)) < p_e[:, None]
+    signals = rng.normal(np.where(excited, 1.0, -1.0), 0.18).astype(np.complex128)
+    # Entirely missing rounds can still be analyzed from completed shots.
+    signals = np.column_stack((signals, np.full_like(signals, np.nan)))
+    result = AmpRabiResult(gains, np.arange(2000), signals)
+    fit, figure = AmpRabiExp().analyze(result, initial_state=initial_state)
     try:
+        assert fit.joint_fit.backend.valid
+        assert fit.joint_fit.phase == 0.0
+        assert fit.joint_fit.t_r is None
+        assert abs(fit.joint_fit.g_center + 1) < 0.1
+        assert abs(fit.joint_fit.e_center - 1) < 0.1
         assert fit.frequency == pytest.approx(2, rel=0.01)
-        assert fit.amplitude == pytest.approx(0.4, abs=0.01)
+        assert fit.amplitude == pytest.approx(0.4, abs=0.05)
         assert fit.pi_gain == pytest.approx(0.25, abs=0.01)
-        assert len(figure.axes[0].lines) == 4
+        assert fit.pi2_gain == pytest.approx(0.125, abs=0.005)
+        assert np.isfinite(fit.pi_gain_error) and fit.pi_gain_error > 0
+        assert fit.pi2_gain_error == pytest.approx(fit.pi_gain_error / 2)
+        assert len(figure.axes) == 3
+        assert "gain" in figure.axes[0].get_xlabel()
+        assert "rad/gain" in figure.axes[0].get_title()
     finally:
         plt.close(figure)
