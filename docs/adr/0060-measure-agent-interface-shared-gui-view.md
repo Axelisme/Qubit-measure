@@ -120,7 +120,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 | cfg 格式與目前值 | `tab_get(tab, include=["cfg"])` | 每個可設路徑的種類（scalar／sweep edge／ref key）、型別、目前值、ref 可選的 library 項目、是否鎖定 |
 | 分析參數格式 | `tab_get(tab, include=["analyze_params"])` | primary 與 post 各自的參數名、型別、可選值、目前值；該實驗有哪些分析階段、是否互動式 |
 | 分析結果 | `tab_analyze` 的回傳，或 `tab_get(tab, include=["analysis", "post"])` | summary 欄位與值、figure 路徑 |
-| 寫回內容 | `writeback(tab, stage)`（不帶 `items`，唯一讀取入口） | 每個項目的 id、種類（md／module／waveform）、target、current、proposed、是否勾選、目的地 context |
+| 寫回內容 | `writeback(tab, stage)`（不帶 `write`，唯一讀取入口） | 每個項目的 id、種類（md／module／waveform）、target、current、proposed、目的地 context |
 | 存檔路徑 | `tab_get(tab, include=["save_paths"])` | data、analysis image、post image 的預設路徑（依 GUI 檔名規則） |
 
 #### Tools
@@ -202,8 +202,11 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 - `done` 屬於互動分析的生命週期（對應 `finish()`），所有外掛共有；結果經原本的 op 送出。取消一律用 `cancel(op)`。
 - 除 `done` 外，不提供介面層的通用命令（例如指標事件或控制項）；外掛需要的操作都由外掛自己註冊。
 
-**`writeback(tab, stage = "primary" | "post", items?, apply = false)`**
-不帶 `items` 時只讀取草稿。`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}` 與目的地 context。
+**`writeback(tab, stage = "primary" | "post", write?)`**
+
+- 不帶 `write`：讀取寫回草稿，不切換 GUI。回傳 `{destination, items: [{id, kind, target, description, current, proposed}]}`；md 項目的 `current`／`proposed` 為值，module／waveform 項目為 cfg（目標不存在時 `current` 為 `null`）。不提供差異比對。
+- `write = [{id, target?, value?, edits?}]`：只寫入列出的項目，未列出的不寫。`target` 改寫入名稱；`value` 改 md 值；`edits` 以 cfg 編輯語法修改 module／waveform 欄位。依序處理、遇錯即停，寫入目前 active context（即 `destination`），GUI 的寫回清單隨之更新並切到對應子 tab。回傳 `written: {target: {before, after}}`。
+- 不提供勾選與「已套用」狀態：寫入哪些項目由 `write` 決定。
 
 **`tab_save(tab, data = true, images = ["analysis"], data_path?, image_paths?, comment?)`**
 不給路徑時用 `save_paths` 的預設路徑；`comment` 寫入資料檔註解。回傳實際寫入的檔案路徑。
@@ -220,10 +223,10 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 | `tab_open` | 新 tab 的 run 子 tab |
 | `tab_edit`、`tab_run` | run（cfg 表單與 live plot 所在） |
 | `tab_analyze`、`tab_interact`（帶 `payload`） | analysis 或 post |
-| `writeback`（帶 `items` 或 `apply`） | analysis 或 post（writeback 清單所在） |
+| `writeback`（帶 `write`） | analysis 或 post（writeback 清單所在） |
 | `tab_save` | data |
 
-讀取類 tool（`tab_get`、`tab_live`、`data`、不帶 `items` 的 `writeback`、不帶 `payload` 的 `tab_interact`）不切換，避免在 agent 反覆讀取時打斷使用者的畫面。
+讀取類 tool（`tab_get`、`tab_live`、`data`、不帶 `write` 的 `writeback`、不帶 `payload` 的 `tab_interact`）不切換，避免在 agent 反覆讀取時打斷使用者的畫面。
 
 ### E. 非同步（2）
 
@@ -285,7 +288,7 @@ wait("o2", timeout=60)                          → finished
 tab_get("t1", include=["analyze_params"])       → model_type: lor | sinc
 tab_analyze("t1")                               → q_f=845.1 MHz，fit 貼合（GUI 切到 analysis）
 writeback("t1")                                 → md.q_f 842.7 → 845.1、md.qf_w → 0.8
-writeback("t1", apply=true)
+writeback("t1", write=[{id: "md-1"}, {id: "md-2"}])
 tab_get("t1", include=["save_paths"])           → Database/Q5_2D/Q1/…/Q1_qubit_freq_0925@051115_2.000mA.hdf5
 tab_save("t1", comment="q_f = 845.1 MHz")       → GUI 切到 data 子 tab
 tab_close("t1")
@@ -300,14 +303,14 @@ tab_run("t2") → wait → tab_live                 → 兩個完整週期
 tab_analyze("t2")                               → pi_gain=0.213，但第一點離群
 tab_analyze("t2", params={skip: 1})             → pi_gain=0.211，殘差較小
 writeback("t2")                                 → md.pi_gain、ml.pi_amp、ml.pi2_amp
-writeback("t2", items=[{id: "md-2", selected: false}], apply=true)
+writeback("t2", write=[{id: "md-1"}, {id: "ml-1"}, {id: "ml-2"}])
 tab_save("t2")
 
 # T1：長量測，分段等待
 tab_open("time_domain/t1") → tab_run("t3")      → op o4
 wait("o4", timeout=60); tab_live("t3")          → 衰減曲線合理，繼續
 wait("o4", timeout=240)                         → finished
-tab_analyze("t3") → writeback("t3", apply=true) → tab_save("t3")
+tab_analyze("t3") → writeback("t3") → writeback("t3", write=[{id: "md-1"}, {id: "md-2"}]) → tab_save("t3")
 ```
 
 ### 情境二 a：接手使用者的 tab
@@ -321,7 +324,7 @@ tab_edit("t4", [{path: "sweep.freq", value: {center: 848.0, span: 20, expts: 201
 tab_run("t4") → wait → tab_live("t4")
 tab_analyze("t4")                          → fit ok
 （在 session 問使用者：找到 q_f=848.3 MHz，要寫回並繼續做 rabi 嗎？）
-writeback("t4", apply=true)
+writeback("t4", write=[{id: "md-1"}])
 ```
 
 ### 情境二 b：分析舊資料
@@ -368,7 +371,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `tab_live` | `operation.progress` + run pane 截圖（`tab.get_figure(run)`） |
 | `tab_analyze` | `tab.analyze`／`tab.post_analyze` + short-wait |
 | `tab_interact` | **新增** wire method，轉送子命令至互動分析外掛註冊的方法 |
-| `writeback` | `tab.writeback_preview` + `tab.writeback_set` + `tab.writeback_apply` |
+| `writeback` | `tab.writeback_preview`（**補** md 的 current 與 module／waveform 的 current／proposed cfg）+ `tab.writeback_set` + `tab.writeback_apply`（依 `write` 設定勾選後套用） |
 | `tab_save` | `tab.save_data`（`data_path`、`comment`）+ `tab.save_image` |
 | `wait`／`cancel` | `operation.await`；各類 cancel 合一 |
 | `device_set` | `device.connect`／`disconnect`／`setup` |
