@@ -147,17 +147,36 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 
 寫回草稿只由 `writeback` 讀取，各階段的圖由 `tab_live`／`tab_analyze` 回傳。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
 
-**`tab_edit(tab, edits)`**
-依序套用 cfg 編輯到該 tab 的 cfg 草稿，GUI 表單即時更新。沿用現有編輯語法（[[0050]]）：
+**`tab_edit(tab, edits: [{path, value}])`**
+依序套用 cfg 編輯到該 tab 的 cfg 草稿，GUI 表單即時更新。路徑沿用 canonical path（[[0050]]）：
 
 ```text
-{path: "relax_delay", value: 30.5}                          常數
-{path: "qub_pulse.freq", value: {__kind: "eval", expr: "q_f"}}   連結 md 表達式
-{path: "sweep.freq.start", value: 815.0}                    sweep 端點
-{path: "readout.ref", value: "readout_rf"}                  切換參照的 library 模組
+{path: "relax_delay", value: 30.5}                                   常數
+{path: "qub_pulse.freq", value: {__kind: "eval", expr: "q_f"}}       連結 md 表達式
+{path: "readout.ref", value: "readout_rf"}                           切換參照的 library 模組
+{path: "sweep.freq", value: {start: 815, stop: 875, expts: 301}}     整個 sweep
 ```
 
-回傳套用數量與草稿是否有效。
+- 遇錯即停、不回滾；錯誤指出失敗的路徑與已套用的筆數。
+- 切換 ref 會移除舊的子路徑，須先切 ref 再改子欄位。
+- tab 執行中回 `reason="busy"`。
+- 回傳 `{applied, valid, errors?}`；`valid=false` 時 `errors` 列出不合法的欄位與原因。
+- value source（`{__kind: "value_ref", key}`，解析一次後寫入常數）仍可用，但不列為主要用法。
+
+**sweep 一律整體修改。** sweep 欄位彼此連動（`step` 由 `start`／`stop`／`expts` 推得，給 `step` 時反推 `expts`），因此只接受在 sweep 路徑上給整個物件，不接受 `sweep.freq.start` 之類的端點路徑：
+
+```text
+一般 sweep： {start, stop, expts} 或 {start, stop, step}
+置中 sweep： {center, span, expts} 或 {center, span, step}
+```
+
+- `expts` 與 `step` 恰好給一個：兩者都給回 `reason="conflict"`，都沒給回 `reason="missing"`；其餘欄位必須給齊。
+- 形式必須符合該 sweep 的種類；`start`／`stop` 與 `center`／`span` 不能混用。
+- 中心被鎖定（`locked_center` 或 `center_editable=false`）時給 `center` 回錯。
+- `start`、`stop`、`center` 可用 md 表達式（`{__kind: "eval", expr}`）；`span`、`expts`、`step` 只接受數值。
+- 正規化由 GUI 的 `SweepEditor` 負責；回傳中附上每個被修改 sweep 的實際值 `{start, stop, expts, step}`（表達式端點另附求值結果）。
+
+同一套編輯語法也用於 `writeback` 中模組／波形項目的欄位修改。
 
 **`tab_run(tab)`**
 以該 tab 目前的 cfg 草稿開始 run，立即回傳 `{op}`；不附帶編輯、不自動分析。
@@ -261,7 +280,7 @@ tab_open("rabi/amp_rabi")                       → t2
 tab_run("t2")                                   → op o3
 wait("o3", timeout=15); tab_live("t2")          → 振盪只有半個週期
 cancel("o3")
-tab_edit("t2", [{path: "sweep.gain.stop", value: 0.4}, {path: "sweep.gain.expts", value: 101}])
+tab_edit("t2", [{path: "sweep.gain", value: {start: 0.0, stop: 0.4, expts: 101}}])
 tab_run("t2") → wait → tab_live                 → 兩個完整週期
 tab_analyze("t2")                               → pi_gain=0.213，但第一點離群
 tab_analyze("t2", params={skip: 1})             → pi_gain=0.211，殘差較小
@@ -283,7 +302,7 @@ connect(launch="never")
 status()                                   → t4 twotone/freq, active, analysis: failed
 tab_get("t4", include=["cfg", "analysis"])
 data("t4", max_points=150)                 → 峰貼在掃描邊緣
-tab_edit("t4", [{path: "sweep.freq.start", value: 838.0}, {path: "sweep.freq.stop", value: 858.0}])
+tab_edit("t4", [{path: "sweep.freq", value: {center: 848.0, span: 20, expts: 201}}])
 tab_run("t4") → wait → tab_live("t4")
 tab_analyze("t4")                          → fit ok
 （在 session 問使用者：找到 q_f=848.3 MHz，要寫回並繼續做 rabi 嗎？）
@@ -329,7 +348,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `tab_open` | `tab.new`（+ `tab.load_data`）+ `tab.set_active` |
 | `tab_close` | `tab.close` |
 | `tab_get` | `tab.snapshot`（含 `save_paths`）、`tab.get_cfg`、`tab.get_analyze_params`／`get_post_analyze_params`、analyze／post result、writeback preview、figure |
-| `tab_edit` | `tab.set_cfg`（既有編輯語法） |
+| `tab_edit` | `tab.set_cfg`；**調整**編輯語法：sweep 改為整體物件並檢查衝突、sweep 端點接受 md 表達式（`SweepEditor` 已支援 `EvalValue` 端點）、`valid=false` 時回傳錯誤清單 |
 | `tab_run` | `tab.run_start` |
 | `tab_live` | `operation.progress` + run pane 截圖（`tab.get_figure(run)`） |
 | `tab_analyze` | `tab.analyze`／`tab.post_analyze` + short-wait |
