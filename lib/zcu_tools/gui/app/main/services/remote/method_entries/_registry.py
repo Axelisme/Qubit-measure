@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from importlib import import_module
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from zcu_tools.gui.remote.method_spec import (
     BoundMethod,
@@ -13,6 +13,9 @@ from zcu_tools.gui.remote.method_spec import (
     build_method_registry,
 )
 from zcu_tools.gui.remote.param_spec import build_input_schema
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.main.services.remote.service import RemoteControlAdapter
 
 AgentExposure = Literal["rpc", "tool", "internal"]
 
@@ -27,7 +30,7 @@ class AgentMethodPolicy:
     reveals: tuple[str, ...] = ()
     # A partial query cannot reveal the entire named resource.
     reveals_without: tuple[str, ...] = ()
-    # Only a successful write may advance the whole observed baseline.
+    # A successful write reports the versions it changed on the owner thread.
     refresh_after_write: bool = False
     operation_key: str | None = None
 
@@ -105,10 +108,36 @@ def build_dispatch_registry(
     entries: tuple[RemoteMethodEntry, ...],
 ) -> dict[str, BoundMethod]:
     specs = build_method_specs(entries)
-    handlers = {
-        entry.method: _resolve_handler_ref(entry.handler_ref) for entry in entries
-    }
+    handlers: dict[str, Handler] = {}
+    for entry in entries:
+        handler = _resolve_handler_ref(entry.handler_ref)
+        if entry.agent.refresh_after_write:
+            if entry.spec.off_main_thread:
+                raise ValueError("write-version receipts require the owner thread")
+            handler = _with_write_versions(handler)
+        handlers[entry.method] = handler
     return build_method_registry(handlers, specs)
+
+
+def _with_write_versions(handler: Handler) -> Handler:
+    def wrapped(
+        adapter: RemoteControlAdapter, params: dict[str, object]
+    ) -> dict[str, object]:
+        # The handler and both samples share one owner-thread dispatch. Versions
+        # obtained by a separate RPC after the reply may include unseen GUI edits.
+        before = adapter.ctrl.resources_versions()
+        result = handler(adapter, params)
+        after = adapter.ctrl.resources_versions()
+        return {
+            **result,
+            "__agent_write_versions": {
+                key: [before.get(key, 0), version]
+                for key, version in after.items()
+                if version != before.get(key, 0)
+            },
+        }
+
+    return wrapped
 
 
 def _resolve_handler_ref(handler_ref: str) -> Handler:

@@ -11,7 +11,9 @@ from ._helpers import dispatch_handler as _dispatch
 
 
 def _ctrl_with_context_control(context_control: MagicMock) -> SimpleNamespace:
-    ctrl = SimpleNamespace(context_control=context_control)
+    ctrl = SimpleNamespace(
+        context_control=context_control, resources_versions=lambda: {}
+    )
     for name in (
         "use_context",
         "new_context",
@@ -40,6 +42,7 @@ def test_context_switch_and_create_use_context_control_facet() -> None:
     assert _dispatch(ctrl, "context.use", {"label": "base"}) == {
         "label": "base",
         "has_active_context": True,
+        "__agent_write_versions": {},
     }
     ctx.use_context.assert_called_once_with("base")
     ctrl.use_context.assert_not_called()
@@ -49,6 +52,7 @@ def test_context_switch_and_create_use_context_control_facet() -> None:
     ) == {
         "label": "base",
         "has_active_context": True,
+        "__agent_write_versions": {},
     }
     ctx.new_context.assert_called_once_with(bind_device=None, clone_from=None)
     ctrl.new_context.assert_not_called()

@@ -240,6 +240,30 @@ def test_tab_new_list_close_roundtrip(fx):
         sock.close()
 
 
+def test_tab_creation_receipt_reports_only_owner_thread_changes(fx):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(sock, {"id": "before", "method": "resources.versions", "params": {}})
+        before = _recv_response(sock)["result"]["versions"]
+        _send(
+            sock, {"id": "new", "method": "tab.new", "params": {"adapter_name": "fake"}}
+        )
+        reply = _recv_response(sock)
+        assert reply["ok"] is True
+        tab_id = reply["result"]["tab_id"]
+        changed = reply["result"]["__agent_write_versions"]
+        _send(sock, {"id": "after", "method": "resources.versions", "params": {}})
+        after = _recv_response(sock)["result"]["versions"]
+        assert f"tab:{tab_id}" in changed
+        assert "soc" not in changed
+        for resource, (old, new) in changed.items():
+            assert old == before.get(resource, 0)
+            assert new == after[resource]
+            assert new > old
+    finally:
+        sock.close()
+
+
 def test_invalid_typed_request_rejected(fx):
     sock = _open_client(fx.service.port)
     try:

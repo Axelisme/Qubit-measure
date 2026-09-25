@@ -447,14 +447,133 @@ def test_device_list_refreshes_membership_without_masking_device_edit(
     assert expected["devices:__set__"] == 3
 
 
-def test_successful_declared_write_refreshes_baseline(client: MeasureClient) -> None:
+def test_discarding_another_editor_does_not_accept_an_unread_cfg_edit(
+    client: MeasureClient,
+) -> None:
+    def respond(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        replies = {
+            "state.has_project": {"value": False},
+            "state.has_active_context": {"value": False},
+            "state.has_soc": {"value": False},
+            "context.active": {"label": None},
+            "device.list": {"devices": []},
+            "predictor.info": {"loaded": False},
+            "tab.snapshot": {"tabs": []},
+            "operation.active": {"operations": []},
+            "tab.get_cfg": {"tree": {"value": 3}},
+            "editor.discard": {},
+        }
+        return replies[method]
+
+    client.transport.responder = respond
+    set_versions(client, {"tab:t:cfg": 3})
+    client.call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": "t"}})
+    set_versions(client, {"tab:t:cfg": 4})  # GUI changes only tab t.
+    client.call("rpc_call", {"method": "editor.discard", "params": {"editor_id": "e"}})
+    client.call("status", {})
+
+    def guarded_run(params: dict[str, Any]) -> dict[str, Any]:
+        if params["expected_versions"]["tab:t:cfg"] != 4:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "stale_version",
+                    "message": "cfg changed",
+                    "data": {"stale": ["tab:t:cfg"]},
+                },
+            }
+        return {"ok": True, "result": {"operation_id": 1}}
+
+    client.transport.replies["tab.run_start"] = guarded_run
+    with pytest.raises(RuntimeError) as error:
+        client.context.send_gui_rpc("tab.run_start", {"tab_id": "t"})
+    assert getattr(error.value, "reason", None) == "stale_version"
+    run_params = [
+        params for method, params in client.transport.sent if method == "tab.run_start"
+    ][-1]
+    assert run_params["expected_versions"]["tab:t:cfg"] == 3
+
+
+def test_successful_write_refreshes_only_changed_previously_seen_resources(
+    client: MeasureClient,
+) -> None:
     client.observe_versions({"context": 7, "tab:t:cfg": 1})
     set_versions(client, {"context": 8, "tab:t:cfg": 9, "soc": 4})
-    send(client, "editor.commit", {"editor_id": "e", "name": "m"})
+    client.transport.replies["editor.commit"] = {
+        "ok": True,
+        "result": {"__agent_write_versions": {"context": [7, 8]}},
+    }
+    assert (
+        client.context.send_gui_rpc("editor.commit", {"editor_id": "e", "name": "m"})
+        == {}
+    )
     expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
     assert expected["context"] == 8
-    assert expected["tab:t:cfg"] == 9
-    assert expected["soc"] == 4
+    assert expected["tab:t:cfg"] == 1
+    assert expected["soc"] == 0
+
+
+@pytest.mark.parametrize("receipt", [None, {"context": [7, "8"]}, {"context": [7, 7]}])
+def test_invalid_write_receipt_does_not_advance_observations(
+    client: MeasureClient, receipt: object
+) -> None:
+    client.observe_versions({"context": 7})
+    client.transport.replies["editor.commit"] = {
+        "ok": True,
+        "result": {"__agent_write_versions": receipt},
+    }
+    with pytest.raises(RuntimeError) as error:
+        client.context.send_gui_rpc("editor.commit", {"editor_id": "e", "name": "m"})
+    assert getattr(error.value, "reason", None) == "incompatible_wire"
+    expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
+    assert expected["context"] == 7
+
+
+def test_write_does_not_approve_a_prior_unread_edit_to_the_same_cfg(
+    client: MeasureClient,
+) -> None:
+    client.observe_versions({"tab:t:cfg": 3})
+    set_versions(client, {"tab:t:cfg": 4})  # GUI edits before this unguarded write.
+    client.transport.replies["tab.set_cfg"] = {
+        "ok": True,
+        "result": {"__agent_write_versions": {"tab:t:cfg": [4, 5]}},
+    }
+    client.call(
+        "rpc_call",
+        {
+            "method": "tab.set_cfg",
+            "params": {
+                "tab_id": "t",
+                "edits": [{"path": "modules.readout.gain", "value": 0.25}],
+            },
+        },
+    )
+    set_versions(client, {"tab:t:cfg": 5})
+    expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
+    assert expected["tab:t:cfg"] == 3
+
+
+def test_write_reply_does_not_approve_a_later_unseen_gui_edit(
+    client: MeasureClient,
+) -> None:
+    client.observe_versions({"context": 7})
+
+    def commit_then_gui_edits(params: dict[str, Any]) -> dict[str, Any]:
+        # The receipt is fixed by the owner-thread handler; the GUI edits later.
+        set_versions(client, {"context": 9})
+        return {
+            "ok": True,
+            "result": {"__agent_write_versions": {"context": [7, 8]}},
+        }
+
+    client.transport.replies["editor.commit"] = commit_then_gui_edits
+    client.call(
+        "rpc_call",
+        {"method": "editor.commit", "params": {"editor_id": "e", "name": "m"}},
+    )
+    expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
+    assert expected["context"] == 8
 
 
 @pytest.mark.parametrize(

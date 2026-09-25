@@ -52,7 +52,7 @@ def test_start_with_primary_result_starts_op():
     """A primary analyze result starts post-analysis with its zero-field params."""
     ctrl = _ctrl()
     res = _dispatch(ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {}})
-    assert res == {"operation_id": 77}
+    assert res == {"operation_id": 77, "__agent_write_versions": {}}
     ctrl.start_post_analyze.assert_called_once()
     args, _ = ctrl.start_post_analyze.call_args
     assert args == ("t", GEPostAnalyzeParams())

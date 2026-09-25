@@ -98,7 +98,9 @@ from __future__ import annotations
 # v59: rpc.catalog marks successful writes that refresh the MCP version baseline.
 # v60: rpc.catalog marks params whose presence makes a read only partially reveal
 # its resource; MCP records a conservative pre-read version after successful reads.
-WIRE_VERSION = 60
+# v61: declared successful writes include owner-thread __agent_write_versions
+# receipts for resources changed by that handler; the MCP strips them from tools.
+WIRE_VERSION = 61
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -130,4 +132,5 @@ WIRE_VERSION = 60
 # v81: project all-origin operations and route cancellation through domain owners.
 # v82: declare catalog write baseline policy separately from read-reveal policy.
 # v83: declare partial cfg read policy in the live agent catalog.
-GUI_VERSION = 83
+# v84: attach only this handler's changed resource versions to declared writes.
+GUI_VERSION = 84

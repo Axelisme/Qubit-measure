@@ -327,12 +327,6 @@ class MeasureMcpSession:
             return None
         return versions
 
-    def refresh_versions(self) -> None:
-        versions = self.read_version_table()
-        if versions is not None:
-            self._last_seen.clear()
-            self._last_seen.update(versions)
-
     def build_expected_versions(
         self, method: str, params: dict[str, Any]
     ) -> dict[str, int]:
@@ -356,13 +350,32 @@ class MeasureMcpSession:
         return expand_pattern_keys(entry["reveals"], params, versions)
 
     def _record_successful_versions(
-        self, entry: CatalogEntry, observed: dict[str, int] | None
+        self,
+        entry: CatalogEntry,
+        observed: dict[str, int] | None,
+        result: dict[str, Any],
     ) -> None:
-        """A declared write refreshes baseline; a read records only its pre-read keys."""
         if observed is not None:
             self._last_seen.update(observed)
-        elif entry["refresh_after_write"]:
-            self.refresh_versions()
+        if not entry["refresh_after_write"]:
+            return
+        changes = result.pop("__agent_write_versions", None)
+        if not isinstance(changes, dict) or any(
+            not isinstance(key, str)
+            or not key
+            or not isinstance(pair, list)
+            or len(pair) != 2
+            or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in pair)
+            or pair[1] <= pair[0]
+            for key, pair in changes.items()
+        ):
+            raise GuiRpcError(
+                "invalid GUI write-version receipt", reason="incompatible_wire"
+            )
+        for key, (before, after) in changes.items():
+            # An unguarded write cannot certify an unseen edit made before it.
+            if self._last_seen.get(key) == before:
+                self._last_seen[key] = after
 
     def send_gui_rpc(
         self,
@@ -420,8 +433,8 @@ class MeasureMcpSession:
             raise GuiRpcError(
                 f"invalid GUI reply for {method}", reason="incompatible_wire"
             )
-        self._record_successful_versions(entry, observed)
         result = dict(result)
+        self._record_successful_versions(entry, observed, result)
         pattern = entry["operation_key"]
         if pattern is not None and "operation_id" in result:
             handle = self.expose_operation(result.pop("operation_id"))

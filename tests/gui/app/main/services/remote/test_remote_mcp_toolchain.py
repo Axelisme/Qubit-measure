@@ -400,6 +400,9 @@ def test_device_setup_spec_uses_device_control_facet(fx):
 
 
 class _PoisonController:
+    def resources_versions(self) -> dict[str, int]:
+        return {}
+
     def __getattr__(self, name: str) -> object:
         raise AssertionError(f"broad controller used for {name}")
 
@@ -453,26 +456,28 @@ def test_device_handlers_dispatch_only_through_device_control_facet():
             "address": "none",
         },
         dev,
-    ) == {"operation_id": 101}
+    ) == {"operation_id": 101, "__agent_write_versions": {}}
     assert isinstance(dev.start_connect_device.call_args.args[0], ConnectDeviceRequest)
 
     assert _dispatch_with_device_control(
         "device.disconnect", {"name": "bias"}, dev
-    ) == {"operation_id": 102}
+    ) == {"operation_id": 102, "__agent_write_versions": {}}
     assert isinstance(
         dev.start_disconnect_device.call_args.args[0], DisconnectDeviceRequest
     )
 
     assert _dispatch_with_device_control("device.reconnect", {"name": "bias"}, dev) == {
-        "operation_id": 103
+        "operation_id": 103,
+        "__agent_write_versions": {},
     }
     assert _dispatch_with_device_control("device.forget", {"name": "bias"}, dev) == {
-        "forgotten": "bias"
+        "forgotten": "bias",
+        "__agent_write_versions": {},
     }
 
     assert _dispatch_with_device_control(
         "device.setup", {"name": "bias", "updates": {"value": 2.0}}, dev
-    ) == {"operation_id": 104}
+    ) == {"operation_id": 104, "__agent_write_versions": {}}
     assert isinstance(dev.start_setup_device.call_args.args[0], SetupDeviceRequest)
 
     assert "fields" in _dispatch_with_device_control(
@@ -612,7 +617,10 @@ def test_save_data_delegates_to_save_control(fx):
             {"tab_id": "tab1", "data_path": "/tmp/data.h5", "comment": "note"},
         )
         assert resp["ok"] is True
-        assert resp["result"] == {"data_path": "/tmp/data.hdf5"}
+        assert resp["result"] == {
+            "data_path": "/tmp/data.hdf5",
+            "__agent_write_versions": {},
+        }
         fx.service.save_control.save_data.assert_called_once_with(
             "tab1", "/tmp/data.h5", comment="note"
         )

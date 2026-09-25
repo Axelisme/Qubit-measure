@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-25 — partial read policy (WIRE 60)
+**Last updated:** 2026-09-26 — owner-thread write receipts (WIRE 61)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -114,11 +114,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 60`, `GUI_VERSION = 83`, and
-`MCP_VERSION = 78` (defined in `zcu_tools.mcp.measure.server`). WIRE 60 adds
-`rpc.catalog.reveals_without` for partial reads; MCP samples the resource version
-before a full read and records it only after that read succeeds. WIRE 59 separates
-successful write refresh from read-reveal policy.
+Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 84`, and
+`MCP_VERSION = 79` (defined in `zcu_tools.mcp.measure.server`). WIRE 61 adds
+`__agent_write_versions` to replies for catalog-declared writes: each changed
+resource carries its versions before and after that handler on the owner thread.
+WIRE 60 adds `rpc.catalog.reveals_without` for partial reads; MCP samples the
+resource version before a full read and records it only after success.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -134,7 +135,9 @@ the State owner thread before calling the controller.
 MCP owns the agent baseline:
 
 - guarded mutations send expected versions derived from the live catalog;
-- catalog-declared successful writes refresh the baseline;
+- catalog-declared successful writes report only resources changed by their
+  owner-thread handler; MCP advances a resource only if its prior observation
+  matches that handler's before-version, never from a later version query;
 - successful full reads record pre-read versions only for keys named by their
   `reveals` policy; `reveals_without` excludes those keys when a named optional
   parameter is present, so a partial or unmatched `prefix` cannot reveal the

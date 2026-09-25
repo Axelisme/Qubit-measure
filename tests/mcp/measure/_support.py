@@ -45,6 +45,7 @@ class WireTransport:
     def send_line(self, payload: dict[str, Any]) -> None:
         method, params = payload["method"], payload["params"]
         self.sent.append((method, params))
+        reply: dict[str, Any]
         if method in self.replies:
             response = self.replies[method]
             reply = response(params) if callable(response) else response
@@ -59,6 +60,18 @@ class WireTransport:
             reply = {"ok": True, "result": self.responder(method, params)}
         else:
             raise AssertionError(f"Unexpected RPC: {method}")
+        result = reply.get("result")
+        if (
+            reply.get("ok")
+            and isinstance(result, dict)
+            and "__agent_write_versions" not in result
+            and any(
+                entry.method == method and entry.agent.refresh_after_write
+                for entry in METHOD_ENTRIES
+            )
+        ):
+            # Recording writes change no State unless a test supplies a receipt.
+            reply = {**reply, "result": {**result, "__agent_write_versions": {}}}
         if self.deliver_reply is None:
             raise AssertionError("Transport has not been attached")
         self.deliver_reply({**reply, "id": payload["id"]})
