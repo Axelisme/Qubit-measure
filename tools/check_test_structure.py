@@ -37,11 +37,11 @@ def _module_target(root: Path, parts: tuple[str, ...]) -> Path | None:
     if not parts:
         return None
     target = root.joinpath(*parts)
-    source = target.with_suffix(".py")
-    if source.is_file():
-        return source
     package = target / "__init__.py"
-    return package if package.is_file() else None
+    if package.is_file():
+        return package
+    source = target.with_suffix(".py")
+    return source if source.is_file() else None
 
 
 def _import_targets(
@@ -57,10 +57,9 @@ def _import_targets(
                 return set()
             prefix = parent[: len(parent) - node.level + 1]
         module = prefix + tuple(node.module.split(".") if node.module else ())
-        names = [
-            module,
-            *(module + tuple(alias.name.split(".")) for alias in node.names),
-        ]
+        # Imported names may be package attributes, even when matching files
+        # exist. Only the explicit module is certain without executing imports.
+        names = [module]
     return {
         target for name in names if (target := _module_target(root, name)) is not None
     }

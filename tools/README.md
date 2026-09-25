@@ -168,7 +168,9 @@ Blocking 規則：
 
 Import 解析限 repo-root-qualified 絕對路徑與明確相對路徑，不追 dynamic import、re-export、
 pytest import mode 或自訂 `sys.path`。例如 bare `import conftest` 不在目前可確定解析範圍。
-此限制不是 policy 豁免。重複定義檢查依預設 `test_` / `Test` 命名，不模擬 decorator、繼承、
+`from package import name` 的 name 可能是套件屬性，不因同名檔案存在就判定匯入子模組；
+只檢查明示的 package/module 部分。`from .test_peer import helper` 仍檢查 test_peer。
+同名 `.py` 與含 `__init__.py` 的套件共存時，優先解析套件。這些限制不是 policy 豁免。重複定義檢查依預設 `test_` / `Test` 命名，不模擬 decorator、繼承、
 assignment 或 pytest plugins 的收集行為。
 
 `test-file-name` 對 ticket、phase、part 加編號、歷史 B/C 編號及 misc 類名稱提醒人工審閱；
