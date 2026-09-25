@@ -49,6 +49,12 @@ def _h_operation_active(
     }
 
 
+def _h_operation_cancel(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    return {"status": adapter.operation_control.cancel_operation(int(params["operation_id"]))}  # type: ignore[arg-type]
+
+
 def _h_operation_await(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:

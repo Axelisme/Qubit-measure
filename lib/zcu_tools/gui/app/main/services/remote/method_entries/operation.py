@@ -29,6 +29,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
             off_main_thread=True,
         ),
+        agent=AgentMethodPolicy(exposure="tool", tool_names=("wait",)),
+    ),
+    method_entry(
+        "operation.cancel",
+        "operation:_h_operation_cancel",
+        MethodSpec(5.0, "Request cancellation of an operation by id", (
+            _int("operation_id", "Known operation handle"),
+        )),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "operation.progress",

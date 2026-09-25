@@ -189,7 +189,12 @@ def build_app_services(
         render_host=render_host,
         access=access,
     )
-    operation_control = OperationControlFacet(handles=handles, progress=progress)
+    operation_control = OperationControlFacet(
+        handles=handles,
+        progress=progress,
+        run_analyze=run_analyze_control,
+        device=session.device_control,
+    )
     save_control = SaveControlFacet(
         state=state,
         bus=bus,

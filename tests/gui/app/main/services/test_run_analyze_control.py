@@ -83,6 +83,10 @@ class RecordingRun:
         self._log.add("run", "cancel_run")
         return True
 
+    @property
+    def active_token(self) -> int | None:
+        return 11
+
 
 class RecordingLoad:
     def __init__(self, log: CallLog) -> None:
@@ -126,6 +130,9 @@ class RecordingAnalyze:
         self._log.add("analyze", "cancel_interactive", tab_id)
         return True
 
+    def active_operations(self) -> tuple[tuple[str, int], ...]:
+        return (("gui-fit", 22),)
+
 
 class RecordingPostAnalyze:
     def __init__(self, log: CallLog) -> None:
@@ -145,6 +152,9 @@ class RecordingPostAnalyze:
             figure_container,
         )
         return 33
+
+    def active_operations(self) -> tuple[tuple[str, int], ...]:
+        return (("gui-post", 33),)
 
 
 class RecordingTab:
@@ -239,6 +249,16 @@ def _facet(
         state,
         bus,
     )
+
+
+def test_gui_started_run_and_both_analysis_stages_are_indexed() -> None:
+    facet, _log, _state, _bus = _facet()
+
+    assert [(op.op, op.tab, op.kind) for op in facet.active_tab_operations()] == [
+        (11, "running-tab", "run"),
+        (22, "gui-fit", "analyze"),
+        (33, "gui-post", "analyze"),
+    ]
 
 
 def test_run_control_starts_with_guard_and_live_container() -> None:

@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from ._support import make_client
 
 
@@ -33,3 +35,55 @@ def test_status_indexes_gui_origin_operations_without_an_agent_start(tmp_path: P
         "running": [{"op": 31, "tab": "gui-tab", "kind": "analyze"}, {"op": 32, "tab": None, "kind": "device"}],
     }
     assert ("operation.active", {}) in client.transport.sent
+
+
+def test_wait_timeout_and_feedback_are_running_results(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    for wire, feedback in (({"reason": "timeout"}, None), ({"reason": "user_feedback", "feedback": "check frequency"}, "check frequency")):
+        client.transport.replies["operation.await"] = {"ok": True, "result": wire}
+        client.transport.replies["operation.progress"] = {
+            "ok": True,
+            "result": {"active": True, "bars": [{"percent": 35.0, "eta_s": 12.5}]},
+        }
+        result = client.call("wait", {"op": 31, "timeout": 0})
+        assert result["status"] == "running"
+        assert result["elapsed_s"] >= 0
+        assert result["progress"] == [{"percent": 35.0, "eta_s": 12.5}]
+        assert result["eta_s"] == 12.5
+        assert result.get("feedback") == feedback
+
+
+def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    client.transport.replies["operation.await"] = {
+        "ok": True,
+        "result": {"reason": "completed", "status": "failed", "error": {"reason": "failed", "message": "ramp failed"}},
+    }
+    result = client.call("wait", {"op": 32})
+    assert result["status"] == "failed"
+    assert result["error"] == {"reason": "failed", "message": "ramp failed"}
+    client.transport.replies["operation.await"] = {
+        "ok": False,
+        "error": {"code": "invalid_params", "reason": "unknown_op", "message": "unknown or evicted op"},
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        client.call("wait", {"op": 999})
+    assert getattr(exc_info.value, "reason", None) == "unknown_op"
+    assert ("operation.progress", {"operation_id": 999}) not in client.transport.sent
+
+
+def test_cancel_short_wait_observes_stop_and_respects_non_cancellable(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    client.transport.replies["operation.cancel"] = {"ok": True, "result": {"status": "cancelling"}}
+    client.transport.replies["operation.await"] = {
+        "ok": True,
+        "result": {"reason": "completed", "status": "cancelled", "feedback": "Stop requested"},
+    }
+    assert client.call("cancel", {"op": 31}) == {"status": "cancelled"}
+    client.transport.replies["operation.cancel"] = {
+        "ok": False,
+        "error": {"code": "precondition_failed", "reason": "not_cancellable", "message": "post/save cannot cancel"},
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        client.call("cancel", {"op": 32})
+    assert getattr(exc_info.value, "reason", None) == "not_cancellable"
