@@ -121,7 +121,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 | 分析參數格式 | `tab_get(tab, include=["analyze_params"])` | primary 與 post 各自的參數名、型別、可選值、目前值；該實驗有哪些分析階段、是否互動式 |
 | 分析結果 | `tab_analyze` 的回傳，或 `tab_get(tab, include=["analysis", "post"])` | summary 欄位與值、figure 路徑 |
 | 寫回內容 | `writeback(tab, stage)`（不帶 `write`，唯一讀取入口） | 每個項目的 id、種類（md／module／waveform）、target、current、proposed、目的地 context |
-| 存檔路徑 | `tab_get(tab, include=["save_paths"])` | data、analysis image、post image 的預設路徑（依 GUI 檔名規則） |
+| 存檔項目 | `tab_get(tab, include=["artifacts"])` | 每個可存項目的 key、種類（data／image）、預設路徑、存檔狀態 |
 
 #### Tools
 
@@ -135,7 +135,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 在 GUI 開新 tab；`from_file` 等於 `tab.new` + `tab.load_data`，資料檔與實驗不相容時報錯並關閉剛開的 tab。回傳 `{tab, experiment}`，不附 cfg 與 guide。
 
 **`tab_close(tab, discard_unsaved = false)`**
-關閉 tab；執行中回 `reason="busy"`。有未存檔的結果時回 `reason="unsaved"` 並列出未存的項目，對應 GUI 關閉 tab 時的確認對話框；agent 在 session 與使用者確認後，以 `discard_unsaved=true` 關閉。
+關閉 tab；執行中回 `reason="busy"`。有 artifact 處於 `not_saved` 或 `unsaved_changes` 時回 `reason="unsaved"` 並列出這些項目，對應 GUI 關閉 tab 時的確認對話框；agent 在 session 與使用者確認後，以 `discard_unsaved=true` 關閉。
 
 **`tab_get(tab, include = ["summary"])`**
 `include` 可選：
@@ -144,7 +144,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 - `cfg`：每個可設路徑的種類（scalar／sweep edge／ref key）、型別、目前值、ref 可選項、是否鎖定；
 - `analyze_params`：primary 與 post 的參數定義與目前值；
 - `analysis`、`post`：分析結果的 summary 與圖檔路徑；
-- `save_paths`：預設存檔路徑。
+- `artifacts`：可存項目清單 `[{key, kind: "data" | "image", default_path, status}]`，`status` 沿用 GUI 存檔區的 `no_result`／`not_saved`／`unsaved_changes`／`saved`。目前 key 為 `data`、`analysis`、`post`。
 
 寫回草稿只由 `writeback` 讀取，各階段的圖由 `tab_live`／`tab_analyze` 回傳。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
 
@@ -208,8 +208,8 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 - `write = [{id, target?, value?, edits?}]`：只寫入列出的項目，未列出的不寫。`target` 改寫入名稱；`value` 改 md 值；`edits` 以 cfg 編輯語法修改 module／waveform 欄位。依序處理、遇錯即停，寫入目前 active context（即 `destination`），GUI 的寫回清單隨之更新並切到對應子 tab。回傳 `written: {target: {before, after}}`。
 - 不提供勾選與「已套用」狀態：寫入哪些項目由 `write` 決定。
 
-**`tab_save(tab, data = true, images = ["analysis"], data_path?, image_paths?, comment?)`**
-不給路徑時用 `save_paths` 的預設路徑；`comment` 寫入資料檔註解。回傳實際寫入的檔案路徑。
+**`tab_save(tab, artifacts = "all" | [key, ...], paths?: {key: path}, comment?)`**
+以 artifact 為單位存檔。預設 `"all"` 對應 GUI 的 Save All，依 GUI 順序存下所有可存項目；給清單時只存列出的。`paths` 覆寫個別項目的路徑，其餘用預設路徑；`comment` 只寫入 data。回傳 `{saved: {key: actual_path}}`，資料檔重名自動加後綴時回傳實際路徑。GUI 存檔區的狀態隨之更新。
 
 **`data(tab, role?, max_points = 200, export = false)`**
 回傳目前結果的降採樣軸與數值；`export=true` 回 `.npz` 路徑供 agent 自行分析。
@@ -289,7 +289,7 @@ tab_get("t1", include=["analyze_params"])       → model_type: lor | sinc
 tab_analyze("t1")                               → q_f=845.1 MHz，fit 貼合（GUI 切到 analysis）
 writeback("t1")                                 → md.q_f 842.7 → 845.1、md.qf_w → 0.8
 writeback("t1", write=[{id: "md-1"}, {id: "md-2"}])
-tab_get("t1", include=["save_paths"])           → Database/Q5_2D/Q1/…/Q1_qubit_freq_0925@051115_2.000mA.hdf5
+tab_get("t1", include=["artifacts"])            → data: Database/Q5_2D/Q1/…/Q1_qubit_freq_0925@051115_2.000mA.hdf5（not_saved）
 tab_save("t1", comment="q_f = 845.1 MHz")       → GUI 切到 data 子 tab
 tab_close("t1")
 
@@ -365,14 +365,14 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `guide` | `adapter.guide` |
 | `tab_open` | `tab.new`（+ `tab.load_data`）+ `tab.set_active` |
 | `tab_close` | `tab.close` |
-| `tab_get` | `tab.snapshot`（含 `save_paths`）、`tab.get_cfg`、`tab.get_analyze_params`／`get_post_analyze_params`、analyze／post result、writeback preview、figure |
+| `tab_get` | `tab.snapshot`（含 `save_paths`）+ **補** artifact 存檔狀態、`tab.get_cfg`、`tab.get_analyze_params`／`get_post_analyze_params`、analyze／post result、writeback preview、figure |
 | `tab_edit` | `tab.set_cfg`；**調整**編輯語法：sweep 改為整體物件並檢查衝突、sweep 端點接受 md 表達式（`SweepEditor` 已支援 `EvalValue` 端點）、`valid=false` 時回傳錯誤清單 |
 | `tab_run` | `tab.run_start` |
 | `tab_live` | `operation.progress` + run pane 截圖（`tab.get_figure(run)`） |
 | `tab_analyze` | `tab.analyze`／`tab.post_analyze` + short-wait |
 | `tab_interact` | **新增** wire method，轉送子命令至互動分析外掛註冊的方法 |
 | `writeback` | `tab.writeback_preview`（**補** md 的 current 與 module／waveform 的 current／proposed cfg）+ `tab.writeback_set` + `tab.writeback_apply`（依 `write` 設定勾選後套用） |
-| `tab_save` | `tab.save_data`（`data_path`、`comment`）+ `tab.save_image` |
+| `tab_save` | `tab.save_data`（`data_path`、`comment`）+ `tab.save_image`，依 Save All 順序 |
 | `wait`／`cancel` | `operation.await`；各類 cancel 合一 |
 | `device_set` | `device.connect`／`disconnect`／`setup` |
 | `predictor`／`predict` | 既有 predictor wire method |
