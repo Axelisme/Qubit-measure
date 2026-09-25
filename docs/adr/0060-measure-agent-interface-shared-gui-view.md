@@ -29,7 +29,7 @@
 | P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 
-## Decision：Tool 集合（27 特化 + 3 RPC）
+## Decision：Tool 集合（26 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -45,13 +45,13 @@
 {
   environment: {project, soc, context, devices: [{name, value, unit, output}], predictor: {loaded}},
   ready: {can_run: bool, missing: [...]},
-  tabs: [{tab: "t3", experiment: "twotone/freq", active: true, subtab: "analysis", running: false,
+  tabs: [{tab: "t3", experiment: "twotone/freq", active: true, running: false,
           has_result: true, analysis: "ok" | "failed" | null, writeback_pending: 2}],
   running: [{op, tab, kind, progress}]
 }
 ```
 
-`tabs[].active` 與 `tabs[].subtab` 是 GUI 上目前選中的 tab 與子 tab。
+`tabs[].active` 是 GUI 上目前選中的 tab。
 
 ### B. 環境（1）
 
@@ -77,7 +77,7 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 **`library(name?)`**
 不帶 `name` 列出 modules 與 waveforms；帶 `name` 回傳該項 cfg。
 
-### D. 實驗與 tab（13）
+### D. 實驗與 tab（12）
 
 #### 資訊從哪裡取得
 
@@ -91,7 +91,6 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 | 分析結果 | `tab_analyze` 的回傳，或 `tab_get(tab, include=["analysis", "post"])` | summary 欄位與值、figure 路徑 |
 | 寫回內容 | `writeback(tab, stage)`（不帶 `items`） | 每個項目的 id、種類（md／module／waveform）、target、current、proposed、是否勾選、目的地 context |
 | 存檔路徑 | `tab_get(tab, include=["save_paths"])` | data、analysis image、post image 的預設路徑（依 GUI 檔名規則） |
-| 使用者目前在看哪裡 | `status()` 的 `tabs[].active` 與 `tabs[].subtab` | 選中的 tab 與子 tab |
 
 #### Tools
 
@@ -101,17 +100,14 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 **`guide(experiment)`**
 回傳該實驗的 guide 全文。開 tab 前後都可讀。
 
-**`tab_open(experiment, from_file?, focus = true)`**
+**`tab_open(experiment, from_file?)`**
 在 GUI 開新 tab；`from_file` 載入既有資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg 摘要。
 
 **`tab_close(tab)`**
 關閉 tab；執行中的 tab 回 `reason="busy"`。
 
-**`tab_focus(tab, subtab? = "run" | "analysis" | "post" | "data" | "guide")`**
-只改變 GUI 顯示哪個 tab 與子 tab，不影響任何操作對象。
-
 **`tab_get(tab, include = ["summary"])`**
-`include` 可選 `cfg`、`analyze_params`、`analysis`、`post`、`writeback`、`save_paths`、`figures`；`summary` 含實驗名、分析階段、run／analysis 狀態、目前子 tab。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
+`include` 可選 `cfg`、`analyze_params`、`analysis`、`post`、`writeback`、`save_paths`、`figures`；`summary` 含實驗名、分析階段、run／analysis 狀態。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
 
 **`tab_edit(tab, edits)`**
 依序套用 cfg 編輯到該 tab 的 cfg 草稿，GUI 表單即時更新。沿用現有編輯語法（[[0050]]）：
@@ -125,37 +121,37 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 
 回傳套用數量與草稿是否有效。
 
-**`tab_run(tab, focus = true)`**
+**`tab_run(tab)`**
 以該 tab 目前的 cfg 草稿開始 run，立即回傳 `{op}`；不附帶編輯、不自動分析。
 
 **`tab_live(tab)`**
 讀取 run 進行中的狀態：進度、run pane 的 live plot（PNG 路徑）。agent 據此決定繼續等、`cancel` 後 `tab_edit` 重來，或讓它跑完。run 結束後回傳最終的 run pane 圖。
 
-**`tab_analyze(tab, stage = "primary" | "post", params?, focus = true)`**
+**`tab_analyze(tab, stage = "primary" | "post", params?)`**
 以 `params` 對目前資料分析，結果寫入 GUI 的 analysis／post pane；可用不同 `params` 反覆呼叫直到滿意。回傳 summary 與 figure 路徑；分析較久時回傳 `{op}`。互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。
 
-**`writeback(tab, stage = "primary" | "post", items?, apply = false, focus = true)`**
+**`writeback(tab, stage = "primary" | "post", items?, apply = false)`**
 不帶 `items` 時只讀取草稿。`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}` 與目的地 context。
 
-**`tab_save(tab, data = true, images = ["analysis"], data_path?, image_paths?, comment?, focus = true)`**
+**`tab_save(tab, data = true, images = ["analysis"], data_path?, image_paths?, comment?)`**
 不給路徑時用 `save_paths` 的預設路徑；`comment` 寫入資料檔註解。回傳實際寫入的檔案路徑。
 
 **`data(tab, role?, max_points = 200, export = false)`**
 回傳目前結果的降採樣軸與數值；`export=true` 回 `.npz` 路徑供 agent 自行分析。
 
-#### 子 tab 關注
+#### GUI 跟隨 agent 的操作
 
-使用者透過 GUI 跟隨 agent，所以各階段 tool 預設把 GUI 切到對應的 tab 與子 tab：
+agent 操作某個 tab 的某個階段時，GUI 一律切到該 tab 與對應的子 tab，讓使用者看到 agent 正在處理的畫面；這是各 tool 的固定行為，沒有開關參數：
 
-| Tool | 切到 |
+| Tool | GUI 切到 |
 | --- | --- |
 | `tab_open` | 新 tab 的 run 子 tab |
-| `tab_run` | run |
+| `tab_edit`、`tab_run`、`tab_live` | run（cfg 表單與 live plot 所在） |
 | `tab_analyze` | analysis 或 post |
 | `writeback` | analysis 或 post（writeback 清單所在） |
 | `tab_save` | data |
 
-`focus=false` 時不切換，用於使用者正在看別的畫面、或 agent 在背景讀寫。讀取類 tool（`tab_get`、`tab_live`、`data`）永遠不切換。
+`tab_get` 與 `data` 可一次讀多個面向，不對應單一子 tab，因此不切換。
 
 ### E. 非同步（2）
 
@@ -244,7 +240,7 @@ tab_analyze("t3") → writeback("t3", apply=true) → tab_save("t3")
 
 ```text
 connect(launch="never")
-status()                                   → t4 twotone/freq, active, subtab: analysis, analysis: failed
+status()                                   → t4 twotone/freq, active, analysis: failed
 tab_get("t4", include=["cfg", "analysis", "figures"])
 data("t4", max_points=150)                 → 峰貼在掃描邊緣
 tab_edit("t4", [{path: "sweep.freq.start", value: 838.0}, {path: "sweep.freq.stop", value: 858.0}])
@@ -285,7 +281,6 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `guide` | `adapter.guide` |
 | `tab_open` | `tab.new`（+ `tab.load_data`）+ `tab.set_active` |
 | `tab_close` | `tab.close` |
-| `tab_focus` | `tab.set_active` + **新增** view-only 的子 tab 切換 wire method |
 | `tab_get` | `tab.snapshot`（含 `save_paths`）、`tab.get_cfg`、`tab.get_analyze_params`／`get_post_analyze_params`、analyze／post result、writeback preview、figure |
 | `tab_edit` | `tab.set_cfg`（既有編輯語法） |
 | `tab_run` | `tab.run_start` |
@@ -300,7 +295,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 需要補的只有三項，都不改 GUI 畫面：
 
 - `data`：run result 的降採樣與匯出。
-- 子 tab 切換與讀取：view-only wire method，讓 agent 切換並讀取 `ExpTabWidget` 目前的子 tab。
+- 子 tab 切換：view-only wire method（與 `tab.set_active` 同性質），供各階段 tool 讓 GUI 跟隨到對應子 tab。
 - cfg 格式投影：`tab.get_cfg` 目前回傳值與路徑種類，需補上型別、ref 可選項與鎖定狀態。
 
 ## 後續（基礎介面穩定後再評估）
@@ -320,7 +315,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 27 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 26 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
