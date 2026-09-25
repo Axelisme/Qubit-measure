@@ -29,7 +29,7 @@
 | P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 
-## Decision：Tool 集合（26 特化 + 3 RPC）
+## Decision：Tool 集合（28 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -72,18 +72,18 @@
 - `running` 列出所有進行中的操作，不論由誰啟動；`op` 可直接用於 `wait`／`cancel`。
 - 儀器欄位與值、context 清單與 md、tab 的 cfg／結果、進度、SoC 硬體資訊、project 路徑都不在此，分別由 `devices`、context 類 tool、`tab_get`／`tab_live`、`wait`、RPC 讀取。
 
-### B. 環境（1）
+### B. 環境（3）
 
-**`setup(project?, soc?, context?)`**
-套用給定的部分，未給的不動；回傳 `status()`。
+**`project(chip?, qubit?, resonator?, scope?)`**
+不帶參數時讀取目前 project：`{chip, qubit, resonator, result_dir, database_path}`；帶參數時設定 project（`startup.apply`）並回傳同樣內容。`scope` 對應既有的 result scope id，用於沿用既有結果目錄；scope 清單走 RPC。重新設定時沿用 GUI 現有行為，不另加限制。
 
-```text
-setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
-      soc = {kind: "remote", address: "192.168.10.179"},
-      context = {use: "051115_2.000mA"} | {create: {bind_device: "flux_yoko", clone_from: "current"}})
-```
+**`soc_connect(address, port)`**
+同步連線實體 SoC，回傳 `soc_info()` 的內容；連不上時快速失敗。重新呼叫即改連另一塊板子，不另提供 disconnect。
 
-儀器連線走 `device_set`／`devices`（F 類）。
+**`soc_info(include_cfg = false)`**
+讀取 SoC 硬體資訊：是否連線、位址、各通道的 generator／readout 類型、converter port、sample rate、最大 pulse／buffer 長度。`include_cfg=true` 附完整 QICK cfg。
+
+mock 模式（mock SoC 與 fake device）屬於開發用途，不在量測介面中，經 RPC 或開發工具啟動。context 的建立與切換見 C 類；儀器連線見 F 類。
 
 ### C. 知識庫（3）
 
@@ -211,7 +211,9 @@ agent 操作某個 tab 的某個階段時，GUI 一律切到該 tab 與對應的
 
 ```text
 connect()
-setup(project={...}, soc={...}, context={create: {bind_device: "flux_yoko"}})
+project(chip="Q5_2D", qubit="Q1", resonator="R1")
+soc_connect("192.168.10.179", 8887)
+（建立 context，見 C 類）
 device_set("flux_yoko", connect={type: "YOKOGS200", address: "USB0::…"}, values={value: 2e-3})  → op o1
 wait("o1")
 predictor("load", path="result/Q5_2D/Q1/params.json")
@@ -295,7 +297,9 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | Tool | 組合的現有能力 |
 | --- | --- |
 | `status` | `gui_overview` + tab 清單 |
-| `setup` | `startup.apply`、`soc.connect`、`context.new`／`context.use` |
+| `project` | `project.info`、`startup.apply` |
+| `soc_connect` | `soc.connect(kind=remote)` |
+| `soc_info` | `soc.info` |
 | `experiments` | `adapter.list` + adapter capabilities |
 | `guide` | `adapter.guide` |
 | `tab_open` | `tab.new`（+ `tab.load_data`）+ `tab.set_active` |
@@ -334,7 +338,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 26 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 28 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
