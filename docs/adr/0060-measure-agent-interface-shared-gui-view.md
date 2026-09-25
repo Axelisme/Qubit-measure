@@ -23,13 +23,13 @@
 | P1 | **同一份狀態，兩個 view** | agent 操作 GUI 的 tab、cfg 草稿、pane 結果、writeback 草稿、context、device、predictor；需要知道現況就讀狀態。 |
 | P2 | **名詞沿用 GUI 物件** | agent 與使用者談論的是同一個 tab、同一份 writeback 清單。 |
 | P3 | **草稿先於提交** | cfg 與 writeback 的編輯先落在 GUI 草稿上，run／apply 才提交（[[0008]]）。 |
-| P4 | **一次回覆足以做下一個決定** | run 完成回傳擬合摘要、圖檔路徑與 writeback 草稿，不需再串 getter。 |
+| P4 | **一個判斷點一個 tool** | 讀 guide → 編輯 cfg → 開始 run → 看 live plot 決定是否中斷重來 → 帶參數分析並反覆調整 → 審核寫回 → 存檔，每一步都是自然判斷點，各自是獨立的 tool，不合併成 batch。每個 tool 的回覆足以做該步的判斷。 |
 | P5 | **一件事一條路** | 常用操作特化成 tool；其餘 wire method 只經 RPC channel；已特化的 method 不能經 RPC 重複呼叫。 |
 | P6 | **非同步只有一種** | 長操作回傳 operation id；一個 `wait`、一個 `cancel`。 |
 | P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 
-## Decision：Tool 集合（23 特化 + 3 RPC）
+## Decision：Tool 集合（24 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -77,7 +77,7 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 **`library(name?)`**
 不帶 `name` 列出 modules 與 waveforms；帶 `name` 回傳該項 cfg。
 
-### D. 實驗與 tab（9）
+### D. 實驗與 tab（10）
 
 **`experiments(name?)`**
 不帶 `name`：列出可用實驗與一行說明。帶 `name`：adapter guide、以目前 context 解析的預設 cfg、analyze params（primary 與 post）、分析模式（fit／interactive）。
@@ -100,14 +100,17 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 
 回傳套用數量與草稿是否有效。
 
-**`tab_run(tab, edits?, analyze = "auto" | "none", wait_s = 10)`**
-先套 `edits`，再執行；`analyze="auto"` 在 run 完成後做 primary 分析。`wait_s` 內完成回傳 `{status: "finished", analysis: {summary, figure}, writeback: [...]}`；否則回傳 `{op, status: "running"}`。
+**`tab_run(tab)`**
+以該 tab 目前的 cfg 草稿開始 run，立即回傳 `{op}`；不附帶編輯、不自動分析。
 
-**`tab_analyze(tab, stage = "primary" | "post", params?, wait_s = 10)`**
-對目前資料（重新）分析，結果寫入 GUI 的 analysis／post pane。回傳 summary、figure 與 writeback 草稿；互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。
+**`tab_live(tab)`**
+讀取 run 進行中的狀態：進度、run pane 的 live plot（PNG 路徑）與已取得的部分資料摘要。agent 據此決定繼續等、`cancel` 後 `tab_edit` 重來，或讓它跑完。run 結束後回傳最終的 run pane 圖。
+
+**`tab_analyze(tab, stage = "primary" | "post", params?)`**
+以 `params` 對目前資料分析，結果寫入 GUI 的 analysis／post pane；可用不同 `params` 反覆呼叫直到滿意。回傳 summary 與 figure 路徑；分析較久時回傳 `{op}`。互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。writeback 草稿不隨附，由 `writeback` 讀取。
 
 **`writeback(tab, stage = "primary" | "post", items?, apply = false)`**
-編輯 GUI 上的 writeback 草稿：`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}`。
+不帶 `items` 時只讀取草稿。編輯 GUI 上的 writeback 草稿：`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}`。
 
 **`tab_save(tab, data = true, images = ["analysis"])`**
 沿用 GUI 的存檔路徑與檔名規則。
@@ -118,7 +121,7 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 ### E. 非同步（2）
 
 **`wait(op, timeout = 60)`**
-等待 operation 結束；timeout 不是錯誤，回傳目前進度。`wait` 期間 session 無法對話，長操作應以較短的 timeout 分段等待，讓使用者能在其間插話。結束後回傳該操作的產物（run／analyze 的摘要與 figure、device 的快照），不需再呼叫 getter。
+等待 operation 結束；timeout 不是錯誤，回傳目前進度。`wait` 期間 session 無法對話，長操作應以較短的 timeout 分段等待，其間用 `tab_live` 看 live plot，也讓使用者能插話。結束後回傳狀態（finished／cancelled／failed）；產物由對應階段的 tool 讀取（`tab_live`、`tab_analyze` 的結果、`devices`）。
 
 **`cancel(op)`**
 取消任何 operation（run、互動式分析、device 操作）。
@@ -158,20 +161,40 @@ setup(project={...}, soc={...}, context={create: {bind_device: "flux_yoko"}})
 device_set("flux_yoko", connect={type: "YOKOGS200", address: "USB0::…"}, values={value: 2e-3})  → op o1
 wait("o1")
 predictor("load", path="result/Q5_2D/Q1/params.json")
-predict(2e-3)                                             → 842.7 MHz
-context_set({q_f: 842.7, qf_w: 15})                       → 作為掃描種子
-tab_open("twotone/freq")                                  → t1（sweep 以 q_f ± 1.5*qf_w 連結）
-tab_run("t1")                                             → fit q_f=845.1 MHz
+predict(2e-3)                                   → 842.7 MHz
+context_set({q_f: 842.7, qf_w: 15})             → 作為掃描種子
+
+# twotone：guide → cfg → run → live plot → 分析 → 寫回 → 存檔
+experiments("twotone/freq")                     → guide、預設 cfg（sweep 以 q_f ± 1.5*qf_w 連結）
+tab_open("twotone/freq")                        → t1
+tab_edit("t1", [{path: "rounds", value: 50}])
+tab_run("t1")                                   → op o2
+wait("o2", timeout=20)                          → running
+tab_live("t1")                                  → 40%，live plot 看得到峰在 845 MHz 附近
+wait("o2", timeout=60)                          → finished
+tab_analyze("t1")                               → q_f=845.1 MHz，fit 貼合
+writeback("t1")                                 → md.q_f 842.7 → 845.1、md.qf_w → 0.8
 writeback("t1", apply=true)
-tab_open("rabi/amp_rabi")                                 → t2
-tab_run("t2")                                             → 掃描範圍不足
-tab_run("t2", edits=[{path: "sweep.gain.stop", value: 0.4}, {path: "sweep.gain.expts", value: 101}])
-writeback("t2", apply=true)                               → md.pi_gain、ml.pi_amp、ml.pi2_amp
-tab_open("time_domain/t1")                                → t3
-tab_run("t3", wait_s=5)                                   → op o2 running
-wait("o2", timeout=300)                                   → t1 = 35.4 us
-writeback("t3", apply=true)
-tab_save("t3")
+tab_save("t1")
+
+# amp rabi：live plot 顯示掃描範圍不足，中斷重來
+tab_open("rabi/amp_rabi")                       → t2
+tab_run("t2")                                   → op o3
+wait("o3", timeout=15); tab_live("t2")          → 振盪只有半個週期
+cancel("o3")
+tab_edit("t2", [{path: "sweep.gain.stop", value: 0.4}, {path: "sweep.gain.expts", value: 101}])
+tab_run("t2") → wait → tab_live                 → 兩個完整週期
+tab_analyze("t2")                               → pi_gain=0.213，但第一點離群
+tab_analyze("t2", params={skip: 1})             → pi_gain=0.211，殘差較小
+writeback("t2")                                 → md.pi_gain、ml.pi_amp、ml.pi2_amp
+writeback("t2", items=[{id: "md-2", selected: false}], apply=true)
+tab_save("t2")
+
+# T1：長量測，分段等待
+tab_open("time_domain/t1") → tab_run("t3")      → op o4
+wait("o4", timeout=60); tab_live("t3")          → 衰減曲線合理，繼續
+wait("o4", timeout=240)                         → finished
+tab_analyze("t3") → writeback("t3", apply=true) → tab_save("t3")
 ```
 
 ### 情境二 a：接手使用者的 tab
@@ -182,7 +205,8 @@ status()                                   → t4 twotone/freq, active, analysis
 tab_get("t4", include=["cfg", "analysis", "figures"])
 data("t4", max_points=150)                 → 峰貼在掃描邊緣
 tab_edit("t4", [{path: "sweep.freq.start", value: 838.0}, {path: "sweep.freq.stop", value: 858.0}])
-tab_run("t4")                              → fit ok
+tab_run("t4") → wait → tab_live("t4")
+tab_analyze("t4")                          → fit ok
 （在 session 問使用者：找到 q_f=848.3 MHz，要寫回並繼續做 rabi 嗎？）
 writeback("t4", apply=true)
 ```
@@ -191,6 +215,7 @@ writeback("t4", apply=true)
 
 ```text
 tab_open("time_domain/t1", from_file="Database/Q5_2D/Q1/…/Q1_t1_0918.hdf5")   → t9
+tab_analyze("t9")
 tab_analyze("t9", params={dual_exp: true})
 data("t9", export=true)                    → .npz，agent 自行擬合比較
 ```
@@ -202,7 +227,7 @@ tab_get("t4", include=["cfg", "figures"])
 devices()                                  → jpa_sgs output=false
 （在 session 問使用者：JPA pump 目前關閉，要打開嗎？）
 device_set("jpa_sgs", values={output: true})
-tab_run("t4")
+tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 ```
 
 ## 對現有架構的需求
@@ -217,7 +242,8 @@ tab_run("t4")
 | `tab_open` | `tab.new`（+ `tab.load_data`） |
 | `tab_get` | `tab.snapshot`、`tab.get_cfg`、analyze／post result、writeback preview、figure |
 | `tab_edit` | `tab.set_cfg`（既有編輯語法） |
-| `tab_run` | `tab.set_cfg` + `tab.run_start` + short-wait + `tab.analyze` |
+| `tab_run` | `tab.run_start` |
+| `tab_live` | `operation.progress` + run pane 截圖（`tab.get_figure(run)`） |
 | `tab_analyze` | `tab.analyze`／`tab.post_analyze` + short-wait |
 | `writeback` | `tab.writeback_set` + `tab.writeback_apply` |
 | `wait`／`cancel` | `operation.await`；各類 cancel 合一 |
@@ -243,7 +269,7 @@ tab_run("t4")
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 23 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 24 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
@@ -255,9 +281,8 @@ tab_run("t4")
 
 ## 待決問題
 
-1. `tab_run` 預設 `analyze="auto"` 是否合適，或預設只跑不分析。
-2. `wait` 回傳產物的大小上限（例如 figure 只回路徑、summary 截斷長度）。
-3. 實作順序：建議先做 `status`、`tab_*`、`writeback`、`wait`，再做 `setup`、`experiments`、`data`、`devices`、`predictor`。
+1. `tab_live` 的部分資料摘要內容（只給進度與圖，或附降採樣數值）。
+2. 實作順序：建議先做 `status`、`tab_*`、`writeback`、`wait`，再做 `setup`、`experiments`、`data`、`devices`、`predictor`。
 
 ## 附錄 A：使用者流程分析（`notebook_md/single_qubit.md` 與 measure-gui）
 
