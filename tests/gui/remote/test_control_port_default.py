@@ -7,7 +7,7 @@ import socket
 import pytest
 
 
-def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:  # noqa: ARG001
+def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:
     """NdjsonRpcEndpoint.start() wraps OSError into RuntimeError with a message.
 
     We bind a real ephemeral port first, then try to bind it again; the second
@@ -27,13 +27,13 @@ def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:  # noq
     taken_port = blocker.getsockname()[1]
 
     class _FakeRouter:
-        def on_client_open(self, link):  # noqa: ANN001
+        def on_client_open(self, link):
             pass
 
-        def on_client_close(self, link, *, on_owner_thread):  # noqa: ANN001
+        def on_client_close(self, link, *, on_owner_thread):
             pass
 
-        def route(self, link, request):  # noqa: ANN001
+        def route(self, link, request):
             pass
 
     opts = ControlOptions(port=taken_port)
@@ -64,13 +64,13 @@ def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:  # noq
 
 
 class _FakeRouter:
-    def on_client_open(self, link):  # noqa: ANN001, ANN201
+    def on_client_open(self, link):
         pass
 
-    def on_client_close(self, link, *, on_owner_thread):  # noqa: ANN001, ANN201
+    def on_client_close(self, link, *, on_owner_thread):
         pass
 
-    def route(self, link, request):  # noqa: ANN001, ANN201
+    def route(self, link, request):
         pass
 
 
