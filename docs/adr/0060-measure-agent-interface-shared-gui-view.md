@@ -33,11 +33,24 @@
 
 ### A. 連線與狀態（3）
 
-**`connect(port?, launch = "if_missing" | "never" | "new", clean = false)`**
-接上 GUI；`"never"` 用於接手使用者正在用的 GUI，`"new"` 用於開發驗證。回傳 `status()` 內容與程式碼版本。
+**`connect(port?, launch = "never" | "if_missing" | "new", clean = false)`**
+接上 GUI。
+
+| `launch` | 已有 GUI | 沒有 GUI |
+| --- | --- | --- |
+| `"never"`（預設） | 接上 | `reason="no_gui"` |
+| `"if_missing"` | 接上 | 啟動並接上 |
+| `"new"` | `reason="port_in_use"` | 啟動並接上 |
+
+- 未給 `port` 時沿用現有的自動尋找，找不到才用預設 port。
+- `clean=true` 只在實際啟動時有效：不還原上次的 GUI session。
+- wire 版本不相容時直接報錯。
+- 已連上時重複呼叫直接回傳目前狀態。
+- 回傳 `{launched, port, versions: {wire, gui, mcp}, status}`，`status` 同 `status()`。
+- 不提供 disconnect；MCP 結束時連線自動關閉。
 
 **`shutdown()`**
-只關閉由本 MCP 啟動的 GUI；接上的 GUI 回 `reason="not_owner"`。
+關閉目前連上的 GUI，不論由誰啟動。走 GUI 正常的關閉流程（保存 session、斷開儀器、清理）。有 run 在跑時回 `reason="busy"`；優雅關閉逾時回 `{stopped: false}`，由使用者處理，不提供強制結束。
 
 **`status()`** — 唯一的定位讀取：
 
