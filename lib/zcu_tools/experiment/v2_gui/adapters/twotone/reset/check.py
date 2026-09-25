@@ -4,16 +4,16 @@ import time
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from matplotlib.figure import Figure
+
 from zcu_tools.experiment.v2.twotone.reset.rabi_check import (
     RabiCheckCfg,
     RabiCheckExp,
     RabiCheckResult,
 )
 from zcu_tools.experiment.v2_gui.adapters._support import (
-    FigureOnlyAnalyzeResult,
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    run_figure_only_analyze,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
@@ -21,6 +21,7 @@ from zcu_tools.gui.app.main.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
+    AnalyzeResultBase,
     ExpContext,
     NoAnalyzeParams,
 )
@@ -30,8 +31,21 @@ from zcu_tools.gui.cfg import (
 
 
 @dataclass
-class RabiCheckAnalyzeResult(FigureOnlyAnalyzeResult):
-    pass
+class RabiCheckAnalyzeResult(AnalyzeResultBase):
+    frequency_cycles_per_gain: float
+    before_amplitude: float
+    after_amplitude: float
+    relative_contrast: float
+    before_phase_deg: float | None
+    after_phase_deg: float | None
+    phase_difference_deg: float | None
+    reset_residual_amplitude: float
+    reset_offset: float
+    after_second_harmonic_amplitude: float
+    before_residual_rms: float
+    reset_residual_rms: float
+    after_residual_rms: float
+    figure: Figure
 
 
 class RabiCheckAdapter(
@@ -41,13 +55,12 @@ class RabiCheckAdapter(
 
     Sweeps the initialisation pulse gain and records three signal branches in
     parallel (without tested_reset / with tested_reset / with tested_reset + rabi_pulse),
-    letting the user judge reset efficacy by eye. No automated fit — the three
-    branches are visually compared (D5 / ADR-0011).
+    fitting relative Rabi contrast and residual input dependence. Averaged IQ
+    diagnostics do not determine reset fidelity or a unique reset channel.
     """
 
     exp_cls = RabiCheckExp
     ExpCfg_cls: ClassVar[Any] = RabiCheckCfg
-    # FIT enables the Analyze pane; the result contains a figure but no fitted scalar.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=True, analysis=AnalysisMode.FIT, load_data=True
     )
@@ -57,9 +70,12 @@ class RabiCheckAdapter(
             "Reset Rabi check: sweeps the initialisation (rabi) pulse gain "
             "and acquires three branches simultaneously — without the tested reset, "
             "with the tested reset, and with the tested reset followed by another "
-            "rabi pulse at the same swept gain — to judge how well reset prepares the "
-            "ground state. Runs on real hardware. No automated fit; read the "
-            "three traces by eye."
+            "rabi pulse at the same swept gain. Fits the before-reset frequency "
+            "and uses it for all branches, adding a second harmonic after reset. "
+            "Reports half peak-to-peak amplitudes, relative contrast, phases, "
+            "reset-only residual oscillation and residual RMS on one shared IQ axis. "
+            "These are averaged-readout diagnostics, not reset fidelity. "
+            "Runs on real hardware."
         ),
         expects_md=(
             "Reads from the MetaDict (all optional): 'q_f' / 'qub_ch' — "
@@ -74,13 +90,18 @@ class RabiCheckAdapter(
             "references a calibrated upstream reset (disabled when absent)."
         ),
         typical_writeback=(
-            "No writeback. Inspect the three labeled analysis traces manually "
-            "to confirm the reset prepares the ground state; proceed to the "
-            "next calibration step once satisfied."
+            "No writeback. Compare relative contrast, reset-only residual "
+            "oscillation and fit residuals. Second-harmonic amplitude does not "
+            "uniquely identify coherence or reset error; a flat reset-only trace "
+            "does not establish ground-state preparation."
         ),
         recommended=(
-            "A gain sweep of 51 points from 0.0 to 1.0 captures the full "
-            "pi-pulse rotation. relax_delay should be long enough for thermal "
+            "Use at least six finite points per branch, preferably 51 points "
+            "spanning a full Rabi period with enough density to resolve 2f. "
+            "Frequency is in cycles/gain, phases in degrees at gain zero; "
+            "phase is unavailable when the fundamental is unresolved above "
+            "residual noise. Partial sweeps spanning less than a period may "
+            "give poorly constrained fits. relax_delay should be long enough for thermal "
             "equilibration (notebook: 5 × T1 for bath reset). No reset is "
             "optional — omit it if no upstream reset is calibrated yet."
         ),
@@ -108,7 +129,23 @@ class RabiCheckAdapter(
     def analyze(
         self, req: AnalyzeRequest[RabiCheckResult, NoAnalyzeParams]
     ) -> RabiCheckAnalyzeResult:
-        return run_figure_only_analyze(RabiCheckExp, RabiCheckAnalyzeResult, req)
+        fit, figure = RabiCheckExp().analyze(req.run_result)
+        return RabiCheckAnalyzeResult(
+            frequency_cycles_per_gain=fit.frequency,
+            before_amplitude=fit.before.amplitude,
+            after_amplitude=fit.after.amplitude,
+            relative_contrast=fit.contrast_ratio,
+            before_phase_deg=fit.before.phase_deg,
+            after_phase_deg=fit.after.phase_deg,
+            phase_difference_deg=fit.phase_difference_deg,
+            reset_residual_amplitude=fit.reset.amplitude,
+            reset_offset=fit.reset.offset,
+            after_second_harmonic_amplitude=fit.after.second_harmonic_amplitude,
+            before_residual_rms=fit.before.residual_rms,
+            reset_residual_rms=fit.reset.residual_rms,
+            after_residual_rms=fit.after.residual_rms,
+            figure=figure,
+        )
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_reset_check_{time.strftime('%m%d')}"

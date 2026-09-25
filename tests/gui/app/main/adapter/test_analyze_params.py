@@ -7,7 +7,7 @@ from typing import Annotated, Literal, get_type_hints
 import pytest
 from zcu_tools.gui.app.main.adapter import ParamMeta
 from zcu_tools.gui.app.main.adapter.analyze_params import (
-    _resolve_field_info,
+    _resolve_field_info,  # type: ignore[reportPrivateUsage]
     describe_analyze_params,
     reconstruct_params,
 )
@@ -29,11 +29,8 @@ def test_resolve_bool_field():
     assert optional is False
 
 
-@pytest.mark.parametrize("experiment", ["ge", "len_rabi", "amp_rabi"])
+@pytest.mark.parametrize("experiment", ["ge", "len_rabi"])
 def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> None:
-    from zcu_tools.experiment.v2_gui.adapters.singleshot.amp_rabi import (
-        SsAmpRabiAnalyzeParams,
-    )
     from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import GEAnalyzeParams
     from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import (
         SsLenRabiAnalyzeParams,
@@ -42,7 +39,6 @@ def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> Non
     cls = {
         "ge": GEAnalyzeParams,
         "len_rabi": SsLenRabiAnalyzeParams,
-        "amp_rabi": SsAmpRabiAnalyzeParams,
     }[experiment]
     spec = next(
         field
@@ -120,10 +116,10 @@ def test_mixed_literal_types_raise():
         _resolve_field_info(field, hints)
 
 
-def test_unsupported_annotation_raises(qapp):  # noqa: ARG001
+def test_unsupported_annotation_raises(qapp):
     @dataclass
     class P:
-        val: list
+        val: list[int]
 
     from zcu_tools.gui.app.main.ui.analyze_form import AnalyzeFormWidget
 

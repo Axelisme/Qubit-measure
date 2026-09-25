@@ -4,7 +4,6 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.singleshot.amp_rabi import AmpRabiExp, AmpRabiResult
 from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResult
 from zcu_tools.experiment.v2.singleshot.rabi_fit import (
     RabiJointFitResult,
@@ -12,31 +11,6 @@ from zcu_tools.experiment.v2.singleshot.rabi_fit import (
     fit_rabi_joint,
     rabi_excited_population,
 )
-
-
-@pytest.mark.parametrize("initial_state", ["ground", "excited"])
-def test_amp_analysis_always_disables_decay(
-    monkeypatch: pytest.MonkeyPatch, initial_state: Literal["ground", "excited"]
-) -> None:
-    called: list[tuple[bool, str]] = []
-
-    def fake_fit(
-        *args: Any, decay: bool, initial_state: str, **kwargs: Any
-    ) -> RabiJointFitResult:
-        called.append((decay, initial_state))
-        raise RuntimeError("fit called")
-
-    monkeypatch.setattr(
-        "zcu_tools.experiment.v2.singleshot.amp_rabi.fit_rabi_joint", fake_fit
-    )
-    result = AmpRabiResult(
-        gains=np.array([0.0]),
-        shot_indices=np.array([0]),
-        signals=np.array([[0.0j]]),
-    )
-    with pytest.raises(RuntimeError, match="fit called"):
-        AmpRabiExp().analyze(result, initial_state=initial_state)
-    assert called == [(False, initial_state)]
 
 
 @pytest.mark.parametrize("initial_state", ["ground", "excited"])

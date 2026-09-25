@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import fields
 from typing import Any, Literal, cast
 
 import pytest
@@ -9,19 +8,16 @@ from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiExp, LenRabiResul
 from zcu_tools.experiment.v2.singleshot.rabi_fit import RabiJointFitResult
 from zcu_tools.experiment.v2_gui.adapters.singleshot.amp_rabi import (
     SsAmpRabiAdapter,
-    SsAmpRabiAnalyzeParams,
 )
 from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import (
     SsLenRabiAdapter,
     SsLenRabiAnalyzeParams,
 )
-from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+from zcu_tools.gui.app.main.adapter import AnalyzeRequest, NoAnalyzeParams
 
 
 def test_amp_analysis_has_no_decay_option() -> None:
-    assert SsAmpRabiAdapter.analyze_params_cls() is SsAmpRabiAnalyzeParams
-    assert "decay" not in {field.name for field in fields(SsAmpRabiAnalyzeParams)}
-    assert SsAmpRabiAnalyzeParams().initial_state == "ground"
+    assert SsAmpRabiAdapter.analyze_params_cls() is NoAnalyzeParams
 
 
 @pytest.mark.parametrize("initial_state", ["ground", "excited"])

@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Any, ClassVar
 
-import numpy as np
 from matplotlib.figure import Figure
 
 from zcu_tools.experiment.v2.singleshot.amp_rabi import (
     AmpRabiCfg,
     AmpRabiExp,
+    AmpRabiFit,
     AmpRabiResult,
 )
-from zcu_tools.experiment.v2.singleshot.rabi_fit import RabiJointFitResult
 from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -27,83 +25,39 @@ from zcu_tools.gui.app.main.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     ExpContext,
-    MetaDictWriteback,
-    ParamMeta,
+    NoAnalyzeParams,
     RunRequest,
-    WritebackItem,
-    WritebackRequest,
     require_soc_handles,
 )
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-)
+from zcu_tools.gui.cfg import CfgSchema
 
 from ._shared import read_ge_centers
-
-# ``AmpRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *gain* and
-# preserves every raw IQ shot. Analysis derives populations from that canonical
-# raw result rather than persisting a second population representation.
-SsAmpRabiRunResult: TypeAlias = AmpRabiResult
-
-
-@dataclass
-class SsAmpRabiAnalyzeParams:
-    initial_state: Annotated[
-        Literal["ground", "excited"], ParamMeta(label="Initial State")
-    ] = "ground"
 
 
 @dataclass
 class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
-    # The full numeric fit is intentionally non-JSON-safe and therefore omitted
-    # from the GUI summary. The operator reviews the population/fit Figure while
-    # writeback projection reads the typed domain result directly.
-    fit_result: RabiJointFitResult
+    pi_gain: float
+    pi_gain_error: float
+    pi2_gain: float
+    pi2_gain_error: float
+    frequency: float
+    amplitude: float
+    fit_result: AmpRabiFit
     figure: Figure
 
 
 class SsAmpRabiAdapter(
-    BaseAdapter[
-        AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
-    ]
+    BaseAdapter[AmpRabiCfg, AmpRabiResult, SsAmpRabiAnalyzeResult, NoAnalyzeParams]
 ):
     exp_cls = AmpRabiExp
     ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
-
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot amp Rabi: sweeps the qubit-drive pulse gain, "
-            "preserves every raw IQ shot, and derives ground / excited / other "
-            "population curves during live view and analysis. Runs on real hardware."
-        ),
-        expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; run "
-            "fast-fails if any is missing. Those values support live classification; "
-            "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_gain' "
-            "to seed the sweep stop (4*pi_gain when calibrated; fallback sweep "
-            "0.03–0.2 us); "
-            "'q_f' / 'qub_ch' to seed the qubit-drive defaults."
-        ),
-        expects_ml=(
-            "Needs a qubit drive-pulse module (qub_pulse) and a readout module. "
-            "Optional reset (disabled when no library entry exists)."
-        ),
-        typical_writeback=(
-            "When the joint fit is valid and its complete calibration is finite, "
-            "proposes g_center, e_center, ge_radius, and confusion_matrix as four "
-            "independent items. The four-item proposal is all-or-none."
-        ),
-        recommended=(
-            "Set Initial State to the predominant state before the swept drive pulse "
-            "(at zero length/gain), even when the first sweep point is nonzero. "
-            "Run after 'singleshot/ge'. A sweep spanning a few pi gains "
-            "captures a full oscillation. Review the measured population curves "
-            "and overlaid joint-fit curves before applying all four calibration "
-            "proposals."
-        ),
+        behavior="Hardware gain sweep with G/E classification in the acquisition layer. Saves populations only. Live view shows Ground / Excited / Other; analysis fits a nondecaying ground-population Rabi curve.",
+        expects_md="Requires g_center / e_center / ge_radius from singleshot/ge. Optionally uses confusion_matrix for analysis correction. Reads pi_gain for the sweep range.",
+        expects_ml="Needs qub_pulse and readout; upstream reset is optional.",
+        typical_writeback="No writeback. Reports pi/pi2 gain, frequency and oscillation amplitude; IQ centers and readout calibration are not refitted.",
+        recommended="Sweep a full Rabi period with at least five gains. Reps are shots per gain per round; rounds average repeated hardware sweeps and update the live plot. Other is not calibrated leakage.",
     )
 
     @classmethod
@@ -128,64 +82,33 @@ class SsAmpRabiAdapter(
                     expts=51,
                 ),
             )
-            .int("shots", label="Shots", default=1000)
-            .reps(1, locked=True)
-            .rounds(1, locked=True)
+            .reps(1000)
+            .rounds(1)
             .build()
         )
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> SsAmpRabiRunResult:
-        # Override standard run: domain run needs the GE classification trio.
+    def run(self, req: RunRequest, schema: CfgSchema) -> AmpRabiResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        cfg = self.build_exp_cfg(schema_to_raw_dict(schema, req.md, req.ml), req)
         g_center, e_center, radius = read_ge_centers(req.md)
         return AmpRabiExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
-        self, req: AnalyzeRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeParams]
+        self, req: AnalyzeRequest[AmpRabiResult, NoAnalyzeParams]
     ) -> SsAmpRabiAnalyzeResult:
-        fit_result, figure = AmpRabiExp().analyze(
-            req.run_result, initial_state=req.analyze_params.initial_state
+        fit, figure = AmpRabiExp().analyze(
+            req.run_result, confusion_matrix=req.md.get("confusion_matrix")
         )
-        return SsAmpRabiAnalyzeResult(fit_result=fit_result, figure=figure)
-
-    def get_writeback_items(
-        self, req: WritebackRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        fit = req.analyze_result.fit_result
-        calibration_is_finite = (
-            fit.backend.valid
-            and np.isfinite([fit.g_center.real, fit.g_center.imag]).all()
-            and np.isfinite([fit.e_center.real, fit.e_center.imag]).all()
-            and np.isfinite(fit.radius)
-            and np.isfinite(fit.confusion_matrix).all()
+        return SsAmpRabiAnalyzeResult(
+            fit.pi_gain,
+            fit.pi_gain_error,
+            fit.pi2_gain,
+            fit.pi2_gain_error,
+            fit.frequency,
+            fit.amplitude,
+            fit,
+            figure,
         )
-        if not calibration_is_finite:
-            return []
-
-        return [
-            MetaDictWriteback(
-                target_name="g_center",
-                description="Amp Rabi fitted |g> IQ cluster centre (complex)",
-                proposed_value=fit.g_center,
-            ),
-            MetaDictWriteback(
-                target_name="e_center",
-                description="Amp Rabi fitted |e> IQ cluster centre (complex)",
-                proposed_value=fit.e_center,
-            ),
-            MetaDictWriteback(
-                target_name="ge_radius",
-                description="Amp Rabi fitted single-shot classification radius",
-                proposed_value=fit.radius,
-            ),
-            MetaDictWriteback(
-                target_name="confusion_matrix",
-                description="Amp Rabi fitted 3x3 confusion matrix",
-                proposed_value=fit.confusion_matrix.tolist(),
-            ),
-        ]
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.qub_name}_ss_amp_rabi_{time.strftime('%m%d')}"

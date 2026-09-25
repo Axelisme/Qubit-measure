@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-25 — GE fit symmetry and population constraints
+**Last updated:** 2026-09-26 — hardware population sweeps for reset check and amp Rabi
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -165,8 +165,8 @@ opaque draft，adapter不接觸Writeback implementation。
 不重跑fit、不重算stability，也不直接apply proposal。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
-`singleshot/amp_rabi`沒有此選項，固定用無衰減joint fit。此選擇不屬於量測cfg，
-不改變raw-IQ acquisition。
+此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
+`singleshot/amp_rabi`直接擬合已分類的population，不使用raw-IQ joint fit。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，
@@ -280,11 +280,23 @@ review 後執行，不屬於 adapter code。
 | single-tone（sideband） | `freq` → `length` | `reset_10` |
 | dual-tone | `freq` → `power` → `length` | `reset_120` |
 | bath（cavity-assisted） | `freq_gain` → `length` → `phase` | `reset_bath` / `reset_bath_e` |
-| 共用驗證 | `check`（RabiCheck，三型共用，Figure-only analysis） | — |
+| 共用驗證 | `check`（RabiCheck，三型共用，contrast / residual analysis） | — |
 
-`reset/check`的analysis直接呈現gain sweep的三條分支，legend區分未套用tested reset、
-套用tested reset，以及tested reset後以相同掃描gain追加第二個rabi pulse；不擬合純量，
-也不提出writeback。cfg只設定一個`rabi_pulse`，兩次pulse使用相同波形與gain。
+`reset/check`的analysis以reset前分支決定共同IQ投影與Rabi基頻，擬合三條gain sweep
+分支；最後一條包含二次諧波。摘要提供前後半峰對峰振幅、相對contrast、相位差、
+reset-only殘餘振盪與offset、二次諧波振幅、各分支residual RMS，圖中保留原始資料、
+擬合線與殘差。無法解析的相位為`None`；頻率無法解析或資料不足時明確失敗。
+這些平均IQ指標不等於reset fidelity，也不唯一識別coherence或population機制；不提出
+writeback。cfg只設定一個`rabi_pulse`，兩次pulse使用相同波形與gain。
+
+`singleshot/reset_check`使用硬體gain／branch sweep，保存G/E populations；
+`singleshot/amp_rabi`也以硬體gain sweep保存G/E populations。Reps是每個gain／branch
+每round的shots，Rounds控制重複平均與live更新；不使用Shots或Shots per batch。
+兩者都要求MetaDict的g_center、e_center、ge_radius，analysis可讀取confusion_matrix修正。
+Live與analysis顯示G/E/Other；reset-check以三種線型區分階段，摘要列出reset-only
+平均／最大excited比例及最大Other比例。Amp Rabi分析回報無衰減cosine的振幅、
+頻率與pi/pi2 gain。兩者都不提供IQ校準writeback，也不從population重建raw IQ。
+Other不是校準後leakage，reset population不是reset-channel fidelity。
 
 ### cfg → writeback 的兩種產出
 
@@ -338,6 +350,6 @@ review 後執行，不屬於 adapter code。
 - **graceful without snapshot**：`cfg_snapshot is None`（如從檔載入）時，module
   writeback 全略過，只剩既有 md item。
 
-三個 singleshot 分析（ge / len_rabi / amp_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 對應零 length/gain，不是第一個掃描點。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。
+兩個 singleshot 分析（ge / len_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 對應零 length/gain，不是第一個掃描點。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。
 
 GE 的主分析與 writeback/post 邊界拒絕非有限 centers/width、重合 centers 與不合法 populations。Optimizer 未收斂不會回傳 initial guess 當作 calibration；失敗不產生新的校準 proposal。

@@ -3,10 +3,9 @@ from __future__ import annotations
 from typing import Any, cast
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
-from matplotlib.figure import Figure
 from zcu_tools.experiment.v2.twotone.reset.rabi_check import (
-    RabiCheckExp,
     RabiCheckResult,
 )
 from zcu_tools.experiment.v2_gui.adapters.twotone.reset.check import (
@@ -21,21 +20,23 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.cfg import CfgSectionSpec
 
 
-def test_reset_check_adapter_exposes_figure_analysis(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_reset_check_adapter_exposes_fit_summary() -> None:
     assert RabiCheckAdapter.capabilities.analysis is AnalysisMode.FIT
     assert RabiCheckAdapter.analyze_params_cls() is NoAnalyzeParams
 
-    figure = Figure()
-    result = cast(RabiCheckResult, object())
-    seen: list[RabiCheckResult] = []
-
-    def fake_analyze(self: RabiCheckExp, run_result: RabiCheckResult) -> Figure:
-        seen.append(run_result)
-        return figure
-
-    monkeypatch.setattr(RabiCheckExp, "analyze", fake_analyze)
+    gains = np.linspace(0, 1, 101)
+    angle = 2 * np.pi * 2 * gains
+    result = RabiCheckResult(
+        gains,
+        np.array(
+            [
+                np.cos(angle),
+                0.1 * np.cos(angle),
+                0.8 * np.cos(angle + 0.2),
+            ],
+            dtype=np.complex128,
+        ),
+    )
     req = AnalyzeRequest(
         run_result=result,
         analyze_params=NoAnalyzeParams(),
@@ -45,10 +46,22 @@ def test_reset_check_adapter_exposes_figure_analysis(
     )
     out = RabiCheckAdapter().analyze(req)
 
-    assert isinstance(out, RabiCheckAnalyzeResult)
-    assert out.figure is figure
-    assert seen == [result]
-    plt.close(figure)
+    try:
+        assert isinstance(out, RabiCheckAnalyzeResult)
+        summary = out.to_summary_dict()
+        assert summary["before_amplitude"] == pytest.approx(1.0)
+        assert summary["after_amplitude"] == pytest.approx(0.8)
+        assert summary["relative_contrast"] == pytest.approx(0.8)
+        assert summary["reset_residual_amplitude"] == pytest.approx(0.1)
+        assert summary["phase_difference_deg"] == pytest.approx(
+            np.degrees(0.2), abs=1e-4
+        )
+        assert summary["frequency_cycles_per_gain"] == pytest.approx(2.0)
+        assert "figure" not in summary
+        assert "fidelity" not in summary
+        assert len(out.figure.axes) == 2
+    finally:
+        plt.close(out.figure)
 
 
 def test_reset_check_cfg_has_one_rabi_pulse_field() -> None:

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-09-25 — GE fit symmetry and population constraints
+**Last updated:** 2026-09-26 — hardware population sweeps for reset check and amp Rabi
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -67,6 +67,26 @@ covariance投影，包含local frequency cross-covariance；analysis不重建per
 blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
 `(chi, kappa, resonator frequency, Figure)`。
 
+`twotone/reset/RabiCheckExp.analyze()`回傳`(RabiCheckFit, Figure)`。reset前分支決定
+共同IQ投影與基頻，reset-only以同基頻擬合，reset後追加Rabi的分支包含基頻與二次諧波。
+半峰對峰振幅、相位、相對contrast與殘差只描述平均IQ資料，不推導reset fidelity。
+數值分析由同目錄`rabi_check_fit`擁有，GUI adapter只投影其純量；acquisition與持久化
+資料格式維持三分支gain sweep。
+
+`singleshot/ResetCheckExp`與`AmpRabiExp`沿用MIST power的population acquisition：
+sweep2param與declare_sweep在硬體掃描gain，reset-check另以Branch掃描三個階段。
+每個program使用cfg的reps與rounds；acquisition在Python分類每筆IQ並平均G/E，
+round hook更新liveplot。Experiment只保存float populations，沒有raw IQ或host shot batches。
+Amp Rabi的canonical shape為`(Ngain, 2)`；reset-check為`(Ngain, 3, 2)`，
+最內軸population_states=[0, 1]，Other由1-G-E導出。取消保留已完成round的population，
+尚無完成round時維持NaN。舊raw-IQ檔案不符合新axes契約，strict loader不自動轉換。
+
+兩者run都需要GE centers/radius；analysis可使用外部confusion matrix修正population。
+Amp Rabi對ground population做無衰減cosine擬合，回傳振幅、頻率與pi/pi2 gain。
+Reset-check分析回傳三階段G/E/Other與reset-only的平均／最差excited population；
+liveplot與分析圖都以顏色區分G/E/Other、線型區分階段。沒有IQ histogram、讀出模型重擬合
+或calibration writeback。Other不是校準後的leakage，這些population不是reset-channel fidelity。
+
 ---
 
 ## 持久化：PersistableExperiment + AxesSpec（ADR-0027）
@@ -93,7 +113,7 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
 Singleshot Rabi joint fit依analysis選擇有衰減或純cosine population dynamics：
-`len_rabi`預設擬合衰減包絡，`amp_rabi`固定使用純cosine。純cosine模型不擬合
+`len_rabi`預設擬合衰減包絡，也可選擇純cosine。純cosine模型不擬合
 `t_r`，結果以`None`表示該參數不適用；兩種模式共用raw-IQ calibration與confusion
 matrix的估計流程。
 
@@ -293,6 +313,6 @@ Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分
 
 ### Singleshot initial state
 
-`GE`、`len_rabi` 與 `amp_rabi` 的 `initial_state` 是 analysis-only 的 `ground` / `excited` 選項，預設 `ground`，描述 probe / swept drive pulse 之前的主要狀態，不代表純態。GE raw rows 固定是 probe off/on；分析與 confusion diagnostic 共同映射到主要 g/e 順序，持久資料不重排。Rabi joint fit 以零 drive 的 excited population 所在半區間限制初態，對同一 pooled PCA histogram 的兩個方向進行候選擬合，以有效性及 likelihood 選擇，不將第一個非零掃描點當成初態。Population、centers 與 confusion matrix 一律保留物理 g/e 語意；len_rabi 保留可選衰減包絡，amp_rabi 固定無衰減。`max_calls` 限制每個方向候選的 Migrad call budget；兩個方向都會評估。
+`GE` 與 `len_rabi` 的 `initial_state` 是 analysis-only 的 `ground` / `excited` 選項，預設 `ground`，描述 probe / swept drive pulse 之前的主要狀態，不代表純態。GE raw rows 固定是 probe off/on；分析與 confusion diagnostic 共同映射到主要 g/e 順序，持久資料不重排。Rabi joint fit 以零 drive 的 excited population 所在半區間限制初態，對同一 pooled PCA histogram 的兩個方向進行候選擬合，以有效性及 likelihood 選擇，不將第一個非零掃描點當成初態。Population、centers 與 confusion matrix 一律保留物理 g/e 語意；len_rabi 保留可選衰減包絡。`max_calls` 限制每個方向候選的 Migrad call budget；兩個方向都會評估。
 
 GE confusion diagnostic 使用兩組各自 refined 的 preparation populations 建立 initial matrix；不以第一列推定第二列。兩組 refinement 均從 joint fit 的同一組 seeds 出發，避免分析順序影響結果。
