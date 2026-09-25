@@ -387,7 +387,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `guide` | `adapter.guide` |
 | `tab_open` | `tab.new`（+ `tab.load_data`）+ `tab.set_active` |
 | `tab_close` | `tab.close` |
-| `tab_get` | `tab.snapshot`（含 `save_paths`）+ **補** artifact 存檔狀態、`tab.get_cfg`、`tab.get_analyze_params`／`get_post_analyze_params`、analyze／post result、writeback preview、figure |
+| `tab_get` | `tab.snapshot`（含 `save_paths`）+ **補** artifact 存檔狀態、`tab.get_cfg`、`tab.get_analyze_params`／`get_post_analyze_params`、analyze／post result |
 | `tab_edit` | `tab.set_cfg`；**調整**編輯語法：sweep 改為整體物件並檢查衝突、sweep 端點接受 md 表達式（`SweepEditor` 已支援 `EvalValue` 端點）、`valid=false` 時回傳錯誤清單 |
 | `tab_run` | `tab.run_start` |
 | `tab_live` | `operation.progress` + run pane 截圖（`tab.get_figure(run)`） |
@@ -440,7 +440,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 ## 待決問題
 
 1. `tab_live` 的部分資料摘要內容（只給進度與圖，或附降採樣數值）。
-2. 實作順序：建議先做 `status`、`tab_*`、`writeback`、`wait`，再做 `project`／`soc_*`、context 類、`experiments`、`devices`、`predictor`。
+2. 實作順序：建議先做 `status`、`tab_*`、`writeback`、`wait`／`cancel`，再做 `project`／`soc_*`、context 類、`experiments`／`guide`、儀器類、predictor 類，最後 `tab_interact`（依賴互動分析外掛的子命令重構）。
 
 ## 附錄 A：使用者流程分析（`notebook_md/single_qubit.md` 與 measure-gui）
 
