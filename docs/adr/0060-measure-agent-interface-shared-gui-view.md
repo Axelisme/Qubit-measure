@@ -1,7 +1,7 @@
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view（基礎版）
 
 **狀態：** proposed（設計草稿；決定後取代 [[0059]] 的 workflow tool 清單，[[0059]] 的 RPC channel 保留並對量測 agent 開放）
-**關聯：** [[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（user feedback wakeup）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
+**關聯：** [[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context
 
@@ -12,7 +12,8 @@
 ## 範圍與前提
 
 - **不改 GUI 的 UIUX。** GUI 畫面與既有行為不變。
-- **agent 介面是另一個 view。** agent 的操作改變 GUI 的同一物件，使用者即時看到；使用者的改動 agent 透過讀取狀態得知。不推送變更通知、不區分改動者；使用者改了東西通常也會直接告訴 agent。
+- **agent 介面是另一個 view。** agent 的操作改變 GUI 的同一物件，使用者即時看到；使用者的改動 agent 透過讀取狀態得知。不推送變更通知、不區分改動者。
+- **對話在 agent session 裡。** agent 跑在使用者面前的前端 session（例如 Claude Code），使用者改了什麼、要 agent 做什麼、agent 要確認什麼，都直接在 session 對話；MCP 介面不承擔人機對話。
 - **基礎介面只包裝現有能力。** 每個 tool 對應 GUI 已有的 service／wire 行為，只做組合與整理回傳，不引入新的領域功能。
 
 ## 設計原則
@@ -28,7 +29,7 @@
 | P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 
-## Decision：Tool 集合（24 特化 + 3 RPC）
+## Decision：Tool 集合（23 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -117,7 +118,7 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 ### E. 非同步（2）
 
 **`wait(op, timeout = 60)`**
-等待 operation 結束；timeout 不是錯誤，回傳目前進度。使用者在 GUI 送出 feedback 時提早返回（[[0025]]）。結束後回傳該操作的產物（run／analyze 的摘要與 figure、device 的快照），不需再呼叫 getter。
+等待 operation 結束；timeout 不是錯誤，回傳目前進度。`wait` 期間 session 無法對話，長操作應以較短的 timeout 分段等待，讓使用者能在其間插話。結束後回傳該操作的產物（run／analyze 的摘要與 figure、device 的快照），不需再呼叫 getter。
 
 **`cancel(op)`**
 取消任何 operation（run、互動式分析、device 操作）。
@@ -138,17 +139,14 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 **`predict(value, transition = [0, 1])`**
 回傳預測頻率。只當掃描種子，不當結果寫回。
 
-### H. 使用者（2）
-
-**`ask_user(question, timeout = 600)`**
-沿用 GUI 既有的 prompt 對話框。
+### H. 畫面（1）
 
 **`screenshot(target = "window" | tab | dialog)`**
-回 PNG 路徑。
+回 PNG 路徑；用於 agent 自己確認 GUI 呈現，或在 session 中給使用者看。
 
 ### I. RPC channel（3）
 
-`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]。承接低頻但必要的操作：tab 關閉與切換、context 列表、MetaDict 刪除、ModuleLibrary 建立／改名／刪除、cfg editor session、arb waveform、value source、device forget／取消、analyze cancel 等。已特化的 method 由 RPC 呼叫時回 `reason="use_tool"`。
+`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]。承接低頻但必要的操作：tab 關閉與切換、context 列表、MetaDict 刪除、ModuleLibrary 建立／改名／刪除、cfg editor session、arb waveform、value source、device forget／取消、analyze cancel、GUI prompt 對話框（agent 不在使用者身邊時）等。已特化的 method 由 RPC 呼叫時回 `reason="use_tool"`。
 
 ## 情境演練
 
@@ -185,7 +183,7 @@ tab_get("t4", include=["cfg", "analysis", "figures"])
 data("t4", max_points=150)                 → 峰貼在掃描邊緣
 tab_edit("t4", [{path: "sweep.freq.start", value: 838.0}, {path: "sweep.freq.stop", value: 858.0}])
 tab_run("t4")                              → fit ok
-ask_user("找到 q_f=848.3 MHz（見 GUI 圖），要寫回並繼續做 rabi 嗎？")
+（在 session 問使用者：找到 q_f=848.3 MHz，要寫回並繼續做 rabi 嗎？）
 writeback("t4", apply=true)
 ```
 
@@ -202,7 +200,7 @@ data("t9", export=true)                    → .npz，agent 自行擬合比較
 ```text
 tab_get("t4", include=["cfg", "figures"])
 devices()                                  → jpa_sgs output=false
-ask_user("JPA pump 目前關閉，要打開嗎？")
+（在 session 問使用者：JPA pump 目前關閉，要打開嗎？）
 device_set("jpa_sgs", values={output: true})
 tab_run("t4")
 ```
@@ -245,7 +243,7 @@ tab_run("t4")
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 24 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 23 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
