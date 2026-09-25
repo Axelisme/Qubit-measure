@@ -1,24 +1,43 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-24 — measure MCP／remote test ownership
+**Last updated:** 2026-09-25 — test structure policy
 
-> 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
+本頁是整個 `tests/` 套件新增、拆分與搬遷測試的結構規則，也保留硬體與 GUI 測試的領域注意事項。
+測試行為與驗證流程以 [AGENTS.md](../AGENTS.md) 為準。
 
-這份筆記整理測試套件的結構、fixture 架構與新增測試時的注意事項。
+## 放置新增測試
 
----
+1. 先找同一個可觀察行為或契約的既有測試檔。新增 regression 優先放在該檔；同一 owner
+   有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
+   `T1` 等名稱若是領域實體或真實物理量，仍可作檔名的一部分，不能只靠字面判定為 ticket 名。
+2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/script/` 和
+   `tests/tools/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
+   `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
+   跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
+3. 案例按情境與預期結果命名，從模組接縫或公開契約檢查可觀察結果。
+   文件、靜態內容、設定值及腳本旗標直接審閱；既有白箱或靜態檢查案例不因本頁宣稱已搬遷。
+
+## Fixture 與測試支援碼
+
+Fixture 放在能覆蓋使用者的最小合理目錄：只供一個檔案用的留在檔內，跨檔共用時
+放最近的 `conftest.py`。`conftest.py` 管理 pytest 注入及生命週期；一般 builder、fake 或
+recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當 library，也不從另一個
+`test_*.py` 匯入。Fixture 的可見範圍取決於所在目錄，`scope=` 則決定實例的生命週期；
+不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。Root fixture 必須具有全套件用途。
+相似 setup 只有在代表相同語意時才共用；不同責任不為減少行數而塞入帶多個旗標的萬用 fixture。
+
+## 搬遷驗收
+
+搬檔前列出舊檔到新檔的案例映射，確認每個情境、斷言與 marker 都有對應；搬檔後
+比較 pytest collection 與 marker，核對 fixture lookup、覆寫與生命週期，並跑受影響選集及共同父目錄。
+涉及共享狀態時，驗證不同執行順序與平行選集。先做純搬檔，再另外審查斷言改寫與重複案例刪除。
+檔案移動可能改變 `conftest.py` 的 fixture lookup；案例總數相同不能取代上述核對。
+本頁不代表現有測試已搬遷。
 
 ## 執行測試套件
 
-**標準快速跑法**（約 15 s）：
-
-```bash
-.venv/bin/python -m pytest tests/ -n auto
-```
-
-CI / agent 品質門檻使用 `uv run pytest -n auto`。`dev` dependency group 會同步安裝
-`zcu-tools[gui]`，因此 bare full-suite pytest 具備 GUI/client 測試需要的 optional dependency；
-若直接呼叫 `.venv/bin/python -m pytest`，先確認 venv 是透過 `uv` 的 dev group 同步。
+受管理 worktree 的 Python 指令按 [AGENTS.md](../AGENTS.md) 使用 `uv run --directory <worktree> --no-sync --`。
+選集與平行化由 pytest CLI 決定。開始前確認所用環境安裝 GUI/client 測試需要的 optional dependency。
 
 pytest 全域 warning filter 只放第三方 noise（例如 `qick` / `scqubits` 在 Python 3.13
 import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warning 不應全域 suppress；
@@ -26,15 +45,9 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 標註該測試的預期退化。
 
 `-n auto` 啟動 pytest-xdist 多進程平行化。`tests/conftest.py` 在每個 worker 進程啟動時
-（偵測到 `PYTEST_XDIST_WORKER`）自動把 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS`
-設為 `"1"`，避免 8 worker × 多執行緒 BLAS 造成過訂（無此 pin 時約 70 s）。Serial 跑法不設
-這些變數，BLAS 保持多執行緒（`pytest tests/` 約 109 s，適合 debug 或全覆蓋確認）。
-
-**Qt GUI 子套件單獨跑**（約 22 s，不需 `-n auto`）：
-
-```bash
-.venv/bin/python -m pytest tests/gui tests/autofluxdep_gui tests/fluxdep_gui tests/dispersive_gui -q
-```
+（偵測到 `PYTEST_XDIST_WORKER`）把 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS`
+設為 `"1"`，避免 worker 與多執行緒 BLAS 相互過訂。Serial 跑法不設這些變數，適合 debug。
+Qt GUI 子套件可選 `tests/gui tests/autofluxdep_gui tests/fluxdep_gui tests/dispersive_gui`。
 
 ### BackgroundRunner.quiesce() — 測試 teardown 必要模式
 
@@ -69,70 +82,15 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 ---
 
-## 目錄結構
+## 現有 owner 導覽
 
-```text
-tests/
-├── conftest.py                     # 頂層 fixture（空的 / 共用 path 設定）
-├── program/
-│   └── v2/
-│       ├── conftest.py             # 從 program/v2 匯入 make_mock_soccfg() + mock_soccfg fixture
-│       ├── test_compile.py         # 空程式 / sweep / reps 等編譯煙霧測試
-│       ├── test_modules_integration.py  # 各 Module 對真實程式的整合測試
-│       ├── ir/                     # IR 子系統單元測試（純 Python 物件，不需 MockSoc）
-│       │   ├── test_ir_analysis.py
-│       │   ├── test_ir_base.py
-│       │   ├── test_ir_builder.py               # IRBuilder structure/meta parsing tests
-│       │   ├── test_ir_estimate_funcs.py        # estimate_body_scheduled_ticks / flat_size / body_cost（IRLoop+IRBranch 所有分支）
-│       │   ├── test_ir_hw_semantics.py          # WAVE/VOLATILE/GENERAL_REGS 常數驗證
-│       │   ├── test_ir_instructions.py
-│       │   ├── test_ir_linker.py
-│       │   ├── test_ir_linker_wait.py
-│       │   ├── test_ir_node.py
-│       │   ├── test_ir_operands.py
-│       │   ├── test_ir_passes_control_flow.py
-│       │   ├── test_ir_passes_increg_merge.py
-│       │   ├── test_ir_passes_optimization.py   # IR traversal/validation/optimization pass tests
-│       │   ├── test_ir_passes_timeline.py
-│       │   ├── test_ir_passes_unpack_branch.py  # UnpackIRBranchPass（含 _first_basic_block, _case_entry_label）
-│       │   ├── test_ir_passes_unreachable.py    # UnreachableEliminationPass
-│       │   ├── test_ir_range_hint.py
-│       │   ├── test_ir_roundtrip.py
-│       │   ├── test_ir_unroll_validation.py
-│       │   ├── test_ir_validation.py
-│       │   └── test_wave_alias_refactor.py
-│       ├── macro/                  # macro 層單元測試（MagicMock prog）
-│       │   ├── conftest.py         # mock_prog (pmem=512) + large_pmem_prog (pmem=4096)
-│       │   ├── test_write_reg.py   # format_alu_op, WriteRegOp
-│       │   ├── test_loop.py        # _needs_big_jump, _emit_cond_jump, OpenInnerLoop, CloseInnerLoop
-│       │   ├── test_debug.py
-│       │   ├── test_delay.py       # DelayRegAuto
-│       │   ├── test_meta.py        # MetaMacro.translate
-│       │   └── test_pulse_reg.py   # PulseByReg
-│       └── modules/
-│           ├── conftest.py         # MagicMock-based mock_prog fixture（f_time=430.08 MHz）
-│           ├── test_control.py     # Repeat + Branch（含 large pmem path）
-│           ├── test_delay.py       # SoftDelay, DelayAuto, Join
-│           ├── test_dmem.py        # LoadValue.run（uncompressed/compressed）+ ScanWith
-│           ├── test_pulse.py
-│           ├── test_readout.py
-│           ├── test_reset.py
-│           ├── test_computed_pulse.py
-│           ├── test_factory.py
-│           ├── test_waveform.py
-│           ├── test_registry.py
-│           └── test_util.py
-├── experiment/v2/                  # Experiment runtime、persistence / analysis tests
-│   ├── autofluxdep/                # FluxDepInfoTracker typed context tests
-│   └── runner/                     # Schedule runtime、ResultTree 與 MultiMeasurementExecutor tests
-├── meta_tool/                      # SyncFile / QubitParams / arbitrary waveform persistence + SampleTable v2 contract tests
-├── analysis/
-│   └── fluxdep/                    # Flux-Dependence Analysis kernel tests
-├── mcp/                            # MCP bridge、call-log、timeout policy、remote schema / ARRAY param regression tests
-├── notebook/analysis/fluxdep/      # Fluxonium 光譜分析模型測試
-├── notebook/analysis/t1_curve/     # T1 curve Q-channel 與 t1_curve_fit tests
-└── utils/fitting/                  # 曲線擬合工具測試
-```
+`tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
+`tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/adapters/`
+擁有 adapter 對設定與寫回的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
+接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/meta_tool/`、`tests/analysis/`、
+`tests/notebook/`、`tests/utils/` 分別擁有其路徑對應模組的測試。
+例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
+與同名的其他 registry 測試無關。需要定位檔案時以目前目錄及程式 owner 為準。
 
 ---
 
@@ -174,18 +132,11 @@ tests/
 用於 `modules/` 下的**純單元測試**，只測試 cfg parsing / set_param / allow_rerun 等邏輯，  
 不觸發真實 QICK 編譯。`mock_prog.soccfg` 是一個最小 dict，不需完整硬體欄位。
 
-### Level 3 — IR 結構測試（`tests/program/v2/ir/`）
+### IR 結構測試（`tests/program/v2/ir/`）
 
-直接構建 `BasicBlockNode` / `BlockNode` / `IRLoop` 等 Python 物件，通過 `_optimize_tree()` 執行 pass，不需要 MockSoc 也不需要 MagicMock prog。適合測試 IR pass 的結構轉換行為。
-
-```python
-# 典型模式
-from zcu_tools.program.v2.ir.pipeline import _optimize_tree, PipeLineContext, PipeLineConfig
-ctx = PipeLineContext(config=PipeLineConfig(pmem_capacity=512), pmem_budget=1024)
-result = _optimize_tree(root, [SomePass()], ctx)
-```
-
-`_optimize_tree()` 對 `BlockNode` 做 in-place mutation（`result is root`），不要依賴返回值是否為新物件來判斷 `changed`。
+`BasicBlockNode` / `BlockNode` / `IRLoop` 可建立不依賴 MockSoc 的輸入。
+經由負責該行為的 IR pipeline 接縫檢查輸出結構或編譯結果；不要以私有
+`_optimize_tree()` 的回傳物件身分判斷是否發生變更，因為它可能原地修改 `BlockNode`。
 
 ### SNR scorer helpers
 
@@ -223,11 +174,10 @@ step-photon readout backaction closed form（pulse length vs readout length 分�
 decimated excited-initial center；`test_bloch.py` 覆蓋 readout 後 amplitude damping map。
 `tests/program/v2/sim/test_engine.py` 放 public simulator behavior：physics shape、
 spectroscopy/Rabi/T1/T2、single-shot blob、readout scaling、readout-induced backaction、
-decimated trace 與 branch smoke。若測試需要 spy private `SimEngine` helper、numba
-routing、cooperative cancel、population cache key 或 optimization call count，放在
-`test_engine_optimization_contract.py`，並在 test name / docstring 說清楚它是白箱
-optimization contract。Segment propagator LRU、單次 signal-grid prefix sequence cache
-與 numba routing threshold 這類 private optimization contract 也放在同一檔。
+decimated trace 與 branch smoke。效能相關 regression 先找 public simulator 的輸出與
+可觀察的資源行為；private cache key、helper call count 或 routing threshold
+不是新增測試的獨立驗收條件。既有 `test_engine_optimization_contract.py`
+仍含白箱案例，本次文件整理不代表該檔已遷移。
 
 ### Shared GUI cfg import ownership tests
 
@@ -242,12 +192,14 @@ value→shape順序，以及既有26-entry metadata/value golden。
 
 `tests/gui/cfg/binding/test_targets.py`鎖定list/resolve acceptance equality、canonical grammar、
 legacy zero-mutation replacement、schema collision與production registry coverage。remote cfg tests
-鎖定target wire parity與AST import purity；service/writeback tests鎖定shape-only listing與batch net diff。
+鎖定 target wire parity；service/writeback tests 鎖定 shape-only listing 與 batch net diff。
+現有 AST import purity 案例屬於待整理的靜態檢查，新增 import 變動直接審閱。
 
-`tests/gui/cfg/test_measure_import_contract.py` 鎖定measure adapter facade不forward
-`zcu_tools.gui.cfg.__all__` names，並以AST掃描`lib/`、`tests/`與`adapter.*` local submodules，
-要求generic imports直接指向shared owner。autofluxdep的app-local barrel ownership由
-`tests/autofluxdep_gui/test_cfg_import_contract.py`獨立鎖定。
+measure adapter facade 不 forward `zcu_tools.gui.cfg.__all__` names；generic cfg imports
+應指向 shared owner，autofluxdep app-local barrel 另有自己的 owner。
+現有 `tests/gui/cfg/test_measure_import_contract.py` 與
+`tests/autofluxdep_gui/test_cfg_import_contract.py` 含靜態 import 檢查；新增或修改
+import 規則時直接 review 相關檔案，對外行為則由接縫測試驗證。
 
 `tests/gui/cfg/test_schema_assembler.py`擁有domain-free paired Spec/Value construction contract：
 path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
@@ -258,10 +210,13 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 `tests/experiment/v2_gui/adapters/_support/test_schema_builder.py`鎖定context-free
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
-`tests/gui/adapter/test_adapter_definition.py`是38-entry registry gate：empty/rich md/ml contexts都必須
-保持同一static spec，且definition可重複instantiate。
+`tests/gui/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
+adapter definition 可重複 instantiate；registry 數量與 static spec 宣告直接審閱。
 
-`tests/experiment/v2_gui/adapters/singleshot/_helpers.py` 集中 singleshot adapter 測試的 `ModuleLibrary` / context / request fixture。singleshot 測試檔名以 domain ownership 命名，例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep；不要再用歷史 Phase 編號命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
+Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷史 Phase 切檔。
+例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep 描述的是領域責任，
+不是 ticket 命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，
+但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
 
 onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering、md preflight 與 writeback
 contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md fit params，runtime
@@ -295,16 +250,16 @@ explicit concrete opt-in/exclusion；`tests/gui/services/remote/test_expected_er
 mapping、direct structured `RemoteError` passthrough、generic `data=None`與translator failure
 containment。`test_unexpected_handler_errors.py`以既有handler樣本確認ordinary RuntimeError、ProviderError、I/O與
 invariant failure不被降級；unexpected dispatch測試另確認controller error log保留traceback。
-新增request handler或修改分類時，直接審閱catch範圍與method entry的靜態宣告，
-再用公開request／reply測試確認對外錯誤碼；不以AST測試重建一份handler規則。
+新增 request handler 或修改分類時，直接審閱 catch 範圍與 method entry 的靜態宣告，
+再用公開 request／reply 測試確認對外錯誤碼。
 
 `tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
 view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
 `tests/gui/services/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
-Shared exposure policy的建構驗證屬於`tests/gui/remote/`。Schema文字、tool inventory與
-script flags用直接review，不納入pytest。
+Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
+script flags 用直接 review，不納入 pytest。
 
 `tests/gui/_control_fakes.py` 提供 control facet tests 的 typed recording fakes。新增 `test_*_control.py` contract 時，偏好 recording fake + 表驅動 public forwarding contract；只在需要 Qt signal / event bus behavior 時測 event disposer、signal rebind 或 state transition，不把 `MagicMock.assert_called_once_with` 當成主要測試內容。
 
@@ -322,7 +277,7 @@ interaction.
 `CfgSchemaAssembler`前後的spec/value/logical-path/persisted observable parity；autoflux domain
 仍擁有logical projection與generation policy。
 
-`tests/autofluxdep_gui/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_cfg_import_contract.py` 鎖定autoflux cfg package只暴露app-owned API，且production generic cfg imports直接指向shared owner。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
+`tests/autofluxdep_gui/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_cfg_import_contract.py` 的現有靜態檢查不作為新增測試模式。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
 
 `tests/autofluxdep_gui/test_labber_browser_export.py` 覆蓋 Labber Browser sidecar contract、fixed-axis sidecar live streaming row writes 與 terminal qubit_freq sidecar export。
 
@@ -406,19 +361,20 @@ _make_prog(modules=[b], sweep=[("sel", 2)])
 ### IR pass 測試
 
 - `tests/program/v2/ir/test_ir_builder.py` 覆蓋 `__META__` parsing、branch case identity、loop section parsing，以及 jump label reference 不被誤判成 label definition。
-- `tests/program/v2/ir/test_ir_passes_optimization.py` 等 `ir/test_ir_passes_*.py` 覆蓋 traversal helper、structure validation、label reference validation、label DCE、branch case normalize、constant loop unroll、hoist/peephole/timing sanity pass。
-- `PeepholePass` 測試必須保證不刪 `NOP`；目前只驗證清理 `IR_` internal annotations。
+- `tests/program/v2/ir/test_ir_passes_optimization.py` 等 `ir/test_ir_passes_*.py` 涵蓋結構與 label validation、label DCE、branch case normalize、constant loop unroll、hoist/peephole/timing pass。新增案例從 pipeline 結果驗證 IR 行為。
+- `PeepholePass` 應保留 `NOP`；驗證輸出時分辨 `NOP` 與可清除的 `IR_` internal annotations。
 - `ConstantLoopUnrollPass` 測試使用顯式 `IRLoop.trip_count`，不要用 QICK 實際 loop asm shape 當作 unroll 偵測依據。
 
 ### estimate_* 函式測試注意事項
 
 `estimate_body_scheduled_ticks` / `estimate_flat_size` / `estimate_body_cost` 的簽名接受 `list[IRNode]`，但 Python list 是 invariant：不能把 `list[BasicBlockNode]` 直接傳入，需要明確宣告型別 `nodes: list[IRNode] = [bb1, bb2]`。
 
-### DeadTestEliminationPass — JumpInst in insts 路徑
+### IR block 不變量
 
-`BasicBlockNode.__post_init__` 拒絕在 `.insts` 中放 `JumpInst`（不變量）。但 `_find_dead_indices` 的 line 80 確實處理了這種情況，適用於「直接呼叫 private method 傳入任意 list」的使用情境。測試必須繞過 BasicBlockNode 直接呼叫 `pass_._find_dead_indices(insts, branch=None)` 而非通過 chunk pipeline 路由。
+`BasicBlockNode.__post_init__` 拒絕在 `.insts` 中放 `JumpInst`。新增 pass 測試用有效的 block
+經 pipeline 檢查可觀察結果；不為 unreachable 的非法 block 繞過建構器測私有方法。
 
-### UnrollLoopPass — _maybe_build_jump_table 觸發條件
+### UnrollLoopPass — jump table 觸發條件
 
 Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2` + `body_size > 0` 才觸發 jump table。測試中：body 用 NopInst（size=1），`pmem_budget=1024`（k_budget=1024），`cost_default=1, cost_jump_flush=40`，body_cost=1，scheduled_ticks=0，slack=-1 < 0 → k_timing=max_unroll_factor=32；k_final=min(32,1024)=32 → 觸發。
 
@@ -429,7 +385,7 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 - `cond_bb`：`JUMP target_labels[1] -if(NZ) -op(value_reg - #0)`（小 PMEM）；big-PMEM 用 `REG_WR s15 label + JUMP [s15]`
 - `fallthrough_bb`：`JUMP target_labels[0]`（小 PMEM，`BranchEliminationPass` 可消除）；big-PMEM 永遠保留
 
-測試應斷言 `isinstance(result, BlockNode)` 並分別驗證兩個 child block 的 branch 指令目標，不可依賴舊的 `BasicBlockNode` 回傳型別。
+經 pipeline 驗證時檢查兩個 branch 的目標，而不是依賴舊的 `BasicBlockNode` 回傳型別。
 
 ### DmemDispatchPass — 小/大 pmem 路徑
 
@@ -437,11 +393,12 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 - `pmem_capacity <= 2048`：guard 是 label-mode `JumpInst`（`label=LabelRef(last)`, `addr=None`）
 - `pmem_capacity > 2048`：guard 是 `RegWriteInst(dst=s15, src=LABEL)` + `JumpInst(addr=s15)`
 
-測試 `DmemDispatchPass` 時用 `PipeLineContext(config=PipeLineConfig(pmem_capacity=512))` 強制小 pmem 路徑。
+驗證小 pmem 路徑時提供 `PipeLineContext(config=PipeLineConfig(pmem_capacity=512))`，經 IR pipeline 觀察生成結果。
 
 ### DeadWriteEliminationPass / ZeroDelayDCEPass — disable_opt guard
 
-兩者都在 `_process_block` 開頭對 `block.disable_opt` 做 early return，測試需明確用 `BasicBlockNode(..., disable_opt=True)` 驗證 skip 行為。
+`block.disable_opt=True` 應保留未優化的行為。以有效 `BasicBlockNode(..., disable_opt=True)`
+作 pipeline 輸入，比較產生的 IR，而非直接斷言 `_process_block` 的呼叫或回傳。
 
 ---
 
@@ -462,11 +419,10 @@ load-result feature 的 targeted tests 分散在對應 ownership：
 `tests/mcp/measure/`覆蓋operation handle與RPC timeout policy：bounded
 GUI handler timeout應回傳狀態，transport timeout應被視為連線異常。
 
-**新增整合測試**：在 `test_modules_integration.py` 加入新的 test class / method，  
-用 `_make_prog(modules=[...])` 建構程式，斷言 `prog.binprog is not None`。
-
-**新增單元測試**：在 `tests/program/v2/modules/test_<module>.py` 加入測試，  
-使用 `mock_prog` fixture（MagicMock），驗證 cfg parsing / set_param / method call patterns。
+Program v2 的 compile regression 先找 `test_modules_integration.py` 中同一契約，
+以 `_make_prog(modules=[...])` 建構程式，檢查編譯結果及該情境需區分的語意。
+`tests/program/v2/modules/` 的 cfg parsing 或 set_param 案例可用 `mock_prog` 隔離硬體；
+從 module 接縫驗證結果，只有呼叫順序本身屬於契約時才斷言順序。
 
 **新增 soccfg 欄位**：若 QICK 版本升級導致新的 `KeyError`，在  
 `lib/zcu_tools/program/v2/mocksoc.py` 的 `_build_mock_cfg()`（內含 `_gen()` / `_readout()`）補入對應欄位即可。
