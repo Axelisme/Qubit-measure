@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, LoadDataRequest
+from zcu_tools.gui.app.main.adapter.loaded_cfg import project_loaded_cfg
+from zcu_tools.gui.app.main.adapter.lowering import validate_schema
+from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .guard import LoadPermit
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.state import RetiredPaneResources, State
+    from zcu_tools.gui.event_bus import BaseEventBus
 
-    from .ports import WritebackLifecyclePort
+    from .ports import CfgEditorReplacementPort, WritebackLifecyclePort
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +30,7 @@ class LoadTabResultOutcome:
     has_cfg_snapshot: bool
     has_analyze_params: bool
     source_kind: str = "loaded"
+    cfg_backfill: Literal["applied", "not_applied"] = "not_applied"
 
 
 class LoadDataError(FailedPreconditionError):
@@ -55,9 +61,14 @@ class LoadService:
         self,
         state: State,
         writeback: WritebackLifecyclePort,
+        *,
+        cfg_editor: CfgEditorReplacementPort,
+        bus: BaseEventBus,
     ) -> None:
         self._state = state
         self._writeback = writeback
+        self._cfg_editor = cfg_editor
+        self._bus = bus
 
     @staticmethod
     def _supports_load_data(adapter: object) -> bool:
@@ -105,7 +116,54 @@ class LoadService:
             result_type=type(result).__name__,
             has_cfg_snapshot=getattr(result, "cfg_snapshot", None) is not None,
             has_analyze_params=False,
+            cfg_backfill=self._backfill_cfg(
+                tab_id, getattr(result, "cfg_snapshot", None)
+            ),
         )
+
+    def _backfill_cfg(
+        self, tab_id: str, snapshot: object
+    ) -> Literal["applied", "not_applied"]:
+        if not isinstance(snapshot, ExpCfgModel):
+            return "not_applied"
+        try:
+            current = self._cfg_editor.snapshot_owner(tab_id)
+            if current is None:
+                current = self._state.get_tab(tab_id).cfg_schema
+            candidate = project_loaded_cfg(
+                current, snapshot, provide_options=self._cfg_editor.provide_options
+            )
+            if candidate is None:
+                return "not_applied"
+            validate_schema(candidate, self._state.exp_context.ml)
+            prepared = self._cfg_editor.prepare_replacement(tab_id, candidate)
+        except Exception:
+            logger.exception("loaded config was not applied: tab_id=%r", tab_id)
+            return "not_applied"
+
+        # Activation checks token/owner identity before any State mutation.
+        # Both publications run synchronously without observer callbacks.
+        try:
+            retired = self._cfg_editor.activate_replacement(prepared)
+        except Exception:
+            self._cfg_editor.discard_prepared(prepared)
+            raise
+        try:
+            self._state.update_tab_cfg_schema(tab_id, candidate)
+            self._bus.emit(
+                TabContentChangedPayload(
+                    tab_id=tab_id, fact=TabContentFact.CFG_REPLACED
+                )
+            )
+        finally:
+            if retired is not None:
+                try:
+                    self._cfg_editor.retire_replaced(retired)
+                except Exception:
+                    logger.exception(
+                        "retired cfg editor cleanup failed: tab_id=%r", tab_id
+                    )
+        return "applied"
 
     def _teardown_retired(
         self, retired: RetiredPaneResources, *, tab_id: str | None = None

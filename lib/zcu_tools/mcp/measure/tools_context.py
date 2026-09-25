@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
     MeasureToolContext,
     _coerce_pairs,
-    bind_context,
-    send_gui_rpc,
 )
 
 
-def tool_gui_context_md_write(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_context_md_write(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Batch-write MetaDict attributes, fail-fast in order (E5).
 
     Batch-only fan-out over context.md_set_attr — there is no atomicity: attrs
@@ -26,7 +27,7 @@ def tool_gui_context_md_write(arguments: dict[str, Any]) -> dict[str, Any]:
     attrs = _coerce_pairs(arguments.get("attrs"), field="attrs", keys=("key", "value"))
     for i, attr in enumerate(attrs):
         try:
-            send_gui_rpc(
+            ctx.send_gui_rpc(
                 "context.md_set_attr",
                 {"key": str(attr["key"]), "value": attr["value"]},
             )
@@ -39,7 +40,9 @@ def tool_gui_context_md_write(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"applied": len(attrs)}
 
 
-def tool_gui_context_md_read(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_context_md_read(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Read MetaDict attributes — the whole tree, or a named subset.
 
     Omit ``keys`` to read every attribute (fans out context.md_get for the key
@@ -52,19 +55,21 @@ def tool_gui_context_md_read(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     raw_keys = arguments.get("keys")
     if raw_keys is None:
-        keys = [str(k) for k in send_gui_rpc("context.md_get", {}).get("keys", [])]
+        keys = [str(k) for k in ctx.send_gui_rpc("context.md_get", {}).get("keys", [])]
     elif isinstance(raw_keys, list):
         keys = [str(k) for k in raw_keys]
     else:
         raise ValueError("'keys' must be a list (or omitted to read the whole tree)")
     values: dict[str, Any] = {}
     for key in keys:
-        res = send_gui_rpc("context.md_get_attr", {"key": key})
+        res = ctx.send_gui_rpc("context.md_get_attr", {"key": key})
         values[key] = res.get("value")
     return {"values": values}
 
 
-def tool_gui_context_md_delete(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_context_md_delete(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Batch-delete MetaDict attributes, fail-fast in order.
 
     Batch-only fan-out over context.md_del_attr. Idempotent per key: deleting a
@@ -79,7 +84,7 @@ def tool_gui_context_md_delete(arguments: dict[str, Any]) -> dict[str, Any]:
     keys = [str(k) for k in raw_keys]
     for i, key in enumerate(keys):
         try:
-            send_gui_rpc("context.md_del_attr", {"key": key})
+            ctx.send_gui_rpc("context.md_del_attr", {"key": key})
         except Exception as exc:
             raise RuntimeError(
                 f"batch md delete failed at keys[{i}] (key={key!r}); "
@@ -89,7 +94,9 @@ def tool_gui_context_md_delete(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"deleted": keys}
 
 
-def tool_gui_context_list(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_context_list(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """List context labels plus the active one (the orientation read for contexts).
 
     Folds context.active + context.labels into one reply
@@ -99,8 +106,8 @@ def tool_gui_context_list(arguments: dict[str, Any]) -> dict[str, Any]:
     the active context's unit could be inferred, and even that is out of scope here.
     """
     del arguments
-    active = send_gui_rpc("context.active", {}).get("label")
-    labels = list(send_gui_rpc("context.labels", {}).get("labels", []))
+    active = ctx.send_gui_rpc("context.active", {}).get("label")
+    labels = list(ctx.send_gui_rpc("context.labels", {}).get("labels", []))
     return {
         "active": active,
         "has_active_context": active is not None,
@@ -108,7 +115,9 @@ def tool_gui_context_list(arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def tool_gui_context_ml_inspect(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_context_ml_inspect(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Read one ModuleLibrary entry's full cfg WITHOUT opening a tab.
 
     Opens a headless, gc-reclaimable cfg-editor draft on the existing ml entry
@@ -121,12 +130,12 @@ def tool_gui_context_ml_inspect(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     item_kind = str(arguments["item_kind"])
     name = str(arguments["name"])
-    opened = send_gui_rpc("editor.new", {"item_kind": item_kind, "from_name": name})
+    opened = ctx.send_gui_rpc("editor.new", {"item_kind": item_kind, "from_name": name})
     editor_id = opened["editor_id"]
     try:
         return {"cfg": opened.get("tree")}
     finally:
-        send_gui_rpc("editor.discard", {"editor_id": editor_id})
+        ctx.send_gui_rpc("editor.discard", {"editor_id": editor_id})
 
 
 OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
@@ -236,5 +245,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

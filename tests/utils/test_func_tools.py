@@ -18,6 +18,21 @@ def test_min_interval_throttles_by_duty_cycle_ratio(monkeypatch: pytest.MonkeyPa
     assert calls == ["first", "second"]
 
 
+def test_min_interval_flush_bypasses_duty_cycle_throttle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    times = iter([10.0, 12.0, 12.1, 13.0, 14.0])
+    monkeypatch.setattr(func_tools.time, "time", lambda: next(times))
+    throttled = func_tools.MinIntervalFunc(lambda value: calls.append(value), 0.5)
+
+    throttled("first")
+    throttled("skipped")
+    throttled.flush("final")
+
+    assert calls == ["first", "final"]
+
+
 def test_min_interval_rejects_invalid_duty_cycle_ratio():
     with pytest.raises(ValueError, match="duty-cycle ratio"):
         func_tools.MinIntervalFunc(lambda: None, 0.0)

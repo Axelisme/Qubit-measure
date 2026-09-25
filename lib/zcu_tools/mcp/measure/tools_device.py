@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
     MeasureToolContext,
     _start_op_with_short_wait,
-    bind_context,
-    send_gui_rpc,
 )
 
 
-def _device_snapshot(name: str) -> Any:
+def _device_snapshot(ctx: MeasureToolContext, name: str) -> Any:
     """Fetch one device's snapshot (now including its live ``info`` params)."""
-    return send_gui_rpc("device.snapshot", {"name": name}).get("snapshot")
+    return ctx.send_gui_rpc("device.snapshot", {"name": name}).get("snapshot")
 
 
-def tool_gui_device_connect(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_device_connect(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(arguments["name"])
     # type_name/address omitted => reconnect a remembered (memory-only) device,
     # reusing its stored type/address (E4: reconnect folded into connect). Both
@@ -26,7 +27,7 @@ def tool_gui_device_connect(arguments: dict[str, Any]) -> dict[str, Any]:
     type_name = arguments.get("type_name")
     address = arguments.get("address")
     if type_name is None and address is None:
-        send_gui_rpc("device.reconnect", {"name": name})
+        ctx.send_gui_rpc("device.reconnect", {"name": name})
     else:
         params: dict[str, Any] = {
             "type_name": str(type_name),
@@ -35,45 +36,54 @@ def tool_gui_device_connect(arguments: dict[str, Any]) -> dict[str, Any]:
         }
         if "remember" in arguments:
             params["remember"] = bool(arguments["remember"])
-        send_gui_rpc("device.connect", params)  # operation_id captured into _OP_BY_KEY
+        ctx.send_gui_rpc(
+            "device.connect", params
+        )  # operation_id captured into _OP_BY_KEY
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
     return _start_op_with_short_wait(
+        ctx,
         f"device:{name}",
         f"Device {name!r} connect",
         wait_seconds,
-        lambda: {"snapshot": _device_snapshot(name)},
+        lambda: {"snapshot": _device_snapshot(ctx, name)},
         "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
     )
 
 
-def tool_gui_device_disconnect(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_device_disconnect(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(arguments["name"])
     params: dict[str, Any] = {"name": name}
     if "remember" in arguments:
         params["remember"] = bool(arguments["remember"])
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    send_gui_rpc("device.disconnect", params)
+    ctx.send_gui_rpc("device.disconnect", params)
     return _start_op_with_short_wait(
+        ctx,
         f"device:{name}",
         f"Device {name!r} disconnect",
         wait_seconds,
-        lambda: {"snapshot": _device_snapshot(name)},
+        lambda: {"snapshot": _device_snapshot(ctx, name)},
         "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
     )
 
 
-def tool_gui_device_setup(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_device_setup(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(arguments["name"])
     updates = arguments.get("updates", {})
     if not isinstance(updates, dict):
         raise ValueError("'updates' must be an object")
     wait_seconds = float(arguments.get("wait_seconds", 1.0))
-    send_gui_rpc("device.setup", {"name": name, "updates": dict(updates)})
+    ctx.send_gui_rpc("device.setup", {"name": name, "updates": dict(updates)})
     return _start_op_with_short_wait(
+        ctx,
         f"device:{name}",
         f"Device {name!r} apply",
         wait_seconds,
-        lambda: {"snapshot": _device_snapshot(name)},
+        lambda: {"snapshot": _device_snapshot(ctx, name)},
         "poll/wait the returned handle with gui_op_poll / gui_op_wait.",
     )
 
@@ -190,5 +200,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

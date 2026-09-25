@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.measure.tool_context import (
     MeasureToolContext,
     _coerce_pairs,
-    bind_context,
-    send_gui_rpc,
 )
 
 
@@ -29,7 +28,9 @@ def _resolve_editor_id(arguments: dict[str, Any]) -> str:
     return str(editor_id)
 
 
-def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, Any]:
+def _fold_tab_editing_context(
+    ctx: MeasureToolContext, tab_id: str, reply: dict[str, Any]
+) -> dict[str, Any]:
     """Fold a fresh tab's editing context into ``reply``, in place.
 
     After tab.new the agent always reads tab.snapshot (for the editor_id) and
@@ -42,13 +43,15 @@ def _fold_tab_editing_context(tab_id: str, reply: dict[str, Any]) -> dict[str, A
     """
     # tab.snapshot always returns {tabs: [...]}; a single tab_id yields a
     # one-element list (no shape-switch).
-    snap = send_gui_rpc("tab.snapshot", {"tab_id": tab_id})["tabs"][0]
+    snap = ctx.send_gui_rpc("tab.snapshot", {"tab_id": tab_id})["tabs"][0]
     reply["editor_id"] = snap.get("editor_id")
-    reply["tree"] = send_gui_rpc("tab.get_cfg", {"tab_id": tab_id}).get("tree")
+    reply["tree"] = ctx.send_gui_rpc("tab.get_cfg", {"tab_id": tab_id}).get("tree")
     return reply
 
 
-def tool_gui_editor_open(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_editor_open(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Open a stateful editing session over an EXISTING ml entry, addressed later
     by ``editor_id``.
 
@@ -57,7 +60,7 @@ def tool_gui_editor_open(arguments: dict[str, Any]) -> dict[str, Any]:
     open reply) uses the same ``cfg`` key. Returns ``{editor_id, cfg}`` — cfg is
     the nested current-value tree of the freshly-opened draft.
     """
-    opened = send_gui_rpc(
+    opened = ctx.send_gui_rpc(
         "editor.new",
         {
             "item_kind": str(arguments["item_kind"]),
@@ -67,7 +70,9 @@ def tool_gui_editor_open(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"editor_id": opened["editor_id"], "cfg": opened.get("tree")}
 
 
-def tool_gui_editor_get_cfg(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_editor_get_cfg(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Read an editing session's settable cfg as a nested current-value tree.
 
     Thin override over the editor.get RPC: folds the wire ``tree`` key to ``cfg``
@@ -78,11 +83,13 @@ def tool_gui_editor_get_cfg(arguments: dict[str, Any]) -> dict[str, Any]:
     prefix = arguments.get("prefix")
     if prefix is not None:
         params["prefix"] = str(prefix)
-    got = send_gui_rpc("editor.get", params)
+    got = ctx.send_gui_rpc("editor.get", params)
     return {"cfg": got.get("tree")}
 
 
-def tool_gui_editor_set(arguments: dict[str, Any]) -> dict[str, Any]:
+def tool_gui_editor_set(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     """Batch-set fields on ONE cfg-editor session, fail-fast in order.
 
     The editor is addressed by ``editor_id`` (from gui_editor_open). For tab cfg
@@ -100,7 +107,7 @@ def tool_gui_editor_set(arguments: dict[str, Any]) -> dict[str, Any]:
     valid = True
     for i, edit in enumerate(edits):
         try:
-            res = send_gui_rpc(
+            res = ctx.send_gui_rpc(
                 "editor.set_field",
                 {
                     "editor_id": editor_id,
@@ -117,8 +124,10 @@ def tool_gui_editor_set(arguments: dict[str, Any]) -> dict[str, Any]:
     return {"applied": len(edits), "valid": valid}
 
 
-def tool_gui_tab_set_cfg(arguments: dict[str, Any]) -> dict[str, Any]:
-    return send_gui_rpc(
+def tool_gui_tab_set_cfg(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    return ctx.send_gui_rpc(
         "tab.set_cfg",
         {
             "tab_id": str(arguments["tab_id"]),
@@ -298,5 +307,7 @@ OVERRIDE_TOOLS: dict[str, dict[str, Any]] = {
 
 
 def build_override_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
-    bind_context(ctx)
-    return OVERRIDE_TOOLS
+    return {
+        name: {**entry, "handler": partial(entry["handler"], ctx)}
+        for name, entry in OVERRIDE_TOOLS.items()
+    }

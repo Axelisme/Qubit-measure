@@ -86,6 +86,13 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
                 raise ValueError(
                     "sampling_mode='homophasal' requires homophasal fit parameters"
                 )
+            readout = self.modules.readout
+            if readout.ro_cfg.gen_ch != readout.pulse_cfg.ch:
+                raise ValueError(
+                    "homophasal sampling requires ro_cfg.gen_ch to match "
+                    f"pulse_cfg.ch; got {readout.ro_cfg.gen_ch} and "
+                    f"{readout.pulse_cfg.ch}"
+                )
         elif self.homophasal is not None:
             raise ValueError(
                 "homophasal fit parameters require sampling_mode='homophasal'"

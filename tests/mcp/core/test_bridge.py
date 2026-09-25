@@ -155,3 +155,39 @@ def test_send_rpc_raw_timeout_closes_transport(tmp_path: Path) -> None:
     assert bridge.is_connected is False
     assert bridge._pending == {}
     assert transport.sent[0]["method"] == "slow.method"
+
+
+@pytest.mark.parametrize(
+    ("wire_version", "gui_version", "mismatch"),
+    [
+        (1, 7, False),
+        (100, 1, True),
+        (1, 999, False),
+    ],
+)
+def test_version_note_compares_wire_but_only_reports_gui_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    wire_version: int,
+    gui_version: int,
+    mismatch: bool,
+) -> None:
+    bridge = McpBridge(_config(tmp_path))
+
+    def send_rpc_raw(
+        method: str, params: dict[str, Any], timeout_seconds: float
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "result": {"wire_version": wire_version, "gui_version": gui_version},
+        }
+
+    monkeypatch.setattr(bridge, "send_rpc_raw", send_rpc_raw)
+    note = bridge.wire_version_note()
+    if mismatch:
+        assert "WIRE VERSION MISMATCH" in note
+    else:
+        assert "MISMATCH" not in note
+        assert "wire v1" in note
+        assert f"gui code v{gui_version}" in note
+        assert "mcp code v1" in note

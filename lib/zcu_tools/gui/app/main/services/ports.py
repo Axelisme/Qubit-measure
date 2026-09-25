@@ -51,7 +51,6 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import (
         AdapterCapabilities,
-        SavePaths,
         WritebackItem,
     )
     from zcu_tools.gui.app.main.state import (
@@ -233,6 +232,35 @@ class WritebackLifecyclePort(Protocol):
     def create_draft(self, items: Iterable[WritebackItem]) -> Any: ...
     def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
     def teardown_draft(self, draft: Any) -> None: ...
+
+
+class PreparedCfgEditor(Protocol):
+    """Opaque service-owned replacement; not yet discoverable by clients."""
+
+    @property
+    def editor_id(self) -> str: ...
+
+
+class RetiredCfgEditor(Protocol):
+    """Revoked session whose draft remains alive until viewers detach."""
+
+    @property
+    def editor_id(self) -> str: ...
+
+
+class CfgEditorReplacementPort(Protocol):
+    """Owner-thread preparation, publication and retirement of a tab draft."""
+
+    def snapshot_owner(self, owner_key: str) -> CfgSchema | None: ...
+    def provide_options(self, source_id: str) -> Sequence[object]: ...
+    def prepare_replacement(
+        self, owner_key: str, seed: CfgSchema
+    ) -> PreparedCfgEditor: ...
+    def activate_replacement(
+        self, prepared: PreparedCfgEditor
+    ) -> RetiredCfgEditor | None: ...
+    def discard_prepared(self, prepared: PreparedCfgEditor) -> None: ...
+    def retire_replaced(self, retired: RetiredCfgEditor) -> None: ...
 
 
 @runtime_checkable

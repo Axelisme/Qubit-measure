@@ -266,6 +266,15 @@ class MainWindow(QMainWindow):
     # ViewProtocol implementation
     # ------------------------------------------------------------------
 
+    def refresh_tab_cfg(self, tab_id: str) -> None:
+        widget = self._resolve_tab_widget(tab_id, "refresh_tab_cfg")
+        if widget is None:
+            return
+        editor_id = self._ctrl.editor_id_for_owner(tab_id)
+        if editor_id is None:
+            raise RuntimeError(f"Tab {tab_id!r} has no replacement cfg editor")
+        widget.attach_cfg_editor(editor_id)
+
     def refresh_tab_analyze_form(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -787,7 +796,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            self._ctrl.load_tab_result(tab_id, path)
+            outcome = self._ctrl.load_tab_result(tab_id, path)
         except LoadDataError as exc:
             logger.warning(
                 "_on_load_data_clicked rejected data file: tab_id=%r path=%r reason=%s",
@@ -801,7 +810,10 @@ class MainWindow(QMainWindow):
             logger.exception("_on_load_data_clicked failed: tab_id=%r", tab_id)
             self.show_error_dialog("Load data failed", str(exc))
             return
-        self.show_status_message(f"Loaded data from {path}")
+        message = f"Loaded data from {path}"
+        if outcome.cfg_backfill == "not_applied":
+            message += "; Config was not backfilled"
+        self.show_status_message(message)
 
     def _on_post_analyze_clicked(self, tab_id: str) -> None:
         logger.info("_on_post_analyze_clicked: tab_id=%r", tab_id)

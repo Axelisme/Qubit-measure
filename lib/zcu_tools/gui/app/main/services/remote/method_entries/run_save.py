@@ -33,7 +33,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             30.0,
             "Load a canonical result file into an already-open adapter tab. The tab "
             "then has a run result and can be analyzed without a SoC connection. "
-            "First release does not backfill Config from cfg_snapshot.",
+            "Compatible snapshot values backfill Config automatically, replacing "
+            "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
+            "backfill failure does not undo the loaded result.",
             (
                 _str("tab_id"),
                 _str("data_path", "Canonical HDF5 result file to load"),

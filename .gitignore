@@ -51,3 +51,6 @@ package-lock.json
 notebook/*
 notebook_md/plot/*
 .ipynb_checkpoints
+
+# pytest basetemp pinned in pyproject.toml
+**/.pytest-tmp*/
