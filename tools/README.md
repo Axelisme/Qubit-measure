@@ -84,6 +84,46 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 `--dist=worksteal` 維持 command-level，因 parity intentionally disables pytest plugin autoload；
 不設定 pytest 全域預設，因此未帶旗標的 `pytest -n auto` 語意不變。
 
+## 品質快照與熱點報表
+
+三個主要入口各有責任：`gate.py` 串接日常檢查，`check_ratchet.py` 判定相對 base 的
+regression，`quality_report.py` 保存現況並解讀債務分布。新報表不取代 gate，也不重做 detector
+規則。`check_pytest_collection.py` 與 pytest 仍另外執行，快照不代表行為測試通過。
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/quality_report.py snapshot --with-pyright --output .agent_state/quality/before.json
+uv run --directory <worktree> --no-sync -- python tools/quality_report.py snapshot --with-pyright --output .agent_state/quality/after.json
+uv run --directory <worktree> --no-sync -- python tools/quality_report.py compare .agent_state/quality/before.json .agent_state/quality/after.json --output .agent_state/quality/comparison.json
+```
+
+沒有 `--output` 時 JSON 寫 stdout；指定檔案必須不存在，避免覆寫證據。snapshot 的 stderr
+列出完整計數與各類 top 10，`--top N` 可調整顯示筆數。完整 finding、來源提供的 line/message
+及額外量值保留在 JSON；可 import `summarize(snapshot, parent="lib/zcu_tools/gui")` 取得完整
+分布或限定父目錄。分組為 production、tests、scripts、tools、configuration、other，以及
+所屬目錄、規則與檔案。不把跨 detector 的總數當品質分數。
+
+Pyright 為 opt-in，未指定時記錄 skipped；啟用時只計 errors，但保留非 error 診斷為 uncounted。
+測試結構的 advisory 也保留但不計入違規。零筆只能是 completed 的觀察；detector 失敗記錄
+error 與原因，不能轉成零。Import contracts 獨立記錄 pass/fail/error，不混入診斷數。
+
+Snapshot 保存 commit、HEAD tree、tracked/untracked status、被量測 Python source digest、
+Python/platform、已安裝 distribution 版本、工具版本、repo 設定與工具實作檔案指紋。
+掃描前後來源或方法有變即拒絕輸出，避免把兩棵樹混成一次觀察。它是目前 worktree 的快照，
+不是重建任意歷史 commit 的工具；外部 SDK、硬體、未安裝 runtime profile 與外部設定不在涵蓋內。
+同版本套件的原地修改不由 distribution 版本指紋辨識；detector 自身的靜態分析限制仍適用。
+
+Compare 要求相同方法與 detector selection/state；任一 error 或方法不同會拒絕比較，
+列出理由。不同 commit/source 是允許的。設定、工具或環境更新後應以同一方法重量兩側，
+或建立新的 baseline，沒有 force-comparable 開關。
+
+比較按精確 `(detector, path, rule)` 列出 before/after、introduced_count、resolved_count、net，
+並彙整到 scope/module/rule。introduced/resolved 指計數變化，不是逐條診斷的身分追蹤。
+搬檔會出現舊路徑減少與新路徑增加，報表不把它解讀為修復；正式 rename 判定仍由 ratchet
+擁有。既有 suppression 的設定項目歸 configuration，不假裝有來源行號。
+
+Exit 0 只表示報表成功，不表示品質合格；即使有診斷或 import gate fail 也可成功產生報表。
+工具錯誤、無效 receipt 或不可比條件 exit 2。規則沒有新門檻，既有 gate 輸出與 exit 語意不變。
+
 ## ratchet 是判準，不是另一個檢查
 
 `check_ratchet.py` 把七項檢查對照 base 判讀：逐 (檔案, 規則) 比較 base tree 與 candidate，
@@ -133,9 +173,9 @@ uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyrigh
 | `check_test_structure.py` | 測試間直接 import、conftest import、覆蓋測試定義；命名另作 advisory | ratchet | 以 CLI 現況為準 |
 | `check_test_capabilities.py` | 測試模組宣告它用的 socket／subprocess／sleep | ratchet | 34 |
 | `check_suppressions.py` | 逃生口計量 | ratchet | 2349 |
-| `pytest -n auto` | 行為 | 硬性 | **紅**，見下 |
+| `pytest -n auto` | 行為 | 硬性 | 見下方 candidate-bound 觀察 |
 
-前兩項已全綠，紅了就是這次改動造成的。
+前兩項在上述歷史觀察通過。新的失敗仍需在相同環境比較 base/candidate，不能只憑歷史綠燈歸因本次變更。
 
 中間的計量檢查保留既有債務可見。**單獨執行它們只會看到既有狀態**，判定一律經由
 ratchet。
@@ -243,9 +283,14 @@ ratchet 會把它讀成進步。
 ——把 `_foo` 改名成 `foo` 讓 `reportUnusedFunction` 不發作、把 5000 行拆成五個 999 行——
 只能靠 reviewer。
 
-## pytest 目前是紅的
+## pytest 的 candidate-bound 觀察
 
-在 main＋Load 起點（`18f22e46a`）與加入這套工具後的分支上，`pytest -n auto` 都有同樣三類既存失敗：
+2026-09-25 在 `bceedb3fe`、Python 3.13.11 主 checkout 環境，`pytest -n auto` 與
+`pytest -n auto --dist=worksteal` 各跑一次，兩次均為 6245 passed、7 skipped、2 warnings。
+`check_pytest_collection.py` 四種入口均收集 6252 tests。這些不是目前所有 candidate 的保證，
+兩次通過也不證明消除了順序依賴或 Qt flake；更新程式、環境或工具後需重新量測。
+
+以下是 main＋Load 起點 `18f22e46a` 與當時工具分支的歷史失敗線索，不是現況豁免：
 
 - `tests/gui/app/main/ui/test_writeback_widget.py` 的三個 layout 測試每次失敗。
 - 每次執行約有一次 xdist worker 以 `Fatal Python error: Aborted`／`node down` 終止，發生在 Qt 物件的 GC
@@ -253,4 +298,5 @@ ratchet 會把它讀成進步。
 - `tests/gui/plotting/test_plotting.py::test_registry_evicts_gc_collected_figure` 間歇失敗：它比較全域
   `WeakKeyDictionary` 的絕對筆數，同一 worker 上其他測試的 figure 在期間被 GC 就會改變計數。
 
-在它們修好之前，判讀看的是「有沒有多出這三類以外的失敗」。
+再次遇到這些症狀時保存 candidate、環境、選集與排程，建立可重現的失敗證據再定因。
+不能因症狀與歷史記錄相似就忽略失敗，也不能以單獨重跑通過取代原選集驗證。

@@ -31,11 +31,17 @@ from zcu_tools.gui.session.value_lookup import ValueKey, ValueRegistry
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-from .test_role_default_characterization import (
-    _POPULATED_MD,
-    _load_golden,
-    _mk_ctx,
-    _serialize,
+from ._role_characterization import (
+    POPULATED_MD as _POPULATED_MD,
+)
+from ._role_characterization import (
+    load_golden as _load_golden,
+)
+from ._role_characterization import (
+    make_context as _mk_ctx,
+)
+from ._role_characterization import (
+    serialize as _serialize,
 )
 
 

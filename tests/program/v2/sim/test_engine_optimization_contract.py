@@ -32,14 +32,14 @@ from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
 from zcu_tools.progress_bar import use_pbar_factory
 
-from .test_engine import (
-    _RESET_RELAX_DELAY,
-    _SIM,
-    _f_qubit_mhz,
-    _pi_pulse_prog,
-    _readout,
-    _rf_g_mhz,
-)
+from . import _engine_support
+
+_RESET_RELAX_DELAY = _engine_support.RESET_RELAX_DELAY
+_SIM = _engine_support.SIM
+_rf_g_mhz = _engine_support.ground_resonator_frequency_mhz
+_pi_pulse_prog = _engine_support.pi_pulse_program
+_f_qubit_mhz = _engine_support.qubit_frequency_mhz
+_readout = _engine_support.readout
 
 
 @pytest.fixture(autouse=True)

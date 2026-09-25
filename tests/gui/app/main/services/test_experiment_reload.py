@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.catalog import (
-    CatalogReloadError,
-    ExperimentAccess,
-    PreparedCatalogReload,
-)
+from zcu_tools.gui.app.main.catalog import CatalogReloadError, ExperimentAccess
 from zcu_tools.gui.app.main.events.tab import TabClosedPayload
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services.experiment_reload import ExperimentReloadService
@@ -22,50 +17,14 @@ from zcu_tools.gui.app.main.services.workspace import WorkspaceService
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    ScalarSpec,
     schema_to_raw,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
-from tests.gui.test_registry import _DummyAdapter
-
-
-class OldAdapter(_DummyAdapter):
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
-        return CfgSchema(
-            spec=CfgSectionSpec(fields={"knob": ScalarSpec(label="Knob", type=int)}),
-            value=CfgSectionValue(fields={"knob": DirectValue(7)}),
-        )
-
-
-class NewAdapter(OldAdapter):
-    pass
-
-
-class Loader:
-    def __init__(self) -> None:
-        self.candidate = Registry()
-        self.candidate.register("demo", NewAdapter)
-        self.failure: CatalogReloadError | None = None
-        self.prepare_failure: Exception | None = None
-        self.during_load: Callable[[], None] = lambda: None
-        self.loads = 0
-
-    def prepare(self) -> PreparedCatalogReload:
-        if self.prepare_failure is not None:
-            raise self.prepare_failure
-        return PreparedCatalogReload()
-
-    def load(self, plan: PreparedCatalogReload) -> Registry:
-        self.loads += 1
-        self.during_load()
-        if self.failure is not None:
-            raise self.failure
-        return self.candidate
+from tests.gui.app.main._reload_fakes import Loader, NewAdapter, OldAdapter
 
 
 @dataclass
