@@ -33,7 +33,7 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 **Qt GUI 子套件單獨跑**（約 22 s，不需 `-n auto`）：
 
 ```bash
-.venv/bin/python -m pytest tests/gui tests/autofluxdep_gui -q
+.venv/bin/python -m pytest tests/gui -q
 ```
 
 ### BackgroundRunner.quiesce() — 測試 teardown 必要模式
@@ -247,7 +247,7 @@ legacy zero-mutation replacement、schema collision與production registry covera
 `tests/gui/cfg/test_measure_import_contract.py` 鎖定measure adapter facade不forward
 `zcu_tools.gui.cfg.__all__` names，並以AST掃描`lib/`、`tests/`與`adapter.*` local submodules，
 要求generic imports直接指向shared owner。autofluxdep的app-local barrel ownership由
-`tests/autofluxdep_gui/test_cfg_import_contract.py`獨立鎖定。
+`tests/gui/app/autofluxdep/test_cfg_import_contract.py`獨立鎖定。
 
 `tests/gui/cfg/test_schema_assembler.py`擁有domain-free paired Spec/Value construction contract：
 path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
@@ -318,13 +318,13 @@ interaction.
 
 ### Autofluxdep GUI tests
 
-`tests/autofluxdep_gui/test_cfg_schema.py`另外鎖定`NodeSchemaBuilder`抽取到shared
+`tests/gui/app/autofluxdep/test_cfg_schema.py`另外鎖定`NodeSchemaBuilder`抽取到shared
 `CfgSchemaAssembler`前後的spec/value/logical-path/persisted observable parity；autoflux domain
 仍擁有logical projection與generation policy。
 
-`tests/autofluxdep_gui/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_cfg_import_contract.py` 鎖定autoflux cfg package只暴露app-owned API，且production generic cfg imports直接指向shared owner。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
+`tests/gui/app/autofluxdep/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。`test_cfg_import_contract.py` 鎖定autoflux cfg package只暴露app-owned API，且production generic cfg imports直接指向shared owner。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
 
-`tests/autofluxdep_gui/test_labber_browser_export.py` 覆蓋 Labber Browser sidecar contract、fixed-axis sidecar live streaming row writes 與 terminal qubit_freq sidecar export。
+`tests/gui/app/autofluxdep/test_labber_browser_export.py` 覆蓋 Labber Browser sidecar contract、fixed-axis sidecar live streaming row writes 與 terminal qubit_freq sidecar export。
 
 Autofluxdep real-acquire smoke tests 依賴 flux-aware `MockSoc` 的物理模型；測試 fixture 要讓
 `connect_mock(..., sim_params=...)`、`mock_flux_predictor(sim_params)` 與 drive pulse calibration

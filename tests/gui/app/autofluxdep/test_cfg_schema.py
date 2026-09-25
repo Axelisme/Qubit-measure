@@ -2696,7 +2696,7 @@ def test_real_builders_restrict_generated_readout_to_pulse_shape():
 
 
 def test_autoflux_measure_app_imports_are_zero():
-    pkg = pathlib.Path(__file__).resolve().parents[2] / (
+    pkg = pathlib.Path(__file__).resolve().parents[4] / (
         "lib/zcu_tools/gui/app/autofluxdep"
     )
     actual: dict[pathlib.Path, set[str]] = {}

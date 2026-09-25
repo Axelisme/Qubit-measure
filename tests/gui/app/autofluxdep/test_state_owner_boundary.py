@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[4]
 _FILES = (
     _ROOT / "lib/zcu_tools/gui/app/autofluxdep/controller.py",
     _ROOT / "lib/zcu_tools/gui/app/autofluxdep/services/run_setup.py",

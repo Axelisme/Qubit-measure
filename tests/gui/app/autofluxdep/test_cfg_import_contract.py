@@ -19,7 +19,7 @@ def test_autoflux_cfg_package_exports_only_app_owned_names() -> None:
 
 
 def test_source_imports_shared_cfg_names_from_shared_owner() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[4]
     generic_names = frozenset(shared_cfg.__all__)
     offenders: list[str] = []
 

@@ -626,7 +626,10 @@ def test_field_labels_use_autofluxdep_width(ctrl_node, qapp):
         # The width constraint is via FieldRenderContext.field_label_max_width.
         assert form._default_form._field_label_max_width == NODE_FIELD_LABEL_MAX_WIDTH
         if form._generation_form is not None:
-            assert form._generation_form._field_label_max_width == NODE_FIELD_LABEL_MAX_WIDTH
+            assert (
+                form._generation_form._field_label_max_width
+                == NODE_FIELD_LABEL_MAX_WIDTH
+            )
         # Verify tree items exist for a known field
         from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
 
@@ -892,6 +895,8 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
         assert generation_editor.isEnabled()
     finally:
         form.teardown()
+
+
 def test_qubit_freq_drive_gain_reference_subtree_preserves_header_and_unrelated(qapp):
     """Shipped qubit_freq: changing drive_gain.mode only rebuilds modules.qub_pulse subtree."""
     from zcu_tools.gui.app.autofluxdep.app import build_core
@@ -930,6 +935,7 @@ def test_qubit_freq_drive_gain_reference_subtree_preserves_header_and_unrelated(
             assert gen is not None
             # Find drive_gain section in generation
             from zcu_tools.gui.cfg.binding import SectionField
+
             drive_gain = None
             for k, v in gen.root.fields.items():
                 if k == "drive_gain":
@@ -942,7 +948,9 @@ def test_qubit_freq_drive_gain_reference_subtree_preserves_header_and_unrelated(
             qapp.processEvents()
             # Decoration should have changed for modules.qub_pulse.gain
             dec = form._default_form.decoration_for_path("modules.qub_pulse.gain")
-            assert dec.enabled is True  # was generated (disabled) in adaptive, now enabled
+            assert (
+                dec.enabled is True
+            )  # was generated (disabled) in adaptive, now enabled
             # Header should be preserved, gain leaf should be recreated, unrelated preserved
             header_after = root._tree.itemWidget(ref_item, 1)
             assert header_after is header_before

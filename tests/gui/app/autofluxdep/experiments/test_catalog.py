@@ -59,7 +59,7 @@ def _catalog_builder(
 
 def _imports(path: Path) -> tuple[str, ...]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    source_root = Path(__file__).parents[3] / "lib"
+    source_root = Path(__file__).parents[5] / "lib"
     module_parts = path.relative_to(source_root).with_suffix("").parts
     if module_parts[-1] == "__init__":
         module_parts = module_parts[:-1]
@@ -145,7 +145,7 @@ def test_unknown_placement_preserves_key_error() -> None:
 
 def test_each_concrete_experiment_file_is_registered_exactly_once() -> None:
     package_dir = (
-        Path(__file__).parents[3] / "lib/zcu_tools/gui/app/autofluxdep/experiments"
+        Path(__file__).parents[5] / "lib/zcu_tools/gui/app/autofluxdep/experiments"
     )
     concrete = {
         path.stem
@@ -161,7 +161,7 @@ def test_each_concrete_experiment_file_is_registered_exactly_once() -> None:
 
 
 def test_support_and_nodes_do_not_import_concrete_experiments() -> None:
-    package_dir = Path(__file__).parents[3] / "lib/zcu_tools/gui/app/autofluxdep"
+    package_dir = Path(__file__).parents[5] / "lib/zcu_tools/gui/app/autofluxdep"
     concrete_modules = {_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES}
     guarded_files = (
         *package_dir.joinpath("experiments/_support").rglob("*.py"),
@@ -174,7 +174,7 @@ def test_support_and_nodes_do_not_import_concrete_experiments() -> None:
 
 def test_concrete_experiments_do_not_import_one_another() -> None:
     package_dir = (
-        Path(__file__).parents[3] / "lib/zcu_tools/gui/app/autofluxdep/experiments"
+        Path(__file__).parents[5] / "lib/zcu_tools/gui/app/autofluxdep/experiments"
     )
     concrete_modules = {_EXPERIMENT_PREFIX + name for name in _EXPECTED_NAMES}
     for name in _EXPECTED_NAMES:
