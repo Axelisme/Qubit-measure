@@ -4,14 +4,18 @@ These lock the numeric output of ``calc_ge_snr`` so that the performance
 refactors in ``floquet.py`` (removing the photon-layer joblib, relaxing the
 ODE tolerance) are provably behaviour-preserving where they must be:
 
-- the strict (qutip-default) solver path stays bit-exact vs the golden values;
+- the strict (qutip-default) solver path stays within ``rel=1e-9`` of the golden values;
 - the relaxed-tolerance path stays within a tight relative tolerance.
 
-The golden ``snr[-3]`` values were captured on this machine from the original
-(joblib, qutip-default) implementation. Reproducibility spread was measured as
-exactly 0.0 (bit-exact deterministic), so the baseline path is locked with
-``atol=1e-12``. ``calc_ge_snr`` now defaults to a relaxed solver tolerance, so
-the baseline tests pass ``solver_options=None`` to exercise the strict path.
+The golden ``snr[-3]`` values were captured from the original (joblib,
+qutip-default) implementation. On one machine the output is bit-exact
+deterministic (``test_reproducible``), but across machines the BLAS/LAPACK
+build and CPU change the rounding: a headless Linux run differs by up to
+~2e-11 relative. ``rel=1e-9`` absorbs that platform noise while staying far
+below the ~6e-5 shift a solver-tolerance change produces, so the strict path
+still catches behavioural refactors. ``calc_ge_snr`` now defaults to a relaxed
+solver tolerance, so the baseline tests pass ``solver_options=None`` to
+exercise the strict path.
 
 A reduced ``max_photon=30`` photon grid is used to keep each test < 1s; the
 golden values correspond to that grid, not the design.ipynb ``max_photon=70``.
@@ -39,8 +43,8 @@ _COMMON = dict(
     max_photon=30,
 )
 
-# (params, golden snr[-3]) captured from the unmodified floquet.py on this
-# machine. Deterministic to the ULP (measured reproducibility spread == 0.0).
+# (params, golden snr[-3]) captured from the unmodified floquet.py. Deterministic
+# to the ULP on one machine; cross-platform rounding stays below rel=1e-9.
 _GOLDEN: list[tuple[tuple[float, float, float], float]] = [
     ((5.5, 1.2, 0.9), 0.6161074224266799),
     ((4.5, 1.0, 0.5), 1.5201939570255476),
@@ -64,8 +68,9 @@ def test_reproducible(params: tuple[float, float, float], _golden: float) -> Non
 
 @pytest.mark.parametrize("params,golden", _GOLDEN)
 def test_baseline_golden(params: tuple[float, float, float], golden: float) -> None:
-    # The strict (qutip-default) path must stay bit-exact across refactors.
-    assert _snr3(params, solver_options=None) == pytest.approx(golden, abs=1e-12)
+    # The strict (qutip-default) path must match the golden up to platform
+    # floating-point noise (see module docstring).
+    assert _snr3(params, solver_options=None) == pytest.approx(golden, rel=1e-9)
 
 
 @pytest.mark.parametrize("params,golden", _GOLDEN)

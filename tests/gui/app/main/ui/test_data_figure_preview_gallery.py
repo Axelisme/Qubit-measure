@@ -665,11 +665,19 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     vp2 = card.image_viewport_size()
     disp2 = card.displayed_pixmap()
     assert vp2 is not None and disp2 is not None
-    # New explicit viewport size with narrow tolerance (previously ~676x407)
+    # Width comes from fixed margins only, so it stays narrow. Height is the
+    # gallery height minus the header/hint/title text rows, whose line heights
+    # follow platform font metrics (~407 where first captured, ~417 on headless Linux);
+    # so only require growth here and lock the exact fit below.
     assert 670 <= vp2.width() <= 682, f"vp2 width {vp2.width()} not ~676"
-    assert 400 <= vp2.height() <= 415, f"vp2 height {vp2.height()} not ~407"
-    assert 538 <= disp2.width() <= 546, f"disp2 width {disp2.width()} not ~542"
-    assert 400 <= disp2.height() <= 415, f"disp2 height {disp2.height()} not ~407"
+    assert vp.height() < vp2.height() < 500, f"vp2 height {vp2.height()} did not grow"
+    # Largest 4:3 size inside vp2, as QSize.scaled(KeepAspectRatio) rounds it.
+    fit_w = vp2.height() * orig.width() // orig.height()
+    if fit_w <= vp2.width():
+        expected = QSize(fit_w, vp2.height())
+    else:
+        expected = QSize(vp2.width(), vp2.width() * orig.height() // orig.width())
+    assert disp2.size() == expected, f"disp2 {disp2.size()} != fit {expected}"
     _assert_aspect_fit(vp2, disp2.size(), orig.size())
     # Original cache must stay 640x480 across resizes
     assert card.original_pixmap().size() == orig.size()  # type: ignore[union-attr]
