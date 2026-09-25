@@ -30,7 +30,7 @@
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 | P9 | **能機械推導的就提供** | 可由現有資料直接算出的值（例如 `eta_s`、正規化後的 sweep 實際值）由介面算好回傳，不留給 agent 推算。 |
 
-## Decision：Tool 集合（35 特化 + 3 RPC）
+## Decision：Tool 集合（40 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -86,7 +86,7 @@
 
 mock 模式（mock SoC 與 fake device）屬於開發用途，不在量測介面中，經 RPC 或開發工具啟動。context 的建立與切換見 C 類；儀器連線見 F 類。
 
-### C. Context 與知識庫（6）
+### C. Context 與知識庫（11）
 
 **`contexts()`**
 context 索引：`{active, labels}`。
@@ -106,7 +106,19 @@ context 索引：`{active, labels}`。
 **`ml_get(name?)`**
 不帶 `name` 列出 modules 與 waveforms（名稱、種類、描述）；帶 `name` 回傳該項 cfg。
 
-ModuleLibrary 的寫入（由 role 建立、改名、刪除、修改欄位）屬常用操作，應有特化 tool；支援方式另行討論，定案前暫經 RPC。
+**`ml_roles()`**
+列出可建立的 role 模板 `[{role_id, label, kind, default_name}]`。
+
+**`ml_create(role_id, name?)`**
+由 role 模板建立空白 module／waveform（預設值由 md 帶入），未給 `name` 時用 `default_name`；回傳 `{name, kind, cfg}`。
+
+**`ml_edit(name, edits, save_as?)`**
+一次完成開啟 editor、依序套用 `edits`（語法同 `tab_edit`，含 sweep 整體修改）與存檔；任何一步失敗即捨棄 editor，library 不變。`save_as` 存為新項目、原項目不動。存檔時 md 表達式會被求值成數值（library 不保存 md 連動）；回傳存入的實際 `{name, cfg}`。
+
+**`ml_rename(name, new_name, kind?)`**、**`ml_delete(name, kind?)`**
+種類依名稱判斷；module 與 waveform 同名時須給 `kind`。名稱衝突時報錯。參照該項目的 cfg 會退化為 inline 值（值保留、不再連結 library，[[0033]]），回傳中提示此影響。
+
+ModuleLibrary 操作不對應 tab 子頁面，不切換 GUI。由 run cfg 建立模組目前由 writeback 的 module 項目處理，不另設入口。
 
 ### D. 實驗與 tab（12）
 
@@ -279,7 +291,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 
 - `rpc_list` 列出所有非 internal 的 wire method，包含已有特化 tool 者（標示對應的 tool），為之後的批次呼叫保留一致的清單。
 - 已特化的 method 經 `rpc_call` 呼叫時回 `reason="use_tool"` 並指名 tool；internal method（例如 `app.shutdown`、`state.*`）不開放。
-- 目前經 RPC 的低頻操作：MetaDict 刪除、ModuleLibrary 建立／改名／刪除與 editor 修改（ml 寫入特化 tool 定案前）、result scope 清單、`device.active_operations`、`predictor.clear`、arb waveform、value source、GUI prompt 對話框。
+- 目前經 RPC 的低頻操作：MetaDict 刪除、result scope 清單、`device.active_operations`、`predictor.clear`、arb waveform、value source、GUI prompt 對話框。
 
 mock 模式（mock SoC 與 fake device）由開發用 tool（例如 `dev_mock_mode`）提供，只在開發模式出現，不在量測介面與 RPC 清單中。
 
@@ -380,6 +392,9 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `context_create` | `context.new`，**新增** `label` 參數 |
 | `md_get`／`md_set` | `context.md_get`／`md_get_attr`／`md_set_attr` |
 | `ml_get` | `context.ml_get` + editor 讀取 |
+| `ml_roles`／`ml_create` | `context.ml_list_roles`／`context.ml_create_from_role` |
+| `ml_edit` | `editor.new` + `editor.set_field` + `editor.commit`，失敗時 `editor.discard` |
+| `ml_rename`／`ml_delete` | `context.ml_rename_*`／`context.ml_del_*` |
 | `project` | `project.info`、`startup.apply` |
 | `soc_connect` | `soc.connect(kind=remote)` |
 | `soc_info` | `soc.info` |
@@ -427,7 +442,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 35 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 40 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
