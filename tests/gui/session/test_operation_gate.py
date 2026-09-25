@@ -3,7 +3,7 @@
 Pure hardware mutual-exclusion keyed by an externally-minted token: the
 fail-fast ``ensure_can_start`` guard, ``register`` / ``release``, and the
 device-name / kind queries. The async handle (await / poll / cancel) lives in
-``OperationHandles`` — see test_operation_handles.py.
+``OperationHandles`` — see tests/gui/session/test_operation_handles.py.
 """
 
 from __future__ import annotations

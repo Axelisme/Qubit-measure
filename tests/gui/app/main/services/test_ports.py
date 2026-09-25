@@ -3,8 +3,9 @@
 implementing the port, with no ExperimentManager / files involved.
 
 (Persistence is no longer a store-port: the PersistenceCaretaker is a Driven
-Adapter owning disk I/O directly, and StartupService is stateless against State —
-see test_caretaker / test_startup.)
+Adapter owning disk I/O directly, and StartupService is stateless against State.
+See tests/gui/app/main/services/test_caretaker.py and
+tests/gui/session/services/test_startup.py.)
 """
 
 from __future__ import annotations
