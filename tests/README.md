@@ -23,12 +23,14 @@ Fixture 放在能覆蓋使用者的最小合理目錄：只供一個檔案用的
 放最近的 `conftest.py`。`conftest.py` 管理 pytest 注入及生命週期；一般 builder、fake 或
 recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當 library，也不從另一個
 `test_*.py` 匯入。Fixture 的可見範圍取決於所在目錄，`scope=` 則決定實例的生命週期；
-不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。
+不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。Root fixture 必須具有全套件用途。
+相似 setup 只有在代表相同語意時才共用；不同責任不為減少行數而塞入帶多個旗標的萬用 fixture。
 
 ## 搬遷驗收
 
 搬檔前列出舊檔到新檔的案例映射，確認每個情境、斷言與 marker 都有對應；搬檔後
-比較 pytest collection 與 marker，核對 fixture lookup、覆寫與生命週期，並跑受影響選集。
+比較 pytest collection 與 marker，核對 fixture lookup、覆寫與生命週期，並跑受影響選集及共同父目錄。
+涉及共享狀態時，驗證不同執行順序與平行選集。先做純搬檔，再另外審查斷言改寫與重複案例刪除。
 檔案移動可能改變 `conftest.py` 的 fixture lookup；案例總數相同不能取代上述核對。
 本頁不代表現有測試已搬遷。
 
