@@ -230,10 +230,15 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 ### E. 非同步（2）
 
 **`wait(op, timeout = 60)`**
-等待 operation 結束；timeout 不是錯誤，回傳目前進度。`wait` 期間 session 無法對話，長操作應以較短的 timeout 分段等待，其間用 `tab_live` 看 live plot，也讓使用者能插話。結束後回傳狀態（finished／cancelled／failed）；產物由對應階段的 tool 讀取（`tab_live`、`tab_analyze` 的結果、`devices`）。
+等待一個 operation，回傳 `{status: "running" | "finished" | "cancelled" | "failed", elapsed_s, progress?, eta_s?, error?, feedback?}`。
+
+- `timeout` 上限 300 秒；逾時回 `running` 並附進度與推算的 `eta_s`，不是錯誤。`wait` 期間 session 無法對話，長操作應分段等待，其間用 `tab_live` 看 live plot。
+- op 失敗時不丟錯誤，回 `status: "failed"` 與 `error: {reason, message}`；`wait` 本身的錯誤（未知 op、連線中斷）才丟錯誤。
+- 使用者在 GUI 以 Stop 附言中止時，回 `cancelled` 並附 `feedback`（沿用 GUI 既有行為，[[0025]]）。
+- 產物由對應階段的 tool 讀取（`tab_live`、`tab_analyze` 的結果、`devices`）。
 
 **`cancel(op)`**
-取消任何 operation（run、互動式分析、device 操作）。
+依 op 種類轉給對應的取消方法（run → `tab.run_cancel`、互動式分析 → `analyze.cancel`、儀器 → `device.cancel_operation`），內部短暫等待後回傳 `{status: "cancelled" | "finished" | "cancelling"}`；`cancelling` 時以 `wait` 確認。不可取消的 op（post 分析）回 `reason="not_cancellable"`。
 
 ### F. 儀器（2）
 
