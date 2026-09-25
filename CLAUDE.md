@@ -32,6 +32,7 @@ MEASUREMENT 只套用本節與語言規則。以下規則屬於 DEVELOPMENT。
 只讀取目前工作需要的文件：
 
 - 需要判斷 Runtime Profiles 或全 repo 概觀時，讀 root `README.md`。
+- 實作、重構或 review 程式碼前，讀 [程式碼品質](docs/code-quality.md)，用於設計取捨與審查裁決。
 - 修改 `lib/` 或 `tests/` 內的模組前，讀該路徑適用的 module `README.md`。
 - 處理或記錄跨模組設計時，先讀 `docs/adr/README.md` 的格式與索引，再讀相關 ADR。
 
