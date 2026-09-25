@@ -49,8 +49,8 @@
 - 回傳 `{launched, port, versions: {wire, gui, mcp}, status}`，`status` 同 `status()`。
 - 不提供 disconnect；MCP 結束時連線自動關閉。
 
-**`shutdown()`**
-關閉目前連上的 GUI，不論由誰啟動。走 GUI 正常的關閉流程（保存 session、斷開儀器、清理）。有 run 在跑時回 `reason="busy"`；優雅關閉逾時回 `{stopped: false}`，由使用者處理，不提供強制結束。
+**`shutdown(discard_unsaved = false)`**
+關閉目前連上的 GUI，不論由誰啟動。走 GUI 正常的關閉流程（保存 session、斷開儀器、清理）。有 run 在跑時回 `reason="busy"`；有 tab 帶未存檔結果時回 `reason="unsaved"`（對應 GUI 關閉時的確認），agent 與使用者確認後以 `discard_unsaved=true` 關閉；優雅關閉逾時回 `{stopped: false}`，由使用者處理，不提供強制結束。
 
 **`status()`** — 索引，只回答「有什麼、在哪裡」，具體內容由各自的 tool 讀取：
 
@@ -119,7 +119,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 | cfg 格式與目前值 | `tab_get(tab, include=["cfg"])` | 每個可設路徑的種類（scalar／sweep edge／ref key）、型別、目前值、ref 可選的 library 項目、是否鎖定 |
 | 分析參數格式 | `tab_get(tab, include=["analyze_params"])` | primary 與 post 各自的參數名、型別、可選值、目前值；該實驗有哪些分析階段、是否互動式 |
 | 分析結果 | `tab_analyze` 的回傳，或 `tab_get(tab, include=["analysis", "post"])` | summary 欄位與值、figure 路徑 |
-| 寫回內容 | `writeback(tab, stage)`（不帶 `items`） | 每個項目的 id、種類（md／module／waveform）、target、current、proposed、是否勾選、目的地 context |
+| 寫回內容 | `writeback(tab, stage)`（不帶 `items`，唯一讀取入口） | 每個項目的 id、種類（md／module／waveform）、target、current、proposed、是否勾選、目的地 context |
 | 存檔路徑 | `tab_get(tab, include=["save_paths"])` | data、analysis image、post image 的預設路徑（依 GUI 檔名規則） |
 
 #### Tools
@@ -131,13 +131,21 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 回傳該實驗的 guide：`{behavior, expects_md, expects_ml, typical_writeback, recommended}`，維持分段。開 tab 前後都可讀；只含 adapter 自己宣告的內容。
 
 **`tab_open(experiment, from_file?)`**
-在 GUI 開新 tab；`from_file` 載入既有資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg 摘要；不附 guide。
+在 GUI 開新 tab；`from_file` 等於 `tab.new` + `tab.load_data`，資料檔與實驗不相容時報錯並關閉剛開的 tab。回傳 `{tab, experiment}`，不附 cfg 與 guide。
 
-**`tab_close(tab)`**
-關閉 tab；執行中的 tab 回 `reason="busy"`。
+**`tab_close(tab, discard_unsaved = false)`**
+關閉 tab；執行中回 `reason="busy"`。有未存檔的結果時回 `reason="unsaved"` 並列出未存的項目，對應 GUI 關閉 tab 時的確認對話框；agent 在 session 與使用者確認後，以 `discard_unsaved=true` 關閉。
 
 **`tab_get(tab, include = ["summary"])`**
-`include` 可選 `cfg`、`analyze_params`、`analysis`、`post`、`writeback`、`save_paths`、`figures`；`summary` 含實驗名、分析階段、run／analysis 狀態。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
+`include` 可選：
+
+- `summary`（預設）：`{experiment, state: {running, analyzing, has_result, has_analysis, has_post}, source_file}`；
+- `cfg`：每個可設路徑的種類（scalar／sweep edge／ref key）、型別、目前值、ref 可選項、是否鎖定；
+- `analyze_params`：primary 與 post 的參數定義與目前值；
+- `analysis`、`post`：分析結果的 summary 與圖檔路徑；
+- `save_paths`：預設存檔路徑。
+
+寫回草稿只由 `writeback` 讀取，各階段的圖由 `tab_live`／`tab_analyze` 回傳。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
 
 **`tab_edit(tab, edits)`**
 依序套用 cfg 編輯到該 tab 的 cfg 草稿，GUI 表單即時更新。沿用現有編輯語法（[[0050]]）：
