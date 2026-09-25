@@ -171,7 +171,8 @@ class RunAnalyzeControlFacet:
         return self._analyze.get_interactive(tab_id)
 
     def finish_interactive(self, tab_id: str, figure: Figure | None = None) -> bool:
-        if self._analyze.get_interactive(tab_id) is None:
+        active = self._analyze.get_interactive(tab_id)
+        if active is None:
             raise FailedPreconditionError(
                 f"tab {tab_id!r} has no active interactive analysis"
             )
@@ -181,6 +182,11 @@ class RunAnalyzeControlFacet:
             presentation = host.interactive_presentation(tab_id)
             if presentation is not None:
                 figure = presentation[0]
+            # A validation failure must keep the frontend mounted and editable.
+            # On success, remove it before finish_plugin emits synchronous content
+            # events that attach the same Figure canvas to the result pane.
+            active.plugin.can_finish(active.session.snapshot())
+            host.unmount_interactive_analysis(tab_id)
         terminal = self._analyze.finish_plugin(tab_id, figure)
         if terminal and host is not None:
             host.unmount_interactive_analysis(tab_id, restore_result=True)

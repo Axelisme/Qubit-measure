@@ -57,7 +57,9 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
             move=Action(lambda state, pair: _move(state, pair, inputs.min_distance)),
             conjugate=Action(_set_conjugate),
             swap=Action(lambda state, _unused: swap_lines(state)),
-            apply_alignment=Action(_apply_alignment),
+            apply_alignment=Action(
+                lambda state, pair: _apply_alignment(state, pair, inputs.min_distance)
+            ),
         )
         PluginDefinition.__init__(
             self,
@@ -96,7 +98,7 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
                     lambda session, _params: self.start_alignment(session),
                 ),
             ),
-            can_finish=lambda _state: None,
+            can_finish=lambda state: _require_finishable(state, inputs.min_distance),
             build_result=lambda state: FluxPickResult(
                 flx_half=state.flux_half,
                 flx_int=state.flux_int,
@@ -200,9 +202,22 @@ def _move(
     state: FluxPickState, pair: tuple[FluxLineRole, float], min_distance: float
 ) -> FluxPickState:
     try:
-        return move_line(state, pair[0], pair[1], min_distance=min_distance)
+        candidate = move_line(state, pair[0], pair[1], min_distance=min_distance)
     except ValueError as exc:
         raise InvalidInputError(str(exc)) from exc
+    if not _lines_separated(candidate, min_distance):
+        raise InvalidInputError("flux lines must remain separated")
+    return candidate
+
+
+def _lines_separated(state: FluxPickState, min_distance: float) -> bool:
+    # Notebook's picker retains its legacy equality boundary; measure rejects it.
+    return abs(state.flux_int - state.flux_half) >= min_distance
+
+
+def _require_finishable(state: FluxPickState, min_distance: float) -> None:
+    if not _lines_separated(state, min_distance):
+        raise FailedPreconditionError("flux lines must remain separated")
 
 
 def _set_conjugate(state: FluxPickState, enabled: bool) -> FluxPickState:  # noqa: FBT001 - Action payload
@@ -212,10 +227,13 @@ def _set_conjugate(state: FluxPickState, enabled: bool) -> FluxPickState:  # noq
 
 
 def _apply_alignment(
-    state: FluxPickState, positions: tuple[float, float]
+    state: FluxPickState, positions: tuple[float, float], min_distance: float
 ) -> FluxPickState:
     # FluxPickState validates both positions before Session publishes the replacement.
-    return replace(state, flux_half=positions[0], flux_int=positions[1])
+    candidate = replace(state, flux_half=positions[0], flux_int=positions[1])
+    if not _lines_separated(candidate, min_distance):
+        raise InvalidInputError("flux lines must remain separated")
+    return candidate
 
 
 def make_flux_pick_plugin(

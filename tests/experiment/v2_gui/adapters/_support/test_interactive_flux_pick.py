@@ -19,7 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.flux_dep import (
     FluxDepAdapter as TwoToneFluxDepAdapter,
 )
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -70,6 +70,18 @@ def test_plugin_typed_actions_and_commands_share_committed_state():
     assert result.flx_half == swapped.flux_half
     assert result.flx_period == 2 * abs(swapped.flux_int - swapped.flux_half)
     assert result.figure is None
+
+
+def test_equal_seed_cannot_finish_until_a_valid_line_is_committed() -> None:
+    md = MetaDict()
+    md.flx_half = md.flx_int = 0.0
+    plugin = make_flux_pick_plugin(_request(md), force_magnitude=True)
+    session = plugin.open(ManualOwnerScheduler())
+    with pytest.raises(FailedPreconditionError, match="separat"):
+        plugin.finish(session)
+    assert session.snapshot().flux_half == session.snapshot().flux_int
+    plugin.execute_command(session, "move_line", {"role": "half", "position": 1.0})
+    assert plugin.finish(session).flx_period > 0.0
 
 
 @pytest.mark.parametrize(

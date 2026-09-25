@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import socket
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -13,6 +14,7 @@ import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
+from zcu_tools.experiment.v2_gui.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_frontend import (
     FluxPickFrontend,
 )
@@ -21,6 +23,7 @@ from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_plugin import (
 )
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
+from zcu_tools.gui.app.main.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -52,6 +55,50 @@ def fx(qapp):
         widget.deleteLater()
     fixture.stop()
     qapp.processEvents()
+
+
+@pytest.fixture
+def mounted_fx(qapp):
+    fixture = InteractiveFixture()
+    fixture.state.set_context(
+        replace(
+            fixture.state.exp_context,
+            md=MetaDict(),
+            ml=ModuleLibrary(),
+            soc=None,
+            soccfg=None,
+        )
+    )
+    window = MainWindow(fixture.ctrl)
+    fixture.ctrl.add_view(window)
+    fixture.service.render_view = window
+    fixture.start()
+    window.show()
+    qapp.processEvents()
+    yield fixture, window
+    fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
+    fixture.stop()
+    window.deleteLater()
+    qapp.processEvents()
+
+
+def _start_mounted(fx: InteractiveFixture, window: MainWindow, adapter: str):
+    tab_id = fx.ctrl.new_tab(adapter)
+    devs = np.linspace(-5.0, 5.0, 60)
+    freqs = np.linspace(4.0, 5.0, 30)
+    signals = np.exp(-(devs[:, None] ** 2)) * np.exp(
+        1j * devs[:, None] * freqs[None, :] / 10
+    )
+    # Synthetic run input is fixture setup; starting analysis, mounting, RPC,
+    # result publication and writeback must all use their production seams.
+    fx.state.get_tab(tab_id).run.result = SimpleNamespace(
+        signals=signals, values=devs, freqs=freqs
+    )
+    token = fx.ctrl.run_analyze_control.analyze(tab_id, FluxPickParams())
+    tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
+    widget = tab_widget.interactive_frontend()
+    assert isinstance(widget, FluxPickFrontend)
+    return tab_id, token, widget
 
 
 def _start(fx, *, background=None):
@@ -185,6 +232,31 @@ def test_invalid_payload_and_stale_guard_leave_one_active_session(fx) -> None:
         assert (
             _interact(sock, tab_id, {"command": "swap_lines"})["error"]["code"]
             == "precondition_failed"
+        )
+
+
+def test_equal_line_command_rejects_without_changing_session_or_operation(fx) -> None:
+    tab_id, token, _plugin = _start(fx)
+    with open_client(fx.service.port) as sock:
+        original = _interact(sock, tab_id)["result"]["state"]
+        reply = _interact(
+            sock,
+            tab_id,
+            {
+                "command": "move_line",
+                "args": {"role": "half", "position": original["flux_int"]},
+            },
+        )
+        assert reply["error"]["code"] == "invalid_params"
+        assert _interact(sock, tab_id)["result"]["state"] == original
+        assert fx.ctrl.run_analyze_control.get_interactive(tab_id) is not None
+        done = _interact(sock, tab_id, {"command": "done"})
+        assert done["result"]["state"] == original
+        assert (
+            _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                "result"
+            ]["status"]
+            == "finished"
         )
 
 
@@ -334,6 +406,123 @@ def test_cancel_during_remote_alignment_ignores_late_delivery(fx) -> None:
             ]["status"]
             == "cancelled"
         )
+
+
+@pytest.mark.parametrize("adapter", ["onetone/flux_dep", "twotone/flux_dep"])
+def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
+    mounted_fx, adapter: str, qapp
+) -> None:
+    fx, window = mounted_fx
+    tab_id, token, widget = _start_mounted(fx, window, adapter)
+    canvas = widget.findChild(FigureCanvasQTAgg)
+    assert canvas is not None
+    canvas.draw()
+    with open_client(fx.service.port) as sock:
+        original = _interact(sock, tab_id)["result"]["state"]
+        assert window.interactive_presentation(tab_id) == (widget.figure, False)
+        _pointer(canvas, "button_press_event", original["flux_half"])
+        _pointer(canvas, "motion_notify_event", original["flux_half"] + 0.4)
+        preview = _interact(sock, tab_id)["result"]
+        assert preview["state"] == original
+        assert preview["preview_active"] is True
+        assert base64.b64decode(preview["figure"]["png_b64"]).startswith(b"\x89PNG")
+        done = _interact(sock, tab_id, {"command": "done"})
+        assert done["ok"] is True
+        assert done["result"]["state"] == original
+        assert done["result"]["preview_active"] is False
+        assert fx.ctrl.get_tab_analyze_result(tab_id).figure is widget.figure
+        assert window.interactive_presentation(tab_id) is None
+        qapp.processEvents()
+        tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - locate the tested view
+        assert tab_widget.get_current_figure_for_pane("analysis") is widget.figure
+        assert (
+            _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+        draft = _rpc(
+            sock, "tab.writeback_preview", {"tab_id": tab_id, "subtab_id": "analysis"}
+        )["result"]
+        assert draft["has_draft"] is True
+        assert {
+            item["target_name"]: item["proposed_value"] for item in draft["items"]
+        } == {
+            "flx_half": pytest.approx(original["flux_half"]),
+            "flx_int": pytest.approx(original["flux_int"]),
+            "flx_period": pytest.approx(
+                2 * abs(original["flux_int"] - original["flux_half"])
+            ),
+        }
+    qapp.processEvents()
+
+
+def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
+    mounted_fx,
+) -> None:
+    fx, window = mounted_fx
+    fx.state.exp_context.md.flx_half = 0.0
+    fx.state.exp_context.md.flx_int = 0.0
+    tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
+    with open_client(fx.service.port) as sock:
+        rejected = _interact(sock, tab_id, {"command": "done"})
+        assert rejected["error"]["code"] == "precondition_failed"
+        assert window.interactive_presentation(tab_id)[0] is widget.figure
+        assert fx.ctrl.get_tab_analyze_result(tab_id) is None
+        moved = _interact(
+            sock,
+            tab_id,
+            {"command": "move_line", "args": {"role": "half", "position": 1.0}},
+        )
+        assert moved["ok"] is True
+        assert _interact(sock, tab_id, {"command": "done"})["ok"] is True
+        assert (
+            _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                "result"
+            ]["status"]
+            == "finished"
+        )
+
+
+def test_two_mounted_tabs_unmount_one_without_retiring_other(mounted_fx, qapp) -> None:
+    fx, window = mounted_fx
+    first_id, first_token, first_widget = _start_mounted(fx, window, "onetone/flux_dep")
+    second_id, second_token, second_widget = _start_mounted(
+        fx, window, "twotone/flux_dep"
+    )
+    assert window.interactive_presentation(first_id)[0] is first_widget.figure
+    assert window.interactive_presentation(second_id)[0] is second_widget.figure
+    with open_client(fx.service.port) as sock:
+        before = _interact(sock, second_id)["result"]["state"]
+        assert _rpc(sock, "analyze.cancel", {"tab_id": first_id})["result"]["cancelled"]
+        assert window.interactive_presentation(first_id) is None
+        qapp.processEvents()
+        assert window.interactive_presentation(second_id)[0] is second_widget.figure
+        _button(second_widget, "Swap Lines").click()
+        after = _interact(sock, second_id)["result"]["state"]
+        assert after["flux_half"] == before["flux_int"]
+        moved = _interact(
+            sock,
+            second_id,
+            {
+                "command": "move_line",
+                "args": {"role": "half", "position": before["flux_int"] + 0.6},
+            },
+        )["result"]["state"]
+        canvas = second_widget.findChild(FigureCanvasQTAgg)
+        assert canvas is not None
+        assert np.asarray(canvas.figure.axes[0].lines[0].get_xdata(), dtype=float).item(
+            0
+        ) == pytest.approx(moved["flux_half"])
+        assert _interact(sock, second_id, {"command": "done"})["ok"] is True
+        for token, status in ((first_token, "cancelled"), (second_token, "finished")):
+            assert (
+                _rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                    "result"
+                ]["status"]
+                == status
+            )
+    qapp.processEvents()
 
 
 def test_two_tabs_keep_independent_remote_sessions(fx) -> None:

@@ -27,7 +27,7 @@ from zcu_tools.gui.app.main.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
 )
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 from .flux_pick_plugin import FluxPickPlugin
 
@@ -142,7 +142,12 @@ class FluxPickFrontend(InteractiveFrontend):
         if self._retired or not self._picker.is_main_axes(event.inaxes):
             return
         x = event.xdata
-        if self._picker.selected_role is not None and x is not None and isfinite(x):
+        role = self._picker.selected_role
+        if role is not None and x is not None and isfinite(x):
+            try:
+                self._plugin.actions.move.calculate(self._committed, (role, x))
+            except InvalidInputError:
+                return
             self._picker.on_move(x)
             self._preview_active = True
             self._repaint()
@@ -163,7 +168,12 @@ class FluxPickFrontend(InteractiveFrontend):
             return
         # The Action recalculates on the latest committed snapshot. The picker
         # is just a local artist cache and never supplies the replacement state.
-        committed = self._plugin.actions.move.execute(self._session, (role, x))
+        try:
+            committed = self._plugin.actions.move.execute(self._session, (role, x))
+        except InvalidInputError as exc:
+            self.cancel_preview()
+            self._info.setText(str(exc))
+            return
         position = committed.flux_half if role == "half" else committed.flux_int
         self._picker.show_loss(role, position, event.ydata)
         self._repaint()

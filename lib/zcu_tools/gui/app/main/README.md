@@ -561,9 +561,10 @@ nor generic remote dispatch interprets flux-line keys.
 INTERACTIVE adapters expose `make_interactive_plugin(req)` and
 `make_interactive_frontend(plugin, session, env, request_finish, request_cancel)`.
 `RunAnalyzeControlFacet` starts the session before mounting; `MainWindow`
-mounts/unmounts the plugin-owned `InteractiveFrontend` in the Analysis pane and
-restores canonical figures on terminal paths. The frontend owns artists,
-pointer selection, preview and timers. Its GUI actions commit to the service
+mounts/unmounts the plugin-owned `InteractiveFrontend` in the Analysis pane.
+Failed finish validation keeps the widget editable; a valid finish unmounts it
+before synchronous result events restore the canonical figure in that pane.
+The frontend owns artists, pointer selection, preview and timers. Its GUI actions commit to the service
 session on valid release, not during drag; external commits cancel preview.
 The Qt-free plugin can execute commands and finish without a widget, though
 that path does not promise a figure. `tab.interact` runs on the owner loop via the

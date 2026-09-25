@@ -9,10 +9,11 @@ import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, QEventLoop, Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QFocusEvent, QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
+    QLabel,
     QPushButton,
     QStackedWidget,
     QWidget,
@@ -85,9 +86,11 @@ def _button(widget, label):
     return next(b for b in widget.findChildren(QPushButton) if b.text() == label)
 
 
-def _pointer(canvas, name: str, x: float, y: float = 4.5):
+def _pointer(canvas, name: str, x: float, y: float = 4.5, *, exact=False):
     px, py = canvas.figure.axes[0].transData.transform((x, y))
     event = MouseEvent(name, canvas, int(px), int(py), button=MouseButton.LEFT)
+    if exact:
+        event.xdata = x
     canvas.callbacks.process(name, event)
 
 
@@ -116,6 +119,62 @@ def test_drag_is_preview_until_valid_release_and_uses_latest_committed_state(qap
         remote.flux_half + 0.3, abs=0.03
     )
     assert widget.preview_active is False
+    widget.teardown()
+    widget.deleteLater()
+
+
+def test_measure_preview_coalesces_loss_and_release_uses_final_coordinate(qapp):
+    widget, _plugin, session, _env, _done, _cancel, canvas = _frontend(qapp)
+    start = session.snapshot()
+    loss_axes = canvas.figure.axes[1]
+    original_image = np.asarray(loss_axes.images[0].get_array()).copy()
+    _pointer(canvas, "button_press_event", start.flux_half)
+    _pointer(canvas, "motion_notify_event", start.flux_half + 0.2)
+    _pointer(canvas, "motion_notify_event", start.flux_half + 0.5)
+    assert session.snapshot() == start
+    assert np.array_equal(np.asarray(loss_axes.images[0].get_array()), original_image)
+
+    loop = QEventLoop()
+    QTimer.singleShot(180, loop.quit)
+    loop.exec()
+    assert widget.preview_active
+    assert np.asarray(loss_axes.lines[0].get_xdata(), dtype=float).item(
+        0
+    ) == pytest.approx(start.flux_half + 0.5, abs=0.03)
+    assert not np.array_equal(
+        np.asarray(loss_axes.images[0].get_array()), original_image
+    )
+    assert loss_axes.get_title().startswith("mirror loss: ")
+    assert loss_axes.get_title() != "mirror loss: -"
+    preview_image = np.asarray(loss_axes.images[0].get_array()).copy()
+
+    _pointer(canvas, "button_release_event", start.flux_half + 0.7)
+    assert session.snapshot().flux_half == pytest.approx(
+        start.flux_half + 0.7, abs=0.03
+    )
+    assert np.asarray(loss_axes.lines[0].get_xdata(), dtype=float).item(
+        0
+    ) == pytest.approx(session.snapshot().flux_half, abs=0.03)
+    assert not np.array_equal(
+        np.asarray(loss_axes.images[0].get_array()), preview_image
+    )
+    widget.teardown()
+    widget.deleteLater()
+
+
+def test_equal_line_release_discards_preview_without_a_commit(qapp):
+    widget, _plugin, session, _env, _done, _cancel, canvas = _frontend(qapp)
+    start = session.snapshot()
+    _pointer(canvas, "button_press_event", start.flux_half)
+    _pointer(canvas, "motion_notify_event", start.flux_half + 0.3)
+    _pointer(canvas, "button_release_event", start.flux_int, exact=True)
+    assert session.snapshot() == start
+    assert widget.preview_active is False
+    assert "separat" in next(
+        label.text()
+        for label in widget.findChildren(QLabel)
+        if "separat" in label.text()
+    )
     widget.teardown()
     widget.deleteLater()
 
