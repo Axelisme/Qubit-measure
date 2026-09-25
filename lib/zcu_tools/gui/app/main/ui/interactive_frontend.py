@@ -29,5 +29,9 @@ class InteractiveFrontend(QWidget):
     def preview_active(self) -> bool:
         raise NotImplementedError
 
+    def cancel_preview(self) -> None:
+        """Drop local edits before the service finishes from committed state."""
+        raise NotImplementedError
+
     def teardown(self) -> None:
         raise NotImplementedError

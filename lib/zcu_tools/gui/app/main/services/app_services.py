@@ -189,6 +189,9 @@ def build_app_services(
         post_analyze=post_analyze,
         render_host=render_host,
         owner_scheduler=owner_scheduler,
+        run_background=lambda compute, on_done, on_error: background.submit(
+            compute, on_done=on_done, on_error=on_error, run_in_pool=True
+        ),
         access=access,
     )
     operation_control = OperationControlFacet(handles=handles, progress=progress)

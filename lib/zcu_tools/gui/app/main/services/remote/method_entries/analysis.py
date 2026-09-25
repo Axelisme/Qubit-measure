@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
+    _expected_versions,  # pyright: ignore[reportPrivateUsage] - package-local ParamSpec helper
     _obj_default,
     _str,
 )
@@ -55,6 +57,26 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             mcp=McpMethodPolicy.override(
                 "gui_tab_analyze_start",
                 reason="manual MCP tool adds short-wait handle and fit-result folding",
+            ),
+        ),
+    ),
+    method_entry(
+        "tab.interact",
+        "interactive:_h_tab_interact",
+        MethodSpec(
+            30.0,
+            "Read or execute one command on the tab's active interactive analysis. "
+            "Omit payload to discover committed state and commands; use "
+            "{command, args} for one validated action, or command=done to settle "
+            "the existing analysis operation. The GUI-local preview never becomes "
+            "the returned state; figure may show it and preview_active reports it.",
+            (
+                _str("tab_id"),
+                ParamSpec("payload", JsonType.OBJECT, required=False),
+                _expected_versions(),
+            ),
+            mcp=McpMethodPolicy.internal(
+                reason="GUI-side contract only; agent-facing tool is outside this task"
             ),
         ),
     ),

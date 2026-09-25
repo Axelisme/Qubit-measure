@@ -53,6 +53,7 @@ from .main_window_events import MainWindowEventCoordinator
 from .main_window_toolbar import MainWindowToolbar
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
     from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
 
     from zcu_tools.gui.app.main.controller import Controller
@@ -521,6 +522,20 @@ class MainWindow(QMainWindow):
             widget.teardown()
             widget.deleteLater()
             raise
+
+    def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None:
+        """Read the mounted frontend's figure and local preview metadata."""
+        tab_w = self._tab_widgets.get(tab_id)
+        widget = tab_w.interactive_frontend() if tab_w is not None else None
+        if widget is None:
+            return None
+        return widget.figure, widget.preview_active
+
+    def discard_interactive_preview(self, tab_id: str) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        widget = tab_w.interactive_frontend() if tab_w is not None else None
+        if widget is not None:
+            widget.cancel_preview()
 
     def unmount_interactive_analysis(
         self, tab_id: str, *, restore_result: bool = False

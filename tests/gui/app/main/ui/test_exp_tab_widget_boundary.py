@@ -74,6 +74,7 @@ class _Interactive(InteractiveFrontend):
     def __init__(self) -> None:
         super().__init__()
         self.stopped = False
+        self._preview_active = True
         self._figure = Figure()
 
     @property
@@ -82,7 +83,10 @@ class _Interactive(InteractiveFrontend):
 
     @property
     def preview_active(self) -> bool:
-        return False
+        return self._preview_active
+
+    def cancel_preview(self) -> None:
+        self._preview_active = False
 
     def teardown(self) -> None:
         self.stopped = True
@@ -141,6 +145,18 @@ def test_interactive_mount_and_unmount_quiesce_frontend(qapp) -> None:
     window.unmount_interactive_analysis("tab-1")
     assert widget.stopped is True
     assert tab.get_current_figure_for_pane("analysis") is None
+
+
+def test_mounted_interactive_view_exposes_figure_and_discardable_preview(qapp) -> None:
+    window, _tab, _ctrl = _window_with_tab()
+    widget = _Interactive()
+    window.mount_interactive_analysis("tab-1", lambda _env: widget)
+
+    assert window.interactive_presentation("tab-1") == (widget.figure, True)
+    window.discard_interactive_preview("tab-1")
+    assert window.interactive_presentation("tab-1") == (widget.figure, False)
+    window.unmount_interactive_analysis("tab-1")
+    assert window.interactive_presentation("tab-1") is None
 
 
 def test_interactive_success_restores_committed_figure_in_analysis_pane(qapp) -> None:

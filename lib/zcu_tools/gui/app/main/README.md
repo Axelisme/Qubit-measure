@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-26 — interactive plugin lifecycle
+**Last updated:** 2026-09-26 — interactive plugin remote command
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -566,8 +566,15 @@ restores canonical figures on terminal paths. The frontend owns artists,
 pointer selection, preview and timers. Its GUI actions commit to the service
 session on valid release, not during drag; external commits cancel preview.
 The Qt-free plugin can execute commands and finish without a widget, though
-that path does not promise a figure. See ADR-0061; notebook line pickers keep
-their existing interaction model.
+that path does not promise a figure. `tab.interact` runs on the owner loop via the
+same `RunAnalyzeControlFacet` and session: reads project committed state and
+plugin-declared commands; writes validate each command's ParamSpec before its
+typed action. The View supplies an optional live PNG and `preview_active` as
+presentation metadata. `done` discards local preview and finishes the existing
+analysis operation. Flux Auto Align uses one plugin-owned single-flight worker
+policy for GUI and remote; terminal callbacks do not recommit. The wire method
+is internal to the GUI process, with no MCP tool in this change. See ADR-0061;
+notebook line pickers keep their existing interaction model.
 
 ## Adapter-Facing Rules
 

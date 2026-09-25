@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.plotting import FigureContainer
     from zcu_tools.gui.session.ports import OwnerScheduler
 
-    from .analyze import AnalyzeService
+    from .analyze import ActiveInteractive, AnalyzeService
     from .guard import AnalyzePermit, GuardService
     from .load import LoadService, LoadTabResultOutcome
     from .ports import TabSnapshot
@@ -54,6 +54,9 @@ class RunAnalyzeRenderHost(Protocol):
         self, tab_id: str, *, restore_result: bool = False
     ) -> None: ...
 
+    def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None: ...
+    def discard_interactive_preview(self, tab_id: str) -> None: ...
+
 
 class RunAnalyzeControlPort(Protocol):
     """App-facing run/load/analyze operation surface for driving adapters."""
@@ -69,6 +72,8 @@ class RunAnalyzeControlPort(Protocol):
     def cancel_analyze(self, tab_id: str) -> bool: ...
     def get_tab_analyze_result(self, tab_id: str) -> object | None: ...
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int: ...
+    def get_interactive(self, tab_id: str) -> ActiveInteractive | None: ...
+    def finish_interactive(self, tab_id: str, figure: Figure | None = None) -> bool: ...
 
     def start_post_analyze(
         self, tab_id: str, post_analyze_params_instance: object
@@ -92,6 +97,15 @@ class RunAnalyzeControlFacet:
         post_analyze: PostAnalyzeService,
         render_host: Callable[[], RunAnalyzeRenderHost | None],
         owner_scheduler: OwnerScheduler,
+        run_background: Callable[
+            [
+                Callable[[], object],
+                Callable[[object], None],
+                Callable[[Exception], None],
+            ],
+            None,
+        ]
+        | None = None,
         access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
@@ -104,6 +118,7 @@ class RunAnalyzeControlFacet:
         self._post_analyze = post_analyze
         self._render_host = render_host
         self._owner_scheduler = owner_scheduler
+        self._run_background = run_background
         self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
@@ -152,6 +167,25 @@ class RunAnalyzeControlFacet:
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
         return self._tab.get_tab_analyze_result(tab_id)
 
+    def get_interactive(self, tab_id: str) -> ActiveInteractive | None:
+        return self._analyze.get_interactive(tab_id)
+
+    def finish_interactive(self, tab_id: str, figure: Figure | None = None) -> bool:
+        if self._analyze.get_interactive(tab_id) is None:
+            raise FailedPreconditionError(
+                f"tab {tab_id!r} has no active interactive analysis"
+            )
+        host = self._render_host()
+        if host is not None:
+            host.discard_interactive_preview(tab_id)
+            presentation = host.interactive_presentation(tab_id)
+            if presentation is not None:
+                figure = presentation[0]
+        terminal = self._analyze.finish_plugin(tab_id, figure)
+        if terminal and host is not None:
+            host.unmount_interactive_analysis(tab_id, restore_result=True)
+        return terminal
+
     def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
         self._access.require_available()
         permit = self._guard.acquire_analyze_permit(tab_id)
@@ -187,6 +221,8 @@ class RunAnalyzeControlFacet:
                 "interactive analysis requires an attached render host"
             )
         plugin = tab.adapter.make_interactive_plugin(req)
+        if self._run_background is not None:
+            plugin.bind_background(self._run_background)
         self._tab.update_tab_analyze_param_instance(tab_id, analyze_params_instance)
         token = self._analyze.start_plugin(permit, plugin, self._owner_scheduler)
         active = self._analyze.get_interactive(tab_id)
@@ -195,10 +231,7 @@ class RunAnalyzeControlFacet:
             raise RuntimeError("interactive operation has no service-owned session")
 
         def finish(figure: Figure) -> bool:
-            terminal = self._analyze.finish_plugin(tab_id, figure)
-            if terminal:
-                host.unmount_interactive_analysis(tab_id, restore_result=True)
-            return terminal
+            return self.finish_interactive(tab_id, figure)
 
         try:
             host.mount_interactive_analysis(

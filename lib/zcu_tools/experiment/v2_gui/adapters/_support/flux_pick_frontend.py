@@ -66,7 +66,6 @@ class FluxPickFrontend(InteractiveFrontend):
         self._picker.show_state(state)
         self._committed = state
         self._preview_active = False
-        self._align_busy = False
         self._retired = False
 
         controls = QWidget(self)
@@ -102,6 +101,7 @@ class FluxPickFrontend(InteractiveFrontend):
         self._canvas.mpl_connect("motion_notify_event", self._on_move)
         self._canvas.mpl_connect("button_release_event", self._on_release)
         self._unsubscribe = session.subscribe(self._on_committed)
+        self._unsubscribe_alignment = plugin.subscribe_alignment(self._on_alignment)
         self._canvas.draw_idle()
 
     @property
@@ -176,41 +176,22 @@ class FluxPickFrontend(InteractiveFrontend):
         if not self._retired:
             self._plugin.actions.swap.execute(self._session, None)
 
-    def _auto_align(self) -> None:
-        if self._retired or self._align_busy:
+    def _on_alignment(self, busy: bool, error: str | None) -> None:  # noqa: FBT001 - status subscription
+        if self._retired:
             return
-        self._align_busy = True
-        self._align.setEnabled(False)
-        captured = self._session.snapshot()
+        self._align.setEnabled(not busy)
+        if error is not None:
+            self._info.setText(error)
 
-        def on_done(result: object) -> None:
-            if self._retired or not self._align_busy:
-                return
-            self._align_busy = False
-            self._align.setEnabled(True)
-            try:
-                self._plugin.actions.apply_alignment.execute(
-                    self._session, cast(tuple[float, float], result)
-                )
-            except FailedPreconditionError:
-                # Done/cancel closes input while the background calculation runs.
-                return
-            except Exception as exc:  # noqa: BLE001 - leave the session editable
-                self._info.setText(str(exc))
-
-        def on_error(exc: Exception) -> None:
-            if self._retired:
-                return
-            self._align_busy = False
-            self._align.setEnabled(True)
-            self._info.setText(str(exc))
-
+    def _auto_align(self) -> None:
+        if self._retired:
+            return
         try:
-            self._env.run_background(
-                lambda: self._plugin.calculate_alignment(captured), on_done, on_error
-            )
+            self._plugin.start_alignment(self._session)
+        except FailedPreconditionError as exc:
+            self._info.setText(str(exc))
         except Exception as exc:  # noqa: BLE001 - failed pool submission
-            on_error(exc)
+            self._info.setText(str(exc))
 
     def _finish(self) -> None:
         if self._retired:
@@ -235,6 +216,7 @@ class FluxPickFrontend(InteractiveFrontend):
             return
         self._retired = True
         self._unsubscribe()
+        self._unsubscribe_alignment()
         self._picker.show_state(self._committed)
         for widget in (
             self._conjugate,

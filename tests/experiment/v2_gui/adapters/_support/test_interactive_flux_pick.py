@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.flux_dep import (
     FluxDepAdapter as TwoToneFluxDepAdapter,
 )
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 
@@ -55,7 +56,7 @@ def test_plugin_typed_actions_and_commands_share_committed_state():
     after_remote = session.snapshot()
     assert after_remote.flux_half - after_gui.flux_half == pytest.approx(0.4)
     assert after_remote.flux_int - after_gui.flux_int == pytest.approx(0.4)
-    with pytest.raises(ValueError, match="role"):
+    with pytest.raises(InvalidInputError, match="role"):
         plugin.execute_command(session, "move_line", {"role": "bad", "position": 1.0})
     assert session.snapshot() == after_remote
     plugin.execute_command(session, "swap_lines", {})

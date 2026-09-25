@@ -334,7 +334,7 @@ tab_close("t1")
 - `tab.snapshot` 補上 artifact 存檔狀態。
 - `tab.writeback_preview` 補上 md 項目的 current 與 module／waveform 項目的 current／proposed cfg。
 - `predictor_calibrate` 的 wire method。
-- `tab_interact` 的 GUI-side wire method：service-owned session 保存 committed `state` 與 operation（[[0061]]）；plugin 宣告子命令與 `ParamSpec`，wire 驗證後執行共用 action，GUI frontend 直接呼叫相同 typed action，不經 JSON。GUI-local preview 只以 `preview_active` presentation metadata 回報，不取代 committed state。
+- `tab_interact` 所需 GUI-side `tab.interact` wire method 已提供：service-owned session 保存 committed `state` 與 operation（[[0061]]）；plugin 宣告子命令與 `ParamSpec`，wire 驗證後執行共用 action，GUI frontend 直接呼叫相同 typed action，不經 JSON。GUI-local preview 只以 `preview_active` presentation metadata 回報，不取代 committed state。MCP tool/bridge 尚未實作。
 
 ## 範圍外
 

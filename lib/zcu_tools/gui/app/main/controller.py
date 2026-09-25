@@ -59,6 +59,8 @@ from .state import State
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.context_control import ContextControlPort
@@ -156,6 +158,9 @@ class RenderHost(Protocol):
         """Remove the plugin widget; completed analysis may restore its figure."""
         ...
 
+    def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None: ...
+    def discard_interactive_preview(self, tab_id: str) -> None: ...
+
     # The View's current left-panel width — the only persistence value sourced
     # from the View (the splitter widget); captured at flush time.
     def current_left_panel_width(self) -> int: ...
@@ -166,6 +171,10 @@ class RenderView(Protocol):
     screenshot / dialog management). Held by the adapter, not the Controller."""
 
     def get_view_snapshot(self) -> dict[str, object]: ...
+    def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None:
+        """Read an active frontend's figure and preview flag, if mounted."""
+        ...
+
     def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
         """Pane-qualified figure screenshot (run|analysis|post_analysis).
 

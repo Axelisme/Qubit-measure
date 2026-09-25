@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
@@ -22,9 +24,12 @@ from zcu_tools.gui.app.main.interactive import (
     PluginDefinition,
     Session,
 )
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from .interactive_flux_pick import FluxPickResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,15 +43,18 @@ class FluxPickActions:
 class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
     """Captured numeric inputs and typed actions stay with this one operation."""
 
-    __slots__ = ("inputs", "actions")
+    __slots__ = (
+        "inputs",
+        "actions",
+        "_alignment_busy",
+        "_alignment_error",
+        "_alignment_listeners",
+        "_next_listener",
+    )
 
     def __init__(self, inputs: FluxPickInputs, seed: FluxPickState) -> None:
         actions = FluxPickActions(
-            move=Action(
-                lambda state, pair: move_line(
-                    state, pair[0], pair[1], min_distance=inputs.min_distance
-                )
-            ),
+            move=Action(lambda state, pair: _move(state, pair, inputs.min_distance)),
             conjugate=Action(_set_conjugate),
             swap=Action(lambda state, _unused: swap_lines(state)),
             apply_alignment=Action(_apply_alignment),
@@ -85,7 +93,7 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
                 Command[FluxPickState](
                     "auto_align",
                     (),
-                    lambda session, _params: self.align(session.snapshot(), session),
+                    lambda session, _params: self.start_alignment(session),
                 ),
             ),
             can_finish=lambda _state: None,
@@ -95,9 +103,90 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
                 flx_period=2 * abs(state.flux_int - state.flux_half),
             ),
             attach_figure=lambda result, figure: replace(result, figure=figure),
+            project_state=lambda state: {
+                "flux_half": state.flux_half,
+                "flux_int": state.flux_int,
+                "conjugate": state.conjugate,
+                "magnitude_only": state.magnitude_only,
+            },
         )
         object.__setattr__(self, "inputs", inputs)
         object.__setattr__(self, "actions", actions)
+        object.__setattr__(self, "_alignment_busy", False)
+        object.__setattr__(self, "_alignment_error", None)
+        object.__setattr__(self, "_alignment_listeners", {})
+        object.__setattr__(self, "_next_listener", 0)
+
+    @property
+    def alignment_busy(self) -> bool:
+        return self._alignment_busy
+
+    def info(self) -> Mapping[str, object]:
+        return {
+            "alignment_busy": self._alignment_busy,
+            "alignment_error": self._alignment_error,
+        }
+
+    def subscribe_alignment(
+        self, callback: Callable[[bool, str | None], None]
+    ) -> Callable[[], None]:
+        """Observe worker status without publishing a second committed state."""
+        key = self._next_listener
+        object.__setattr__(self, "_next_listener", key + 1)
+        self._alignment_listeners[key] = callback
+
+        def unsubscribe() -> None:
+            self._alignment_listeners.pop(key, None)
+
+        return unsubscribe
+
+    def _notify_alignment(self) -> None:
+        for callback in tuple(self._alignment_listeners.values()):
+            try:
+                callback(self._alignment_busy, self._alignment_error)
+            except Exception:
+                logger.exception("interactive alignment status subscriber failed")
+
+    def start_alignment(self, session: Session[FluxPickState]) -> FluxPickState:
+        """One worker for GUI and remote; its owner callback alone commits."""
+        session.ensure_input_open()
+        if self._alignment_busy:
+            raise FailedPreconditionError("Auto Align is already running")
+        captured = session.snapshot()
+        object.__setattr__(self, "_alignment_busy", True)
+        object.__setattr__(self, "_alignment_error", None)
+        self._notify_alignment()
+
+        def settle(error: Exception | None = None) -> None:
+            object.__setattr__(self, "_alignment_busy", False)
+            object.__setattr__(self, "_alignment_error", str(error) if error else None)
+            if error is not None:
+                logger.warning("interactive alignment failed: %s", error)
+            self._notify_alignment()
+
+        def on_done(value: object) -> None:
+            try:
+                session.ensure_input_open()
+            except FailedPreconditionError:
+                settle()
+                return
+            try:
+                self.actions.apply_alignment.execute(
+                    session, cast(tuple[float, float], value)
+                )
+            except Exception as exc:  # noqa: BLE001 - keep input editable
+                settle(exc)
+            else:
+                settle()
+
+        try:
+            self.run_background(
+                lambda: self.calculate_alignment(captured), on_done, settle
+            )
+        except Exception as exc:
+            settle(exc)
+            raise
+        return captured
 
     def calculate_alignment(self, state: FluxPickState) -> tuple[float, float]:
         projection = cast2real_and_norm(
@@ -106,13 +195,14 @@ class FluxPickPlugin(PluginDefinition[FluxPickState, FluxPickResult]):
         aligned = align_lines(state, self.inputs.dev_values, projection)
         return aligned.flux_half, aligned.flux_int
 
-    def align(
-        self, captured: FluxPickState, session: Session[FluxPickState]
-    ) -> FluxPickState:
-        """Compute against captured input; commit the result on the owner loop."""
-        return self.actions.apply_alignment.execute(
-            session, self.calculate_alignment(captured)
-        )
+
+def _move(
+    state: FluxPickState, pair: tuple[FluxLineRole, float], min_distance: float
+) -> FluxPickState:
+    try:
+        return move_line(state, pair[0], pair[1], min_distance=min_distance)
+    except ValueError as exc:
+        raise InvalidInputError(str(exc)) from exc
 
 
 def _set_conjugate(state: FluxPickState, enabled: bool) -> FluxPickState:  # noqa: FBT001 - Action payload

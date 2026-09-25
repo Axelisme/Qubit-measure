@@ -56,6 +56,7 @@ def _frontend(qapp, *, finish=None):
     plugin = make_flux_pick_plugin(req, force_magnitude=True)
     session = plugin.open(ManualOwnerScheduler())
     env = _DeferredEnv()
+    plugin.bind_background(env.run_background)
     completed = []
     cancelled = []
 
