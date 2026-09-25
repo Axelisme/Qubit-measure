@@ -55,6 +55,76 @@ def test_status_indexes_gui_origin_operations_without_an_agent_start(
     assert ("operation.active", {}) in client.transport.sent
 
 
+def test_reconnect_indexes_new_gui_operations_without_reusing_old_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def gui_reply(op: int):
+        replies = {
+            "state.has_project": {"value": False},
+            "state.has_active_context": {"value": False},
+            "state.has_soc": {"value": False},
+            "context.active": {"label": None},
+            "device.list": {"devices": []},
+            "predictor.info": {"loaded": False},
+            "tab.snapshot": {
+                "tabs": [
+                    {
+                        "tab_id": "gui-tab",
+                        "adapter_name": "fake",
+                        "interaction": {"is_running": True},
+                    }
+                ]
+            },
+            "operation.active": {
+                "operations": [{"op": op, "tab": "gui-tab", "kind": "run"}]
+            },
+        }
+        return lambda method, params: replies[method]
+
+    client = make_client(tmp_path, gui_reply(31), port_is_open=lambda port: True)
+    first = client.transport
+    second = type(first)(gui_reply(42))
+    second.replies["rpc.catalog"] = first.replies["rpc.catalog"]
+    second.replies["operation.await"] = lambda params: (
+        {
+            "ok": False,
+            "error": {
+                "code": "invalid_params",
+                "reason": "unknown_op",
+                "message": "unknown operation",
+            },
+        }
+        if params["operation_id"] == 31
+        else {"ok": True, "result": {"reason": "completed", "status": "finished"}}
+    )
+    client.context.bridge.set_transport(None)
+    transports = iter((first, second))
+
+    def connect(port: int, token: str | None = None) -> str:
+        client.context.bridge.set_transport(next(transports))
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    assert client.call("connect", {"port": 9912})["status"]["running"] == [
+        {"op": 31, "tab": "gui-tab", "kind": "run"}
+    ]
+    client.context.bridge.disconnect()
+    assert client.call("connect", {"port": 9912})["status"]["running"] == [
+        {"op": 42, "tab": "gui-tab", "kind": "run"}
+    ]
+    assert client.call("status", {})["running"][0]["op"] == 42
+    with pytest.raises(RuntimeError) as exc_info:
+        client.call("wait", {"op": 31})
+    assert getattr(exc_info.value, "reason", None) == "unknown_op"
+    assert client.call("wait", {"op": 42})["status"] == "finished"
+    assert not any(method == "operation.await" for method, _ in first.sent)
+    assert [
+        params["operation_id"]
+        for method, params in second.sent
+        if method == "operation.await"
+    ] == [31, 42]
+
+
 def test_wait_timeout_and_feedback_are_running_results(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     for wire, feedback in (
