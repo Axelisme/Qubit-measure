@@ -146,7 +146,7 @@ ratchet 會把它讀成進步。
 
 在 main＋Load 起點（`18f22e46a`）與加入這套工具後的分支上，`pytest -n auto` 都有同樣三類既存失敗：
 
-- `tests/gui/ui/test_writeback_widget.py` 的三個 layout 測試每次失敗。
+- `tests/gui/app/main/ui/test_writeback_widget.py` 的三個 layout 測試每次失敗。
 - 每次執行約有一次 xdist worker 以 `Fatal Python error: Aborted`／`node down` 終止，發生在 Qt 物件的 GC
   期間；被記為失敗的是當時在該 worker 上的舊 UI 測試，依排程而異，單獨重跑會通過。
 - `tests/gui/plotting/test_plotting.py::test_registry_evicts_gc_collected_figure` 間歇失敗：它比較全域

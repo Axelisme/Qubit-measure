@@ -15,9 +15,9 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 if TYPE_CHECKING:
@@ -449,7 +449,12 @@ def test_post_save_image_button_gated_on_post_result(qapp):
     assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is False
 
     tab.update_interaction_state(
-        _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=True, post_analysis_figure=Figure())
+        _snapshot(
+            "tab-1",
+            has_analyze_result=True,
+            has_post_analyze_result=True,
+            post_analysis_figure=Figure(),
+        )
     )
     assert tab._save_center.is_save_enabled(ArtifactKind.POST_ANALYSIS) is True
 
