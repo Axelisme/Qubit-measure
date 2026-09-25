@@ -30,7 +30,7 @@
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 | P9 | **能機械推導的就提供** | 可由現有資料直接算出的值（例如 `eta_s`、正規化後的 sweep 實際值）由介面算好回傳，不留給 agent 推算。 |
 
-## Decision：Tool 集合（31 特化 + 3 RPC）
+## Decision：Tool 集合（33 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -240,13 +240,19 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 **`cancel(op)`**
 依 op 種類轉給對應的取消方法（run → `tab.run_cancel`、互動式分析 → `analyze.cancel`、儀器 → `device.cancel_operation`），內部短暫等待後回傳 `{status: "cancelled" | "finished" | "cancelling"}`；`cancelling` 時以 `wait` 確認。不可取消的 op（post 分析）回 `reason="not_cancellable"`。
 
-### F. 儀器（2）
+### F. 儀器（4）
 
 **`devices(name?)`**
-清單或單一儀器的欄位與狀態。
+不帶 `name`：索引 `[{name, type, connected}]`。帶 `name`：`{name, type, address, connected, error, fields: [{name, type, current, settable, choices?}]}`，合併 snapshot 與可設定欄位。
 
-**`device_set(name, connect? , values?)`**
-`connect = {type, address}` 連線（已連線則略過），`connect = false` 斷線；`values` 例如 `{value: 0.5e-3}`、`{output: true}`。ramp 類回傳 operation id。
+**`device_connect(name, type?, address?)`**
+同步連線，完成後回傳該儀器的 `devices(name)` 內容；失敗時報錯。給 `type` 與 `address` 為首次連線，只給 `name` 則重連已記住的儀器。儀器預設記住並跨 session 保存。
+
+**`device_disconnect(name, forget = false)`**
+同步斷線；`forget=true` 同時遺忘該儀器。
+
+**`device_set(name, values: {field: value})`**
+依可設定欄位先驗證：欄位不存在、不可設定或不在 `choices` 內時報錯並列出合法欄位。多個欄位整包交給 `device.setup`，由它決定套用順序；數值使用儀器原生單位（例如 YOKO 電流為 A）。內部短暫等待，完成時回傳設定後的 `fields`；ramp 較久時回傳 `{op}`，可 `cancel`。ramp 步長等保護沿用儀器驅動與 GUI 既有機制。
 
 ### G. Predictor（2）
 
@@ -274,7 +280,8 @@ connect()
 project(chip="Q5_2D", qubit="Q1", resonator="R1")
 soc_connect("192.168.10.179", 8887)
 context_create(bind_device="flux_yoko")
-device_set("flux_yoko", connect={type: "YOKOGS200", address: "USB0::…"}, values={value: 2e-3})  → op o1
+device_connect("flux_yoko", type="YOKOGS200", address="USB0::…")
+device_set("flux_yoko", {value: 2e-3})                                           → op o1（ramp）
 wait("o1")
 predictor("load", path="result/Q5_2D/Q1/params.json")
 predict(2e-3)                                   → 842.7 MHz
@@ -343,9 +350,9 @@ tab_analyze("t9", params={dual_exp: true})
 
 ```text
 tab_get("t4", include=["cfg", "analysis"])
-devices()                                  → jpa_sgs output=false
+devices("jpa_sgs")                         → output=false
 （在 session 問使用者：JPA pump 目前關閉，要打開嗎？）
-device_set("jpa_sgs", values={output: true})
+device_set("jpa_sgs", {output: true})
 tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 ```
 
@@ -377,7 +384,9 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `writeback` | `tab.writeback_preview`（**補** md 的 current 與 module／waveform 的 current／proposed cfg）+ `tab.writeback_set` + `tab.writeback_apply`（依 `write` 設定勾選後套用） |
 | `tab_save` | `tab.save_data`（`data_path`、`comment`）+ `tab.save_image`，依 Save All 順序 |
 | `wait`／`cancel` | `operation.await`；各類 cancel 合一 |
-| `device_set` | `device.connect`／`disconnect`／`setup` |
+| `devices` | `device.list`（狀態收斂為 `connected`）、`device.snapshot` + `device.setup_spec` |
+| `device_connect`／`device_disconnect` | `device.connect`／`device.reconnect`／`device.disconnect`（+ `device.forget`），內部等待 op 結束 |
+| `device_set` | `device.setup_spec` 驗證 + `device.setup` + short-wait |
 | `predictor`／`predict` | 既有 predictor wire method |
 
 需要補的項目，都不改 GUI 畫面：
@@ -405,7 +414,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 31 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 33 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
