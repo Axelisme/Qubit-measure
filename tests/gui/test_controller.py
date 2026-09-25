@@ -50,7 +50,7 @@ from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.services.io_manager import IOManager
 
-from tests.gui.services._completion_helpers import (
+from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )

@@ -26,8 +26,8 @@ from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.services.remote._helpers import open_client, recv_response, send
-from tests.gui.services.test_experiment_reload import Loader, OldAdapter
+from tests.gui.app.main.services.remote._helpers import open_client, recv_response, send
+from tests.gui.app.main.services.test_experiment_reload import Loader, OldAdapter
 
 
 class RuntimeCfg(ExpCfgModel):

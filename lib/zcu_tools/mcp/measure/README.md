@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-24 — instance-owned MCP assembly
+**Last updated:** 2026-09-25 — GUI remote test ownership
 
 # `zcu_tools/mcp/measure/`
 
@@ -76,7 +76,7 @@ Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, 
 
 `tests/mcp/measure/`透過factory、真實session／bridge及recording Transport驗證tool行為；
 stdio以`server.main()`覆蓋成功回覆piggyback及cleanup。GUI handler與真socket事件整合
-留在`tests/gui/services/remote/`，shared policy construction留在`tests/gui/remote/`。
+留在`tests/gui/app/main/services/remote/`，shared policy construction留在`tests/gui/remote/`。
 Schema文字及tool inventory以直接review確認，不用私有alias或靜態pytest維護。
 
 Remote/MCP 測試會建立 loopback socket；受限 sandbox 可能需要 unsandboxed execution。

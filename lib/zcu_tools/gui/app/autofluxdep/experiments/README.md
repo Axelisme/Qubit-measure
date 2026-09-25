@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-11 — readable experiment policy
+**Last updated:** 2026-09-25 — test path ownership
 
 # autofluxdep experiments
 
@@ -36,7 +36,7 @@ experiments/
 3. 在 `catalog.py` 顯式 import 該 singleton，並在 `_DECLARATIONS` 中放到預期的選單位置；不要使用 filesystem discovery、decorator side effect 或 plugin scan。
 4. declaration tuple 內不得重複，experiment name 必須非空且唯一。unknown placement 維持 `KeyError`。
 5. 不修改 `Builder.build_node()` / `Node.produce()` seam，不讓 orchestrator 理解 experiment-specific key，也不把 predictor 加進 catalog。
-6. 在 `tests/autofluxdep_gui/experiments/` 增加該實驗的 cfg/acquire/fit/Result/Patch 測試，並讓 production-wide contract tests 明確從 `experiments.catalog` 的 `builders()` 取得 Builder。
+6. 在 `tests/gui/app/autofluxdep/experiments/` 增加該實驗的 cfg/acquire/fit/Result/Patch 測試，並讓 production-wide contract tests 明確從 `experiments.catalog` 的 `builders()` 取得 Builder。
 7. 執行 catalog/import architecture tests、該實驗 targeted tests，以及相關 cfg/persistence/workflow tests。
 
 跨模組 runtime contract 見 ADR-0018、ADR-0036、ADR-0043；本 package 的高層執行語言見 `../CONTEXT.md`。
