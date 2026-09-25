@@ -30,7 +30,7 @@
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 | P9 | **能機械推導的就提供** | 可由現有資料直接算出的值（例如 `eta_s`、正規化後的 sweep 實際值）由介面算好回傳，不留給 agent 推算。 |
 
-## Decision：Tool 集合（33 特化 + 3 RPC）
+## Decision：Tool 集合（35 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -254,13 +254,19 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 **`device_set(name, values: {field: value})`**
 依可設定欄位先驗證：欄位不存在、不可設定或不在 `choices` 內時報錯並列出合法欄位。多個欄位整包交給 `device.setup`，由它決定套用順序；數值使用儀器原生單位（例如 YOKO 電流為 A）。內部短暫等待，完成時回傳設定後的 `fields`；ramp 較久時回傳 `{op}`，可 `cancel`。ramp 步長等保護沿用儀器驅動與 GUI 既有機制。
 
-### G. Predictor（2）
+### G. Predictor（4）
 
-**`predictor(action = "info" | "load" | "set_params" | "clear", ...)`**
-對應現有 predictor wire method。
+**`predictor_info()`**
+回傳 `{loaded, source, EJ, EC, EL, flux_half, flux_period, flux_bias}`。
 
-**`predict(value, transition = [0, 1])`**
-回傳預測頻率。只當掃描種子，不當結果寫回。
+**`predictor_load(path? | model?, flux_bias?)`**
+`path` 由 `params.json` 的 fluxdep_fit 區段載入；`model = {EJ, EC, EL, flux_half, flux_period}` 直接建立；兩者恰好給一個。取代目前的 predictor，回傳 `predictor_info()` 內容。卸載走 RPC。
+
+**`predict(value, transitions = [[0, 1]])`**
+回傳 `[{transition, freq_mhz}]`；`value` 為儀器原生單位的設定值。預測值只當掃描種子，不當結果寫回。
+
+**`predictor_calibrate(value, freq_mhz, transition = [0, 1])`**
+以一個量測點校正 `flux_bias` 並重新安裝 predictor，回傳 `{flux_bias_before, flux_bias_after}`。
 
 ### H. 畫面（1）
 
@@ -283,8 +289,8 @@ context_create(bind_device="flux_yoko")
 device_connect("flux_yoko", type="YOKOGS200", address="USB0::…")
 device_set("flux_yoko", {value: 2e-3})                                           → op o1（ramp）
 wait("o1")
-predictor("load", path="result/Q5_2D/Q1/params.json")
-predict(2e-3)                                   → 842.7 MHz
+predictor_load(path="result/Q5_2D/Q1/params.json")
+predict(2e-3)                                   → [{transition: [0, 1], freq_mhz: 842.7}]
 md_set({q_f: 842.7, qf_w: 15})             → 作為掃描種子
 
 # twotone：guide → cfg → run → live plot → 分析 → 寫回 → 存檔
@@ -387,7 +393,8 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | `devices` | `device.list`（狀態收斂為 `connected`）、`device.snapshot` + `device.setup_spec` |
 | `device_connect`／`device_disconnect` | `device.connect`／`device.reconnect`／`device.disconnect`（+ `device.forget`），內部等待 op 結束 |
 | `device_set` | `device.setup_spec` 驗證 + `device.setup` + short-wait |
-| `predictor`／`predict` | 既有 predictor wire method |
+| `predictor_info`／`predictor_load`／`predict` | `predictor.info`／`load`／`set_model_params`／`predict` |
+| `predictor_calibrate` | **新增** wire method，接上既有 `PredictorService.calibrate_flux_bias` |
 
 需要補的項目，都不改 GUI 畫面：
 
@@ -405,7 +412,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 - writeback 以更新模式寫入模組部分欄位；由 run cfg 建立 library 模組
 - 衍生值寫入（`reset_f = r_f - q_f`）
 - 工作點操作與跨工作點表格
-- predictor 校正 flux bias、曲線與 matrix element
+- predictor 曲線與 matrix element
 - 互動式分析的數值入口
 - tab 的 run 歷史、排查用的 run 比較
 - 狀態變更摘要、activity 紀錄
@@ -414,7 +421,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 33 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 35 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
