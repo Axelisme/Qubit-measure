@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-09-24 — 品質設定校準與 opt-in diagnostics
+**Last updated:** 2026-09-25 — 測試結構檢查
 
 `tools/` 放 repo 內部的品質檢查。`script/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
@@ -86,7 +86,7 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 
 ## ratchet 是判準，不是另一個檢查
 
-`check_ratchet.py` 把六項檢查對照 base 判讀：逐 (檔案, 規則) 比較 base tree 與 candidate，
+`check_ratchet.py` 把七項檢查對照 base 判讀：逐 (檔案, 規則) 比較 base tree 與 candidate，
 **只有計數上升才失敗**。既有債務不擋工作，往上加才擋。
 
 ```bash
@@ -120,7 +120,7 @@ uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyrigh
 `configuration_changes`，不能只看 `status: PASS`。暫存 base tree 放在 invoking worktree
 的 `.agent_state/ratchet/`，比較結束即移除該次目錄。
 
-## 九項檢查
+## 檢查項目
 
 | 檢查 | 守什麼 | 判讀 | 現況（2026-09-24） |
 | --- | --- | --- | --- |
@@ -130,19 +130,55 @@ uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyrigh
 | `pyright` | 型別，以及跨模組存取 private 造成的封裝破口 | ratchet | 3871 |
 | `check_file_size.py` | 單檔行數上限 1000 | ratchet | 41 |
 | `check_test_path_correspondence.py` | 每個測試目錄的路徑對應一個實際存在的模組 | ratchet | 20 |
+| `check_test_structure.py` | 測試間直接 import、conftest import、覆蓋測試定義；命名另作 advisory | ratchet | 以 CLI 現況為準 |
 | `check_test_capabilities.py` | 測試模組宣告它用的 socket／subprocess／sleep | ratchet | 34 |
 | `check_suppressions.py` | 逃生口計量 | ratchet | 2349 |
 | `pytest -n auto` | 行為 | 硬性 | **紅**，見下 |
 
 前兩項已全綠，紅了就是這次改動造成的。
 
-中間六項對全 repo 回報數百至數千筆既有債務。**單獨執行它們只會看到既有狀態**，判定一律經由
+中間的計量檢查保留既有債務可見。**單獨執行它們只會看到既有狀態**，判定一律經由
 ratchet。
 
 `ruff` 與 `pyright` 的規則選擇記在 `pyproject.toml` 的註解裡，包含刻意排除哪些規則與原因。
 表中的數字是指定日期的歷史觀察，不是新規則啟用後的 baseline。新增 lint 規則與 missing-import
 檢查仍由 ratchet 判定；不為了開啟規則而順手改寫全庫。未安裝 `gdrive` 等 optional profile 時，
 相關 import 診斷保留可見，不以缺少第三方 type stub 為理由全域關閉 import 檢查。
+
+## 測試結構
+
+歸屬、命名、fixture 與搬遷 policy 見 [tests/README.md](../tests/README.md)。先看完整診斷，
+再用 ratchet 判斷本次是否新增 blocking findings：
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/check_test_structure.py
+uv run --directory <worktree> --no-sync -- python tools/check_ratchet.py --base <ref> --detector test-structure
+```
+
+獨立 checker 可帶 `--root <repo>`。JSON 的 `findings` 包含 path、line、rule、message、severity；
+`violation_count` 只計 blocking，`advisory_count` 單獨列出。沒有 blocking 時 exit 0，有則 exit 1；
+讀檔或語法錯誤 exit 2，不視為通過。它不匯入或執行被檢查的測試。
+
+Blocking 規則：
+
+- `test-module-import`：tests 內 Python 檔明確 import 另一個存在的 `tests/**/test_*.py`。
+- `conftest-import`：明確 import 存在的 `tests/**/conftest.py` 作為 library。
+- `duplicate-test-definition`：同 module 或 Test class 的直接敘述重複定義 test function / Test class。
+  不同 class 的同名測試不衝突；條件分支與 nested function 不推論為收集時覆蓋。
+
+Import 解析限 repo-root-qualified 絕對路徑與明確相對路徑，不追 dynamic import、re-export、
+pytest import mode 或自訂 `sys.path`。例如 bare `import conftest` 不在目前可確定解析範圍。
+此限制不是 policy 豁免。重複定義檢查依預設 `test_` / `Test` 命名，不模擬 decorator、繼承、
+assignment 或 pytest plugins 的收集行為。
+
+`test-file-name` 對 ticket、phase、part 加編號、歷史 B/C 編號及 misc 類名稱提醒人工審閱；
+不阻擋，也不把 `T1` / `T2` 當 ticket。命中不代表已確認歸屬錯誤。
+Fixture 依賴深度、setup 語意重複與責任混合仍由 review 判斷，不設 LOC 比或案例數硬門檻。
+既有 `check_file_size.py` 提供大小訊號，無須另設一套測試檔行數門檻。
+
+快速 gate 的 ratchet 只比較 blocking 的每檔每規則計數，兩側用 candidate checker 掃全 tests tree，
+讓新增目標檔造成既有 import 可解析的情況也被看見。檔案搬遷仍可能因 path key 改變被報為新增，
+需審閱而非直接當成品質退步。命名提醒留在獨立 checker；`gate.py` 現況表只顯示 blocking 數。
 
 ## Opt-in diagnostics
 

@@ -209,6 +209,24 @@ def path_correspondence_counts(
     }
 
 
+def test_structure_counts(
+    tree: Path, files: Iterable[str]
+) -> Mapping[tuple[str, str], int]:
+    """Compare the whole test tree: new targets can resolve unchanged imports."""
+    del files
+    checker = _support.load_tool("check_test_structure")
+    counts: dict[tuple[str, str], int] = {}
+    try:
+        found = checker.findings(tree)
+    except (OSError, SyntaxError, UnicodeError, ValueError) as error:
+        raise RatchetError(f"test structure check failed: {error}") from error
+    for item in found:
+        if item.severity == "blocking":
+            key = (item.path, item.rule)
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def capability_counts(
     tree: Path, files: Iterable[str]
 ) -> Mapping[tuple[str, str], int]:
@@ -261,6 +279,7 @@ _DETECTORS: Final = {
     "pyright": pyright_counts,
     "file-size": file_size_counts,
     "path-correspondence": path_correspondence_counts,
+    "test-structure": test_structure_counts,
 }
 
 
