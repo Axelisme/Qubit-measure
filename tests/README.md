@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-24 — measure MCP／remote test ownership
+**Last updated:** 2026-09-25 — GUI test path ownership
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -258,7 +258,7 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 `tests/experiment/v2_gui/adapters/_support/test_schema_builder.py`鎖定context-free
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
-`tests/gui/adapter/test_adapter_definition.py`是38-entry registry gate：empty/rich md/ml contexts都必須
+`tests/gui/app/main/adapter/test_adapter_definition.py`是38-entry registry gate：empty/rich md/ml contexts都必須
 保持同一static spec，且definition可重複instantiate。
 
 `tests/experiment/v2_gui/adapters/singleshot/_helpers.py` 集中 singleshot adapter 測試的 `ModuleLibrary` / context / request fixture。singleshot 測試檔名以 domain ownership 命名，例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep；不要再用歷史 Phase 編號命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
@@ -449,7 +449,7 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 
 ### GUI analyze params 測試
 
-`tests/gui/adapter/test_analyze_params.py` 覆蓋 dataclass-based analyze params helper；`tests/gui/ui/test_analyze_form.py` 覆蓋 `AnalyzeFormWidget` 的 dataclass round-trip、hydrate 不 emit、使用者編輯 emit instance。新增 GUI adapter 測試時，analysis 參數應直接使用 adapter 回傳的 params dataclass instance，不要組 raw dict 或假設 `get_analyze_params()` 可迭代。
+`tests/gui/app/main/adapter/test_analyze_params.py` 覆蓋 dataclass-based analyze params helper；`tests/gui/ui/test_analyze_form.py` 覆蓋 `AnalyzeFormWidget` 的 dataclass round-trip、hydrate 不 emit、使用者編輯 emit instance。新增 GUI adapter 測試時，analysis 參數應直接使用 adapter 回傳的 params dataclass instance，不要組 raw dict 或假設 `get_analyze_params()` 可迭代。
 
 ### measure-gui canonical result load 測試
 
