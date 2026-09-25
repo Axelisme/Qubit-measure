@@ -29,7 +29,7 @@ from ._helpers import Fixture, call, open_client
 
 def test_remote_path_projection_has_no_field_or_editor_subtype_grammar() -> None:
     source_path = (
-        Path(__file__).parents[4]
+        Path(__file__).parents[6]
         / "lib/zcu_tools/gui/app/main/services/remote/path_resolver.py"
     )
     source = source_path.read_text(encoding="utf-8")

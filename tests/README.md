@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-25 — GUI test path ownership
+**Last updated:** 2026-09-25 — GUI remote test paths
 
 > 註：`test_registry.py` 測的是 `program/v2/modules/registry.py` 的 `PulseRegistry`（pulse 定義 SHA256 去重）。
 
@@ -287,7 +287,7 @@ run去重、analysis start-rejected/failure/cancel retained-figure restore、loa
 same-class form hydrate/cache，以及ModuleLibrary變更透過attached cfg draft更新run gate。
 
 `tests/gui/test_expected_error.py`鎖定closed category、legacy RuntimeError/ValueError ancestry與
-explicit concrete opt-in/exclusion；`tests/gui/services/remote/test_expected_error_wire_compat.py`
+explicit concrete opt-in/exclusion；`tests/gui/app/main/services/remote/test_expected_error_wire_compat.py`
 以exact `(code, message, reason, data)` tuple鎖定既有handler projection，並證
 `ResultScopeError`分類不依賴reason prefix。
 
@@ -301,7 +301,7 @@ invariant failure不被降級；unexpected dispatch測試另確認controller err
 `tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
 view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
-`tests/gui/services/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
+`tests/gui/app/main/services/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
 Shared exposure policy的建構驗證屬於`tests/gui/remote/`。Schema文字、tool inventory與
 script flags用直接review，不納入pytest。
@@ -458,7 +458,7 @@ load-result feature 的 targeted tests 分散在對應 ownership：
 `tests/experiment/v2_gui/adapters/test_legacy_load.py` 鎖 adapter legacy single-file fallback；
 `tests/gui/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/app/main/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
-`tests/gui/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
+`tests/gui/app/main/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
 `tests/mcp/measure/`覆蓋operation handle與RPC timeout policy：bounded
 GUI handler timeout應回傳狀態，transport timeout應被視為連線異常。
 

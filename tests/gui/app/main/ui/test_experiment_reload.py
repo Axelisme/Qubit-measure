@@ -23,7 +23,7 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.services.remote._helpers import open_client, recv_response, send
+from tests.gui.app.main.services.remote._helpers import open_client, recv_response, send
 from tests.gui.services.test_experiment_reload import Loader, NewAdapter, OldAdapter
 
 
