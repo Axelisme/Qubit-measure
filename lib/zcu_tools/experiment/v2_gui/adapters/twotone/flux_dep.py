@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import ClassVar, TypeAlias
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
+
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment.v2.twotone.fluxdep import (
     FreqFluxCfg,
@@ -14,9 +16,14 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
-    build_flux_pick_session,
     flux_range,
     qub_freq_range,
+)
+from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_frontend import (
+    make_flux_pick_frontend,
+)
+from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_plugin import (
+    make_flux_pick_plugin,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
@@ -25,13 +32,18 @@ from zcu_tools.gui.app.main.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     ExpContext,
-    InteractiveHost,
-    InteractiveSession,
     MetaDictWriteback,
     RunRequest,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.main.ui.interactive_frontend import (
+        InteractiveFrontend,
+        InteractiveFrontendEnv,
+    )
 
 FluxDepRunResult: TypeAlias = FreqFluxResult
 
@@ -138,14 +150,23 @@ class FluxDepAdapter(
             .build()
         )
 
-    def setup_interactive_analysis(
+    def make_interactive_plugin(
+        self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams]
+    ) -> PluginDefinition[Any, Any]:
+        # Two-tone spectra may carry useful phase information.
+        return make_flux_pick_plugin(req, force_magnitude=False)
+
+    def make_interactive_frontend(
         self,
-        req: AnalyzeRequest[FluxDepRunResult, FluxPickParams],
-        host: InteractiveHost,
-    ) -> InteractiveSession:
-        # Two-tone qubit spectra may carry useful phase information, so the
-        # magnitude-only projection is fixed False (not surfaced as an analyze param).
-        return build_flux_pick_session(req, host, force_magnitude=False)
+        plugin: PluginDefinition[Any, Any],
+        session: Session[Any],
+        env: InteractiveFrontendEnv,
+        request_finish: Callable[[Figure], bool],
+        request_cancel: Callable[[], bool],
+    ) -> InteractiveFrontend:
+        return make_flux_pick_frontend(
+            plugin, session, env, request_finish, request_cancel
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[FluxDepRunResult, FluxPickResult]

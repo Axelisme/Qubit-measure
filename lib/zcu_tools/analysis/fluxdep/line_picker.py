@@ -11,6 +11,7 @@ from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.line_state import (
+    FluxLineRole,
     FluxPickInputs,
     FluxPickState,
     align_lines,
@@ -232,6 +233,17 @@ class TwoLinePicker:
         x = self.flux_half if self._picked is self._half_line else self.flux_int
         self._update_loss_view(x, float(ydata))
 
+    def show_loss(self, role: FluxLineRole, x: float, y: float) -> None:
+        """Refresh the selected line's loss after a framework commit."""
+        if role not in ("half", "integer"):
+            raise ValueError(f"unknown flux-line role: {role!r}")
+        previous = self._picked
+        self._picked = self._half_line if role == "half" else self._int_line
+        try:
+            self._update_loss_view(x, y)
+        finally:
+            self._picked = previous
+
     def set_conjugate(self, on: bool) -> None:
         self._state = replace(self._state, conjugate=bool(on))
 
@@ -243,6 +255,23 @@ class TwoLinePicker:
 
     def clear_selection(self) -> None:
         self._picked = None
+
+    def show_state(self, state: FluxPickState) -> None:
+        """Reconcile artists with committed state, abandoning any local preview."""
+        if self._loss_timer is not None:
+            self._loss_timer.stop()
+        self._loss_refresh_pending = False
+        self.clear_selection()
+        if state.magnitude_only != self._state.magnitude_only:
+            self._real_signals = cast2real_and_norm(
+                self._signals, use_phase=not state.magnitude_only
+            )
+            self._main_im.set_data(self._real_signals.T)
+            self._main_im.autoscale()
+        self._state = state
+        self._apply_line_positions()
+        center_y = 0.5 * (self._freqs[0] + self._freqs[-1])
+        self.show_loss("half", self.flux_half, center_y)
 
     def set_magnitude_only(self, on: bool) -> None:
         self.clear_selection()

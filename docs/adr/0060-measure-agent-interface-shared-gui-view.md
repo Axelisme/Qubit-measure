@@ -1,7 +1,7 @@
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
 
 **狀態：** accepted（未實作）
-**關聯：** [[0059]]（RPC channel）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（Stop feedback）、[[0033]]（刪改名不掃描參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
+**關聯：** [[0059]]（RPC channel）、[[0061]]（interactive plugin session）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（Stop feedback）、[[0033]]（刪改名不掃描參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context
 
@@ -10,7 +10,7 @@
 ## 前提
 
 - agent 操作的是 GUI 正在顯示的同一份狀態（[[0013]]）。agent 的改動即時出現在 GUI；使用者的改動 agent 以讀取得知。介面不推送變更通知，也不區分改動者。
-- GUI 的畫面與既有行為不變。
+- GUI 的既有畫面與非互動分析行為不變；measure flux picker 的拖曳改為本地 preview、有效 release 才 commit（[[0061]]）。
 - 人機對話在 agent 所在的 session（例如 Claude Code）進行，不經 MCP。
 - 介面只組合 GUI 既有能力，所需補充列於「實作依據」。
 
@@ -334,7 +334,7 @@ tab_close("t1")
 - `tab.snapshot` 補上 artifact 存檔狀態。
 - `tab.writeback_preview` 補上 md 項目的 current 與 module／waveform 項目的 current／proposed cfg。
 - `predictor_calibrate` 的 wire method。
-- `tab_interact` 的 wire method，以及互動分析外掛的子命令註冊：`InteractiveSession` 宣告 `{name, description, args, handler}` 子命令與結構化 `state`，GUI host 只轉送子命令，GUI 自身的互動元件也經同一組子命令操作。
+- `tab_interact` 的 GUI-side wire method：service-owned session 保存 committed `state` 與 operation（[[0061]]）；plugin 宣告子命令與 `ParamSpec`，wire 驗證後執行共用 action，GUI frontend 直接呼叫相同 typed action，不經 JSON。GUI-local preview 只以 `preview_active` presentation metadata 回報，不取代 committed state。
 
 ## 範圍外
 

@@ -32,12 +32,7 @@ from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from .adapter import (
-    AnalysisMode,
-    ExpContext,
-    InteractiveHost,
-    InteractiveSession,
-)
+from .adapter import AnalysisMode, ExpContext
 from .events.completion import AnalyzeFailedPayload, SaveDataFinishedPayload
 from .events.run import RunFinishedPayload
 from .events.tab import (
@@ -61,6 +56,7 @@ from .services.cfg_lowering import lower_module, lower_waveform
 from .services.ports import CfgEdit, CfgEditResult, ContextWrites
 from .services.remote.dialogs import DialogName
 from .state import State
+from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
 if TYPE_CHECKING:
     from zcu_tools.gui.cfg.binding import SettableTarget
@@ -68,7 +64,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
-    from zcu_tools.gui.session.ports import ProgressTransport
+    from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
@@ -149,21 +145,15 @@ class RenderHost(Protocol):
     def mount_interactive_analysis(
         self,
         tab_id: str,
-        session_factory: Callable[[InteractiveHost], InteractiveSession],
-        on_finish: Callable[[InteractiveSession], None],
+        frontend_factory: Callable[[InteractiveFrontendEnv], InteractiveFrontend],
     ) -> None:
-        """Mount an interactive analysis on a tab's analysis area (INTERACTIVE
-        adapters). The View builds an ``InteractiveHost`` (its canvas + worker
-        pool), calls ``session_factory(host)`` to get the adapter's session,
-        renders its actions / forwards canvas events, and on Done calls
-        ``on_finish(session)``. The View knows nothing of the interaction."""
+        """Mount one plugin frontend; the service retains its committed session."""
         ...
 
-    def unmount_interactive_analysis(self, tab_id: str) -> None:
-        """Tear down a tab's mounted interactive picker (the dual of
-        ``mount_interactive_analysis``). Called when an interactive analyze is
-        cancelled — the picker widget has no settle path of its own, so the
-        Controller drives its removal. A no-op when nothing is mounted."""
+    def unmount_interactive_analysis(
+        self, tab_id: str, *, restore_result: bool = False
+    ) -> None:
+        """Remove the plugin widget; completed analysis may restore its figure."""
         ...
 
     # The View's current left-panel width — the only persistence value sourced
@@ -237,6 +227,7 @@ class Controller(SessionControllerMixin):
         progress_transport: ProgressTransport | None = None,
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
+        owner_scheduler: OwnerScheduler | None = None,
     ) -> None:
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
@@ -278,6 +269,13 @@ class Controller(SessionControllerMixin):
             )
 
             transport = QtProgressTransport()
+        if owner_scheduler is None:
+            from zcu_tools.gui.session.adapters.qt_owner_scheduler import (
+                QtOwnerScheduler,
+            )
+
+            owner_scheduler = QtOwnerScheduler()
+        self.owner_scheduler = owner_scheduler
         services = build_app_services(
             state=state,
             bus=bus,
@@ -288,6 +286,7 @@ class Controller(SessionControllerMixin):
             notify_info=self._info,
             resource_versions=self.resources_versions,
             render_host=lambda: self._render_host,
+            owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
         )
@@ -889,19 +888,17 @@ class Controller(SessionControllerMixin):
         )
 
     def run_background(
-        self, compute: Callable[[], object], on_done: Callable[[object], None]
+        self,
+        compute: Callable[[], object],
+        on_done: Callable[[object], None],
+        on_error: Callable[[Exception], None],
     ) -> None:
-        """InteractiveHostEnv (ADR-0019): run a short interactive compute off-main
-        via BackgroundRunner's pool, delivering the result to ``on_done`` on the
-        main thread. The interactive host has no error channel, so a failure is
-        logged (the user keeps the current picker state)."""
+        """Run captured interactive computation off-main; deliver on the owner loop."""
         self._background_svc.submit(
             compute,
             run_in_pool=True,
             on_done=on_done,
-            on_error=lambda exc: logger.warning(
-                "interactive run_background failed: %r", exc
-            ),
+            on_error=on_error,
         )
 
     # ------------------------------------------------------------------

@@ -50,6 +50,7 @@
 - [0052 — Event meta 與多前端 attribution](0052-event-meta-and-frontend-attribution.md)：bus 為事件蓋章 `EventMeta(seq, origin)`，origin 由 dispatch 邊界宣告、operation 記錄顯式攜帶；coalescing 屬 subscriber-side；wire 封套 additive 加 seq/origin。
 - [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 隨 method 宣告於 `RemoteMethodEntry`。
 - [0060 — Agent interface as second view](0060-measure-agent-interface-shared-gui-view.md)：量測 agent 以 40 個特化 tool 操作與 GUI 共用的狀態；一個判斷點一個 tool，寫入類 tool 使 GUI 跟隨到對應子 tab。
+- [0061 — Measure interactive plugin session](0061-measure-interactive-plugin-session.md)：service 擁有互動分析的 committed session/operation，plugin 提供共用 actions/commands 與本地 preview frontend。
 
 ## Persistence
 

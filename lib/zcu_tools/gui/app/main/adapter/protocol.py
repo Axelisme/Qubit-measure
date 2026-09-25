@@ -5,13 +5,12 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from zcu_tools.gui.cfg import CfgSchema
 
+from .interactive import InteractivePluginProvider
 from .types import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
     ExpContext,
-    InteractiveHost,
-    InteractiveSession,
     LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
@@ -32,7 +31,7 @@ __all__ = [
 
 
 @runtime_checkable
-class ExpAdapterProtocol(Protocol):
+class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     """Structural contract the GUI framework requires from an experiment adapter.
 
     This Protocol lists *only* the members the framework actually calls; it
@@ -90,12 +89,6 @@ class ExpAdapterProtocol(Protocol):
 
     def analyze(self, req: AnalyzeRequest[Any, Any]) -> Any:
         """Run analysis on a completed run result."""
-        ...
-
-    def setup_interactive_analysis(
-        self, req: AnalyzeRequest[Any, Any], host: InteractiveHost
-    ) -> InteractiveSession:
-        """Set up an interactive analysis on the host's figure (INTERACTIVE)."""
         ...
 
     @classmethod

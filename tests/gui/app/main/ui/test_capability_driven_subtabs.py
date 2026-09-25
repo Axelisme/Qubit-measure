@@ -636,6 +636,10 @@ def test_render_host_routes_to_correct_pane_container(qapp):
     analyze_svc.start_analyze.return_value = 2
     post_svc = MagicMock()
     post_svc.start_post_analyze.return_value = 3
+    from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
+        ManualOwnerScheduler,
+    )
+
     facet = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -646,6 +650,7 @@ def test_render_host_routes_to_correct_pane_container(qapp):
         analyze=analyze_svc,
         post_analyze=post_svc,
         render_host=lambda: host,
+        owner_scheduler=ManualOwnerScheduler(),
     )  # type: ignore[arg-type]
     facet.start_run("tab-1")
     assert log[-1] == "run"

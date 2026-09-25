@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from zcu_tools.gui.app.main.adapter import AnalysisMode
 from zcu_tools.gui.app.main.events.tab import TabContentChangedPayload, TabContentFact
+from zcu_tools.gui.app.main.interactive import PluginDefinition
+from zcu_tools.gui.app.main.services.analyze import ActiveInteractive
 from zcu_tools.gui.app.main.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.main.services.run_analyze_control import RunAnalyzeControlFacet
+from zcu_tools.gui.app.main.ui.interactive_frontend import (
+    InteractiveFrontend,
+    InteractiveFrontendEnv,
+)
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 from tests.gui._control_fakes import CallLog, call
 
@@ -49,9 +57,15 @@ class RecordingAdapter:
         self._log = log
         self.capabilities = SimpleNamespace(analysis=analysis)
 
-    def setup_interactive_analysis(self, req: object, host: object) -> object:
-        self._log.add("adapter", "setup_interactive_analysis", req, host)
-        return "interactive-session"
+    def make_interactive_plugin(self, req: object) -> PluginDefinition[int, object]:
+        self._log.add("adapter", "make_interactive_plugin", req)
+        return PluginDefinition("test", 0, (), lambda _state: None, lambda state: state)
+
+    def make_interactive_frontend(
+        self, plugin, session, env, request_finish, request_cancel
+    ) -> object:
+        self._log.add("adapter", "make_interactive_frontend", plugin, session, env)
+        return object()
 
 
 class RecordingGuard:
@@ -115,12 +129,23 @@ class RecordingAnalyze:
         )
         return 22
 
-    def start_interactive(self, permit: object) -> int:
-        self._log.add("analyze", "start_interactive", permit)
+    def start_plugin(
+        self,
+        permit: object,
+        plugin: PluginDefinition[Any, Any],
+        owner: ManualOwnerScheduler,
+    ) -> int:
+        self._log.add("analyze", "start_plugin", permit, plugin, owner)
+        self.active = ActiveInteractive(plugin, plugin.open(owner))
         return 23
 
-    def finish_interactive(self, tab_id: str, session: object) -> None:
-        self._log.add("analyze", "finish_interactive", tab_id, session)
+    def get_interactive(self, tab_id: str) -> ActiveInteractive:
+        self._log.add("analyze", "get_interactive", tab_id)
+        return self.active
+
+    def finish_plugin(self, tab_id: str, figure: object) -> bool:
+        self._log.add("analyze", "finish_plugin", tab_id, figure)
+        return True
 
     def cancel_interactive(self, tab_id: str) -> bool:
         self._log.add("analyze", "cancel_interactive", tab_id)
@@ -201,16 +226,19 @@ class RecordingRenderHost:
         return "figure-container"
 
     def mount_interactive_analysis(
-        self, tab_id: str, session_factory: object, on_finish: object
+        self,
+        tab_id: str,
+        frontend_factory: Callable[[InteractiveFrontendEnv], InteractiveFrontend],
     ) -> None:
-        self._log.add(
-            "host", "mount_interactive_analysis", tab_id, session_factory, on_finish
-        )
+        self._log.add("host", "mount_interactive_analysis", tab_id, frontend_factory)
         if self._mount_error is not None:
             raise self._mount_error
+        self.frontend = frontend_factory(cast(InteractiveFrontendEnv, object()))
 
-    def unmount_interactive_analysis(self, tab_id: str) -> None:
-        self._log.add("host", "unmount_interactive_analysis", tab_id)
+    def unmount_interactive_analysis(
+        self, tab_id: str, *, restore_result: bool = False
+    ) -> None:
+        self._log.add("host", "unmount_interactive_analysis", tab_id, restore_result)
 
 
 def _facet(
@@ -234,6 +262,7 @@ def _facet(
             analyze=cast(Any, RecordingAnalyze(log)),
             post_analyze=cast(Any, RecordingPostAnalyze(log)),
             render_host=lambda: host,
+            owner_scheduler=ManualOwnerScheduler(),
         ),
         log,
         state,
@@ -271,7 +300,7 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
     ]
     payload = bus.payloads[0]
     assert isinstance(payload, TabContentChangedPayload)
-    content_payload = cast(TabContentChangedPayload, payload)
+    content_payload = payload
     assert content_payload.fact is TabContentFact.LOADED_RESULT_COMMITTED
 
 
@@ -300,11 +329,14 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "state",
         "state",
         "state",
+        "adapter",
         "tab",
         "analyze",
+        "analyze",
         "host",
+        "adapter",
     ]
-    assert log.calls[5] == call("analyze", "start_interactive", "analyze-permit")
+    assert log.calls[6].method == "start_plugin"
 
 
 def test_interactive_mount_failure_unmounts_and_cancels_operation() -> None:

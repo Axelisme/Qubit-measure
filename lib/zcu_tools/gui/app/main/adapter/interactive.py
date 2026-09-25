@@ -6,9 +6,18 @@ committed-state core. Concrete interactive adapters supply both at composition.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol
 
-from zcu_tools.gui.app.main.interactive import PluginDefinition
+from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
+    from zcu_tools.gui.app.main.ui.interactive_frontend import (
+        InteractiveFrontend,
+        InteractiveFrontendEnv,
+    )
 
 from .types import AnalyzeRequest
 
@@ -23,3 +32,12 @@ class InteractivePluginProvider(Protocol):
     def make_interactive_plugin(
         self, request: AnalyzeRequest[Any, Any]
     ) -> PluginDefinition[Any, Any]: ...
+
+    def make_interactive_frontend(
+        self,
+        plugin: PluginDefinition[Any, Any],
+        session: Session[Any],
+        env: InteractiveFrontendEnv,
+        request_finish: Callable[[Figure], bool],
+        request_cancel: Callable[[], bool],
+    ) -> InteractiveFrontend: ...

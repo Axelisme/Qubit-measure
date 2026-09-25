@@ -15,10 +15,16 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import InteractiveHost, InteractiveSession
+    from matplotlib.figure import Figure
+
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.app.main.ui.interactive_frontend import (
+        InteractiveFrontend,
+        InteractiveFrontendEnv,
+    )
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.plotting import FigureContainer
+    from zcu_tools.gui.session.ports import OwnerScheduler
 
     from .analyze import AnalyzeService
     from .guard import AnalyzePermit, GuardService
@@ -41,11 +47,12 @@ class RunAnalyzeRenderHost(Protocol):
     def mount_interactive_analysis(
         self,
         tab_id: str,
-        session_factory: Callable[[InteractiveHost], InteractiveSession],
-        on_finish: Callable[[InteractiveSession], None],
+        frontend_factory: Callable[[InteractiveFrontendEnv], InteractiveFrontend],
     ) -> None: ...
 
-    def unmount_interactive_analysis(self, tab_id: str) -> None: ...
+    def unmount_interactive_analysis(
+        self, tab_id: str, *, restore_result: bool = False
+    ) -> None: ...
 
 
 class RunAnalyzeControlPort(Protocol):
@@ -84,6 +91,7 @@ class RunAnalyzeControlFacet:
         analyze: AnalyzeService,
         post_analyze: PostAnalyzeService,
         render_host: Callable[[], RunAnalyzeRenderHost | None],
+        owner_scheduler: OwnerScheduler,
         access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
@@ -95,6 +103,7 @@ class RunAnalyzeControlFacet:
         self._analyze = analyze
         self._post_analyze = post_analyze
         self._render_host = render_host
+        self._owner_scheduler = owner_scheduler
         self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
@@ -177,13 +186,30 @@ class RunAnalyzeControlFacet:
             raise FailedPreconditionError(
                 "interactive analysis requires an attached render host"
             )
+        plugin = tab.adapter.make_interactive_plugin(req)
         self._tab.update_tab_analyze_param_instance(tab_id, analyze_params_instance)
-        token = self._analyze.start_interactive(permit)
+        token = self._analyze.start_plugin(permit, plugin, self._owner_scheduler)
+        active = self._analyze.get_interactive(tab_id)
+        if active is None:
+            self._analyze.cancel_interactive(tab_id)
+            raise RuntimeError("interactive operation has no service-owned session")
+
+        def finish(figure: Figure) -> bool:
+            terminal = self._analyze.finish_plugin(tab_id, figure)
+            if terminal:
+                host.unmount_interactive_analysis(tab_id, restore_result=True)
+            return terminal
+
         try:
             host.mount_interactive_analysis(
                 tab_id,
-                lambda ihost: tab.adapter.setup_interactive_analysis(req, ihost),
-                lambda session: self._analyze.finish_interactive(tab_id, session),
+                lambda env: tab.adapter.make_interactive_frontend(
+                    plugin,
+                    active.session,
+                    env,
+                    finish,
+                    lambda: self.cancel_analyze(tab_id),
+                ),
             )
         except Exception:
             try:
