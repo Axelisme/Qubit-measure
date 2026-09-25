@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — catalog write/read baseline policy (WIRE 59)
+**Last updated:** 2026-09-25 — partial read policy (WIRE 60)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -114,10 +114,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 59`, `GUI_VERSION = 82`, and
-`MCP_VERSION = 77` (defined in `zcu_tools.mcp.measure.server`). WIRE 59 adds
-`rpc.catalog.refresh_after_write` so successful mutations and read-reveal policy
-are distinct. WIRE 58 added GUI-owned operation indexing and cancellation.
+Current measure-gui values are `WIRE_VERSION = 60`, `GUI_VERSION = 83`, and
+`MCP_VERSION = 78` (defined in `zcu_tools.mcp.measure.server`). WIRE 60 adds
+`rpc.catalog.reveals_without` for partial reads; MCP samples the resource version
+before a full read and records it only after that read succeeds. WIRE 59 separates
+successful write refresh from read-reveal policy.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -134,8 +135,10 @@ MCP owns the agent baseline:
 
 - guarded mutations send expected versions derived from the live catalog;
 - catalog-declared successful writes refresh the baseline;
-- pure reads refresh only keys named by their `reveals` policy; reads with no
-  `reveals` preserve unrelated observations;
+- successful full reads record pre-read versions only for keys named by their
+  `reveals` policy; `reveals_without` excludes those keys when a named optional
+  parameter is present, so a partial or unmatched `prefix` cannot reveal the
+  entire cfg/editor; reads with no `reveals` preserve unrelated observations;
 - stale rejection preserves the baseline and becomes a semantic tool error;
   the agent re-snapshots the affected resource before retrying.
 

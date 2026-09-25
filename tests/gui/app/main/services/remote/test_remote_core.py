@@ -196,6 +196,9 @@ def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
         assert methods["tab.run_start"]["tool_names"] == []
         assert "tab:{tab_id}:cfg" in methods["tab.run_start"]["guard_deps"]
         assert methods["tab.run_start"]["operation_key"] == "tab:{tab_id}"
+        assert methods["tab.get_cfg"]["reveals"] == ["tab:{tab_id}:cfg"]
+        assert methods["tab.get_cfg"]["reveals_without"] == ["prefix"]
+        assert methods["editor.get"]["reveals_without"] == ["prefix"]
         assert (
             "expected_versions" not in methods["tab.run_start"]["params"]["properties"]
         )

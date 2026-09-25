@@ -48,6 +48,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -229,7 +230,8 @@ class SocketTransport:
 
     @property
     def is_open(self) -> bool:
-        return self._sock is not None
+        with self._sock_lock:
+            return self._sock is not None
 
     def open(self, port: int) -> None:
         """Connect to 127.0.0.1:port and start the reader thread.
@@ -246,43 +248,38 @@ class SocketTransport:
             raise
         # Short blocking timeout so the reader loop wakes to observe the stop flag.
         sock.settimeout(1.0)
-        self._sock = sock
-        self._reader_stop.clear()
+        with self._sock_lock:
+            self._sock = sock
+            self._reader_stop.clear()
         self._reader_thread = threading.Thread(
             target=self._reader_loop, name=f"mcp-{self._app_name}-reader", daemon=True
         )
         self._reader_thread.start()
 
     def send_line(self, payload: dict[str, Any]) -> None:
-        sock = self._sock
-        if sock is None:
-            raise RuntimeError("transport not open")
         data = (json.dumps(payload) + "\n").encode("utf-8")
         with self._sock_lock:
-            sock.sendall(data)
+            if self._sock is None:
+                raise RuntimeError("transport not open")
+            self._sock.sendall(data)
 
     def close(self) -> None:
-        sock = self._sock
-        if sock is None:
-            return
-        self._reader_stop.set()
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
+        with self._sock_lock:
+            self._reader_stop.set()
+            sock, self._sock = self._sock, None
+        if sock is not None:
+            with suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
             sock.close()
-        except OSError:
-            pass
-        self._sock = None
         t = self._reader_thread
-        if t is not None and t.is_alive():
+        if t is not None and t.is_alive() and t is not threading.current_thread():
             t.join(timeout=2.0)
         self._reader_thread = None
 
     def _reader_loop(self) -> None:
         """Sole reader of the GUI socket; routes replies, hands events to hook."""
         buf = bytearray()
+        sock: socket.socket | None = None
         while not self._reader_stop.is_set():
             sock = self._sock
             if sock is None:
@@ -304,23 +301,30 @@ class SocketTransport:
                 del buf[: nl + 1]
                 if not line:
                     continue
-                try:
-                    msg = json.loads(line.decode("utf-8"))
-                except Exception:
-                    # A malformed NDJSON line is skipped so one bad frame never
-                    # stalls the reader; log it so the drop is observable.
-                    logger.debug("skipping unparseable GUI socket line", exc_info=True)
-                    continue
-                if isinstance(msg, dict) and "id" in msg:
-                    if self._deliver_reply is not None:
-                        self._deliver_reply(msg)
-                elif isinstance(msg, dict) and "event" in msg:
-                    if self._deliver_event is not None:
-                        self._deliver_event(msg)
-                    # else: event pushes are dropped (read-only apps).
-        # Socket dropped: let the bridge wake any pending RPC waiters.
+                self._route_line(line)
+        # Unexpected EOF invalidates liveness before waking callers. A deliberate
+        # close already retired the socket and must not affect a new connection.
+        with self._sock_lock:
+            if self._reader_stop.is_set() or self._sock is not sock or sock is None:
+                return
+            self._sock = None
+        sock.close()
         if self._on_closed is not None:
             self._on_closed()
+
+    def _route_line(self, line: bytes) -> None:
+        try:
+            msg = json.loads(line.decode("utf-8"))
+        except (UnicodeError, ValueError):
+            logger.debug("skipping unparseable GUI socket line", exc_info=True)
+            return
+        if isinstance(msg, dict) and "id" in msg:
+            if self._deliver_reply is not None:
+                self._deliver_reply(msg)
+        elif (
+            isinstance(msg, dict) and "event" in msg and self._deliver_event is not None
+        ):
+            self._deliver_event(msg)
 
 
 class McpBridge:
@@ -359,7 +363,9 @@ class McpBridge:
         self._transport = transport
         if transport is not None:
             transport.attach(
-                self._deliver_reply, self._deliver_event, self._on_socket_closed
+                self._deliver_reply,
+                self._deliver_event,
+                lambda: self._on_socket_closed(transport),
             )
 
     def _deliver_event(self, msg: dict[str, Any]) -> None:
@@ -367,13 +373,15 @@ class McpBridge:
         if self._on_event is not None:
             self._on_event(msg)
 
-    def _on_socket_closed(self) -> None:
-        # The reader thread saw the socket drop: wake every pending RPC waiter so
-        # callers see "disconnected" instead of blocking to their timeout.
+    def _on_socket_closed(self, transport: Transport) -> None:
+        # Ignore late callbacks from a retired socket after a reconnect.
         with self._rid_cond:
+            if self._transport is not transport:
+                return
             for holder in self._pending.values():
                 holder["error"] = "GUI socket closed unexpectedly."
                 holder["done"] = True
+            self._pending.clear()
             self._rid_cond.notify_all()
 
     @property
@@ -451,6 +459,7 @@ class McpBridge:
         except Exception:
             with self._rid_cond:
                 self._pending.pop(rid, None)
+            self._close_timed_out_transport(transport)
             raise
 
         deadline = time.monotonic() + timeout_seconds
@@ -539,11 +548,12 @@ class McpBridge:
 
     def disconnect(self) -> str:
         transport = self._transport
-        if transport is None or not transport.is_open:
+        if transport is None:
             return "Not connected."
-        transport.close()
+        was_open = transport.is_open
         self._transport = None
-        return "Disconnected from GUI."
+        transport.close()
+        return "Disconnected from GUI." if was_open else "Not connected."
 
     def launch(
         self,

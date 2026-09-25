@@ -99,7 +99,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(reveals=("editor:{editor_id}",)),
+        agent=AgentMethodPolicy(
+            reveals=("editor:{editor_id}",), reveals_without=("prefix",)
+        ),
     ),
     method_entry(
         "editor.commit",

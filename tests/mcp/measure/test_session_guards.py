@@ -285,6 +285,128 @@ def test_status_and_unrelated_catalog_read_do_not_accept_unread_gui_cfg_edit(
     )
 
 
+@pytest.mark.parametrize(
+    ("read_method", "read_params", "guard_method", "resource"),
+    [
+        ("tab.get_cfg", {"tab_id": "t"}, "tab.run_start", "tab:t:cfg"),
+        ("editor.get", {"editor_id": "e"}, "editor.commit", "editor:e"),
+    ],
+)
+@pytest.mark.parametrize("prefix", ["modules.readout", "not.there"])
+def test_partial_or_unmatched_cfg_read_does_not_accept_an_unread_gui_edit(
+    client: MeasureClient,
+    read_method: str,
+    read_params: dict[str, Any],
+    guard_method: str,
+    resource: str,
+    prefix: str,
+) -> None:
+    def respond(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        replies = {
+            "state.has_project": {"value": False},
+            "state.has_active_context": {"value": False},
+            "state.has_soc": {"value": False},
+            "context.active": {"label": None},
+            "device.list": {"devices": []},
+            "predictor.info": {"loaded": False},
+            "tab.snapshot": {"tabs": []},
+            "operation.active": {"operations": []},
+        }
+        return replies.get(
+            method,
+            {"tree": {} if params.get("prefix") == "not.there" else {"readout": 1}},
+        )
+
+    client.transport.responder = respond
+    set_versions(client, {resource: 3})
+    client.call("rpc_call", {"method": read_method, "params": read_params})
+    set_versions(client, {resource: 4})  # GUI edits a field outside the partial tree.
+    client.call(
+        "rpc_call", {"method": read_method, "params": {**read_params, "prefix": prefix}}
+    )
+    client.call("status", {})
+
+    def guarded(params: dict[str, Any]) -> dict[str, Any]:
+        if params["expected_versions"][resource] != 4:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "stale_version",
+                    "message": "cfg changed",
+                    "data": {"stale": [resource]},
+                },
+            }
+        return {"ok": True, "result": {"operation_id": 1}}
+
+    client.transport.replies[guard_method] = guarded
+    guard_params = (
+        {"tab_id": "t"}
+        if guard_method == "tab.run_start"
+        else {"editor_id": "e", "name": "copy"}
+    )
+    with pytest.raises(RuntimeError) as error:
+        client.context.send_gui_rpc(guard_method, guard_params)
+    assert getattr(error.value, "reason", None) == "stale_version"
+    assert (
+        next(
+            params["expected_versions"][resource]
+            for method, params in reversed(client.transport.sent)
+            if method == guard_method
+        )
+        == 3
+    )
+
+
+@pytest.mark.parametrize(
+    ("read_method", "read_params", "guard_method", "resource"),
+    [
+        ("tab.get_cfg", {"tab_id": "t"}, "tab.run_start", "tab:t:cfg"),
+        ("editor.get", {"editor_id": "e"}, "editor.commit", "editor:e"),
+    ],
+)
+def test_read_reply_cannot_reveal_a_later_unseen_version(
+    client: MeasureClient,
+    read_method: str,
+    read_params: dict[str, Any],
+    guard_method: str,
+    resource: str,
+) -> None:
+    set_versions(client, {resource: 3})
+
+    def read_then_gui_edits(params: dict[str, Any]) -> dict[str, Any]:
+        set_versions(client, {resource: 4})
+        return {"ok": True, "result": {"tree": {"readout": 3}}}
+
+    client.transport.replies[read_method] = read_then_gui_edits
+    client.call("rpc_call", {"method": read_method, "params": read_params})
+
+    def guarded(params: dict[str, Any]) -> dict[str, Any]:
+        if params["expected_versions"][resource] == 3:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "stale_version",
+                    "message": "cfg changed",
+                    "data": {"stale": [resource]},
+                },
+            }
+        return {"ok": True, "result": {"operation_id": 1}}
+
+    client.transport.replies[guard_method] = guarded
+    params = (
+        {"tab_id": "t"}
+        if guard_method == "tab.run_start"
+        else {"editor_id": "e", "name": "copy"}
+    )
+    with pytest.raises(RuntimeError) as error:
+        client.context.send_gui_rpc(guard_method, params)
+    assert getattr(error.value, "reason", None) == "stale_version"
+    sent = [method for method, _ in client.transport.sent]
+    assert sent.index("resources.versions") < sent.index(read_method)
+
+
 def test_unguarded_read_does_not_attach_versions(client: MeasureClient) -> None:
     assert send(client, "tab.snapshot", {"tab_id": "t"}) == {"tab_id": "t"}
 

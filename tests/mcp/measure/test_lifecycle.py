@@ -1,12 +1,100 @@
 """Measure MCP connection and live GUI catalog contracts."""
 
+import json
+import socket
+import threading
+import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 import pytest
+from zcu_tools.gui.app.main.services.remote.method_entries import METHOD_ENTRIES
+from zcu_tools.gui.app.main.services.remote.method_entries._registry import (
+    build_agent_catalog,
+)
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 
 from ._support import make_client
+
+
+class LoopbackGui:
+    """One disposable GUI wire incarnation, without a process or instrument."""
+
+    def __init__(self, catalog: dict[str, Any], port: int = 0) -> None:
+        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server.bind(("127.0.0.1", port))
+        self._server.listen(1)
+        self._server.settimeout(0.1)
+        self.port = int(self._server.getsockname()[1])
+        self._catalog = catalog
+        self._stop = threading.Event()
+        self._socket: socket.socket | None = None
+        self.sent: list[str] = []
+        self.close_on: str | None = None
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        try:
+            while not self._stop.is_set():
+                try:
+                    conn, _ = self._server.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                self._socket = conn
+                with conn, conn.makefile("rb") as stream:
+                    for line in stream:
+                        if self._stop.is_set():
+                            return
+                        request = json.loads(line)
+                        method = request["method"]
+                        self.sent.append(method)
+                        if method == self.close_on:
+                            return
+                        reply = {
+                            "id": request["id"],
+                            "ok": True,
+                            "result": self._result(method, request["params"]),
+                        }
+                        try:
+                            conn.sendall((json.dumps(reply) + "\n").encode())
+                        except OSError:
+                            return
+        finally:
+            self._server.close()
+
+    def _result(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any]
+        if method == "wire.version":
+            result = {"wire_version": self._catalog["wire"], "gui_version": 83}
+        elif method == "rpc.catalog":
+            result = {"methods": self._catalog["methods"]}
+        elif method == "resources.versions":
+            result = {"versions": {}}
+        elif method == "operation.active":
+            result = {"operations": [{"op": 1, "tab": None, "kind": "device"}]}
+        elif method == "operation.await":
+            result = {"reason": "completed", "status": "finished"}
+        elif method == "operation.cancel":
+            result = {"status": "finished"}
+        else:
+            result = overview_rpc(method, params)
+        return result
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._socket is not None:
+            with suppress(OSError):
+                self._socket.shutdown(socket.SHUT_RDWR)
+            self._socket.close()
+        self._server.close()
+        self._thread.join(timeout=2)
+        assert not self._thread.is_alive()
+
 
 CATALOG = [
     {
@@ -18,6 +106,7 @@ CATALOG = [
         "tool_names": [],
         "guard_deps": [],
         "reveals": [],
+        "reveals_without": [],
         "refresh_after_write": False,
         "operation_key": None,
     },
@@ -34,6 +123,7 @@ CATALOG = [
         "tool_names": ["guide"],
         "guard_deps": [],
         "reveals": [],
+        "reveals_without": [],
         "refresh_after_write": False,
         "operation_key": None,
     },
@@ -111,6 +201,51 @@ def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
         method not in {"adapter.guide", "rpc.catalog"}
         for method, _ in client.transport.sent[2:]
     )
+
+
+def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path, port_is_open=lambda port: True)
+    catalog = {"methods": build_agent_catalog(METHOD_ENTRIES)}
+    gui_a = LoopbackGui({**catalog, "wire": client.context.config.wire_version})
+    client.context.bridge.set_transport(None)
+    gui_b: LoopbackGui | None = None
+    try:
+        old = client.call("connect", {"port": gui_a.port})["status"]["running"][0]["op"]
+        gui_a.close_on = "tab.set_cfg"
+        with pytest.raises((ConnectionError, OSError, RuntimeError)):
+            client.call(
+                "rpc_call",
+                {"method": "tab.set_cfg", "params": {"tab_id": "t", "edits": []}},
+            )
+        gui_a.stop()
+        gui_b = LoopbackGui(
+            {**catalog, "wire": client.context.config.wire_version}, gui_a.port
+        )
+        deadline = time.monotonic() + 2
+        while client.context.bridge.is_connected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not client.context.bridge.is_connected
+        with pytest.raises(RuntimeError) as error:
+            client.call("wait", {"op": old})
+        assert getattr(error.value, "reason", None) == "unknown_op"
+        new = client.call("connect", {"port": gui_a.port})["status"]["running"][0]["op"]
+        assert new != old
+        with pytest.raises(RuntimeError) as error:
+            client.call("cancel", {"op": old})
+        assert getattr(error.value, "reason", None) == "unknown_op"
+        assert client.call("wait", {"op": new})["status"] == "finished"
+        assert client.call("cancel", {"op": new})["status"] == "finished"
+        assert gui_a.sent.count("tab.set_cfg") == 1
+        assert "tab.set_cfg" not in gui_b.sent
+        assert gui_b.sent.count("operation.await") == 1
+        assert gui_b.sent.count("operation.cancel") == 1
+    finally:
+        client.context.bridge.disconnect()
+        gui_a.stop()
+        if gui_b is not None:
+            gui_b.stop()
 
 
 def test_incompatible_wire_refuses_catalog_and_mutation(
@@ -370,7 +505,21 @@ def test_connect_refuses_second_port_while_launched_gui_is_alive(
 
 
 @pytest.mark.parametrize(
-    "catalog", [{"methods": "invalid"}, {"methods": [CATALOG[0], CATALOG[0]]}]
+    "catalog",
+    [
+        {"methods": "invalid"},
+        {"methods": [CATALOG[0], CATALOG[0]]},
+        {
+            "methods": [
+                {
+                    key: value
+                    for key, value in CATALOG[0].items()
+                    if key != "reveals_without"
+                }
+            ]
+        },
+        {"methods": [{**CATALOG[0], "reveals_without": ["prefix"]}]},
+    ],
 )
 def test_connect_rejects_malformed_or_duplicate_catalog(
     tmp_path: Path,

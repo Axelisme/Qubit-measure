@@ -38,6 +38,7 @@ class CatalogEntry(TypedDict):
     tool_names: list[str]
     guard_deps: tuple[str, ...]
     reveals: tuple[str, ...]
+    reveals_without: tuple[str, ...]
     refresh_after_write: bool
     operation_key: str | None
 
@@ -86,11 +87,12 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             )
         deps = value.get("guard_deps")
         reveals = value.get("reveals")
+        reveals_without = value.get("reveals_without")
         if not all(
             isinstance(patterns, list)
             and all(isinstance(pattern, str) and pattern for pattern in patterns)
-            for patterns in (deps, reveals)
-        ):
+            for patterns in (deps, reveals, reveals_without)
+        ) or (reveals_without and not reveals):
             raise GuiRpcError(
                 "invalid GUI rpc.catalog policy", reason="incompatible_wire"
             )
@@ -103,6 +105,7 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             tool_names=cast(list[str], tools),
             guard_deps=tuple(cast(list[str], deps)),
             reveals=tuple(cast(list[str], reveals)),
+            reveals_without=tuple(cast(list[str], reveals_without)),
             refresh_after_write=refresh_after_write,
             operation_key=operation_key,
         )
@@ -285,6 +288,8 @@ class MeasureMcpSession:
         registry is maintained for these GUI-owned internal reads.
         """
         self.ensure_connected()
+        entry = self._catalog.get(method)
+        observed = self._read_revealed_versions(entry, params)
         reply = self.bridge.send_rpc_raw(method, params, 6.0)
         if not reply.get("ok"):
             error = reply.get("error", {})
@@ -300,9 +305,8 @@ class MeasureMcpSession:
             )
         # The catalog is the sole owner of read-reveal policy, including reads
         # used internally by status (such as device membership).
-        entry = self._catalog.get(method)
-        if entry is not None and entry["reveals"]:
-            self.refresh_revealed_versions(method, params)
+        if observed is not None:
+            self._last_seen.update(observed)
         return result
 
     def read_version_table(self) -> dict[str, int] | None:
@@ -336,19 +340,27 @@ class MeasureMcpSession:
             self._catalog[method]["guard_deps"], params, self._last_seen
         )
 
-    def refresh_revealed_versions(self, method: str, params: dict[str, Any]) -> None:
+    def _read_revealed_versions(
+        self, entry: CatalogEntry | None, params: dict[str, Any]
+    ) -> dict[str, int] | None:
+        """Sample before the read; a later version may describe data not in its reply."""
+        if (
+            entry is None
+            or not entry["reveals"]
+            or any(name in params for name in entry["reveals_without"])
+        ):
+            return None
         versions = self.read_version_table()
-        if versions is not None:
-            self._last_seen.update(
-                expand_pattern_keys(self._catalog[method]["reveals"], params, versions)
-            )
+        if versions is None:
+            return None
+        return expand_pattern_keys(entry["reveals"], params, versions)
 
     def _record_successful_versions(
-        self, entry: CatalogEntry, method: str, params: dict[str, Any]
+        self, entry: CatalogEntry, observed: dict[str, int] | None
     ) -> None:
-        """A declared write refreshes baseline; a read reveals only its keys."""
-        if entry["reveals"]:
-            self.refresh_revealed_versions(method, params)
+        """A declared write refreshes baseline; a read records only its pre-read keys."""
+        if observed is not None:
+            self._last_seen.update(observed)
         elif entry["refresh_after_write"]:
             self.refresh_versions()
 
@@ -376,6 +388,7 @@ class MeasureMcpSession:
                 **params,
                 "expected_versions": self.build_expected_versions(method, params),
             }
+        observed = self._read_revealed_versions(entry, params)
         try:
             resp = self.bridge.send_rpc_raw(method, send_params, timeout_seconds)
         except GuiTransportTimeoutError as exc:
@@ -407,7 +420,7 @@ class MeasureMcpSession:
             raise GuiRpcError(
                 f"invalid GUI reply for {method}", reason="incompatible_wire"
             )
-        self._record_successful_versions(entry, method, params)
+        self._record_successful_versions(entry, observed)
         result = dict(result)
         pattern = entry["operation_key"]
         if pattern is not None and "operation_id" in result:

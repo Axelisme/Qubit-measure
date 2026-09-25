@@ -25,6 +25,8 @@ class AgentMethodPolicy:
     tool_names: tuple[str, ...] = ()
     guard_deps: tuple[str, ...] = ()
     reveals: tuple[str, ...] = ()
+    # A partial query cannot reveal the entire named resource.
+    reveals_without: tuple[str, ...] = ()
     # Only a successful write may advance the whole observed baseline.
     refresh_after_write: bool = False
     operation_key: str | None = None
@@ -36,6 +38,8 @@ class AgentMethodPolicy:
             raise ValueError("tool exposure requires tool_names only")
         if len(set(self.tool_names)) != len(self.tool_names):
             raise ValueError("duplicate tool names")
+        if self.reveals_without and not self.reveals:
+            raise ValueError("reveals_without requires revealed resources")
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +77,7 @@ def build_agent_catalog(
             "tool_names": list(entry.agent.tool_names),
             "guard_deps": list(entry.agent.guard_deps),
             "reveals": list(entry.agent.reveals),
+            "reveals_without": list(entry.agent.reveals_without),
             "refresh_after_write": entry.agent.refresh_after_write,
             "operation_key": entry.agent.operation_key,
         }

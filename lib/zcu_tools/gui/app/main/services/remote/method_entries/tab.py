@@ -90,7 +90,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(reveals=("tab:{tab_id}:cfg",)),
+        agent=AgentMethodPolicy(
+            reveals=("tab:{tab_id}:cfg",), reveals_without=("prefix",)
+        ),
     ),
     method_entry(
         "tab.set_cfg",
