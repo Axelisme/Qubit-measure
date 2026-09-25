@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-09-24 — 移植到 main：現況與既存失敗
+**Last updated:** 2026-09-24 — 品質設定校準與 opt-in diagnostics
 
 `tools/` 放 repo 內部的品質檢查。`script/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
@@ -41,6 +41,9 @@ uv run --no-sync -- python tools/gate.py --with-pyright   # 加上 pyright，多
 --with-pyright   現況模式加上 pyright（約 +40 秒）
 ```
 
+`--no-fix` 會對同一批受影響檔案執行 import 排序檢查與 `ruff format --check`，不寫檔；
+只有沒有存續的 Python 變更檔案時才跳過這兩項。
+
 `--no-fix` 之外，預設會實際執行 import 排序與 formatter，也就是說 **`gate.py` 會改你的檔案**。
 那是 `CLAUDE.md` §5 要求的步驟，放進來是為了不必記兩次。
 
@@ -64,7 +67,10 @@ Run separately: python tools/check_pytest_collection.py; pytest -n auto --dist=w
 uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector suppressions
 ```
 
-`gate.py` 只在失敗時印細節；全綠時四行就結束，因為沒有東西需要你讀。
+`gate.py` 在失敗時印診斷細節。品質設定有變時，即使計數未增加，也會列出 `REVIEW` 與
+before/after；這是人工審查提示，不是自動判定設定變弱，也不代表已獲豁免。
+範圍包含 Ruff、Pyright、pytest 設定與 `.importlinter`。刪除規則、降低 severity 或縮小
+掃描範圍不能只靠違規計數看見，因此這些差異獨立列出。
 
 格式化排在最前面是有原因的：它會改寫程式碼，先量測再格式化的話，讀到結果時那個狀態已經不存在了。
 
@@ -98,13 +104,27 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 打開」這個改動本身。但 base tree 同時保留自己那份於 `pyproject.base.toml`，供設定層的抑制
 比對使用——否則新增一條 per-file-ignore 會對負責看見它的檢查隱形。
 
-成本與改動大小成正比，不與 repo 大小成正比。這是能放進 writer 迴圈的前提。
+預設 Pyright 只檢查變更檔案，不能保證未修改 caller 仍符合修改後的 interface。
+合併前使用獨立的慢速全樹比較，讓既存債務保持可見而不阻擋本次變更：
+
+```bash
+uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyright --full-pyright
+```
+
+`--full-pyright` 對 base 與 candidate 都使用 candidate 設定、目前 worktree interpreter 與
+已安裝依賴，不建立 base 的另一個環境；receipt 的 `pyright_scope` 記錄此次範圍。
+此模式包含未修改 caller，成本與全樹相關，刻意不加入快速 gate。
+`gate.py --with-pyright` 則仍是現況報告，exit 0 不代表 regression 驗收通過。
+
+設定差異與診斷分開判讀：兩側使用 candidate 設定仍會受規則弱化影響，合併前必須審閱
+`configuration_changes`，不能只看 `status: PASS`。暫存 base tree 放在 invoking worktree
+的 `.agent_state/ratchet/`，比較結束即移除該次目錄。
 
 ## 九項檢查
 
 | 檢查 | 守什麼 | 判讀 | 現況（2026-09-24） |
 | --- | --- | --- | --- |
-| `lint-imports` | 模組間的依賴方向，契約在 `.importlinter`（目前只有 C1：experiment 不依賴 gui） | 硬性 | 綠 |
+| `lint-imports` | 模組間的依賴方向，契約在 `.importlinter`；包含 experiment、shared session、cfg core/widgets、autofluxdep 與 analysis kernel | 硬性 | 綠 |
 | `check_pytest_collection.py` | 四種 pytest entrypoint／並行組合收集到相同的測試集 | 硬性 | 綠 |
 | `ruff check` | 結構：函式複雜度、分支數、statement 數、參數數、死碼、boolean trap | ratchet | 1492 |
 | `pyright` | 型別，以及跨模組存取 private 造成的封裝破口 | ratchet | 3871 |
@@ -120,6 +140,49 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 ratchet。
 
 `ruff` 與 `pyright` 的規則選擇記在 `pyproject.toml` 的註解裡，包含刻意排除哪些規則與原因。
+表中的數字是指定日期的歷史觀察，不是新規則啟用後的 baseline。新增 lint 規則與 missing-import
+檢查仍由 ratchet 判定；不為了開啟規則而順手改寫全庫。未安裝 `gdrive` 等 optional profile 時，
+相關 import 診斷保留可見，不以缺少第三方 type stub 為理由全域關閉 import 檢查。
+
+## Opt-in diagnostics
+
+以下命令不進快速 gate，也不自動修復依賴。先在要檢查的 worktree 安裝 locked 環境：
+
+```bash
+uv sync --directory <worktree> --locked --group quality
+```
+
+一般 `pytest` 預設停用 randomly plugin，即使已安裝 quality group 也不改變 collection 順序。
+診斷測試污染時，明確啟用 plugin 與 seed；先單 worker，再按需要檢查 parallel 排程：
+
+```bash
+uv run --directory <worktree> --no-sync -- pytest <affected-tests> -n 0 -p randomly --randomly-seed=12345
+```
+
+同 seed 不保證重現 thread／xdist 排程；randomly 也會重設隨機狀態。保留 seed、選集與執行模式，
+把順序造成的差異視為缺陷，不以偶然通過結案。
+
+Branch coverage 已由 dev group 提供，針對修改的 module 找未驗證分支，不設全域百分比門檻：
+
+```bash
+uv run --directory <worktree> --no-sync -- pytest <affected-tests> --cov=<affected-module> --cov-branch --cov-report=term-missing
+```
+
+依賴宣告與安全稽核適合獨立診斷或 release 前執行，非 code-health regression 判定：
+
+```bash
+uv run --directory <worktree> --no-sync -- deptry .
+uv run --directory <worktree> --no-sync -- pip-audit --format json
+```
+
+Deptry findings 需對照 `lib/` layout、套件／module 名稱、Notebook 使用與 optional extras；
+不要只因 unused 診斷而移除依賴。Pip-audit 需要漏洞服務，檢查的是目前環境，不代表未安裝的
+Python 3.12 design 或其他 profiles 也通過；Git／未識別套件是涵蓋限制，需列出而不是略過。
+每個受支援 profile 用自己的環境檢查，不為了掃描而混裝不相容 extras，也不使用 `--fix`。
+
+Ruff 候選規則調查使用 `--extend-select` 保留原規則；`RUF100` 的結果取決於目前啟用哪些規則。
+抑制清理前確認適用的完整規則集合。Broad catch 的 logging 可以通過 lint，但是否能恢復、
+失敗狀態是否保留，仍由 code-quality policy 的人工審查判斷。
 
 ## 為什麼要計量逃生口
 
