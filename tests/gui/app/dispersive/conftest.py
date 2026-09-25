@@ -8,8 +8,8 @@ from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.utils.datasaver import save_labber_data
 
 
-@pytest.fixture(autouse=True)
-def _drain_qt_events() -> None:  # pyright: ignore[reportUnusedFunction]  # pytest fixture lookup
+@pytest.fixture(autouse=True, name="_drain_qt_events")
+def isolate_non_ui_qt_events() -> None:
     """Keep non-UI Dispersive tests independent of QApplication."""
 
 

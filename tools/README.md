@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-09-25 — 測試結構檢查
+**Last updated:** 2026-09-25
 
 `tools/` 放 repo 內部的品質檢查。`script/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
@@ -87,7 +87,7 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 ## ratchet 是判準，不是另一個檢查
 
 `check_ratchet.py` 把七項檢查對照 base 判讀：逐 (檔案, 規則) 比較 base tree 與 candidate，
-**只有計數上升才失敗**。既有債務不擋工作，往上加才擋。
+**只有計數上升才失敗**。Git 以 20% 相似度確認的搬檔沿用原檔計數；其餘新檔從零比較。
 
 ```bash
 --base <ref>        判定基準，預設 git merge-base HEAD main
@@ -96,8 +96,8 @@ uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
 
 兩個設計決定值得知道：
 
-**沒有 baseline 檔。** 以路徑為 key 的 baseline 在檔案改名時失效——那正是大重構最需要 gate
-讓路的時候；而且它會變成第二個需要治理所有權的檔案。git 已經知道什麼變了。
+**沒有 baseline 檔。** Git diff 將可辨識的舊路徑對應到新路徑，再比較兩側檢查結果。
+拆檔時只有一個新檔可成為 Git rename；其餘新檔仍須處理新增診斷。
 
 **兩側都用 candidate 的規則量測。** base tree 透過 `git archive` 展開後會拿到 candidate 的
 `pyproject.toml`，否則新啟用一條規則會讓它的所有發現看起來都是新的，ratchet 會擋下「把檢查
@@ -179,8 +179,8 @@ Fixture 依賴深度、setup 語意重複與責任混合仍由 review 判斷，�
 既有 `check_file_size.py` 提供大小訊號，無須另設一套測試檔行數門檻。
 
 快速 gate 的 ratchet 只比較 blocking 的每檔每規則計數，兩側用 candidate checker 掃全 tests tree，
-讓新增目標檔造成既有 import 可解析的情況也被看見。檔案搬遷仍可能因 path key 改變被報為新增，
-需審閱而非直接當成品質退步。命名提醒留在獨立 checker；`gate.py` 現況表只顯示 blocking 數。
+讓新增目標檔造成既有 import 可解析的情況也被看見。無法由 Git 確認來源的新增檔仍從零計數，
+需審閱是否有拆檔繼承的診斷。命名提醒留在獨立 checker；`gate.py` 現況表只顯示 blocking 數。
 
 ## Opt-in diagnostics
 

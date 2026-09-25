@@ -147,7 +147,7 @@ max-args = 6
 include = ["lib", "tests", "script", "tools"]
 executionEnvironments = [
   { root = "lib", extraPaths = ["lib"] },
-  { root = "tests", extraPaths = ["lib", "tools"] },
+  { root = "tests", extraPaths = ["lib", "tools", "."] },
   { root = "script", extraPaths = ["lib"] },
   { root = "tools", extraPaths = ["lib", "tools"] },
 ]

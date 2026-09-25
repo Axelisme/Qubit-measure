@@ -6,10 +6,9 @@ it counts violations per (file, rule) on both the base tree and the candidate,
 and fails only when a count rises. Existing debt does not block work; adding to
 it does.
 
-There is deliberately no baseline file. A baseline keyed by path goes stale the
-moment a file is renamed, which is exactly when a large refactor needs the gate
-to stay out of the way, and it becomes a second artifact with its own ownership
-question. Git already knows what changed.
+There is deliberately no baseline file. Git-detected renames transfer the old
+file's counts to its new path; genuine additions still start at zero. A saved
+path-keyed baseline would go stale during refactors.
 
 Both sides are measured with the CANDIDATE's configuration: the base tree gets
 the candidate's pyproject.toml copied in before it is measured. Otherwise
@@ -85,6 +84,52 @@ def changed_paths(root: Path, base: str) -> frozenset[str]:
     names = set(_git(root, "diff", "--name-only", base).splitlines())
     names.update(_git(root, "ls-files", "--others", "--exclude-standard").splitlines())
     return frozenset(name for name in names if name)
+
+
+def renamed_paths(root: Path, base: str) -> dict[str, str]:
+    """Map a base path to its candidate path for Git-detected renames only.
+
+    The lower similarity threshold covers test files whose imports changed during
+    relocation. Split files still have one Git owner; other parts stay additions.
+    """
+    records = iter(
+        _git(
+            root,
+            "diff",
+            "--no-ext-diff",
+            "--name-status",
+            "-z",
+            "--find-renames=20%",
+            base,
+            "--",
+        )
+        .rstrip("\0")
+        .split("\0")
+    )
+    result: dict[str, str] = {}
+    try:
+        for status in records:
+            if not status:
+                continue
+            source = next(records)
+            if status.startswith(("R", "C")):
+                destination = next(records)
+                if status.startswith("R"):
+                    result[source] = destination
+    except StopIteration as error:
+        raise RatchetError("git diff returned incomplete rename data") from error
+    return result
+
+
+def remap_counts(
+    counts: Mapping[tuple[str, str], int], renames: Mapping[str, str]
+) -> dict[tuple[str, str], int]:
+    """Compare existing findings under the candidate name of their source file."""
+    mapped: dict[tuple[str, str], int] = {}
+    for (path, rule), count in counts.items():
+        key = (renames.get(path, path), rule)
+        mapped[key] = mapped.get(key, 0) + count
+    return mapped
 
 
 def changed_python_files(root: Path, base: str) -> tuple[str, ...]:
@@ -334,6 +379,9 @@ def run(
             if name.endswith(".py") and name.split("/")[0] in _support.CHECKED_ROOTS
         )
     )
+    renames = renamed_paths(root, resolved)
+    old_by_new = {new: old for old, new in renames.items()}
+    base_files = tuple(sorted({old_by_new.get(name, name) for name in files}))
     found: dict[str, tuple[Regression, ...]] = {}
     configuration_changes: list[dict[str, Any]] = []
     selected = tuple(detectors)
@@ -364,12 +412,14 @@ def run(
             for name in selected:
                 if name == "pyright" and full_pyright:
                     found[name] = regressions(
-                        pyright_counts(tree, None), pyright_counts(root, None)
+                        remap_counts(pyright_counts(tree, None), renames),
+                        pyright_counts(root, None),
                     )
                 else:
                     detector = _DETECTORS[name]
                     found[name] = regressions(
-                        detector(tree, files), detector(root, files)
+                        remap_counts(detector(tree, base_files), renames),
+                        detector(root, files),
                     )
 
     return {

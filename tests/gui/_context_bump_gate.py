@@ -18,7 +18,7 @@ def _is_md_target(arg: ast.expr) -> bool:
     )
 
 
-def _is_md_ml_write(node: ast.Call) -> bool:
+def is_md_ml_write(node: ast.Call) -> bool:
     func = node.func
     return (isinstance(func, ast.Attribute) and func.attr in _ML_WRITE_METHODS) or (
         isinstance(func, ast.Name)
@@ -28,7 +28,7 @@ def _is_md_ml_write(node: ast.Call) -> bool:
     )
 
 
-def _is_context_bump(node: ast.Call) -> bool:
+def is_context_bump(node: ast.Call) -> bool:
     """True for ``<...>.version.bump(\"context\")``."""
     func = node.func
     if not (isinstance(func, ast.Attribute) and func.attr == "bump"):
@@ -41,7 +41,7 @@ def _is_context_bump(node: ast.Call) -> bool:
     return isinstance(arg, ast.Constant) and arg.value == "context"
 
 
-def _calls_in(fn: ast.FunctionDef) -> list[ast.Call]:
+def calls_in(fn: ast.FunctionDef) -> list[ast.Call]:
     return [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
 
 
@@ -52,9 +52,9 @@ def missing_context_bumps(path: Path) -> dict[str, list[str]]:
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef):
             continue
-        calls = _calls_in(fn)
-        if not any(_is_md_ml_write(c) for c in calls):
+        calls = calls_in(fn)
+        if not any(is_md_ml_write(c) for c in calls):
             continue
-        if not any(_is_context_bump(c) for c in calls):
+        if not any(is_context_bump(c) for c in calls):
             offenders.setdefault(path.name, []).append(fn.name)
     return offenders

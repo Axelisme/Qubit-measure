@@ -12,9 +12,9 @@ from pathlib import Path
 import zcu_tools.gui.app.main.services as services_pkg
 
 from tests.gui._context_bump_gate import (
-    _calls_in,
-    _is_context_bump,
-    _is_md_ml_write,
+    calls_in,
+    is_context_bump,
+    is_md_ml_write,
     missing_context_bumps,
 )
 
@@ -40,9 +40,9 @@ def test_gate_detects_a_missing_bump():
     )
     tree = ast.parse(src)
     fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef))
-    calls = _calls_in(fn)
-    assert any(_is_md_ml_write(c) for c in calls)
-    assert not any(_is_context_bump(c) for c in calls)
+    calls = calls_in(fn)
+    assert any(is_md_ml_write(c) for c in calls)
+    assert not any(is_context_bump(c) for c in calls)
 
 
 def test_gate_recognises_a_correct_writer():
@@ -54,9 +54,9 @@ def test_gate_recognises_a_correct_writer():
     )
     tree = ast.parse(src)
     fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef))
-    calls = _calls_in(fn)
-    assert any(_is_md_ml_write(c) for c in calls)
-    assert any(_is_context_bump(c) for c in calls)
+    calls = calls_in(fn)
+    assert any(is_md_ml_write(c) for c in calls)
+    assert any(is_context_bump(c) for c in calls)
 
 
 def test_gate_ignores_reads_and_pure_swaps():
@@ -70,5 +70,5 @@ def test_gate_ignores_reads_and_pure_swaps():
     )
     tree = ast.parse(src)
     fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef))
-    calls = _calls_in(fn)
-    assert not any(_is_md_ml_write(c) for c in calls)
+    calls = calls_in(fn)
+    assert not any(is_md_ml_write(c) for c in calls)

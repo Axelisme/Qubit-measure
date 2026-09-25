@@ -6,6 +6,8 @@ import socket
 
 import pytest
 
+pytestmark = pytest.mark.requires_loopback
+
 
 def test_ndjson_endpoint_bind_failure_raises_runtime_error(qapp) -> None:
     """NdjsonRpcEndpoint.start() wraps OSError into RuntimeError with a message.
