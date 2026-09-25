@@ -71,6 +71,11 @@ STATUS_CHECKS: Final = (
         "violation_count",
     ),
     Check(
+        "test structure",
+        (sys.executable, str(_TOOLS_DIR / "check_test_structure.py")),
+        "violation_count",
+    ),
+    Check(
         "test capabilities",
         (sys.executable, str(_TOOLS_DIR / "check_test_capabilities.py")),
         "violation_count",
