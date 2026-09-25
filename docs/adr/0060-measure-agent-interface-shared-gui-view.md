@@ -52,19 +52,25 @@
 **`shutdown()`**
 關閉目前連上的 GUI，不論由誰啟動。走 GUI 正常的關閉流程（保存 session、斷開儀器、清理）。有 run 在跑時回 `reason="busy"`；優雅關閉逾時回 `{stopped: false}`，由使用者處理，不提供強制結束。
 
-**`status()`** — 唯一的定位讀取：
+**`status()`** — 索引，只回答「有什麼、在哪裡」，具體內容由各自的 tool 讀取：
 
 ```text
 {
-  environment: {project, soc, context, devices: [{name, value, unit, output}], predictor: {loaded}},
-  ready: {can_run: bool, missing: [...]},
-  tabs: [{tab: "t3", experiment: "twotone/freq", active: true, running: false,
-          has_result: true, analysis: "ok" | "failed" | null, writeback_pending: 2}],
-  running: [{op, tab, kind, progress}]
+  project: {chip, qubit, resonator} | null,
+  soc: {connected, mock},
+  context: {active: "051115_2.000mA" | null},
+  devices: [{name, connected}],
+  predictor: {loaded},
+  ready: {can_run, missing: ["soc", "active_context"]},
+  tabs: [{tab: "t3", experiment: "twotone/freq", running: false}],
+  running: [{op: 17, tab: "t3", kind: "run" | "analyze" | "device"}]
 }
 ```
 
-`tabs[].active` 是 GUI 上目前選中的 tab。
+- 純讀取，不切換 GUI 畫面。
+- `ready.missing` 由現有 readiness 四旗標翻譯而來。
+- `running` 列出所有進行中的操作，不論由誰啟動；`op` 可直接用於 `wait`／`cancel`。
+- 儀器欄位與值、context 清單與 md、tab 的 cfg／結果、進度、SoC 硬體資訊、project 路徑都不在此，分別由 `devices`、context 類 tool、`tab_get`／`tab_live`、`wait`、RPC 讀取。
 
 ### B. 環境（1）
 
