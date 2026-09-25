@@ -10,7 +10,7 @@ from ._params import (
     _json,
     _str,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -19,8 +19,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "List qubit-scoped arbitrary waveform data keys. Returns {waveforms: [name]}.",
-            tool_name="list_arb_waveform",
         ),
+        agent=AgentMethodPolicy(reveals=("arb_waveforms",)),
     ),
     method_entry(
         "arb_waveform.preview",
@@ -31,8 +31,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "PNG. Returns {recipe, preview_figure}; recipe is null for raw imported "
             "assets.",
             (_str("name", "Arbitrary waveform data_key"),),
-            tool_name="get_arb_waveform_preview",
         ),
+        agent=AgentMethodPolicy(reveals=("arb_waveforms",)),
     ),
     method_entry(
         "arb_waveform.set",
@@ -50,7 +50,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
                 _expected_versions(),
             ),
-            tool_name="set_arb_waveform",
         ),
+        agent=AgentMethodPolicy(guard_deps=("arb_waveforms",)),
     ),
 )

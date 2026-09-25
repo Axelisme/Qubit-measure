@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _expected_versions,
@@ -10,7 +10,7 @@ from ._params import (
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -27,10 +27,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("item_kind", "'module' or 'waveform'"),
                 _str("from_name", "Existing ml entry name to load for editing"),
-            ),
-            mcp=McpMethodPolicy.override(
-                "gui_editor_open",
-                reason="folds editor.new tree reply into the editor cfg tool surface",
             ),
         ),
     ),
@@ -69,10 +65,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "JSON scalar, {__kind:eval, expr}, or {__kind:value_ref, key, type?}",
                 ),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_editor_set",
-                reason="batch MCP tool preserves ordered edits and untyped JSON value schema",
-            ),
         ),
     ),
     method_entry(
@@ -104,11 +96,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "(e.g. 'modules.readout'); omit for the whole draft. No match → {}",
                 ),
             ),
-            mcp=McpMethodPolicy.override(
-                "gui_editor_get_cfg",
-                reason="renames tree reply to the agent-facing cfg shape",
-            ),
         ),
+        agent=AgentMethodPolicy(reveals=("editor:{editor_id}",)),
     ),
     method_entry(
         "editor.commit",
@@ -127,8 +116,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("name", "ml entry name to register under"),
                 _expected_versions(),
             ),
-            tool_name="gui_editor_save",
         ),
+        agent=AgentMethodPolicy(guard_deps=("editor:{editor_id}", "context")),
     ),
     method_entry(
         "editor.discard",

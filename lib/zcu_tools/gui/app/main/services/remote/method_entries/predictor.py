@@ -25,7 +25,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("path", "Predictor file path"),
                 _num_default("flux_bias", 0.0, "Flux bias"),
             ),
-            tool_name="gui_predictor_install_from_file",
         ),
     ),
     method_entry(
@@ -50,7 +49,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _num("flux_period", "Flux period (device units); must be non-zero"),
                 _num_default("flux_bias", 0.0, "Flux bias correction (device units)"),
             ),
-            tool_name="gui_predictor_install_params",
         ),
     ),
     method_entry(
@@ -60,7 +58,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Unload the current predictor (idempotent — succeeds with no predictor "
             "loaded). Returns {loaded: false}.",
-            tool_name="gui_predictor_unload",
         ),
     ),
     method_entry(

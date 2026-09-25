@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _json,
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -21,7 +21,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "An unknown label fails fast (invalid_params) with the available labels; no "
             "applied project fails with precondition_failed.",
             (_str("label", "Context label to switch to"),),
-            tool_name="gui_context_switch",
         ),
     ),
     method_entry(
@@ -42,7 +41,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "clone_from", "Label of an existing context to clone ml/md from"
                 ),
             ),
-            tool_name="gui_context_create",
         ),
     ),
     method_entry(
@@ -51,8 +49,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "List context labels",
-            mcp=McpMethodPolicy.internal("folded into gui_context_list"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "context.active",
@@ -60,10 +58,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Active context label",
-            mcp=McpMethodPolicy.internal(
-                "folded into gui_context_list and gui_overview"
-            ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "context.md_get",
@@ -71,10 +67,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "List MetaDict keys",
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_read",
-                reason="merged MCP read covers key listing and per-key reads",
-            ),
         ),
     ),
     method_entry(
@@ -84,10 +76,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Read one MetaDict attribute",
             (_str("key", "MetaDict key"),),
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_read",
-                reason="merged MCP read covers key listing and per-key reads",
-            ),
         ),
     ),
     method_entry(
@@ -125,7 +113,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "'kind' is the module type tag (e.g. 'pulse', 'reset/bath'); 'style' is the "
             "waveform style (e.g. 'gauss', 'const'). Read one entry's full cfg with "
             "gui_context_ml_inspect.",
-            tool_name="gui_context_ml_list",
         ),
     ),
     method_entry(
@@ -135,10 +122,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Set one MetaDict attribute",
             (_str("key", "MetaDict key"), _json("value", "JSON-safe value")),
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_write",
-                reason="batch MCP write preserves ordered MetaDict updates",
-            ),
         ),
     ),
     method_entry(
@@ -148,10 +131,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Delete one MetaDict attribute",
             (_str("key", "MetaDict key"),),
-            mcp=McpMethodPolicy.override(
-                "gui_context_md_delete",
-                reason="batch MCP delete preserves ordered MetaDict deletes",
-            ),
         ),
     ),
     method_entry(
@@ -163,7 +142,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "at this entry degrade to inline Custom (the value is kept inline, not lost); "
             "to re-link, edit them.",
             (_str("name", "Module name"),),
-            tool_name="gui_context_ml_delete_module",
         ),
     ),
     method_entry(
@@ -175,7 +153,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "at this entry degrade to inline Custom (the value is kept inline, not lost); "
             "to re-link, edit them.",
             (_str("name", "Waveform name"),),
-            tool_name="gui_context_ml_delete_waveform",
         ),
     ),
     method_entry(

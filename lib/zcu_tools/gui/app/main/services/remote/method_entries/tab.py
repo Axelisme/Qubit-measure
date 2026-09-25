@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _json,
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -46,7 +46,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the tab the USER is focused on (a collaboration cue, NOT your operation "
             "target); running_tab_id is the tab currently running (or null when "
             "nothing is running).",
-            tool_name="gui_tab_list",
         ),
     ),
     method_entry(
@@ -89,6 +88,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
+        agent=AgentMethodPolicy(reveals=("tab:{tab_id}:cfg",)),
     ),
     method_entry(
         "tab.set_cfg",
@@ -114,10 +114,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 _str("tab_id"),
                 _json("edits", "Ordered list of {path, value} edits"),
-            ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_set_cfg",
-                reason="batch MCP tool preserves ordered edits and untyped JSON value schema",
             ),
         ),
     ),

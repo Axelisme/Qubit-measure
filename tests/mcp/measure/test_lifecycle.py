@@ -1,12 +1,12 @@
-"""Measure lifecycle handlers attach and subscribe without taking over hardware."""
+"""Measure MCP connection and live GUI catalog contracts."""
 
-import socket
 from pathlib import Path
 from typing import Any
 
 import pytest
+from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 
-from ._support import MeasureClient, make_client
+from ._support import make_client
 
 CATALOG = [
     {
@@ -57,7 +57,7 @@ def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = make_client(tmp_path, overview_rpc)
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
     client.transport.replies["rpc.catalog"] = {
         "ok": True,
@@ -112,7 +112,7 @@ def test_incompatible_wire_refuses_catalog_and_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = make_client(tmp_path)
+    client = make_client(tmp_path, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
     client.transport.replies["wire.version"] = {
         "ok": True,
@@ -134,7 +134,7 @@ def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = make_client(tmp_path, overview_rpc)
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
     first = client.transport
     first.replies["rpc.catalog"] = {"ok": True, "result": {"methods": CATALOG}}
     first.replies["adapter.list"] = {"ok": True, "result": {"adapters": ["old"]}}
@@ -148,8 +148,10 @@ def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
     }
     next_transport.replies["project.info"] = {"ok": True, "result": {"chip": "new"}}
     transports = iter((first, next_transport))
+    ports: list[int] = []
 
     def connect(port: int, token: str | None = None) -> str:
+        ports.append(port)
         client.context.bridge.set_transport(next(transports))
         return "connected"
 
@@ -167,151 +169,137 @@ def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
     assert getattr(error.value, "reason", None) == "unknown_method"
     assert [method for method, _ in first.sent].count("adapter.list") == 1
     assert all(method != "adapter.list" for method, _ in next_transport.sent)
+    assert ports == [9912, 9912]
 
 
-def configure_events(client: MeasureClient) -> None:
-    client.transport.replies.update(
-        {
-            "events.list": {
-                "ok": True,
-                "result": {"events": ["tab_added", "run_finished"]},
-            },
-            "events.subscribe": {"ok": True, "result": {}},
-        }
-    )
-
-
-def test_lazy_attach_subscribes_before_forwarding_without_starting_soc(
+def test_discovered_gui_can_restart_on_a_different_port(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    discovered = iter((9911, 9913))
     client = make_client(
         tmp_path,
         overview_rpc,
-        resolve_connect_port=lambda config, requested: 9911,
-        port_is_open=lambda port: port == 9911,
+        resolve_connect_port=lambda config, requested: (
+            requested if requested is not None else next(discovered)
+        ),
+        port_is_open=lambda port: True,
     )
     client.context.bridge.set_transport(None)
-    configure_events(client)
-    connections: list[tuple[int, str | None]] = []
+    first = client.transport
+    first.replies["rpc.catalog"] = {"ok": True, "result": {"methods": CATALOG}}
+    second = type(first)(overview_rpc)
+    second.replies["rpc.catalog"] = {"ok": True, "result": {"methods": CATALOG}}
+    second.replies["adapter.list"] = {"ok": True, "result": {"adapters": ["new"]}}
+    transports = iter((first, second))
+    ports: list[int] = []
 
     def connect(port: int, token: str | None = None) -> str:
-        connections.append((port, token))
-        client.context.bridge.set_transport(client.transport)
+        ports.append(port)
+        client.context.bridge.set_transport(next(transports))
         return "connected"
 
     monkeypatch.setattr(client.context.bridge, "connect", connect)
-    assert client.context.send_gui_rpc("state.has_soc", {}) == {"value": False}
-    assert connections == [(9911, None)]
-    assert client.transport.sent[:3] == [
-        ("events.list", {}),
-        ("events.subscribe", {"events": ["tab_added", "run_finished"]}),
-        ("state.has_soc", {}),
-    ]
-    assert all(method != "soc.connect" for method, _ in client.transport.sent)
-    client.context.send_gui_rpc("state.has_soc", {})
-    assert connections == [(9911, None)]
+    assert client.call("connect", {})["port"] == 9911
+    client.context.bridge.disconnect()
+    assert client.call("rpc_call", {"method": "adapter.list"}) == {
+        "adapters": ["new"],
+    }
+    assert ports == [9911, 9913]
 
 
-@pytest.mark.parametrize(
-    ("method", "reply", "message"),
-    [
-        ("events.list", {"ok": False}, "events.list failed"),
-        (
-            "events.list",
-            {"ok": True, "result": {"events": "invalid"}},
-            "invalid catalog",
-        ),
-        ("events.subscribe", {"ok": False}, "events.subscribe failed"),
-    ],
-)
-def test_failed_subscription_closes_transport_and_clears_pending_events(
+def test_ambiguous_mutation_timeout_does_not_replay_on_reconnect(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    method: str,
-    reply: dict[str, Any],
-    message: str,
 ) -> None:
-    client = make_client(tmp_path, port_is_open=lambda port: True)
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
+    first = client.transport
+    second = type(first)(overview_rpc)
+    second.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {
+            "methods": [
+                {**CATALOG[0], "method": "project.info"},
+            ]
+        },
+    }
+    second.replies["project.info"] = {"ok": True, "result": {"chip": "new"}}
+    client.context.session.ensure_connected()
+    real_send = client.context.bridge.send_rpc_raw
+    attempted: list[str] = []
+
+    def send(
+        method: str, params: dict[str, Any], timeout_seconds: float
+    ) -> dict[str, Any]:
+        if method == "adapter.list":
+            attempted.append(method)
+            client.context.bridge.disconnect()
+            raise GuiTransportTimeoutError(method, timeout_seconds)
+        return real_send(method, params, timeout_seconds)
+
+    def reconnect(port: int, token: str | None = None) -> str:
+        client.context.bridge.set_transport(second)
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "send_rpc_raw", send)
+    monkeypatch.setattr(client.context.bridge, "connect", reconnect)
+    with pytest.raises(RuntimeError) as error:
+        client.call("rpc_call", {"method": "adapter.list", "params": {}})
+    assert getattr(error.value, "reason", None) == "gui_transport_timeout"
+    assert client.call("rpc_call", {"method": "project.info"}) == {"chip": "new"}
+    assert attempted == ["adapter.list"]
+    assert all(method != "adapter.list" for method, _ in second.sent)
+
+
+def test_connect_switches_an_explicit_port_and_discards_previous_observations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
-    configure_events(client)
-    client.transport.replies[method] = reply
+    first = client.transport
+    first.replies["rpc.catalog"] = {"ok": True, "result": {"methods": CATALOG}}
+    other = type(first)(overview_rpc)
+    other.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {
+            "methods": [
+                {**CATALOG[0], "method": "project.info"},
+            ]
+        },
+    }
+    ports: list[int] = []
+    transports = iter((first, other))
 
     def connect(port: int, token: str | None = None) -> str:
-        client.context.bridge.set_transport(client.transport)
-        client.context.session.deliver_event({"event": "tab_added"})
+        ports.append(port)
+        client.context.bridge.set_transport(next(transports))
         return "connected"
 
     monkeypatch.setattr(client.context.bridge, "connect", connect)
-    with pytest.raises(RuntimeError, match=message):
-        client.context.send_gui_rpc("state.has_soc", {})
-    assert not client.context.bridge.is_connected
-    assert not client.transport.is_open
-    assert client.context.session.drain_pending() == {"diagnostics": [], "events": []}
-
-
-@pytest.mark.parametrize("listener_open", [False, True])
-def test_lazy_attach_reports_no_gui_on_probe_or_connection_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    listener_open: bool,
-) -> None:
-    client = make_client(tmp_path, port_is_open=lambda port: listener_open)
-    client.context.bridge.set_transport(None)
-
-    def connect(port: int, token: str | None = None) -> str:
-        raise RuntimeError(f"No GUI is listening on 127.0.0.1:{port}")
-
-    monkeypatch.setattr(client.context.bridge, "connect", connect)
-    with pytest.raises(
-        RuntimeError, match="no running measure-gui found to attach to"
-    ) as error:
-        client.context.send_gui_rpc("state.has_soc", {})
-    assert "gui_launch" in str(error.value)
-
-
-@pytest.mark.parametrize("requested", [None, 9912])
-def test_explicit_connect_uses_discovered_or_requested_port_and_folds_overview(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    requested: int | None,
-) -> None:
-    client = make_client(tmp_path, overview_rpc)
-    client.context.bridge.set_transport(None)
-    configure_events(client)
-    connections: list[tuple[int, str | None]] = []
-
-    def connect(port: int, token: str | None = None) -> str:
-        connections.append((port, token))
-        client.context.bridge.set_transport(client.transport)
-        return "connected"
-
-    monkeypatch.setattr(client.context.bridge, "connect", connect)
-    arguments: dict[str, Any] = {"token": "secret"}
-    if requested is not None:
-        arguments["port"] = requested
-    result = client.call("gui_bridge_connect", arguments)
-    assert connections == [(8765 if requested is None else requested, "secret")]
-    assert result["note"] == "connected"
-    assert result["overview"]["soc"] == {"connected": False, "is_mock": None}
-    assert client.transport.sent[:2] == [
-        ("events.list", {}),
-        ("events.subscribe", {"events": ["tab_added", "run_finished"]}),
+    client.call("connect", {"port": 9911})
+    client.context.session.last_seen_versions["context"] = 12
+    client.context.session.operation_handles["tab:old"] = 43
+    client.call("connect", {"port": 9912})
+    assert ports == [9911, 9912]
+    assert not client.context.session.operation_handles
+    assert "context" not in client.context.session.last_seen_versions
+    assert client.call("rpc_list", {})["methods"] == [
+        {"method": "project.info", "description": "List adapters", "tool_names": []},
     ]
 
 
-@pytest.mark.parametrize("clean", [False, True])
-@pytest.mark.parametrize("auto_connect", [False, True])
-def test_launch_forwards_clean_and_only_subscribes_when_attached(
+def test_connect_launch_modes_do_not_start_hardware_or_kill_an_existing_gui(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    clean: bool,
-    auto_connect: bool,
 ) -> None:
-    client = make_client(tmp_path, overview_rpc)
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: False)
     client.context.bridge.set_transport(None)
-    configure_events(client)
-    calls: list[dict[str, Any]] = []
+    client.transport.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {"methods": CATALOG},
+    }
+    calls: list[tuple[int, list[str] | None]] = []
 
     def launch(
         repo_root: Path,
@@ -320,51 +308,44 @@ def test_launch_forwards_clean_and_only_subscribes_when_attached(
         auto_connect: bool = True,
         extra_args: list[str] | None = None,
     ) -> str:
-        calls.append(
-            {
-                "port": port,
-                "token": token,
-                "auto_connect": auto_connect,
-                "extra_args": extra_args,
-            }
-        )
-        if auto_connect:
-            client.context.bridge.set_transport(client.transport)
+        calls.append((port, extra_args))
+        client.context.bridge.set_transport(client.transport)
         return "launched"
 
     monkeypatch.setattr(client.context.bridge, "launch", launch)
-    result = client.call(
-        "gui_launch",
-        {
-            "port": 9912,
-            "token": "secret",
-            "clean": clean,
-            "auto_connect": auto_connect,
-        },
-    )
-    assert calls == [
-        {
-            "port": 9912,
-            "token": "secret",
-            "auto_connect": auto_connect,
-            "extra_args": ["--clean"] if clean else None,
-        }
-    ]
-    assert result["note"] == "launched"
-    if auto_connect:
-        assert result["overview"]["soc"]["connected"] is False
-        assert client.transport.sent[0] == ("events.list", {})
-    else:
-        assert result == {"note": "launched"}
-        assert client.transport.sent == []
+    with pytest.raises(RuntimeError) as error:
+        client.call("connect", {})
+    assert getattr(error.value, "reason", None) == "no_gui"
+    assert calls == []
+    result = client.call("connect", {"launch": "if_missing", "clean": True})
+    assert result["launched"] is True
+    assert calls == [(8765, ["--clean"])]
+    assert all(method != "soc.connect" for method, _ in client.transport.sent)
+
+    busy = make_client(tmp_path, port_is_open=lambda port: True)
+    busy.context.bridge.set_transport(None)
+    with pytest.raises(RuntimeError) as error:
+        busy.call("connect", {"launch": "new"})
+    assert getattr(error.value, "reason", None) == "port_in_use"
 
 
-def test_launch_rejects_an_occupied_port_before_starting_a_process(
+@pytest.mark.parametrize(
+    "catalog", [{"methods": "invalid"}, {"methods": [CATALOG[0], CATALOG[0]]}]
+)
+def test_connect_rejects_malformed_or_duplicate_catalog(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    catalog: dict[str, Any],
 ) -> None:
-    client = make_client(tmp_path)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", 0))
-        listener.listen(1)
-        with pytest.raises(RuntimeError, match="already in use"):
-            client.call("gui_launch", {"port": listener.getsockname()[1]})
+    client = make_client(tmp_path, port_is_open=lambda port: True)
+    client.context.bridge.set_transport(None)
+    client.transport.replies["rpc.catalog"] = {"ok": True, "result": catalog}
+
+    def connect(port: int, token: str | None = None) -> str:
+        client.context.bridge.set_transport(client.transport)
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    with pytest.raises(RuntimeError, match="catalog"):
+        client.call("connect", {"port": 9912})
+    assert not client.context.bridge.is_connected

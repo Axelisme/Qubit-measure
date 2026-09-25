@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _obj_default,
     _str,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -26,7 +26,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "succeeded); cancelled is true when an interactive analyze was settled, or "
             "false (a graceful no-op) when none was in flight.",
             (_str("tab_id"),),
-            tool_name="gui_tab_analyze_cancel",
         ),
     ),
     method_entry(
@@ -52,11 +51,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "a concurrent save/edit returns precondition_failed until it settles. "
             "Read the fit summary with gui_tab_get_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Analyze param updates")),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_analyze_start",
-                reason="manual MCP tool adds short-wait handle and fit-result folding",
-            ),
         ),
+        agent=AgentMethodPolicy(operation_key="analyze:{tab_id}"),
     ),
     method_entry(
         "tab.get_post_analyze_result",
@@ -83,10 +79,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "overrides post params (see gui_tab_get_post_analyze_params). Read the "
             "fit summary with gui_tab_get_post_analyze_result.",
             (_str("tab_id"), _obj_default("updates", "Post-analysis param updates")),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_post_analyze_start",
-                reason="manual MCP tool adds short-wait handle and summary folding",
-            ),
         ),
+        agent=AgentMethodPolicy(operation_key="post_analyze:{tab_id}"),
     ),
 )

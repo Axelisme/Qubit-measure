@@ -10,7 +10,7 @@ from ._params import (
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -33,7 +33,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "gui_tab_writeback_set_item; the user's Edit dialog renders the same "
             "model (WYSIWYG).",
             (_str("tab_id"), _str("subtab_id", "Pane: analysis|post_analysis")),
-            tool_name="gui_tab_writeback_list",
         ),
     ),
     method_entry(
@@ -82,7 +81,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
                 _expected_versions(),
             ),
-            tool_name="gui_tab_writeback_set_item",
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=(
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:{writeback_resource}",
+                "context",
+            )
         ),
     ),
     method_entry(
@@ -103,6 +108,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("subtab_id", "Pane: analysis|post_analysis"),
                 _expected_versions(),
             ),
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=(
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:{writeback_resource}",
+                "context",
+            )
         ),
     ),
 )

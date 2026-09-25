@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _bool_default,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -16,8 +16,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
-            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "state.has_context",
@@ -25,8 +25,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
-            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "state.has_active_context",
@@ -34,8 +34,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
-            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "state.has_soc",
@@ -43,8 +43,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
-            mcp=McpMethodPolicy.internal("folded into gui_overview readiness state"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "state.hardware_gate",
@@ -52,8 +52,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Read active hardware exclusion leases with kind, origin, note, and age.",
-            mcp=McpMethodPolicy.internal("folded into gui_overview hardware_gate"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "soc.info",
@@ -78,8 +78,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read the applied project identity: chip_name / qub_name / res_name plus "
             "the resolved result_dir and database_path. Fast-fails with "
             "precondition_failed (no_project) when no project is applied yet.",
-            mcp=McpMethodPolicy.internal("folded into gui_overview project section"),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "result_scope.list",
@@ -91,7 +91,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "startup.apply may pass a returned scope_id to use an existing non-generated "
             "scope. Existing params.json files are migrated in place to schema v1 "
             "project identity when needed; this read never creates new params.json files.",
-            tool_name="gui_result_scope_list",
         ),
     ),
     method_entry(
@@ -100,10 +99,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Snapshot of all resource versions",
-            mcp=McpMethodPolicy.override(
-                "gui_debug_resource_versions",
-                reason="debug MCP tool exposes the hidden stale-guard version table",
-            ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
 )

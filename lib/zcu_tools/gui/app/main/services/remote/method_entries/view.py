@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _str,
@@ -29,7 +29,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "is your call. Empty fields mean the adapter has no guide written yet.",
             (_str("adapter_name", "Adapter to introspect"),),
         ),
-        agent=AgentMethodPolicy(exposure="tool", tool_names=("guide",)),
     ),
     method_entry(
         "app.shutdown",
@@ -40,7 +39,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "session, disconnect devices, cleanup) — the same as a user closing the "
             "window. Returns immediately; the close happens just after. No OS kill. "
             "Prefer this over gui_stop's force path to stop a GUI cleanly.",
-            mcp=McpMethodPolicy.internal("used only by gui_stop lifecycle shutdown"),
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -51,10 +49,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             10.0,
             "Capture a named dialog as base64 PNG",
             (_str("name", "Dialog name"),),
-            mcp=McpMethodPolicy.override(
-                "gui_screenshot",
-                reason="manual MCP tool writes PNG files instead of returning base64",
-            ),
         ),
     ),
     method_entry(
@@ -63,10 +57,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Capture view state summary",
-            mcp=McpMethodPolicy.internal(
-                "folded into gui_overview active-tab projection"
-            ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "view.screenshot",
@@ -76,10 +68,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Capture the WHOLE main window (client area + floating widgets) as base64 "
             "PNG. Runs MainWindow.grab() on the main thread (auto-marshalled, like "
             "dialog.screenshot).",
-            mcp=McpMethodPolicy.override(
-                "gui_screenshot",
-                reason="manual MCP tool writes PNG files instead of returning base64",
-            ),
         ),
     ),
     method_entry(
@@ -96,10 +84,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: run|analysis|post_analysis"),
                 _str_opt("out_path", "Write PNG here instead of returning base64"),
-            ),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_get_figure",
-                reason="manual MCP tool writes PNG files instead of returning base64",
             ),
         ),
     ),

@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-23 — Load Config result（WIRE 56）
+**Last updated:** 2026-09-26 — live agent catalog（WIRE 57）
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -19,11 +19,11 @@ not declare MCP tools and does not own stdio transport.
   `METHOD_REGISTRY` import path stable.
 - `handlers/`：grouped wire method handlers bound to controller, control facets,
   or render-view calls.
-- `method_specs.py`：Qt-free public projection for wire method schema, timeouts,
-  and MCP generation metadata.
+- `method_specs.py`：Qt-free projection for wire method schema and timeouts.
 - `method_entries/`：single registration source for method name, handler ref,
-  `MethodSpec`, MCP exposure policy, and `ParamSpec` shorthands. Handler refs
-  are resolved only by the dispatch projection.
+  `MethodSpec`, agent exposure/guard policy and `ParamSpec` shorthands. The
+  `rpc.catalog` projection uses those same entries; handler refs are resolved
+  only by dispatch.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
 - `path_resolver.py`：dotted-path mutation and settable-tree projection for
@@ -102,12 +102,8 @@ subscription only after its close push is accepted by that client's queue.
 
 Diagnostics are separate from EventBus. The controller pushes diagnostics to the
 remote adapter sink, which broadcasts diagnostic payloads to clients regardless
-of subscription. MCP keeps diagnostics in a dedicated queue and automatically
-subscribes to the existing low-frequency event catalog; both queues piggyback on
-the next successful tool reply.
-
-Agent-visible async completion comes from `gui_op_poll` / `gui_op_wait`, not
-from resource-change events.
+of subscription. Measure MCP does not subscribe, queue or piggyback events.
+Agent-visible async completion comes from operation request/reply, not pushes.
 
 ## Version Handshake
 
@@ -118,8 +114,9 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 56`, `GUI_VERSION = 79`, and
-`MCP_VERSION = 74`（defined in `zcu_tools.mcp.measure.server`）。WIRE 56的`tab.load_data`回覆新增`cfg_backfill=applied|not_applied`，result載入成功但Config未回填仍是成功回覆。GUI 79在同tab以runtime snapshot的可靠欄位替換Cfg和editor，舊editor id不重用。原subtab-qualified pane locator、writeback與save contract維持不變。
+Current measure-gui values are `WIRE_VERSION = 57`, `GUI_VERSION = 80`, and
+`MCP_VERSION = 75` (defined in `zcu_tools.mcp.measure.server`). WIRE 57 adds
+`rpc.catalog`; GUI 80 projects the live agent method schema and policy.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
@@ -134,7 +131,7 @@ the State owner thread before calling the controller.
 
 MCP owns the agent baseline:
 
-- guarded mutations send expected versions derived from policy tables;
+- guarded mutations send expected versions derived from the live catalog;
 - successful writes refresh the baseline;
 - pure reads refresh only keys they fully reveal;
 - stale rejection is translated into semantic tool errors for the agent.
@@ -170,12 +167,12 @@ The wire surface is grouped by ownership:
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
-Subtab locator is required and closed (`run|analysis|post_analysis`); save_image only `analysis|post_analysis`; legacy `tab.get_current_figure`, `tab.save_post_image`, `tab.save_result` and omitted-subtab fallback are removed (clean break, no alias). MCP convenience bundles (`gui_tab_run`→`run`, `gui_tab_analyze`/`gui_tab_analyze_review`→`analysis`, `gui_tab_post_analyze_start`→`post_analysis`) query the pane they just operated on, and `gui_tab_get_figure`/`gui_tab_save_data`+`gui_tab_save_image`/`gui_tab_writeback_*` use the same qualified wire forms (no `gui_tab_save` bundle, no `gui_tab_commit`).
-
-`method_entries/` is the registration SSOT. Adding an agent-visible method
-requires one entry containing the wire method name, handler ref, method spec, MCP
-mapping or override, and tests for generation / guard policy. `method_specs.py`
-remains the Qt-free public projection used by MCP generation.
+Subtab locator is required and closed (`run|analysis|post_analysis`); save_image
+only accepts `analysis|post_analysis`. `method_entries/` owns the wire method
+name, handler ref, schema, agent exposure and guard/reveal/operation policy.
+Adding a wire method requires one entry; MCP receives the projection through
+`rpc.catalog` after its version handshake. No tool inventory is generated from
+`MethodSpec`.
 
 ## Cfg Editing
 
@@ -217,5 +214,5 @@ Shutdown flows through the same MainWindow close path as the UI, persists state,
 marks the controller shutting down, stops the remote service, and then closes Qt
 resources.
 
-`gui_launch` starts a new GUI process and expects the requested port to be free.
-`gui_bridge_connect` attaches to an already-running GUI.
+The MCP `connect` tool attaches to an existing GUI or explicitly launches one;
+exiting MCP disconnects without closing the GUI.

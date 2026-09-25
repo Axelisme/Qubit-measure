@@ -101,7 +101,7 @@ class _Fixture:
 
 
 @pytest.fixture()
-def fx(qapp):  # noqa: ARG001
+def fx(qapp):
     f = _Fixture()
     f.start()
     yield f
@@ -142,8 +142,7 @@ def _recv_response(sock: socket.socket, timeout_s: float = 3.0) -> dict:
 
 
 def _open_client(port: int) -> socket.socket:
-    sock = socket.create_connection(("127.0.0.1", port), timeout=1.0)
-    return sock
+    return socket.create_connection(("127.0.0.1", port), timeout=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +157,7 @@ def test_service_binds_loopback_only(fx):
     assert fx.service.port > 0
 
 
-def test_external_requires_token(qapp):  # noqa: ARG001
+def test_external_requires_token(qapp):
     with pytest.raises(RuntimeError, match="token"):
         RemoteControlAdapter(
             controller=MagicMock(),
@@ -178,7 +177,7 @@ def test_unknown_method_returns_error_code(fx):
         sock.close()
 
 
-def test_catalog_exposes_live_params_and_tool_routing_on_the_control_socket(fx):
+def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
     sock = _open_client(fx.service.port)
     try:
         _send(sock, {"id": "catalog", "method": "rpc.catalog", "params": {}})
@@ -186,11 +185,18 @@ def test_catalog_exposes_live_params_and_tool_routing_on_the_control_socket(fx):
         assert reply["ok"] is True
         methods = {entry["method"]: entry for entry in reply["result"]["methods"]}
         assert "rpc.catalog" not in methods
-        assert methods["adapter.guide"]["exposure"] == "tool"
-        assert methods["adapter.guide"]["tool_names"] == ["guide"]
+        assert methods["adapter.guide"]["exposure"] == "rpc"
+        assert methods["adapter.guide"]["tool_names"] == []
         assert methods["adapter.guide"]["params"]["required"] == ["adapter_name"]
         assert methods["soc.info"]["exposure"] == "rpc"
         assert methods["soc.info"]["timeout_seconds"] == 5.0
+        assert methods["tab.run_start"]["exposure"] == "rpc"
+        assert methods["tab.run_start"]["tool_names"] == []
+        assert "tab:{tab_id}:cfg" in methods["tab.run_start"]["guard_deps"]
+        assert methods["tab.run_start"]["operation_key"] == "tab:{tab_id}"
+        assert (
+            "expected_versions" not in methods["tab.run_start"]["params"]["properties"]
+        )
 
         _send(sock, {"id": "bad", "method": "adapter.guide", "params": {}})
         assert _recv_response(sock)["error"]["code"] == "invalid_params"
@@ -273,7 +279,7 @@ def test_wire_version_reported(fx):
         sock.close()
 
 
-def test_wire_version_is_no_auth(qapp):  # noqa: ARG001
+def test_wire_version_is_no_auth(qapp):
     # wire.version is a handshake probe: it must answer before auth even on a
     # token-gated service, so a caller can detect a stale process on connect.
     f = _Fixture(ControlOptions(port=0, token="s3cr3t"))
@@ -295,7 +301,7 @@ def test_wire_version_is_no_auth(qapp):  # noqa: ARG001
         f.stop()
 
 
-def test_token_gated_when_set(qapp):  # noqa: ARG001
+def test_token_gated_when_set(qapp):
     f = _Fixture(ControlOptions(port=0, token="s3cr3t"))
     f.start()
     try:

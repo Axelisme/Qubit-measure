@@ -46,9 +46,7 @@ def rpc_call(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, An
     params = arguments.get("params", {})
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    return ctx.session.send_gui_rpc(
-        entry["method"], params, float(entry["timeout_seconds"]) + 1.0
-    )
+    return ctx.session.send_gui_rpc(entry["method"], params, rpc_only=True)
 
 
 RPC_TOOLS: dict[str, dict[str, Any]] = {

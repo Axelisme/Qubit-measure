@@ -1,84 +1,42 @@
-**Last updated:** 2026-09-25 — GUI remote test ownership
+**Last updated:** 2026-09-26 — live GUI catalog and fixed connection tools
 
 # `zcu_tools/mcp/measure/`
 
-measure-gui 的 MCP entry，負責把 MCP tool call 轉接到 live measure-gui
-RemoteControlAdapter。此 package 是 app-local policy 層，不是共用 transport。
+This package is the measure-gui MCP server. The shared `zcu_tools.mcp.core`
+bridge owns socket and stdio transport; this package owns measure-specific
+connection, guarded requests and fixed tool handlers. GUI core does not import
+this package.
 
-## 邊界
+## Boundaries
 
-Cfg agent直接複製`gui_tab_get_cfg`/`gui_editor_get_cfg`列出的canonical leaf path；不加入
-`.sweep`或`.value` wrapper。Batch path diff是成功後final net結果，失敗後重新讀cfg reconcile。
+- `server.py` creates one bridge, session and tool table per stdio session.
+  Exiting MCP closes only its socket. Starting and stopping the GUI are
+  separate, explicit operations.
+- `assembly.py` registers handwritten tools. Wire methods never generate a
+  dynamic MCP tool inventory. The connection ticket registers `connect` and
+  `rpc_list` / `rpc_describe` / `rpc_call`; later tickets add the remaining
+  specialized tools.
+- `session.py` validates `wire.version`, loads `rpc.catalog` from the live GUI
+  on each connection and caches that connection's policy, observed resource
+  versions and operation handles. Reconnecting discards the old observations.
+  A failed or timed-out mutation is not automatically sent again.
+- The GUI's `services.remote.method_entries` own each method's agent exposure,
+  version guard dependencies, revealed resources and operation key. The MCP
+  does not keep a separate method or guard table. `session_policy.py` only
+  expands resource patterns and describes stale keys.
+- `tool_context.py` binds fixed handlers to their session. Ordinary RPC
+  timeouts come from the live catalog; wait methods supply their own deadline.
+  GUI handlers validate parameter values and return stable error reasons.
+- `tools_overview.py` reads known GUI orientation methods for the `connect`
+  reply. Internal methods are not available through `rpc_call`.
 
-Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, subtab_id=run|analysis|post_analysis)`讀對應pane figure（run為live container截圖，analysis/post為canonical State figure）；`gui_tab_writeback_list`、`gui_tab_writeback_set_item`與`gui_tab_writeback_apply`以`(tab_id, subtab_id=analysis|post_analysis)`定址pane draft；`gui_tab_save_data`（tab-only）與`gui_tab_save_image(tab_id, subtab_id=analysis|post_analysis)`分離，無`gui_tab_save` bundle與`gui_tab_commit`。舊`gui_tab_get_current_figure`、`tab.save_result`/`save_post_image`及其bundle均已移除；寫入/預覽回覆投影`destination_context`（當下active ExpContext）；operation期間同pane的remote edit/apply被gate。
+There is no measure MCP event subscription, diagnostic queue or reply
+piggyback. The GUI's own EventBus and wire event transport remain available
+to other consumers. Operation state is read through request/reply methods.
 
-- `server.py` 是 bootstrap／stdio entry：`main()`建立同次呼叫專屬的session、
-  bridge、context與tool table。Cleanup及piggyback hooks綁定該次session，不暴露
-  測試用compatibility aliases。
-- `zcu_tools.mcp._standalone.bootstrap_standalone_server()` 是所有 standalone
-  MCP entry server 共用的最小啟動 helper：在 entry import `zcu_tools.*` 前把
-  repo `lib` 加進 `sys.path`，並用一致的 stderr + `SystemExit(1)` 做 dependency
-  preflight。各 app server 只保留自己的 required modules 與錯誤訊息。
-- `tool_context.py` 的frozen `MeasureToolContext`顯式持有config、session、method specs
-  與port resolver。Generated及override handlers共用該context的guarded sender，
-  不經module-global provider或反向查找server。
-- `assembly.py::build_measure_tools(context)`每次建立fresh tool table，先驗證exposure
-  再合併generated及override tools並加上call logging。不同assembly的handlers不串線。
-- `tools_*.py`依domain共置hand-written handler與schema；domain factory綁定傳入context。
-- `exposure.py` 從 GUI wire contract 的 `METHOD_SPECS[*].mcp` 推導 generated /
-  internal / override exposure plan，並在 assembly 時 fail-fast 檢查 generated
-  tool collision、manual/generated collision、override tool 缺漏，以及
-  internal/override method 誤用 `MethodSpec.tool_name`。
-- `session.py` 擁有 measure-only policy state：diagnostics與low-frequency event兩個
-  bounded piggyback queues、
-  optimistic-concurrency baseline、guarded send flow、operation handle capture，以及
-  `gui_debug_operations` 使用的 latest-handle projection。
-- `session_policy.py` 放不可變 policy table 與純 helper：version guard deps、
-  read-reveal table、start-op semantic key mapping、stale key 語義化。
-- arbitrary waveform tools 是 agent-friendly generated RPC aliases：
-  `list_arb_waveform`、`get_arb_waveform_preview`、`set_arb_waveform`。
-  它們操作 qubit-scoped `.npz` asset store；`set_arb_waveform` guard deps 是
-  `arb_waveforms`，list/preview 只 reveal `arb_waveforms`，validation/collision/missing
-  以 tool error 的 stable `reason` 回報。
-- `gui_value_list` / `gui_value_read` 是 generated read-only RPC tools，對應
-  `value.list` / `value.read`。它們是 resolve-once value source 逃生通道；
-  因來源可能投影 context/device/predictor，不列入 read-reveal table。
-- `gui_editor_set` / `gui_tab_set_cfg` 的 scalar `value` 可傳
-  `{"__kind":"value_ref","key":"device.flux.value","type":"float"}`，其中
-  `flux` 是具名 registered device。
-  bridge 不解這個 tag；GUI 端 `CfgEditorSession` / `LiveModel` 立即解析成 direct
-  scalar，失敗以 stable RPC/tool error 回報。
-- `tab.load_data` / generated `gui_tab_load_data` 是同步 mutation：guard deps 是
-  `tab:{tab_id}`、`tab:{tab_id}:result`、`tab:{tab_id}:analyze`、`context`；不依賴
-  SoC、device、cfg 或 save path，且不進 operation-handle table。
-- load failure 以 `precondition_failed` 搭配 stable `reason` 呈現：
-  `invalid_data_file`（canonical/adapter 不相容）、`unsupported_load`、
-  `data_file_read_failed`；agent 不需要 parse traceback 或 raw Python exception。
-- 一般 generated / hand-written RPC 的 transport timeout 以 `MethodSpec.timeout_seconds`
-  加少量 slack 為準；`operation.await` 與 `notify.await` 必須由 caller 明確傳入
-  動態 timeout。GUI handler timeout 代表可預期的 bounded wait 結果，transport
-  timeout 代表控制 socket 已失去可信度，MCP bridge 會關閉該 socket 並讓下一次 call
-  重新連線。
-- `McpBridge` 只屬於 `zcu_tools.mcp.core` 的 transport adapter；measure-gui policy
-  不下放到 bridge。
-- 每次 explicit connect、launch auto-connect或lazy auto-connect後，session先呼叫
-  `events.list`再訂閱回傳的既有low-frequency catalog，不維護第二份event清單。
-  完整wire envelope（`event`、`payload`、`seq`、`origin`）在下一個successful
-  MCP tool reply以compact JSON block穿透；queue bounded、disconnect清空且不提供
-  replay，因此operation wait/poll與fresh snapshot仍是authority。
-- Wire method MCP exposure policy 由
-  `zcu_tools.gui.app.main.services.remote.method_entries` 的 method entry 宣告：
-  default `generated` 產生 1:1 RPC tool；`internal` 保留 wire method 供 bundle /
-  lifecycle 內部使用；`override` 指向一個或多個 hand-written MCP tools。
-  MCP-only lifecycle/bundle/debug tools 不硬塞進 method policy。
+## Tests
 
-## 測試注意
-
-`tests/mcp/measure/`透過factory、真實session／bridge及recording Transport驗證tool行為；
-stdio以`server.main()`覆蓋成功回覆piggyback及cleanup。GUI handler與真socket事件整合
-留在`tests/gui/app/main/services/remote/`，shared policy construction留在`tests/gui/remote/`。
-Schema文字及tool inventory以直接review確認，不用私有alias或靜態pytest維護。
-
-Remote/MCP 測試會建立 loopback socket；受限 sandbox 可能需要 unsandboxed execution。
-headless 測試環境通常需要 `QT_QPA_PLATFORM=offscreen`、
-`QT_QPA_PLATFORMTHEME=`、`MPLBACKEND=Agg`。
+`tests/mcp/measure/` uses in-process recording transports. GUI control-socket
+contract tests live in `tests/gui/app/main/services/remote/`; headless Qt
+runs use `QT_QPA_PLATFORM=offscreen`, `QT_QPA_PLATFORMTHEME=` and
+`MPLBACKEND=Agg`. Tool inventory and module boundaries are reviewed directly.

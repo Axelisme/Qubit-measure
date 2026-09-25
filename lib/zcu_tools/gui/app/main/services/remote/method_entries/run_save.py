@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.remote.method_spec import McpMethodPolicy, MethodSpec
+from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     _comment,
@@ -10,7 +10,7 @@ from ._params import (
     _str,
     _str_opt,
 )
-from ._registry import RemoteMethodEntry, method_entry
+from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -20,10 +20,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Start a run (fire-and-forget)",
             (_str("tab_id"), _expected_versions()),
-            mcp=McpMethodPolicy.override(
-                "gui_tab_run_start",
-                reason="manual MCP tool adds short-wait handle and figure folding",
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=(
+                "tab:{tab_id}:cfg",
+                "tab:{tab_id}",
+                "soc",
+                "context",
+                "device:*",
+                "devices:__set__",
             ),
+            operation_key="tab:{tab_id}",
         ),
     ),
     method_entry(
@@ -41,6 +48,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str("data_path", "Canonical HDF5 result file to load"),
                 _expected_versions(),
             ),
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=(
+                "tab:{tab_id}",
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:analyze",
+                "context",
+            )
         ),
     ),
     method_entry(
@@ -62,10 +77,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Current running tab",
-            mcp=McpMethodPolicy.internal(
-                "folded into gui_overview and tab listing surfaces"
-            ),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.save_data",
@@ -79,7 +92,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _comment(),
                 _expected_versions(),
             ),
-            tool_name="gui_tab_save_data",
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=(
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:path:data",
+            )
         ),
     ),
     method_entry(
@@ -96,7 +114,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 _str_opt("image_path", "Override image path"),
                 _expected_versions(),
             ),
-            tool_name="gui_tab_save_image",
+        ),
+        agent=AgentMethodPolicy(
+            guard_deps=(
+                "tab:{tab_id}:result",
+                "tab:{tab_id}:post_analyze",
+                "tab:{tab_id}:path:analysis_image",
+                "tab:{tab_id}:path:post_analysis_image",
+            )
         ),
     ),
 )

@@ -1,17 +1,11 @@
-"""Measure-gui MCP app session.
-
-``McpBridge`` owns transport state only.  ``MeasureMcpSession`` owns the
-measure-gui MCP policy state described by ADR-0014/ADR-0026: diagnostics,
-optimistic-concurrency baselines, guarded send flow, and the debug-only latest
-operation handle projection.
-"""
+"""Measure MCP connection, live GUI catalog and guarded request state."""
 
 from __future__ import annotations
 
-import threading
-from collections import deque
+import math
 from collections.abc import Callable, Mapping, MutableMapping
-from typing import Any, Literal, TypedDict
+from pathlib import Path
+from typing import Any, Literal, TypedDict, cast
 
 from zcu_tools.mcp.core.bridge import (
     GuiTransportTimeoutError,
@@ -19,15 +13,13 @@ from zcu_tools.mcp.core.bridge import (
     MCPBridgeConfig,
 )
 from zcu_tools.mcp.measure.session_policy import (
-    DEFAULT_POLICY,
-    MeasureMcpPolicy,
     describe_stale_keys,
     expand_pattern_keys,
 )
 
 
 class GuiRpcError(RuntimeError):
-    """A wire-level GUI error with structured ``reason`` / ``code`` tags."""
+    """A GUI or MCP boundary error with a stable agent-facing reason."""
 
     def __init__(
         self, message: str, *, reason: str | None = None, code: str | None = None
@@ -53,58 +45,99 @@ ResolveConnectPortFn = Callable[[MCPBridgeConfig, int | None], int]
 PortIsOpenFn = Callable[[int], bool]
 
 
+def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
+    """Validate the untrusted GUI reply before installing any policy state."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("methods"), list):
+        raise GuiRpcError("invalid GUI rpc.catalog reply", reason="incompatible_wire")
+    methods: dict[str, CatalogEntry] = {}
+    for value in raw["methods"]:
+        if not isinstance(value, dict):
+            raise GuiRpcError(
+                "invalid GUI rpc.catalog entry", reason="incompatible_wire"
+            )
+        method = value.get("method")
+        exposure = value.get("exposure")
+        timeout = value.get("timeout_seconds")
+        tools = value.get("tool_names")
+        schema = value.get("params")
+        operation_key = value.get("operation_key")
+        if (
+            not isinstance(method, str)
+            or not method
+            or method in methods
+            or exposure not in ("rpc", "tool")
+            or not isinstance(value.get("description"), str)
+            or not isinstance(schema, dict)
+            or schema.get("type") != "object"
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+            or not isinstance(tools, list)
+            or any(not isinstance(tool, str) or not tool for tool in tools)
+            or (exposure == "tool") != bool(tools)
+            or (operation_key is not None and not isinstance(operation_key, str))
+        ):
+            raise GuiRpcError(
+                "invalid or duplicate GUI rpc.catalog entry", reason="incompatible_wire"
+            )
+        deps = value.get("guard_deps")
+        reveals = value.get("reveals")
+        if not all(
+            isinstance(patterns, list)
+            and all(isinstance(pattern, str) and pattern for pattern in patterns)
+            for patterns in (deps, reveals)
+        ):
+            raise GuiRpcError(
+                "invalid GUI rpc.catalog policy", reason="incompatible_wire"
+            )
+        methods[method] = CatalogEntry(
+            method=method,
+            description=value["description"],
+            params=cast(dict[str, object], schema),
+            timeout_seconds=float(timeout),
+            exposure=exposure,
+            tool_names=cast(list[str], tools),
+            guard_deps=tuple(cast(list[str], deps)),
+            reveals=tuple(cast(list[str], reveals)),
+            operation_key=operation_key,
+        )
+    return methods
+
+
 class MeasureMcpSession:
-    """App-local policy session for the measure-gui MCP server."""
+    """One MCP session; bridge transport remains independent of method policy."""
 
     def __init__(
         self,
         config: MCPBridgeConfig,
         *,
-        policy: MeasureMcpPolicy = DEFAULT_POLICY,
         bridge: McpBridge | None = None,
         resolve_connect_port: ResolveConnectPortFn,
         port_is_open: PortIsOpenFn,
-        diagnostic_queue_max: int = 1024,
-        event_queue_max: int = 1024,
     ) -> None:
         self._config = config
-        self._policy = policy
         self._bridge = bridge
         self._resolve_connect_port = resolve_connect_port
         self._port_is_open = port_is_open
-        self._diagnostic_queue: deque[dict[str, Any]] = deque(
-            maxlen=diagnostic_queue_max
-        )
-        self._event_queue: deque[dict[str, Any]] = deque(maxlen=event_queue_max)
-        self._pending_cond = threading.Condition()
         self._last_seen: dict[str, int] = {}
         self._operation_handles: dict[str, int] = {}
         self._catalog: dict[str, CatalogEntry] = {}
-
-    @property
-    def catalog(self) -> Mapping[str, CatalogEntry]:
-        """Validated methods from this GUI connection, not a server-side method table."""
-        return self._catalog
-
-    def connect_to_gui(
-        self, *, port: int | None, launch: str, clean: bool
-    ) -> dict[str, Any]:
-        """Attach/launch, verify wire compatibility and load the live catalog.
-
-        Returns launched, port and versions. A failed handshake disconnects and
-        never sends a pending mutation to the new GUI.
-        """
-        raise NotImplementedError
-
-    @property
-    def policy(self) -> MeasureMcpPolicy:
-        return self._policy
+        self._connected_port: int | None = None
+        self._requested_port: int | None = None
+        self._versions: dict[str, int] = {}
+        self._launched = False
 
     @property
     def bridge(self) -> McpBridge:
         if self._bridge is None:
             raise RuntimeError("MeasureMcpSession has no attached McpBridge")
         return self._bridge
+
+    @property
+    def catalog(self) -> Mapping[str, CatalogEntry]:
+        """Validated live GUI entries, refreshed for each new connection."""
+        return self._catalog
 
     @property
     def last_seen_versions(self) -> MutableMapping[str, int]:
@@ -119,80 +152,159 @@ class MeasureMcpSession:
             raise RuntimeError("MeasureMcpSession bridge is already attached")
         self._bridge = bridge
 
-    def clear_diagnostics(self) -> None:
-        with self._pending_cond:
-            self._diagnostic_queue.clear()
-
-    def clear_pending(self) -> None:
-        """Drop diagnostics and events owned by the current connection."""
-
-        with self._pending_cond:
-            self._diagnostic_queue.clear()
-            self._event_queue.clear()
-
-    def clear_policy_state(self) -> None:
-        """Reset mutable policy state for tests and fresh sessions."""
-
-        self.clear_pending()
+    def _clear_connection(self) -> None:
+        self._catalog = {}
         self._last_seen.clear()
         self._operation_handles.clear()
+        self._connected_port = None
+        self._requested_port = None
+        self._versions = {}
+        self._launched = False
 
-    def deliver_event(self, msg: dict[str, Any]) -> None:
-        """Queue diagnostics and subscribed low-frequency event envelopes."""
-
-        with self._pending_cond:
-            if msg.get("event") == "diagnostic":
-                self._diagnostic_queue.append(msg)
-            else:
-                self._event_queue.append(msg)
-            self._pending_cond.notify_all()
-
-    def drain_pending(self) -> dict[str, list[dict[str, Any]]]:
-        """Drain diagnostics and events for the next successful tool reply."""
-
-        with self._pending_cond:
-            diagnostics = list(self._diagnostic_queue)
-            events = list(self._event_queue)
-            self._diagnostic_queue.clear()
-            self._event_queue.clear()
-        return {"diagnostics": diagnostics, "events": events}
-
-    def initialize_event_stream(self) -> None:
-        """Clear stale queues and subscribe to the GUI's low-frequency catalog."""
-
-        self.clear_pending()
+    def _load_catalog(
+        self, port: int, *, launched: bool, requested_port: int | None = None
+    ) -> dict[str, Any]:
+        """Wire compatibility must be established before reading live policy."""
+        self._clear_connection()
         try:
-            listed = self.bridge.send_rpc_raw("events.list", {}, 5.0)
-            if not listed.get("ok", False):
-                raise RuntimeError("GUI events.list failed during MCP bridge connect")
-            events = listed.get("result", {}).get("events")
-            if not isinstance(events, list) or not all(
-                isinstance(event, str) for event in events
-            ):
-                raise RuntimeError("GUI events.list returned an invalid catalog")
-            subscribed = self.bridge.send_rpc_raw(
-                "events.subscribe", {"events": events}, 5.0
-            )
-            if not subscribed.get("ok", False):
-                raise RuntimeError(
-                    "GUI events.subscribe failed during MCP bridge connect"
+            version = self.bridge.send_rpc_raw("wire.version", {}, 5.0)
+            result = version.get("result")
+            if not version.get("ok") or not isinstance(result, dict):
+                raise GuiRpcError(
+                    "invalid GUI wire.version reply", reason="incompatible_wire"
                 )
-        except Exception:
+            wire = result.get("wire_version")
+            gui = result.get("gui_version")
+            if (
+                isinstance(wire, bool)
+                or not isinstance(wire, int)
+                or wire != self._config.wire_version
+            ):
+                raise GuiRpcError(
+                    f"incompatible GUI wire version {wire!r}; expected {self._config.wire_version}",
+                    reason="incompatible_wire",
+                )
+            if isinstance(gui, bool) or not isinstance(gui, int):
+                raise GuiRpcError(
+                    "invalid GUI wire.version revision", reason="incompatible_wire"
+                )
+            reply = self.bridge.send_rpc_raw("rpc.catalog", {}, 5.0)
+            if not reply.get("ok"):
+                raise GuiRpcError("GUI rpc.catalog failed", reason="incompatible_wire")
+            self._catalog = _parse_catalog(reply.get("result"))
+            self._connected_port = port
+            self._requested_port = requested_port
+            self._versions = {"wire": wire, "gui": gui, "mcp": self._config.mcp_version}
+            self._launched = launched
+            return {
+                "launched": launched,
+                "port": port,
+                "versions": dict(self._versions),
+            }
+        except Exception:  # Any failed handshake invalidates this socket.
             self.bridge.disconnect()
-            self.clear_pending()
+            self._clear_connection()
             raise
 
-    def read_version_table(self) -> dict[str, int] | None:
-        """Read the full resource version table without applying guard policy."""
+    def connect_to_gui(
+        self, *, port: int | None, launch: str, clean: bool
+    ) -> dict[str, Any]:
+        """Attach or launch once; incompatible GUI contracts fail before mutations.
 
+        A repeated attach returns the connected GUI. GUI code revision is shown
+        but never compared. No failed or stale mutation is resent automatically.
+        """
+        if (
+            launch != "new"
+            and self.bridge.is_connected
+            and self._catalog
+            and (port is None or port == self._connected_port)
+        ):
+            return {
+                "launched": self._launched,
+                "port": self._connected_port,
+                "versions": dict(self._versions),
+            }
+        selected = self._resolve_connect_port(self._config, port)
+        existing = self._port_is_open(selected)
+        if launch == "new" and existing:
+            raise GuiRpcError(f"GUI port {selected} is in use", reason="port_in_use")
+        if launch == "never" and not existing:
+            raise GuiRpcError(
+                f"no GUI is listening on port {selected}", reason="no_gui"
+            )
+        launched = launch == "new" or (launch == "if_missing" and not existing)
+        if launched:
+            repo_root = Path(__file__).resolve().parents[4]
+            self.bridge.launch(
+                repo_root,
+                selected,
+                auto_connect=True,
+                extra_args=["--clean"] if clean else None,
+            )
+            if not self.bridge.is_connected:
+                raise GuiRpcError(
+                    "GUI launched but is not ready to attach", reason="no_gui"
+                )
+        else:
+            try:
+                self.bridge.connect(selected)
+            except RuntimeError as exc:
+                raise GuiRpcError(f"GUI attach failed: {exc}", reason="no_gui") from exc
+        return self._load_catalog(selected, launched=launched, requested_port=port)
+
+    def ensure_connected(self) -> None:
+        """A lazy attach always reloads catalog/observations after GUI restart."""
+        if self.bridge.is_connected and self._catalog:
+            return
+        if self.bridge.is_connected:
+            selected = self._resolve_connect_port(self._config, self._requested_port)
+            self._load_catalog(
+                selected, launched=False, requested_port=self._requested_port
+            )
+            return
+        self.connect_to_gui(port=self._requested_port, launch="never", clean=False)
+
+    def read_internal(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Read a known GUI orientation method without exporting it to rpc_call.
+
+        The caller names only shipped read operations. No MCP method or guard
+        registry is maintained for these GUI-owned internal reads.
+        """
+        self.ensure_connected()
+        reply = self.bridge.send_rpc_raw(method, params, 6.0)
+        if not reply.get("ok"):
+            error = reply.get("error", {})
+            raise GuiRpcError(
+                f"GUI Error ({error.get('code')}): {error.get('message')}",
+                reason=error.get("reason"),
+                code=error.get("code"),
+            )
+        result = reply.get("result")
+        if not isinstance(result, dict):
+            raise GuiRpcError(
+                f"invalid GUI reply for {method}", reason="incompatible_wire"
+            )
+        self.refresh_versions()
+        return result
+
+    def read_version_table(self) -> dict[str, int] | None:
+        """Read resource versions, returning None when best-effort resync fails."""
         try:
             resp = self.bridge.send_rpc_raw("resources.versions", {}, 5.0)
-        except Exception:  # pragma: no cover - best-effort resync
+        except (OSError, RuntimeError):
             return None
         if not resp.get("ok", False):
             return None
         versions = resp.get("result", {}).get("versions")
-        return versions if isinstance(versions, dict) else None
+        if not isinstance(versions, dict) or not all(
+            isinstance(key, str)
+            and isinstance(version, int)
+            and not isinstance(version, bool)
+            for key, version in versions.items()
+        ):
+            return None
+        return versions
 
     def refresh_versions(self) -> None:
         versions = self.read_version_table()
@@ -203,63 +315,46 @@ class MeasureMcpSession:
     def build_expected_versions(
         self, method: str, params: dict[str, Any]
     ) -> dict[str, int]:
-        deps = self._policy.guard_deps.get(method)
-        if not deps:
-            return {}
-        return expand_pattern_keys(deps, params, self._last_seen)
+        return expand_pattern_keys(
+            self._catalog[method]["guard_deps"], params, self._last_seen
+        )
 
     def refresh_revealed_versions(self, method: str, params: dict[str, Any]) -> None:
-        reveals = self._policy.read_reveals[method]
         versions = self.read_version_table()
-        if versions is None:
-            return
-        self._last_seen.update(expand_pattern_keys(reveals, params, versions))
-
-    def ensure_connected(self) -> None:
-        """Lazily attach to a running measure-gui control channel."""
-
-        if self.bridge.is_connected:
-            return
-        port = self._resolve_connect_port(self._config, None)
-        if not self._port_is_open(port):
-            raise RuntimeError(
-                "no running measure-gui found to attach to "
-                f"(tried 127.0.0.1:{port}); start one with gui_launch."
+        if versions is not None:
+            self._last_seen.update(
+                expand_pattern_keys(self._catalog[method]["reveals"], params, versions)
             )
-        try:
-            self.bridge.connect(port)
-        except RuntimeError as exc:
-            raise RuntimeError(
-                "no running measure-gui found to attach to "
-                f"(tried 127.0.0.1:{port}); start one with gui_launch."
-            ) from exc
-        self.initialize_event_stream()
 
     def send_gui_rpc(
         self,
         method: str,
         params: dict[str, Any],
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float | None = None,
+        *,
+        rpc_only: bool = False,
     ) -> dict[str, Any]:
-        """Issue one guarded RPC against the GUI; raises on error or timeout."""
-
+        """One guarded send; transport failure never retries an ambiguous mutation."""
         self.ensure_connected()
-
+        entry = self._catalog.get(method)
+        if entry is None:
+            raise GuiRpcError(f"unknown GUI method {method!r}", reason="unknown_method")
+        if rpc_only and entry["exposure"] != "rpc":
+            tools = ", ".join(entry["tool_names"])
+            raise GuiRpcError(f"use {tools} for {method}", reason="use_tool")
+        if timeout_seconds is None:
+            timeout_seconds = entry["timeout_seconds"] + 1.0
         send_params = params
-        if method in self._policy.guard_deps:
-            send_params = dict(params)
-            send_params["expected_versions"] = self.build_expected_versions(
-                method, params
-            )
-
+        if entry["guard_deps"]:
+            send_params = {
+                **params,
+                "expected_versions": self.build_expected_versions(method, params),
+            }
         try:
             resp = self.bridge.send_rpc_raw(method, send_params, timeout_seconds)
         except GuiTransportTimeoutError as exc:
             raise GuiRpcError(
-                (
-                    f"GUI Transport Timeout: {exc}. The MCP bridge closed the "
-                    "stale control socket and will reconnect on the next call."
-                ),
+                f"GUI Transport Timeout: {exc}. Reconnect on the next call; review before retrying.",
                 reason="gui_transport_timeout",
                 code="timeout",
             ) from exc
@@ -267,31 +362,37 @@ class MeasureMcpSession:
             err = resp.get("error", {})
             if err.get("reason") == "stale_version":
                 self.refresh_versions()
-                data = err.get("data") or {}
-                stale = describe_stale_keys(data.get("stale", []))
+                stale = describe_stale_keys((err.get("data") or {}).get("stale", []))
                 detail = f" ({', '.join(stale)})" if stale else ""
-                raise RuntimeError(
-                    "GUI Error (PRECONDITION_FAILED): a resource you depend on was "
-                    f"changed in the GUI since you last saw it{detail}; review then "
-                    "retry"
+                raise GuiRpcError(
+                    "GUI Error (PRECONDITION_FAILED): a resource changed since your last read"
+                    f"{detail}; review then retry",
+                    reason="stale_version",
+                    code="precondition_failed",
                 )
             code = err.get("code")
             reason = err.get("reason")
             if code == "timeout" and reason is None:
                 reason = "gui_handler_timeout"
-            msg = f"GUI Error ({code}): {err.get('message')}"
-            raise GuiRpcError(msg, reason=reason, code=code)
-
-        if method in self._policy.read_reveals:
+            raise GuiRpcError(
+                f"GUI Error ({code}): {err.get('message')}", reason=reason, code=code
+            )
+        if entry["reveals"]:
             self.refresh_revealed_versions(method, params)
         else:
             self.refresh_versions()
-
-        result = dict(resp.get("result", {}))
-        key_of = self._policy.operation_key_of.get(method)
-        if key_of is not None and "operation_id" in result:
+        result = resp.get("result")
+        if not isinstance(result, dict):
+            raise GuiRpcError(
+                f"invalid GUI reply for {method}", reason="incompatible_wire"
+            )
+        result = dict(result)
+        pattern = entry["operation_key"]
+        if pattern is not None and "operation_id" in result:
             handle = int(result.pop("operation_id"))
-            self._operation_handles[key_of(params)] = handle
+            keys = expand_pattern_keys((pattern,), params, {})
+            key = next(iter(keys))
+            self._operation_handles[key] = handle
             result["handle"] = handle
         return result
 
@@ -299,8 +400,9 @@ class MeasureMcpSession:
         return self._operation_handles.get(key)
 
     def debug_operations(self) -> dict[str, dict[str, dict[str, int]]]:
-        handles = {
-            key: {"operation_id": op_id}
-            for key, op_id in self._operation_handles.items()
+        return {
+            "handles": {
+                key: {"operation_id": op_id}
+                for key, op_id in self._operation_handles.items()
+            }
         }
-        return {"handles": handles}

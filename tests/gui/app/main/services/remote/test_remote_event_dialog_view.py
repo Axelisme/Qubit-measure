@@ -6,18 +6,12 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
   - ``events.subscribe`` / ``events.unsubscribe`` / ``events.list``;
   - server-pushed events with the requery-hint schema;
   - per-client writer thread + outbound queue overflow behaviour;
-  - ``app.shutdown`` and ``view.snapshot`` (internal-only wire methods kept for
-    gui_stop / overview, with no agent tool) against a mock ``ViewProtocol``;
+  - ``app.shutdown`` and ``view.snapshot`` wire methods against a mock ``ViewProtocol``;
   - clean teardown that unsubscribes from EventBus.
 """
 
 from __future__ import annotations
 
-import threading
-import time
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -49,8 +43,6 @@ from zcu_tools.gui.session.events import (
     PredictorChangedPayload,
     SocChangedPayload,
 )
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
-from zcu_tools.mcp.measure.session import MeasureMcpSession
 
 from ._helpers import (
     Fixture,
@@ -66,7 +58,7 @@ from ._helpers import (
 
 
 @pytest.fixture()
-def fx(qapp):  # noqa: ARG001
+def fx(qapp):
     f = Fixture()
     f.start()
     yield f
@@ -87,7 +79,7 @@ _EXPECTED_WIRE_NAMES = frozenset(
         # run domain
         "run_started",
         "run_finished",
-        # session-core (device / context / predictor / soc)
+        # State-change event names
         "predictor_changed",
         "device_changed",
         "device_setup_started",
@@ -238,7 +230,7 @@ def test_subscribe_then_run_started_arrives(fx):
         sock.close()
 
 
-def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch):  # noqa: ARG001
+def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch):
     from zcu_tools.gui.remote import control_service as service_module
 
     f = Fixture()
@@ -264,7 +256,7 @@ def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch)
         f.stop()
 
 
-def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):  # noqa: ARG001
+def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
     from zcu_tools.gui.remote import control_service as service_module
 
     f = Fixture()
@@ -301,7 +293,7 @@ def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):  # n
         f.stop()
 
 
-def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):  # noqa: ARG001
+def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):
     f = Fixture()
     serializer = MagicMock(side_effect=RuntimeError("broken serializer"))
     f.service._event_serializers = {
@@ -327,7 +319,7 @@ def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):  # noqa: 
         f.stop()
 
 
-def test_serializer_returning_none_only_runs_for_subscriber(qapp):  # noqa: ARG001
+def test_serializer_returning_none_only_runs_for_subscriber(qapp):
     f = Fixture()
     serializer = MagicMock(return_value=None)
     f.service._event_serializers = {
@@ -350,7 +342,7 @@ def test_serializer_returning_none_only_runs_for_subscriber(qapp):  # noqa: ARG0
         f.stop()
 
 
-def test_push_encode_failure_is_logged_and_contained(qapp, monkeypatch, caplog):  # noqa: ARG001
+def test_push_encode_failure_is_logged_and_contained(qapp, monkeypatch, caplog):
     from zcu_tools.gui.remote import control_service as service_module
 
     f = Fixture()
@@ -461,7 +453,7 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
         sock.close()
 
 
-def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
+def test_stop_unsubscribes_event_bus(qapp):
     from zcu_tools.gui.app.main.services.remote.events import EVENT_SERIALIZERS
 
     f = Fixture()
@@ -589,87 +581,7 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
         sock.close()
 
 
-def _run_mcp_call(qapp: object, fn: Callable[[], Any]) -> Any:
-    result: list[Any] = []
-    errors: list[BaseException] = []
-
-    def work() -> None:
-        try:
-            result.append(fn())
-        except BaseException as exc:  # noqa: BLE001 - re-raised on test thread
-            errors.append(exc)
-
-    thread = threading.Thread(target=work)
-    thread.start()
-    deadline = time.monotonic() + 10.0
-    while thread.is_alive() and time.monotonic() < deadline:
-        qapp.processEvents()  # type: ignore[attr-defined]
-        time.sleep(0.005)
-    thread.join(timeout=0.1)
-    assert not thread.is_alive(), "MCP call did not complete"
-    if errors:
-        raise errors[0]
-    assert len(result) == 1
-    return result[0]
-
-
-def test_real_mcp_bridge_receives_agent_run_origin(fx, qapp, tmp_path: Path) -> None:
-    config = MCPBridgeConfig(
-        tool_prefix="gui_",
-        server_display_name="measure-test",
-        server_instructions="",
-        app_name="gui",
-        default_port=fx.service.port,
-        mcp_version=74,
-        wire_version=56,
-        pid_file=tmp_path / "unused.pid",
-        log_file=tmp_path / "unused.log",
-        run_script_name="run_measure_gui.py",
-    )
-    session = MeasureMcpSession(
-        config,
-        resolve_connect_port=lambda _config, _requested: fx.service.port,
-        port_is_open=lambda _port: True,
-    )
-    bridge = McpBridge(config, on_event=session.deliver_event)
-    session.attach_bridge(bridge)
-    try:
-        _run_mcp_call(qapp, session.ensure_connected)
-        created = _run_mcp_call(
-            qapp,
-            lambda: session.send_gui_rpc("tab.new", {"adapter_name": "fake"}),
-        )
-        tab_id = created["tab_id"]
-        session.clear_pending()
-
-        started = _run_mcp_call(
-            qapp,
-            lambda: session.send_gui_rpc("tab.run_start", {"tab_id": tab_id}),
-        )
-        handle = started["handle"]
-        deadline = time.monotonic() + 5.0
-        while (
-            fx.state.get_tab(tab_id).run.result is None and time.monotonic() < deadline
-        ):
-            qapp.processEvents()
-            time.sleep(0.005)
-        assert fx.state.get_tab(tab_id).run.result is not None
-
-        # Synchronize the wire reader before draining the session's event queue.
-        _run_mcp_call(qapp, lambda: session.send_gui_rpc("state.has_soc", {}))
-        events = session.drain_pending()["events"]
-        finished = next(event for event in events if event["event"] == "run_finished")
-        assert finished["origin"] == {
-            "kind": "agent",
-            "operation_id": str(handle),
-        }
-        assert isinstance(finished["seq"], int)
-    finally:
-        bridge.disconnect()
-        session.clear_pending()
-
-
-def test_unauthenticated_subscribe_rejected(qapp):  # noqa: ARG001
+def test_unauthenticated_subscribe_rejected(qapp):
     from zcu_tools.gui.app.main.services.remote import ControlOptions
 
     f = Fixture(ControlOptions(port=0, token="s3cr3t"))

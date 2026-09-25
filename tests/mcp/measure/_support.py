@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from zcu_tools.gui.app.main.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.main.services.remote.method_entries import METHOD_ENTRIES
+from zcu_tools.gui.app.main.services.remote.method_entries._registry import (
+    build_agent_catalog,
+)
 from zcu_tools.gui.app.main.services.remote.wire_version import WIRE_VERSION
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
@@ -82,7 +85,7 @@ class MeasureClient:
             "ok": True,
             "result": {"value": False},
         }
-        self.context.send_gui_rpc("state.has_soc", {})
+        self.context.session.read_internal("state.has_soc", {})
         self.transport.sent.clear()
 
 
@@ -94,12 +97,12 @@ def make_client(
     port_is_open: PortIsOpenFn | None = None,
 ) -> MeasureClient:
     config = MCPBridgeConfig(
-        tool_prefix="gui_",
+        tool_prefix="",
         server_display_name="measure-test",
         server_instructions="",
         app_name="gui",
         default_port=8765,
-        mcp_version=74,
+        mcp_version=75,
         wire_version=WIRE_VERSION,
         pid_file=tmp_path / "unused.pid",
         log_file=tmp_path / "unused.log",
@@ -115,14 +118,17 @@ def make_client(
         resolve_connect_port=resolver,
         port_is_open=port_is_open or (lambda port: False),
     )
-    bridge = McpBridge(config, on_event=session.deliver_event)
+    bridge = McpBridge(config)
     session.attach_bridge(bridge)
     transport = WireTransport(responder)
+    transport.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {"methods": build_agent_catalog(METHOD_ENTRIES)},
+    }
     bridge.set_transport(transport)
     context = MeasureToolContext(
         config,
         session,
-        METHOD_SPECS,
         resolve_connect_port=resolver,
     )
     return MeasureClient(context, transport, build_measure_tools(context))

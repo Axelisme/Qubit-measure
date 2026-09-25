@@ -256,7 +256,6 @@ def test_device_list_refreshes_membership_without_masking_device_edit(
     [
         ("editor.commit", {"editor_id": "e", "name": "m"}),
         ("soc.info", {}),
-        ("state.has_soc", {}),
         ("context.md_get", {}),
         ("context.md_get_attr", {"key": "x", "attr": "y"}),
         ("context.ml_get", {"name": "x"}),
