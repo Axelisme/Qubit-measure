@@ -38,6 +38,9 @@ GERunResult: TypeAlias = GE_Result
 
 @dataclass
 class GEAnalyzeParams:
+    initial_state: Annotated[
+        Literal["ground", "excited"], ParamMeta(label="Initial State")
+    ] = "ground"
     # ``backend`` selects the primary rotation/threshold fit. Post-analysis uses
     # the resulting centres and does not choose or run another fit backend.
     backend: Annotated[Literal["pca", "center"], ParamMeta(label="Backend")] = "pca"
@@ -50,6 +53,7 @@ class GEAnalyzeParams:
 
 @dataclass
 class GEAnalyzeResult(AnalyzeResultBase):
+    initial_state: Literal["ground", "excited"]
     # ``fidelity`` and ``ge_s`` are plain floats (writeback-safe). ``g_center`` /
     # ``e_center`` are complex — kept here for downstream post-analysis use, but
     # skipped from ``to_summary_dict`` automatically (complex is not JSON-safe).
@@ -61,6 +65,30 @@ class GEAnalyzeResult(AnalyzeResultBase):
     e_center: complex
     init_pops: list[list[float]]
     figure: Figure
+
+    def validate_calibration(self) -> None:
+        populations = np.asarray(self.init_pops, dtype=np.float64)
+        scalars = [
+            self.fidelity,
+            self.theta,
+            self.threshold,
+            self.ge_s,
+            self.g_center,
+            self.e_center,
+        ]
+        if (
+            not np.isfinite(scalars).all()
+            or not 0.0 <= self.fidelity <= 1.0
+            or self.ge_s <= 0
+            or np.isclose(self.g_center, self.e_center)
+            or populations.shape != (2, 2)
+            or not np.isfinite(populations).all()
+            or np.any(populations < 0)
+            or np.any(populations.sum(axis=1) > 1 + 1e-12)
+        ):
+            raise ValueError(
+                "Invalid GE calibration: check centers, width and populations"
+            )
 
 
 @dataclass
@@ -85,12 +113,12 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Single-shot ground/excited readout: prepares the qubit in |g> "
-            "(no probe pulse) and |e> (probe pi-pulse), takes 'shots' "
+            "Single-shot ground/excited readout: measures without and with the "
+            "probe pi-pulse, takes 'shots' "
             "single-shot readouts of each, and fits the two IQ clusters to "
             "extract the assignment fidelity, rotation angle and threshold. "
             "Runs on real hardware; the domain forces rounds=1 and reps=shots, "
-            "running the readout twice (g-prep / e-prep) internally."
+            "running the readout twice (probe off / on) internally."
         ),
         expects_md=(
             "Reads from the MetaDict (all optional): 't1' — sets the relax "
@@ -115,6 +143,8 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             "writeback item)."
         ),
         recommended=(
+            "Set Initial State to the predominant state after reset/init and before "
+            "the probe pi-pulse. This labels the two acquisitions, not a pure-state prior. "
             "Use a large 'shots' (~1e5) so the IQ histograms are well sampled; "
             "the default analysis backend is 'pca'. Analysis also exposes histogram "
             "log scale, T1 alignment, and an optional shared length ratio; advanced "
@@ -148,12 +178,14 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         exp = GE_Exp()
         fidelity, pops, fit_result, fig = exp.analyze(
             req.run_result,
+            initial_state=params.initial_state,
             backend=params.backend,
             logscale=params.logscale,
             align_t1=params.align_t1,
             length_ratio=params.length_ratio,
         )
         return GEAnalyzeResult(
+            initial_state=params.initial_state,
             fidelity=fidelity,
             theta=fit_result["theta"],
             threshold=fit_result["threshold"],
@@ -175,6 +207,7 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeParams],
     ) -> GEPostAnalyzeResult:
         primary = req.analyze_result
+        primary.validate_calibration()
         exp = GE_Exp()
         confusion = exp.calc_confusion_matrix(
             np.asarray(primary.init_pops, dtype=np.float64),
@@ -184,12 +217,14 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             radius=None,
             result=req.run_result,
             consider_other=False,
+            initial_state=primary.initial_state,
         )
         figure = exp.plot_confusion_matrix(
             confusion,
             primary.g_center,
             primary.e_center,
             result=req.run_result,
+            initial_state=primary.initial_state,
         )
         return GEPostAnalyzeResult(
             ge_radius=confusion.radius,
@@ -201,6 +236,7 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         self, req: WritebackRequest[GERunResult, GEAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
+        result.validate_calibration()
         # Float scalars plus the complex discrimination centres. complex md
         # values round-trip end-to-end now (in-process apply + MetaDict str
         # persistence both speak complex; the wire carries {"__complex__": [...]}
