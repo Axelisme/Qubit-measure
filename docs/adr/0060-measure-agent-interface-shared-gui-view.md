@@ -29,7 +29,7 @@
 | P7 | **錯誤可行動** | 錯誤帶 stable `reason` 與 `hint`（[[0047]]）；guard 衝突時重讀狀態再重試。 |
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 
-## Decision：Tool 集合（24 特化 + 3 RPC）
+## Decision：Tool 集合（27 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -45,13 +45,13 @@
 {
   environment: {project, soc, context, devices: [{name, value, unit, output}], predictor: {loaded}},
   ready: {can_run: bool, missing: [...]},
-  tabs: [{tab: "t3", experiment: "twotone/freq", active: true, running: false,
+  tabs: [{tab: "t3", experiment: "twotone/freq", active: true, subtab: "analysis", running: false,
           has_result: true, analysis: "ok" | "failed" | null, writeback_pending: 2}],
   running: [{op, tab, kind, progress}]
 }
 ```
 
-`tabs[].active` 是 GUI 上目前選中的 tab。
+`tabs[].active` 與 `tabs[].subtab` 是 GUI 上目前選中的 tab 與子 tab。
 
 ### B. 環境（1）
 
@@ -77,16 +77,41 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 **`library(name?)`**
 不帶 `name` 列出 modules 與 waveforms；帶 `name` 回傳該項 cfg。
 
-### D. 實驗與 tab（10）
+### D. 實驗與 tab（13）
 
-**`experiments(name?)`**
-不帶 `name`：列出可用實驗與一行說明。帶 `name`：adapter guide、以目前 context 解析的預設 cfg、analyze params（primary 與 post）、分析模式（fit／interactive）。
+#### 資訊從哪裡取得
 
-**`tab_open(experiment, from_file?)`**
-在 GUI 開新 tab；`from_file` 載入既有資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg。
+guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪些值、建議的操作順序、常見問題。它是散文，不是格式契約。具體格式各有獨立的讀取方式：
+
+| 需要知道 | 取得方式 | 內容 |
+| --- | --- | --- |
+| 怎麼做這個實驗 | `guide(experiment)` | adapter guide：behavior、expects_md、expects_ml、typical_writeback、recommended |
+| cfg 格式與目前值 | `tab_get(tab, include=["cfg"])` | 每個可設路徑的種類（scalar／sweep edge／ref key）、型別、目前值、ref 可選的 library 項目、是否鎖定 |
+| 分析參數格式 | `tab_get(tab, include=["analyze_params"])` | primary 與 post 各自的參數名、型別、可選值、目前值；該實驗有哪些分析階段、是否互動式 |
+| 分析結果 | `tab_analyze` 的回傳，或 `tab_get(tab, include=["analysis", "post"])` | summary 欄位與值、figure 路徑 |
+| 寫回內容 | `writeback(tab, stage)`（不帶 `items`） | 每個項目的 id、種類（md／module／waveform）、target、current、proposed、是否勾選、目的地 context |
+| 存檔路徑 | `tab_get(tab, include=["save_paths"])` | data、analysis image、post image 的預設路徑（依 GUI 檔名規則） |
+| 使用者目前在看哪裡 | `status()` 的 `tabs[].active` 與 `tabs[].subtab` | 選中的 tab 與子 tab |
+
+#### Tools
+
+**`experiments()`**
+列出可用實驗：名稱、一行說明、分析階段（primary／post）與模式（fit／interactive）。
+
+**`guide(experiment)`**
+回傳該實驗的 guide 全文。開 tab 前後都可讀。
+
+**`tab_open(experiment, from_file?, focus = true)`**
+在 GUI 開新 tab；`from_file` 載入既有資料檔（用於分析，不需 SoC）。回傳 tab id 與 cfg 摘要。
+
+**`tab_close(tab)`**
+關閉 tab；執行中的 tab 回 `reason="busy"`。
+
+**`tab_focus(tab, subtab? = "run" | "analysis" | "post" | "data" | "guide")`**
+只改變 GUI 顯示哪個 tab 與子 tab，不影響任何操作對象。
 
 **`tab_get(tab, include = ["summary"])`**
-`include` 可選 `cfg`、`result`、`analysis`、`post`、`writeback`、`figures`。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
+`include` 可選 `cfg`、`analyze_params`、`analysis`、`post`、`writeback`、`save_paths`、`figures`；`summary` 含實驗名、分析階段、run／analysis 狀態、目前子 tab。這也是 agent 讀取使用者在某個 tab 做了什麼的方式。
 
 **`tab_edit(tab, edits)`**
 依序套用 cfg 編輯到該 tab 的 cfg 草稿，GUI 表單即時更新。沿用現有編輯語法（[[0050]]）：
@@ -100,23 +125,37 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 
 回傳套用數量與草稿是否有效。
 
-**`tab_run(tab)`**
+**`tab_run(tab, focus = true)`**
 以該 tab 目前的 cfg 草稿開始 run，立即回傳 `{op}`；不附帶編輯、不自動分析。
 
 **`tab_live(tab)`**
-讀取 run 進行中的狀態：進度、run pane 的 live plot（PNG 路徑）與已取得的部分資料摘要。agent 據此決定繼續等、`cancel` 後 `tab_edit` 重來，或讓它跑完。run 結束後回傳最終的 run pane 圖。
+讀取 run 進行中的狀態：進度、run pane 的 live plot（PNG 路徑）。agent 據此決定繼續等、`cancel` 後 `tab_edit` 重來，或讓它跑完。run 結束後回傳最終的 run pane 圖。
 
-**`tab_analyze(tab, stage = "primary" | "post", params?)`**
-以 `params` 對目前資料分析，結果寫入 GUI 的 analysis／post pane；可用不同 `params` 反覆呼叫直到滿意。回傳 summary 與 figure 路徑；分析較久時回傳 `{op}`。互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。writeback 草稿不隨附，由 `writeback` 讀取。
+**`tab_analyze(tab, stage = "primary" | "post", params?, focus = true)`**
+以 `params` 對目前資料分析，結果寫入 GUI 的 analysis／post pane；可用不同 `params` 反覆呼叫直到滿意。回傳 summary 與 figure 路徑；分析較久時回傳 `{op}`。互動式分析回 `status: "awaiting_user"`，由使用者在 GUI 完成。
 
-**`writeback(tab, stage = "primary" | "post", items?, apply = false)`**
-不帶 `items` 時只讀取草稿。編輯 GUI 上的 writeback 草稿：`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}`。
+**`writeback(tab, stage = "primary" | "post", items?, apply = false, focus = true)`**
+不帶 `items` 時只讀取草稿。`items = [{id, selected?, target?, value?, edits?}]` 勾選、改名、改 md 值，或以 cfg 編輯語法修改模組／波形項目的欄位；`apply=true` 套用到目前 context。回傳每個項目的 `{id, kind, target, current, proposed, selected}` 與目的地 context。
 
-**`tab_save(tab, data = true, images = ["analysis"])`**
-沿用 GUI 的存檔路徑與檔名規則。
+**`tab_save(tab, data = true, images = ["analysis"], data_path?, image_paths?, comment?, focus = true)`**
+不給路徑時用 `save_paths` 的預設路徑；`comment` 寫入資料檔註解。回傳實際寫入的檔案路徑。
 
 **`data(tab, role?, max_points = 200, export = false)`**
 回傳目前結果的降採樣軸與數值；`export=true` 回 `.npz` 路徑供 agent 自行分析。
+
+#### 子 tab 關注
+
+使用者透過 GUI 跟隨 agent，所以各階段 tool 預設把 GUI 切到對應的 tab 與子 tab：
+
+| Tool | 切到 |
+| --- | --- |
+| `tab_open` | 新 tab 的 run 子 tab |
+| `tab_run` | run |
+| `tab_analyze` | analysis 或 post |
+| `writeback` | analysis 或 post（writeback 清單所在） |
+| `tab_save` | data |
+
+`focus=false` 時不切換，用於使用者正在看別的畫面、或 agent 在背景讀寫。讀取類 tool（`tab_get`、`tab_live`、`data`）永遠不切換。
 
 ### E. 非同步（2）
 
@@ -149,7 +188,7 @@ setup(project = {chip: "Q5_2D", qubit: "Q1", resonator: "R1"},
 
 ### I. RPC channel（3）
 
-`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]。承接低頻但必要的操作：tab 關閉與切換、context 列表、MetaDict 刪除、ModuleLibrary 建立／改名／刪除、cfg editor session、arb waveform、value source、device forget／取消、analyze cancel、GUI prompt 對話框（agent 不在使用者身邊時）等。已特化的 method 由 RPC 呼叫時回 `reason="use_tool"`。
+`rpc_list(domain?)`、`rpc_describe(method)`、`rpc_call(method, params)`，規格見 [[0059]]。承接低頻但必要的操作：context 列表、MetaDict 刪除、ModuleLibrary 建立／改名／刪除、cfg editor session、arb waveform、value source、device forget／取消、analyze cancel、GUI prompt 對話框（agent 不在使用者身邊時）等。已特化的 method 由 RPC 呼叫時回 `reason="use_tool"`。
 
 ## 情境演練
 
@@ -165,17 +204,21 @@ predict(2e-3)                                   → 842.7 MHz
 context_set({q_f: 842.7, qf_w: 15})             → 作為掃描種子
 
 # twotone：guide → cfg → run → live plot → 分析 → 寫回 → 存檔
-experiments("twotone/freq")                     → guide、預設 cfg（sweep 以 q_f ± 1.5*qf_w 連結）
-tab_open("twotone/freq")                        → t1
+guide("twotone/freq")                           → 先寬掃找真實的峰，再窄掃擬合；predictor 只當種子
+tab_open("twotone/freq")                        → t1（GUI 切到 t1 的 run 子 tab）
+tab_get("t1", include=["cfg"])                  → sweep.freq 以 q_f ± 1.5*qf_w 連結；readout.ref 可選 readout_rf／readout_dpm
 tab_edit("t1", [{path: "rounds", value: 50}])
 tab_run("t1")                                   → op o2
 wait("o2", timeout=20)                          → running
 tab_live("t1")                                  → 40%，live plot 看得到峰在 845 MHz 附近
 wait("o2", timeout=60)                          → finished
-tab_analyze("t1")                               → q_f=845.1 MHz，fit 貼合
+tab_get("t1", include=["analyze_params"])       → model_type: lor | sinc
+tab_analyze("t1")                               → q_f=845.1 MHz，fit 貼合（GUI 切到 analysis）
 writeback("t1")                                 → md.q_f 842.7 → 845.1、md.qf_w → 0.8
 writeback("t1", apply=true)
-tab_save("t1")
+tab_get("t1", include=["save_paths"])           → Database/Q5_2D/Q1/…/Q1_qubit_freq_0925@051115_2.000mA.hdf5
+tab_save("t1", comment="q_f = 845.1 MHz")       → GUI 切到 data 子 tab
+tab_close("t1")
 
 # amp rabi：live plot 顯示掃描範圍不足，中斷重來
 tab_open("rabi/amp_rabi")                       → t2
@@ -201,7 +244,7 @@ tab_analyze("t3") → writeback("t3", apply=true) → tab_save("t3")
 
 ```text
 connect(launch="never")
-status()                                   → t4 twotone/freq, active, analysis: failed
+status()                                   → t4 twotone/freq, active, subtab: analysis, analysis: failed
 tab_get("t4", include=["cfg", "analysis", "figures"])
 data("t4", max_points=150)                 → 峰貼在掃描邊緣
 tab_edit("t4", [{path: "sweep.freq.start", value: 838.0}, {path: "sweep.freq.stop", value: 858.0}])
@@ -238,19 +281,27 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 | --- | --- |
 | `status` | `gui_overview` + tab 清單 |
 | `setup` | `startup.apply`、`soc.connect`、`context.new`／`context.use` |
-| `experiments` | `adapter.list`、`adapter.guide` 與預設 cfg |
-| `tab_open` | `tab.new`（+ `tab.load_data`） |
-| `tab_get` | `tab.snapshot`、`tab.get_cfg`、analyze／post result、writeback preview、figure |
+| `experiments` | `adapter.list` + adapter capabilities |
+| `guide` | `adapter.guide` |
+| `tab_open` | `tab.new`（+ `tab.load_data`）+ `tab.set_active` |
+| `tab_close` | `tab.close` |
+| `tab_focus` | `tab.set_active` + **新增** view-only 的子 tab 切換 wire method |
+| `tab_get` | `tab.snapshot`（含 `save_paths`）、`tab.get_cfg`、`tab.get_analyze_params`／`get_post_analyze_params`、analyze／post result、writeback preview、figure |
 | `tab_edit` | `tab.set_cfg`（既有編輯語法） |
 | `tab_run` | `tab.run_start` |
 | `tab_live` | `operation.progress` + run pane 截圖（`tab.get_figure(run)`） |
 | `tab_analyze` | `tab.analyze`／`tab.post_analyze` + short-wait |
-| `writeback` | `tab.writeback_set` + `tab.writeback_apply` |
+| `writeback` | `tab.writeback_preview` + `tab.writeback_set` + `tab.writeback_apply` |
+| `tab_save` | `tab.save_data`（`data_path`、`comment`）+ `tab.save_image` |
 | `wait`／`cancel` | `operation.await`；各類 cancel 合一 |
 | `device_set` | `device.connect`／`disconnect`／`setup` |
 | `predictor`／`predict` | 既有 predictor wire method |
 
-唯一新增的讀取是 `data`（run result 的降採樣與匯出）。
+需要補的只有三項，都不改 GUI 畫面：
+
+- `data`：run result 的降採樣與匯出。
+- 子 tab 切換與讀取：view-only wire method，讓 agent 切換並讀取 `ExpTabWidget` 目前的子 tab。
+- cfg 格式投影：`tab.get_cfg` 目前回傳值與路徑種類，需補上型別、ref 可選項與鎖定狀態。
 
 ## 後續（基礎介面穩定後再評估）
 
@@ -269,7 +320,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 24 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 27 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
