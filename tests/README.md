@@ -33,7 +33,7 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 **Qt GUI 子套件單獨跑**（約 22 s，不需 `-n auto`）：
 
 ```bash
-.venv/bin/python -m pytest tests/gui tests/autofluxdep_gui tests/fluxdep_gui tests/dispersive_gui -q
+.venv/bin/python -m pytest tests/gui tests/autofluxdep_gui tests/fluxdep_gui -q
 ```
 
 ### BackgroundRunner.quiesce() — 測試 teardown 必要模式

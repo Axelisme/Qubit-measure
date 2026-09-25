@@ -8,6 +8,11 @@ from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.utils.datasaver import save_labber_data
 
 
+@pytest.fixture(autouse=True)
+def _drain_qt_events() -> None:  # pyright: ignore[reportUnusedFunction]  # pytest fixture lookup
+    """Keep non-UI Dispersive tests independent of QApplication."""
+
+
 @pytest.fixture
 def onetone_hdf5(tmp_path):
     """A small 2D one-tone spectrum hdf5 (canonical x=flux, y=freq[Hz], z=signals.T).
