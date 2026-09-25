@@ -30,7 +30,7 @@
 | P8 | **省 context** | 預設精簡，細節用 `include=`；圖回檔案路徑；陣列降採樣或匯出。 |
 | P9 | **能機械推導的就提供** | 可由現有資料直接算出的值（例如 `eta_s`、正規化後的 sweep 實際值）由介面算好回傳，不留給 agent 推算。 |
 
-## Decision：Tool 集合（32 特化 + 3 RPC）
+## Decision：Tool 集合（31 特化 + 3 RPC）
 
 ### A. 連線與狀態（3）
 
@@ -108,7 +108,7 @@ context 索引：`{active, labels}`。
 
 ModuleLibrary 的寫入（由 role 建立、改名、刪除、修改欄位）屬常用操作，應有特化 tool；支援方式另行討論，定案前暫經 RPC。
 
-### D. 實驗與 tab（13）
+### D. 實驗與 tab（12）
 
 #### 資訊從哪裡取得
 
@@ -211,8 +211,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 **`tab_save(tab, artifacts = "all" | [key, ...], paths?: {key: path}, comment?)`**
 以 artifact 為單位存檔。預設 `"all"` 對應 GUI 的 Save All，依 GUI 順序存下所有可存項目；給清單時只存列出的。`paths` 覆寫個別項目的路徑，其餘用預設路徑；`comment` 只寫入 data。回傳 `{saved: {key: actual_path}}`，資料檔重名自動加後綴時回傳實際路徑。GUI 存檔區的狀態隨之更新。
 
-**`data(tab, role?, max_points = 200, export = false)`**
-回傳目前結果的降採樣軸與數值；`export=true` 回 `.npz` 路徑供 agent 自行分析。
+原始數值不經本介面讀取：需要自行計算時先 `tab_save`，再以 `load_labber_data`／`load_grouped_labber_data` 讀取存好的資料檔。
 
 #### GUI 跟隨 agent 的操作
 
@@ -226,7 +225,7 @@ guide 是這個實驗的 skill：說明它量什麼、假設 context 已有哪�
 | `writeback`（帶 `write`） | analysis 或 post（writeback 清單所在） |
 | `tab_save` | data |
 
-讀取類 tool（`tab_get`、`tab_live`、`data`、不帶 `write` 的 `writeback`、不帶 `payload` 的 `tab_interact`）不切換，避免在 agent 反覆讀取時打斷使用者的畫面。
+讀取類 tool（`tab_get`、`tab_live`、不帶 `write` 的 `writeback`、不帶 `payload` 的 `tab_interact`）不切換，避免在 agent 反覆讀取時打斷使用者的畫面。
 
 ### E. 非同步（2）
 
@@ -319,7 +318,6 @@ tab_analyze("t3") → writeback("t3") → writeback("t3", write=[{id: "md-1"}, {
 connect(launch="never")
 status()                                   → t4 twotone/freq, active, analysis: failed
 tab_get("t4", include=["cfg", "analysis"])
-data("t4", max_points=150)                 → 峰貼在掃描邊緣
 tab_edit("t4", [{path: "sweep.freq", value: {center: 848.0, span: 20, expts: 201}}])
 tab_run("t4") → wait → tab_live("t4")
 tab_analyze("t4")                          → fit ok
@@ -333,7 +331,7 @@ writeback("t4", write=[{id: "md-1"}])
 tab_open("time_domain/t1", from_file="Database/Q5_2D/Q1/…/Q1_t1_0918.hdf5")   → t9
 tab_analyze("t9")
 tab_analyze("t9", params={dual_exp: true})
-data("t9", export=true)                    → .npz，agent 自行擬合比較
+（agent 以 load_labber_data 讀原始檔，自行擬合比較）
 ```
 
 ### 情境二 c：排查問題
@@ -379,7 +377,6 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 需要補的項目，都不改 GUI 畫面：
 
-- `data`：run result 的降採樣與匯出。
 - 子 tab 切換：view-only wire method（與 `tab.set_active` 同性質），供各階段 tool 讓 GUI 跟隨到對應子 tab。
 - cfg 格式投影：`tab.get_cfg` 目前回傳值與路徑種類，需補上型別、ref 可選項與鎖定狀態。
 - cfg 編輯語法：sweep 整體修改與衝突檢查、sweep 端點接受 md 表達式、錯誤清單。
@@ -403,7 +400,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 
 ## 與 [[0059]] 的關係
 
-- [[0059]] 的七類 workflow tool 清單由本 ADR 的 32 個特化 tool 取代。
+- [[0059]] 的七類 workflow tool 清單由本 ADR 的 31 個特化 tool 取代。
 - [[0059]] 的 RPC channel 保留並對量測 agent 開放；開發 agent 也用它做 GUI 端改動的 e2e 驗證。
 
 ## Alternatives considered
@@ -416,7 +413,7 @@ tab_run("t4") → wait → tab_live("t4")      → 峰值恢復
 ## 待決問題
 
 1. `tab_live` 的部分資料摘要內容（只給進度與圖，或附降採樣數值）。
-2. 實作順序：建議先做 `status`、`tab_*`、`writeback`、`wait`，再做 `setup`、`experiments`、`data`、`devices`、`predictor`。
+2. 實作順序：建議先做 `status`、`tab_*`、`writeback`、`wait`，再做 `project`／`soc_*`、context 類、`experiments`、`devices`、`predictor`。
 
 ## 附錄 A：使用者流程分析（`notebook_md/single_qubit.md` 與 measure-gui）
 
