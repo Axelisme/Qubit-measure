@@ -141,7 +141,7 @@ uv run --directory <worktree> --no-sync -- python tools/quality_report.py snapsh
 未選用時明列 skipped；選用但未安裝、解析失敗或輸出無效時記 error，exit 2，不當作零筆。
 高複雜度本身不改變 exit code，也不判定品質合格與否。
 
-報表沿用來源掃描排除規則，只分析 `lib/` 與 `tools/`，不含 tests、script 或 Notebook。
+報表沿用來源掃描排除規則，只分析 `lib/` 與 `tools/`，不含 tests、scripts 或 Notebook。
 保留 Radon JSON 提供的函式、方法及 closure，排除 class aggregate；巢狀 block 以 qualified name
 顯示。Radon 未提供的 block 不另自行推導，例如函式內定義的 class 可能不在其輸出中。
 計算包含 assert，不按 rank 過濾；CC 與 Ruff 的演算法不同，不能直接共用 12 的門檻。
