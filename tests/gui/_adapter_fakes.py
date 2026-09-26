@@ -81,8 +81,8 @@ class DummyAdapter:
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         del req, raw_cfg
 
-    def run(self, req: RunRequest, schema: CfgSchema):
-        del req, schema
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]):
+        del req, raw_cfg
         return object()
 
     def load(self, req: LoadDataRequest):

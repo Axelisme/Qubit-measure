@@ -399,8 +399,8 @@ def test_start_run_sets_is_running(cf):
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))  # cleanup
 
 
-def test_start_run_uses_committed_state_schema(cf):
-    """start_run reads cfg from State, not from a passed-in schema."""
+def test_start_run_passes_lowered_committed_state_cfg(cf):
+    """start_run delivers concrete values from the committed State cfg."""
     tab_id = cf.ctrl.new_tab("fake")
 
     # Mutate committed cfg in State after tab creation.
@@ -412,13 +412,13 @@ def test_start_run_uses_committed_state_schema(cf):
     mutated = dataclasses.replace(base, value=mutated_value)
     cf.ctrl.update_tab_cfg(tab_id, mutated)
 
-    # Intercept run to capture the schema the adapter actually receives.
-    captured: dict[str, CfgSchema] = {}
+    # Observe the payload at the worker-to-adapter boundary.
+    captured: dict[str, dict[str, object]] = {}
     real_adapter = cf.state.get_tab(tab_id).adapter
 
-    def _capture_run(req, schema):
-        captured["schema"] = schema
-        return real_adapter.run(req, schema)
+    def _capture_run(req, raw_cfg):
+        captured["cfg"] = raw_cfg
+        return real_adapter.run(req, raw_cfg)
 
     spy = MagicMock(spec=FakeAdapter)
     spy.capabilities = real_adapter.capabilities
@@ -428,9 +428,7 @@ def test_start_run_uses_committed_state_schema(cf):
     cf.ctrl.start_run(tab_id)
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
-    reps_value = captured["schema"].value.fields["reps"]
-    assert isinstance(reps_value, DirectValue)
-    assert reps_value.value == 42
+    assert captured["cfg"]["reps"] == 42
 
 
 def test_start_run_emits_run_started(cf):

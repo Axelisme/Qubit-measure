@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -18,6 +19,7 @@ from typing_extensions import TypeVar
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.device import DeviceInfo
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.meta_tool.metadict import MetaDict
@@ -157,10 +159,16 @@ T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=NoAnalyzeParams)
 
 @dataclass(frozen=True)
 class RunRequest:
-    md: MetaDict
-    ml: ModuleLibrary
+    """Runtime handles and detached, already observed device settings."""
+
     soc: SocHandle | None
     soccfg: SocCfgHandle | None
+    device_snapshot: Mapping[str, DeviceInfo]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "device_snapshot", deepcopy(dict(self.device_snapshot))
+        )
 
 
 @dataclass(frozen=True)

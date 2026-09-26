@@ -35,7 +35,7 @@ from zcu_tools.gui.app.main.adapter import (
 )
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 
-from ._shared import cached_device_snapshot, lower_jpa_rf_dev
+from ._shared import lower_jpa_rf_dev
 
 _JPA_FREQ_SWEEP_EXPTS = 101
 # Bring-up seed: ±2% around the centre. These are inspectable starting bounds,
@@ -148,13 +148,12 @@ class JpaFreqAdapter(
 
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
         cfg_raw = dict(raw_cfg)
-        cfg_raw["dev"] = lower_jpa_rf_dev(cfg_raw, cached_device_snapshot())
+        cfg_raw["dev"] = lower_jpa_rf_dev(cfg_raw, req.device_snapshot)
         return super().build_exp_cfg(cfg_raw, req)
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        del req
-        # Pure preflight over cached/static data — never commands a live device.
-        lower_jpa_rf_dev(raw_cfg, cached_device_snapshot())
+        # Pure preflight over the detached request snapshot.
+        lower_jpa_rf_dev(raw_cfg, req.device_snapshot)
 
     def analyze(
         self, req: AnalyzeRequest[FreqResult, NoAnalyzeParams]

@@ -57,6 +57,7 @@ class OneToneFluxDepAdapter(
     BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
     exp_cls = FluxDepExp
+    ExpCfg_cls = FluxDepCfg
     legacy_migration_experiment: ClassVar[str | None] = "onetone/flux_dep"
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True
@@ -206,7 +207,7 @@ class OneToneFluxDepAdapter(
                 )
             dev_patch[device_name] = {"label": label_key}
         cfg_raw["dev"] = dev_patch
-        return req.ml.make_cfg(cfg_raw, FluxDepCfg)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def make_filename_stem(self, ctx: ExpContext) -> str:
         return f"{ctx.res_name}_flux"

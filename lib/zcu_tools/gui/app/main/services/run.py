@@ -102,7 +102,7 @@ class RunService:
         cancel_requested = threading.Event()
         adapter = permit.adapter
         request = permit.request
-        schema = permit.schema
+        raw_cfg = permit.raw_cfg
 
         def request_cancel() -> None:
             cancel_requested.set()
@@ -117,7 +117,7 @@ class RunService:
                 with progress_ambient(factory):
                     with schedule_stop_scope(stop_signal):
                         with device_setup_cancel_scope(stop_event):
-                            result = adapter.run(request, schema)
+                            result = adapter.run(request, raw_cfg)
                             stop_signal.raise_if_error()
                             return result
 

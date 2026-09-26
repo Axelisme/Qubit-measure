@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-25 — test structure policy
+**Last updated:** 2026-09-26 — frozen Run contract ownership
 
 本頁是整個 `tests/` 套件新增、拆分與搬遷測試的結構規則，也保留硬體與 GUI 測試的領域注意事項。
 測試行為與驗證流程以 [AGENTS.md](../AGENTS.md) 為準。
@@ -218,9 +218,11 @@ Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷
 不是 ticket 命名。adapter 層 patch domain `run` / `analyze` 可作為 boundary isolation，
 但 assertion 應驗證 adapter 對 cfg、centers、summary、writeback 的語意。
 
-onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering、md preflight 與 writeback
-contract；`onetone/freq` 的 homophasal selector 只在 adapter 邊界注入 md fit params，runtime
-取樣公式由 domain-level tests 擁有。`onetone/freq` writeback tests 覆蓋 MetaDict
+onetone adapter tests 覆蓋 real-hardware adapter 的 cfg lowering 與 writeback contract。
+`tests/gui/app/main/adapter/test_lowering_adapter.py` 擁有 homophasal 正式 optional cfg
+到 domain assembly 的接縫，校正不從 live md 注入；runtime 取樣公式由 domain-level tests
+擁有。Guard tests 驗證 cached-only cfg 與 device snapshot 凍結；RunService tests 驗證
+worker delivery 與既有 operation cleanup。`onetone/freq` writeback tests 覆蓋 MetaDict
 `r_f` / `rf_w` / `theta0` 與 `readout_rf` ModuleLibrary writeback 的 no-snapshot gate、
 pulse-readout schema、non-pulse skip，以及 default 仍不 adopt library readout。
 

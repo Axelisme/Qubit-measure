@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.utils import make_comment, parse_comment
 from zcu_tools.experiment.v2.runner import ProgramBuilder
 from zcu_tools.experiment.v2.singleshot import ac_stark
@@ -23,6 +22,7 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone_sweep import (
     SsT1ToneSweepGainAdapter,
 )
 from zcu_tools.gui.app.main.adapter import ExpContext, RunRequest
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_resolved_dict
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import DirectValue, EvalValue
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -80,17 +80,6 @@ def calibration(request, monkeypatch):
     ):
         draft.set_target("uniform", True)
 
-    def materialize(raw, cfg_type, *, ml):
-        return assemble_experiment_cfg(raw, cfg_type, ml=ml, device_snapshot={})
-
-    monkeypatch.setattr(
-        "zcu_tools.experiment.v2_gui.adapters.base.make_cfg", materialize
-    )
-    monkeypatch.setattr(
-        ModuleLibrary,
-        "make_cfg",
-        lambda self, raw, cfg_type: materialize(raw, cfg_type, ml=self),
-    )
     monkeypatch.setattr(module, "setup_devices", lambda *args, **kwargs: None)
     monkeypatch.setattr(module, "sweep2array", lambda *args, **kwargs: np.array([0.1]))
     viewer = MagicMock()
@@ -116,14 +105,15 @@ def calibration(request, monkeypatch):
 
 
 def test_population_run_uses_cfg_calibration_and_preserves_result_snapshot(calibration):
-    adapter, md, ml, draft, acquisition = calibration
+    adapter, md, _ml, draft, acquisition = calibration
     snapshot = draft.snapshot()
     assert snapshot.value.fields["g_center"] == EvalValue(
         "g_center", resolved=-1 + 0.25j
     )
     md.g_center = 100j
     result = adapter.run(
-        RunRequest(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock()), snapshot
+        RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
+        schema_to_resolved_dict(snapshot),
     )
     acquisition.assert_called()
     for call in acquisition.call_args_list:
@@ -146,10 +136,11 @@ def test_population_run_uses_cfg_calibration_and_preserves_result_snapshot(calib
 
 
 def test_population_direct_override_does_not_write_md(calibration):
-    adapter, md, ml, draft, acquisition = calibration
+    adapter, md, _ml, draft, acquisition = calibration
     draft.set_target("g_center", DirectValue(3 + 4j))
     result = adapter.run(
-        RunRequest(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock()), draft.snapshot()
+        RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
+        schema_to_resolved_dict(draft.snapshot()),
     )
     assert result.cfg_snapshot.g_center == 3 + 4j
     assert acquisition.call_args.kwargs["g_center"] == 3 + 4j
@@ -157,12 +148,12 @@ def test_population_direct_override_does_not_write_md(calibration):
 
 
 def test_population_invalid_calibration_rejects_acquisition(calibration):
-    adapter, md, ml, draft, acquisition = calibration
+    adapter, _md, _ml, draft, acquisition = calibration
     draft.set_target("g_center", EvalValue("missing_center"))
     assert not draft.is_valid()
     with pytest.raises(RuntimeError, match="missing_center"):
         adapter.run(
-            RunRequest(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock()),
-            draft.snapshot(),
+            RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={}),
+            schema_to_resolved_dict(draft.snapshot()),
         )
     acquisition.assert_not_called()

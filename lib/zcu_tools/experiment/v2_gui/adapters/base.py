@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from inspect import signature
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
-from zcu_tools.experiment.cfg_assembler import make_cfg
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -32,10 +32,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import (
-    schema_to_raw_dict,
-    validate_schema,
-)
+from zcu_tools.gui.app.main.adapter.lowering import validate_schema
 from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
@@ -287,15 +284,17 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T_Cfg:
         """Build experiment config from the flat GUI raw dict.
 
-        Default delegates to ``make_cfg(raw_cfg, ExpCfg_cls, ml=req.ml)``. An adapter must
-        either set the ``ExpCfg_cls`` ClassVar or override this; the raise is a
-        Fast-Fail guard against forgetting both (mirrors the analysis no-ops).
+        Materialize resolved module dictionaries without a live library, using
+        only the request's device snapshot. An adapter must set ``ExpCfg_cls``
+        or override this method.
         """
         if self.ExpCfg_cls is None:
             raise NotImplementedError(
                 f"{type(self).__name__} must set ExpCfg_cls or override build_exp_cfg"
             )
-        return make_cfg(raw_cfg, self.ExpCfg_cls, ml=req.ml)
+        return assemble_experiment_cfg(
+            raw_cfg, self.ExpCfg_cls, ml=None, device_snapshot=req.device_snapshot
+        )
 
     def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
         """Pure run preflight for adapter-specific constraints.
@@ -451,8 +450,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             return _analyze_params_generic_arg(cls)
         return ret
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> T_Result:
         cfg = self.build_exp_cfg(raw_cfg, req)
         if self.capabilities.requires_soc:
             soc, soccfg = require_soc_handles(req)

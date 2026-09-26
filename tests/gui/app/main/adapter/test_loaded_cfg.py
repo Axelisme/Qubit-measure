@@ -246,7 +246,7 @@ def test_onetone_freq_runtime_mode_and_readout_are_restored():
     current = adapter.make_default_cfg(ctx)
     raw = schema_to_raw_dict(current, ctx.md, ctx.ml)
     runtime = adapter.build_exp_cfg(
-        raw, RunRequest(md=ctx.md, ml=ctx.ml, soc=None, soccfg=None)
+        raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
     )
     snapshot = FreqCfg.model_validate(
         {

@@ -21,9 +21,7 @@ from zcu_tools.gui.app.main.adapter import (
     RunRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     EvalValue,
     ScalarSpec,
 )
@@ -127,7 +125,7 @@ class SsT1Adapter(
         # Pop ``uniform`` before lowering — it is not part of T1Cfg.
         cfg_raw = dict(raw_cfg)
         cfg_raw.pop("uniform", None)
-        return req.ml.make_cfg(cfg_raw, T1Cfg)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def _uniform(self, raw_cfg: dict[str, object]) -> bool:
         value = raw_cfg.get("uniform", False)
@@ -135,10 +133,9 @@ class SsT1Adapter(
             raise ValueError(f"'uniform' must be a bool, got {type(value).__name__}")
         return value
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> SsT1RunResult:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> SsT1RunResult:
         # Uniform remains an explicit domain run option.
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         uniform = self._uniform(raw_cfg)
         return T1Exp().run(soc, soccfg, cfg, uniform=uniform)

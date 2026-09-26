@@ -31,9 +31,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     SweepValue,
 )
 
@@ -64,6 +62,7 @@ class RoOptAutoAdapter(
     ]
 ):
     exp_cls = AutoOptExp
+    ExpCfg_cls = AutoOptCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -149,7 +148,7 @@ class RoOptAutoAdapter(
     def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> AutoOptCfg:
         cfg_raw = dict(raw_cfg)
         cfg_raw.pop("num_points", None)
-        return req.ml.make_cfg(cfg_raw, AutoOptCfg)
+        return super().build_exp_cfg(cfg_raw, req)
 
     def _num_points(self, raw_cfg: dict[str, object]) -> int:
         value = raw_cfg.get("num_points")
@@ -159,9 +158,8 @@ class RoOptAutoAdapter(
             raise ValueError("num_points must be positive")
         return value
 
-    def run(self, req: RunRequest, schema: CfgSchema) -> RoOptAutoRunResult:
+    def run(self, req: RunRequest, raw_cfg: dict[str, object]) -> RoOptAutoRunResult:
         soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
         num_points = self._num_points(raw_cfg)
         return AutoOptExp().run(soc, soccfg, cfg, num_points=num_points)

@@ -43,8 +43,8 @@ def test_fake_adapter_full_flow():
 
     # 3. run
     schema.value.fields["noise_scale"] = DirectValue(0.05)
-    run_req = RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
-    result = adapter.run(run_req, schema)
+    run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={})
+    result = adapter.run(run_req, schema_to_raw_dict(schema, ctx.md, ctx.ml))
     assert isinstance(result.data, np.ndarray)
     assert len(result.data) == 11
 

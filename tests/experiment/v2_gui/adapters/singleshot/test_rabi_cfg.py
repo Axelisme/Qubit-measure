@@ -11,7 +11,10 @@ from zcu_tools.experiment.v2.singleshot.len_rabi import LenRabiCfg, LenRabiExp
 from zcu_tools.experiment.v2_gui.adapters.singleshot.amp_rabi import SsAmpRabiAdapter
 from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import SsLenRabiAdapter
 from zcu_tools.gui.app.main.adapter import ExpContext, RunRequest
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.main.adapter.lowering import (
+    schema_to_raw_dict,
+    schema_to_resolved_dict,
+)
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import DirectValue, EvalValue
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
@@ -54,14 +57,14 @@ def test_rabi_missing_calibration_is_invalid_and_cannot_acquire(
     calibration_draft, rabi_api, monkeypatch
 ):
     adapter_type, _, experiment_type, _ = rabi_api
-    md, ml, draft = calibration_draft
+    _md, _ml, draft = calibration_draft
     draft.set_target("g_center", EvalValue("missing_center"))
     assert not draft.is_valid()
     acquire = MagicMock()
     monkeypatch.setattr(experiment_type, "run", acquire)
-    request = RunRequest(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock())
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
     with pytest.raises(RuntimeError, match="missing_center"):
-        adapter_type().run(request, draft.snapshot())
+        adapter_type().run(request, schema_to_resolved_dict(draft.snapshot()))
     acquire.assert_not_called()
 
 
@@ -69,7 +72,7 @@ def test_rabi_uses_cfg_calibration_after_md_changes(
     calibration_draft, rabi_api, monkeypatch
 ):
     adapter_type, _, experiment_type, _ = rabi_api
-    md, ml, draft = calibration_draft
+    md, _ml, draft = calibration_draft
     snapshot = draft.snapshot()
     assert snapshot.value.fields["g_center"] == EvalValue(
         "g_center", resolved=-1 + 0.25j
@@ -83,15 +86,9 @@ def test_rabi_uses_cfg_calibration_after_md_changes(
         observed.append(cfg)
         return "acquired"
 
-    def materialize(raw, cfg_type, *, ml):
-        return assemble_experiment_cfg(raw, cfg_type, ml=ml, device_snapshot={})
-
     monkeypatch.setattr(experiment_type, "run", record_run)
-    monkeypatch.setattr(
-        "zcu_tools.experiment.v2_gui.adapters.base.make_cfg", materialize
-    )
-    request = RunRequest(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock())
-    result = adapter_type().run(request, snapshot)
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    result = adapter_type().run(request, schema_to_resolved_dict(snapshot))
     assert result == "acquired"
     cfg = observed[0]
     assert (cfg.g_center, cfg.e_center, cfg.radius) == (-1 + 0.25j, 2 - 0.5j, 0.75)

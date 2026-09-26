@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-26 — synchronous cfg publication
+**Last updated:** 2026-09-26 — frozen Run inputs
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -254,7 +254,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
-3. `GuardService` validates static preconditions and materializes a permit.
+3. `GuardService` validates static preconditions and freezes a permit containing
+   cached resolved cfg and detached State-owned device settings. Missing observed
+   settings for a live device reject the permit without querying hardware.
+   `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
 4. The operation policy builds worker thunks with the needed ambient scopes:
    plotting, progress, `Schedule` cancellation, and device setup cancellation.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
@@ -339,7 +342,7 @@ bar. Active and running tabs are identified by tab id, not visual index.
 投影到 `State.cfg_schema` 並更新整份 cfg 的 resource revision。Invalid raw 同樣發布，不依賴
 viewer 是否 attach 或 Qt timer 是否執行。Widget 只輸入與渲染，不重送 schema 到 State。
 Inspect/writeback owner 不寫 tab cfg；prepared replacement 保留原有 owner State swap 邊界。
-這條 publication 路徑不代表 agent 已有完整 observation，也不代表 Run 已停止 live lowering。
+Run permit 使用此 snapshot 的 cached resolved 值，不重新解析來源。
 
 CfgEditor在app seam解碼`ValueRef`，並以typed `CfgEdit` batch依序操作binding target。
 Batch維持fail-fast/non-atomic；只有reference shape edit列出前後path set，成功回final net diff，
@@ -350,9 +353,11 @@ The GUI uses a two-tree model:
 - Spec tree: static shape, labels, variants, literal locks, optional/ref rules.
 - Value tree: mutable draft data shown by the editor.
 
-`adapter.lowering.schema_to_raw_dict(schema, md, ml)` is the finished-cfg lowering
-boundary. `CfgSchema` 本身只保存 shared spec/value data。`EvalValue` resolves
-against current `MetaDict` when a field is set or lowered. `ValueRef` is
+`adapter.lowering.schema_to_resolved_dict(schema)` freezes cached values for Run;
+unresolved or invalid fields reject the entire cfg. Legal optional `None` remains
+valid. `schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
+non-Run consumers. `CfgSchema` 保存 shared spec/value data；`CfgDraft` 擁有 expression
+解析與 cached validity，Run 不重新讀取 `MetaDict` 或 `ModuleLibrary`。 `ValueRef` is
 resolve-once: it reads the session `ValueLookup` immediately and stores the
 resolved direct scalar in the value tree.
 

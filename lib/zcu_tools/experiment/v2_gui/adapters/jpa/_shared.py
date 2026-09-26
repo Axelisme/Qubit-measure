@@ -8,9 +8,8 @@ expanded from this package.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, cast
 
-from zcu_tools.device import BaseDeviceInfo, DeviceInfo, GlobalDeviceManager
+from zcu_tools.device import BaseDeviceInfo, DeviceInfo
 
 # Role-oriented GUI device keys and the labeled device patches they lower to.
 # The core JPA experiments look the device up by these labels
@@ -46,24 +45,6 @@ def supports_power_knob(info: DeviceInfo) -> bool:
 def supports_output_knob(info: DeviceInfo) -> bool:
     """True when ``info`` implements the output knob (``set_output``)."""
     return type(info).set_output is not BaseDeviceInfo.set_output
-
-
-def cached_device_snapshot() -> dict[str, DeviceInfo]:
-    """Registry-cached device snapshot; never queries or commands hardware.
-
-    Builds each entry's info from its static ``info_model`` (address only), so
-    preflight stays pure: knob support is a class-level fact, and labels are
-    run-time patch artifacts that never persist in the registry. The run-time
-    snapshot (``GlobalDeviceManager.get_all_info``) remains the assembler's job.
-    """
-    devices = GlobalDeviceManager.get_all_devices()
-    snapshot: dict[str, DeviceInfo] = {}
-    for name, device in devices.items():
-        # info_model is a concrete BaseDeviceInfo subclass; the base constructor
-        # only knows its abstract shape, so construct through the concrete class.
-        info_cls = cast(Any, device.info_model)
-        snapshot[name] = cast(DeviceInfo, info_cls(address=device.address))
-    return snapshot
 
 
 def _lower_jpa_dev(

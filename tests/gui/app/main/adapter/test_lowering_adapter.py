@@ -125,7 +125,7 @@ def test_resolved_calibration_is_assembled_from_cfg_not_metadict(
 
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     cfg = adapter.build_exp_cfg(
-        raw, RunRequest(md=ctx.md, ml=ctx.ml, soc=None, soccfg=None)
+        raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
     )
 
     if mode == "linear":
@@ -146,7 +146,7 @@ def test_empty_optional_calibration_allows_linear_assembly(
     monkeypatch.setattr(GlobalDeviceManager, "get_all_info", lambda: {})
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
     cfg = adapter.build_exp_cfg(
-        raw, RunRequest(md=ctx.md, ml=ctx.ml, soc=None, soccfg=None)
+        raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
     )
     assert cfg.sampling_mode == "linear"
     assert cfg.homophasal is None
@@ -180,7 +180,10 @@ def test_adapter_run_rejects_invalid_calibration_before_device_io(
 
     monkeypatch.setattr(GlobalDeviceManager, "get_all_info", unexpected_device_read)
     with pytest.raises(ValueError, match=field):
-        adapter.run(RunRequest(md=ctx.md, ml=ctx.ml, soc=None, soccfg=None), schema)
+        adapter.run(
+            RunRequest(soc=None, soccfg=None, device_snapshot={}),
+            schema_to_raw_dict(schema, ctx.md, ctx.ml),
+        )
 
 
 def _unknown_reference_schema(*, disabled: bool) -> CfgSchema:
