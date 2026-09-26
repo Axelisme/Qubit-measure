@@ -278,11 +278,10 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             if current.get(key, 0) != want
         }
         if mismatched:
-            # The caller (mcp) resyncs by re-reading resources.versions on this
-            # error — pure read-via-snapshot, so the error carries no version
-            # numbers itself (they stay RPC<->mcp bookkeeping, never on the
-            # agent-facing message). It DOES carry the resource *identities* that
-            # moved (data.stale), so mcp can name them in agent language.
+            # MCP must fully re-snapshot every identity in data.stale before
+            # retrying; a resources.versions read alone cannot establish what
+            # the caller has seen. Version numbers remain RPC bookkeeping, not
+            # part of the agent-facing error.
             logger.debug(
                 "version guard BLOCK: expected=%s mismatched(current)=%s",
                 expected,

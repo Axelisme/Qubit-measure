@@ -384,7 +384,7 @@ class MeasureMcpSession:
         return result
 
     def read_version_table(self) -> dict[str, int] | None:
-        """Read resource versions, returning None when best-effort resync fails."""
+        """Sample versions before a full read; this never re-snapshots resources."""
         try:
             resp = self.bridge.send_rpc_raw("resources.versions", {}, 5.0)
         except (OSError, RuntimeError):
