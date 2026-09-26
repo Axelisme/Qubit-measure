@@ -17,7 +17,7 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgDefinition,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
 )

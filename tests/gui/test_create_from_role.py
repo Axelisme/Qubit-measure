@@ -11,12 +11,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
-from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
-from zcu_tools.gui.app.main.controller import Controller
-from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
-from zcu_tools.gui.app.main.specs import make_pulse_spec
-from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.app.measure.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.measure.specs import make_pulse_spec
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,

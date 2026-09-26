@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.state import ExpContext, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,

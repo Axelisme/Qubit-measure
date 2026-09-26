@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter import ContextReadiness
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.state import ExpContext, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.context import ContextService, MdValueError
 from zcu_tools.gui.session.services.io_manager import IOManager

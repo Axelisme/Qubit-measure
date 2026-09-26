@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-02 — atomic ModuleLibrary/MetaDict mutations, Inspect draft lifecycle and device Apply activity projection
+**Last updated:** 2026-09-27 — measure app path rename
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -21,7 +21,7 @@ session/
 ├── hardware_gate.py    — RunBlocksHardwareGate：measure/autofluxdep 共用硬體互斥矩陣（RUN 擋 RUN/SoC/device mutation；device mutation 依 resource id 互斥；SoC connect 擋 RUN/SoC）；每個lease另保存captured origin、human note與monotonic start，register/release emit `GateChangedPayload`，`snapshot()`只投影active duration、不曝露raw epoch
 ├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Message/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0025）+ captured EventOrigin operation record；`create(cancel_hook=, origin=)`要求caller顯式capture，`event_origin(token)`在live/retained-done record上投影string operation id；`has_cancel_hook`/channel.`can_cancel` gate 'Send & Stop'鈕；cancel hook例外只log，Stop事件仍入列且cancel_all繼續處理其它operation
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0026 §1：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
-├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/main/services/scopes.py`
+├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0026 §2，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。figure_ambient（Qt）住 app 層 `gui/app/measure/services/scopes.py`
 ├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Message/Stop；鏡像 OperationChannel 四不變式，ADR-0025）
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不含 context `get_current_md`
 ├── predictor_control.py — PredictorControlPort + PredictorControlFacet：predictor load/set_model_params/clear/query/compute/event-subscription 的窄 control facet（PredictorService + BaseEventBus），供 shared PredictorDialog、main predictor panel 與 remote predictor handler 使用

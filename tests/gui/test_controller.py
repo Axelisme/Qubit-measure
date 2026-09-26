@@ -19,29 +19,29 @@ from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2_gui.adapters._support import FluxPickParams
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     ExpContext,
 )
-from zcu_tools.gui.app.main.controller import Controller
-from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
-from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
-from zcu_tools.gui.app.main.events.tab import (
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.services import (
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services import (
     StartupConnectionRequest,
     StartupProjectRequest,
 )
-from zcu_tools.gui.app.main.services import (
+from zcu_tools.gui.app.measure.services import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
-from zcu_tools.gui.app.main.services.ports import RestoreIssue, RestoreReport
-from zcu_tools.gui.app.main.state import DeviceStatus, State
+from zcu_tools.gui.app.measure.services.ports import RestoreIssue, RestoreReport
+from zcu_tools.gui.app.measure.state import DeviceStatus, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
@@ -486,7 +486,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     (whose base impl is a Fast-Fail raise). Regression: previously this raised
     NotImplementedError and surfaced as an error dialog at the end of every run.
     """
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 
     tab_id = cf.ctrl.new_tab("fake")
     no_analysis = MagicMock(spec=FakeAdapter)
@@ -617,7 +617,7 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     adapter = MagicMock()
     # Final contract requires explicit load_data capability; FakeAdapter's
     # default lacks it, so set load_data True for the driving path.
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 
     adapter.capabilities = AdapterCapabilities(requires_soc=False, load_data=True)
     adapter.load.return_value = loaded
@@ -905,7 +905,7 @@ def test_restore_tab_events_use_system_origin(tmp_path) -> None:
     persisted = source.ctrl.capture_persisted_state()
     restored = ControllerFixture(cache_dir=tmp_path / "restored", mock_emit=False)
     observed: list[EventMeta] = []
-    from zcu_tools.gui.app.main.events.tab import TabAddedPayload
+    from zcu_tools.gui.app.measure.events.tab import TabAddedPayload
 
     restored.bus.subscribe_with_meta(
         TabAddedPayload, lambda _payload, meta: observed.append(meta)

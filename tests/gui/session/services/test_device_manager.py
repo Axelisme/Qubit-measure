@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
-from zcu_tools.gui.app.main.services.operation_gate import OperationGate
-from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport

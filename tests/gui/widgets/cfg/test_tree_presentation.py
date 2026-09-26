@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QSizePolicy,
     QTreeWidgetItem,  # type: ignore[attr-defined]
 )
-from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,

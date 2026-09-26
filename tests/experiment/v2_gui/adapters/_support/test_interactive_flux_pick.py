@@ -18,7 +18,7 @@ from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
 from zcu_tools.experiment.v2_gui.adapters.twotone.flux_dep import (
     FluxDepAdapter as TwoToneFluxDepAdapter,
 )
-from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.resources.context import MetaDict, ModuleLibrary

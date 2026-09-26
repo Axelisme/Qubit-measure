@@ -19,10 +19,10 @@ from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.controller import Controller
-from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.gui.app.main.state import DeviceStatus, State
+from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.state import DeviceStatus, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.services.connection import (
     ConnectMockRequest,

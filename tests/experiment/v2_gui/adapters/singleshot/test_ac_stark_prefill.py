@@ -5,8 +5,8 @@ import math
 import pytest
 from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkCfg
 from zcu_tools.experiment.v2_gui.adapters.singleshot.ac_stark import SsAcStarkAdapter
-from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,

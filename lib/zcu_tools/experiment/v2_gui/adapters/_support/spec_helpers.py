@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,

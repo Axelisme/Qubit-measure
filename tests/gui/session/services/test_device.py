@@ -12,8 +12,8 @@ import pytest
 from qtpy.QtCore import QCoreApplication, QEventLoop
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.app.main.services.operation_gate import OperationGate
-from zcu_tools.gui.app.main.state import State
+from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (

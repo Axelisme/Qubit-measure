@@ -42,7 +42,7 @@ from .spec_helpers import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
 
 ModuleOverrideInput = ScalarLeafInput | Seed[ScalarLeafInput]
 

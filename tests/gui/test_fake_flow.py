@@ -7,13 +7,13 @@ from unittest.mock import MagicMock
 import numpy as np
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
 from zcu_tools.experiment.v2_gui.registry import ADAPTERS, register_all
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     RunRequest,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import DirectValue
 
 

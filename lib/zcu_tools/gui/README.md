@@ -134,8 +134,8 @@ marshalling). Read a dialog's outcome from its `accepted` / `finished` signal
 instead of `exec()`'s return value, set `WA_DeleteOnClose`, and hold an instance
 reference so `open()`'s immediate return does not let it be garbage-collected.
 The measure registry path (`MainWindow.open_dialog` / `close_dialog`) is detailed
-in `app/main/services/remote/README.md`. The sole intentional `exec()` is the
-global unhandled-exception presenter in `app/main/ui/error_handler.py`, where the
+in `app/measure/services/remote/README.md`. The sole intentional `exec()` is the
+global unhandled-exception presenter in `app/measure/ui/error_handler.py`, where the
 process is already crashing and the message must block.
 
 Short-lived modal confirmations, error reports, and text prompts are the

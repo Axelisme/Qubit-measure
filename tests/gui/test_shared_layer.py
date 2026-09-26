@@ -108,7 +108,7 @@ def test_shared_module_is_qt_and_matplotlib_clean(module: str) -> None:
 def test_version_table_is_single_shared_source() -> None:
     """Both apps' ``state.VersionTable`` resolve to the one shared class."""
     from zcu_tools.gui.app.fluxdep.state import VersionTable as FluxVT
-    from zcu_tools.gui.app.main.state import VersionTable as MainVT
+    from zcu_tools.gui.app.measure.state import VersionTable as MainVT
     from zcu_tools.gui.version_table import VersionTable as SharedVT
 
     assert MainVT is SharedVT
@@ -118,7 +118,7 @@ def test_version_table_is_single_shared_source() -> None:
 def test_apps_keep_their_own_wire_versions() -> None:
     """The per-app wire/code versions stay in each app's wire_version.py."""
     from zcu_tools.gui.app.fluxdep.services.remote import wire_version as flux_wv
-    from zcu_tools.gui.app.main.services.remote import wire_version as main_wv
+    from zcu_tools.gui.app.measure.services.remote import wire_version as main_wv
 
     # Distinct contracts: measure-gui has evolved its wire; fluxdep starts at 1.
     assert main_wv.WIRE_VERSION >= 1

@@ -19,7 +19,7 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     scaled_md,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
@@ -30,7 +30,7 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
 )

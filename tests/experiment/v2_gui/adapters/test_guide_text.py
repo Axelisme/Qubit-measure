@@ -3,7 +3,7 @@ from __future__ import annotations
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.adapters.fake.stub import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import ADAPTERS
-from zcu_tools.gui.app.main.adapter import AdapterGuide
+from zcu_tools.gui.app.measure.adapter import AdapterGuide
 
 
 def test_registered_adapters_define_local_guide_text() -> None:

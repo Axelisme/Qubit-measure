@@ -1,4 +1,4 @@
-"""Unit tests for zcu_tools.gui.app.main.state."""
+"""Unit tests for zcu_tools.gui.app.measure.state."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.device.base import BaseDeviceInfo
-from zcu_tools.gui.app.main.state import (
+from zcu_tools.gui.app.measure.state import (
     DeviceState,
     DeviceStatus,
     Session,
@@ -421,7 +421,7 @@ def test_device_state_status_predicates():
 
 
 def test_tab_state_predicates():
-    from zcu_tools.gui.app.main.state import Session
+    from zcu_tools.gui.app.measure.state import Session
     from zcu_tools.gui.cfg import (
         CfgSchema,
         CfgSectionSpec,

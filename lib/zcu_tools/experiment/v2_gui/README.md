@@ -1,10 +1,10 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-27 — route-scoped calibration
+**Last updated:** 2026-09-27 — measure app path rename
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
-包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
-`gui/app/main/`（框架契約 `ExpAdapterProtocol`），反向不成立。框架層不含任何實驗領域知識。
+包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/` →
+`gui/app/measure/`（框架契約 `ExpAdapterProtocol`），反向不成立。框架層不含任何實驗領域知識。
 
 ---
 
@@ -52,10 +52,10 @@ Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 imp
 `validate_run_request(req, raw_cfg)` preflight；只有需要 SoC-dependent
 但可預測的 run-time cfg 檢查時才覆寫，並維持純 preflight
 （例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
-`gui/app/main/README.md`。
+`gui/app/measure/README.md`。
 
 `BaseAdapter.build_exp_cfg` 是 GUI run path 的 cfg materialization seam：adapter 先用
-`gui.app.main.adapter.lowering.schema_to_raw_dict(schema, req.md, req.ml)` 在 GUI adapter
+`gui.app.measure.adapter.lowering.schema_to_raw_dict(schema, req.md, req.ml)` 在 GUI adapter
 層完成 EvalValue / md lowering，再把
 concrete raw cfg 交給 `zcu_tools.experiment.cfg_assembler.make_cfg` / `assemble_experiment_cfg`。
 assembler 每次呼叫接收 request 當下的 current `ml` 與 device snapshot；不要把 active

@@ -13,7 +13,7 @@ from zcu_tools.experiment.v2_gui.adapters.twotone.reset.check import (
     RabiCheckAdapter,
     RabiCheckAnalyzeResult,
 )
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     NoAnalyzeParams,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
 
 from typing import cast
 
@@ -149,7 +149,7 @@ def test_select_named_module_value_returns_none_when_preferred_missing():
 
 
 def _make_ctx(ml: ModuleLibrary) -> ExpContext:
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
 
     return ExpContext(
         md=MetaDict(),

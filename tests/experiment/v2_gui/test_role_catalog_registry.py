@@ -12,8 +12,8 @@ from zcu_tools.experiment.v2_gui.role_registry import (
     ALL_ROLE_ENTRIES,
     register_all_roles,
 )
-from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
 from zcu_tools.gui.cfg import DirectValue, LiteralSpec, make_custom_reference_key
 from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 from zcu_tools.resources.context import MetaDict, ModuleLibrary

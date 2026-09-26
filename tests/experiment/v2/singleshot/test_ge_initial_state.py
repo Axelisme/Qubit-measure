@@ -11,7 +11,7 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
     GEAnalyzeParams,
     GEPostAnalyzeParams,
 )
-from zcu_tools.gui.app.main.adapter import AnalyzeRequest, PostAnalyzeRequest
+from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, PostAnalyzeRequest
 
 
 @pytest.mark.parametrize("backend", ["pca", "center"])

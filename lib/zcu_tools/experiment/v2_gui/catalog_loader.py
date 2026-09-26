@@ -19,8 +19,8 @@ from threading import get_ident
 from types import CodeType, ModuleType
 from typing import cast
 
-from zcu_tools.gui.app.main.catalog import CatalogReloadError, PreparedCatalogReload
-from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
+from zcu_tools.gui.app.measure.registry import Registry
 
 
 def _within(name: str, root: str) -> bool:

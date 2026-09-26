@@ -1,10 +1,10 @@
-"""Unit tests for zcu_tools.gui.app.main.registry."""
+"""Unit tests for zcu_tools.gui.app.measure.registry."""
 
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.main.adapter import ExpAdapterProtocol
-from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
+from zcu_tools.gui.app.measure.registry import Registry
 
 from tests.gui._adapter_fakes import DummyAdapter as _DummyAdapter
 
