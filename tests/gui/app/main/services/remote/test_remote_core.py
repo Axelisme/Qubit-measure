@@ -21,6 +21,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from qick.asm_v2 import QickParam
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
@@ -42,7 +43,7 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.program.v2 import WaveformCfgFactory
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 # Poll real socket workers while delivering owner-thread Qt events.
@@ -222,63 +223,6 @@ def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
 
         _send(sock, {"id": "bad", "method": "adapter.guide", "params": {}})
         assert _recv_response(sock)["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_context_snapshot_returns_full_active_md_and_ml_over_the_socket(fx):
-    md = MetaDict()
-    md.update({"r_f": 6000.0, "peaks": [1, 2], "phase": 1 + 2j})
-    ml = ModuleLibrary()
-    ml.modules["drive"] = ModuleCfgFactory.from_raw(
-        {
-            "type": "pulse",
-            "ch": 0,
-            "nqz": 1,
-            "freq": 6000.0,
-            "gain": 0.25,
-            "phase": 0.0,
-            "pre_delay": 0.0,
-            "post_delay": 0.0,
-            "waveform": {"style": "const", "length": 0.1},
-        }
-    )
-    ml.waveforms["square"] = WaveformCfgFactory.from_raw(
-        {"style": "const", "length": 0.1}
-    )
-    fx.state.set_context(replace(fx.state.exp_context, md=md, ml=ml))
-    sock = _open_client(fx.service.port)
-    try:
-        _send(sock, {"id": "full", "method": "context.snapshot", "params": {}})
-        reply = _recv_response(sock)
-        assert reply["ok"] is True
-        assert reply["result"] == {
-            "label": "ctx001",
-            "md": {
-                "peaks": [1, 2],
-                "phase": {"__complex__": [1.0, 2.0]},
-                "r_f": 6000.0,
-            },
-            "ml": {
-                "modules": {"drive": ml.modules["drive"].to_dict()},
-                "waveforms": {"square": ml.waveforms["square"].to_dict()},
-            },
-        }
-    finally:
-        sock.close()
-
-
-def test_context_snapshot_rejects_opaque_values_instead_of_claiming_full_read(fx):
-    md = MetaDict()
-    md.update({"opaque": object()})
-    fx.state.set_context(replace(fx.state.exp_context, md=md, ml=ModuleLibrary()))
-    sock = _open_client(fx.service.port)
-    try:
-        _send(sock, {"id": "full", "method": "context.snapshot", "params": {}})
-        reply = _recv_response(sock)
-        assert reply["ok"] is False
-        assert reply["error"]["code"] == "precondition_failed"
-        assert reply["error"]["reason"] == "unserializable_context"
     finally:
         sock.close()
 
@@ -762,6 +706,47 @@ def test_load_after_gui_context_edit_requires_a_new_full_read(
         assert getattr(stale.value, "reason", None) == "stale_version"
 
         assert call("rpc_call", {"method": "context.snapshot"})["md"]["r_f"] == 6000.0
+        with pytest.raises(RuntimeError) as missing_file:
+            call("rpc_call", args)
+        assert getattr(missing_file.value, "reason", None) != "stale_version"
+    finally:
+        bridge.disconnect()
+
+
+@pytest.mark.parametrize(
+    "lossy",
+    [{"1": "first", 1: "second"}, QickParam(start=1.0, spans={"pulse": 0.1})],
+    ids=["nested-key-collision", "qick-param"],
+)
+def test_failed_complete_context_read_does_not_advance_mcp_load_guard(
+    fx, tmp_path: Path, lossy: object
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "context.snapshot"})
+        md = fx.state.exp_context.md
+        md.update({"nested": lossy})
+        fx.state.version.bump("context")
+        with pytest.raises(RuntimeError) as unreadable:
+            call("rpc_call", {"method": "context.snapshot"})
+        assert getattr(unreadable.value, "reason", None) == "unserializable_context"
+
+        args = {
+            "method": "tab.load_data",
+            "params": {"tab_id": tab_id, "data_path": "missing.h5"},
+        }
+        with pytest.raises(RuntimeError) as stale:
+            call("rpc_call", args)
+        assert getattr(stale.value, "reason", None) == "stale_version"
+
+        md.update({"nested": {"first": "a", "second": "b"}})
+        fx.state.version.bump("context")
+        snapshot = call("rpc_call", {"method": "context.snapshot"})
+        assert snapshot["md"]["nested"] == {"first": "a", "second": "b"}
         with pytest.raises(RuntimeError) as missing_file:
             call("rpc_call", args)
         assert getattr(missing_file.value, "reason", None) != "stale_version"

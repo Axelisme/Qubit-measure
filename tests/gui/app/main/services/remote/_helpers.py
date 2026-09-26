@@ -91,7 +91,11 @@ class Fixture:
     """Holds strong refs to Controller + service to survive GC mid-test."""
 
     def __init__(
-        self, opts: ControlOptions | None = None, project_root: str | None = None
+        self,
+        opts: ControlOptions | None = None,
+        project_root: str | None = None,
+        *,
+        active_label: str | None = None,
     ) -> None:
         self.state = State(make_ctx())
         self.registry = Registry()
@@ -100,7 +104,10 @@ class Fixture:
             self.registry.register("fake", FakeAdapter)
         self.view = make_view()
         io_manager = IOManager()
-        io_manager._em = MagicMock()
+        exp_manager = MagicMock()
+        if active_label is not None:
+            exp_manager.current_label = active_label
+        io_manager._em = exp_manager
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,

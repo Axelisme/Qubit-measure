@@ -9,9 +9,10 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+import numpy as np
+
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.value_lookup import ValueInfo
-from zcu_tools.utils import format_obj
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -89,9 +90,25 @@ def _h_context_active(
     return {"label": adapter.context_control.get_active_context_label()}
 
 
-def _context_json_default(value: object) -> object:
+def _context_wire_value(value: object) -> object:
+    """Project supported context values without coercing unknown types or keys."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
     if isinstance(value, complex):
         return {"__complex__": [value.real, value.imag]}
+    if isinstance(value, np.ndarray):
+        return _context_wire_value(value.tolist())
+    if isinstance(value, np.generic):
+        return _context_wire_value(value.item())
+    if isinstance(value, dict):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"unsupported context key: {type(key).__name__}")
+            result[key] = _context_wire_value(item)
+        return result
+    if isinstance(value, list):
+        return [_context_wire_value(item) for item in value]
     raise TypeError(f"unsupported context value: {type(value).__name__}")
 
 
@@ -102,27 +119,23 @@ def _h_context_snapshot(
     ctx = adapter.context_control
     md = ctx.get_current_md()
     ml = ctx.get_current_ml()
-    snapshot = {
-        "label": ctx.get_active_context_label(),
-        "md": {key: value for key, value in sorted(md.items())},
-        "ml": {
-            "modules": {
-                name: cfg.to_dict() for name, cfg in sorted(ml.modules.items())
-            },
-            "waveforms": {
-                name: cfg.to_dict() for name, cfg in sorted(ml.waveforms.items())
-            },
-        },
-    }
     try:
-        # Encode the *whole* snapshot before replying. A partial or lossy read
-        # must never establish a baseline for the entire context resource.
-        return json.loads(
-            json.dumps(
-                format_obj(snapshot), default=_context_json_default, allow_nan=False
-            )
-        )
-    except (TypeError, ValueError) as exc:
+        snapshot = {
+            "label": ctx.get_active_context_label(),
+            "md": {key: value for key, value in sorted(md.items())},
+            "ml": {
+                "modules": {
+                    name: cfg.to_dict() for name, cfg in sorted(ml.modules.items())
+                },
+                "waveforms": {
+                    name: cfg.to_dict() for name, cfg in sorted(ml.waveforms.items())
+                },
+            },
+        }
+        # Validate every nested value before JSON encoding. Success is a full
+        # context observation and advances the MCP guard baseline.
+        return json.loads(json.dumps(_context_wire_value(snapshot), allow_nan=False))
+    except (TypeError, ValueError, RecursionError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             f"cannot fully snapshot the active context: {exc}",

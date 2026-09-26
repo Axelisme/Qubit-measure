@@ -13,20 +13,20 @@ _Avoid_: guard token, ticket, voucher
 **Lease**（`OperationLease`）:
 證明一個受保護操作「此刻動態資源可用」的租約。涵蓋**動態互斥**：hardware 操作互斥（RUN / SOC_CONNECT / DEVICE_*）、tab busy。由 `OperationGate` 在操作當下 acquire，有生命週期、**必須在 terminal path 釋放**（`release(lease, outcome)`）。
 
-**Async operation handle**（`operation_id` = lease token）:
-一個進行中 async 操作（device.setup / run.start）的 async-task 式 handle（connect 已改同步 `soc.connect`，不再是 handle）。`OperationGate` 是統合 façade，內部**責任分離**：`_OperationExclusion`（互斥，release 即移、讓出 hardware）+ `_OperationRegistry`（**所有 async task 工具的統一入口** —— per-token outcome/Event + cancel/poll/await）。生命週期綁死（一個 operation 同時是互斥的+可 await 的，同一 token 串起兩者，不拆成可選疊加），但三個 async 動詞統一在 Registry：
-- **await**（`await_outcome(token, timeout)`）：阻塞取 outcome，**off-main only**（不卡 Qt 主線，靠 off-main thread + threading.Event 模擬，**非 asyncio**）。
-- **poll**（`poll(token)`）：非阻塞查 outcome（pending → None）。**主線唯一能用的等待原語**（主線不能阻塞 await，用 QTimer 週期 poll 替代）。
-- **cancel**（`cancel(token)` / `cancel_all() → list[token]`）：**異步通知式** —— 只 `set` 該 token 的 stop_event 即返回，**不等待**。「停了沒」由之後 `poll` 查。register 時把 worker 的 **stop_event（純數據 handle，非 callback）** 一起交給 Registry，故 Registry 是 cancel 唯一入口（不再散在各 worker by-name）。**worker 自己負責把 stop 信號翻成 cancelled outcome**（`stop_event.is_set()` → emit cancelled，run/device worker 對齊）—— cancel 端純信號傳遞、無副作用、無 callback IoC（符合「用傳遞不用共享」）。cancel 是 handle 的天然能力（≈ Go context：Registry 持 sender=event.set，worker 持 receiver=event+自判），**非**互斥職責，不違背下方 _Avoid_。
+**Async operation handle**（`operation_id`）:
+`OperationHandles` 持有 async 操作的 handle 與 outcome。`OperationGate` 只管硬體互斥；run/device 操作把同一 token 用在 handle 與互斥租約，analyze 操作只需 handle。`soc.connect` 是同步操作，不建立 agent handle。
+- **await**：`operation.await(operation_id)` 在 off-main thread 等 `OperationHandles` 的 outcome，不阻塞 Qt 主線。measure MCP 的 `wait(op)` 由此讀取終態與 feedback。
+- **poll**：`OperationHandles.poll(token)` 非阻塞讀 outcome；主線上的 shutdown driver 用 QTimer 定期呼叫 coordinator 的 `tick()`。
+- **cancel**：`OperationControl.cancel_operation` 先確認 handle 有可取消的 domain hook，再請 run、analyze 或 device owner 執行取消。它回報取消請求，不保證操作已停止；用 `wait(op)` 確認結果。關閉流程由 `OperationHandles.cancel_all()` 通知仍存活的 handles。
 
 **outcome = `OperationOutcome`**（中性 status finished/failed/cancelled + error，**不帶 result**；result 走原有 snapshot/query）。啟動回 `operation_id`（= token），`operation.await(operation_id)` 阻塞取 outcome；共用 handle 的舊式查詢允許未知 token 視為 finished；measure-gui 的 remote/agent 入口對未知或淘汰的 token 報錯，不假稱完成。**三層分工**同版本號：GUI `operation_id` 是 RPC↔MCP 簿記，MCP 將它映成不跨 GUI 重啟沿用的 `op`。agent 以 `status()` 索引 GUI 或 agent 發起的操作，以 `wait(op)` 查看終態及 Stop feedback；`cancel(op)` 依實際 handle 要求取消。
 
-**cancel 不保證即停**：cancel 是「請求」，能否停是 operation 自己的事。run/device 有 stop polling point 會停；**connect 是阻塞網絡調用、無 stop 點 → 收到 cancel 仍跑到自然完成/超時**。關閉流程（closeEvent / app.shutdown）`cancel_all` 後用 QTimer poll 等所有 token settle，**超時則強關**（kill 沒停的 connect）。
-_Avoid_: 讓 outcome 帶 result payload、把 operation_id 暴露給 agent、把**互斥邏輯**混進 Registry（cancel 是 handle 能力、不是互斥；_Avoid_ 防的是把 exclusion 塞進 Registry）、期望 await 真協程讓出（是 off-main thread 模擬，見 qasync spike 備案）、期望 cancel 同步等待（會死鎖主線 / 卡死在不可中斷的 connect）
+**cancel 不保證即停**：domain owner 收到取消請求後，操作仍須抵達 terminal path 才有結果。沒有取消點的操作回 `not_cancellable`，已失敗的操作回失敗原因，不假報 finished。關閉流程定期 poll handles，等它們 settle 或到達 timeout。
+_Avoid_: 讓 outcome 帶 result payload、把 operation_id 暴露給 agent、把互斥邏輯混進 handles、期待 cancel 同步等到 terminal outcome。
 _Avoid_: guard, lock token
 
 **關閉協調 / `ShutdownCoordinator`**（ADR-0003）:
-GUI 關閉（user closeEvent / agent app.shutdown）時「**中斷所有 in-flight operation → 等它們停 → 全停或超時才真關**」的編排。**Qt-free 純邏輯**：`begin()` = `gate.cancel_all()`（拿全部 token）；`tick() → state`（WAITING/SETTLED/TIMED_OUT，每 tick 對所有 token `gate.poll` + 比 deadline）。**主線不能阻塞 await，故用「週期 tick + 非阻塞 poll」取代**（項目第一個週期計時器）。分層 = Progress 重構同款（ADR-0005 Hexagonal）：coordinator 純邏輯可單測無 Qt；**QTimer 包在 driven adapter** `QtShutdownDriver`（`adapters/qt_shutdown_driver.py`）驅動 `tick()`；`Controller`（Qt-free façade）暴露 `begin_shutdown(on_closed)`（懶建 driver）+ `active_operation_count()`；`MainWindow` closeEvent/request_shutdown 調它、傳 `_perform_close` 當 on_closed（user close 保留確認框，`_closing` guard 放行 `_perform_close` 觸發的二次 closeEvent）。
+GUI 關閉（user closeEvent / agent app.shutdown）時「**中斷所有 in-flight operation → 等它們停 → 全停或超時才真關**」的編排。**Qt-free 純邏輯**：`begin()` 呼叫 `OperationHandles.cancel_all()` 取得仍存活的 tokens；`tick() → state`（WAITING/SETTLED/TIMED_OUT），每次用 `OperationHandles.poll` 查 outcome 並比對 deadline。**主線不能阻塞 await，故用「週期 tick + 非阻塞 poll」取代**（項目第一個週期計時器）。分層 = Progress 重構同款（ADR-0005 Hexagonal）：coordinator 純邏輯可單測無 Qt；**QTimer 包在 driven adapter** `QtShutdownDriver`（`adapters/qt_shutdown_driver.py`）驅動 `tick()`；`Controller`（Qt-free façade）暴露 `begin_shutdown(on_closed)`（懶建 driver）+ `active_operation_count()`；`MainWindow` closeEvent/request_shutdown 調它、傳 `_perform_close` 當 on_closed（user close 保留確認框，`_closing` guard 放行 `_perform_close` 觸發的二次 closeEvent）。
 _Avoid_: 在 coordinator 裡 import qtpy / 監聽 Qt signal（破壞 Qt-free + 回到「訂閱事件」；統一用 poll）、把輪詢狀態機塞進 Controller（Qt-free façade）或 MainWindow（UI）、用屬性 flag 在 closeEvent/回調間傳「在等誰」（用 coordinator 自己的局部 token 列表 = 執行上下文，非跨對象共享）
 
 **靜態 vs 動態邊界**（Permit 與 Lease 的分工基石）:
@@ -49,7 +49,7 @@ View 專用的便利 façade —— 事件回調、error dialog 呈現。**不�
 
 **View 渠道**（ADR-0013，取代舊 ViewQueryService）:
 Controller 對 View 的下行拆成三個接口，按 cardinality + 機制分：**DiagnosticSink**（多個，fan-out，`notify_diagnostic(severity∈error/info, title, message)`，**不經 EventBus**）、**RenderHost**（單一可選，pbar/container，run/analyze 用，headless 為 None）、**RenderView**（snapshot/screenshot/dialog 純讀，由 `RemoteControlAdapter` 持 `render_view` 直接拉、不經 Controller）。`MainWindow` 實作全三者；`RemoteControlAdapter` 是 DiagnosticSink + 持 RenderView。cfg 欄位編輯走 tab 的 `CfgEditorService` session（`editor.set_field`，ADR-0013 F11），與 form attach 同一棵 draft；`tab.update_cfg`（codec-based、replace committed）是另一條語義。
-_Avoid_: 把診斷架在 EventBus 上、讓 Controller 當 render 查詢的二傳手、把「agent 該被動知道什麼」當 wire 機制（那是實驗語義，歸 mcp 端 default-subscribe）
+_Avoid_: 把診斷架在 EventBus 上、讓 Controller 當 render 查詢的二傳手、把 measure MCP 的 feedback 改成 event 訂閱。GUI EventBus 與 remote push 仍供其他 consumer 使用。
 
 **CfgDraft**（`SectionField` root）:
 cfg 編輯的runtime draft SSOT，**本身Qt-free**（`on_change`是純`CallbackList`，非Qt signal）。`CfgDraft`只接expression evaluator、opaque option provider與reference catalog三個窄ports；measure policy集中在app-local `MeasureCfgBindings`，shared field不持controller/environment aggregate。close遞迴關閉root與所有cached child，之後所有field read/mutation/refresh都Fast Fail。**draft永遠由`CfgEditorService`持有（ADR-0008）**；`CfgFormWidget`是可插拔viewer，`attach(draft)`顯示`draft.root`，`detach()`只清Qt tree與subscriptions、不close draft。measure composition以generic text-input enhancer安裝app-local ValueSource completion/resolve-on-space。agent與user都經同一棵session draft編輯（無第二條繞過View-model的路徑——ADR-0013 F11移除了它）。
@@ -134,11 +134,15 @@ _Avoid_: 讓「值未變的快取同步」bump;讓「讀到值真的變了」靜
 _Avoid_: 用 wall-clock 時戳取代版本號、在 worker thread bump、把 bump 散進每個 emit(綁 owner 而非 emit)、期望版本號區分「誰改的」(只答「變了沒」)
 
 **Version guard**（`_guard_versions`）:
-一道 **optimistic-concurrency 閘**(If-Match 式):受護操作(`run.start` / `save.*` / `editor.commit`)帶 optional `expected_versions`(資源→版本),server 在主線 `_dispatch._run()` 單一同步序列內**原子**比對當前版本;不符(含 key 不存在=資源已 drop)→ `PRECONDITION_FAILED(reason=stale_version)`。沒帶=不檢查(同普通 RPC)。比對與真人 GUI 寫同在主線 → 無 TOCTOU。guard 是純 mechanism,**不懂依賴語義**(哪些 key 重要由 mcp 決定)。
+一道 **optimistic-concurrency 閘**(If-Match 式):受護操作(`tab.run_start` / `save.*` / `editor.commit`)帶 optional `expected_versions`(資源→版本),server 在主線 `_dispatch._run()` 單一同步序列內**原子**比對當前版本;不符(含 key 不存在=資源已 drop)→ `PRECONDITION_FAILED(reason=stale_version)`。沒帶=不檢查(同普通 RPC)。比對與真人 GUI 寫同在主線 → 無 TOCTOU。guard 是純 mechanism,**不懂依賴語義**(哪些 key 重要由 mcp 決定)。
 _Avoid_: 把它當永久鎖、讓 RPC 端懂「什麼叫 stale」或「run 依賴什麼」(那是 mcp policy)、在比對前 auto-refresh(會抹掉真人的變動)
 
 **expected_versions**（wire-only,MCP-hidden）:
-guard 操作的 optional 參數,由 mcp 依 `_GUARD_DEPS`(依賴對應表:run→cfg/tab/soc/context/device:*;save→result/save_path;commit→editor/context)從 last-seen 組出。`ParamSpec.mcp_hidden=True` → 驗證+達 handler 但**不進 MCP inputSchema**(版本號不洩漏給 agent)。MCP 的 last-seen 只由確實揭露資源的完整讀取或成功寫入回執推進受影響且先前已觀察的版本；`status()` 等其他讀取不刷新整張表。GUI 使用者的未讀編輯保持 stale，須重讀受影響內容後才重試。
+guard 操作的 optional 參數。GUI 的 `rpc.catalog` 是方法依賴的單一來源。MCP 依該方法的 `guard_deps` 與 last-seen 組出版本。
+
+`tab.run_start` 依已呈現的 tab cfg、tab、SoC、devices。整份 context 無法匯出不會阻斷 snapshot-only Run。`tab.load_data`、editor commit 與 writeback 依各自會用到的 live context 保留 guard。
+
+`ParamSpec.mcp_hidden=True` 讓 handler 驗證版本，但不把版本號放入 MCP inputSchema。完整揭露資源的讀取或成功寫入回執，才推進受影響且先前已觀察的 last-seen 版本。`status()` 不刷新未讀狀態。GUI 使用者改過但 agent 未重讀的資料保持 stale。
 _Avoid_: 讓 expected_versions 出現在 agent schema、讓 agent 自己組版本、save 依賴 cfg(存檔來自 result 自帶 cfg_snapshot)
 
 **Operation feedback**（與版本 guard 分開）:
@@ -198,7 +202,7 @@ _Avoid_: 把 startup_prefs 與 active ExpContext 混為一談、restore 時自�
 
 ## 範例對話
 
-Dev：「agent 送 run.start，要怎麼確保跟 UI 按 Run 行為一致？」
+Dev：「agent 用 `rpc_call(method='tab.run_start', params=...)` 啟動 Run，要怎麼確保跟 UI 按 Run 行為一致？」
 Expert：「兩個 client 都得先跟 GuardService 要一張 RunPermit。GuardService 檢查 context 是不是 active、committed cfg 過不過 lowering、需不需要 SoC。拿到 permit 才能呼叫 `start_run`。」
 Dev：「那 tab 正在跑的時候呢？permit 會擋嗎？」
 Expert：「不會，那是動態狀態，不歸 permit。permit 只證明『這個請求本身合法』。『此刻 tab 在不在跑』是 Lease 的事 —— `start_run` 內部 acquire OperationLease 時才判，因為它隨時會變。permit 證明靜態前置，lease 證明動態資源，兩者語義不同。」
