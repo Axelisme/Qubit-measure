@@ -24,7 +24,7 @@
 - [0021 — Event ownership domain modules](0021-event-ownership-domain-modules.md)：事件 enum 與 payload 由 domain module 擁有，app 只組裝 bus 與 serializer。
 - [0048 — Domain event facts and View reactions](0048-domain-event-facts-and-view-reactions.md)：producer發布closed domain fact；pane-owned State先commit完整resource並於commit後回收retired draft，coordinator擁有lazy-snapshot reaction matrix與figure restore政策。
 - [0037 — Value lookup + resolve-once refs](0037-measure-gui-value-lookup-resolve-once.md)：session value source 提供少量 default / md-write escape hatch；`ValueRef` 立即 materialize。
-- [0044 — GUI process runtime](0044-gui-process-runtime.md)：GUI app 用 static runtime spec + behavior ABC 宣告 process startup contract。
+- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、plotting 與 remote 的責任分界。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：core 以 `OwnerScheduler` port 取代 Qt main-thread 隱含假設，service completion 全走 EventBus；hardware gate lease 附 origin_kind/note/since 供多前端 presence。
 
 ## Cfg / Value Model
@@ -76,16 +76,19 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 - [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；§3 的 predictor 校正與載入敘述已被取代（現行 overlay 見 0062，按需載入的目標見 draft）。
 - [0023 — Cooperative interrupt feedback](0023-cooperative-interrupt-feedback-wakeup.md)：由 [[0025]] 取代；保留為被取代設計的定位點。
-- [0024 — Agent launch UI retirement](0024-embedded-agent-session-architecture.md)：measure-gui 不內建 Agent launch UI；agent 啟動由外部 CLI/MCP workflow 負責。
 
 ## Draft
 
 - [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
+- [外部 agent launch 責任](draft/external-agent-launch-ownership.md)：已核准方向待 Remote／Transport ADR 核實轉正。
+- [Agent operation feedback](draft/agent-operation-feedback.md)：已核准方向待 Operation ADR 核實轉正。
 
 ## Retired
 
-以下舊篇保留原號與正文；現行 Persistence 決策見 0063，workflow 決策見 0062。
+以下舊篇保留原號與正文；現行 Persistence 決策見 0063，workflow 決策見 0062，process startup 決策見 0064。
 
+- [0044 — GUI process runtime](retired/0044-gui-process-runtime.md)：跨模組啟動邊界由 0064 接替，局部契約見 gui README。
+- [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：有效的 launch／feedback 邊界暫見 Remote／Operation draft。
 - [0015 — GUI memento caretaker](retired/0015-persistence-caretaker-memento-single-file.md)：app 與 shared caretaker 的責任由 0063 接替。
 - [0027 — Experiment data persistence](retired/0027-experiment-data-persistence-native-labber-axes-list.md)：資料責任由 0063 接替，細節在 datafile 與 experiment owner 文件。
 - [0032 — Waveform reference time axis](retired/0032-arbitrary-waveform-reference-time-axis.md)：時間權威由 0063 接替。
