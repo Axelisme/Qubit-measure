@@ -10,7 +10,7 @@
 ## 前提
 
 - agent 操作的是 GUI 正在顯示的同一份狀態（[[0013]]）。agent 的改動即時出現在 GUI；使用者的改動 agent 以讀取得知。介面不推送變更通知，也不區分改動者。
-- GUI 的既有畫面與非互動分析行為不變；measure flux picker 的拖曳改為本地 preview、有效 release 才 commit（[[0061]]）。
+- GUI 的非互動分析行為不變；measure flux picker 以第一次左鍵點選開始本地 preview、第二次有效左鍵點選才 commit，鬆開按鍵不提交（[[0061]]）。
 - 人機對話在 agent 所在的 session（例如 Claude Code）進行，不經 MCP。
 - 介面只組合 GUI 既有能力，所需補充列於「實作依據」。
 
