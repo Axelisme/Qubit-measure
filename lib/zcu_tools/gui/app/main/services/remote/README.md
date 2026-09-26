@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — complete cached cfg observations (GUI 91, WIRE 63)
+**Last updated:** 2026-09-26，bounded RPC response failure，GUI 92 / WIRE 63
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -45,7 +45,12 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
-- Line size is bounded by UTF-8 byte length.
+- Line size is bounded by UTF-8 byte length. Unencodable replies return a bounded
+  `internal` error with reason `response_encoding_failed`. The handler may have
+  executed, so callers must inspect state before retrying a mutation. If the
+  fallback cannot fit or the reply queue rejects delivery, the connection closes.
+- A failed full read does not advance the MCP observation baseline. Large context
+  export is not a framing exception or an implicit partial read.
 - Error codes are closed and typed in `gui.remote.errors`.
 - `wire.version` is available before auth; all other methods require auth when a
   token is configured. MCP `connect(token=...)` authenticates before catalog

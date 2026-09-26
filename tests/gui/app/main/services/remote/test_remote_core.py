@@ -34,6 +34,7 @@ from zcu_tools.gui.app.main.services.remote.wire_version import (
 )
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
@@ -739,6 +740,42 @@ def test_load_after_gui_context_edit_requires_a_new_full_read(
         assert getattr(stale.value, "reason", None) == "stale_version"
 
         assert call("rpc_call", {"method": "context.snapshot"})["md"]["r_f"] == 6000.0
+        with pytest.raises(RuntimeError) as missing_file:
+            call("rpc_call", args)
+        assert getattr(missing_file.value, "reason", None) != "stale_version"
+    finally:
+        bridge.disconnect()
+
+
+def test_oversized_context_read_returns_error_without_advancing_guard(
+    fx, tmp_path: Path
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "context.snapshot"})
+        _edit_context_as_gui(fx, "large", "x" * (MAX_LINE_BYTES // 2))
+        _edit_context_as_gui(fx, "other_large", "x" * (MAX_LINE_BYTES // 2))
+
+        with pytest.raises(RuntimeError) as oversized:
+            call("rpc_call", {"method": "context.snapshot"})
+        assert getattr(oversized.value, "reason", None) == "response_encoding_failed"
+        assert "may have executed" in str(oversized.value)
+        args = {
+            "method": "tab.load_data",
+            "params": {"tab_id": tab_id, "data_path": "missing.h5"},
+        }
+        with pytest.raises(RuntimeError) as stale:
+            call("rpc_call", args)
+        assert getattr(stale.value, "reason", None) == "stale_version"
+
+        _edit_context_as_gui(fx, "large", "small")
+        assert (
+            call("rpc_call", {"method": "context.snapshot"})["md"]["large"] == "small"
+        )
         with pytest.raises(RuntimeError) as missing_file:
             call("rpc_call", args)
         assert getattr(missing_file.value, "reason", None) != "stale_version"

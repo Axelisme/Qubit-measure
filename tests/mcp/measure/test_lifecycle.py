@@ -567,6 +567,27 @@ def test_ambiguous_mutation_timeout_does_not_replay_on_reconnect(
     assert all(method != "adapter.list" for method, _ in second.sent)
 
 
+def test_response_encoding_error_does_not_replay_mutation(tmp_path: Path) -> None:
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
+    client.transport.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {"methods": [{**CATALOG[0], "method": "project.save"}]},
+    }
+    client.transport.replies["project.save"] = {
+        "ok": False,
+        "error": {
+            "code": "internal",
+            "reason": "response_encoding_failed",
+            "message": "The request may have executed; inspect state before retrying.",
+        },
+    }
+    with pytest.raises(RuntimeError) as error:
+        client.call("rpc_call", {"method": "project.save"})
+    assert getattr(error.value, "reason", None) == "response_encoding_failed"
+    client.call("rpc_list", {})
+    assert [method for method, _ in client.transport.sent].count("project.save") == 1
+
+
 def test_connect_switches_an_explicit_port_and_discards_previous_observations(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -383,13 +383,7 @@ class NdjsonRpcEndpoint:
     # ------------------------------------------------------------------
 
     def reply_ok(self, link: ClientLink, *, rid: str, result) -> None:
-        resp = Response(id=rid, ok=True, result=result)
-        try:
-            line = encode_line(resp.to_wire())
-        except Exception:
-            logger.exception("failed to encode reply for %s", rid)
-            return
-        self._enqueue(link, line, is_push=False)
+        self._send_response(link, Response(id=rid, ok=True, result=result))
 
     def reply_error(
         self,
@@ -402,13 +396,50 @@ class NdjsonRpcEndpoint:
         data: dict | None = None,
     ) -> None:
         env = ErrorEnvelope(code=code.value, message=message, reason=reason, data=data)
-        resp = Response(id=rid, ok=False, error=env)
+        self._send_response(link, Response(id=rid, ok=False, error=env))
+
+    def _send_response(self, link: ClientLink, response: Response) -> None:
         try:
-            line = encode_line(resp.to_wire())
+            line = encode_line(response.to_wire())
         except Exception:
-            logger.exception("failed to encode error reply for %s", rid)
-            return
-        self._enqueue(link, line, is_push=False)
+            logger.exception("failed to encode reply for %.128r", response.id)
+            fallback = Response(
+                id=response.id,
+                ok=False,
+                error=ErrorEnvelope(
+                    code=ErrorCode.INTERNAL.value,
+                    reason="response_encoding_failed",
+                    message=(
+                        "Could not encode RPC response. The request may have executed; "
+                        "inspect state before retrying any mutation."
+                    ),
+                ),
+            )
+            try:
+                line = encode_line(fallback.to_wire())
+            except Exception:
+                # A request ID near the frame limit can prevent even this reply.
+                logger.exception(
+                    "failed to encode fallback reply for %.128r", response.id
+                )
+                self._abort_client(link)
+                return
+        if not self._enqueue(link, line, is_push=False):
+            # Unlike pushes, a correlated reply must not be silently dropped.
+            self._abort_client(link)
+
+    def _abort_client(self, link: ClientLink) -> None:
+        link.closing = True
+        with self._clients_lock:
+            for sock, current in self._clients.items():
+                if current is link:
+                    try:
+                        # Wake the IO owner through EOF so it owns cleanup and
+                        # the router's on_client_close callback, as on peer loss.
+                        sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        logger.debug("client %s already disconnected", link.peer)
+                    break
 
     def broadcast(self, line: bytes, predicate: Callable[[ClientLink], bool]) -> None:
         """Fan a pre-encoded push line out to every link passing ``predicate``.

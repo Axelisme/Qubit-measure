@@ -144,4 +144,5 @@ WIRE_VERSION = 63
 # v89: report already failed operations as errors when cancellation is requested.
 # v90: expose explicit context, tab, and SoC guard observations in the live catalog.
 # v91: cfg reads project CfgDraft observations without resolving live sources.
-GUI_VERSION = 91
+# v92: return bounded errors for unencodable replies; disconnect on failed delivery.
+GUI_VERSION = 92
