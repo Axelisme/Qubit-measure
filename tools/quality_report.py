@@ -32,6 +32,7 @@ Detector = Literal[
     "test-structure",
     "test-capabilities",
     "suppressions",
+    "radon",
 ]
 DETECTORS: tuple[Detector, ...] = (
     "ruff",
@@ -41,6 +42,7 @@ DETECTORS: tuple[Detector, ...] = (
     "test-structure",
     "test-capabilities",
     "suppressions",
+    "radon",
 )
 NOTICE = "Counts only; not a gate verdict. Relocations are not paired."
 
@@ -111,7 +113,7 @@ class Candidate(Record):
 
 
 class Snapshot(Record):
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     captured_at: str
     candidate: Candidate
     method: Method
@@ -188,6 +190,96 @@ def normalize_diagnostics(
             )
         )
     return tuple(sorted(found, key=lambda item: (item.path, item.rule, item.line or 0)))
+
+
+class ComplexityBlock(BaseModel):
+    """Validate Radon's recursive JSON before interpreting measurements."""
+
+    model_config = ConfigDict(strict=True)
+    type: Literal["function", "method", "class"]
+    name: str = Field(min_length=1)
+    lineno: int = Field(ge=1)
+    col_offset: int = Field(default=0, ge=0)
+    classname: str | None = None
+    complexity: int = Field(ge=1)
+    rank: Literal["A", "B", "C", "D", "E", "F"]
+    methods: list[ComplexityBlock] = Field(default_factory=list)
+    closures: list[ComplexityBlock] = Field(default_factory=list)
+    inner_classes: list[ComplexityBlock] = Field(default_factory=list)
+
+
+def normalize_complexity(payload: JsonValue, root: Path) -> tuple[Finding, ...]:
+    """Retain function metrics, excluding class aggregates and violation counts."""
+    found: dict[tuple[str, int, int], Finding] = {}
+
+    def visit(path: str, block: ComplexityBlock, parent: str = "") -> None:
+        owner = parent or block.classname
+        name = f"{owner}.{block.name}" if owner else block.name
+        key = (path, block.lineno, block.col_offset)
+        if block.type != "class" and key not in found:
+            found[key] = Finding(
+                path=path,
+                rule="cyclomatic-complexity",
+                line=block.lineno,
+                message=f"{name}: CC {block.complexity} ({block.rank})",
+                counted=False,
+                details={
+                    "name": name,
+                    "complexity": block.complexity,
+                    "rank": block.rank,
+                },
+            )
+        for child in (*block.methods, *block.closures, *block.inner_classes):
+            visit(path, child, name)
+
+    for filename, rows in object_value(payload).items():
+        path = (root / filename).resolve().relative_to(root.resolve()).as_posix()
+        if not isinstance(rows, list):
+            raise ReportError(f"Radon could not analyze {path}: {rows}")
+        blocks = [ComplexityBlock.model_validate(row) for row in rows]
+        # Class-owned methods also occur at the top level of Radon's JSON.
+        for block in sorted(blocks, key=lambda item: item.type != "class"):
+            visit(path, block)
+    return tuple(sorted(found.values(), key=lambda item: (item.path, item.line or 0)))
+
+
+def complexity_summary(snapshot: Snapshot, *, top: int = 10) -> dict[str, JsonValue]:
+    """Rank advisory CC values separately from counted diagnostic distributions."""
+    if top < 1:
+        raise ReportError("top must be positive")
+    result = snapshot.detectors["radon"]
+    groups: dict[str, Counter[str]] = {}
+    for item in result.findings:
+        scope = scope_for(item.path)
+        groups.setdefault(scope, Counter())[str(item.details["rank"])] += 1
+    hotspots = sorted(
+        result.findings,
+        key=lambda item: (-int(item.details["complexity"]), item.path, item.line or 0),
+    )[:top]
+    return {
+        "state": result.state,
+        "reason": result.reason,
+        "ranks_by_scope": {
+            scope: dict(sorted(ranks.items()))
+            for scope, ranks in sorted(groups.items())
+        },
+        "hotspots": [item.model_dump(mode="json") for item in hotspots],
+    }
+
+
+def radon_findings(root: Path) -> tuple[Finding, ...]:
+    files = tuple(
+        path.relative_to(root).as_posix()
+        for path in _support.python_files(root)
+        if path.relative_to(root).parts[0] in ("lib", "tools")
+    )
+    if not files:
+        return ()
+    # Use the worktree interpreter, never an unrelated uv-tool executable on PATH.
+    result = command(root, (sys.executable, "-m", "radon", "cc", "--json", *files))
+    if result.returncode:
+        raise ReportError(f"Radon exit {result.returncode}: {result.stderr.strip()}")
+    return normalize_complexity(json.loads(result.stdout), root)
 
 
 def scope_for(path: str) -> str:
@@ -511,7 +603,9 @@ def import_contracts(root: Path) -> GateResult:
         return GateResult(state="error", detail=str(error))
 
 
-def collect_snapshot(root: Path, *, with_pyright: bool = False) -> Snapshot:
+def collect_snapshot(
+    root: Path, *, with_pyright: bool = False, with_radon: bool = False
+) -> Snapshot:
     """Measure without changing source; reject concurrent source/method changes."""
     root = root.resolve()
     before = candidate(root)
@@ -523,7 +617,19 @@ def collect_snapshot(root: Path, *, with_pyright: bool = False) -> Snapshot:
             if name == "pyright"
             else "whole tree; detector defaults"
         )
-        if name == "pyright" and not with_pyright:
+        if name == "radon":
+            selection = "lib/tools Python functions, methods and closures; class aggregates excluded; asserts counted"
+            results[name] = (
+                observe(selection, lambda: radon_findings(root))
+                if with_radon
+                else DetectorResult(
+                    state="skipped",
+                    findings=(),
+                    selection=selection,
+                    reason="Radon not requested",
+                )
+            )
+        elif name == "pyright" and not with_pyright:
             results[name] = DetectorResult(
                 state="skipped",
                 findings=(),
@@ -542,7 +648,7 @@ def collect_snapshot(root: Path, *, with_pyright: bool = False) -> Snapshot:
     if before != candidate(root) or method != measurement_method(root):
         raise ReportError("source or measurement method changed during snapshot")
     return Snapshot(
-        schema_version=1,
+        schema_version=2,
         captured_at=datetime.now(timezone.utc).isoformat(),
         candidate=before,
         method=method,
@@ -553,6 +659,8 @@ def collect_snapshot(root: Path, *, with_pyright: bool = False) -> Snapshot:
 
 def emit_summary(snapshot: Snapshot, top: int) -> None:
     for name, result in sorted(snapshot.detectors.items()):
+        if name == "radon":
+            continue
         count = (
             str(sum(item.count for item in result.findings if item.counted))
             if result.state == "completed"
@@ -565,6 +673,16 @@ def emit_summary(snapshot: Snapshot, top: int) -> None:
             f"{group}: {sorted(distribution.items(), key=lambda item: (-item[1], item[0]))[:top]}",
             file=sys.stderr,
         )
+    radon = complexity_summary(snapshot, top=top)
+    print(
+        f"Radon CC advisory: {radon['state']} {radon['reason'] or ''}", file=sys.stderr
+    )
+    print(f"Radon ranks by scope: {radon['ranks_by_scope']}", file=sys.stderr)
+    hotspots = radon["hotspots"]
+    if isinstance(hotspots, list):
+        for item in hotspots:
+            row = object_value(item)
+            print(f"  {row['path']}:{row['line']} {row['message']}", file=sys.stderr)
     print(NOTICE, file=sys.stderr)
 
 
@@ -573,6 +691,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="operation", required=True)
     snapshot_parser = sub.add_parser("snapshot")
     snapshot_parser.add_argument("--with-pyright", action="store_true")
+    snapshot_parser.add_argument("--with-radon", action="store_true")
     snapshot_parser.add_argument("--top", type=int, default=10)
     compare_parser = sub.add_parser("compare")
     compare_parser.add_argument("before", type=Path)
@@ -586,7 +705,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.top < 1:
                 raise ReportError("--top must be positive")
             snapshot = collect_snapshot(
-                Path(__file__).resolve().parents[1], with_pyright=args.with_pyright
+                Path(__file__).resolve().parents[1],
+                with_pyright=args.with_pyright,
+                with_radon=args.with_radon,
             )
             output = snapshot.model_dump_json(indent=2)
             emit_summary(snapshot, args.top)
