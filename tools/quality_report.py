@@ -10,6 +10,7 @@ import platform
 import re
 import subprocess
 import sys
+import tokenize
 from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -268,18 +269,20 @@ def complexity_summary(snapshot: Snapshot, *, top: int = 10) -> dict[str, JsonVa
 
 
 def radon_findings(root: Path) -> tuple[Finding, ...]:
-    files = tuple(
-        path.relative_to(root).as_posix()
-        for path in _support.python_files(root)
-        if path.relative_to(root).parts[0] in ("lib", "tools")
-    )
-    if not files:
-        return ()
-    # Use the worktree interpreter, never an unrelated uv-tool executable on PATH.
-    result = command(root, (sys.executable, "-m", "radon", "cc", "--json", *files))
-    if result.returncode:
-        raise ReportError(f"Radon exit {result.returncode}: {result.stderr.strip()}")
-    return normalize_complexity(json.loads(result.stdout), root)
+    """Analyze selected source with fixed options, independent of CLI config."""
+    from radon.cli.tools import cc_to_dict
+    from radon.complexity import cc_visit
+
+    payload: dict[str, JsonValue] = {}
+    for path in _support.python_files(root):
+        relative = path.relative_to(root)
+        if relative.parts[0] not in ("lib", "tools"):
+            continue
+        with tokenize.open(path) as source:
+            blocks = cc_visit(source.read(), no_assert=False)
+        serialized: list[JsonValue] = [dict(cc_to_dict(block)) for block in blocks]
+        payload[relative.as_posix()] = serialized
+    return normalize_complexity(payload, root)
 
 
 def scope_for(path: str) -> str:
@@ -576,6 +579,7 @@ def observe(
             state="completed", selection=selection, findings=collect()
         )
     except (
+        ImportError,
         OSError,
         ValueError,
         SyntaxError,

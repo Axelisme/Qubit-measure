@@ -135,14 +135,16 @@ uv run --directory <worktree> --no-sync -- python tools/quality_report.py snapsh
 ```
 
 `--with-radon` 可與 `--with-pyright` 同時使用；`--top N` 控制 stderr 熱點數量。
-Radon 使用 worktree 的 Python，不依賴 `uv tool install` 提供的全域 executable。
+報表在 worktree Python 內使用 Radon 分析函式，不呼叫 CLI 或 `uv tool install` 提供的全域 executable。
+選集由 repo 掃描器決定，固定 `no_assert=False`；不採用 `RADONCFG`、個人或 repo 的 Radon CLI
+設定，因此 `cc_min`、`exclude`、`no_assert` 等 CLI 設定不會悄悄改變報表。
 未選用時明列 skipped；選用但未安裝、解析失敗或輸出無效時記 error，exit 2，不當作零筆。
 高複雜度本身不改變 exit code，也不判定品質合格與否。
 
 報表沿用來源掃描排除規則，只分析 `lib/` 與 `tools/`，不含 tests、script 或 Notebook。
 保留 Radon JSON 提供的函式、方法及 closure，排除 class aggregate；巢狀 block 以 qualified name
 顯示。Radon 未提供的 block 不另自行推導，例如函式內定義的 class 可能不在其輸出中。
-計算使用 Radon 預設，包含 assert；CC 與 Ruff 的演算法不同，不能直接共用 12 的門檻。
+計算包含 assert，不按 rank 過濾；CC 與 Ruff 的演算法不同，不能直接共用 12 的門檻。
 
 JSON 的 `detectors.radon.findings` 保存 path、line，以及 details 中的 name、complexity、rank；
 全部 `counted=false`，不混入違規計數。stderr 分開顯示 production/tools 的等級分布與 CC 熱點；

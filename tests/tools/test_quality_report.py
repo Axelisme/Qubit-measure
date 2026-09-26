@@ -20,6 +20,7 @@ from quality_report import (
     normalize_diagnostics,
     normalize_tool_version,
     observe,
+    radon_findings,
     summarize,
 )
 
@@ -49,6 +50,42 @@ def snapshot(*findings: Finding) -> Snapshot:
         },
         import_contracts=GateResult(state="pass", detail="contracts kept"),
     )
+
+
+def test_radon_analysis_ignores_cli_filters_and_counts_asserts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("radon")
+    config = "[radon]\ncc_min = F\nexclude = lib/*\nno_assert = True\n"
+    config_path = tmp_path / "radon.cfg"
+    config_path.write_text(config, encoding="utf-8")
+    monkeypatch.setenv("RADONCFG", str(config_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "sample.py").write_text(
+        "def plain():\n    return 1\n\ndef validated(value):\n    assert value\n    return value\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_sample.py").write_text(
+        "def test_other():\n    assert True\n", encoding="utf-8"
+    )
+    findings = radon_findings(tmp_path)
+    assert [(f.details["name"], f.details["complexity"]) for f in findings] == [
+        ("plain", 1),
+        ("validated", 2),
+    ]
+    assert {f.path for f in findings} == {"lib/sample.py"}
+
+
+def test_radon_analysis_reports_syntax_failure(tmp_path: Path) -> None:
+    pytest.importorskip("radon")
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "broken.py").write_text("def broken(:", encoding="utf-8")
+    result = observe("Radon lib/tools", lambda: radon_findings(tmp_path))
+    assert result.state == "error"
+    assert result.findings == ()
+    assert result.reason is not None and "SyntaxError" in result.reason
 
 
 def complexity_report(payload, root: Path) -> Snapshot:
