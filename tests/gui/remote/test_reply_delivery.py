@@ -49,6 +49,10 @@ class _Router:
                 code=ErrorCode.CONTROLLER_ERROR,
                 message="x" * MAX_LINE_BYTES,
             )
+        elif request.method == "large_result":
+            self.endpoint.reply_ok(
+                link, rid=request.id, result={"value": "x" * (MAX_LINE_BYTES - 1024)}
+            )
         elif request.method == "unserializable_error":
             self.endpoint.reply_error(
                 link,
@@ -127,6 +131,28 @@ def test_unencodable_reply_returns_correlated_error_without_replaying_handler(
         _send(client, "small", "next")
         assert _response(client) == {"id": "next", "ok": True, "result": {"value": 42}}
     assert router.calls == [method, "small"]
+
+
+@pytest.mark.parametrize("shutdown", [False, True])
+def test_backpressured_client_does_not_block_other_clients_or_cleanup(
+    endpoint: tuple[NdjsonRpcEndpoint, _Router], shutdown: bool
+) -> None:
+    server, router = endpoint
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as slow:
+        slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8192)
+        slow.settimeout(3)
+        slow.connect(("127.0.0.1", server.port))
+        _send(slow, "large_result")
+        assert slow.recv(1) == b"{"
+        with socket.create_connection(("127.0.0.1", server.port), timeout=3) as healthy:
+            _send(healthy, "small")
+            assert _response(healthy)["result"] == {"value": 42}
+            if shutdown:
+                server.stop()
+            else:
+                slow.close()
+            assert router.closed.wait(timeout=3)
+    assert router.calls == ["large_result", "small"]
 
 
 @pytest.mark.parametrize("method", ["unserializable_result", "reject_reply"])

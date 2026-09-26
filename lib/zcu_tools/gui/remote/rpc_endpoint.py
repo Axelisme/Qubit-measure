@@ -602,21 +602,35 @@ class NdjsonRpcEndpoint:
 
     def _client_writer(self, sock: socket.socket, link: ClientLink) -> None:
         """Drain the outbound queue to the socket; exits on sentinel / close."""
-        while True:
-            try:
-                line = link.outbound.get(timeout=1.0)
-            except queue.Empty:
-                if link.closing or self._stopping.is_set():
-                    return
-                continue
-            if line is _SHUTDOWN_SENTINEL or line == _SHUTDOWN_SENTINEL:
-                return
-            try:
-                sock.sendall(line)
-            except OSError as exc:
-                logger.info("remote client writer %s exit on send: %s", link.peer, exc)
-                link.closing = True
-                return
+        try:
+            with selectors.DefaultSelector() as writable:
+                writable.register(sock, selectors.EVENT_WRITE)
+                while True:
+                    try:
+                        line = link.outbound.get(timeout=1.0)
+                    except queue.Empty:
+                        if link.closing or self._stopping.is_set():
+                            return
+                        continue
+                    if line is _SHUTDOWN_SENTINEL or line == _SHUTDOWN_SENTINEL:
+                        return
+                    # Accepted sockets are nonblocking. Keep the byte cursor
+                    # across backpressure without replaying a partially sent line.
+                    pending = memoryview(line)
+                    while pending:
+                        if link.closing or self._stopping.is_set():
+                            return
+                        try:
+                            sent = sock.send(pending)
+                        except (BlockingIOError, InterruptedError):
+                            writable.select(timeout=0.5)
+                            continue
+                        if sent == 0:
+                            raise ConnectionError("socket closed during reply delivery")
+                        pending = pending[sent:]
+        except (OSError, ValueError) as exc:
+            logger.info("remote client writer %s exit on send: %s", link.peer, exc)
+            self._abort_client(link)
 
     def _service_client(
         self, sel: selectors.BaseSelector, sock: socket.socket, link: ClientLink

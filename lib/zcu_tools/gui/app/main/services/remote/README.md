@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26，snapshot-only Run guards，GUI 93 / WIRE 63
+**Last updated:** 2026-09-26，8 MiB RPC message limit，GUI 94 / WIRE 63
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -45,7 +45,8 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
-- Line size is bounded by UTF-8 byte length. Unencodable replies return a bounded
+- Request and response lines allow up to 8 MiB of UTF-8 bytes, excluding the
+  newline. There is no chunking protocol. Unencodable replies return a bounded
   `internal` error with reason `response_encoding_failed`. The handler may have
   executed, so callers must inspect state before retrying a mutation. If the
   fallback cannot fit or the reply queue rejects delivery, the connection closes.
@@ -121,7 +122,7 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 63`, `GUI_VERSION = 93`, and
+Current measure-gui values are `WIRE_VERSION = 63`, `GUI_VERSION = 94`, and
 `MCP_VERSION = 83` (defined in `zcu_tools.mcp.measure.server`). GUI 93 removes
 Run's context-content dependency after freezing cfg and device inputs; tab cfg,
 tab existence, SoC, devices and hardware exclusion remain protected. WIRE 63

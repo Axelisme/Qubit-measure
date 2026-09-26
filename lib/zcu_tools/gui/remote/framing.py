@@ -12,7 +12,7 @@ from collections.abc import Mapping
 
 from .errors import ErrorCode, RemoteError
 
-MAX_LINE_BYTES = 1 << 20  # 1 MiB per request line
+MAX_LINE_BYTES = 8 << 20  # 8 MiB per UTF-8 message, excluding the newline
 LINE_TERMINATOR = b"\n"
 
 

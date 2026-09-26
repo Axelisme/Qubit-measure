@@ -783,6 +783,44 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
         fx.ctrl.teardown_cfg_editor(editor_id)
 
 
+@pytest.mark.parametrize("value_bytes", [2 << 20, MAX_LINE_BYTES - 2048])
+def test_large_context_roundtrip_restores_load_guard(
+    fx, tmp_path: Path, value_bytes: int
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "context.snapshot"})
+        value = "x" * value_bytes
+        call(
+            "rpc_call",
+            {
+                "method": "context.md_set_attr",
+                "params": {"key": "large", "value": value},
+            },
+        )
+        _edit_context_as_gui(fx, "changed", 17)
+        args = {
+            "method": "tab.load_data",
+            "params": {"tab_id": tab_id, "data_path": "missing.h5"},
+        }
+        with pytest.raises(RuntimeError) as stale:
+            call("rpc_call", args)
+        assert getattr(stale.value, "reason", None) == "stale_version"
+
+        observed = call("rpc_call", {"method": "context.snapshot"})
+        assert observed["md"]["large"] == value
+        assert observed["md"]["changed"] == 17
+        with pytest.raises(RuntimeError) as missing_file:
+            call("rpc_call", args)
+        assert getattr(missing_file.value, "reason", None) != "stale_version"
+    finally:
+        bridge.disconnect()
+
+
 def test_oversized_context_read_returns_error_without_advancing_guard(
     fx, tmp_path: Path
 ) -> None:
