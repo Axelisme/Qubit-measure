@@ -154,6 +154,22 @@ class ScalarField(CfgField):
         else:
             self._refresh_validity()
 
+    def set_text(self, text: str) -> None:
+        """Store direct input text and its parse result, including invalid input."""
+        self._require_open()
+        if self.spec.type not in (int, float, str):
+            raise TypeError(f"Text input is unsupported for {self.spec.type.__name__}")
+        if not text.strip() and (self.spec.optional or self.spec.type is not str):
+            value = DirectValue(None, raw=text)
+        else:
+            try:
+                parsed = self.spec.type(text.strip() if self.spec.optional else text)
+            except ValueError as exc:
+                value = DirectValue(None, raw=text, error=str(exc))
+            else:
+                value = DirectValue(parsed, raw=text)
+        self.set_value(value)
+
     def _validate_direct_value(self, value: DirectValue) -> None:
         raw = value.value
         if raw is None:
@@ -231,7 +247,9 @@ class ScalarField(CfgField):
     def _refresh_validity(self) -> None:
         if isinstance(self._value, DirectValue):
             raw = self._value.value
-            valid = raw is not None or self.spec.optional
+            valid = self._value.error is None and (
+                raw is not None or self.spec.optional
+            )
         else:
             raw = self._value.resolved
             valid = raw is not None

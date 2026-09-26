@@ -65,7 +65,7 @@ def test_static_validation_fast_fails_missing_and_extra_fields() -> None:
             LiteralSpec("fixed"),
             DirectValue("changed"),
             "Config field 'value' is a locked literal (must be 'fixed'), "
-            "got DirectValue(value='changed')",
+            "got DirectValue(value='changed', raw=None, error=None)",
         ),
         (
             ScalarSpec("Count", int),
@@ -107,7 +107,7 @@ def test_static_error_precedes_expression_error() -> None:
 
     assert str(exc_info.value) == (
         "Config field 'literal' is a locked literal (must be 'fixed'), "
-        "got DirectValue(value='changed')"
+        "got DirectValue(value='changed', raw=None, error=None)"
     )
 
 
@@ -129,7 +129,7 @@ def test_static_error_precedes_reference_error() -> None:
 
     assert str(exc_info.value) == (
         "Config field 'literal' is a locked literal (must be 'fixed'), "
-        "got DirectValue(value='changed')"
+        "got DirectValue(value='changed', raw=None, error=None)"
     )
 
 

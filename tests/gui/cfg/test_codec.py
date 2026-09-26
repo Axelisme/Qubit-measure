@@ -30,6 +30,21 @@ from zcu_tools.gui.cfg import (
 )
 
 
+def test_invalid_direct_text_round_trips_without_becoming_optional_unset() -> None:
+    from zcu_tools.gui.cfg.lowering import validate_finished_cfg
+
+    value = DirectValue(None, raw="1e", error="Invalid number")
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"mixer": ScalarSpec("Mixer", float, optional=True)}),
+        CfgSectionValue(fields={"mixer": value}),
+    )
+    restored = raw_to_schema(schema, schema_to_raw(schema))
+
+    assert restored.value.fields["mixer"] == value
+    with pytest.raises(RuntimeError, match="mixer.*Invalid number"):
+        validate_finished_cfg(restored, resolve_reference=None)
+
+
 def test_decode_eval_wire_carriers() -> None:
     assert decode_eval_wire({"__kind": "eval", "expr": "x + 1"}) == EvalValue(
         expr="x + 1"

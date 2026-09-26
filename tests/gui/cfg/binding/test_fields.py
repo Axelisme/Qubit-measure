@@ -70,6 +70,53 @@ def test_scalar_field_dynamic_options_drive_membership_and_observability() -> No
     validity_changed.assert_called_once_with(False)
 
 
+def test_direct_text_input_retains_invalid_raw_without_reusing_previous_value() -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Mixer", float, optional=True),
+        ports.evaluate,
+        ports.provide,
+        DirectValue(5.0),
+    )
+
+    field.set_text("1e")
+    value = field.get_value()
+    assert isinstance(value, DirectValue)
+    assert value.raw == "1e"
+    assert value.value is None
+    assert value.error
+    assert not field.is_valid()
+
+    field.set_text(" 1e2 ")
+    assert field.get_value() == DirectValue(100.0, raw=" 1e2 ")
+    assert field.is_valid()
+
+    field.set_text("")
+    assert field.get_value() == DirectValue(None, raw="")
+    assert field.is_valid()
+
+
+@pytest.mark.parametrize(
+    ("optional", "text", "expected"),
+    [(True, "  name  ", "name"), (True, "   ", None), (False, "  name  ", "  name  ")],
+)
+def test_direct_text_keeps_existing_string_input_semantics(
+    *, optional: bool, text: str, expected: str | None
+) -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Name", str, optional=optional),
+        ports.evaluate,
+        ports.provide,
+        DirectValue("initial"),
+    )
+
+    field.set_text(text)
+
+    assert field.get_value() == DirectValue(expected, raw=text)
+    assert field.is_valid()
+
+
 def test_scalar_field_optional_unset_remains_valid() -> None:
     ports = BindingPorts()
     field = ScalarField(

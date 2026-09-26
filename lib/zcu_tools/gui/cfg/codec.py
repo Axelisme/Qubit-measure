@@ -124,7 +124,15 @@ def _node_value_to_raw(
                 "__kind": "eval",
                 "expr": value.expr,
             }
-        return {"__kind": "direct", "value": _to_json_compatible(value.value)}
+        payload: dict[str, object] = {
+            "__kind": "direct",
+            "value": _to_json_compatible(value.value),
+        }
+        if value.raw is not None:
+            payload["raw"] = value.raw
+        if value.error is not None:
+            payload["error"] = value.error
+        return payload
     if isinstance(spec, SweepSpec):
         assert isinstance(value, SweepValue)
         return {
@@ -208,7 +216,7 @@ def _node_value_from_raw(
         if eval_value is not None:
             return eval_value
         if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            return DirectValue(value=raw.get("value"))
+            return _decode_direct_wire(raw)
         if isinstance(raw, str) and raw.strip().startswith("="):
             raise RuntimeError("Legacy scalar '=expr' payload is unsupported")
         return DirectValue(raw)
@@ -247,6 +255,16 @@ def _node_value_from_raw(
     if isinstance(spec, ReferenceSpec):
         return _ref_value_from_raw(spec, raw)
     raise RuntimeError(f"Unsupported spec node for restore: {type(spec).__name__}")
+
+
+def _decode_direct_wire(raw: dict[str, object]) -> DirectValue:
+    text = raw.get("raw")
+    error = raw.get("error")
+    if text is not None and not isinstance(text, str):
+        raise ValueError("Direct input raw must be a string")
+    if error is not None and not isinstance(error, str):
+        raise ValueError("Direct input error must be a string")
+    return DirectValue(value=raw.get("value"), raw=text, error=error)
 
 
 def _parse_sweep_edge(raw: object) -> float | EvalValue:

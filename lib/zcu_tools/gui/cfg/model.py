@@ -348,14 +348,23 @@ CfgNodeSpec = (
 
 @dataclass(frozen=True)
 class DirectValue:
-    """A directly-entered scalar value. ``value is None`` means *unset* (the
-    field has no value yet) — there is no separate ``is_unset`` flag, the value
-    itself is the single source of truth (ADR-0010). Scalar types are only
-    int/float/str/bool, whose legal values are never ``None``, so ``None``
-    unambiguously means unset. The ``DirectValue`` wrapper is kept even when
-    unset so the scalar's *mode* (direct vs ``EvalValue``) survives."""
+    """A directly-entered scalar value with optional input text and parse error.
+
+    ``value=None`` means unset when ``error`` is absent. Scalar types are
+    int/float/str/bool, whose legal values are never ``None``.
+    Text parsing failures retain ``raw``
+    and ``error`` with no parsed value, so invalid input cannot reuse an earlier
+    valid value. The wrapper also preserves direct mode while unset or invalid."""
 
     value: Any | None = None
+    raw: str | None = field(default=None, kw_only=True)
+    error: str | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.error is not None and (self.raw is None or self.value is not None):
+            raise ValueError(
+                "Invalid direct input requires raw text and no parsed value"
+            )
 
 
 @dataclass(frozen=True)

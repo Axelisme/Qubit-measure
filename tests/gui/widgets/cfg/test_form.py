@@ -313,6 +313,46 @@ def test_optional_scalar_widget_round_trips_value(qapp):
     assert read_scalar_widget(w, spec) is None
 
 
+def test_optional_numeric_edit_is_owned_by_model_and_survives_widget_recreation(
+    qapp, ctrl
+):
+    from qtpy.QtWidgets import QLineEdit
+    from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget
+
+    field = _scalar_field(
+        ctrl, ScalarSpec("Mixer", float, optional=True), DirectValue(5.0)
+    )
+    widget = ScalarWidget(field)
+    try:
+        entry = widget.findChild(QLineEdit)
+        assert entry is not None
+        entry.setText("1e")
+        value = field.get_value()
+        assert isinstance(value, DirectValue)
+        assert value.raw == "1e"
+        assert value.value is None
+        assert value.error
+        assert not field.is_valid()
+    finally:
+        widget.teardown()
+        widget.close()
+        widget.deleteLater()
+
+    replacement = ScalarWidget(field)
+    try:
+        entry = replacement.findChild(QLineEdit)
+        assert entry is not None
+        assert entry.text() == "1e"
+        entry.setText("1e2")
+        assert field.get_value() == DirectValue(100.0, raw="1e2")
+        assert field.is_valid()
+    finally:
+        replacement.teardown()
+        replacement.close()
+        replacement.deleteLater()
+        field.teardown()
+
+
 def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget, default_cfg_renderers
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget

@@ -521,6 +521,10 @@ def _validate_static_node(
 
 
 def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) -> None:
+    if node_value.error is not None:
+        raise RuntimeError(
+            f"Config field '{full_path}' ({spec.label}): {node_value.error}"
+        )
     value = node_value.value
     if value is None:
         return

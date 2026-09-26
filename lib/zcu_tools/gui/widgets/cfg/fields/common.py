@@ -325,6 +325,8 @@ def read_scalar_widget(w: QWidget, spec: ScalarSpec) -> Any:
 
 
 def _widget_default_for_direct_value(value: DirectValue, spec: ScalarSpec) -> Any:
+    if spec.optional and value.raw is not None:
+        return value.raw
     if value.value is None:
         # An optional unset scalar shows as an empty field (the "(none)" state),
         # not the type's zero default.
@@ -417,16 +419,7 @@ class ScalarWidget(BaseLiveWidget):
                 field.set_value(EvalValue(expr=inp.text().strip()))
                 self._sync_eval_ghost(field.get_value())
             elif field.spec.optional and isinstance(inp, QLineEdit):
-                # Optional direct input: empty = None (unset). A partial/invalid
-                # entry (e.g. "-", "1e") is held until it parses — don't clobber.
-                txt = inp.text().strip()
-                if txt == "":
-                    field.set_value(None)
-                else:
-                    try:
-                        field.set_value(field.spec.type(txt))
-                    except (ValueError, TypeError):
-                        return
+                field.set_text(inp.text())
             else:
                 val = read_value_widget(inp, field.spec.type)
                 field.set_value(val)
