@@ -12,7 +12,7 @@
 - [0019 — Operation facets and execution strategy](0019-operation-facets-and-execution-strategy.md)：Operation 由 Exclusion、Handle、Progress、Cancel facet 組合。
 - [0025 — Cross-thread interaction channel](0025-cross-thread-interaction-channel.md)：operation/user prompt 使用單一有序 channel 傳遞 settle、message、stop。
 - [0026 — OperationRunner + scope ports](0026-operation-abstraction-runner-scope-ports.md)：OperationRunner 擁有通用生命週期；各 operation 只提供 policy 與窄 write port。
-- [0058 — Registry-owned VISA session disconnect](0058-registry-owned-visa-session-disconnect.md)：GlobalDeviceManager 以 identity claims 統一擁有 disconnect；close I/O 在 registry lock 外、失敗聚合且保留重試。
+- [0058 — Registry-owned VISA session disconnect](0058-registry-owned-visa-session-disconnect.md)：device 局部契約見 [device README](../../lib/zcu_tools/device/README.md)；跨 owner teardown 歸 Operation，故本篇尚未退役。
 
 ## GUI Service Architecture
 
@@ -49,7 +49,7 @@
 - [0052 — Event meta 與多前端 attribution](0052-event-meta-and-frontend-attribution.md)：bus 為事件蓋章 `EventMeta(seq, origin)`，origin 由 dispatch 邊界宣告、operation 記錄顯式攜帶；coalescing 屬 subscriber-side；wire 封套 additive 加 seq/origin。
 - [0059 — measure MCP RPC channel](0059-measure-mcp-rpc-channel.md)：低頻 wire method 經 live GUI 提供的 `rpc.catalog` 與通用 `rpc_*` 呼叫；exposure 與 guard policy 隨 method 宣告於 `RemoteMethodEntry`。
 - [0060 — Agent interface as second view](0060-measure-agent-interface-shared-gui-view.md)：量測 agent 以 40 個特化 tool 操作與 GUI 共用的狀態；一個判斷點一個 tool，寫入類 tool 使 GUI 跟隨到對應子 tab。
-- [0061 — Measure interactive plugin session](0061-measure-interactive-plugin-session.md)：service 擁有互動分析的 committed session/operation，plugin 提供共用 actions/commands 與本地 preview frontend。
+- [0061 — Measure interactive plugin session](0061-measure-interactive-plugin-session.md)：plugin 局部契約見 [main app README](../../lib/zcu_tools/gui/app/main/README.md)；跨 owner session ownership 歸 GUI，故本篇尚未退役。
 
 ## Persistence
 
@@ -66,27 +66,22 @@
 
 ## Analysis / Simulation / Waveform
 
-- [0054 — Resonance multiplicative amplitude background](0054-resonance-multiplicative-amplitude-background.md)：real log-amplitude slope 乘完整 resonator response，`edelay` 維持唯一 global phase slope。
-- [0055 — Route-scoped resonator electrical delay](0055-route-scoped-resonator-electrical-delay.md)：boundary search 可 bounded adaptive expansion；成功 delay 與 generator/readout route 以單一 compound calibration 持久化為後續 branch seed。
-- [0056 — Resonance phase curvature and rational initializer](0056-resonance-phase-curvature-rational-initializer.md)：optional resonance-centered quadratic phase background 與 internal degree-1 rational initializer 不接管 route-scoped delay branch。
-- [0028 — Fluxdep analysis kernel](0028-fluxdep-analysis-kernel.md)：flux-dependence analysis kernel 位於 GUI / notebook adapter 之外。
-- [0029 — Fluxonium prediction engine](0029-fluxonium-prediction-engine.md)：Fluxonium prediction policy 位於 `simulate.fluxonium`。
-- [0030 — Arbitrary waveform optional recipe](0030-arbitrary-waveform-asset-optional-recipe.md)：arbitrary waveform asset 是 qubit-scoped `.npz`，可內嵌 formula recipe。
-- [0031 — Formula recipe segments](0031-formula-recipe-complex-segments.md)：formula recipe 使用 ordered segments 與 complex expression。
+局部分析／預測契約見 [fluxdep](../../lib/zcu_tools/analysis/fluxdep/README.md)、[fitting](../../lib/zcu_tools/analysis/fitting/README.md) 與 [prediction](../../lib/zcu_tools/simulate/fluxonium/README.md)；waveform 資產契約見 [repository 參考](../../lib/zcu_tools/resources/waveform_assets.md)。
+
 - [0032 — Reference time axis](0032-arbitrary-waveform-reference-time-axis.md)：arbitrary waveform playback 使用 asset 自帶 time axis。
 - [0033 — Delete/rename without reference scan](0033-arbitrary-waveform-delete-no-reference-scan.md)：asset mutation 不掃描或遷移 ModuleLibrary references。
-- [0034 — ArbWaveformDatabase repository](0034-arb-waveform-database-shared-asset-repository.md)：shared asset operation 收斂到 `meta_tool.ArbWaveformDatabase`。
-- [0035 — MCP failures use tool errors](0035-arb-waveform-mcp-failures-use-tool-errors.md)：arb waveform MCP validation/missing/collision 走 failed tool call 與 stable reason。
 
 ## Plotting
 
-- [0016 — notebook liveplot auto close](0016-notebook-liveplot-auto-close-default.md)：notebook liveplot 預設 auto-close，不依賴 ipympl 私有協議。
+Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_tools/plotting/liveplot/README.md)。
+
 - [0017 — Worker-thread plotting](0017-worker-thread-plotting.md)：worker 直接畫圖時 marshal；只通知時走 queued signal。
 
 ## Agents
 
+協作流程歸外部 dev-flow／collab skills，repo 的 live resource 限制見 [CLAUDE.md](../../CLAUDE.md)。
+
 - [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；現行跨模組分工見 0062，未落實的依賴目標見 draft。
-- [0022 — Worktree coordination](0022-agent-coordination-worktree.md)：多 agent / 長線 orchestration 使用 `.agent_state/` worktree protocol，主 checkout merge 由 merge queue 序列化。
 - [0023 — Cooperative interrupt feedback](0023-cooperative-interrupt-feedback-wakeup.md)：由 [[0025]] 取代；保留為被取代設計的定位點。
 - [0024 — Agent launch UI retirement](0024-embedded-agent-session-architecture.md)：measure-gui 不內建 Agent launch UI；agent 啟動由外部 CLI/MCP workflow 負責。
 
@@ -102,3 +97,17 @@
 - [0041 — Autofluxdep feedback framework](retired/0041-autofluxdep-feedback-framework.md)：feedback 跨模組邊界接入 0062，slot 細節移至 app README。
 - [0042 — Autofluxdep feedback confidence reversion](retired/0042-autofluxdep-feedback-confidence-reversion.md)：freshness 邊界接入 0062，公式移至 app README。
 - [0043 — Autofluxdep runtime cfg override plan](retired/0043-autofluxdep-runtime-cfg-override-plan.md)：cfg 邊界接入 0062，snapshot／decoration 細節移至 app README。
+
+以下舊篇已分流至模組 owner 文件；退役正文僅供追溯。
+
+- [0054 — Resonance multiplicative amplitude background](retired/0054-resonance-multiplicative-amplitude-background.md)：real log-amplitude slope 乘完整 resonator response，`edelay` 維持唯一 global phase slope。
+- [0055 — Route-scoped resonator electrical delay](retired/0055-route-scoped-resonator-electrical-delay.md)：boundary search 可 bounded adaptive expansion；成功 delay 與 generator/readout route 以單一 compound calibration 持久化為後續 branch seed。
+- [0056 — Resonance phase curvature and rational initializer](retired/0056-resonance-phase-curvature-rational-initializer.md)：optional resonance-centered quadratic phase background 與 internal degree-1 rational initializer 不接管 route-scoped delay branch。
+- [0028 — Fluxdep analysis kernel](retired/0028-fluxdep-analysis-kernel.md)：flux-dependence analysis kernel 位於 GUI / notebook adapter 之外。
+- [0029 — Fluxonium prediction engine](retired/0029-fluxonium-prediction-engine.md)：Fluxonium prediction policy 位於 `simulate.fluxonium`。
+- [0030 — Arbitrary waveform optional recipe](retired/0030-arbitrary-waveform-asset-optional-recipe.md)：arbitrary waveform asset 是 qubit-scoped `.npz`，可內嵌 formula recipe。
+- [0031 — Formula recipe segments](retired/0031-formula-recipe-complex-segments.md)：formula recipe 使用 ordered segments 與 complex expression。
+- [0034 — ArbWaveformDatabase repository](retired/0034-arb-waveform-database-shared-asset-repository.md)：資產操作現由 `resources.ArbWaveformDatabase` 擁有。
+- [0035 — MCP failures use tool errors](retired/0035-arb-waveform-mcp-failures-use-tool-errors.md)：arb waveform error 由 main app 投影到 remote 契約。
+- [0016 — notebook liveplot auto close](retired/0016-notebook-liveplot-auto-close-default.md)：notebook liveplot 預設 auto-close，不依賴 ipympl 私有協議。
+- [0022 — Worktree coordination](retired/0022-agent-coordination-worktree.md)：舊協作 protocol；通用流程改由外部 skill 管理，本地 live resource 限制見 CLAUDE.md。

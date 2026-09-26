@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.liveplot` 模組重點筆記
 
-**Last updated:** 2026-09-27 — plotting 家族搬移
+**Last updated:** 2026-09-27 — notebook close 與 backend 選擇
 
 供 Notebook、experiment runtime 與註冊 backend 的 GUI 使用的即時 matplotlib 繪圖能力。Plotter 以各自的 typed `update()` 增量更新 segment，再透過 active backend 刷新 figure；frontend 的選擇不由 plotter 偵測。家族定位見 [plotting/README.md](../README.md)。
 
@@ -15,7 +15,7 @@
    - `backend/__init__.py`：active backend **選擇順序**（與 matplotlib backend 名稱解耦）：
      1. 經 `set_liveplot_backend(backend)`（ContextVar context manager，per-task）註冊者 —— GUI run worker 用它註冊自己的 Qt backend。
      2. `set_default_liveplot_backend(backend)` 設的 process-wide 預設。
-     3. 都沒有時，依 matplotlib backend 名稱兜底（`nbagg` → `JupyterBackend`，其餘 → `FallbackBackend`）。
+     3. 都沒有時，依 matplotlib backend 名稱兜底（名稱含 `nbagg` 或 `widget` → `JupyterBackend`，其餘 → `FallbackBackend`）。
    - 內建 backend（純 matplotlib，**零 gui/Qt 認知**）：`JupyterBackend`（notebook display）、`FallbackBackend`（`plt.subplots` / `draw_idle`）。
    - 對外統一入口（皆 dispatch 到 `active_backend()`）：`make_plot_frame` / `instant_plot` / `refresh_figure` / `close_figure`。
    - GUI 的 backend（`QtLivePlotBackend`）**住在 `gui/app/main/driven/`、不在 liveplot**：它靠註冊進來，故合法認識 gui（`plot_host`），依賴方向 gui → liveplot。它的 `make_plot_frame` 走 `plt.subplots`（被 GUI custom mpl backend 攔截、attach 進 `FigureContainer`），與裸 `plt.subplots()` 及 analysis figure 同一條渲染路徑；`refresh` marshalling 到主線程；`instant_plot`/`close` no-op（figure 建圖當下已 attach、生命週期歸 container）。
@@ -88,3 +88,11 @@ with MultiLivePlot(fig, {
 - 純桌面 `qtagg`（非 GUI、非 notebook）跑 LivePlot **刻意走 `FallbackBackend`**（`fig.show` + `draw_idle` 已足夠），非另設專屬 qt backend；要 qt 特化再 `set_liveplot_backend` 註冊即可。GUI 的 Qt 整合由 `QtLivePlotBackend` 提供。
 - `LivePlot` run 與 pyplot analysis **共用同一條渲染路徑**：兩者都經 `plt.subplots`/`plt.figure` → GUI custom mpl backend（`GuiFigureManager`）→ attach 進 `FigureContainer`。worker 端的 `draw_idle` 由 `GuiFigureCanvas` 覆寫 marshalling 到主線程，故不會遞迴建圖。
 - Qt bridge 的初始化 thread 很重要；若 bridge 首次在 worker thread 建立，Qt canvas 可能被當成獨立視窗或 attach 失敗，因此 `FigureContainer` 需要在 GUI thread 提前確立 host bridge。
+
+## Notebook figure 生命週期
+
+預設 `auto_close=True`。Notebook 的 `instant_plot` 在資料擷取開始時顯示 canvas，
+backend 在 context 結束時處理 close；在 ipympl/widget 下這避免存活 canvas 在 cell 結束時
+再次顯示。需要保留 figure 供後續 `savefig` 時可以用 `auto_close=False`，但 notebook 中
+可能看到第二次顯示。這裡不覆寫 ipympl 私有 `_ipython_display_` 協議來消除此副作用。
+GUI 註冊的 backend 對 close 需求不直接銷毀宿主 figure，圖由 GUI container 管理。

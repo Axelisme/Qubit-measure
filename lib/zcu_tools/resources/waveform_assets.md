@@ -1,6 +1,6 @@
 # `waveform_assets` 參考
 
-**Last updated:** 2026-09-27 — moved from resources README
+**Last updated:** 2026-09-27 — asset 與 recipe 契約
 
 本檔是 [`waveform_assets.py`](waveform_assets.py) 的 owner 參考，記錄 `ArbWaveformDatabase` 的檔案格式、方法與約束。家族導覽見 [resources README](README.md)。
 
@@ -50,4 +50,28 @@ data = ArbWaveformDatabase.load("my_pulse")
 - formula recipe 是可選資料；用 recipe 生成等於完全覆寫原本 data，並把 recipe 一起寫入同一個 `.npz`。
 - `ArbWaveform`（`program/v2/modules/waveform.py`）在建立波形時 lazy load asset，以完整 asset 時間軸（`time[-1]`）作為播放長度，依 generator 的 sample rate 用 `np.interp` 重採樣 I/Q；不截斷、不重設時間軸。
 
-**Preview helper（ADR-0034）**：`prepare_preview_series(data, normalize: bool) -> ArbWaveformPreview` 是純 numpy domain 函式，統一計算 peak-normalize（可選）+ I/Q/Abs 三條 series。GUI dialog 與 agent PNG service 共用此 helper，而非各自重寫 normalization 算式。
+**Preview helper**：`prepare_preview_series(data, normalize: bool) -> ArbWaveformPreview` 是純 numpy domain 函式，統一計算 peak-normalize（可選）+ I/Q/Abs 三條 series。GUI dialog 與 agent PNG service 共用此 helper，而非各自重寫 normalization 算式。
+
+## 資產與 recipe 約束
+
+Data key 符合 `^[A-Za-z][A-Za-z0-9_]*$`，單一檔案為 `<data_key>.npz`。
+載入拒絕未知 key；若有 `recipe_json` 卻無法解析則直接失敗，不退回 raw asset。
+三條 playback array 同長且長度介於 2 與 `MAX_ARB_WAVEFORM_SAMPLES = 1_000_001`；
+匯入 raw `.npz` 的 time 軸可不等距，但必須從 0 開始並嚴格遞增。
+`inspect` 即時計算衍生摘要，不另存 duration、sample count 或 `peak_abs`。
+
+Formula recipe 只保存 `segments` 與 `normalize`。每段有正的 `duration` 和非空的
+`formula`；解析時去除前後空白，保存時保留原字串。每段一條 SymPy-compatible expression，
+實數輸出進 I，複數輸出分配到 I/Q。`t` 是段內時間，`T` 是全長時間，單位都是 us。
+總長是各段 duration 的和，增刪段不會重新分配其他段的長度。除最後一段含終點外，
+每段使用半開區間，內部交界點交給下一段。條件式 `Piecewise` 不屬於支援的 v1 expression。
+
+渲染以 `round(total_duration * 1000) + 1` 個點覆蓋完整時間軸；超過樣本上限會拒絕。
+`normalize` 必填，只接受 `none`、`peak`。`none` 對超出單位幅度的輸出 fast-fail；
+`peak` 以全長 `max(hypot(I, Q))` 同時縮放 I/Q，正 peak 即使小於 1 也放大至 1，
+零波形保持零。播放讀取保存的 arrays，不依 recipe 在播放時重新渲染。
+資產 key 可被 ModuleLibrary 引用；rename/delete 不掃描也不改寫這些引用，失效 key 由使用端處理。
+
+GUI 建立新 recipe 的隱藏預設是 `peak`，編輯已有 recipe 時保留原 `normalize`。
+GUI validation 失敗時禁用 Save；agent-facing validation 提供具名 reason。
+這些是操作端的呈現政策，repository 仍負責共同驗證與渲染。

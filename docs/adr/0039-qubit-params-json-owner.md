@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0039 — QubitParams owns params.json typed handoff
 
-關聯 [[0029]]（prediction engine 擁有 simulation policy）、[[0037]]（value lookup 不取代 explicit typed dependencies）。
+關聯 [prediction owner](../../lib/zcu_tools/simulate/fluxonium/README.md)（prediction engine 擁有 simulation policy）、[[0037]]（value lookup 不取代 explicit typed dependencies）。
 
 ## 脈絡
 

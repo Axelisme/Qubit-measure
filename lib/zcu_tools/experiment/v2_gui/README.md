@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-27 — canonical load and flux interactive adapters
+**Last updated:** 2026-09-27 — route-scoped calibration
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -199,6 +199,11 @@ readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id�
 readout length、trigger timing 等欄位都沿用 snapshot。`cfg_snapshot is None` 或
 readout 不是 pulse readout 時，module writeback graceful skip，只保留 MetaDict items。
 
+`onetone/freq` 的 `fit_bg_amp_slope` 預設開啟，`fit_bg_phase_curvature` 預設關閉；
+兩者是獨立選項。fake one-tone 的兩個選項預設都關閉。只有啟用的項才進入
+raw-complex refinement；未啟用項固定為零。若 Hanger fit 的 `Qi=None`，consumer 依
+`qi_status` 呈現診斷，不將它當成數字，也不因 derived Qi 不可解釋就否決整個 fit。
+
 `onetone/freq` 的 electrical-delay analyze policy 提供 `auto` / `calibrated` / `manual`。
 `auto` 優先讀取 MetaDict 中與本次 pulse generator/readout channel 相符的
 `res_edelay_calibration` prior，缺少時以 bounded adaptive global search 建立 branch；`calibrated`
@@ -207,7 +212,11 @@ refinement。只有實際參與 fitting（移除首尾點後）的 nonuniform gr
 branch；uniform grid 若沒有可信 seed，不會把 local alias 提案寫成 calibration。可持久化
 的結果以單一 compound MetaDict writeback item
 `res_edelay_calibration = {edelay, res_ch, ro_ch}` 保存，讓 delay 與 route identity 的選取
-all-or-none，遵循 ADR-0055。
+all-or-none。只有可辨識 pulse route 的 run snapshot，且有可信 seed 或 fitting grid 為 nonuniform，
+才提出此 writeback。沒有 cfg snapshot 的舊資料仍可分析，不提出無 route 的 calibration。
+worker 提出 proposal，`ContextService` 在 preview/apply 後負責 MetaDict 寫入。
+GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 us）；若已明確固定
+`edelay`，不重新搜尋 branch。
 
 ---
 

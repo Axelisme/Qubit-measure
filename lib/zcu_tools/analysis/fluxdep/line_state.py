@@ -159,7 +159,7 @@ def mirror_loss_at(
     if not isfinite(center) or dev_values[0] == dev_values[-1]:
         raise ValueError("center and device axis span must be finite")
     image = diff_mirror(dev_values, real_signals, center)
-    # ADR-0028: valid zero loss must not be confused with out-of-bounds zero fill.
+    # A valid zero loss must not be confused with out-of-bounds zero fill.
     inbounds = _mirror_inbounds_mask(dev_values, center)
     mean_loss = float(np.mean(image[inbounds])) if inbounds.any() else float("nan")
     return image, mean_loss

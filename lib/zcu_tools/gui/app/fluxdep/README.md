@@ -137,7 +137,7 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
   **重用 scatter(set_offsets) + debounce redraw(50ms)**。
 
 ### Flux-Dependence Analysis kernel handoff
-ADR-0028 下，互動選點、filtering、line selection、one-tone peak detection 的共用規則住在
+[fluxdep kernel README](../../../analysis/fluxdep/README.md) 下，互動選點、filtering、line selection、one-tone peak detection 的共用規則住在
 `zcu_tools.analysis.fluxdep`。Qt `ui/interactive/` widget 只保留控制項、canvas、worker/debounce
 與 Qt event translation；database search、診斷圖與 params export 仍留在 GUI 既有 pipeline。
 

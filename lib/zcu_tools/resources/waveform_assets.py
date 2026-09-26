@@ -232,7 +232,7 @@ class ArbWaveformPreview:
 
     Keeps GUI and agent-PNG callers consistent without each reimplementing the
     normalization arithmetic.  All arrays share the same sample count as the
-    source ArbWaveformData.  ADR-0034: preview series generation is domain logic.
+    source ArbWaveformData. Preview series generation belongs to this module.
     """
 
     time: NDArray[np.float64]

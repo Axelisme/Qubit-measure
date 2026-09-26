@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。現行局部契約見 [`gui/app/main/README.md`](../../../lib/zcu_tools/gui/app/main/README.md) 與 [ADR-0047](../0047-typed-expected-error-taxonomy.md)；以下保留歷史正文。
+
 ---
 status: accepted
 ---

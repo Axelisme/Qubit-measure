@@ -1,7 +1,7 @@
 # ADR-0059：measure-gui MCP 的 RPC channel——由 live GUI 提供 method catalog
 
 **狀態：** accepted（未實作）
-**關聯：** [[0060]]（特化 tool）；[[0002]]（version guard / operation handle）、[[0013]]（remote adapter 為第二個 View）、[[0014]]（共用 transport 與 app policy 邊界）、[[0035]] 與 [[0047]]（tool error 契約）。
+**關聯：** [[0060]]（特化 tool）；[[0002]]（version guard / operation handle）、[[0013]]（remote adapter 為第二個 View）、[[0014]]（共用 transport 與 app policy 邊界）、[[0047]]（tool error 契約；arb waveform 具體錯誤見 [main app README](../../lib/zcu_tools/gui/app/main/README.md)）。
 
 ## Context
 
@@ -41,7 +41,7 @@ version guard 相依（guard deps）、讀取後揭露的 resource（reveals）�
 
 ### 5. 驗證與錯誤
 
-- 參數由 GUI 端 `validate_params` 在 handler 前驗證；錯誤以 stable `reason` 回報（[[0035]]、[[0047]]）。
+- 參數由 GUI 端 `validate_params` 在 handler 前驗證；錯誤以 stable `reason` 回報（[[0047]]）。
 - 呼叫 catalog 中不存在的 method 回 `reason="unknown_method"`。
 - transport timeout 取 catalog 的 `timeout_seconds` 加上固定 slack；需要呼叫者指定等待時間的 method（例如 `operation.await`）由參數給定。
 

@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-08-18 — registry-owned disconnect (`close_device` / `close_all_devices`)
+**Last updated:** 2026-09-27 — disconnect 契約核對
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `GlobalDeviceManager` 做 process-wide 單例管理。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -142,7 +142,11 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
   `DeviceCloseInProgressError`（含該 identity 的所有 snapshot aliases）聚合，連同 named
   failures 一起以 built-in `ExceptionGroup` 拋出；empty registry 是 no-op。
 - close 只 disconnect session，絕不執行 RF/current/voltage state mutation；也不會取代
-  `drop_device()` 或 GUI disconnect 語義。
+  `drop_device()` 或 GUI disconnect 語義。`BaseDevice.close()` 仍按 driver 自己的 `_op_lock` /
+  `_io_lock` 同步；registry claim 不取代 driver 鎖。
+- failure 保留 registry entries 供明確處置，並不保證部分 close 後的 session 可繼續使用、
+  再試一定成功或所有資源都已斷線。factory owner 要在所管理的 device 成功 disconnect 後
+  才關閉 ResourceManager；disconnect 不等於硬體已處於安全狀態。
 
 **使用慣例**：在 notebook / 實驗腳本啟動時一次 `register_device`，之後以名稱（如 `"flux"`, `"qubit_lo"`）在任何地方取用。`register_device` 只接受 `BaseDevice` instance，duck object 或裸 mock 會在入口 fail-fast。`setup_devices` 通常接受從 YAML / JSON 讀出的 config block。
 

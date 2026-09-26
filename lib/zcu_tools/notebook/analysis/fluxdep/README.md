@@ -24,7 +24,7 @@ fluxdep/
 ```
 
 共用的 Flux-Dependence Analysis 選點/filtering/line selection/one-tone peak detection
-規則位於 `zcu_tools.analysis.fluxdep`（ADR-0028）。Notebook 這層保留 fitting/model/visualizer
+規則位於 `zcu_tools.analysis.fluxdep`（[fluxdep kernel README](../../../analysis/fluxdep/README.md)）。Notebook 這層保留 fitting/model/visualizer
 與 ipywidgets shell；被抽出的互動與 processing API 透過 thin re-export 或 adapter 呼叫 kernel。
 measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建立 measure 的 service session；
 `InteractiveLines` 保留既有即時拖曳行為。

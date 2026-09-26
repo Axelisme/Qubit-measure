@@ -101,7 +101,7 @@ class _PreviewCanvas(QWidget):
         self.canvas.draw_idle()
 
     def plot(self, data_key: str, data: ArbWaveformData, *, normalize: bool) -> None:
-        # Delegate normalize + I/Q/Abs computation to the domain helper (ADR-0034).
+        # Delegate normalize + I/Q/Abs computation to resources.waveform_assets.
         series = prepare_preview_series(data, normalize=normalize)
 
         self._time = series.time
