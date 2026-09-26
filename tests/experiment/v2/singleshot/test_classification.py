@@ -9,7 +9,7 @@ from zcu_tools.experiment.v2.singleshot.util import (
     classify_result,
     plot_with_classified,
 )
-from zcu_tools.program.base.improve_acquire import SingleShotMixin
+from zcu_tools.program.acquisition import SingleShotMixin
 from zcu_tools.utils.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 

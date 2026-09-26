@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.program.base import StoppedPartialAcquireError
+from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modular import ModularProgramV2

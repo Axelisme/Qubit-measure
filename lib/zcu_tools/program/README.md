@@ -1,8 +1,12 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-09-01 — accumulated reps progress transport
+**Last updated:** 2026-09-27 — acquisition module placement
 
 這份筆記整理 `lib/zcu_tools/program` 對 QICK 的實際依賴，目的是讓後續開發能快速定位「應該看哪個 QICK 類別/方法」，而不用每次從頭追。
+
+## Program 層定位
+
+`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。
 
 ## 主要依賴面
 
@@ -58,8 +62,8 @@
 
 ### 本專案中的對應實作
 
-- `lib/zcu_tools/program/base/improve_acquire.py`
-- `lib/zcu_tools/program/base/__init__.py`
+- `lib/zcu_tools/program/acquisition.py`
+- `lib/zcu_tools/program/v2/base.py`
 - `lib/zcu_tools/program/__init__.py`
 
 ### QICK upstream（.venv 來源）

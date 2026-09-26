@@ -10,7 +10,7 @@ silently.
 When this test fails after a qick upgrade:
 1. Diff the snapshot against the new upstream source to see what changed.
 2. Re-port the change into ``EarlyStopMixin._finish_accumulated_round``
-   (lib/zcu_tools/program/base/improve_acquire.py).
+   (lib/zcu_tools/program/acquisition.py).
 3. Refresh the snapshot:
    .venv/bin/python -c "import inspect; from qick.qick_asm import AcquireMixin; \
 open('tests/program/qick_finish_round.snapshot.txt', 'w').write(\

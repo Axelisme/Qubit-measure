@@ -16,7 +16,7 @@ from zcu_tools.experiment.v2.runner import (
     StopSignal,
     schedule_stop_scope,
 )
-from zcu_tools.program.base import StoppedPartialAcquireError
+from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue

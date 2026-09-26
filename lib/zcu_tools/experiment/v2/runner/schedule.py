@@ -22,7 +22,7 @@ import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from typing_extensions import TypeVar
 
-from zcu_tools.program.base import CancelFlagProtocol
+from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Module,

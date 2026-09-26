@@ -29,7 +29,7 @@ from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program.base import StoppedPartialAcquireError
+from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     DirectReadoutCfg,
     ProgramV2Cfg,

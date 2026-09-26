@@ -24,7 +24,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
-from zcu_tools.program.base import StoppedPartialAcquireError
+from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,

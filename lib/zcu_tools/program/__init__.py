@@ -1,4 +1,4 @@
-from .base import ImproveAcquireMixin, TrackerProtocol
+from .acquisition import ImproveAcquireMixin, TrackerProtocol
 from .soc_summary import describe_soc
 from .v2 import SweepCfg
 

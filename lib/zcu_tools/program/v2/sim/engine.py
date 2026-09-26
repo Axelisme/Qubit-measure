@@ -62,7 +62,7 @@ import numpy as np
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
-from zcu_tools.program.base import CancelFlagProtocol
+from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2.modules.readout import (
     AbsReadout,
     DirectReadout,
