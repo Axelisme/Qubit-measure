@@ -17,6 +17,8 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting.resonance.hanger import HangerModel
+from zcu_tools.analysis.fitting.resonance.transmission import TransmissionModel
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -61,8 +63,6 @@ from zcu_tools.program.v2 import (
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.utils.fitting.resonance.hanger import HangerModel
-from zcu_tools.utils.fitting.resonance.transmission import TransmissionModel
 
 # ---------------------------------------------------------------------------
 # FakeFreqCfg — same structure as FreqCfg but with HangerModel params

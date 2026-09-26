@@ -11,6 +11,7 @@ from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
 )
 
+from zcu_tools.analysis.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     format_ext,
@@ -42,7 +43,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
 from ..env import OvernightEnv
 from ..executor import OvernightCfg

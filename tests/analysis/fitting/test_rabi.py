@@ -1,6 +1,6 @@
 import numpy as np
-from zcu_tools.utils.fitting.base import cosfunc, decaycos
-from zcu_tools.utils.fitting.rabi import fit_rabi
+from zcu_tools.analysis.fitting.base import cosfunc, decaycos
+from zcu_tools.analysis.fitting.rabi import fit_rabi
 
 
 def test_fit_rabi_no_decay():

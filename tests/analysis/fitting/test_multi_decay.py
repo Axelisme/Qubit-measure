@@ -1,5 +1,5 @@
 import numpy as np
-from zcu_tools.utils.fitting.multi_decay import (
+from zcu_tools.analysis.fitting.multi_decay import (
     TransitionRates,
     fit_dual_transition_rates,
     fit_transition_rates,

@@ -10,6 +10,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -38,7 +39,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
 

@@ -26,6 +26,7 @@ from typing import Any, Literal, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting import fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
@@ -80,7 +81,6 @@ from zcu_tools.simulate.fluxonium.physical_fit import (
     FluxoniumLocalFitResult,
     fit_local_fluxonium_model,
 )
-from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 logger = logging.getLogger(__name__)

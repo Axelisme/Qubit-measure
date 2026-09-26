@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from zcu_tools.analysis.fitting import fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
@@ -72,7 +73,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseCfg, ReadoutCfg
-from zcu_tools.utils.fitting import fit_decay_fringe
 
 logger = logging.getLogger(__name__)
 

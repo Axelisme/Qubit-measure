@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-import zcu_tools.utils.fitting.base.base as base_module
-from zcu_tools.utils.fitting.base import (
+import zcu_tools.analysis.fitting.base.base as base_module
+from zcu_tools.analysis.fitting.base import (
     asym_lorfunc,
     cosfunc,
     decaycos,
@@ -19,7 +19,7 @@ from zcu_tools.utils.fitting.base import (
     lorfunc,
     sincfunc,
 )
-from zcu_tools.utils.fitting.base.base import fit_func
+from zcu_tools.analysis.fitting.base.base import fit_func
 
 
 def test_fitexp_recovers_parameters():

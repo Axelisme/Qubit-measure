@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import model_validator
 
+from zcu_tools.analysis.fitting import HangerModel, TransmissionModel, get_proper_model
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -34,7 +35,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
-from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
 SamplingMode = Literal["linear", "homophasal"]
 
