@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-26，numeric text 與 sweep edge raw carriers
+**Last updated:** 2026-09-26，numeric text、sweep edge 與 reference snapshot 狀態
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -75,6 +75,9 @@ Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`
 轉送的app-local opaque id。module/waveform shape factory與raw materialization policy由
 `gui.measure_cfg`擁有，resolver與runtime object normalization留在各app，
 既有`module_ref`/`waveform_ref` persistence wire shape不變。
+ReferenceValue 的 runtime snapshot 保存 chosen_key、resolved_label 與 error；missing library
+時保留可編輯 subtree，但 finished cfg 拒絕該 snapshot。Persistence 不保存 resolution metadata，
+重新 attach 時由 binding 解析當前 catalog。
 
 `zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。
 `CfgDraft`集中snapshot、validity、refresh與close lifecycle；field只依賴expression evaluator、

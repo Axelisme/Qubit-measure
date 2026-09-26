@@ -448,6 +448,9 @@ class ReferenceValue:
     # away from the library snapshot (LibraryBindingState.MODIFIED). Persisted so
     # the override survives reload; False for pure library refs and <Custom:> refs.
     is_overridden: bool = False
+    # Resolution metadata belongs to the displayed snapshot, not the live catalog.
+    resolved_label: str | None = field(default=None, kw_only=True)
+    error: str | None = field(default=None, kw_only=True)
 
     def with_field(self, path: str, value: ScalarLeafInput) -> Self:
         """Set a scalar leaf inside this ref's value (in-place, returns self).

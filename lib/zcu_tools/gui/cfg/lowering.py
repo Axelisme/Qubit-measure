@@ -280,6 +280,8 @@ def _select_reference_spec(
     ref_value: ReferenceValue,
     resolve_reference: ReferenceResolver | None,
 ) -> CfgSectionSpec:
+    if ref_value.error is not None:
+        raise RuntimeError(ref_value.error)
     chosen = ref_value.chosen_key
     try:
         label = parse_custom_reference_key(chosen)

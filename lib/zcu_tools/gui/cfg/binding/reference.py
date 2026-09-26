@@ -160,6 +160,16 @@ class ReferenceField(CfgField):
             chosen_key=self._chosen_key,
             value=sub_value,
             is_overridden=self.is_modified(),
+            resolved_label=(
+                self.sub_field.spec.label
+                if self.sub_field is not None and not self._missing_library_ref
+                else None
+            ),
+            error=(
+                f"Unknown {self.spec.kind} reference: {self._chosen_key!r}"
+                if self._missing_library_ref
+                else None
+            ),
         )
 
     def set_value(self, value: object) -> None:
