@@ -258,6 +258,13 @@ def test_onetone_freq_runtime_mode_and_readout_are_restored():
     result = project_loaded_cfg(current, snapshot)
     assert result is not None
     assert result.value.fields["sampling_mode"] == DirectValue("homophasal")
+    calibration = result.value.fields["homophasal"]
+    assert isinstance(calibration, CfgSectionValue)
+    assert calibration.fields == {
+        "r_f": DirectValue(6000.0),
+        "rf_w": DirectValue(10.0),
+        "theta0": DirectValue(0.1),
+    }
     modules = result.value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     readout = modules.fields["readout"]

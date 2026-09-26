@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-26 — Amp Rabi calibration cfg
+**Last updated:** 2026-09-26 — Explicit homophasal calibration cfg
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -111,7 +111,7 @@ adapter-defined top-level knobs以generic scalar/`field` verb按GUI顯示順序�
 ExpCfg欄位，也可以是run-only adapter欄位。正式欄位正常lower到
 ExpCfg；run-only 欄位由 adapter 在 `build_exp_cfg()` 或 custom `run()` 內讀取後 pop 掉。
 `onetone/freq` 的 `sampling_mode` 是正式 `FreqCfg` 欄位，GUI 維持既有 `sweep.freq`
-結構，選 `homophasal` 時 adapter 從 md 的 `r_f` / `rf_w` / `theta0` 注入 fit params。
+結構。`homophasal.r_f` / `rf_w` / `theta0` 是正式校正欄位的 GUI 輸入，預設合法空值，可填 direct 或 expression。通用 lowering 不忽略任一模式下的解析錯誤；linear 不使用合法校正值，homophasal 由 adapter Run 路徑重用 domain model 檢查必要值與正值條件，早於 device I/O。不從 live md 注入校正、不增加 conditional section。
 `twotone/time_domain/t1` 的 `uniform` 是 run-only 欄位：預設 `True` 使用線性 delay
 sweep；設為 `False` 時 adapter 仍保持同一個 cfg start/stop/expts 視窗，底層在硬體量化前
 沿 normalized T1 decay curve 等弧長配置 delay。內部 lifetime model 不成為 GUI 欄位；cycle
