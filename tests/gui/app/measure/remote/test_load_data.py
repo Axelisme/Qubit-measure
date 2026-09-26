@@ -6,8 +6,8 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.measure.remote.handlers.run_save import _h_tab_load_data
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
-from zcu_tools.gui.app.measure.services.remote.handlers.run_save import _h_tab_load_data
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ._helpers import dispatch_handler

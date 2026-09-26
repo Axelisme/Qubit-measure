@@ -13,11 +13,11 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.app import _make_empty_ctx
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
-from zcu_tools.gui.app.measure.services.remote import (
+from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
     RemoteControlAdapter,
 )
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -30,7 +30,7 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
-from tests.gui.app.measure.services.remote._helpers import (
+from tests.gui.app.measure.remote._helpers import (
     open_client,
     recv_response,
     send,

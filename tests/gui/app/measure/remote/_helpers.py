@@ -20,11 +20,11 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.remote import (
+from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
     RemoteControlAdapter,
 )
-from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
@@ -178,7 +178,7 @@ def dispatch_handler(ctrl: Any, method: str, params: dict) -> Mapping[str, objec
     from types import SimpleNamespace
     from typing import cast
 
-    from zcu_tools.gui.app.measure.services.remote.dispatch import METHOD_REGISTRY
+    from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 
     def _facet_or_self(name: str) -> Any:
         if isinstance(ctrl, MagicMock) and name not in ctrl.__dict__:

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.measure.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.measure.services.remote.handlers.notify import _h_notify_await
-from zcu_tools.gui.app.measure.services.remote.method_entries import METHOD_ENTRIES
-from zcu_tools.gui.app.measure.services.remote.method_entries._registry import (
+from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.measure.remote.handlers.notify import _h_notify_await
+from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
+from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     RemoteMethodEntry,
     build_dispatch_registry,
     build_method_specs,
     method_entry,
 )
-from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
 

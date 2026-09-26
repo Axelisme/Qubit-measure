@@ -6,32 +6,32 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
-from zcu_tools.gui.app.measure.services.guard import GuardError
-from zcu_tools.gui.app.measure.services.load import LoadDataError
-from zcu_tools.gui.app.measure.services.remote.handlers.arb_waveform import (
+from zcu_tools.gui.app.measure.remote.handlers.arb_waveform import (
     _h_arb_waveform_list,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.connection_device import (
+from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     _h_device_connect,
     _h_startup_apply,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.context import (
+from zcu_tools.gui.app.measure.remote.handlers.context import (
     _h_context_md_del_attr,
     _h_context_md_set_attr,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.editor import _h_editor_new
-from zcu_tools.gui.app.measure.services.remote.handlers.run_save import (
+from zcu_tools.gui.app.measure.remote.handlers.editor import _h_editor_new
+from zcu_tools.gui.app.measure.remote.handlers.run_save import (
     _h_tab_load_data,
     _h_tab_run_start,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.view import (
+from zcu_tools.gui.app.measure.remote.handlers.view import (
     _h_dialog_screenshot,
     _h_tab_get_figure,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.writeback import (
+from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     _h_tab_writeback_set,
 )
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
+from zcu_tools.gui.app.measure.services.guard import GuardError
+from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import (
     ExpectedError,
     ExpectedErrorCategory,

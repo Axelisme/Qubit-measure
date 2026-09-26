@@ -9,7 +9,7 @@ than in the transport-pure ``wire.py``; the field-level
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.measure.services.remote.handlers.connection_device import (
+from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     coerce_connect_device_request,
     coerce_connect_request,
     coerce_disconnect_device_request,
@@ -93,7 +93,7 @@ def test_coerce_disconnect_device_request_ok():
 
 def test_device_connect_spec_rejects_non_string_type_name():
     """type_name declared as STRING — an integer must be rejected with INVALID_PARAMS."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
     from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
     from zcu_tools.gui.remote.param_spec import validate_params
 
@@ -108,7 +108,7 @@ def test_device_connect_spec_rejects_non_string_type_name():
 
 def test_device_connect_spec_remember_defaults_to_true():
     """Omitting 'remember' must yield the default True (not None / missing)."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
     from zcu_tools.gui.remote.param_spec import validate_params
 
     spec = METHOD_SPECS["device.connect"]
@@ -121,7 +121,7 @@ def test_device_connect_spec_remember_defaults_to_true():
 
 def test_device_connect_spec_remember_explicit_false():
     """Explicitly passing remember=False is valid and preserved."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
     from zcu_tools.gui.remote.param_spec import validate_params
 
     spec = METHOD_SPECS["device.connect"]
@@ -139,7 +139,7 @@ def test_device_connect_spec_remember_explicit_false():
 
 def test_device_disconnect_spec_requires_name():
     """Omitting the required 'name' must be rejected with INVALID_PARAMS."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
     from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
     from zcu_tools.gui.remote.param_spec import validate_params
 
@@ -151,7 +151,7 @@ def test_device_disconnect_spec_requires_name():
 
 def test_device_disconnect_spec_remember_defaults_to_true():
     """Omitting 'remember' in disconnect must also default to True."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
     from zcu_tools.gui.remote.param_spec import validate_params
 
     spec = METHOD_SPECS["device.disconnect"]
@@ -171,7 +171,7 @@ def test_field_type_choices_typing_optional_unwraps():
     """Baseline: typing.Optional[float] is unwrapped to ('float', None)."""
     from typing import Optional
 
-    from zcu_tools.gui.app.measure.services.remote.handlers.connection_device import (
+    from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
         _field_type_and_choices,
     )
 
@@ -183,7 +183,7 @@ def test_field_type_choices_pep604_optional_unwraps():
     """PEP 604: float | None must also be unwrapped to ('float', None)."""
     import types  # noqa: F401 — ensure types.UnionType is available
 
-    from zcu_tools.gui.app.measure.services.remote.handlers.connection_device import (
+    from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
         _field_type_and_choices,
     )
 
@@ -195,7 +195,7 @@ def test_field_type_choices_pep604_optional_unwraps():
 
 def test_field_type_choices_pep604_optional_int_unwraps():
     """PEP 604: int | None must also be unwrapped to ('int', None)."""
-    from zcu_tools.gui.app.measure.services.remote.handlers.connection_device import (
+    from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
         _field_type_and_choices,
     )
 

@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — session environment naming
+**Last updated:** 2026-09-27 — app-local remote layout
 
 # `zcu_tools/mcp/measure/`
 
@@ -67,7 +67,7 @@ Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, 
   MCP tool reply以compact JSON block穿透；queue bounded、disconnect清空且不提供
   replay，因此operation wait/poll與fresh snapshot仍是authority。
 - Wire method MCP exposure policy 由
-  `zcu_tools.gui.app.measure.services.remote.method_entries` 的 method entry 宣告：
+  `zcu_tools.gui.app.measure.remote.method_entries` 的 method entry 宣告：
   default `generated` 產生 1:1 RPC tool；`internal` 保留 wire method 供 bundle /
   lifecycle 內部使用；`override` 指向一個或多個 hand-written MCP tools。
   MCP-only lifecycle/bundle/debug tools 不硬塞進 method policy。
@@ -76,7 +76,7 @@ Figure/writeback/save-image均為subtab-qualified：`gui_tab_get_figure(tab_id, 
 
 `tests/mcp/measure/`透過factory、真實session／bridge及recording Transport驗證tool行為；
 stdio以`server.main()`覆蓋成功回覆piggyback及cleanup。GUI handler與真socket事件整合
-留在`tests/gui/app/measure/services/remote/`，shared policy construction留在`tests/gui/remote/`。
+留在`tests/gui/app/measure/remote/`，shared policy construction留在`tests/gui/remote/`。
 Schema文字及tool inventory以直接review確認，不用私有alias或靜態pytest維護。
 
 Remote/MCP 測試會建立 loopback socket；受限 sandbox 可能需要 unsandboxed execution。

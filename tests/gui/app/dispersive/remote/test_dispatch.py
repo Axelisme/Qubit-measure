@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import numpy as np
 from zcu_tools.gui.app.dispersive.controller import Controller
-from zcu_tools.gui.app.dispersive.services.remote.dispatch import (
+from zcu_tools.gui.app.dispersive.remote.dispatch import (
     _HANDLERS,
     METHOD_REGISTRY,
 )
-from zcu_tools.gui.app.dispersive.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.dispersive.remote.method_specs import METHOD_SPECS
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     FluxoniumInputs,

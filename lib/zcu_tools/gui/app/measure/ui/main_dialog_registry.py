@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 
-from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
 

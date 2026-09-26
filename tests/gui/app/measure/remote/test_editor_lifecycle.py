@@ -15,11 +15,11 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
-from zcu_tools.gui.app.measure.services.remote import (
+from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
     RemoteControlAdapter,
 )
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
@@ -428,7 +428,7 @@ def test_failed_editor_closed_encoding_keeps_subscription(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from zcu_tools.gui.app.measure.services.remote import service as service_module
+    from zcu_tools.gui.app.measure.remote import service as service_module
 
     owner = connections.connect()
     editor_id = owner.open_editor()

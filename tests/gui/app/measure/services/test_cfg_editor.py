@@ -131,7 +131,7 @@ def service(ctrl):
 
 
 def _paths(entries):
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import project_targets
+    from zcu_tools.gui.app.measure.remote.path_resolver import project_targets
 
     return {e["path"]: e for e in project_targets(entries)}
 

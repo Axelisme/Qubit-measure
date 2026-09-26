@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from qtpy.QtWidgets import QPushButton, QWidget  # type: ignore[attr-defined]
-from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_window_toolbar import (
     AdapterMenuItem,
     MainWindowToolbar,

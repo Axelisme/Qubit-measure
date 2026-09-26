@@ -17,8 +17,8 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.guard import GuardError
-from zcu_tools.gui.app.measure.services.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
@@ -68,7 +68,7 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
     from types import SimpleNamespace
     from typing import cast
 
-    from zcu_tools.gui.app.measure.services.remote.service import RemoteControlAdapter
+    from zcu_tools.gui.app.measure.remote.service import RemoteControlAdapter
 
     spec = METHOD_REGISTRY[method]
     handler_params = validate_params(spec.params, params) if spec.params else params

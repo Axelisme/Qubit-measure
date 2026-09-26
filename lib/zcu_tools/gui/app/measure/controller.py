@@ -42,6 +42,7 @@ from .events.tab import (
     TabInteractionFact,
 )
 from .registry import Registry
+from .remote.dialogs import DialogName
 from .role_catalog import RoleCatalog
 from .services import (
     AppPersistedState,
@@ -54,7 +55,6 @@ from .services import (
 )
 from .services.cfg_lowering import lower_module, lower_waveform
 from .services.ports import CfgEdit, CfgEditResult, ContextWrites
-from .services.remote.dialogs import DialogName
 from .state import State
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 

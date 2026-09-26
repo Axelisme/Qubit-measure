@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.dispersive.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.dispersive.remote.method_specs import METHOD_SPECS
 
 
 def test_all_specs_are_read_only_no_params():

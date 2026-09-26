@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession

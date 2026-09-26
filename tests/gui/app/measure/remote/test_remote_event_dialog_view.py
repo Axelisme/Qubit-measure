@@ -30,7 +30,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.services.remote.events import (
+from zcu_tools.gui.app.measure.remote.events import (
     _ser_predictor_changed,
     _ser_run_finished,
     _ser_run_started,
@@ -104,7 +104,7 @@ def test_event_serializers_wire_names_locked():
     """All 14 measure-gui EVENT_SERIALIZERS wire names are byte-identical to the
     documented set.  Any payload rename or accidental removal fails here first,
     before a connected agent notices silent breakage."""
-    from zcu_tools.gui.app.measure.services.remote.events import (
+    from zcu_tools.gui.app.measure.remote.events import (
         EVENT_SERIALIZERS,
         wire_event_name,
     )
@@ -118,7 +118,7 @@ def test_event_serializers_wire_names_locked():
 
 
 def test_all_event_serializer_payload_shapes_are_locked() -> None:
-    from zcu_tools.gui.app.measure.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
 
     opaque = MagicMock()
     cases = [
@@ -462,7 +462,7 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
 
 
 def test_stop_unsubscribes_event_bus(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
 
     f = Fixture()
     f.start()
@@ -670,7 +670,7 @@ def test_real_mcp_bridge_receives_agent_run_origin(fx, qapp, tmp_path: Path) -> 
 
 
 def test_unauthenticated_subscribe_rejected(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote import ControlOptions
+    from zcu_tools.gui.app.measure.remote import ControlOptions
 
     f = Fixture(ControlOptions(port=0, token="s3cr3t"))
     f.start()

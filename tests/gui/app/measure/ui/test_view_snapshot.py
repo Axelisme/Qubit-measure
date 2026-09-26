@@ -17,7 +17,7 @@ import types
 from typing import Any
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
 # ---------------------------------------------------------------------------

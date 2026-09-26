@@ -92,7 +92,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
 
         adapter = None
         if control is not None:
-            from zcu_tools.gui.app.measure.services.remote import RemoteControlAdapter
+            from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
 
             adapter = RemoteControlAdapter(
                 controller=ctrl,
@@ -135,7 +135,7 @@ def _show_startup_dialog(ctrl: Controller, parent: MainWindow) -> None:
     """
     from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 
-    from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+    from zcu_tools.gui.app.measure.remote.dialogs import DialogName
     from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
     dlg = SetupDialog(ctrl.setup_control, parent=parent, startup_mode=True)
