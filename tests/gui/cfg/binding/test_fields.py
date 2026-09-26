@@ -78,6 +78,79 @@ def test_scalar_field_resolves_expressions_and_refreshes_snapshot() -> None:
     assert field.get_value() == EvalValue("freq", resolved=7.0)
 
 
+@pytest.mark.parametrize("expression", [False, True])
+def test_scalar_choice_error_survives_snapshot_until_model_refresh(expression) -> None:
+    from zcu_tools.gui.cfg import (
+        CfgSchema,
+        raw_to_schema,
+        schema_to_raw,
+        validate_finished_cfg,
+    )
+    from zcu_tools.gui.cfg.binding import CfgDraft
+
+    ports = BindingPorts()
+    ports.expressions["level"] = 1.0
+    ports.options["levels"] = (1.0,)
+    schema = CfgSchema(
+        CfgSectionSpec(
+            fields={"level": ScalarSpec("Level", float, choices_source="levels")}
+        ),
+        CfgSectionValue(
+            fields={
+                "level": EvalValue("level")
+                if expression
+                else DirectValue(1.0, raw="1.00")
+            }
+        ),
+    )
+    draft = CfgDraft(
+        schema,
+        evaluate_expression=ports.evaluate,
+        provide_options=ports.provide,
+        references=ports,
+    )
+    try:
+        valid = draft.snapshot()
+        assert draft.is_valid()
+        ports.options["levels"] = (2.0,)
+        draft.refresh_options("levels")
+        invalid = draft.snapshot()
+        assert not draft.is_valid()
+        with pytest.raises(RuntimeError, match="level.*available option"):
+            validate_finished_cfg(invalid, resolve_reference=None)
+        value = invalid.value.fields["level"]
+        assert isinstance(value, (DirectValue, EvalValue))
+        assert value.validation_error is not None
+        assert (value.resolved if isinstance(value, EvalValue) else value.value) == 1.0
+
+        restored = raw_to_schema(invalid, schema_to_raw(invalid))
+        restored_value = restored.value.fields["level"]
+        assert isinstance(restored_value, (DirectValue, EvalValue))
+        assert restored_value.validation_error is None
+        reopened = CfgDraft(
+            restored,
+            evaluate_expression=ports.evaluate,
+            provide_options=ports.provide,
+            references=ports,
+        )
+        try:
+            assert not reopened.is_valid()
+            with pytest.raises(RuntimeError, match="level.*available option"):
+                validate_finished_cfg(reopened.snapshot(), resolve_reference=None)
+        finally:
+            reopened.close()
+        ports.options["levels"] = (1.0, 2.0)
+        draft.refresh_options("levels")
+        assert draft.is_valid()
+        recovered = draft.snapshot()
+        validate_finished_cfg(recovered, resolve_reference=None)
+        validate_finished_cfg(valid, resolve_reference=None)
+        with pytest.raises(RuntimeError, match="level.*available option"):
+            validate_finished_cfg(invalid, resolve_reference=None)
+    finally:
+        draft.close()
+
+
 def test_scalar_field_dynamic_options_drive_membership_and_observability() -> None:
     ports = BindingPorts()
     ports.options["rig_devices"] = ("flux",)

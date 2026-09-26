@@ -354,11 +354,15 @@ class DirectValue:
     int/float/complex/str/bool, whose legal values are never ``None``.
     Text parsing failures retain ``raw``
     and ``error`` with no parsed value, so invalid input cannot reuse an earlier
-    valid value. The wrapper also preserves direct mode while unset or invalid."""
+    valid value. ``validation_error`` records binding constraints such as option
+    membership without discarding the current selection. Binding recomputes that
+    runtime metadata; persistence stores only the input.
+    The wrapper also preserves direct mode while unset or invalid."""
 
     value: Any | None = None
     raw: str | None = field(default=None, kw_only=True)
     error: str | None = field(default=None, kw_only=True)
+    validation_error: str | None = field(default=None, kw_only=True, repr=False)
 
     def __post_init__(self) -> None:
         if self.error is not None and (self.raw is None or self.value is not None):
@@ -372,6 +376,7 @@ class EvalValue:
     expr: str
     resolved: Any | None = None
     error: str | None = None
+    validation_error: str | None = field(default=None, kw_only=True, repr=False)
 
 
 ScalarValue: TypeAlias = DirectValue | EvalValue

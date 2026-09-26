@@ -531,14 +531,7 @@ def _validate_static_node(
         return
 
     if isinstance(spec, ScalarSpec):
-        if isinstance(node_value, EvalValue):
-            return
-        if not isinstance(node_value, DirectValue):
-            raise RuntimeError(
-                f"Config field '{full_path}' must be a DirectValue/EvalValue, "
-                f"got {type(node_value).__name__}"
-            )
-        _validate_scalar(spec, node_value, full_path)
+        _validate_scalar_node(spec, node_value, full_path)
         return
 
     if isinstance(spec, SweepSpec):
@@ -593,11 +586,30 @@ def _validate_static_node(
     )
 
 
-def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) -> None:
-    if node_value.error is not None:
+def _validate_scalar_node(spec: ScalarSpec, node_value: object, full_path: str) -> None:
+    if isinstance(node_value, EvalValue):
+        if node_value.validation_error is not None:
+            raise RuntimeError(
+                f"Config field '{full_path}' ({spec.label}): "
+                f"{node_value.validation_error}"
+            )
+        return
+    if not isinstance(node_value, DirectValue):
         raise RuntimeError(
-            f"Config field '{full_path}' ({spec.label}): {node_value.error}"
+            f"Config field '{full_path}' must be a DirectValue/EvalValue, "
+            f"got {type(node_value).__name__}"
         )
+    _validate_scalar(spec, node_value, full_path)
+
+
+def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) -> None:
+    error = (
+        node_value.error
+        if node_value.error is not None
+        else node_value.validation_error
+    )
+    if error is not None:
+        raise RuntimeError(f"Config field '{full_path}' ({spec.label}): {error}")
     value = node_value.value
     if value is None:
         return

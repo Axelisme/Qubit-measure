@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-26，sweep control raw／resolved 與 reference snapshot 狀態
+**Last updated:** 2026-09-26，scalar 選項與 sweep/reference snapshot 狀態
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -41,7 +41,10 @@ validation/lowering。materialization walker把missing scalar/section、referenc
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
 raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag validation不由app重複實作。
 Numeric 與 complex ScalarSpec 的 direct text 由 ScalarField 解析，保存 raw 與 error；
-Widget 只傳入文字並顯示 model 狀態，invalid text 不沿用舊有效值。Sweep start/stop 與
+Widget 只傳入文字並顯示 model 狀態，invalid text 不沿用舊有效值。
+Scalar carriers 的 validation_error 保存當時選項 membership 的失敗；選項恢復只使新 snapshot
+有效，不治癒舊 snapshot。這是 binding 重算的 runtime metadata，persistence 不保存它。
+Sweep start/stop 與
 center 同樣保留 direct raw/error。Sweep points／step 與 centered span 也保存 model-owned
 文字與解析狀態，codec 可往返，finished cfg 拒絕任一 incomplete/invalid control。
 Step 文字反推 points 後保存實際 canonical step；Widget 同時呈現 raw 與 resolved，

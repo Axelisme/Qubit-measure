@@ -4,6 +4,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Literal, cast
 
 from ..inheritance import make_default_value, select_ref_value_spec
@@ -226,8 +227,6 @@ class ScalarField(CfgField):
         return tuple(options)
 
     def _resolved_eval_value(self, value: EvalValue) -> EvalValue:
-        from dataclasses import replace
-
         try:
             raw = self._evaluate_expression(value.expr)
             resolved = _coerce_eval_result(raw, self.spec.type)
@@ -258,8 +257,11 @@ class ScalarField(CfgField):
         if valid and self.spec.required and raw == "":
             valid = False
         options = self.available_options()
+        validation_error = None
         if valid and raw is not None and options is not None and raw not in options:
             valid = False
+            validation_error = f"Value {raw!r} is not an available option"
+        self._value = replace(self._value, validation_error=validation_error)
         self._set_valid(valid)
 
 
