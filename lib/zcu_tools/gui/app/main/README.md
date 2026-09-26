@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-26 — GUI operation ownership
+**Last updated:** 2026-09-26 — GUI operation and prompt ownership
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -447,7 +447,8 @@ controlled fields.
 - Analyze and post-analyze use async handles but no hardware exclusion.
 - `OperationChannel` is the ordered cross-thread channel for terminal state,
   user messages, and Send & Stop.
-- `NotifyChannel` mirrors the same pattern for `gui_prompt_user`.
+- `NotifyChannel` mirrors the same pattern for the `notify.open` / `notify.await`
+  RPC prompt. `notify.await` bounds the consumer wait so MCP transport stays alive.
 - `FeedbackDockController` owns the docked feedback panel, target-tab
   resolution, and op-count plus agent-presence gate; `MainWindow` keeps the
   public render-view refresh façade.

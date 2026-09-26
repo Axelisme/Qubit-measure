@@ -76,6 +76,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "It does NOT mean the worker has stopped: the run's true terminal "
             "('cancelled') is observed by wait(op) on the run handle.",
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "run.running_tab",

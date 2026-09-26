@@ -136,4 +136,5 @@ WIRE_VERSION = 61
 # v85: live agent method descriptions name the currently available tools and wait path.
 # v86: tab.run_start live catalog describes its MCP handle and wait path.
 # v87: no-project remote errors point to the current startup.apply RPC entry.
-GUI_VERSION = 87
+# v88: route MCP cancellation only through opaque op handles; bound notify.await.
+GUI_VERSION = 88

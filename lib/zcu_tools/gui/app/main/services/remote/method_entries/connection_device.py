@@ -173,6 +173,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "cancelled (it raises PRECONDITION_FAILED).",
             (_str("name", "Device name"),),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "device.active_operations",

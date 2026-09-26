@@ -192,8 +192,8 @@ def _find_writeback_item_for_pane(
 def _h_tab_writeback_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Apply a pane's persistent writeback draft as-is (edit it first via
-    gui_tab_writeback_set_item). Projects destination context at reply time."""
+    """Apply a pane's persistent draft after rpc_call on tab.writeback_set.
+    Projects destination context at reply time."""
     tab_id = str(params["tab_id"])
     subtab_id = str(params["subtab_id"])
     if subtab_id not in _VALID_WRITEBACK_SUBTABS:

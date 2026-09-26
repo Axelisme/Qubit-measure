@@ -107,6 +107,8 @@ class LoopbackGui:
             result = {"reason": "completed", "status": "finished"}
         elif method == "operation.cancel":
             result = {"status": "finished"}
+        elif method in {"tab.run_cancel", "analyze.cancel", "device.cancel_operation"}:
+            result = {"ok": True, "cancelled": True}
         else:
             result = overview_rpc(method, params)
         return result
@@ -261,6 +263,15 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
         with pytest.raises(RuntimeError) as error:
             client.call("cancel", {"op": old})
         assert getattr(error.value, "reason", None) == "unknown_op"
+        for method, params in (
+            ("tab.run_cancel", {}),
+            ("analyze.cancel", {"tab_id": "t"}),
+            ("device.cancel_operation", {"name": "bias"}),
+        ):
+            with pytest.raises(RuntimeError) as error:
+                client.call("rpc_call", {"method": method, "params": params})
+            assert getattr(error.value, "reason", None) == "unknown_method"
+            assert method not in gui_b.sent
         assert client.call("wait", {"op": new})["status"] == "finished"
         assert client.call("cancel", {"op": new})["status"] == "finished"
         assert gui_a.sent.count("tab.set_cfg") == 1

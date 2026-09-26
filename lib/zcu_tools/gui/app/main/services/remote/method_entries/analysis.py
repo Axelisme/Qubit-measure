@@ -16,17 +16,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "analysis:_h_analyze_cancel",
         MethodSpec(
             5.0,
-            "Cancel the tab's in-flight (interactive) analyze: settle its handle as "
-            "cancelled and clear is_analyzing so the tab can then be closed. This is "
-            "the agent-side counterpart of the GUI 'Done' button for an interactive "
-            "picker — interactive analyze is a separate operation from run, so "
-            "run cancellation does NOT settle it. Call this via rpc_call for "
-            "interactive View teardown that generic handle cancellation cannot "
-            "do (ADR-0026 §8). Returns {ok, cancelled}: ok is always true (the call "
-            "succeeded); cancelled is true when an interactive analyze was settled, or "
-            "false (a graceful no-op) when none was in flight.",
+            "Cancel the tab's in-flight interactive analyze and clear is_analyzing. "
+            "The generic operation.cancel handle path uses the same domain "
+            "cancellation hook and tears down the interactive View. Run "
+            "cancellation does not settle a separate analyze operation. Returns "
+            "{ok, cancelled}: cancelled is false when none was in flight; "
+            "true requests cancellation, not necessarily worker completion.",
             (_str("tab_id"),),
         ),
+        agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
         "tab.get_analyze_result",

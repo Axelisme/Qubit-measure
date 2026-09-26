@@ -28,15 +28,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "notify.await",
         "notify:_h_notify_await",
         MethodSpec(
-            # Nominal only — off_main_thread handlers bypass the main-thread budget
-            # watchdog (control_service), so the real bound is the caller's `timeout`
-            # param. Kept >= the default consumer backstop (600 + slack) for clarity.
+            # Off-main handlers bypass the owner-thread watchdog. The handler
+            # caps the caller's wait at 600 seconds; MCP adds transport slack
+            # above this catalog deadline.
             615.0,
             "Block the IO worker until the notify prompt settles. Returns "
             "{reason, reply?}. reason in {'reply', 'dismiss', 'timeout'}.",
             (
                 _int("token", "Token returned by notify.open"),
-                _num_default("timeout", 600.0, "Consumer backstop timeout in seconds"),
+                _num_default("timeout", 600.0, "Consumer backstop in seconds (0–600)"),
             ),
             off_main_thread=True,
         ),

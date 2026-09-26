@@ -31,7 +31,7 @@ def _h_context_use(
     available = list(ctx.get_context_labels())
     if label not in available:
         # Fast-fail an unknown label with the valid choices so the agent can
-        # correct without a separate gui_context_list round-trip.
+        # correct without a separate rpc_call on context.labels.
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"unknown context label: {label!r}; available: {available}",
@@ -148,7 +148,7 @@ def _h_context_ml_get(
     # Each stored cfg is a pydantic discriminated-union value: modules tag on
     # 'type' (e.g. 'pulse', 'reset/bath'), waveforms on 'style' (e.g. 'gauss').
     # Surface the discriminator so the agent can tell entry kinds apart without
-    # opening each one (gui_context_ml_inspect).
+    # opening each one via rpc_call on editor.new(item_kind=..., from_name=...).
     return {
         "modules": [
             {"name": name, "kind": getattr(ml.modules[name], "type")}

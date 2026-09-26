@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — project precondition guidance (GUI 87, WIRE 61)
+**Last updated:** 2026-09-26 — operation cancellation and prompt wait (GUI 88, WIRE 61)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -116,10 +116,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 87`, and
-`MCP_VERSION = 80` (defined in `zcu_tools.mcp.measure.server`). GUI 87 corrects
-no-project error guidance to use `rpc_call(method="startup.apply", params=...)`;
-GUI 86 corrected `tab.run_start` live catalog guidance. WIRE 61 adds
+Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 88`, and
+`MCP_VERSION = 80` (defined in `zcu_tools.mcp.measure.server`). GUI 88 makes the
+domain cancel RPCs internal in the MCP catalog, requiring `cancel(op)`, and
+bounds `notify.await` to 600 seconds so the catalog transport deadline is longer
+than every accepted wait. GUI 87 corrected no-project RPC guidance. WIRE 61 adds
 `__agent_write_versions` to replies for catalog-declared writes: each changed
 resource carries its versions before and after that handler on the owner thread.
 WIRE 60 adds `rpc.catalog.reveals_without` for partial reads; MCP samples the
@@ -222,6 +223,8 @@ operations; a GUI restart can reuse a wire id but cannot reuse an exposed MCP
 handle. `operation.await` reads the shared handle channel off-main and rejects
 unknown or evicted GUI ids. `operation.cancel` runs on the owner thread and uses
 the domain cancel hook; a non-cancellable operation fails with `not_cancellable`.
+MCP uses `cancel(op)` alone. The domain-specific wire cancellation methods remain
+available to other socket consumers but are absent from its live catalog.
 MCP `wait` reports status, progress, user feedback, timeout or failure as data;
 figures, summaries and device snapshots come from typed getters after completion.
 

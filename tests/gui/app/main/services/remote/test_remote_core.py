@@ -217,6 +217,39 @@ def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
         sock.close()
 
 
+def test_notify_await_rejects_wait_beyond_transport_budget(fx):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(
+            sock,
+            {
+                "id": "too-long",
+                "method": "notify.await",
+                "params": {"token": 1, "timeout": 601},
+            },
+        )
+        rejected = _recv_response(sock)
+        assert rejected["ok"] is False
+        assert rejected["error"]["code"] == "invalid_params"
+        assert rejected["error"]["reason"] == "invalid_timeout"
+
+        # An unknown prompt returns immediately; this checks the upper bound
+        # without waiting for a real user or for the backstop to expire.
+        _send(
+            sock,
+            {
+                "id": "bounded",
+                "method": "notify.await",
+                "params": {"token": 1, "timeout": 600},
+            },
+        )
+        accepted = _recv_response(sock)
+        assert accepted["ok"] is True
+        assert accepted["result"] == {"reason": "dismiss"}
+    finally:
+        sock.close()
+
+
 def test_tab_new_list_close_roundtrip(fx):
     sock = _open_client(fx.service.port)
     try:
