@@ -26,7 +26,7 @@ from zcu_tools.experiment.utils import (
 )
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlot2DwithLine
+from zcu_tools.plotting.liveplot import LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseReadout,

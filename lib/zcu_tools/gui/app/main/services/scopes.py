@@ -39,7 +39,7 @@ def figure_ambient(figure_container: Any | None) -> Iterator[None]:
 
     from zcu_tools.gui.app.main.driven.qt_liveplot_backend import QtLivePlotBackend
     from zcu_tools.gui.plotting import routing_scope
-    from zcu_tools.liveplot.backend import set_liveplot_backend
+    from zcu_tools.plotting.liveplot.backend import set_liveplot_backend
 
     with ExitStack() as stack:
         stack.enter_context(routing_scope(figure_container))

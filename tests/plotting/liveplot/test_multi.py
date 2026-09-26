@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from matplotlib.figure import Figure
-from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot
+from zcu_tools.plotting.liveplot import AbsLivePlot, MultiLivePlot
 
 
 class _Plotter(AbsLivePlot):

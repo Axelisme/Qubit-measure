@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-09-27 — canonical-only experiment loading
+**Last updated:** 2026-09-27 — liveplot import path
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runtime/` 的細節另見 `runtime/README.md`。
 
@@ -145,7 +145,7 @@ def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
 1. **`orig_cfg = deepcopy(cfg)`**：在方法最開頭就拍下執行前快照，最後以 `cfg_snapshot=orig_cfg` 寫進 Result。不另存 `last_cfg`，cfg 一律由 Result 攜帶（見「AbsExperiment 與 Result 合約」）。`run()` 的輸入 `cfg` 是 `CfgModel` 型別（型別即驗證），不在方法內重做 `model_validate`。
 2. **`sweep2array`**（`utils/round_zcu.py`）把 `SweepCfg` 展成實際會量到的點（已套 ZCU 的 freq/time/gain 量化），用來畫圖 / 存檔。
 3. **`with Schedule(cfg, signals_buffer) as sched`** 是一般單次 run scope；`sched.cfg` 是 runner-owned deepcopy，mutation 不會汙染 `orig_cfg` 或 caller 傳入的 cfg。`Schedule` 可用 `env=RunEnv(...)` 接 typed dataclass 依賴；env 只放穩定 run context，不放 scan/repeat 動態 value/index，loop state 由 `ScheduleStep.value` / `index` / `path` 表示。`ProgramBuilder.build()` 回傳 program；`run_program(program)` 執行既有 integrated-acquire program；`build_and_acquire()` 直接建立 isolated cfg / program、執行 acquire 並寫回 buffer。`reps` / `rounds` 由 builder 建出的 `program.cfg_model` 讀取；builder owner cfg 可以是 experiment cfg，`ProgramBuilder` 只抽取 `ProgramV2Cfg` runtime 欄位，也可用 `prog_builder(..., cfg=program_cfg)` 明確覆寫；已是 `ProgramV2Cfg` 的 instance/subclass 會保留原型別，沒有任何 runtime 欄位的 cfg 會 fast-fail。Decimated trace 走 `run_program_decimated(...)` / `build_and_acquire_decimated(...)`，不用參數切換 acquire mode；若需先 build program 才能知道 buffer shape，使用 `sched.register_buffer(signals_buffer)` 註冊 caller 建好的 buffer。round-level `update_hook`、`cancel_flag`、pbar 與 raw2signal 由 Schedule runtime 持有，不再透過 `Task` 包裝。
-4. **LivePlot**：`LivePlot1D` / `LivePlot2D` 是 context manager，常規寫法是在 `SignalBuffer(on_update=...)` 裡每次以當前完整 buffer ndarray 重畫；`SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 update，`trigger_update()` 可手動刷新。
+4. **LivePlot**：從 `zcu_tools.plotting.liveplot` 匯入 `LivePlot1D` / `LivePlot2D`；兩者是 context manager。常規寫法是在 `SignalBuffer(on_update=...)` 裡每次以當前完整 buffer ndarray 重畫；`SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 update，`trigger_update()` 可手動刷新。
 5. **回傳 Result**：`run()` 直接 `return XxxResult(...)`，由 `@record_result` decorator 寫入 `last_result`（給 `analyze` / `save` 使用），Result 內部攜帶 `cfg_snapshot`。
 
 目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback.py`、`fake.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*`、`mist/*`、`autofluxdep/*` 與 `overnight/*`。

@@ -32,8 +32,13 @@ from zcu_tools.experiment.v2.utils import (
     materialize_nonuniform_t1_pulse_lengths,
     sweep2array,
 )
-from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
-from zcu_tools.liveplot.backend import close_figure
+from zcu_tools.plotting.liveplot import (
+    LivePlot1D,
+    LivePlot2D,
+    MultiLivePlot,
+    make_plot_frame,
+)
+from zcu_tools.plotting.liveplot.backend import close_figure
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,

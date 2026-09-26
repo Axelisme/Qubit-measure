@@ -56,7 +56,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     SweepValue,
 )
-from zcu_tools.liveplot import LivePlot1D
+from zcu_tools.plotting.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     AbsReadoutCfg,
     ProgramV2Cfg,

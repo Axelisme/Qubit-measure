@@ -1,8 +1,8 @@
-# liveplot 模組重點筆記
+# `zcu_tools.plotting.liveplot` 模組重點筆記
 
-**Last updated:** 2026-07-02 - lifecycle contract cleanup
+**Last updated:** 2026-09-27 — plotting 家族搬移
 
-Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊跑邊畫。
+供 Notebook、experiment runtime 與註冊 backend 的 GUI 使用的即時 matplotlib 繪圖能力。Plotter 以各自的 typed `update()` 增量更新 segment，再透過 active backend 刷新 figure；frontend 的選擇不由 plotter 偵測。家族定位見 [plotting/README.md](../README.md)。
 
 ## 模組分層
 
@@ -49,7 +49,7 @@ Jupyter 中即時更新的 matplotlib 繪圖工具，在資料擷取過程中邊
 
 ## 對外 API 與匯出
 
-- 根模組 `liveplot/__init__.py` 匯出：
+- `zcu_tools.plotting.liveplot` 的 `__init__.py` 匯出：
   - `backend`
   - `make_plot_frame`
   - `AbsLivePlot`

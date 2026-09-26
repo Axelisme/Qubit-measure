@@ -22,8 +22,8 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.plotting.liveplot import LivePlot2D
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,

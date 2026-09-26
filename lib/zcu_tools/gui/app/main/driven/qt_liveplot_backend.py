@@ -25,7 +25,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from zcu_tools.gui.plotting import refresh_figure_in_main_thread
-from zcu_tools.liveplot.backend.base import LivePlotBackend
+from zcu_tools.plotting.liveplot.backend.base import LivePlotBackend
 
 
 class QtLivePlotBackend(LivePlotBackend):

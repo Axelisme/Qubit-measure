@@ -9,7 +9,7 @@ from zcu_tools.gui.plotting import (
     attach_existing_figure_to_container,
     get_figure_container,
 )
-from zcu_tools.liveplot.backend import close_figure
+from zcu_tools.plotting.liveplot.backend import close_figure
 
 
 def test_figure_ambient_preserves_container_owned_figure_on_liveplot_close(qapp):

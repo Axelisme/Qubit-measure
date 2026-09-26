@@ -10,7 +10,7 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.utils import Result
-from zcu_tools.liveplot import AbsLivePlot
+from zcu_tools.plotting.liveplot import AbsLivePlot
 
 from .result_tree import ResultUpdateEvent
 from .schedule import ScheduleStep
