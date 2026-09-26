@@ -181,7 +181,7 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 
 ### Shared GUI cfg import ownership tests
 
-`tests/gui/measure_cfg/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
+`tests/experiment/cfg_editing/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
 runtime parity、nested allowed sets、deep-fresh mutable containers、main/autoflux僅兩個policy差異、
 strict root-only Mapping/typed inspection、missing/non-string/unknown與fresh-process import purity；materializer tests另鎖spec/value完整對齊、scalar
 missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與

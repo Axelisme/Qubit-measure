@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from zcu_tools.experiment.cfg_editing import program_shape_for_input
 from zcu_tools.gui.cfg import (
     CfgSchema,
     ExpressionResolver,
@@ -11,7 +12,6 @@ from zcu_tools.gui.cfg import (
     lower_finished_cfg,
     validate_reference_kinds,
 )
-from zcu_tools.gui.measure_cfg import program_shape_for_input
 from zcu_tools.program.v2 import SweepCfg
 
 if TYPE_CHECKING:

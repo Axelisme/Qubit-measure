@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, cast
 
+from zcu_tools.experiment.cfg_editing import ProgramCfgKind, program_shape_for_input
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -10,7 +11,6 @@ from zcu_tools.gui.cfg import (
     DirectValue,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
-from zcu_tools.gui.measure_cfg import ProgramCfgKind, program_shape_for_input
 from zcu_tools.gui.session.expression import evaluate_numeric_expr
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,

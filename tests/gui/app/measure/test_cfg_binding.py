@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 import zcu_tools.gui.app.measure.cfg_binding as binding_module
+from zcu_tools.experiment.cfg_editing import ProgramShape, UnknownProgramShapeError
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.measure_cfg import ProgramShape, UnknownProgramShapeError
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 

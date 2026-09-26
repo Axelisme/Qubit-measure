@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-27 — universal cfg tree and shared sweep range/sampling presentation
+**Last updated:** 2026-09-27 — cfg editing relocation
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -52,23 +52,23 @@ framework contract、request/result/writeback/analyze params與protocol signatur
 vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
 `NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
 normalization與policy binding留在`cfg.module_adapter`，program shape/spec與raw missing/subset policy由
-`gui.measure_cfg`擁有（ADR-0051）。
+`experiment.cfg_editing`擁有（ADR-0051）。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
 allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與
 reference value且要求leaf已存在。這層不create、不wrap、不處理lock或domain policy；
 `CfgSectionValue.with_field`只保留scalar wrapping後委派replace。
 
-`zcu_tools.gui.measure_cfg`是Qt-free measure-domain層：closed catalog擁有七種module與六種
+`zcu_tools.experiment.cfg_editing`是Qt-free measure-domain層：closed catalog擁有七種module與六種
 waveform的discriminator、label與fresh Spec factory；app只綁定Arb choices與readout inheritance
 兩個spec policy，以及可materialize module/waveform subset。program materializer固定missing
 `ch/ro_ch=0`、其它scalar為unset、nested section完整default、required ref採`allowed[0]`；missing style
-是Const，explicit unknown Fast Fail。它不importprogram runtime/app/session/experiment，`gui.cfg`也不
+是Const，explicit unknown Fast Fail。它不 import program runtime/app/session，`gui.cfg` 也不
 反向import它。
 
 Reference節點統一使用`ReferenceSpec(kind=...)`與`ReferenceValue`；`kind`是shared core只
 轉送的app-local opaque id。module/waveform shape factory與raw materialization policy由
-`gui.measure_cfg`擁有，resolver與runtime object normalization留在各app，
+`experiment.cfg_editing`擁有，resolver與runtime object normalization留在各app，
 既有`module_ref`/`waveform_ref` persistence wire shape不變。
 
 `zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。

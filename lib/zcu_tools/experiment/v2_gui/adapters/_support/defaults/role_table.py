@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
@@ -35,7 +36,6 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
     make_default_value,
 )
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 from zcu_tools.gui.session.value_lookup import ValueRef, resolve_value_ref
 from zcu_tools.program.v2.modules import AbsResetCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg

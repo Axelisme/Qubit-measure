@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, ProgramSpecPolicy
 from zcu_tools.gui.cfg import CfgSectionSpec
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, ProgramSpecPolicy
 
 MAIN_PROGRAM_SPEC_POLICY = ProgramSpecPolicy(
     arb_data_choices_source="arb_waveforms",

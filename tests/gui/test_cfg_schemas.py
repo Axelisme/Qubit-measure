@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
+from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
@@ -17,7 +18,6 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ReferenceValue,
 )
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 
 
 def test_waveform_cfg_to_value():

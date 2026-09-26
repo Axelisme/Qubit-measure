@@ -6,19 +6,19 @@ from dataclasses import FrozenInstanceError, replace
 from typing import cast
 
 import pytest
+from zcu_tools.experiment.cfg_editing import (
+    PROGRAM_SHAPES,
+    ProgramCfgKind,
+    ProgramSpecPolicy,
+    UnknownProgramShapeError,
+    program_shape_for_input,
+)
 from zcu_tools.gui.cfg import (
     CfgNodeSpec,
     CfgSectionSpec,
     LiteralSpec,
     ReferenceSpec,
     ScalarSpec,
-)
-from zcu_tools.gui.measure_cfg import (
-    PROGRAM_SHAPES,
-    ProgramCfgKind,
-    ProgramSpecPolicy,
-    UnknownProgramShapeError,
-    program_shape_for_input,
 )
 from zcu_tools.program.v2.modules import (
     ArbWaveformCfg,
@@ -165,7 +165,7 @@ def test_program_shape_inspection_preserves_catalog_unknown_error() -> None:
 def test_waveform_inspection_and_materialization_intentionally_differ_on_missing_style() -> (
     None
 ):
-    from zcu_tools.gui.measure_cfg import (
+    from zcu_tools.experiment.cfg_editing import (
         ProgramMaterializationPolicy,
         materialize_program_waveform,
     )

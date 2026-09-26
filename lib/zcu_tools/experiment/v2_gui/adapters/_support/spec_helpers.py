@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
@@ -9,7 +10,6 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     ReferenceSpec,
 )
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 
 
 def _module_shape(discriminator: str) -> CfgSectionSpec:

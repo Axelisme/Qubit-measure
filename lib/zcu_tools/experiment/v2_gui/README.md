@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-27 — measure app path rename
+**Last updated:** 2026-09-27 — cfg editing relocation
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -65,7 +65,7 @@ entry point只組current md expression、measure module shape與`SweepCfg` ports
 facade只提供framework contract、request/result/writeback/analyze params與session signature
 vocabulary，不forward shared generic names。role/module conversion policy仍在experiment/measure
 domain，不下沉到shared core。role registration同時攜帶context-free fresh shape factory與eval-aware
-value factory；named role沿用`ROLE_FACTORIES.shape`，blank role直接依`gui.measure_cfg` closed catalog
+value factory；named role沿用`ROLE_FACTORIES.shape`，blank role直接依`experiment.cfg_editing` closed catalog
 順序產生。role seed與library adopt policy仍由experiment層擁有
 （ADR-0045、ADR-0046、ADR-0051）。
 

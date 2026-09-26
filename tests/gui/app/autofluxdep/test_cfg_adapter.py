@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import zcu_tools.gui.app.autofluxdep.cfg.lowering as lowering_module
+from zcu_tools.experiment.cfg_editing import program_shape_for_input
 from zcu_tools.gui.app.autofluxdep.cfg.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import (
     module_cfg_to_value,
@@ -24,7 +25,6 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
-from zcu_tools.gui.measure_cfg import program_shape_for_input
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 

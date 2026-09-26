@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, ProgramShape
 from zcu_tools.gui.app.measure.adapter import ExpContext
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
@@ -12,7 +13,6 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
     make_default_value,
 )
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, ProgramShape
 
 from .adapters._support import ROLE_FACTORIES
 

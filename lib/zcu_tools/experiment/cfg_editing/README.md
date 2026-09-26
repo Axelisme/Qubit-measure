@@ -1,14 +1,15 @@
-# `zcu_tools.gui.measure_cfg` — program cfg GUI vocabulary
+# `zcu_tools.experiment.cfg_editing` — experiment cfg editing support
 
-**Last updated:** 2026-07-11 — strict shape inspection
+**Last updated:** 2026-09-27 — experiment cfg editing relocation
 
-此 Qt-free package 是 program/v2 module/waveform GUI shape 的唯一 owner。`PROGRAM_SHAPES`
+此 Qt-free 實驗側編輯支援 package 是 program/v2 module/waveform editable shape 的唯一 owner。`PROGRAM_SHAPES`
 固定列出七種 module 與六種 waveform discriminator、label與fresh Spec factory；它不做runtime
-registration，也不import program runtime、app、session、experiment、Qt或`resources`。
+registration。Import 會經 experiment package root 載入 `experiment.base` 與其 device/datafile 依賴；
+本 package 不載入 program runtime、app、session、resources、notebook 或 Qt。
 
 每次`ProgramShape.make_spec(policy)`都建立deep-fresh tree。`ProgramSpecPolicy`只容許兩個跨app
 差異：Arb data的choices source，以及Direct/Pulse Readout間的inheritance hook。main與autoflux
-各自在app edge綁定policy；runtime object normalization與role seed仍不屬於本package。
+各自在 app edge 綁定 policy；runtime object normalization 與 role seed 仍不屬於本 package。Generic GUI 不直接依賴具體實作，由組裝處注入能力。
 
 `ProgramMaterializationPolicy`把generic `gui.cfg` spec walk綁成program raw contract：missing
 `ch`/`ro_ch`為0、其它scalar為unset；missing或non-mapping nested section建立完整Spec default；required
