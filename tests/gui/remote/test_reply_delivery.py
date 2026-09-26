@@ -16,6 +16,8 @@ from zcu_tools.gui.remote.rpc_endpoint import (
 )
 from zcu_tools.gui.remote.wire import Request
 
+pytestmark = pytest.mark.requires_loopback
+
 
 class _RejectingQueue(queue.Queue[bytes]):
     def put_nowait(self, item: bytes) -> None:
