@@ -77,7 +77,7 @@ def _h_project_info(
     if not adapter.ctrl.has_project():
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            "No project applied yet; apply a project first (gui_project_apply).",
+            "No project applied yet; use rpc_call(method='startup.apply', params=...) first.",
             reason="no_project",
         )
     ctx = adapter.ctrl.get_exp_context()
