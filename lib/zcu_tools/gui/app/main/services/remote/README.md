@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — explicit full guard reads (GUI 90, WIRE 62)
+**Last updated:** 2026-09-26 — complete cached cfg observations (GUI 91, WIRE 63)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -26,8 +26,8 @@ not declare MCP tools and does not own stdio transport.
   only by dispatch.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
-- `path_resolver.py`：dotted-path mutation and settable-tree projection for
-  cfg-editor sessions.
+- `path_resolver.py`：flat mutation-target projection for cfg-editor sessions.
+- `cfg_observation.py`：complete cached cfg observation and prefix projection.
 - `wire_version.py`：measure-gui wire contract version and GUI code revision.
 
 Shared transport primitives live in `zcu_tools.gui.remote`: NDJSON framing,
@@ -206,12 +206,22 @@ terminal status, not removed aliases. No tool inventory is generated from
 
 ## Cfg Editing
 
-`path_resolver.py`只把binding `SettableTarget`投影成flat/tree wire view與prefix query，禁止
-field/editor subtype grammar。Setter只接受listing canonical leaf；legacy `.sweep.*`/`.value.*`
-zero-mutation拒絕並給replacement。Tab/writeback成功batch回final net path diff。
+`path_resolver.py` projects nominal `SettableTarget` entries for mutations and path
+changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
+field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
-`tab.get_cfg` returns the nested settable value tree for discovery. Mutations use
-dotted paths through `tab.set_cfg` or `editor.set_field`.
+`tab.get_cfg`, `editor.get`, and `editor.new` return the same typed `tree` format.
+Nodes contain kind/path/label/valid. Sections and active references have named
+children, including locked literals. Scalar/literal input and sweep inputs retain
+mode/raw/resolved/error/validation_error. Reference nodes include their chosen key,
+cached shape label, error, override flag, and choices. Reads do not resolve sources.
+Unknown objects, non-string object keys, and nonfinite numbers fail serialization;
+complex numbers use the shared reversible tag, with no string fallback.
+
+Prefix reads select a node while preserving its full path; sweep edges and reference
+keys select their parent node. Unknown prefixes return an empty object. Only a
+successful read with no prefix parameter establishes the full cfg observation.
+Wire keys children/input/inputs are not mutation-path segments.
 
 Scalar values may be direct values, tagged eval values, or tagged value refs.
 Eval values store a resolved snapshot at set/lower time. Value refs resolve once

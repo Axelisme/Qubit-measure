@@ -340,7 +340,7 @@ def test_status_and_unrelated_catalog_read_do_not_accept_unread_gui_cfg_edit(
         ("editor.get", {"editor_id": "e"}, "editor.commit", "editor:e"),
     ],
 )
-@pytest.mark.parametrize("prefix", ["modules.readout", "not.there"])
+@pytest.mark.parametrize("prefix", ["modules.readout", "not.there", ""])
 def test_partial_or_unmatched_cfg_read_does_not_accept_an_unread_gui_edit(
     client: MeasureClient,
     read_method: str,
@@ -455,6 +455,44 @@ def test_read_reply_cannot_reveal_a_later_unseen_version(
     assert sent.index("resources.versions") < sent.index(read_method)
 
 
+@pytest.mark.parametrize(
+    ("read_method", "read_params", "guard_method", "guard_params", "resource"),
+    [
+        ("tab.get_cfg", {"tab_id": "t"}, "tab.run_start", {"tab_id": "t"}, "tab:t:cfg"),
+        (
+            "editor.get",
+            {"editor_id": "e"},
+            "editor.commit",
+            {"editor_id": "e", "name": "copy"},
+            "editor:e",
+        ),
+    ],
+)
+def test_failed_cfg_read_and_bare_versions_preserve_previous_observation(
+    client: MeasureClient,
+    read_method: str,
+    read_params: dict[str, Any],
+    guard_method: str,
+    guard_params: dict[str, Any],
+    resource: str,
+) -> None:
+    set_versions(client, {resource: 3})
+    client.transport.replies[read_method] = {
+        "ok": True,
+        "result": {"tree": {"kind": "section", "children": {}}},
+    }
+    client.call("rpc_call", {"method": read_method, "params": read_params})
+    set_versions(client, {resource: 4})
+    client.transport.replies[read_method] = {
+        "ok": False,
+        "error": {"code": "controller_error", "message": "cfg projection failed"},
+    }
+    with pytest.raises(RuntimeError, match="cfg projection failed"):
+        client.call("rpc_call", {"method": read_method, "params": read_params})
+    assert client.context.session.read_version_table() == {resource: 4}
+    assert send(client, guard_method, guard_params)["expected_versions"][resource] == 3
+
+
 def test_unguarded_read_does_not_attach_versions(client: MeasureClient) -> None:
     assert send(client, "tab.snapshot", {"tab_id": "t"}) == {"tab_id": "t"}
 
@@ -471,6 +509,17 @@ def test_cfg_read_baseline_does_not_advance_without_another_read(
         send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]["tab:t:cfg"]
         == 3
     )
+
+
+def test_reading_another_cfg_does_not_invalidate_the_target_cfg(
+    client: MeasureClient,
+) -> None:
+    client.observe_versions({"tab:t:cfg": 3, "tab:other:cfg": 2})
+    set_versions(client, {"tab:t:cfg": 3, "tab:other:cfg": 4})
+    send(client, "tab.get_cfg", {"tab_id": "other"})
+    expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
+    assert expected["tab:t:cfg"] == 3
+    assert "tab:other:cfg" not in expected
 
 
 def test_unrelated_read_reveals_its_own_resource_without_absorbing_cfg_change(

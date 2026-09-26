@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
+from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
     _json,
     _str,
@@ -71,23 +72,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:_h_tab_get_cfg",
         MethodSpec(
             5.0,
-            "Read the tab's settable cfg as a NESTED tree of current values (the "
-            "read-only view; edit a leaf with tab.set_cfg or editor.set_field on the "
-            "tab's editor_id from tab.snapshot, using the leaf's dotted path). Node "
-            "shape, distinguished by '$'-prefixed reserved keys: a SCALAR leaf is "
-            "its bare current value (null = unset); an ENUM scalar leaf is "
-            "{'$value': current, '$choices': [...]}; a SWEEP is a sub-tree of bare "
-            "edges {start, stop, expts, step} (each edge accepts ONLY a number/int "
-            "via tab.set_cfg — NOT an eval/ref); a REF node "
-            "(module/waveform/device selector) is {'$ref': {'current': <chosen>, "
-            "'options': [<names>]}, <chosen variant's settable sub-tree>} — only the "
-            "CURRENTLY-CHOSEN variant is expanded; 'options' lists bare names while "
-            "'current' may be a tagged internal key — switch by passing a bare "
-            "'options' name to tab.set_cfg on the ref's dotted path. "
-            "Any other dict is a plain section sub-tree (its keys are child fields). "
-            "'prefix' (optional, dotted) returns just the sub-tree rooted at that "
-            "node (a prefix at a sweep edge returns the whole sweep node); a prefix "
-            "matching nothing returns {}.",
+            CFG_OBSERVATION_DESCRIPTION,
             (
                 _str("tab_id"),
                 _str_opt(

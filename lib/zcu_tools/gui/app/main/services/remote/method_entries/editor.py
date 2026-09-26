@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
+from ..cfg_observation import CFG_OBSERVATION_DESCRIPTION
 from ._params import (
     _expected_versions,
     _json,
@@ -22,7 +23,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "module/waveform (by 'from_name'). To create a new blank/shaped entry, "
             "use context.ml_create_from_role (e.g. role_id='pulse:blank' or a named role) "
             "then editor.new(from_name=name) to edit it. item_kind is 'module' or "
-            "'waveform'. Returns {editor_id, tree} (tree = the nested current-value "
+            "'waveform'. Returns {editor_id, tree} (tree = the complete cached cfg "
             "view, same shape as editor.get / tab.get_cfg).",
             (
                 _str("item_kind", "'module' or 'waveform'"),
@@ -57,7 +58,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "'valid' is whether the whole draft is currently valid; 'removed'/'added' "
             "list net settable paths a reference key switch ('<path>.ref') dropped/"
             "created so you need not re-list after a variant switch. To read cfg use "
-            "tab.get_cfg / editor.get (the nested current-value tree).",
+            "tab.get_cfg / editor.get (the complete cached observation).",
             (
                 _str("editor_id"),
                 _str("path", "Dotted field path"),
@@ -74,22 +75,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "editor:_h_editor_get",
         MethodSpec(
             5.0,
-            "Read an editing session's settable cfg as a NESTED tree of current "
-            "values (the read-only view; edit a leaf with editor.set_field using the "
-            "leaf's dotted path). Node shape, distinguished by '$'-prefixed reserved "
-            "keys: a SCALAR leaf is its bare current value (null = unset); an ENUM "
-            "scalar leaf is {'$value': current, '$choices': [...]}; a SWEEP is a "
-            "sub-tree of bare edges {start, stop, expts, step} (each edge accepts "
-            "ONLY a number/int via editor.set_field — NOT an eval/ref); a REF node "
-            "(module/waveform/device selector) is {'$ref': {'current': <chosen>, "
-            "'options': [<names>]}, <chosen variant's settable sub-tree>} — only the "
-            "CURRENTLY-CHOSEN variant is expanded; 'options' lists bare names while "
-            "'current' may be a tagged internal key — switch by passing a bare "
-            "'options' name to editor.set_field on the ref's dotted path. "
-            "Any other dict is a plain section sub-tree (its keys are child fields). "
-            "'prefix' (optional, dotted) returns just the sub-tree rooted at that "
-            "node (a prefix at a sweep edge returns the whole sweep node); a prefix "
-            "matching nothing returns {}.",
+            CFG_OBSERVATION_DESCRIPTION,
             (
                 _str("editor_id"),
                 _str_opt(

@@ -128,17 +128,13 @@ def _save_paths_wire(paths) -> dict[str, str | None] | None:
 def _h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..path_resolver import build_settable_tree
+    from ..cfg_observation import build_cfg_observation
 
     tab_id = str(params["tab_id"])
     if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    # A tab's cfg draft is a CfgEditorService session keyed by its tab_id (the
-    # same draft the open form attaches to). Build the settable tree off that
-    # session's live root — the one tab.set_cfg/editor.set_field mutates — so
-    # the tree mirrors exactly what can be edited and agent+user share one model
-    # (ADR-0013 F11). Leaf values come straight off the live tree
-    # (ADR-0010: None = unset).
+    # Read the same service-owned draft as the form, including locked fields
+    # and cached input state. A read never resolves live sources.
     editor_id = adapter.ctrl.editor_id_for_owner(tab_id)
     if editor_id is None:
         raise RemoteError(
@@ -148,7 +144,7 @@ def _h_tab_get_cfg(
     raw_prefix = params.get("prefix")
     prefix = str(raw_prefix) if raw_prefix else None
     draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
-    return {"tree": build_settable_tree(draft, prefix=prefix)}
+    return {"tree": build_cfg_observation(draft, prefix=prefix)}
 
 
 def _h_tab_set_cfg(

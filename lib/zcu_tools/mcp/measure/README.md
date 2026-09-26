@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-26 — explicit full context and tab/SoC guard reads
+**Last updated:** 2026-09-26，完整 cached cfg observation
 
 # `zcu_tools/mcp/measure/`
 
@@ -11,6 +11,13 @@
 - 資源版本由 GUI owner bump。MCP 在完整 read 前取保守版本，成功後只更新 catalog 指定的資源；`prefix` 局部讀取不揭露整份 cfg，status 的 orientation reads 不吸收其他資源。GUI catalog 宣告哪些寫入回傳 owner-thread 前後版本；MCP 只更新該次變更且寫入前版本符合既有觀察的資源，不吸收別的 GUI 編輯。新建 `tab.new` 回執只確立新 tab 的存在版本，不把未讀 cfg 或其他資源當成已觀察。stale 拒絕不刷新 baseline，需重讀資源後才由呼叫者決定是否重試；斷線或 transport timeout 不自動重送。
 - 接手既有或重啟後的 GUI 時，明確呼叫 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)` 和 `context.snapshot`，分別重讀 tab 存在、完整 SoC cfg、目前 active label 與所有可序列化 md/ml cfg。`context.snapshot` 可能回傳大型敏感資料，遇無法序列化的值會失敗且不刷新版本；摘要、局部 getter 與裸 `resources.versions` 都不能替代完整讀取。
 - `bridge` 只管 socket/GUI subprocess。`connect(token=...)` 使用現有 GUI control-token 認證；session 留住本次憑證供斷線後重新握手，顯式切換 port 不沿用前一 GUI 的 token。未授權與 wire 不相容分別回報；MCP 工具記錄遮蔽 token。`connect(launch=...)` 對已由此 bridge 啟動且仍活著的 GUI 不會在另一個空 port 假裝再次啟動；MCP 清理只斷線，不殺 GUI。所有硬體 gate、取消與 operation 結果都仍歸 GUI owners。
+
+## Cfg 讀取
+
+`tab.get_cfg`／`editor.get` 回完整 typed observation，包含 locked 欄位、raw/resolved/error、
+validity 與 cached choices；GUI model 是來源，讀取不重新解析 md/ml。Prefix 回指定 node，
+保留其完整 path；即使 prefix 是空字串也不更新整份 cfg 觀察版本。失敗讀取與裸版本表
+不推進基線，其他 cfg 的更新不影響目標 cfg。Wire 格式與描述由 GUI catalog 擁有。
 
 ## 驗證
 

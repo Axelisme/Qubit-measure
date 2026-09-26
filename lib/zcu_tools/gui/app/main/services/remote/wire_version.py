@@ -102,7 +102,9 @@ from __future__ import annotations
 # receipts for resources changed by that handler; the MCP strips them from tools.
 # v62: context.snapshot fully reads md/ml; the live catalog identifies conditional
 # full reads and newly created resources certified by owner-thread write receipts.
-WIRE_VERSION = 62
+# v63: cfg reads return complete typed model observations, including locked
+# fields and cached raw/resolved/error state, instead of settable-only values.
+WIRE_VERSION = 63
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -141,4 +143,5 @@ WIRE_VERSION = 62
 # v88: route MCP cancellation only through opaque op handles; bound notify.await.
 # v89: report already failed operations as errors when cancellation is requested.
 # v90: expose explicit context, tab, and SoC guard observations in the live catalog.
-GUI_VERSION = 90
+# v91: cfg reads project CfgDraft observations without resolving live sources.
+GUI_VERSION = 91

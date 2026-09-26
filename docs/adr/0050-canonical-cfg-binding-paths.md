@@ -26,8 +26,19 @@ Unrepresentable or reserved field keys fail when the target tree is built.
 `gui.cfg` owns strict custom-reference-key make/parse/query helpers. Binding
 normalizes allowed bare labels; tags remain internal persistence representation.
 Binding never imports measure session policy. `ValueRef` resolves at the app
-service seam and only for scalar targets. Remote code only projects targets to
-existing flat/tree wire views and applies prefix read policy.
+service seam and only for scalar targets. Remote code projects targets to flat
+mutation listings and path-change replies.
+
+Complete cfg reads use the separate nominal `CfgDraft.observe()` contract.
+`CfgNodeObservation` includes locked literals, cached options, active reference
+children, validity, and value carriers with raw/resolved/error state. Binding
+owns field traversal and returns detached data without resolving sources. A
+settable listing or persistence encoding cannot substitute for this observation.
+The remote adapter serializes these data nodes and applies prefix read policy;
+it does not import field/editor classes or reconstruct their validation rules.
+Only a successful full read without a prefix parameter reveals the whole cfg
+revision. Unknown objects and nonfinite values fail serialization rather than
+becoming display strings. Prefixes and bare versions never certify a full read.
 
 Cfg edit batches are ordered, fail-fast, and non-atomic. Resolution remains
 sequential so a reference switch can expose the next path. Only a shape target

@@ -14,19 +14,16 @@ if TYPE_CHECKING:
 def _h_editor_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..path_resolver import build_settable_tree
+    from ..cfg_observation import build_cfg_observation
 
     item_kind = str(params["item_kind"])
     from_name = str(params["from_name"])
     # editor.new is modify-only: it edits an existing ml entry. Creating a blank
     # entry goes through context.ml_create_from_role (role_id='<disc>:blank').
     editor_id, _ = adapter.ctrl.open_cfg_editor(item_kind, from_name=from_name)
-    # The agent reads every cfg view as a nested tree (same shape as
-    # tab.get_cfg / editor.get), so the open reply carries the freshly-opened
-    # draft as {tree} rather than the nominal current_targets snapshot
-    # internally for change-push / set_field diffing.
+    # Creation and explicit reads share the complete observation format.
     draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
-    return {"editor_id": editor_id, "tree": build_settable_tree(draft)}
+    return {"editor_id": editor_id, "tree": build_cfg_observation(draft)}
 
 
 def _h_editor_set_field(
@@ -50,17 +47,14 @@ def _h_editor_set_field(
 def _h_editor_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..path_resolver import build_settable_tree
+    from ..cfg_observation import build_cfg_observation
 
     editor_id = str(params["editor_id"])
     raw_prefix = params.get("prefix")
     prefix = str(raw_prefix) if raw_prefix else None
-    # Build the nested current-value tree off the session's live root — the same
-    # tree shape tab.get_cfg returns, so the agent reads every cfg view as a tree
-    # and edits leaves via editor.set_field (dotted paths). An unknown
-    # editor_id raises CfgEditorError from get_cfg_editor_draft → INVALID_PARAMS.
+    # Unknown sessions retain CfgEditorError -> INVALID_PARAMS translation.
     draft = adapter.ctrl.get_cfg_editor_draft(editor_id)
-    return {"tree": build_settable_tree(draft, prefix=prefix)}
+    return {"tree": build_cfg_observation(draft, prefix=prefix)}
 
 
 def _h_editor_commit(
