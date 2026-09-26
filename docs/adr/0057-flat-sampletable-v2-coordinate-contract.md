@@ -54,7 +54,8 @@ mA），magnitude 也無法可靠分辨（A/mA domains 可重疊）。generic `S
    mA/mV ÷1000 轉 base unit；單次 invocation 單一 scalar unit；
    `LegacySampleFluxFrame` 先正規化到 base unit，且其 physical kind 必須與
    `dev_value_unit` 相符；`flux_column` 只在 caller 宣告時處理。輸入含 v2 columns、
-   缺欄、`source == dest`、dest 已存在或 validation 失敗 → fail。函式不 mutate
+   缺少指定欄位、`flux_column` 與 `dev_value_column` 相同、輸入值無法轉為有效 v2
+   資料或 validation 失敗 → fail。函式不 mutate
    輸入，產出完整 target v2 table（coordinate columns 在前，measurement columns
    與 row order 原樣保留）。
 

@@ -11,9 +11,9 @@ status: accepted
 
 ## 脈絡
 
-實驗量測資料（onetone/twotone/singleshot/… 的 1D/2D sweep 結果）的存取目前一律經 `lib/zcu_tools/utils/datasaver.py` 的 **dict 殼**：`save_data` / `load_data` / `save_local_data` / `load_local_data`，以 `x_info` / `y_info` / `z_info` 三個 `{name, unit, values}` dict 為介面。這層殼底下是真正的引擎 `lib/zcu_tools/utils/labber_io.py`（純 h5py/numpy 的 Labber Log Browser 格式 reader/writer）。
+此決策提出前，實驗量測資料（onetone/twotone/singleshot/… 的 1D/2D sweep 結果）經 `lib/zcu_tools/utils/datasaver.py` 的 **dict 殼**存取：`save_data` / `load_data` / `save_local_data` / `load_local_data`，以 `x_info` / `y_info` / `z_info` 三個 `{name, unit, values}` dict 為介面。當時這層殼底下是 `lib/zcu_tools/utils/labber_io.py`（純 h5py/numpy 的 Labber Log Browser 格式 reader/writer）。兩個舊 module 均已退休；現行入口是 `zcu_tools.utils.datasaver` package（見決定 1）。
 
-殼洩漏了它的核心不變式——**軸序**：
+當時的殼洩漏了它的核心不變式——**軸序**：
 - `save_local_data` 收 z 為 `(Ny, Nx)`（外-y、內-x），直送 labber_io。
 - `load_local_data` 卻在 load 時把內兩軸翻成 `(Nx, Ny)`「frequency-major」（`datasaver.py:173-179`），理由是一個 labber_io 自己**根本不使用**的「historical frequency-major contract」。
 
