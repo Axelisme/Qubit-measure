@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-09-26
 
-`tools/` 放 repo 內部的品質檢查。`script/` 放使用者入口——板端 server、GUI 啟動、資料工具。
+`tools/` 放 repo 內部的品質檢查。`scripts/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
 
 本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到

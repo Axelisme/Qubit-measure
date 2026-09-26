@@ -2,7 +2,7 @@
 
 Usage:
 
-    .venv/bin/python script/export_autofluxdep_sample_table.py \
+    .venv/bin/python scripts/export_autofluxdep_sample_table.py \
         results/autofluxdep_runs/20260706-120000_flux-sweep-abcd1234
 
 The input may be either an ``autofluxdep_runs/<run_slug>`` directory or its

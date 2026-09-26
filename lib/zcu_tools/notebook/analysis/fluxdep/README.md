@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-09-26 — notebook line picker remains independent
+**Last updated:** 2026-09-27 — notebook line picker remains independent
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -63,7 +63,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 
 在預先生成的 Fluxonium 資料庫中做精確搜尋：
 
-- **資料庫結構**（由 `script/generate_fluxonium_sample.py` 產生）：
+- **資料庫結構**（由 `scripts/generate_fluxonium_sample.py` 產生）：
   - `fluxs`：(N_flux,) 通量點
   - `params`：(N_sample, 3) 的 `(EJ, EC, EL)` 取樣點（Fibonacci lattice 在球面上均勻分布，
     並按 `EJb/ECb/ELb` 立方體做射線相交篩選 → 代表「方向」而非「位置」）
@@ -127,7 +127,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 
 Figure builder 內部把 `self.fig` 視為 concrete `go.Figure`。建構時若 caller 未傳入 figure，就立即建立並儲存具體 figure；Matplotlib path 建圖後用 runtime assert 確認是 `Figure`。不要用 `cast()` 取代這個 invariant。
 
-## 資料庫產生：`script/generate_fluxonium_sample.py`
+## 資料庫產生：`scripts/generate_fluxonium_sample.py`
 
 - 輸出 `Database/simulation/fluxonium_all.h5`（或 `_dryrun.h5`）。
 - 參數範圍由 `EJb, ECb, ELb` 的立方體定義；樣本以 Fibonacci lattice

@@ -248,7 +248,7 @@ def test_counts_keep_scope_rule_and_directory_ownership() -> None:
         Finding(path="lib/pkg/a.py", rule="B"),
         Finding(path="tests/pkg/test_a.py", rule="A"),
         Finding(path="tools/helper.py", rule="A"),
-        Finding(path="script/run.py", rule="A"),
+        Finding(path="scripts/run.py", rule="A"),
         Finding(
             path="pyproject.toml[per-file-ignores:tests/**]", rule="ignore", count=4
         ),

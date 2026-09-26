@@ -20,12 +20,12 @@ cores) parallelise cleanly. A 10k "all" database runs in a few minutes, not hour
 Usage:
 
     # a real "all"-range database with 10k samples (all cores)
-    .venv/bin/python script/generate_fluxonium_sample.py \
+    .venv/bin/python scripts/generate_fluxonium_sample.py \
         --output Database/simulation/fluxonium_all.h5 \
         --preset all --num-samples 10000
 
     # a tiny dry run (random energies, no scqubits) to sanity-check plumbing
-    .venv/bin/python script/generate_fluxonium_sample.py \
+    .venv/bin/python scripts/generate_fluxonium_sample.py \
         --output /tmp/db.h5 --num-samples 8 --dry-run
 
 The output path must not already exist unless ``--overwrite`` is given (so a real

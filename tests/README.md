@@ -10,7 +10,7 @@
 1. 先找同一個可觀察行為或契約的既有測試檔。新增 regression 優先放在該檔；同一 owner
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
    `T1` 等名稱若是領域實體或真實物理量，仍可作檔名的一部分，不能只靠字面判定為 ticket 名。
-2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/script/` 和
+2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/` 和
    `tests/tools/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。

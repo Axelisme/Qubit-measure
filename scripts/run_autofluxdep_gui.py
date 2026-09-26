@@ -10,9 +10,9 @@ the repo root (the whole run loop: each flux point, each Node entered / skipped 
 fitted). Disable with ``--no-log`` or redirect with ``--log-file``.
 
 Example:
-    uv run python script/run_autofluxdep_gui.py             # opens control socket on port 8768
-    uv run python script/run_autofluxdep_gui.py --no-control # disable the remote-control socket
-    uv run python script/run_autofluxdep_gui.py --no-log
+    uv run python scripts/run_autofluxdep_gui.py             # opens control socket on port 8768
+    uv run python scripts/run_autofluxdep_gui.py --no-control # disable the remote-control socket
+    uv run python scripts/run_autofluxdep_gui.py --no-log
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from pathlib import Path
 
 from zcu_tools.gui.launcher import add_runtime_cli_options, runtime_options_from_args
 
-# Repo root: this script lives in script/, so its parent is the root.
+# Repo root: this script lives in scripts/, so its parent is the root.
 PROJECT_ROOT = Path(__file__).parent.parent
 
 

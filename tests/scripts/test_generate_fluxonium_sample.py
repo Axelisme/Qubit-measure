@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 _SCRIPT = (
-    Path(__file__).resolve().parents[2] / "script" / "generate_fluxonium_sample.py"
+    Path(__file__).resolve().parents[2] / "scripts" / "generate_fluxonium_sample.py"
 )
 _spec = importlib.util.spec_from_file_location("gen_fluxonium", _SCRIPT)
 assert _spec is not None and _spec.loader is not None

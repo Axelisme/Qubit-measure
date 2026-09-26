@@ -196,7 +196,7 @@ def _make_figure_container() -> FigureContainer:
 def test_get_project_root_returns_injected_root(qapp, tmp_path):  # noqa: ARG001
     """The entry script injects the repo root; the Controller exposes it so the
     setup dialog / startup RPC anchor default paths there instead of cwd (the
-    .bat launcher cd's into script/, so cwd is the wrong base)."""
+    .bat launcher cd's into scripts/, so cwd is the wrong base)."""
     injected = str(tmp_path / "repo_root")
     fixture = ControllerFixture(cache_dir=tmp_path, project_root=injected)
     assert fixture.ctrl.get_project_root() == injected

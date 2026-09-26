@@ -41,8 +41,8 @@ def default_result_dir(chip_name: str, qub_name: str, root: str = "") -> str:
     Empty names fall back to ``unknown_chip`` / ``unknown_qubit`` so the path is
     always well-formed. ``root`` (the repo root, injected by the entry script)
     anchors the result tree there instead of leaving it relative to cwd — a .bat
-    launcher does ``cd /d "%~dp0"`` into script/, which would otherwise scope the
-    default under script/. Empty ``root`` keeps the legacy cwd-relative form.
+    launcher does ``cd /d "%~dp0"`` into scripts/, which would otherwise scope the
+    default under scripts/. Empty ``root`` keeps the legacy cwd-relative form.
     """
     chip = chip_name or DEFAULT_CHIP
     qub = qub_name or DEFAULT_QUBIT

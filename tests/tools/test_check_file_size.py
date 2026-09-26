@@ -32,12 +32,17 @@ def test_violations_are_ordered_longest_first(tmp_path: Path):
 
 
 def test_every_checked_root_is_covered_not_only_the_library(tmp_path: Path):
-    for root in ("lib", "tests", "script", "tools"):
+    for root in ("lib", "tests", "scripts", "tools"):
         _write(tmp_path, f"{root}/big.py", 40)
 
     found = checker.oversize_files(tmp_path, limit=10)
 
-    assert {item.path.parts[0] for item in found} == {"lib", "tests", "script", "tools"}
+    assert {item.path.parts[0] for item in found} == {
+        "lib",
+        "tests",
+        "scripts",
+        "tools",
+    }
 
 
 def test_generated_and_virtual_environment_trees_are_skipped(tmp_path: Path):

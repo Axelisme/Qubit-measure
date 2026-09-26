@@ -7,7 +7,7 @@ from pathlib import Path
 
 _SCRIPT = (
     Path(__file__).resolve().parents[2]
-    / "script"
+    / "scripts"
     / "export_autofluxdep_sample_table.py"
 )
 _spec = importlib.util.spec_from_file_location(

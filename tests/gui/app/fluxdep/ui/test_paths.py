@@ -47,7 +47,7 @@ def test_database_dir_falls_back_to_bundled_when_unset():
 
 def test_database_dir_anchors_bundled_at_injected_root(tmp_path):
     # The bundled search database is repo-relative; the injected repo root anchors
-    # it there instead of relative to cwd — the .bat-launcher fix (cwd is script/).
+    # it there instead of relative to cwd — the .bat-launcher fix (cwd is scripts/).
     sim = tmp_path / "Database" / "simulation"
     sim.mkdir(parents=True)
     p = ProjectInfo()

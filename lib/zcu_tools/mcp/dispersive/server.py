@@ -8,7 +8,7 @@ analysis method tool is generated 1:1 from the wire-method contract table
 (``METHOD_SPECS``, all pure queries — the user drives the GUI); the agent-facing
 lifecycle tools (``dispersive_launch`` / ``dispersive_connect`` /
 ``dispersive_disconnect``) are built by the shared read-only factory and fork
-``script/run_dispersive_gui.py``.
+``scripts/run_dispersive_gui.py``.
 
 The whole server body (``send_gui_rpc``, the lifecycle tools, cleanup, the stdio
 loop) lives in :func:`zcu_tools.mcp.core.readonly_server.build_readonly_server`;
