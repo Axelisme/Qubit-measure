@@ -85,7 +85,7 @@
 
 ## Agents
 
-- [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；現行跨模組分工見 0062，未落實的依賴目標見 draft。
+- [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；§3 的 predictor 校正與載入敘述已被取代（現行 overlay 見 0062，按需載入的目標見 draft）。
 - [0022 — Worktree coordination](0022-agent-coordination-worktree.md)：多 agent / 長線 orchestration 使用 `.agent_state/` worktree protocol，主 checkout merge 由 merge queue 序列化。
 - [0023 — Cooperative interrupt feedback](0023-cooperative-interrupt-feedback-wakeup.md)：由 [[0025]] 取代；保留為被取代設計的定位點。
 - [0024 — Agent launch UI retirement](0024-embedded-agent-session-architecture.md)：measure-gui 不內建 Agent launch UI；agent 啟動由外部 CLI/MCP workflow 負責。
