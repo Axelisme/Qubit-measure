@@ -1,6 +1,6 @@
 """SessionControllerMixin — shared Controller forwards used by both apps.
 
-Both measurement-session app Controllers (measure: ``gui/app/main/controller``;
+Both measurement-session app Controllers (measure: ``gui/app/measure/controller``;
 autofluxdep: ``gui/app/autofluxdep/controller``) expose a wall of one-line
 forwards into the same four session services (soc_connection / context / device /
 startup). Shared dialogs now use explicit control facets; app-local and

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from zcu_tools.experiment.v2_gui.adapters._support import reset_module_writeback_items
-from zcu_tools.gui.app.main.adapter import ExpContext, ModuleWriteback
+from zcu_tools.gui.app.measure.adapter import ExpContext, ModuleWriteback
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2_gui.adapters._support.writeback_helpers import (

@@ -22,8 +22,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import FluxPickState
-from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
-from zcu_tools.gui.app.main.ui.interactive_frontend import (
+from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
+from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
 )

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Literal
 from .role_table import ROLE_TABLE, RoleDef, role_blank, role_ref
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
     from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceValue
 
 # A blank factory always produces a value (never None); a ref factory's optional

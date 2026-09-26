@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from zcu_tools.gui.app.main.adapter import ExpContext
-from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
-from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
+from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
+from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,

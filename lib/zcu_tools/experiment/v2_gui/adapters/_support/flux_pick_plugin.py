@@ -17,8 +17,8 @@ from zcu_tools.analysis.fluxdep.line_state import (
     swap_lines,
 )
 from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
-from zcu_tools.gui.app.main.adapter import AnalyzeRequest
-from zcu_tools.gui.app.main.interactive import (
+from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
+from zcu_tools.gui.app.measure.interactive import (
     Action,
     Command,
     PluginDefinition,

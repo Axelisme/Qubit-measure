@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
+from zcu_tools.gui.app.measure.figure_export import SAVE_DPI, SAVE_FIGSIZE
+from zcu_tools.gui.app.measure.services.guard import SavePermit
+from zcu_tools.gui.app.measure.services.save import SaveService
+from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import EventMeta, EventOrigin
+from zcu_tools.gui.expected_error import (
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+)
+
+
+def _make_figure() -> MagicMock:
+    """Mock figure whose get_size_inches returns a real tuple, so the fixed-size
+    export helper (set/savefig/restore) can run against it."""
+    figure = MagicMock()
+    figure.get_size_inches.return_value = (6.0, 4.0)
+    return figure
+
+
+def _assert_saved_fixed_size(figure: MagicMock, image_path: str) -> None:
+    """save_figure_to_path pins the fixed export size, savefig(path, dpi), restores."""
+    figure.savefig.assert_called_once_with(image_path, dpi=SAVE_DPI)
+    figure.set_size_inches.assert_any_call(*SAVE_FIGSIZE)
+    figure.set_size_inches.assert_called_with(6.0, 4.0)  # restored last
+
+
+def _make_service() -> tuple[SaveService, State, MagicMock]:
+    state = State(MagicMock())
+    adapter = MagicMock()
+    state.add_tab(
+        "tab",
+        Session(adapter_name="fake", adapter=adapter, cfg_schema=MagicMock()),
+    )
+    state.update_tab_result("tab", object())
+    bg = MagicMock()  # BackgroundRunner stand-in; submit() is inspected per-test
+    svc = SaveService(state, bg, EventBus())
+    return svc, state, bg
+
+
+def _record_facts(svc: SaveService) -> list[TabInteractionFact]:
+    facts: list[TabInteractionFact] = []
+    svc._bus.subscribe(  # type: ignore[attr-defined]
+        TabInteractionChangedPayload,
+        lambda payload: facts.append(payload.fact),
+    )
+    return facts
+
+
+def _record_outcomes(svc: SaveService) -> list[SaveDataFinishedPayload]:
+    outcomes: list[SaveDataFinishedPayload] = []
+    svc._bus.subscribe(  # type: ignore[attr-defined]
+        SaveDataFinishedPayload, outcomes.append
+    )
+    return outcomes
+
+
+def test_start_save_data_creates_parent_at_command_boundary(
+    qapp,
+    tmp_path: Path,  # noqa: ARG001
+) -> None:
+    svc, _, bg = _make_service()
+    facts = _record_facts(svc)
+    data_path = tmp_path / "data" / "measurement"
+
+    svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
+
+    assert data_path.parent.is_dir()
+    bg.submit.assert_called_once()
+    assert facts == [TabInteractionFact.SAVE_STARTED]
+
+
+def test_start_save_data_resolves_path_to_actual_hdf5(
+    qapp,
+    tmp_path: Path,  # noqa: ARG001
+) -> None:
+    # The path handed to the saver (and reported to the agent) is normalised up
+    # front to what actually lands on disk: .hdf5 extension + uniqueness suffix —
+    # not the caller's raw stem (Phase 130 follow-up: display matches reality).
+    svc, _, _ = _make_service()
+    data_path = tmp_path / "data" / "meas"  # no extension
+
+    returned = svc.start_save_data(SavePermit(tab_id="tab"), str(data_path))
+
+    # The path the saver actually writes (.hdf5 + uniqueness suffix) is resolved
+    # up front. The returned path and the reported _active_paths both reflect it
+    # (start_save_data returns it synchronously, so the RPC/agent gets it back
+    # immediately, not via a later diagnostic).
+    assert returned.endswith("meas_1.hdf5")
+    assert svc._active_paths["tab"] == returned
+
+
+def test_save_terminal_restores_agent_origin_without_operation_id(
+    qapp, tmp_path: Path
+) -> None:  # noqa: ARG001
+    svc, _state, bg = _make_service()
+    observed: list[EventMeta] = []
+    svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
+        TabInteractionChangedPayload,
+        lambda payload, meta: (
+            observed.append(meta)
+            if payload.fact is TabInteractionFact.SAVE_SUCCEEDED
+            else None
+        ),
+    )
+
+    with svc._bus.origin(EventOrigin(kind="agent", client_id="client-a")):  # type: ignore[attr-defined]
+        svc.start_save_data(SavePermit(tab_id="tab"), str(tmp_path / "save"))
+    on_done = bg.submit.call_args.kwargs["on_done"]
+    on_done(None)
+
+    assert observed == [
+        EventMeta(
+            seq=observed[0].seq,
+            origin=EventOrigin(kind="agent", client_id="client-a"),
+        )
+    ]
+
+
+def test_save_image_creates_parent_at_command_boundary(
+    qapp,
+    tmp_path: Path,  # noqa: ARG001
+) -> None:
+    svc, state, _ = _make_service()
+    figure = _make_figure()
+    state.get_tab("tab").analysis.figure = figure
+    image_path = tmp_path / "images" / "plot.png"
+
+    svc.save_image_sync(SavePermit(tab_id="tab"), str(image_path))
+
+    assert image_path.parent.is_dir()
+    _assert_saved_fixed_size(figure, str(image_path))
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    ("start_save_data", "save_image_sync", "save_post_image_sync"),
+)
+def test_save_entrypoints_reject_busy_tab_before_side_effects(
+    qapp,
+    tmp_path: Path,
+    entrypoint: str,
+) -> None:
+    svc, state, bg = _make_service()
+    figure = _make_figure()
+    tab = state.get_tab("tab")
+    tab.analysis.figure = figure
+    tab.post_analysis.figure = figure
+    state.set_tab_analyzing("tab", True)
+    permit = SavePermit(tab_id="tab")
+    data_path = str(tmp_path / "data" / "measurement")
+    image_path = str(tmp_path / "images" / "plot.png")
+
+    with pytest.raises(FailedPreconditionError, match="busy"):
+        if entrypoint == "start_save_data":
+            svc.start_save_data(permit, data_path)
+        elif entrypoint == "save_image_sync":
+            svc.save_image_sync(permit, image_path)
+        else:
+            svc.save_post_image_sync(permit, image_path)
+
+    bg.submit.assert_not_called()
+    figure.savefig.assert_not_called()
+    assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "images").exists()
+
+
+# ---------------------------------------------------------------------------
+# Save Data completion
+# ---------------------------------------------------------------------------
+
+
+def test_on_save_data_finished_emits_completion(qapp) -> None:  # noqa: ARG001
+    svc, _, _ = _make_service()
+    facts = _record_facts(svc)
+    permit = SavePermit(tab_id="tab")
+
+    finished = _record_outcomes(svc)
+
+    # Stage the active path as start_save_data would
+    svc.start_save_data(permit, "/tmp/data")
+    svc._on_save_data_finished("tab")
+
+    assert len(finished) == 1
+    assert finished[0].tab_id == "tab"
+    assert facts == [
+        TabInteractionFact.SAVE_STARTED,
+        TabInteractionFact.SAVE_SUCCEEDED,
+    ]
+
+
+# ---------------------------------------------------------------------------
+# _on_save_failed
+# ---------------------------------------------------------------------------
+
+
+def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
+    svc, _, _ = _make_service()
+    facts = _record_facts(svc)
+    permit = SavePermit(tab_id="tab")
+
+    failed = _record_outcomes(svc)
+
+    svc.start_save_data(permit, "/tmp/data")
+    error = OSError("write error")
+    svc._on_save_failed("tab", error)
+
+    assert len(failed) == 1
+    assert failed[0].tab_id == "tab"
+    assert failed[0].error == str(error)
+    assert facts == [
+        TabInteractionFact.SAVE_STARTED,
+        TabInteractionFact.SAVE_FAILED,
+    ]

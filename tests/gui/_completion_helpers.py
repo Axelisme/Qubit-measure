@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from zcu_tools.gui.app.main.events.completion import AnalyzeFailedPayload
-from zcu_tools.gui.app.main.events.tab import (
+from zcu_tools.gui.app.measure.events.completion import AnalyzeFailedPayload
+from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )

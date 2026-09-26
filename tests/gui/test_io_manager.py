@@ -10,7 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import ExpContext
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 

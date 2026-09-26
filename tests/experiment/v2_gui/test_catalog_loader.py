@@ -13,8 +13,8 @@ from types import ModuleType
 
 import pytest
 from zcu_tools.experiment.v2_gui.catalog_loader import SourceExperimentCatalogLoader
-from zcu_tools.gui.app.main.catalog import CatalogReloadError
-from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.measure.catalog import CatalogReloadError
+from zcu_tools.gui.app.measure.registry import Registry
 
 
 @dataclass
@@ -41,7 +41,7 @@ def source_catalog(
     files = {
         "__init__.py": "",
         "core.py": """
-            from zcu_tools.gui.app.main.adapter import ExpAdapterProtocol, AdapterCapabilities
+            from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, AdapterCapabilities
             class Base(ExpAdapterProtocol):
                 capabilities = AdapterCapabilities()
         """,
@@ -62,7 +62,7 @@ def source_catalog(
         "adapters/example.py": """
             from reload_fixture.core import Base
             from reload_fixture.domain import Experiment
-            from zcu_tools.gui.app.main.adapter import AdapterGuide
+            from zcu_tools.gui.app.measure.adapter import AdapterGuide
             class Adapter(Base):
                 @classmethod
                 def guide(cls):
@@ -144,7 +144,7 @@ def test_deferred_import_cannot_use_previous_bytecode(
         "adapters/example.py",
         """
         from reload_fixture.core import Base
-        from zcu_tools.gui.app.main.adapter import AdapterGuide
+        from zcu_tools.gui.app.measure.adapter import AdapterGuide
         class Adapter(Base):
             @classmethod
             def guide(cls):
@@ -182,7 +182,7 @@ def test_new_adapter_and_shared_helper(source_catalog: CatalogFixture) -> None:
         """
         from .example import Adapter
         from reload_fixture.domain.seed import LABEL
-        from zcu_tools.gui.app.main.adapter import AdapterGuide
+        from zcu_tools.gui.app.measure.adapter import AdapterGuide
         class NewAdapter(Adapter):
             @classmethod
             def guide(cls):

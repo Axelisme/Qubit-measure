@@ -64,7 +64,7 @@ type = forbidden
 source_modules =
     zcu_tools.gui.app.autofluxdep
 forbidden_modules =
-    zcu_tools.gui.app.main
+    zcu_tools.gui.app.measure
 
 # lib/zcu_tools/analysis/fluxdep/README.md: notebook and GUI are adapters of the
 # analysis kernel (formerly ADR-0028).

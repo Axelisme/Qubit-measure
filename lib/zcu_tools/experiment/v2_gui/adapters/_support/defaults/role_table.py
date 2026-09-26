@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
+from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
@@ -50,7 +50,7 @@ from .helpers import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
     from zcu_tools.gui.cfg import CfgSectionSpec
 
 _RefNode = ReferenceValue
@@ -241,7 +241,7 @@ def _nested_ref(role_id: str, ctx: ExpContext, *, optional: bool) -> _RefNode | 
 def _adopt_waveform(value: CfgSectionValue, ctx: ExpContext, name: str) -> None:
     """Adopt a library waveform into the pulse's ``waveform`` sub-ref when present
     (mirrors the readout factories' ro_waveform block)."""
-    from zcu_tools.gui.app.main.cfg_schemas import waveform_cfg_to_value
+    from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
 
     pulse_cfg = value.fields.get("pulse_cfg")
     if not isinstance(pulse_cfg, CfgSectionValue):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter.lowering import (
+from zcu_tools.gui.app.measure.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
 )

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.main.state import ExpContext, State
+from zcu_tools.gui.app.measure.state import ExpContext, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.predictor import (
     CalibrateFluxBiasRequest,

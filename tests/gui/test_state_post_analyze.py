@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.gui.app.main.state import Session, State
+from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,

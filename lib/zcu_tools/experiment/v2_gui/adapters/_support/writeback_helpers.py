@@ -14,15 +14,15 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.main.adapter import ModuleWriteback
-from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.measure.adapter import ModuleWriteback
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.program.v2.modules import PulseReadoutCfg
 
 from .ctx_helpers import md_get_float, md_has_key
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
 
 
 class _HasTestedReset(Protocol):

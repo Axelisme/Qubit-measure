@@ -26,7 +26,7 @@ from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_plugin import (
     make_flux_pick_plugin,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
@@ -37,10 +37,10 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
+from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.ui.interactive_frontend import (
+    from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )

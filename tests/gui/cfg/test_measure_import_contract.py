@@ -7,11 +7,11 @@ import importlib.util
 from pathlib import Path
 
 import zcu_tools.experiment.v2_gui.adapters._support.defaults as role_defaults
-import zcu_tools.gui.app.main.adapter as measure_adapter
+import zcu_tools.gui.app.measure.adapter as measure_adapter
 import zcu_tools.gui.cfg as shared_cfg
 
 _MEASURE_GENERIC_FACADES = (
-    "zcu_tools.gui.app.main.adapter",
+    "zcu_tools.gui.app.measure.adapter",
     "zcu_tools.experiment.v2_gui.adapters._support.defaults",
 )
 

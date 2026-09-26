@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
-from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
-from zcu_tools.gui.app.main.specs import MAIN_PROGRAM_SPEC_POLICY
+from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
+from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import CfgSectionSpec, LiteralSpec
 from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 

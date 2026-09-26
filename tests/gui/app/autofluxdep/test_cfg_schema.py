@@ -9,7 +9,7 @@ Three families of test:
    production. Tests assert invariants and derive expected values from production
    schemas/helpers instead of duplicating default tables.
 3. **Seam invariant** — only ``cfg/form.py`` may import
-   ``zcu_tools.gui.app.main`` from inside the autofluxdep package.
+   ``zcu_tools.gui.app.measure`` from inside the autofluxdep package.
 """
 
 from __future__ import annotations
@@ -2710,7 +2710,7 @@ def test_autoflux_measure_app_imports_are_zero():
             elif isinstance(node, ast.Import):
                 modules.extend(alias.name for alias in node.names)
             for module in modules:
-                if not module.startswith("zcu_tools.gui.app.main"):
+                if not module.startswith("zcu_tools.gui.app.measure"):
                     continue
                 actual.setdefault(py, set()).add(module)
 

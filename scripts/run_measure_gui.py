@@ -67,8 +67,8 @@ def _build_measure_catalogs():
     # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
     # into the GUI framework. The behavior receives a factory, so these imports
     # happen after runtime logging and matplotlib policy setup.
-    from zcu_tools.gui.app.main.registry import Registry
-    from zcu_tools.gui.app.main.role_catalog import RoleCatalog
+    from zcu_tools.gui.app.measure.registry import Registry
+    from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 
     registry = Registry()
     register_all(registry)
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     # under scripts/.
     project_root = str(PROJECT_ROOT)
 
-    from zcu_tools.gui.app.main.app import MeasureGuiBehavior
+    from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
     return launch_gui_runtime(

@@ -1,6 +1,6 @@
 """Safe numeric expression evaluation for GUI scalar eval fields.
 
-Moved from gui.app.main.expression to the session layer so that both the
+Moved from gui.app.measure.expression to the session layer so that both the
 cfg-editor (app/main) and the device dialog (session/ui) can share the same
 evaluator without creating a session→app upward dependency.
 """

@@ -13,11 +13,11 @@ import time
 from pathlib import Path
 
 import pytest
-from zcu_tools.gui.app.main.services.caretaker import (
+from zcu_tools.gui.app.measure.services.caretaker import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
-from zcu_tools.gui.app.main.services.persistence_types import AppPersistedState
-from zcu_tools.gui.app.main.services.ports import RestoreReport
+from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState
+from zcu_tools.gui.app.measure.services.ports import RestoreReport
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.operation_handles import (
@@ -83,7 +83,7 @@ def test_caretaker_load_failure_logs_warning(tmp_path: Path, caplog) -> None:
     caretaker = PersistenceCaretaker(_Originator(), cache_dir=tmp_path)
     caretaker.state_path.write_text("{ not json", encoding="utf-8")
     with caplog.at_level(
-        logging.WARNING, logger="zcu_tools.gui.app.main.services.caretaker"
+        logging.WARNING, logger="zcu_tools.gui.app.measure.services.caretaker"
     ):
         caretaker.restore_all(load=True)
     warnings = [r for r in caplog.records if "persistence load failed" in r.message]

@@ -210,7 +210,7 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 `tests/experiment/v2_gui/adapters/_support/test_schema_builder.py`鎖定context-free
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
-`tests/gui/app/main/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
+`tests/gui/app/measure/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
 adapter definition 可重複 instantiate；registry 數量與 static spec 宣告直接審閱。
 
 Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷史 Phase 切檔。
@@ -236,13 +236,13 @@ late subscribe不補收舊event，以及slow-client drop budget不阻塞healthy 
 remote EventBus與cfg-editor focused tests另鎖serializer/current-path/encode lazy cost、failure logging、
 `editor_closed` delivery cleanup；diagnostic測試確認fault channel仍不受subscription gate影響。
 
-`tests/gui/app/main/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
+`tests/gui/app/measure/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
 完整call sequence、zero-reaction local edits與lazy單次snapshot；service與真實UI測試覆蓋
 run去重、analysis start-rejected/failure/cancel retained-figure restore、load stale-canvas clear、
 same-class form hydrate/cache，以及ModuleLibrary變更透過attached cfg draft更新run gate。
 
 `tests/gui/test_expected_error.py`鎖定closed category、legacy RuntimeError/ValueError ancestry與
-explicit concrete opt-in/exclusion；`tests/gui/app/main/services/remote/test_expected_error_wire_compat.py`
+explicit concrete opt-in/exclusion；`tests/gui/app/measure/services/remote/test_expected_error_wire_compat.py`
 以exact `(code, message, reason, data)` tuple鎖定既有handler projection，並證
 `ResultScopeError`分類不依賴reason prefix。
 
@@ -256,7 +256,7 @@ invariant failure不被降級；unexpected dispatch測試另確認controller err
 `tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
 view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
-`tests/gui/app/main/services/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
+`tests/gui/app/measure/services/remote/test_remote_mcp_toolchain.py`保留GUI startup/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
 Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
 script flags 用直接 review，不納入 pytest。
@@ -406,15 +406,15 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 
 ### GUI analyze params 測試
 
-`tests/gui/app/main/adapter/test_analyze_params.py` 覆蓋 dataclass-based analyze params helper；`tests/gui/app/main/ui/test_analyze_form.py` 覆蓋 `AnalyzeFormWidget` 的 dataclass round-trip、hydrate 不 emit、使用者編輯 emit instance。新增 GUI adapter 測試時，analysis 參數應直接使用 adapter 回傳的 params dataclass instance，不要組 raw dict 或假設 `get_analyze_params()` 可迭代。
+`tests/gui/app/measure/adapter/test_analyze_params.py` 覆蓋 dataclass-based analyze params helper；`tests/gui/app/measure/ui/test_analyze_form.py` 覆蓋 `AnalyzeFormWidget` 的 dataclass round-trip、hydrate 不 emit、使用者編輯 emit instance。新增 GUI adapter 測試時，analysis 參數應直接使用 adapter 回傳的 params dataclass instance，不要組 raw dict 或假設 `get_analyze_params()` 可迭代。
 
 ### measure-gui canonical result load 測試
 
 load-result feature 的 targeted tests 分散在對應 ownership：
 `tests/experiment/v2_gui/adapters/test_base_load.py` 鎖 adapter default load contract；
-`tests/gui/app/main/services/test_load.py` 鎖 state invalidation / version bump；
-`tests/gui/app/main/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
-`tests/gui/app/main/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
+`tests/gui/app/measure/services/test_load.py` 鎖 state invalidation / version bump；
+`tests/gui/app/measure/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
+`tests/gui/app/measure/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。
 `tests/mcp/measure/`覆蓋operation handle與RPC timeout policy：bounded
 GUI handler timeout應回傳狀態，transport timeout應被視為連線異常。
 

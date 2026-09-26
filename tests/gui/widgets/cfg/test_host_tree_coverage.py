@@ -35,11 +35,11 @@ def _fake_ctrl():
 
 def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     """measure-gui Run renders through sole tree."""
-    import zcu_tools.gui.app.main.ui.exp_tab_widget as mod
+    import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
-    from zcu_tools.gui.app.main.services.ports import (
+    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.measure.services import PersistedStartup, TabSnapshot
+    from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
         PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
@@ -47,8 +47,8 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
         SavePaneSnapshot,
         TabPathsSnapshot,
     )
-    from zcu_tools.gui.app.main.state import TabInteractionState
-    from zcu_tools.gui.app.main.ui.exp_tab_widget import ExpTabWidget
+    from zcu_tools.gui.app.measure.state import TabInteractionState
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 
     # stub _populate_cfg to avoid needing real cfg editor service
     orig = mod.ExpTabWidget._populate_cfg
@@ -134,7 +134,7 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     tab = ExpTabWidget("t1", ctrl, caps)
     tab.attach(snap, MagicMock())
     # Need to populate a real cfg to verify tree – attach a draft directly to cfg_form
-    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.cfg import CfgSchema as CS
 
     ctrl2 = _fake_ctrl()
@@ -179,9 +179,9 @@ def test_autofluxdep_default_and_generation_use_sole_tree(qapp):
 
 def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
     """writeback module/waveform Edit dialog CfgFormWidget is sole tree."""
-    from zcu_tools.gui.app.main.adapter import ModuleWriteback
-    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.main.ui.writeback_widget import WritebackWidget
+    from zcu_tools.gui.app.measure.adapter import ModuleWriteback
+    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
     from zcu_tools.gui.cfg import (
         CfgSectionSpec,
         CfgSectionValue,
@@ -214,7 +214,7 @@ def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
 
 def test_module_library_cfg_form_uses_sole_tree(qapp, monkeypatch):
     """ModuleLibrary cfg forms use the shared tree widget."""
-    from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.cfg import (
         CfgSectionSpec,
         CfgSectionValue,

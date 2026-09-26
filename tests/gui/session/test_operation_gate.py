@@ -18,10 +18,10 @@ from zcu_tools.gui.app.autofluxdep.operation_gate import (
 from zcu_tools.gui.app.autofluxdep.operation_gate import (
     OperationKind as AutoFluxDepOpKind,
 )
-from zcu_tools.gui.app.main.services.operation_gate import (
+from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate as MeasureOperationGate,
 )
-from zcu_tools.gui.app.main.services.operation_gate import (
+from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind as MeasureOpKind,
 )
 from zcu_tools.gui.event_bus import BaseEventBus

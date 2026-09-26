@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from matplotlib.figure import Figure
 
-from zcu_tools.gui.app.main.adapter import AnalyzeResultBase
+from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+    from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 
 _FigureOnlyT = TypeVar("_FigureOnlyT", bound="FigureOnlyAnalyzeResult")
 

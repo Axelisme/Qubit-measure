@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import (
     SsLenRabiAdapter,
     SsLenRabiAnalyzeParams,
 )
-from zcu_tools.gui.app.main.adapter import AnalyzeRequest
+from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 
 
 def test_amp_analysis_has_no_decay_option() -> None:

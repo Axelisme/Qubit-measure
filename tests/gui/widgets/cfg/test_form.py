@@ -6,8 +6,8 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -113,7 +113,7 @@ def _registry_with_factories(
 
 
 def _make_ctx():
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
 
     return ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
 
@@ -437,7 +437,9 @@ def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
 
 def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
+    from zcu_tools.gui.app.measure.ui.cfg_binding import (
+        make_value_source_input_enhancer,
+    )
     from zcu_tools.gui.session.value_lookup import ValueInfo
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
@@ -1896,7 +1898,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     ml.modules["my_pulse"] = cast(Any, {"type": "readout/direct", "ro_freq": 7000.0})
     ctrl.get_current_ml.return_value = ml
 
-    from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 
     lib_spec, lib_val = module_cfg_to_value(
         {"type": "readout/direct", "ro_freq": 7000.0}
@@ -2144,7 +2146,7 @@ def _ref_item(root, path: str):
 
 def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
     """A1: library refs start collapsed, custom refs start expanded."""
-    from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
     from zcu_tools.resources.context import ModuleLibrary
@@ -2187,7 +2189,7 @@ def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
 
 def test_reference_identity_change_reapplies_folding(qapp, ctrl):
     """A1: changing reference identity reapplies library/custom folding policy."""
-    from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
+    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget

@@ -10,7 +10,7 @@ from zcu_tools.gui.cfg import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.main.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import ExpContext
 
 
 def md_get_float(ctx: ExpContext, key: str, default: float) -> float:

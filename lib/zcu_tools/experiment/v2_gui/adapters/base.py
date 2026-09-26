@@ -7,7 +7,7 @@ from inspect import signature
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
 from zcu_tools.experiment.cfg_assembler import make_cfg
-from zcu_tools.gui.app.main.adapter import (
+from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
@@ -30,11 +30,11 @@ from zcu_tools.gui.app.main.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import (
+from zcu_tools.gui.app.measure.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
 )
-from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
+from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.v2_gui.adapters._support.schema_builder import (
         MeasureCfgDefinition,
     )
-    from zcu_tools.gui.app.main.ui.interactive_frontend import (
+    from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
@@ -105,7 +105,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     ``capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`` so the
     framework never routes analysis to them.
 
-    Structurally satisfies ``zcu_tools.gui.app.main.adapter.ExpAdapterProtocol``; the GUI
+    Structurally satisfies ``zcu_tools.gui.app.measure.adapter.ExpAdapterProtocol``; the GUI
     holds adapters only through that generic-free Protocol.
     """
 

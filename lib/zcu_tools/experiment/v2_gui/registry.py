@@ -1,6 +1,6 @@
 """Explicit, reloadable experiment catalog; startup roles live in role_registry."""
 
-from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.measure.registry import Registry
 
 from .adapters.fake.freq import FakeFreqAdapter
 from .adapters.jpa import (

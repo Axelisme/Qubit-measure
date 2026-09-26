@@ -1,6 +1,6 @@
 """Tests for the autofluxdep-gui startup dialog auto-open.
 
-Mirrors the behaviour in ``zcu_tools.gui.app.main.app._show_startup_dialog``:
+Mirrors the behaviour in ``zcu_tools.gui.app.measure.app._show_startup_dialog``:
 on first launch the setup dialog is opened non-modally with ``startup_mode=True``
 so the user is immediately prompted to configure the project/connection.
 """

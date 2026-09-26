@@ -124,7 +124,7 @@ def _is_main_window(value: object) -> TypeGuard[MainWindow]:
 def _show_startup_dialog(parent: MainWindow) -> None:
     """Open the setup dialog non-modally on first launch.
 
-    Mirrors ``zcu_tools.gui.app.main.app._show_startup_dialog``.  Non-modal is
+    Mirrors ``zcu_tools.gui.app.measure.app._show_startup_dialog``.  Non-modal is
     required so the Qt event loop keeps pumping while the dialog is visible —
     this lets background session operations (mock-soc connect, device setup)
     complete without deadlocking.

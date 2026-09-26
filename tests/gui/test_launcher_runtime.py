@@ -38,7 +38,7 @@ def test_launcher_module_is_import_light() -> None:
             "    'PySide6',",
             "    'PyQt5',",
             "    'matplotlib',",
-            "    'zcu_tools.gui.app.main.app',",
+            "    'zcu_tools.gui.app.measure.app',",
             "    'zcu_tools.gui.app.autofluxdep.app',",
             "    'zcu_tools.gui.app.fluxdep.app',",
             "    'zcu_tools.gui.app.dispersive.app',",
@@ -60,7 +60,7 @@ def test_launcher_module_is_import_light() -> None:
 @pytest.mark.parametrize(
     ("module_name", "behavior_name"),
     [
-        ("zcu_tools.gui.app.main.app", "MeasureGuiBehavior"),
+        ("zcu_tools.gui.app.measure.app", "MeasureGuiBehavior"),
         ("zcu_tools.gui.app.autofluxdep.app", "AutoFluxDepGuiBehavior"),
         ("zcu_tools.gui.app.fluxdep.app", "FluxDepGuiBehavior"),
         ("zcu_tools.gui.app.dispersive.app", "DispersiveGuiBehavior"),

@@ -14,7 +14,7 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     scaled_md,
     value_source,
 )
-from zcu_tools.gui.app.main.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import ExpContext
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,

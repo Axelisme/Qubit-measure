@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from matplotlib.figure import Figure
 
-from zcu_tools.gui.app.main.adapter import AnalyzeResultBase
+from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
 
 
 @dataclass

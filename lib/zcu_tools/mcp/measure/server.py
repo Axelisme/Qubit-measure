@@ -55,10 +55,10 @@ _BOOTSTRAP["bootstrap_standalone_server"](
 # (``python .../mcp_server.py`` per .mcp.json), so it has no parent package and a
 # relative import would fail with "attempted relative import with no known
 # parent package". The sys.path insert above makes the absolute path resolvable.
-from zcu_tools.gui.app.main.services.remote.method_specs import (  # noqa: E402
+from zcu_tools.gui.app.measure.services.remote.method_specs import (  # noqa: E402
     METHOD_SPECS,
 )
-from zcu_tools.gui.app.main.services.remote.wire_version import (  # noqa: E402
+from zcu_tools.gui.app.measure.services.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 from zcu_tools.mcp.core.bridge import (  # noqa: E402
