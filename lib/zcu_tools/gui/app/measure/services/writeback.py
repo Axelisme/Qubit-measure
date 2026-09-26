@@ -405,14 +405,14 @@ class WritebackService:
     # ------------------------------------------------------------------
 
     def _snapshot_context(self) -> Any | None:
-        """Best-effort read of the live destination ExpContext.
+        """Best-effort read of the live destination SessionEnv.
 
         In production ``_write`` is the Controller, which exposes
-        ``get_exp_context``. In tests it is a MagicMock, so we probe
+        ``get_session_env``. In tests it is a MagicMock, so we probe
         defensively and return None when unavailable — the draft remains
         usable with fallback summaries.
         """
-        for attr in ("get_exp_context",):
+        for attr in ("get_session_env",):
             if hasattr(self._write, attr):
                 try:
                     getter = getattr(self._write, attr)

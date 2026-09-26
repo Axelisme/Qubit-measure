@@ -57,7 +57,7 @@ def test_ro_optimize_acquire_finds_best_point():
     ctrl = build_core()
     sim_params = high_snr_simparams(20_000.0)
     connect_mock(ctrl, sim_params=sim_params)
-    ml = ctrl.state.exp_context.ml
+    ml = ctrl.state.session_env.ml
     pi_pulse = _pi_pulse(ml, sim_params)
 
     builder = RoOptimizeBuilder()
@@ -97,7 +97,7 @@ def test_ro_optimize_acquire_leaves_cooperative_stop_to_schedule(monkeypatch):
     ctrl = build_core()
     sim_params = high_snr_simparams()
     connect_mock(ctrl, sim_params=sim_params)
-    ml = ctrl.state.exp_context.ml
+    ml = ctrl.state.session_env.ml
     pi_pulse = _pi_pulse(ml, sim_params)
 
     captured: dict[str, object] = {}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
@@ -17,7 +17,7 @@ from zcu_tools.gui.app.measure.state import (
 
 def test_tab_snapshot_is_single_pure_render_model() -> None:
     state = State(
-        ExpContext(
+        SessionEnv(
             md=MagicMock(),
             ml=MagicMock(),
             soc=MagicMock(),
@@ -126,7 +126,7 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
 
 def _active_state() -> State:
     return State(
-        ExpContext(
+        SessionEnv(
             md=MagicMock(),
             ml=MagicMock(),
             soc=MagicMock(),

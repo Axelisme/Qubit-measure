@@ -21,10 +21,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
+    SessionEnv,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
@@ -163,5 +163,5 @@ class FakeAdapter(
             )
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.res_name}_fake"

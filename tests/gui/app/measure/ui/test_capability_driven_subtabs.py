@@ -309,10 +309,10 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     # Busy tab cannot be closed
     from zcu_tools.gui.app.measure.state import Session, State
     from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    exp_ctx = ExpContext(
+    exp_ctx = SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),
         soc=MagicMock(),
@@ -621,7 +621,7 @@ def test_render_host_routes_to_correct_pane_container(qapp):
     state.get_tab.return_value = MagicMock(
         adapter=MagicMock(capabilities=MagicMock(analysis=AnalysisMode.FIT))
     )
-    state.exp_context = MagicMock(md=MagicMock(), ml=MagicMock(), predictor=None)
+    state.session_env = MagicMock(md=MagicMock(), ml=MagicMock(), predictor=None)
     guard = MagicMock()
     guard.acquire_run_permit.return_value = MagicMock(
         tab_id="tab-1", adapter=MagicMock(), request=MagicMock(), schema=MagicMock()

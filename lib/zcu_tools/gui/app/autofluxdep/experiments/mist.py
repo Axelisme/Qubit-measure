@@ -53,7 +53,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import ModuleDep
 from zcu_tools.gui.cfg import EvalValue, SweepValue
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -210,7 +210,7 @@ class MistBuilder(Builder):
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Default cfg for the MIST power sweep."""
         relax_delay_default: float | EvalValue = 30.5
-        if isinstance(ctx, ExpContext) and ctx.md.get("t1") is not None:
+        if isinstance(ctx, SessionEnv) and ctx.md.get("t1") is not None:
             relax_delay_default = EvalValue("5.0 * t1")
 
         return (

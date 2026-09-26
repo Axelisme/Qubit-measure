@@ -28,12 +28,12 @@ from typing import TYPE_CHECKING, Literal
 from .role_table import ROLE_TABLE, RoleDef, role_blank, role_ref
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceValue
 
 # A blank factory always produces a value (never None); a ref factory's optional
 # path may return None (the disabled-optional ref, ADR-0010).
-BlankFactory = Callable[["ExpContext"], "ReferenceValue"]
+BlankFactory = Callable[["SessionEnv"], "ReferenceValue"]
 RefFactory = Callable[..., "ReferenceValue | None"]
 
 
@@ -59,14 +59,14 @@ def _from_role(role: RoleDef) -> RoleFactorySpec:
 
     kind: Literal["module", "waveform"] = "waveform" if role.is_waveform else "module"
 
-    def blank(ctx: ExpContext, _role: RoleDef = role) -> ReferenceValue:
+    def blank(ctx: SessionEnv, _role: RoleDef = role) -> ReferenceValue:
         return role_blank(_role, ctx)
 
     if role.lib is None:
         return RoleFactorySpec(kind=kind, shape=role.shape, blank=blank)
 
     def ref(
-        ctx: ExpContext, *, optional: bool = False, _role: RoleDef = role
+        ctx: SessionEnv, *, optional: bool = False, _role: RoleDef = role
     ) -> ReferenceValue | None:
         return role_ref(_role, ctx, optional=optional)
 

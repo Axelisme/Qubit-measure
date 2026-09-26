@@ -21,8 +21,8 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     NoAnalyzeParams,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -142,5 +142,5 @@ class BathLengthAdapter(
         items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_bathreset_len_{time.strftime('%m%d')}"

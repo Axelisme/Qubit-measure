@@ -38,7 +38,7 @@ from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind,
 )
 from zcu_tools.gui.app.measure.services.run import RunService
-from zcu_tools.gui.app.measure.state import ExpContext, Session, State
+from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -67,7 +67,7 @@ def _empty_schema() -> CfgSchema:
 def _make_state() -> tuple[State, str, MagicMock]:
     md = MagicMock()
     ml = MagicMock()
-    state = State(ExpContext(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock()))
+    state = State(SessionEnv(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock()))
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(requires_soc=True)
@@ -79,7 +79,7 @@ def _make_state() -> tuple[State, str, MagicMock]:
 
 
 def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
-    ctx = state.exp_context
+    ctx = state.session_env
     return RunPermit(
         tab_id=tab_id,
         adapter_name=state.get_tab(tab_id).adapter_name,

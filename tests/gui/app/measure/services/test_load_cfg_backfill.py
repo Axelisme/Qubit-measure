@@ -15,7 +15,7 @@ from zcu_tools.gui.app.measure.services.cfg_editor import (
 )
 from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
-from zcu_tools.gui.app.measure.state import ExpContext, Session, State
+from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -48,7 +48,7 @@ def app():
     host.get_current_ml.return_value = None
     host.list_device_names.return_value = []
     host.list_arb_waveforms.return_value = []
-    state = State(ExpContext(md=MagicMock(), ml=ModuleLibrary(), soc=None, soccfg=None))
+    state = State(SessionEnv(md=MagicMock(), ml=ModuleLibrary(), soc=None, soccfg=None))
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
@@ -176,7 +176,7 @@ def device_app():
     host.get_current_ml.return_value = None
     host.list_device_names.return_value = ["stable"]
     host.list_arb_waveforms.return_value = []
-    state = State(ExpContext(md=MagicMock(), ml=ModuleLibrary(), soc=None, soccfg=None))
+    state = State(SessionEnv(md=MagicMock(), ml=ModuleLibrary(), soc=None, soccfg=None))
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={

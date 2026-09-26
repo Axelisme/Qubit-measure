@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
-from zcu_tools.gui.app.measure.state import ExpContext, State
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.services.context import ContextService, MdValueError
 from zcu_tools.gui.session.services.io_manager import IOManager
@@ -16,7 +16,7 @@ from zcu_tools.resources.context import MetaDict, ModuleLibrary
 def _make_svc(md: MetaDict | None = None) -> ContextService:
     md = md if md is not None else MetaDict()
     state = State(
-        ExpContext(
+        SessionEnv(
             md=md,
             ml=ModuleLibrary(),
             soc=None,
@@ -83,7 +83,7 @@ def test_coerce_existing_key_unknown_type_rejected():
 
 def test_coerce_no_context_falls_back_to_new_key_path():
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     # No startup context — service should treat key as new and accept scalars.
     svc = ContextService(state, IOManager(), EventBus())

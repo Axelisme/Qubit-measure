@@ -10,11 +10,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 
-def _make_base_ctx(**overrides) -> ExpContext:
+def _make_base_ctx(**overrides) -> SessionEnv:
     defaults = dict(
         md=MagicMock(),
         ml=MagicMock(),
@@ -24,7 +24,7 @@ def _make_base_ctx(**overrides) -> ExpContext:
         predictor=None,
     )
     defaults.update(overrides)
-    return ExpContext(**defaults)  # type: ignore[arg-type]
+    return SessionEnv(**defaults)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

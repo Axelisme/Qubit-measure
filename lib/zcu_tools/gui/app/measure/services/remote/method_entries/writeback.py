@@ -23,7 +23,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "with closed values analysis|post_analysis. Returns "
             "{has_draft, items, destination_context}; has_draft is false before any "
             "analyze produced a draft; destination_context is the current active "
-            "ExpContext projection at reply time. Each item: id "
+            "SessionEnv projection at reply time. Each item: id "
             "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
             "kind (metadict|module|waveform), description, selected; metadict adds "
             "proposed_value; module/waveform add has_edit_schema, and "
@@ -97,7 +97,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "
             "context_version is the bumped 'context' resource version after apply (use "
             "it as an expected_versions guard on a follow-up write); "
-            "destination_context is the active ExpContext projection at reply time.",
+            "destination_context is the active SessionEnv projection at reply time.",
             (
                 _str("tab_id"),
                 _str("subtab_id", "Pane: analysis|post_analysis"),

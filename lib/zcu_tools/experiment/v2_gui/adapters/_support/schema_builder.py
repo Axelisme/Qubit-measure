@@ -42,7 +42,7 @@ from .spec_helpers import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
 ModuleOverrideInput = ScalarLeafInput | Seed[ScalarLeafInput]
 
@@ -85,7 +85,7 @@ class MeasureCfgDefinition:
 
         return deepcopy(self._spec)
 
-    def instantiate(self, ctx: ExpContext) -> CfgSchema:
+    def instantiate(self, ctx: SessionEnv) -> CfgSchema:
         """Materialize defaults against ``ctx`` without changing the shape."""
 
         assembler = CfgSchemaAssembler(
@@ -470,7 +470,7 @@ class MeasureCfgBuilder:
         for relative_path, value in locks:
             spec = spec.lock_literal(relative_path, value)
 
-        def resolve(ctx: ExpContext) -> ReferenceValue | None:
+        def resolve(ctx: SessionEnv) -> ReferenceValue | None:
             return _materialize_module(
                 ctx,
                 cfg_path=f"modules.{name}",
@@ -507,7 +507,7 @@ class MeasureCfgBuilder:
 
 
 def _materialize_module(
-    ctx: ExpContext,
+    ctx: SessionEnv,
     *,
     cfg_path: str,
     role_id: str,

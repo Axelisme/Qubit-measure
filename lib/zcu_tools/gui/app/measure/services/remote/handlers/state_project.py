@@ -69,7 +69,7 @@ def _h_project_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Project identity (the chip / qubit / resonator names + their output roots).
-    # It lives only on the in-process ExpContext, so this is the sole wire query
+    # It lives only on the in-process SessionEnv, so this is the sole wire query
     # that exposes it — _assemble_overview folds {chip, qub, res} from here. The
     # res_name field is measure-specific (the other GUIs' shared project.info
     # carries only chip/qub/result_dir/database_path).
@@ -80,7 +80,7 @@ def _h_project_info(
             "No project applied yet; apply a project first (gui_project_apply).",
             reason="no_project",
         )
-    ctx = adapter.ctrl.get_exp_context()
+    ctx = adapter.ctrl.get_session_env()
     return {
         "chip_name": ctx.chip_name,
         "qub_name": ctx.qub_name,

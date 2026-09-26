@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
 
     from .persistence_types import AppPersistedState
 
@@ -355,7 +355,7 @@ class TabAnalyzeReadPort(Protocol):
     """
 
     @property
-    def exp_context(self) -> ExpContext: ...
+    def session_env(self) -> SessionEnv: ...
 
     def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]: ...
 

@@ -122,7 +122,7 @@ class SaveService:
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         req = SaveDataRequest(
             run_result=tab.run.result,
             data_path=data_path,

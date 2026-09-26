@@ -87,7 +87,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, Node, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep, Need
 from zcu_tools.gui.cfg import SweepValue
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -445,7 +445,7 @@ class LenRabiBuilder(Builder):
         sweep_stop_factor = 5.0
 
         qub_ch = 0
-        if isinstance(ctx, ExpContext):
+        if isinstance(ctx, SessionEnv):
             value = ctx.md.get("qub_ch")
             if isinstance(value, int) and not isinstance(value, bool):
                 qub_ch = value

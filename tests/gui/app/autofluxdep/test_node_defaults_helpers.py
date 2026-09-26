@@ -30,7 +30,7 @@ from zcu_tools.gui.app.autofluxdep.experiments._support.utils.timing import (
     pop_sweep_ranges,
 )
 from zcu_tools.gui.cfg import SweepValue
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import ModuleCfgFactory, PulseCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -101,7 +101,7 @@ def test_snapshot_and_fixed_sweep_helpers():
 def test_seed_helpers_use_md_or_fallback():
     md = MetaDict()
     md.update({"t1": 12.5, "r_f": 6123.0})
-    ctx = ExpContext(md=md, ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=md, ml=ModuleLibrary(), soc=None, soccfg=None)
 
     assert seed_md_float(ctx, "t1", 10.0) == 12.5
     assert seed_md_float(ctx, "missing", 10.0) == 10.0

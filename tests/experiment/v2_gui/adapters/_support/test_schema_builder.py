@@ -14,7 +14,7 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     scaled_md,
     value_source,
 )
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
@@ -41,7 +41,7 @@ def _ctx(
     md = MetaDict()
     for key, value in (md_values or {}).items():
         setattr(md, key, value)
-    return ExpContext(
+    return SessionEnv(
         md=md,
         ml=ml if ml is not None else ModuleLibrary(),
         soc=None,
@@ -220,7 +220,7 @@ def _exception_notes(exc: BaseException) -> str:
 
 
 def test_custom_seed_failure_identifies_cfg_path_and_seed() -> None:
-    def fail(_ctx: ExpContext) -> float:
+    def fail(_ctx: SessionEnv) -> float:
         raise ValueError("broken custom resolver")
 
     definition = (
@@ -264,7 +264,7 @@ def test_missing_value_source_identifies_cfg_path_and_seed() -> None:
 
 
 def test_module_override_failure_identifies_module_path_and_seed() -> None:
-    def fail(_ctx: ExpContext) -> float:
+    def fail(_ctx: SessionEnv) -> float:
         raise RuntimeError("broken module override")
 
     definition = (

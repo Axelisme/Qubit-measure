@@ -20,7 +20,7 @@ from zcu_tools.gui.runtime import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.registry import Registry
@@ -34,12 +34,12 @@ RegistryFactory = Callable[
 ]
 
 
-def _make_empty_ctx() -> ExpContext:
+def _make_empty_ctx() -> SessionEnv:
     """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    return ExpContext(
+    return SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),
         soc=None,

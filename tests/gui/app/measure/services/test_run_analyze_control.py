@@ -38,7 +38,7 @@ class RecordingState:
         self._log = log
         self._busy = busy
         self.running_tab_id: str | None = "running-tab"
-        self.exp_context = SimpleNamespace(md="md", ml="ml", predictor="predictor")
+        self.session_env = SimpleNamespace(md="md", ml="ml", predictor="predictor")
         self.tab = SimpleNamespace(
             adapter=RecordingAdapter(log, analysis=analysis),
             run=SimpleNamespace(result="run-result"),

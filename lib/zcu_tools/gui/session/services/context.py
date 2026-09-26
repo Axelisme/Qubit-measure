@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.ports import ProjectIOPort
     from zcu_tools.gui.session.state import SessionState
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
 
 
 class MlEntryValidationError(InvalidInputError):
@@ -146,13 +146,13 @@ class ContextService:
         self._state = state
         self._io = io_manager
         self._bus = bus
-        self._values = values or state.exp_context.values
-        if state.exp_context.values is not self._values:
+        self._values = values or state.session_env.values
+        if state.session_env.values is not self._values:
             # Pure facade injection: this preserves set_context's "no content bump"
             # semantics because md/ml are unchanged.
-            self._state.set_context(self._attach_values(state.exp_context))
+            self._state.set_context(self._attach_values(state.session_env))
 
-    def _attach_values(self, ctx: ExpContext) -> ExpContext:
+    def _attach_values(self, ctx: SessionEnv) -> SessionEnv:
         if ctx.values is self._values:
             return ctx
         return dataclasses.replace(ctx, values=self._values)
@@ -162,14 +162,14 @@ class ContextService:
 
     def has_context(self) -> bool:
         """True when any valid context exists (startup DRAFT or file-backed ACTIVE)."""
-        return self._state.exp_context.has_context()
+        return self._state.session_env.has_context()
 
     def has_startup_context(self) -> bool:
-        return self._state.exp_context.is_draft()
+        return self._state.session_env.is_draft()
 
     def is_active_context(self) -> bool:
         """True only for a file-backed context eligible for run and save."""
-        return self._state.exp_context.is_active()
+        return self._state.session_env.is_active()
 
     def get_active_context_label(self) -> str | None:
         return self._io.get_active_label()
@@ -178,14 +178,14 @@ class ContextService:
         return self._io.list_contexts()
 
     def get_current_md(self) -> MetaDict:
-        return self._state.exp_context.md
+        return self._state.session_env.md
 
     def get_current_ml(self) -> ModuleLibrary:
-        return self._state.exp_context.ml
+        return self._state.session_env.ml
 
-    def get_exp_context(self) -> ExpContext:
-        """The live ExpContext (md + ml + …) — used to seed role templates."""
-        return self._state.exp_context
+    def get_session_env(self) -> SessionEnv:
+        """The live SessionEnv (md + ml + …) — used to seed role templates."""
+        return self._state.session_env
 
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._values.describe()
@@ -206,7 +206,7 @@ class ContextService:
     def get_flux_dir(self) -> str | None:
         import os
 
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         label = self._io.get_active_label()
         if ctx.result_dir and label:
             return os.path.join(ctx.result_dir, "exps", label)
@@ -236,7 +236,7 @@ class ContextService:
         )
         new_ctx = self._attach_values(
             dataclasses.replace(
-                self._state.exp_context,
+                self._state.session_env,
                 md=md,
                 ml=ml,
                 chip_name=chip_name,
@@ -259,7 +259,7 @@ class ContextService:
 
     def use_context(self, label: str) -> None:
         logger.info("use_context: label=%r", label)
-        new_ctx = self._io.use_context(label, self._state.exp_context)
+        new_ctx = self._io.use_context(label, self._state.session_env)
         new_ctx = self._attach_values(
             dataclasses.replace(
                 new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
@@ -281,7 +281,7 @@ class ContextService:
             "new_context: value=%r unit=%r clone_from=%r", value, unit, clone_from
         )
         new_ctx = self._io.new_context(
-            self._state.exp_context,
+            self._state.session_env,
             value=value,
             unit=unit,
             clone_from=clone_from,
@@ -307,7 +307,7 @@ class ContextService:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
         _validate_md_key(key)
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         snapshot = dict(md.items())
         if key in snapshot:
             raise FailedPreconditionError(f"MetaDict already has attribute {key!r}.")
@@ -322,7 +322,7 @@ class ContextService:
             raise FailedPreconditionError("No experiment context.")
         _validate_md_key(old)
         _validate_md_key(new)
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         snapshot = dict(md.items())
         if old not in snapshot:
             raise FailedPreconditionError(f"MetaDict has no attribute {old!r}.")
@@ -336,7 +336,7 @@ class ContextService:
     def set_md_attr(self, key: str, value: Any) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         setattr(md, key, value)
         # Semantic context content change: bump so concurrency guards on
         # ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detect this edit.
@@ -356,7 +356,7 @@ class ContextService:
     def del_md_attr(self, key: str) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        md = self._state.exp_context.md
+        md = self._state.session_env.md
         try:
             delattr(md, key)
         except AttributeError as exc:
@@ -399,7 +399,7 @@ class ContextService:
         lowering callback) on a bad entry."""
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         for key, value in md.items():
             setattr(ctx.md, key, value)
         for name, entry in modules.items():
@@ -481,7 +481,7 @@ class ContextService:
         if not old_name or not new_name:
             raise FailedPreconditionError("ModuleLibrary names must not be empty.")
 
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         store = ctx.ml.modules if item_kind == "module" else ctx.ml.waveforms
         if old_name not in store:
             raise FailedPreconditionError(f"No {item_kind} named {old_name!r}.")
@@ -512,7 +512,7 @@ class ContextService:
     def del_ml_module(self, name: str) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         ml.delete_module(name)
         self._state.version.bump("context")
         self._bus.emit(MlChangedPayload(ml=ml))
@@ -531,14 +531,14 @@ class ContextService:
 
         Raises MdValueError on any conversion that cannot be performed safely.
         """
-        existing = self._state.exp_context.md
+        existing = self._state.session_env.md
         current = getattr(existing, key, None) if self.has_context() else None
         return _coerce_scalar(text, current)
 
     def del_ml_waveform(self, name: str) -> None:
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         ml.delete_waveform(name)
         self._state.version.bump("context")
         self._bus.emit(MlChangedPayload(ml=ml))
@@ -554,7 +554,7 @@ class ContextService:
             raise FailedPreconditionError("No experiment context.")
         if not new:
             raise FailedPreconditionError("New name must not be empty.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         if old not in ml.modules:
             raise FailedPreconditionError(f"No module named {old!r}.")
         if new in ml.modules:
@@ -570,7 +570,7 @@ class ContextService:
             raise FailedPreconditionError("No experiment context.")
         if not new:
             raise FailedPreconditionError("New name must not be empty.")
-        ml = self._state.exp_context.ml
+        ml = self._state.session_env.ml
         if old not in ml.waveforms:
             raise FailedPreconditionError(f"No waveform named {old!r}.")
         if new in ml.waveforms:

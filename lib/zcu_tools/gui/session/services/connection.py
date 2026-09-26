@@ -101,10 +101,10 @@ class SoCConnectionService:
     # ------------------------------------------------------------------
 
     def has_soc(self) -> bool:
-        return self._state.exp_context.soc is not None
+        return self._state.session_env.soc is not None
 
     def get_soccfg(self) -> SocCfgHandle | None:
-        return self._state.exp_context.soccfg
+        return self._state.session_env.soccfg
 
     def is_mock_soc(self) -> bool:
         """Whether the current connection is the offline mock board.
@@ -261,7 +261,7 @@ class SoCConnectionService:
         self, soc: SocHandle, soccfg: SocCfgHandle, is_mock: bool
     ) -> None:
         logger.info("connect succeeded: mock=%s", is_mock)
-        new_ctx = dataclasses.replace(self._state.exp_context, soc=soc, soccfg=soccfg)
+        new_ctx = dataclasses.replace(self._state.session_env, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         # soc is its own resource (a run depends on it independently of context);
         # bump it here, on the main thread, where the soc is written. Deliberately

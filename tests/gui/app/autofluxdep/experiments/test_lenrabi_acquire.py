@@ -48,7 +48,7 @@ _PARAMS = {
 
 
 def _ml(ctrl):
-    ml = ctrl.state.exp_context.ml
+    ml = ctrl.state.session_env.ml
     ml.register_waveform(rabi_drive={"style": "const", "length": 1.0})
     return ml
 

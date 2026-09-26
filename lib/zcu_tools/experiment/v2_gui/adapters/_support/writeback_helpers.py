@@ -22,7 +22,7 @@ from zcu_tools.program.v2.modules import PulseReadoutCfg
 from .ctx_helpers import md_get_float, md_has_key
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
 
 class _HasTestedReset(Protocol):
@@ -60,7 +60,7 @@ READOUT_DPM_PULSE_TAIL_US = 0.1
 
 
 def _resolve_readout_dpm_values(
-    ctx: ExpContext, proposed: Mapping[str, float]
+    ctx: SessionEnv, proposed: Mapping[str, float]
 ) -> tuple[float, float, float] | None:
     values: list[float] = []
     for key in _READOUT_DPM_KEYS:
@@ -107,7 +107,7 @@ def pulse_readout_module_writeback_items(
 
 
 def readout_dpm_writeback_items(
-    ctx: ExpContext,
+    ctx: SessionEnv,
     cfg_snapshot: _HasReadoutModules | None,
     *,
     proposed: Mapping[str, float],
@@ -139,7 +139,7 @@ def readout_dpm_writeback_items(
 
 
 def reset_module_writeback_items(
-    ctx: ExpContext,
+    ctx: SessionEnv,
     cfg_snapshot: _HasModules | None,
     *,
     target: str,

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from zcu_tools.experiment.v2_gui.adapters._support import reset_module_writeback_items
-from zcu_tools.gui.app.measure.adapter import ExpContext, ModuleWriteback
+from zcu_tools.gui.app.measure.adapter import ModuleWriteback, SessionEnv
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2_gui.adapters._support.writeback_helpers import (
@@ -38,7 +38,7 @@ _BATH_VARIANTS: tuple[tuple[str, str, str], ...] = (
 
 
 def bath_reset_writeback_items(
-    ctx: ExpContext, cfg_snapshot: _HasModules | None
+    ctx: SessionEnv, cfg_snapshot: _HasModules | None
 ) -> list[ModuleWriteback]:
     """Gated 'reset_bath' + 'reset_bath_e' proposals from a bath calibration run.
 

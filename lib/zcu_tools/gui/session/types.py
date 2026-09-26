@@ -2,13 +2,13 @@
 
 These are the session-core value types every measurement-session app speaks in:
 the minimal ``SocHandle`` / ``SocCfgHandle`` surfaces a connected QICK board
-exposes, and ``ExpContext`` (the active md/ml/soc/project bundle) + its
+exposes, and ``SessionEnv`` (the active md/ml/soc/project bundle) + its
 ``ContextReadiness`` lifecycle. They carry no experiment cfg-tree coupling
 (``CfgSchema``, the Spec/Value trees, ``RunRequest``/analyze/writeback types stay
 in the adapter layer), so they sit below the apps in ``gui/session`` and are
 import-clean (only TYPE_CHECKING references to MetaDict/ModuleLibrary/predictor).
 
-The adapter package re-exports ``ExpContext`` / ``ContextReadiness`` /
+The adapter package re-exports ``SessionEnv`` / ``ContextReadiness`` /
 ``SocHandle`` / ``SocCfgHandle`` because ``ExpAdapterProtocol``'s own signatures
 speak in them — i.e. they are part of the adapter contract's vocabulary, sourced
 from here.
@@ -72,7 +72,7 @@ class ContextReadiness(Enum):
 
 
 @dataclass(frozen=True)
-class ExpContext:
+class SessionEnv:
     md: MetaDict
     ml: ModuleLibrary
     soc: SocHandle | None

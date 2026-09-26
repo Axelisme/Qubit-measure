@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, ProgramShape
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
 from zcu_tools.gui.cfg import (
@@ -17,8 +17,8 @@ from zcu_tools.gui.cfg import (
 from .adapters._support import ROLE_FACTORIES
 
 
-def _blank_value_factory(shape: ProgramShape) -> Callable[[ExpContext], ReferenceValue]:
-    def _make(_ctx: ExpContext) -> ReferenceValue:
+def _blank_value_factory(shape: ProgramShape) -> Callable[[SessionEnv], ReferenceValue]:
+    def _make(_ctx: SessionEnv) -> ReferenceValue:
         value = make_default_value(shape.make_spec(MAIN_PROGRAM_SPEC_POLICY))
         return ReferenceValue(make_custom_reference_key(shape.discriminator), value)
 
@@ -27,7 +27,7 @@ def _blank_value_factory(shape: ProgramShape) -> Callable[[ExpContext], Referenc
 
 def _blank_entries() -> list[RoleEntry]:
     entries: list[RoleEntry] = []
-    factory: Callable[[ExpContext], ReferenceValue]
+    factory: Callable[[SessionEnv], ReferenceValue]
     for shape in PROGRAM_SHAPES.modules():
         factory = _blank_value_factory(shape)
         entries.append(

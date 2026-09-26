@@ -17,9 +17,9 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
     require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
@@ -140,5 +140,5 @@ class MistPowerAdapter(
         )
         return MistPowerAnalyzeResult(figure=fig)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_mist_power_{time.strftime('%m%d')}"

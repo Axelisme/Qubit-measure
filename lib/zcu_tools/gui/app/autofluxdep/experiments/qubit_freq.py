@@ -66,7 +66,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.io import Patch, Snapshot
 from zcu_tools.gui.app.autofluxdep.nodes.spec import Dependency, ModuleDep
 from zcu_tools.gui.app.autofluxdep.tools import Predictor
 from zcu_tools.gui.cfg import CenteredSweepValue
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
@@ -456,7 +456,7 @@ class QubitFreqBuilder(Builder):
     def make_default_schema(self, ctx: Any | None = None) -> NodeCfgSchema:
         """Default cfg plus autofluxdep generation controls."""
         qub_ch = 0
-        if isinstance(ctx, ExpContext):
+        if isinstance(ctx, SessionEnv):
             value = ctx.md.get("qub_ch")
             if isinstance(value, int) and not isinstance(value, bool):
                 qub_ch = value

@@ -26,10 +26,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -46,7 +46,7 @@ _JPA_FLUX_SEED_SPAN = 5.0e-3
 
 
 def jpa_flux_sweep_seed(
-    ctx: ExpContext, *, expts: int = _JPA_FLUX_SWEEP_EXPTS
+    ctx: SessionEnv, *, expts: int = _JPA_FLUX_SWEEP_EXPTS
 ) -> SweepValue:
     """JPA flux sweep seed: centred on ``best_jpa_flux`` when known, else the
     notebook-derived literal survey around zero.
@@ -193,5 +193,5 @@ class JpaFluxAdapter(
             )
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_jpa_flux_{time.strftime('%m%d')}"

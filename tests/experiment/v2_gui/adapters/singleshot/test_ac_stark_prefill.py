@@ -5,7 +5,7 @@ import math
 import pytest
 from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkCfg
 from zcu_tools.experiment.v2_gui.adapters.singleshot.ac_stark import SsAcStarkAdapter
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     DirectValue,
@@ -20,7 +20,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
-def _ctx(*, with_pi_amp: bool = True) -> ExpContext:
+def _ctx(*, with_pi_amp: bool = True) -> SessionEnv:
     md = MetaDict()
     md.q_f = 4000.0
     md.r_f = 6200.0
@@ -37,7 +37,7 @@ def _ctx(*, with_pi_amp: bool = True) -> ExpContext:
             freq=4000.0,
             gain=0.3,
         )
-    return ExpContext(md=md, ml=ml, soc=None, soccfg=None)
+    return SessionEnv(md=md, ml=ml, soc=None, soccfg=None)
 
 
 def test_prefill_matches_notebook_tone_roles_and_timing() -> None:

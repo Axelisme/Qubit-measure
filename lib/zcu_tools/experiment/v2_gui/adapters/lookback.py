@@ -20,9 +20,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ParamMeta,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -150,5 +150,5 @@ class LookbackAdapter(
             )
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"lookback_{time.strftime('%H%M')}"

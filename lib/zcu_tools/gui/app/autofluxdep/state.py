@@ -17,7 +17,7 @@ from zcu_tools.gui.app.autofluxdep.services.persistence_types import (
     PersistedPredictorDialogState,
 )
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.tools import Predictor
@@ -49,7 +49,7 @@ class ProjectInfo:
 class AutoFluxDepState(SessionState):
     """Mutable working set: the workflow the user is assembling + run resources.
 
-    Extends ``SessionState`` (the active ``ExpContext`` + device set + startup
+    Extends ``SessionState`` (the active ``SessionEnv`` + device set + startup
     prefs + the shared ``VersionTable``) with autofluxdep's experiment slice: the
     ordered Node placements, the flux sweep, the (transitional) Setup resources,
     and the per-Node run Results. Workflow version keys bump the same shared table
@@ -64,11 +64,11 @@ class AutoFluxDepState(SessionState):
     only on the main thread" invariant. Cleared/rebuilt at each Run start.
 
     The soc / soccfg / predictor the run needs live in the inherited
-    ``exp_context`` (the session SSOT, written by Setup / the session services);
+    ``session_env`` (the session SSOT, written by Setup / the session services);
     ``run_predictor`` holds the base predictor the current run was built with.
     """
 
-    def __init__(self, ctx: ExpContext, project: ProjectInfo | None = None) -> None:
+    def __init__(self, ctx: SessionEnv, project: ProjectInfo | None = None) -> None:
         super().__init__(ctx)
         self.project: ProjectInfo | None = project
         self.nodes: list[PlacedNode] = []
@@ -86,7 +86,7 @@ class AutoFluxDepState(SessionState):
         self.flux_device_name: str | None = None
         self.run_results: dict[str, Any] = {}
         # The base predictor the current/last run was built with (made per-run
-        # from ``exp_context.predictor`` in ``Controller._build_tools``). Run-lived
+        # from ``session_env.predictor`` in ``Controller._build_tools``). Run-lived
         # and non-serialisable — like ``run_results`` — so an Info dialog / a test
         # can inspect the predictor the run calibrated.
         self.run_predictor: Predictor | None = None
@@ -94,8 +94,8 @@ class AutoFluxDepState(SessionState):
     @property
     def has_setup(self) -> bool:
         """Whether a SoC is connected — the run prerequisite. Reads the active
-        ``exp_context`` (the session SSOT), not a separate resources bundle."""
-        return self.exp_context.has_soc()
+        ``session_env`` (the session SSOT), not a separate resources bundle."""
+        return self.session_env.has_soc()
 
     def node_names(self) -> list[str]:
         return [n.name for n in self.nodes]

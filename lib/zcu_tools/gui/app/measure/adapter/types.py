@@ -22,12 +22,12 @@ if TYPE_CHECKING:
 
 
 # ``SocProtocol``/``SocCfgProtocol`` + the ``SocHandle``/``SocCfgHandle`` aliases,
-# ``ContextReadiness``, and ``ExpContext`` are session-core value types — they live
+# ``ContextReadiness``, and ``SessionEnv`` are session-core value types — they live
 # in ``gui/session/types`` (no experiment cfg-tree coupling). They are re-exported
 # from the adapter package because ``ExpAdapterProtocol``'s signatures speak in
-# them (``make_default_cfg(ctx: ExpContext)``, ``RunRequest.soc: SocHandle``).
+# them (``make_default_cfg(ctx: SessionEnv)``, ``RunRequest.soc: SocHandle``).
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.session.types import ExpContext, SocCfgHandle, SocHandle
+from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 
 T_Result = TypeVar("T_Result")
 T_Cfg = TypeVar("T_Cfg", bound="ExpCfgModel")
@@ -238,7 +238,7 @@ class SaveDataRequest(Generic[T_Result]):
 class WritebackRequest(Generic[T_Result, T_AnalyzeResult]):
     run_result: T_Result
     analyze_result: T_AnalyzeResult
-    ctx: ExpContext
+    ctx: SessionEnv
 
 
 @dataclass(frozen=True)
@@ -253,7 +253,7 @@ class PostWritebackRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeResul
     run_result: T_Result
     analyze_result: T_AnalyzeResult
     post_analyze_result: T_PostAnalyzeResult
-    ctx: ExpContext
+    ctx: SessionEnv
 
 
 @dataclass

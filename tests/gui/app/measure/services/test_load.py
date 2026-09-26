@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, NoAnalyzeParams
 from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
-from zcu_tools.gui.app.measure.state import ExpContext, Session, State
+from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -25,7 +25,7 @@ def _empty_schema() -> CfgSchema:
 
 
 def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
-    state = State(ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
+    state = State(SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(load_data=load_data)

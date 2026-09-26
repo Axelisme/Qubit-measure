@@ -19,7 +19,7 @@ from zcu_tools.gui.app.measure.state import (
 
 
 def _make_state() -> State:
-    # State only stores the ExpContext; these tests never touch it, so a stand-in
+    # State only stores the SessionEnv; these tests never touch it, so a stand-in
     # is sufficient (matches the existing test_state.py / test_device_snapshot.py
     # convention of State(MagicMock())).
     return State(MagicMock())

@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.services.guard import (
     SavePermit,
     WritebackPermit,
 )
-from zcu_tools.gui.app.measure.state import ExpContext, Session, State
+from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -40,7 +40,7 @@ def _make_state(
     ml = MagicMock()
     soc = MagicMock() if soc_attached else None
     soccfg = MagicMock() if soc_attached else None
-    state = State(ExpContext(md=md, ml=ml, soc=soc, soccfg=soccfg, readiness=readiness))
+    state = State(SessionEnv(md=md, ml=ml, soc=soc, soccfg=soccfg, readiness=readiness))
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(
@@ -76,7 +76,7 @@ def test_run_permit_issued_for_active_valid_cfg():
     assert isinstance(permit, RunPermit)
     assert permit.tab_id == tab_id
     assert permit.schema is state.get_tab(tab_id).cfg_schema
-    assert permit.request.soc is state.exp_context.soc
+    assert permit.request.soc is state.session_env.soc
     assert permit.adapter is state.get_tab(tab_id).adapter
     adapter = cast(MagicMock, permit.adapter)
     adapter.validate_run_request.assert_called_once_with(permit.request, {})

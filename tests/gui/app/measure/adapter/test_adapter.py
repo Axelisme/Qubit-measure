@@ -771,7 +771,7 @@ def _make_concrete_adapter() -> BaseAdapter:
 
 
 def _make_ctx(**kwargs):
-    from zcu_tools.gui.app.measure.adapter import ContextReadiness, ExpContext
+    from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     defaults = dict(
@@ -785,7 +785,7 @@ def _make_ctx(**kwargs):
         readiness=ContextReadiness.ACTIVE,
     )
     defaults.update(kwargs)
-    return ExpContext(**defaults)  # type: ignore[arg-type]
+    return SessionEnv(**defaults)  # type: ignore[arg-type]
 
 
 def test_make_default_save_paths_raises_without_database_path():

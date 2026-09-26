@@ -25,7 +25,7 @@ from zcu_tools.gui.session.state import (
 from zcu_tools.gui.session.state import (
     StartupPrefs as StartupPrefs,  # noqa: F401  (re-export)
 )
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 
 from .adapter import (
     AnalyzeResultWithFigure,
@@ -180,18 +180,18 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         root, extension = os.path.splitext(path)
         return f"{root}{suffix}{extension}"
 
-    def _adapter_save_paths(self, ctx: ExpContext) -> SavePaths | None:
+    def _adapter_save_paths(self, ctx: SessionEnv) -> SavePaths | None:
         if not ctx.database_path or not ctx.result_dir or not ctx.active_label:
             return None
         return self.adapter.make_save_paths(ctx)
 
-    def effective_data_path(self, ctx: ExpContext) -> str | None:
+    def effective_data_path(self, ctx: SessionEnv) -> str | None:
         if self.save.data_path_override is not None:
             return self.save.data_path_override
         paths = self._adapter_save_paths(ctx)
         return None if paths is None else paths.data_path
 
-    def effective_analysis_image_path(self, ctx: ExpContext) -> str | None:
+    def effective_analysis_image_path(self, ctx: SessionEnv) -> str | None:
         if self.analysis.image_path_override is not None:
             return self.analysis.image_path_override
         paths = self._adapter_save_paths(ctx)
@@ -199,7 +199,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
             None if paths is None else self._with_suffix(paths.image_path, "_analysis")
         )
 
-    def effective_post_analysis_image_path(self, ctx: ExpContext) -> str | None:
+    def effective_post_analysis_image_path(self, ctx: SessionEnv) -> str | None:
         if self.post_analysis.image_path_override is not None:
             return self.post_analysis.image_path_override
         paths = self._adapter_save_paths(ctx)
@@ -237,7 +237,7 @@ class State(SessionState):
     same shared table as the inherited session keys (decision 6).
     """
 
-    def __init__(self, ctx: ExpContext) -> None:
+    def __init__(self, ctx: SessionEnv) -> None:
         super().__init__(ctx)
         self.tabs: dict[str, Session[Any, Any, Any, Any]] = {}
         self.active_tab_id: str | None = None

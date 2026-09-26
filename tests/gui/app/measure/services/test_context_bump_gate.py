@@ -35,7 +35,7 @@ def test_gate_detects_a_missing_bump():
     a vacuously-passing matcher that recognises no write at all)."""
     src = (
         "def writer(self):\n"
-        "    ml = self._state.exp_context.ml\n"
+        "    ml = self._state.session_env.ml\n"
         "    ml.register_module(foo=bar)\n"  # write, but no bump
     )
     tree = ast.parse(src)
@@ -48,7 +48,7 @@ def test_gate_detects_a_missing_bump():
 def test_gate_recognises_a_correct_writer():
     src = (
         "def writer(self):\n"
-        "    md = self._state.exp_context.md\n"
+        "    md = self._state.session_env.md\n"
         "    setattr(md, key, value)\n"
         '    self._state.version.bump("context")\n'
     )
@@ -63,9 +63,9 @@ def test_gate_ignores_reads_and_pure_swaps():
     """getattr reads and dataclasses.replace swaps are not md/ml writes."""
     src = (
         "def reader(self):\n"
-        "    md = self._state.exp_context.md\n"
+        "    md = self._state.session_env.md\n"
         "    current = getattr(md, key, None)\n"
-        "    new_ctx = dataclasses.replace(self._state.exp_context, md=md)\n"
+        "    new_ctx = dataclasses.replace(self._state.session_env, md=md)\n"
         "    return current\n"
     )
     tree = ast.parse(src)

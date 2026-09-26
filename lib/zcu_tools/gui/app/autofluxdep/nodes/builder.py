@@ -286,7 +286,7 @@ class PlacedNode:
     # Seed for the per-placement schema. Consumed once in ``__post_init__`` to
     # build ``schema``; not retained (the schema is the SSOT thereafter).
     overrides: InitVar[Mapping[str, Any] | None] = None
-    # Active ExpContext used only while building fresh defaults. It is not retained,
+    # Active SessionEnv used only while building fresh defaults. It is not retained,
     # and persisted workflow restore still overwrites from the saved raw value tree.
     default_context: InitVar[Any | None] = None
     schema: NodeCfgSchema = field(init=False)

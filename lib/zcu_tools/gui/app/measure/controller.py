@@ -32,7 +32,7 @@ from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
-from .adapter import AnalysisMode, ExpContext
+from .adapter import AnalysisMode, SessionEnv
 from .events.completion import AnalyzeFailedPayload, SaveDataFinishedPayload
 from .events.run import RunFinishedPayload
 from .events.tab import (
@@ -1067,8 +1067,8 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError("No role catalog is wired up.")
         return self._role_catalog
 
-    def get_exp_context(self) -> ExpContext:
-        return self._ctx_svc.get_exp_context()
+    def get_session_env(self) -> SessionEnv:
+        return self._ctx_svc.get_session_env()
 
     def create_from_role(self, item_kind: str, role_id: str, name: str) -> None:
         """Seed a blank ml module/waveform from a named role and register it.
@@ -1089,7 +1089,7 @@ class Controller(SessionControllerMixin):
         # overwrite). Editing an existing entry goes through the modify path.
         self._require_new_ml_name(item_kind, name)
 
-        ctx = self.get_exp_context()
+        ctx = self.get_session_env()
         ref = entry.make_value(ctx)
         spec = entry.shape()
         # ADR-0006: hand the un-lowered CfgSchema to the single write authority;

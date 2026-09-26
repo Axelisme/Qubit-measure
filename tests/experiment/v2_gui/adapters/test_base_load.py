@@ -18,10 +18,10 @@ from zcu_tools.experiment.v2_gui.adapters.twotone import FluxDepAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    ExpContext,
     LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
+    SessionEnv,
 )
 
 
@@ -52,7 +52,7 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedResult, NoAnalysisResult, NoAnalyzeP
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return MeasureCfgBuilder().build()
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "load"
 
 

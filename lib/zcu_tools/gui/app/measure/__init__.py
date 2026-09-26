@@ -19,12 +19,12 @@ from zcu_tools.gui.cfg import (
 
 from .adapter import (
     ExpAdapterProtocol,
-    ExpContext,
     MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
     PostWritebackRequest,
     SavePaths,
+    SessionEnv,
     WaveformWriteback,
     WritebackItem,
     reconstruct_params,
@@ -53,7 +53,7 @@ __all__ = [
     "DirectValue",
     "EvalValue",
     "ExpAdapterProtocol",
-    "ExpContext",
+    "SessionEnv",
     "RunPaneState",
     "AnalysisPaneState",
     "PostAnalysisPaneState",

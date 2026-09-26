@@ -83,7 +83,7 @@ class WritebackPermit:
 class GuardService:
     """Single owner of domain guard logic; issues typed Permits.
 
-    Pure query service over ``State`` and ``ExpContext.readiness`` — no side
+    Pure query service over ``State`` and ``SessionEnv.readiness`` — no side
     effects, no event emission. Both clients must acquire a Permit before
     invoking a protected service method, so the guard logic lives in exactly
     one place and cannot drift between the View and remote paths.
@@ -103,7 +103,7 @@ class GuardService:
         return self._state.get_tab(tab_id)
 
     def _require_readiness(self, expected: ContextReadiness, operation: str) -> None:
-        readiness = self._state.exp_context.readiness
+        readiness = self._state.session_env.readiness
         if readiness is expected:
             return
         if expected is ContextReadiness.ACTIVE:
@@ -120,7 +120,7 @@ class GuardService:
 
     def _require_context(self, operation: str) -> None:
         """Require any editable context (DRAFT or ACTIVE), not EMPTY."""
-        if self._state.exp_context.readiness is ContextReadiness.EMPTY:
+        if self._state.session_env.readiness is ContextReadiness.EMPTY:
             raise GuardError(
                 f"Cannot {operation}: no experiment context. Use Project… to set "
                 "up chip/qubit or load a project.",
@@ -131,7 +131,7 @@ class GuardService:
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         req = RunRequest(md=ctx.md, ml=ctx.ml, soc=ctx.soc, soccfg=ctx.soccfg)
 
         # Lowering verifies committed cfg validity (fail-fast before any worker).

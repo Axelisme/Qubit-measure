@@ -35,9 +35,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    ExpContext,
     MetaDictWriteback,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -56,7 +56,7 @@ OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 
 
 def _readout_length_default() -> Seed[float | EvalValue]:
-    def resolve(ctx: ExpContext) -> float | EvalValue:
+    def resolve(ctx: SessionEnv) -> float | EvalValue:
         probe_len = md_get_float(ctx, "res_probe_len", 1.0)
         if md_has_key(ctx, "res_probe_len") and probe_len > 0.1:
             return EvalValue(expr="res_probe_len - 0.1")
@@ -228,5 +228,5 @@ class OneToneFluxDepAdapter(
         cfg_raw["dev"] = dev_patch
         return req.ml.make_cfg(cfg_raw, FluxDepCfg)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.res_name}_flux"

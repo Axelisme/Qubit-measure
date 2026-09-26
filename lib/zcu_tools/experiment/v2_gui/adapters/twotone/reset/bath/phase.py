@@ -22,9 +22,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -158,5 +158,5 @@ class BathPhaseAdapter(
 
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_bathreset_phase_{time.strftime('%m%d')}"

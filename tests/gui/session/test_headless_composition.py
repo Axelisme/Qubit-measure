@@ -70,7 +70,7 @@ def _run_headless_smoke() -> None:
         SessionState,
         StartupPrefs,
     )
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     owner_id = threading.get_ident()
@@ -128,7 +128,7 @@ def _run_headless_smoke() -> None:
             owner.pump_once(block=True, timeout=min(0.05, remaining))
 
     state = SessionState(
-        ExpContext(
+        SessionEnv(
             md=MetaDict(),
             ml=ModuleLibrary(),
             soc=None,
@@ -192,8 +192,8 @@ def _run_headless_smoke() -> None:
     assert success_outcome is not None and success_outcome.status == "finished"
     assert session.soc_connection.has_soc()
     assert session.soc_connection.is_mock_soc()
-    assert state.exp_context.soc is not None
-    assert state.exp_context.soccfg is not None
+    assert state.session_env.soc is not None
+    assert state.session_env.soccfg is not None
     assert state.version.get("soc") == 1
     assert len(connection_events) == 1 and connection_events[0].success
     assert progress.bars_for_operation(success_token) == ()

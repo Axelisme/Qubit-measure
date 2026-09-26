@@ -20,17 +20,17 @@ from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
 )
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    ExpContext,
     MetaDictWriteback,
     RunRequest,
+    SessionEnv,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
-def _make_ctx() -> ExpContext:
-    return ExpContext(
+def _make_ctx() -> SessionEnv:
+    return SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),
         soc=None,
@@ -39,7 +39,7 @@ def _make_ctx() -> ExpContext:
 
 
 def _default_analyze_params(
-    adapter: FakeFreqAdapter, result: FakeFreqRunResult, ctx: ExpContext
+    adapter: FakeFreqAdapter, result: FakeFreqRunResult, ctx: SessionEnv
 ) -> FakeFreqAnalyzeParams:
     return adapter.get_analyze_params(result, ctx)
 

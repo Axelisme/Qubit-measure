@@ -35,7 +35,7 @@ def test_measure_state_rejects_foreign_thread_mutation() -> None:
 
     assert isinstance(error, RuntimeError)
     assert str(error) == "State mutation must run on its owner thread"
-    assert state.exp_context is original
+    assert state.session_env is original
 
 
 def test_autoflux_state_rejects_foreign_thread_mutation() -> None:

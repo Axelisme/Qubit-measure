@@ -265,13 +265,13 @@ def test_update_tab_analyze_bumps_analyze_version():
     assert state.version.get("tab:t1:analyze") == 2
 
 
-def test_set_context_replaces_exp_context():
+def test_set_context_replaces_session_env():
     ctx1 = _make_ctx()
     ctx2 = _make_ctx()
     state = State(ctx1)
-    assert state.exp_context is ctx1
+    assert state.session_env is ctx1
     state.set_context(ctx2)
-    assert state.exp_context is ctx2
+    assert state.session_env is ctx2
 
 
 def test_set_context_does_not_bump_context_version():

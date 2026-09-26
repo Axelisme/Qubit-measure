@@ -22,7 +22,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
-from zcu_tools.gui.app.measure.state import ExpContext, Session, State
+from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
@@ -38,7 +38,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 
 
 def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
-    ctx = ExpContext(
+    ctx = SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),
         soc=MagicMock(),

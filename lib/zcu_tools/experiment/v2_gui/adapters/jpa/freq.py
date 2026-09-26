@@ -26,10 +26,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -47,7 +47,7 @@ _JPA_FREQ_SEED_CENTER_MHZ = 13000.0
 
 
 def jpa_freq_sweep_seed(
-    ctx: ExpContext, *, expts: int = _JPA_FREQ_SWEEP_EXPTS
+    ctx: SessionEnv, *, expts: int = _JPA_FREQ_SWEEP_EXPTS
 ) -> SweepValue:
     """JPA pump sweep seed: centred on ``best_jpa_freq`` when known, else near
     ``2 * r_f`` (live expression when ``r_f`` exists, fixed seed otherwise)."""
@@ -173,5 +173,5 @@ class JpaFreqAdapter(
             )
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_jpa_freq_{time.strftime('%m%d')}"

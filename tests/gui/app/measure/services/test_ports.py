@@ -10,7 +10,7 @@ tests/gui/session/services/test_startup.py.)
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.ports import ProjectIOPort
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -36,7 +36,7 @@ class _FakeProjectIO:
     def get_active_label(self) -> str | None:
         return self._label
 
-    def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext:
+    def use_context(self, label: str, base_ctx: SessionEnv) -> SessionEnv:
         self._label = label
         return base_ctx
 
@@ -94,4 +94,4 @@ def test_cfg_editor_service_satisfies_cfg_editor_port():
 def _make_state():
     from zcu_tools.gui.app.measure.state import State
 
-    return State(ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))
+    return State(SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))

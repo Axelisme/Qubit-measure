@@ -62,7 +62,7 @@ def mounted_fx(qapp):
     fixture = InteractiveFixture()
     fixture.state.set_context(
         replace(
-            fixture.state.exp_context,
+            fixture.state.session_env,
             md=MetaDict(),
             ml=ModuleLibrary(),
             soc=None,
@@ -461,8 +461,8 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
     mounted_fx,
 ) -> None:
     fx, window = mounted_fx
-    fx.state.exp_context.md.flx_half = 0.0
-    fx.state.exp_context.md.flx_int = 0.0
+    fx.state.session_env.md.flx_half = 0.0
+    fx.state.session_env.md.flx_int = 0.0
     tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
     with open_client(fx.service.port) as sock:
         rejected = _interact(sock, tab_id, {"command": "done"})

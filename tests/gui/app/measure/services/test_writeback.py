@@ -20,7 +20,7 @@ from zcu_tools.gui.app.measure.events.tab import TabContentChangedPayload
 from zcu_tools.gui.app.measure.services.guard import WritebackPermit
 from zcu_tools.gui.app.measure.services.ports import CfgEdit, CfgEditResult
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
-from zcu_tools.gui.app.measure.state import ExpContext, Session, State
+from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
@@ -36,7 +36,7 @@ from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 def _make_state_with_tab(tab_id: str = "t1") -> State:
     state = State(
-        ExpContext(
+        SessionEnv(
             md=MetaDict(),
             ml=ModuleLibrary(),
             soc=None,
@@ -62,7 +62,7 @@ def _make_write_port(state: State, bus: EventBus):
     port = MagicMock()
 
     def _apply_writes(writes) -> None:
-        ctx = state.exp_context
+        ctx = state.session_env
         for key, value in writes.md.items():
             setattr(ctx.md, key, value)
         for name, schema in writes.ml_modules.items():
@@ -190,9 +190,9 @@ def test_draft_cfg_edits_use_private_editor_session():
 def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape():
     state = _make_state_with_tab()
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
-    state.exp_context.md.confusion_matrix = matrix
+    state.session_env.md.confusion_matrix = matrix
     write_port = _make_write_port(state, EventBus())
-    write_port.get_exp_context.return_value = state.exp_context
+    write_port.get_session_env.return_value = state.session_env
     svc = WritebackService(MagicMock(), write_port)
 
     draft = svc.create_draft(

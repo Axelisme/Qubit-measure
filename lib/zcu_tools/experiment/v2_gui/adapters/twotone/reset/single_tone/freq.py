@@ -27,9 +27,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -38,7 +38,7 @@ from zcu_tools.gui.cfg import EvalValue, SweepValue
 SingleToneFreqRunResult: TypeAlias = FreqResult
 
 
-def _reset_freq_range(ctx: ExpContext) -> SweepValue:
+def _reset_freq_range(ctx: SessionEnv) -> SweepValue:
     """Build this sideband-reset scan around its calibrated frequency."""
     center = md_get_float(ctx, "reset_f", 3000.0)
     if md_has_key(ctx, "reset_f") and md_has_key(ctx, "resetf_w"):
@@ -186,5 +186,5 @@ class SingleToneFreqAdapter(
         )
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_sidereset_freq_{time.strftime('%m%d')}"

@@ -216,7 +216,7 @@ class RunAnalyzeControlFacet:
         self, tab_id: str, permit: AnalyzePermit, analyze_params_instance: object
     ) -> int:
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         req = AnalyzeRequest(
             run_result=tab.run.result,
             analyze_params=analyze_params_instance,

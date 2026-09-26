@@ -51,7 +51,7 @@ def test_t2echo_acquire_fits_finite_positive_t2():
     ctrl = build_core()
     sim_params = high_snr_simparams()
     connect_mock(ctrl, sim_params=sim_params)
-    ml = ctrl.state.exp_context.ml
+    ml = ctrl.state.session_env.ml
     predictor = mock_flux_predictor(sim_params)
 
     builder = T2EchoBuilder()

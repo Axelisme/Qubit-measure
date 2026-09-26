@@ -14,7 +14,7 @@ file. Two generic builders consume the data:
 
 The seed value carriers (:class:`Md` / :class:`Source` / :data:`TRIG`) wrap the
 existing md-mechanism and the read-only value-source escape hatch. They resolve
-against the whole ``ExpContext`` (predictor / device / project / …) while still
+against the whole ``SessionEnv`` (predictor / device / project / …) while still
 materializing to direct/eval scalar leaves before the cfg tree leaves the builder.
 """
 
@@ -50,7 +50,7 @@ from .helpers import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.cfg import CfgSectionSpec
 
 _RefNode = ReferenceValue
@@ -130,7 +130,7 @@ TRIG = _Trig.TRIG
 SeedVal = float | int | str | bool | Md | Source | _Trig
 
 
-def _resolve(ctx: ExpContext, v: SeedVal) -> ScalarValue:
+def _resolve(ctx: SessionEnv, v: SeedVal) -> ScalarValue:
     """Lower a seed value to a scalar leaf (DirectValue / EvalValue)."""
     if isinstance(v, Md):
         if md_has_key(ctx, v.key):
@@ -226,7 +226,7 @@ def _section(value: CfgSectionValue, at: str) -> CfgSectionValue:
     return sub
 
 
-def _nested_ref(role_id: str, ctx: ExpContext, *, optional: bool) -> _RefNode | None:
+def _nested_ref(role_id: str, ctx: SessionEnv, *, optional: bool) -> _RefNode | None:
     try:
         role = ROLE_TABLE[role_id]
     except KeyError as exc:
@@ -238,7 +238,7 @@ def _nested_ref(role_id: str, ctx: ExpContext, *, optional: bool) -> _RefNode | 
     return role_ref(role, ctx, optional=optional)
 
 
-def _adopt_waveform(value: CfgSectionValue, ctx: ExpContext, name: str) -> None:
+def _adopt_waveform(value: CfgSectionValue, ctx: SessionEnv, name: str) -> None:
     """Adopt a library waveform into the pulse's ``waveform`` sub-ref when present
     (mirrors the readout factories' ro_waveform block)."""
     from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
@@ -252,7 +252,7 @@ def _adopt_waveform(value: CfgSectionValue, ctx: ExpContext, name: str) -> None:
         pulse_cfg.fields["waveform"] = ReferenceValue(chosen_key=name, value=wav_val)
 
 
-def role_blank(role: RoleDef, ctx: ExpContext) -> _RefNode:
+def role_blank(role: RoleDef, ctx: SessionEnv) -> _RefNode:
     """Assemble a role's blank value tree from its data (never a library lookup)."""
     value = make_default_value(role.shape())
 
@@ -289,7 +289,7 @@ def role_blank(role: RoleDef, ctx: ExpContext) -> _RefNode:
 
 
 def role_ref(
-    role: RoleDef, ctx: ExpContext, *, optional: bool = False
+    role: RoleDef, ctx: SessionEnv, *, optional: bool = False
 ) -> _RefNode | None:
     """Library-aware mount: adopt the first preferred-named library entry, else the
     blank (or ``None`` when ``optional`` and nothing matches, ADR-0010)."""

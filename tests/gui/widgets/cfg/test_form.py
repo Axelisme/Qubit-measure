@@ -113,9 +113,9 @@ def _registry_with_factories(
 
 
 def _make_ctx():
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    return ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
+    return SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
 
 
 # ---------------------------------------------------------------------------

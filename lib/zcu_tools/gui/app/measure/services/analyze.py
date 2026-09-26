@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import OwnerScheduler
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
 
     from ..state import RetiredPaneResources
     from .ports import AnalyzeStatePort, WritebackLifecyclePort
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class _AnalyzeCapture:
     run_result: object | None
-    context: ExpContext
+    context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object | None
 
@@ -98,7 +98,7 @@ class AnalyzeService(_StagedAnalyzeService):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         req = AnalyzeRequest(
             run_result=tab.run.result,
             analyze_params=analyze_params_instance,
@@ -149,7 +149,7 @@ class AnalyzeService(_StagedAnalyzeService):
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         captured = _AnalyzeCapture(
             run_result=tab.run.result,
             context=ctx,

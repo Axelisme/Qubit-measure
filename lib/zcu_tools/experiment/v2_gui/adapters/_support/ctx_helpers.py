@@ -1,4 +1,4 @@
-"""Type-guarded helpers for reading ExpContext.md values."""
+"""Type-guarded helpers for reading SessionEnv.md values."""
 
 from __future__ import annotations
 
@@ -10,24 +10,24 @@ from zcu_tools.gui.cfg import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
 
-def md_get_float(ctx: ExpContext, key: str, default: float) -> float:
+def md_get_float(ctx: SessionEnv, key: str, default: float) -> float:
     value = ctx.md.get(key)
     if isinstance(value, (int, float)):
         return float(value)
     return default
 
 
-def md_has_key(ctx: ExpContext, key: str) -> bool:
+def md_has_key(ctx: SessionEnv, key: str) -> bool:
     sentinel = object()
     value = ctx.md.get(key, sentinel)
     return value is not sentinel and value is not None
 
 
 def _freq_range(
-    ctx: ExpContext,
+    ctx: SessionEnv,
     center_key: str,
     width_key: str,
     expts: int,
@@ -59,20 +59,20 @@ def _freq_range(
 
 
 def proper_res_freq_range(
-    ctx: ExpContext, expts: int, *, span_factor: float = 1.5
+    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
     """Resonator frequency sweep range: ``r_f ± span_factor*rf_w``."""
     return _freq_range(ctx, "r_f", "rf_w", expts, span_factor, 6500.0, 500.0)
 
 
 def proper_qub_freq_range(
-    ctx: ExpContext, expts: int, *, span_factor: float = 1.5
+    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
     """Qubit frequency sweep range: ``q_f ± span_factor*qf_w``."""
     return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 5000.0, 1000.0)
 
 
-def proper_flux_range(ctx: ExpContext, expts: int) -> SweepValue:
+def proper_flux_range(ctx: SessionEnv, expts: int) -> SweepValue:
     """Flux sweep range spanning one period around the calibrated flux points.
 
     Extrapolates 10% past the two fitted positions (flx_half / flx_int):

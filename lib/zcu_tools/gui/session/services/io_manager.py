@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context import ContextManager
 
 
 class IOManager:
-    """Wraps ContextManager; returns new ExpContext objects to Controller."""
+    """Wraps ContextManager; returns new SessionEnv objects to Controller."""
 
     def __init__(self) -> None:
         self._em: ContextManager | None = None
@@ -30,7 +30,7 @@ class IOManager:
             return []
         return self._em.list_contexts()
 
-    def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext:
+    def use_context(self, label: str, base_ctx: SessionEnv) -> SessionEnv:
         """Switch to an existing context; preserve soc/soccfg/predictor/database_path."""
         logger.info("use_context: label=%r", label)
         if self._em is None:
@@ -40,12 +40,12 @@ class IOManager:
 
     def new_context(
         self,
-        base_ctx: ExpContext,
+        base_ctx: SessionEnv,
         value: float | None = None,
         unit: str = "none",
         clone_from: str | None = None,
-    ) -> ExpContext:
-        """Create a new context; return updated ExpContext to Controller.
+    ) -> SessionEnv:
+        """Create a new context; return updated SessionEnv to Controller.
 
         ``clone_from`` is the label of an existing context to clone (its ml/md
         are read from ``exp_dir/<label>``); ``None`` starts empty. ``em.new_flux``

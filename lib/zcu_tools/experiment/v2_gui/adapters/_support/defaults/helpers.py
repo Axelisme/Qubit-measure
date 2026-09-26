@@ -24,7 +24,7 @@ from .module_defaults import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
 __all__ = [
     "select_named_module_value",
@@ -100,7 +100,7 @@ def patch_ro_cfg_fields(
 
 
 def make_trig_offset(
-    ctx: ExpContext,
+    ctx: SessionEnv,
     *,
     trig_expr: str,
     trig_fallback: float,

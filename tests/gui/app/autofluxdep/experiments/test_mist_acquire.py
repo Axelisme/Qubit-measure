@@ -48,7 +48,7 @@ def _pi_pulse(ml, freq: float):
 def test_mist_acquire_runs_or_skips_on_simengine_gap():
     ctrl = build_core()
     connect_mock(ctrl)
-    ml = ctrl.state.exp_context.ml
+    ml = ctrl.state.session_env.ml
     predictor = FluxoniumPredictor(
         params=(4.0, 1.0, 1.0), flux_half=0.0, flux_period=1.0, flux_bias=0.0
     )

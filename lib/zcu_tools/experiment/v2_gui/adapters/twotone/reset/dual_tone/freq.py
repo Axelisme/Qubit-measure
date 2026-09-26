@@ -27,10 +27,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
@@ -52,7 +52,7 @@ def _reset_freq_axis(
 ) -> Seed[SweepValue]:
     """Build one axis of this experiment's two-frequency reset map."""
 
-    def resolve(ctx: ExpContext) -> SweepValue:
+    def resolve(ctx: SessionEnv) -> SweepValue:
         width_key = f"{center_key}_w"
         center = md_get_float(ctx, center_key, 3000.0)
         if md_has_key(ctx, center_key) and md_has_key(ctx, width_key):
@@ -218,5 +218,5 @@ class DualToneFreqAdapter(
         )
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_dualreset_freq_{time.strftime('%m%d')}"

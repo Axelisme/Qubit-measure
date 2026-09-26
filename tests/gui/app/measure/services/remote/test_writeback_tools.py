@@ -94,7 +94,7 @@ def _ctrl() -> MagicMock:
     ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
         tab_id, _items(), has_writeback_draft=True
     )
-    ctrl.get_exp_context.return_value = MagicMock(
+    ctrl.get_session_env.return_value = MagicMock(
         active_label="ctx001",
         chip_name="chip",
         qub_name="qubit",
@@ -191,7 +191,7 @@ def test_apply_reads_persistent_draft():
 def test_destination_context_projection_does_not_hide_programmer_errors():
     ctrl = _ctrl()
     error = RuntimeError("context projection bug")
-    ctrl.get_exp_context.side_effect = error
+    ctrl.get_session_env.side_effect = error
 
     with pytest.raises(RuntimeError) as exc_info:
         _dispatch(

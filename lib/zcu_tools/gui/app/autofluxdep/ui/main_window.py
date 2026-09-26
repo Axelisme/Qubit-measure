@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
             return
 
         # The shared predictor dialog loads a FluxoniumPredictor into the active
-        # context; the run reads exp_context.predictor.
+        # context; the run reads session_env.predictor.
         dlg = PredictorDialog(
             self._ctrl.predictor_control,
             self,
@@ -1167,7 +1167,7 @@ class MainWindow(QMainWindow):
         self._sync_devices_dialog_read_only()
 
     def _refresh_session_status(self) -> None:
-        ctx = self._ctrl.state.exp_context
+        ctx = self._ctrl.state.session_env
         if ctx.is_active() and ctx.active_label:
             ctx_text = ctx.active_label
         elif ctx.has_context():

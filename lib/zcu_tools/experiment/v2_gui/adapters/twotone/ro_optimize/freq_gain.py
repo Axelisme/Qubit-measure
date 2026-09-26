@@ -26,9 +26,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ParamMeta,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -40,7 +40,7 @@ from zcu_tools.gui.cfg import (
 RoOptFreqGainRunResult: TypeAlias = FreqGainResult
 
 
-def _best_ro_freq_range(ctx: ExpContext) -> SweepValue:
+def _best_ro_freq_range(ctx: SessionEnv) -> SweepValue:
     """Center this experiment's frequency scan on its latest trusted optimum."""
     center_key = "best_ro_freq" if md_has_key(ctx, "best_ro_freq") else "r_f"
     center = md_get_float(ctx, center_key, 6500.0)
@@ -193,5 +193,5 @@ class RoOptFreqGainAdapter(
         )
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_ro_opt_freqgain_{time.strftime('%m%d')}"

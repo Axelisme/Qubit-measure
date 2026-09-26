@@ -23,10 +23,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ModuleWriteback,
     ParamMeta,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -207,5 +207,5 @@ class AmpRabiAdapter(
 
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_amp_rabi_{time.strftime('%m%d')}"

@@ -718,7 +718,7 @@ class Controller(SessionControllerMixin):
             builder=builder,
             name=name,
             overrides=params,
-            default_context=self._state.exp_context,
+            default_context=self._state.session_env,
         )
         self._state.append_node(node)
         logger.debug("add_node: %r (type=%r) params=%s", name, builder.name, params)
@@ -732,7 +732,7 @@ class Controller(SessionControllerMixin):
         workflow (a second ``mist`` becomes ``mist_2``); the user can rename it.
         """
         self._require_workflow_editable()
-        node = create_placement(type_name, ctx=self._state.exp_context)
+        node = create_placement(type_name, ctx=self._state.session_env)
         node.name = self._unique_name(node.name)
         self._state.append_node(node)
         logger.debug("add_node_by_type: %r -> %r", type_name, node.name)
@@ -1053,7 +1053,7 @@ class Controller(SessionControllerMixin):
     def _build_tools(self, providers: list[PlacedNode] | None = None) -> Tools:
         """Build the sweep's run-lived predictor and feedback capabilities.
 
-        ``exp_context.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
+        ``session_env.predictor`` holds the raw ``FluxoniumPredictor`` (loaded at
         setup / by PredictorService) or None. A real predictor is wrapped into
         ``FluxoniumPredictorAdapter``; with none loaded we fall back to the
         base-only ``SimplePredictor`` stand-in. Feedback capabilities are built

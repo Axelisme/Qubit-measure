@@ -22,8 +22,8 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     NoAnalyzeParams,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -148,5 +148,5 @@ class DualToneLengthAdapter(
         )
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_dualreset_length_{time.strftime('%m%d')}"

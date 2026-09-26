@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.app.measure.services.cfg_lowering import lower_module, lower_waveform
-from zcu_tools.gui.app.measure.state import ExpContext, State
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -49,7 +49,7 @@ def _waveform_schema(raw: dict) -> CfgSchema:
 
 def _make_svc_with_state() -> tuple[ContextService, State]:
     state = State(
-        ExpContext(
+        SessionEnv(
             md=MetaDict(),
             ml=ModuleLibrary(),
             soc=None,
