@@ -1,6 +1,6 @@
 """Fast per-flux electronic-delay fit (numba), dispersive-gui-local.
 
-A GUI-local, ~14x-faster replacement for looping ``zcu_tools.utils.fitting.resonance.fit_edelay``
+A GUI-local, ~14x-faster replacement for looping ``zcu_tools.analysis.fitting.resonance.fit_edelay``
 over every flux row: the whole (n_flux × grid) double loop is JIT-compiled into one
 ``@njit(parallel=True)`` kernel with the per-flux outer loop in ``prange``. Two
 optimizations vs the utility path:
@@ -23,7 +23,7 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from zcu_tools.utils.fitting.resonance.base import (
+from zcu_tools.analysis.fitting.resonance.base import (
     _align_uniform_edelay_aliases,
     find_edelay_branch,
 )

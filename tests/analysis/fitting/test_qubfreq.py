@@ -1,6 +1,6 @@
 import numpy as np
-from zcu_tools.utils.fitting.base import lorfunc, sincfunc
-from zcu_tools.utils.fitting.qubfreq import fit_qubit_freq
+from zcu_tools.analysis.fitting.base import lorfunc, sincfunc
+from zcu_tools.analysis.fitting.qubfreq import fit_qubit_freq
 
 
 def test_fit_qubit_freq_lor():

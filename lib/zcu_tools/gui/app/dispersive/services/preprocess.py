@@ -12,7 +12,7 @@ the GIL, so the parallelism needs no process fork — nothing is pickled, so a Q
 black-box call (about 0.1 s for a representative 64 × 301 warm run), the GUI shows a
 busy/indeterminate bar rather than per-flux ticks. The whole ``compute`` still runs on
 a worker thread so it cannot block the event loop. The remaining steps reuse the
-resonance primitives from ``zcu_tools.utils.fitting.resonance``.
+resonance primitives from ``zcu_tools.analysis.fitting.resonance``.
 """
 
 from __future__ import annotations
@@ -22,13 +22,13 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.gui.app.dispersive.services._fast_edelay import fast_edelays
-from zcu_tools.gui.app.dispersive.state import DispersiveState, PreprocessResult
-from zcu_tools.utils.fitting.resonance import (
+from zcu_tools.analysis.fitting.resonance import (
     calc_phase,
     fit_circle_params,
     remove_edelay,
 )
+from zcu_tools.gui.app.dispersive.services._fast_edelay import fast_edelays
+from zcu_tools.gui.app.dispersive.state import DispersiveState, PreprocessResult
 from zcu_tools.utils.process import SmoothMethod, smooth_signal1d
 
 logger = logging.getLogger(__name__)

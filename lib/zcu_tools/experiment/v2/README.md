@@ -61,7 +61,7 @@ class AbsExperiment(Generic[T_Result, T_Config]):
 - **解包與存取**：所有對 Result 物件的存取均採用屬性存取（Property access，例如 `result.freqs`、`result.signals`），不可直接解包為 tuple。
 
 CKP numeric analysis先從ground/excited maps抽取resonance trace，再透過
-`utils.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance
+`analysis.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance
 frequency維持local，兩個slope各自固定為零。Chi/kappa uncertainty直接由named global
 covariance投影，包含local frequency cross-covariance；analysis不重建per-trace covariance
 blocks。Backend minimum或covariance無效時fast-fail，public result仍維持

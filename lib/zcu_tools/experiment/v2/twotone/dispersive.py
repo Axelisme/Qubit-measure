@@ -11,6 +11,13 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting.resonance import (
+    find_edelay_branch,
+    fit_edelay,
+    get_proper_model,
+    normalize_signal,
+)
+from zcu_tools.analysis.fitting.resonance.base import remove_background
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -39,13 +46,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.fitting.resonance import (
-    find_edelay_branch,
-    fit_edelay,
-    get_proper_model,
-    normalize_signal,
-)
-from zcu_tools.utils.fitting.resonance.base import remove_background
 
 
 @dataclass(frozen=True)

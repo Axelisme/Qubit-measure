@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from zcu_tools.utils.fitting.base import decaycos, dual_expfunc, expfunc
-from zcu_tools.utils.fitting.decay import (
+from zcu_tools.analysis.fitting.base import decaycos, dual_expfunc, expfunc
+from zcu_tools.analysis.fitting.decay import (
     fit_decay,
     fit_decay_fringe,
     fit_dual_decay,

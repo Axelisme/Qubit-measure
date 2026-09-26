@@ -13,7 +13,7 @@ from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
 )
 
-from zcu_tools.utils.fitting.singleshot import (
+from zcu_tools.analysis.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,
     fit_singleshot_p0,

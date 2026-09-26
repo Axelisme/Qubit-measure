@@ -12,6 +12,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -38,7 +39,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.fitting.singleshot import transition_state_bin_probabilities
 
 from .rabi_fit import RabiJointFitResult, fit_rabi_joint
 from .util import classify_result, raw_shots_to_signal

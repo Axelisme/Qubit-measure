@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import zcu_tools.utils.fitting as fitting
-import zcu_tools.utils.fitting.base as fitting_base
+import zcu_tools.analysis.fitting as fitting
+import zcu_tools.analysis.fitting.base as fitting_base
 from numpy.typing import NDArray
-from zcu_tools.utils.fitting.shared import (
+from zcu_tools.analysis.fitting.shared import (
     FitTrace,
     ParameterSpec,
     fit_shared,

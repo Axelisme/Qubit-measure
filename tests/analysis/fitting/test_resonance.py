@@ -7,9 +7,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-import zcu_tools.utils.fitting.resonance.base as resonance_base
+import zcu_tools.analysis.fitting.resonance.base as resonance_base
 from numpy.typing import NDArray
-from zcu_tools.utils.fitting.resonance import (
+from zcu_tools.analysis.fitting.resonance import (
     HangerModel,
     TransmissionModel,
     calc_phase,
@@ -20,7 +20,7 @@ from zcu_tools.utils.fitting.resonance import (
     normalize_signal,
     phase_func,
 )
-from zcu_tools.utils.fitting.resonance.rational import fit_degree_one_rational
+from zcu_tools.analysis.fitting.resonance.rational import fit_degree_one_rational
 
 
 def _hanger_truth(
@@ -467,7 +467,7 @@ def test_explicit_edelay_bypasses_branch_search(
         raise AssertionError("explicit edelay must bypass branch search")
 
     monkeypatch.setattr(
-        "zcu_tools.utils.fitting.resonance.hanger.fit_edelay",
+        "zcu_tools.analysis.fitting.resonance.hanger.fit_edelay",
         unexpected_search,
     )
 
@@ -533,7 +533,7 @@ def test_model_fit_uses_edelay_branch_seed(
 
     module = "hanger" if model is HangerModel else "transmission"
     monkeypatch.setattr(
-        f"zcu_tools.utils.fitting.resonance.{module}.fit_edelay", capture_seed
+        f"zcu_tools.analysis.fitting.resonance.{module}.fit_edelay", capture_seed
     )
 
     params = model.fit(freqs, signals, edelay_branch_seed=edelay)
@@ -780,7 +780,7 @@ def test_bound_limited_refinement_warns_and_returns_sequential_result(
         )
 
     monkeypatch.setattr(
-        "zcu_tools.utils.fitting.resonance.base.sp.optimize.least_squares",
+        "zcu_tools.analysis.fitting.resonance.base.sp.optimize.least_squares",
         bound_result,
     )
 

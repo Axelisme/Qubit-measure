@@ -1,6 +1,6 @@
 import numpy as np
-from zcu_tools.utils.fitting.anticross import fit_anticross, get_predict_ys
-from zcu_tools.utils.fitting.base import retrieve_params
+from zcu_tools.analysis.fitting.anticross import fit_anticross, get_predict_ys
+from zcu_tools.analysis.fitting.base import retrieve_params
 
 
 def test_fit_anticross_recovers_center_and_width():

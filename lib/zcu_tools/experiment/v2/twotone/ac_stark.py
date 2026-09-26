@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -44,7 +45,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
 

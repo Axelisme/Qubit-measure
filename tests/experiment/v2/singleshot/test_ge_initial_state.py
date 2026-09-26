@@ -4,6 +4,7 @@ from typing import Any, Literal, cast
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
 from zcu_tools.experiment.v2.singleshot.ge import GE_Exp, GE_Result
 from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
     GEAdapter,
@@ -11,7 +12,6 @@ from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
     GEPostAnalyzeParams,
 )
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest, PostAnalyzeRequest
-from zcu_tools.utils.fitting.singleshot import calc_population_pdf
 
 
 @pytest.mark.parametrize("backend", ["pca", "center"])

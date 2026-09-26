@@ -10,6 +10,7 @@ from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
 )
 
+from zcu_tools.analysis.fitting import fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load_labber_data, save_labber_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -36,7 +37,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.resources.context import ModuleLibrary
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.fitting import fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 from .env import FluxDepEnv

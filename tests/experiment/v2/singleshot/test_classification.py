@@ -4,13 +4,13 @@ from typing import cast
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.experiment.v2.singleshot.ge import optimize_ge_radius
 from zcu_tools.experiment.v2.singleshot.util import (
     classify_result,
     plot_with_classified,
 )
 from zcu_tools.program.acquisition import SingleShotMixin
-from zcu_tools.utils.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
 
@@ -84,7 +84,7 @@ def test_plot_boundaries_stay_in_assigned_half_planes() -> None:
 
 def test_transition_regions_match_sampled_transition_distribution() -> None:
     from scipy.integrate import cumulative_trapezoid
-    from zcu_tools.utils.fitting.singleshot import calc_fc
+    from zcu_tools.analysis.fitting.singleshot import calc_fc
 
     rng = np.random.default_rng(13)
     p_avg, length_ratio, sigma, radius = 0.3, 1.2, 0.6, 2.0

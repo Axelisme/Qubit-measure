@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from zcu_tools.utils.fitting.singleshot import (
+from zcu_tools.analysis.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,
     fit_singleshot_p0,
@@ -130,7 +130,7 @@ def test_row_population_is_legal_and_shared_ratio_is_honored(
 
 
 def test_ge_does_not_return_initial_guess_on_optimizer_failure(monkeypatch):
-    from zcu_tools.utils.fitting import singleshot
+    from zcu_tools.analysis.fitting import singleshot
 
     def fail(*args, **kwargs):
         raise RuntimeError("optimizer exhausted")
