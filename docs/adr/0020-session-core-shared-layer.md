@@ -5,7 +5,7 @@ status: accepted
 # session-core 共用層：measure + autofluxdep 共享量測 session（gui/session/）
 
 **狀態：** accepted（**已落地**：S1–S5 抽取 + autofluxdep 完整複用 + real-acquire RUN path；本檔現在式描述生效設計）。
-**關聯：** session service 角色/依賴依 [[0004]]/[[0005]]（App Service / Aggregate Root / 三問依賴）；resource versioning + async operation handle 依 [[0002]]；context 單一寫入 + CfgSchema lowering 依 [[0006]]；exclusion gate / handle / background 三 facet 依 [[0019]]（本檔把那套 leaf 提到共用層 + 定 app-local vs shared 邊界）；event_bus / shared transport 依 [[0014]]；autofluxdep orchestrator 設計依 [[0018]]；worker 不畫圖故 [[0017]] marshal 不適用。
+**關聯：** session service 角色/依賴依 [[0004]]/[[0005]]（App Service / Aggregate Root / 三問依賴）；resource versioning + async operation handle 依 [[0002]]；context 單一寫入 + CfgSchema lowering 依 [[0006]]；exclusion gate / handle / background 三 facet 依 [[0019]]（本檔把那套 leaf 提到共用層 + 定 app-local vs shared 邊界）；event_bus / shared transport 依 [[0014]]；autofluxdep orchestrator 設計依 [[0062]]；worker 不畫圖故 [[0017]] marshal 不適用。
 
 ## 脈絡
 

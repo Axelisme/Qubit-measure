@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-25 — test path ownership
+**Last updated:** 2026-09-26 — workflow 引用更新
 
 # autofluxdep experiments
 
@@ -23,7 +23,7 @@ experiments/
 - `catalog.py` 是唯一會同時 import 七個 `EXPERIMENT` 的 composition root。catalog 的顯式順序只控制 GUI 新增選單，不改變 persisted workflow order。
 - `__init__.py` 只有 package docstring，不 import catalog 或 concrete experiment。需要 catalog 的 caller 明確從 `experiments.catalog` import；只使用 `_support` 或單一 experiment 時不會啟動完整 composition root。
 - `_support/` 只擁有至少兩個實驗共用的 mechanics；它不 import concrete experiment 或 catalog。詳細邊界見 `_support/README.md`。
-- `../nodes/` 只擁有 ADR-0018 execution contracts 與 pure-compute predictor；量測實驗不放回該 package。
+- `../nodes/` 只擁有 ADR-0062 execution contracts（原 Builder/Node 介面見 ADR-0018）與 pure-compute predictor；量測實驗不放回該 package。
 
 ## 修改既有實驗
 
@@ -39,4 +39,4 @@ experiments/
 6. 在 `tests/gui/app/autofluxdep/experiments/` 增加該實驗的 cfg/acquire/fit/Result/Patch 測試，並讓 production-wide contract tests 明確從 `experiments.catalog` 的 `builders()` 取得 Builder。
 7. 執行 catalog/import architecture tests、該實驗 targeted tests，以及相關 cfg/persistence/workflow tests。
 
-跨模組 runtime contract 見 ADR-0018、ADR-0036、ADR-0043；本 package 的高層執行語言見 `../CONTEXT.md`。
+跨模組 runtime contract 見 ADR-0062、ADR-0036；本 package 的高層執行語言見 `../CONTEXT.md`。
