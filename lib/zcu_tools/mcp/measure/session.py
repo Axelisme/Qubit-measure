@@ -6,7 +6,7 @@ import math
 from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
 from string import Formatter
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict
 
 from zcu_tools.mcp.core.bridge import (
     GuiAuthenticationError,
@@ -73,6 +73,20 @@ def _created_resource_fields(pattern: str) -> tuple[str, ...]:
     return fields
 
 
+def _catalog_strings(raw: object) -> list[str]:
+    """Validate catalog names and policy patterns before storing typed lists."""
+    if not isinstance(raw, list):
+        raise GuiRpcError("invalid GUI rpc.catalog list", reason="incompatible_wire")
+    strings: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item:
+            raise GuiRpcError(
+                "invalid GUI rpc.catalog list entry", reason="incompatible_wire"
+            )
+        strings.append(item)
+    return strings
+
+
 def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
     """Validate the untrusted GUI reply before installing any policy state."""
     if not isinstance(raw, dict) or not isinstance(raw.get("methods"), list):
@@ -86,7 +100,7 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
         method = value.get("method")
         exposure = value.get("exposure")
         timeout = value.get("timeout_seconds")
-        tools = value.get("tool_names")
+        tools = _catalog_strings(value.get("tool_names"))
         schema = value.get("params")
         operation_key = value.get("operation_key")
         refresh_after_write = value.get("refresh_after_write")
@@ -103,8 +117,6 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             or not isinstance(timeout, (int, float))
             or not math.isfinite(timeout)
             or timeout <= 0
-            or not isinstance(tools, list)
-            or any(not isinstance(tool, str) or not tool for tool in tools)
             or (exposure == "tool") != bool(tools)
             or (operation_key is not None and not isinstance(operation_key, str))
             or not isinstance(refresh_after_write, bool)
@@ -123,29 +135,25 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             )
         if created_resource is not None:
             _created_resource_fields(created_resource)
-        deps = value.get("guard_deps")
-        reveals = value.get("reveals")
-        reveals_without = value.get("reveals_without")
-        reveals_when_nonempty = value.get("reveals_when_nonempty")
-        if not all(
-            isinstance(patterns, list)
-            and all(isinstance(pattern, str) and pattern for pattern in patterns)
-            for patterns in (deps, reveals, reveals_without, reveals_when_nonempty)
-        ) or ((reveals_without or reveals_when_nonempty) and not reveals):
+        deps = _catalog_strings(value.get("guard_deps"))
+        reveals = _catalog_strings(value.get("reveals"))
+        reveals_without = _catalog_strings(value.get("reveals_without"))
+        reveals_when_nonempty = _catalog_strings(value.get("reveals_when_nonempty"))
+        if (reveals_without or reveals_when_nonempty) and not reveals:
             raise GuiRpcError(
                 "invalid GUI rpc.catalog policy", reason="incompatible_wire"
             )
         methods[method] = CatalogEntry(
             method=method,
             description=value["description"],
-            params=cast(dict[str, object], schema),
+            params=schema,
             timeout_seconds=float(timeout),
             exposure=exposure,
-            tool_names=cast(list[str], tools),
-            guard_deps=tuple(cast(list[str], deps)),
-            reveals=tuple(cast(list[str], reveals)),
-            reveals_without=tuple(cast(list[str], reveals_without)),
-            reveals_when_nonempty=tuple(cast(list[str], reveals_when_nonempty)),
+            tool_names=tools,
+            guard_deps=tuple(deps),
+            reveals=tuple(reveals),
+            reveals_without=tuple(reveals_without),
+            reveals_when_nonempty=tuple(reveals_when_nonempty),
             refresh_after_write=refresh_after_write,
             created_resource=created_resource,
             operation_key=operation_key,

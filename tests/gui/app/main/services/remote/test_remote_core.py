@@ -402,6 +402,25 @@ def test_invalid_typed_request_rejected(fx):
         sock.close()
 
 
+@pytest.mark.parametrize("operation_id", [True, "1", 1.5, None])
+def test_cancel_rejects_invalid_operation_id_over_socket(fx, operation_id):
+    sock = _open_client(fx.service.port)
+    try:
+        _send(
+            sock,
+            {
+                "id": "invalid-cancel",
+                "method": "operation.cancel",
+                "params": {"operation_id": operation_id},
+            },
+        )
+        reply = _recv_response(sock)
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
 def test_wire_version_reported(fx):
     sock = _open_client(fx.service.port)
     try:

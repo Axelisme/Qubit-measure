@@ -709,6 +709,26 @@ def test_connect_refuses_second_port_while_launched_gui_is_alive(
 @pytest.mark.parametrize(
     "catalog",
     [
+        *(
+            {
+                "methods": [
+                    {**CATALOG[0], "method": "rejected.entry"},
+                    {**CATALOG[0], field: invalid},
+                ]
+            }
+            for field in (
+                "tool_names",
+                "guard_deps",
+                "reveals",
+                "reveals_without",
+                "reveals_when_nonempty",
+            )
+            for invalid in (None, "not-a-list", [1], [""])
+        ),
+        *(
+            {"methods": [{**CATALOG[0], "params": invalid}]}
+            for invalid in (None, [], {}, {"type": "array"})
+        ),
         {"methods": "invalid"},
         {"methods": [CATALOG[0], CATALOG[0]]},
         {
@@ -755,15 +775,30 @@ def test_connect_rejects_malformed_or_duplicate_catalog(
     monkeypatch: pytest.MonkeyPatch,
     catalog: dict[str, Any],
 ) -> None:
-    client = make_client(tmp_path, port_is_open=lambda port: True)
+    client = make_client(tmp_path, overview_rpc, port_is_open=lambda port: True)
     client.context.bridge.set_transport(None)
     client.transport.replies["rpc.catalog"] = {"ok": True, "result": catalog}
 
     def connect(port: int, token: str | None = None) -> str:
+        client.transport.is_open = True
         client.context.bridge.set_transport(client.transport)
         return "connected"
 
     monkeypatch.setattr(client.context.bridge, "connect", connect)
-    with pytest.raises(RuntimeError, match="catalog"):
+    with pytest.raises(RuntimeError, match="catalog") as error:
         client.call("connect", {"port": 9912})
+    assert getattr(error.value, "reason", None) == "incompatible_wire"
     assert not client.context.bridge.is_connected
+
+    client.transport.replies["rpc.catalog"] = {
+        "ok": True,
+        "result": {"methods": CATALOG},
+    }
+    client.call("connect", {"port": 9912})
+    methods = client.call("rpc_list", {})["methods"]
+    assert [entry["method"] for entry in methods] == [
+        entry["method"] for entry in CATALOG
+    ]
+    with pytest.raises(RuntimeError) as missing:
+        client.call("rpc_describe", {"method": "rejected.entry"})
+    assert getattr(missing.value, "reason", None) == "unknown_method"

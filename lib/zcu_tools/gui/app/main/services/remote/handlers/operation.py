@@ -56,7 +56,9 @@ def _h_operation_active(
 def _h_operation_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    operation_id = int(params["operation_id"])  # type: ignore[arg-type]
+    operation_id = params["operation_id"]
+    if not isinstance(operation_id, int) or isinstance(operation_id, bool):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "operation_id must be an integer")
     try:
         status = adapter.operation_control.cancel_operation(operation_id)
     except KeyError as exc:

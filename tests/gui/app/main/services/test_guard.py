@@ -97,8 +97,11 @@ def test_run_permit_freezes_displayed_expression_without_live_context() -> None:
     schema.value.fields["gain"] = DirectValue(0.75)
 
     assert permit.raw_cfg == {"gain": 0.25}
-    assert cast(MagicMock, state.exp_context.md).mock_calls == []
-    assert cast(MagicMock, state.exp_context.ml).mock_calls == []
+    md, ml = state.exp_context.md, state.exp_context.ml
+    assert isinstance(md, MagicMock)
+    assert isinstance(ml, MagicMock)
+    assert md.mock_calls == []
+    assert ml.mock_calls == []
 
 
 def test_run_permit_does_not_resolve_missing_cached_expression() -> None:
@@ -110,11 +113,14 @@ def test_run_permit_does_not_resolve_missing_cached_expression() -> None:
     with pytest.raises(GuardError, match="unresolved"):
         GuardService(state).acquire_run_permit(tab_id)
 
-    assert cast(MagicMock, state.exp_context.md).mock_calls == []
-    assert cast(MagicMock, state.exp_context.ml).mock_calls == []
-    cast(
-        MagicMock, state.get_tab(tab_id).adapter
-    ).validate_run_request.assert_not_called()
+    md, ml = state.exp_context.md, state.exp_context.ml
+    adapter = state.get_tab(tab_id).adapter
+    assert isinstance(md, MagicMock)
+    assert isinstance(ml, MagicMock)
+    assert isinstance(adapter, MagicMock)
+    assert md.mock_calls == []
+    assert ml.mock_calls == []
+    adapter.validate_run_request.assert_not_called()
 
 
 def test_run_permit_freezes_cached_reference_shape_and_values() -> None:
@@ -134,7 +140,9 @@ def test_run_permit_freezes_cached_reference_shape_and_values() -> None:
     shape.fields.clear()
 
     assert permit.raw_cfg == {"asset": {"gain": 0.25}}
-    assert cast(MagicMock, state.exp_context.ml).mock_calls == []
+    ml = state.exp_context.ml
+    assert isinstance(ml, MagicMock)
+    assert ml.mock_calls == []
 
 
 def test_run_permit_detaches_observed_device_settings(monkeypatch) -> None:
@@ -186,9 +194,9 @@ def test_run_permit_rejects_live_device_without_observed_settings(status) -> Non
 
     with pytest.raises(GuardError, match="no observed settings"):
         GuardService(state).acquire_run_permit(tab_id)
-    cast(
-        MagicMock, state.get_tab(tab_id).adapter
-    ).validate_run_request.assert_not_called()
+    adapter = state.get_tab(tab_id).adapter
+    assert isinstance(adapter, MagicMock)
+    adapter.validate_run_request.assert_not_called()
 
 
 def test_run_permit_excludes_remembered_disconnected_device() -> None:
