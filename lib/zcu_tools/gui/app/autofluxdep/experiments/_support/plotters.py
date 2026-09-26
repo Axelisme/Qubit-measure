@@ -6,13 +6,13 @@ the flux-aware Result as it fills, redrawn each flux point). It holds drawing
 state but never owns the Qt widget, and is NEVER marshalled — the worker only
 fills numpy rows + notifies (ADR-0017).
 
-Each Plotter reuses ``zcu_tools.liveplot`` (LivePlot1D / LivePlot2DwithLine /
+Each Plotter reuses ``zcu_tools.plotting.liveplot`` (LivePlot1D / LivePlot2DwithLine /
 LivePlot2D) embedded into the host Figure's axes via ``existed_axes`` — the same
 plot classes and the same per-subplot data the runner module's
 ``update_plotter`` feeds, so the GUI liveplot matches the notebook exactly. With
 ``existed_axes`` the liveplot owns no figure (``fig is None``); the host
 refreshes by calling ``canvas.draw_idle()`` after ``update(..., refresh=False)``
-(see ``zcu_tools.liveplot.segments.base``).
+(see ``zcu_tools.plotting.liveplot.segments.base``).
 
 Three shapes cover the experiments (qubit_freq keeps its own two-panel Plotter):
 
@@ -47,7 +47,7 @@ class Decay1DPlotter:
     """
 
     def __init__(self, figure: Any, title: str, value_label: str, x_label: str) -> None:
-        from zcu_tools.liveplot import LivePlot1D
+        from zcu_tools.plotting.liveplot import LivePlot1D
 
         self._fig = figure
         ax_scalar = figure.add_subplot(2, 1, 1)
@@ -105,7 +105,7 @@ class ColormapLinePlotter:
         num_lines: int = 3,
         marker_of: Any | None = None,
     ) -> None:
-        from zcu_tools.liveplot import LivePlot2DwithLine
+        from zcu_tools.plotting.liveplot import LivePlot2DwithLine
 
         self._fig = figure
         self._title = title
@@ -149,7 +149,7 @@ class Landscape2DPlotter:
     """
 
     def __init__(self, figure: Any, title: str = "ro_optimize") -> None:
-        from zcu_tools.liveplot import LivePlot2D
+        from zcu_tools.plotting.liveplot import LivePlot2D
 
         self._fig = figure
         ax = figure.add_subplot(1, 1, 1)

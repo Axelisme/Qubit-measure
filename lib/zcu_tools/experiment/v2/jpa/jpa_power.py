@@ -29,7 +29,7 @@ from zcu_tools.experiment.utils import (
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.liveplot import LivePlotScatter
+from zcu_tools.plotting.liveplot import LivePlotScatter
 from zcu_tools.program.v2 import (
     Branch,
     ProgramV2Cfg,

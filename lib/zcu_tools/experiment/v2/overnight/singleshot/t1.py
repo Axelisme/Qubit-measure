@@ -28,7 +28,7 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.singleshot.util import correct_populations
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlot1D, LivePlot2D
+from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2D
 from zcu_tools.program.v2 import (
     Branch,
     Delay,

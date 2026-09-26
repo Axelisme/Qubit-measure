@@ -370,9 +370,9 @@ class QubitFreqPlotter:
     """qubit_freq's two-panel liveplot, aligned with the runner module.
 
     Built once at Run start with a bare matplotlib ``Figure``; reuses
-    ``zcu_tools.liveplot`` (LivePlot1D / LivePlot2DwithLine) embedded into the
+    ``zcu_tools.plotting.liveplot`` (LivePlot1D / LivePlot2DwithLine) embedded into the
     Figure's axes via ``existed_axes`` (the liveplot fig is None then — the host
-    refreshes; see ``zcu_tools.liveplot.segments.base``). ``update(result, idx)``
+    refreshes; see ``zcu_tools.plotting.liveplot.segments.base``). ``update(result, idx)``
     on the main thread after each row notification feeds:
 
     - ``fit_freq`` (LivePlot1D): flux value → fitted absolute qubit frequency.
@@ -382,7 +382,7 @@ class QubitFreqPlotter:
     """
 
     def __init__(self, figure: Any) -> None:
-        from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
+        from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2DwithLine
 
         self._fig = figure
         ax_fit = figure.add_subplot(2, 1, 1)

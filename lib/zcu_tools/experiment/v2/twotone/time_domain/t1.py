@@ -31,7 +31,7 @@ from zcu_tools.experiment.v2.utils import (
     materialize_nonuniform_t1_delays,
     sweep2array,
 )
-from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
+from zcu_tools.plotting.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,

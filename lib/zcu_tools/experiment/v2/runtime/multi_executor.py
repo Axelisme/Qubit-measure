@@ -25,9 +25,9 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.runtime.task import MeasurementBundle
 from zcu_tools.experiment.v2.utils import Result
-from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
-from zcu_tools.liveplot.backend import close_figure
-from zcu_tools.liveplot.backend.jupyter import grab_frame_with_instant_plot
+from zcu_tools.plotting.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
+from zcu_tools.plotting.liveplot.backend import close_figure
+from zcu_tools.plotting.liveplot.backend.jupyter import grab_frame_with_instant_plot
 from zcu_tools.utils.debug import log_current_exception
 
 T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)

@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from zcu_tools.liveplot.backend import (
+from zcu_tools.plotting.liveplot.backend import (
     FallbackBackend,
     JupyterBackend,
     LivePlotBackend,

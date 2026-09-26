@@ -5,7 +5,7 @@ from typing import Any, cast
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from zcu_tools.liveplot.segments import Plot1DSegment
+from zcu_tools.plotting.liveplot.segments import Plot1DSegment
 
 
 def test_plot1d_segment_rejects_complex_signals() -> None:

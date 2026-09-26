@@ -284,7 +284,7 @@ marshal layer is for worker-drawn figures and this worker never draws; see
 ADR-0018). At **Run start** the UI builds, for every workflow Node, its figure +
 Plotter + Result together (all three are sweep-lived), so auto-follow can switch
 to any Node's plot at any time.
-_Avoid_: live plot (that's the rendering substrate, `zcu_tools.liveplot`);
+_Avoid_: live plot (that's the rendering substrate, `zcu_tools.plotting.liveplot`);
 "per-execution plotter" (the lifetime is the sweep, not one execution).
 
 The Plotter is **never marshalled** (ADR-0017 does NOT apply): the worker NEVER

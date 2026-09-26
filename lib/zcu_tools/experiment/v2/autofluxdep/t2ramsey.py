@@ -21,8 +21,8 @@ from zcu_tools.experiment.v2.runtime import (
     ScheduleStep,
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
-from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.plotting.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Delay,
     ProgramV2Cfg,

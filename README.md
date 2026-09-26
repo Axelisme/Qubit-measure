@@ -1,6 +1,6 @@
 # ZCU-Tools
 
-**Last updated:** 2026-09-26 — canonical experiment data
+**Last updated:** 2026-09-27 — plotting package layout
 
 ZCU-Tools 是 ZCU216/QICK 平台上的量子量測工具集。工作站端負責 GUI、
 Notebook、MCP automation、資料分析與模擬；ZCU 板端只跑 Pyro server，讓工作站
@@ -54,7 +54,7 @@ Notebook 仍可直接呼叫 `zcu_tools.experiment.v2` 與 `zcu_tools.notebook` h
 - `zcu_tools.analysis` / `zcu_tools.notebook.analysis`：GUI-neutral analysis kernel
   與 notebook-facing workflow。
 - `zcu_tools.simulate.fluxonium`：Fluxonium prediction engine。
-- `zcu_tools.liveplot`：Notebook / experiment runtime live plotting。
+- `zcu_tools.plotting.liveplot`：Notebook / experiment runtime 的即時繪圖，GUI 透過註冊 backend 接入。
 - `zcu_tools.datafile`：Labber-style HDF5 persistence facade。
 
 ## Data Layout
