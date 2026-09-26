@@ -17,29 +17,16 @@
 - Context（`context/`）綁定一個具名實驗工作 scope 的 MetaDict 與 ModuleLibrary。
 - `QubitParams` 擁有 result scope 層級的 `params.json`，跨多個 context 共用。
 - `SampleTable` 是 notebook 記錄量測結果的 CSV；v2 欄位協定是 opt-in。
-- `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開；rename／delete 不改寫 ModuleLibrary 的 references。
+- `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開。
 
 `zcu_tools.resources` root 不 re-export 任何名稱；caller 從各 owner 的 module 或子 package import。
 
-## 跨模組依賴
+## 閱讀入口
 
-```
-ContextManager
-    ├── ModuleLibrary  (module_cfg.yaml)
-    │       └── ModuleCfg / WaveformCfg  (from program/v2/modules)
-    └── MetaDict       (meta_info.json)
+各 owner 的行為、限制與跨模組接縫只在自己的文件：
 
-Experiment cfg materialization
-    ├── zcu_tools.experiment.cfg_assembler.make_cfg / assemble_experiment_cfg
-    ├── ModuleLibrary  (current ml；module lookup / lowering context)
-    └── GlobalDeviceManager.get_all_info()  (thin wrapper 呼叫當下的 default snapshot provider)
-
-QubitParams          (params.json typed owner；fluxdep/dispersive/t1_curve/predictor caller 共用)
-ArbWaveformDatabase  (獨立，被 modules/waveform.py:ArbWaveform 使用)
-SampleTable          (獨立，供 notebook 記錄量測結果用；v2 協定由 `sample_table/schema.py` 提供，不改變 SampleTable 本身)
-```
-
-## 注意事項
-
-- Experiment cfg materialization 每次呼叫都使用 caller 傳入的 current `ml` 與 device snapshot；active context 切換不應被長壽 object 綁住。
-- 各 owner 的使用限制在自己的文件：MetaDict 與 ModuleLibrary 見 [context README](context/README.md)，QubitParams 見 [qubit_params.md](qubit_params.md)，SyncFile 的同步與 file lock 限制見 `syncfile.py` 的 module docstring。
+- MetaDict、ModuleLibrary、ContextManager，以及 experiment cfg materialization 與 context 的接縫：[context README](context/README.md)。
+- QubitParams：[qubit_params.md](qubit_params.md)。
+- SampleTable 與 v2 欄位協定：[sample_table README](sample_table/README.md)。
+- ArbWaveformDatabase：[waveform_assets.md](waveform_assets.md)。
+- SyncFile 的同步規則與 file lock 限制：`syncfile.py` 的 module docstring。
