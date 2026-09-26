@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [main GUI](../../../lib/zcu_tools/gui/app/main/README.md)、[autofluxdep GUI](../../../lib/zcu_tools/gui/app/autofluxdep/README.md) 與 [shared caretaker](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
+
 # 0015 — PersistenceCaretaker（Memento + Caretaker）+ 單檔 app-state + 關閉才寫
 
 **狀態：** accepted（Phase 126 gui2，live-verified）。

@@ -4,11 +4,11 @@
 
 ## `SampleTable`（`table.py`）
 
-以 CSV 儲存量測樣品紀錄（pandas DataFrame 包裝）。`SampleTable` 本身不固定 schema；notebook 與 GUI/script export 以呼叫端約定欄位，例如 single-qubit sample 使用 `calibrated mA`、`Freq (MHz)`、T1/T2r/T2e、error、`comment` 與 `date` 欄位。`extend_samples()` 會接在既有 CSV 後面；要重建檔案需由 caller 先刪除或使用 export script 的 overwrite mode。
+以 CSV 儲存量測樣品紀錄（pandas DataFrame 包裝）。`SampleTable` 本身不固定 schema；notebook 與 GUI/script export 以呼叫端約定欄位，例如 single-qubit producer 使用 v2 的 `dev_value`／`dev_unit`，再加 `Freq (MHz)`、T1/T2r/T2e、error、`comment` 與 `date` 欄位。舊 CSV 的 `calibrated mA` 只供明示 legacy conversion，不是新樣品的欄位。`extend_samples()` 會接在既有 CSV 後面；要重建檔案需由 caller 先刪除或使用 export script 的 overwrite mode。
 
 ```python
 st = SampleTable("samples.csv")  # 也接受 pathlib.Path
-st.add_sample(qubit="Q1", flux=1.23e-3, T1=50e-6)
+st.add_sample(dev_value=1.23e-3, dev_unit="A", flux=0.25, T1=50e-6)
 df = st.get_samples()
 ```
 

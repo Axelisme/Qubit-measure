@@ -53,11 +53,7 @@
 
 ## Persistence
 
-- [0015 — PersistenceCaretaker](0015-persistence-caretaker-memento-single-file.md)：GUI app-state 用單一 memento file，由 caretaker 管理讀寫時機。
-- [0027 — Experiment data persistence](0027-experiment-data-persistence-native-labber-axes-list.md)：Experiment data file 使用 Labber axes-list、typed axes spec、strict grouped dataset roles；runtime 與 GUI 只接受 canonical data，repo 不提供已退休的 converter。
-- [0039 — QubitParams owns params.json](0039-qubit-params-json-owner.md)：`meta_tool.QubitParams` 是 result-scope `params.json` 的 typed 讀寫權威。
-- [0040 — Autofluxdep run result artifact](0040-autofluxdep-run-result-artifact.md)：autofluxdep run output 以 run directory、journal 與 per-node streaming Labber-readable HDF5 作 canonical artifact。
-- [0057 — Flat SampleTable v2 coordinate contract](0057-flat-sampletable-v2-coordinate-contract.md)：五欄平鋪 coordinate（flux/dev_value/dev_unit/flux_int/flux_period）與 A/V base unit、explicit provenance precedence；legacy 可用仍存在的 pure migration API 顯式轉換，CSV CLI 已退休。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分 memento、experiment result、run artifact、參數、樣品座標與波形資產的 owner、完整性、失敗與引用邊界；局部格式見各 owner 文件。
 
 ## Experiment runtime／Autofluxdep workflow
 
@@ -73,8 +69,6 @@
 - [0029 — Fluxonium prediction engine](0029-fluxonium-prediction-engine.md)：Fluxonium prediction policy 位於 `simulate.fluxonium`。
 - [0030 — Arbitrary waveform optional recipe](0030-arbitrary-waveform-asset-optional-recipe.md)：arbitrary waveform asset 是 qubit-scoped `.npz`，可內嵌 formula recipe。
 - [0031 — Formula recipe segments](0031-formula-recipe-complex-segments.md)：formula recipe 使用 ordered segments 與 complex expression。
-- [0032 — Reference time axis](0032-arbitrary-waveform-reference-time-axis.md)：arbitrary waveform playback 使用 asset 自帶 time axis。
-- [0033 — Delete/rename without reference scan](0033-arbitrary-waveform-delete-no-reference-scan.md)：asset mutation 不掃描或遷移 ModuleLibrary references。
 - [0034 — ArbWaveformDatabase repository](0034-arb-waveform-database-shared-asset-repository.md)：shared asset operation 收斂到 `meta_tool.ArbWaveformDatabase`。
 - [0035 — MCP failures use tool errors](0035-arb-waveform-mcp-failures-use-tool-errors.md)：arb waveform MCP validation/missing/collision 走 failed tool call 與 stable reason。
 
@@ -96,9 +90,16 @@
 
 ## Retired
 
-以下舊篇保留原號與正文，現行設計見 0062。
+以下舊篇保留原號與正文；現行 Persistence 決策見 0063，workflow 決策見 0062。
 
+- [0015 — GUI memento caretaker](retired/0015-persistence-caretaker-memento-single-file.md)：app 與 shared caretaker 的責任由 0063 接替。
+- [0027 — Experiment data persistence](retired/0027-experiment-data-persistence-native-labber-axes-list.md)：資料責任由 0063 接替，細節在 datafile 與 experiment owner 文件。
+- [0032 — Waveform reference time axis](retired/0032-arbitrary-waveform-reference-time-axis.md)：時間權威由 0063 接替。
+- [0033 — Waveform reference lifecycle](retired/0033-arbitrary-waveform-delete-no-reference-scan.md)：不級聯更新由 0063 接替。
 - [0038 — Executor ResultTree](retired/0038-executor-result-tree.md)：結果樹與 executor 局部用法移至 runtime README。
+- [0039 — QubitParams JSON owner](retired/0039-qubit-params-json-owner.md)：typed handoff 由 0063 接替。
+- [0040 — Autofluxdep run artifact](retired/0040-autofluxdep-run-result-artifact.md)：保存邊界由 0063 接替，workflow lifecycle 見 0062。
+- [0057 — SampleTable v2](retired/0057-flat-sampletable-v2-coordinate-contract.md)：座標保存契約由 0063 接替，schema 細節由 sample_table owner 維護。
 - [0041 — Autofluxdep feedback framework](retired/0041-autofluxdep-feedback-framework.md)：feedback 跨模組邊界接入 0062，slot 細節移至 app README。
 - [0042 — Autofluxdep feedback confidence reversion](retired/0042-autofluxdep-feedback-confidence-reversion.md)：freshness 邊界接入 0062，公式移至 app README。
 - [0043 — Autofluxdep runtime cfg override plan](retired/0043-autofluxdep-runtime-cfg-override-plan.md)：cfg 邊界接入 0062，snapshot／decoration 細節移至 app README。
