@@ -25,21 +25,18 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     DirectValue,
     EvalValue,
+    ScalarSpec,
     SweepValue,
 )
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
-from ._shared import read_chi_kappa, read_ge_centers, readout_probe_freq
+from ._shared import read_chi_kappa, readout_probe_freq
 
 # Domain AcStarkExp.analyze returns (ac_coeff, fig). The fitted AC-Stark
 # coefficient is written back to the MetaDict (key ``ac_stark_coeff``, matching
@@ -268,19 +265,25 @@ class SsAcStarkAdapter(
                     description="AC-Stark probe frequency range",
                 ),
             )
+            .field(
+                "g_center",
+                spec=ScalarSpec("Ground center", complex),
+                default=EvalValue("g_center"),
+            )
+            .field(
+                "e_center",
+                spec=ScalarSpec("Excited center", complex),
+                default=EvalValue("e_center"),
+            )
+            .field(
+                "radius",
+                spec=ScalarSpec("Classification radius", float),
+                default=EvalValue("ge_radius"),
+            )
             .reps(1000)
             .rounds(2)
             .build()
         )
-
-    def run(self, req: RunRequest, schema: CfgSchema) -> SsAcStarkRunResult:
-        # Override the standard run path: the domain run needs the GE
-        # classification trio (not in cfg) — read it from md and forward it.
-        soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
-        cfg = self.build_exp_cfg(raw_cfg, req)
-        g_center, e_center, radius = read_ge_centers(req.md)
-        return AcStarkExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 

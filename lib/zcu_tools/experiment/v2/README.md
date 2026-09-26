@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-09-26 — Rabi calibration cfg
+**Last updated:** 2026-09-26 — classification calibration cfg
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
 
@@ -92,8 +92,8 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
-Singleshot Amp／Len Rabi 的 live classification 校正值由
-`AmpRabiCfg`／`LenRabiCfg` 的 `g_center/e_center/radius` 提供，`run(soc, soccfg, cfg)` 不接受獨立校正參數。Result 的 cfg_snapshot 保存這次使用的
+Singleshot Amp／Len Rabi、AC Stark 及 MIST freq/power/power_freq 的 classification
+校正值由各自 cfg 的 `g_center/e_center/radius` 提供，`run(soc, soccfg, cfg)` 不接受獨立校正參數。Result 的 cfg_snapshot 保存這次使用的
 校正值；complex centers 在 experiment comment 中以可逆 complex literal 序列化，還原由
 Pydantic complex 欄位處理。
 

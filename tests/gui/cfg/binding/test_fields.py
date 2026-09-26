@@ -508,6 +508,26 @@ def test_scalar_field_empty_dynamic_options_respect_required_and_optional_semant
     assert field.is_valid() is expected_valid
 
 
+def test_sweep_resolves_initial_and_replacement_expression_bounds_before_step() -> None:
+    values = {"start": 1.0, "stop": 3.0}
+    initial = SweepValue(EvalValue("start"), EvalValue("stop"), 5)
+    field = SweepField(SweepSpec(), lambda expression: values[expression], initial)
+    try:
+        assert field.is_valid()
+        assert field.get_value().step == pytest.approx(0.5)
+        values["stop"] = 5.0
+        field.set_value(initial)
+        assert field.is_valid()
+        assert field.get_value().step == pytest.approx(1.0)
+        field.set_text("step", "1e")
+        unfinished = field.get_value()
+        field.set_value(unfinished)
+        assert field.get_value().step == unfinished.step
+        assert not field.is_valid()
+    finally:
+        field.teardown()
+
+
 def test_sweep_snapshot_preserves_incomplete_edge_and_recovers() -> None:
     ports = BindingPorts()
     field = SweepField(SweepSpec(), ports.evaluate, SweepValue(0.0, 1.0, 5))

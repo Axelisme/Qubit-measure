@@ -3326,10 +3326,13 @@ exp_cfg = {
     },
     "relax_delay": 20.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.mist.PowerCfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(
+    exp_cfg, ze.singleshot.mist.PowerCfg, reps=1000, rounds=100,
+    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
+)
 
 sh_mist_exp = ze.singleshot.mist.PowerExp()
-_ = sh_mist_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius)
+_ = sh_mist_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
@@ -3446,10 +3449,13 @@ exp_cfg = {
     },
     "relax_delay": 5.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.AcStarkCfg, reps=1000, rounds=2)
+cfg = ml.make_cfg(
+    exp_cfg, ze.singleshot.AcStarkCfg, reps=1000, rounds=2,
+    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
+)
 
 sh_ac_stark_exp = ze.singleshot.AcStarkExp()
-_ = sh_ac_stark_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius)
+_ = sh_ac_stark_exp.run(soc, soccfg, cfg)
 ```
 
 ```python

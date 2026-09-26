@@ -333,6 +333,8 @@ class SweepField(CfgField):
             evaluate_expression,
             initial_val=self._coerce_edge(initial.stop),
         )
+        # Child construction resolves expressions; derive step from those cached values.
+        self._step = SweepEditor.canonicalize(self.get_value()).step
         self.start_field.on_change.connect(self._on_child_change)
         self.stop_field.on_change.connect(self._on_child_change)
         self.start_field.on_validity_changed.connect(self._on_child_validity_changed)
@@ -382,6 +384,7 @@ class SweepField(CfgField):
             self.stop_field.set_value(self._coerce_edge(canonical.stop))
             self._expts = canonical.expts
             self._step = canonical.step
+            self._step = SweepEditor.canonicalize(self.get_value()).step
         finally:
             self._updating = False
         self._refresh_validity()
