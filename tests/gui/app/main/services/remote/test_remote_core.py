@@ -747,6 +747,42 @@ def test_load_after_gui_context_edit_requires_a_new_full_read(
         bridge.disconnect()
 
 
+@pytest.mark.parametrize("mutate_cfg", [False, True])
+def test_frozen_run_needs_cfg_observation_not_large_context_export(
+    fx, tmp_path: Path, mutate_cfg: bool
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    editor_id, _ = fx.ctrl.open_seeded_cfg_editor(
+        fx.state.get_tab(tab_id).cfg_schema, owner_key=tab_id
+    )
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        _edit_context_as_gui(fx, "large", "x" * (MAX_LINE_BYTES // 2))
+        _edit_context_as_gui(fx, "other_large", "x" * (MAX_LINE_BYTES // 2))
+        with pytest.raises(RuntimeError) as oversized:
+            call("rpc_call", {"method": "context.snapshot"})
+        assert getattr(oversized.value, "reason", None) == "response_encoding_failed"
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        _edit_context_as_gui(fx, "unrelated", 17)
+        if mutate_cfg:
+            fx.ctrl.cfg_editor_set_field(editor_id, "reps", 42)
+        args = {"method": "tab.run_start", "params": {"tab_id": tab_id}}
+        if mutate_cfg:
+            with pytest.raises(RuntimeError) as stale:
+                call("rpc_call", args)
+            assert getattr(stale.value, "reason", None) == "stale_version"
+        else:
+            started = call("rpc_call", args)
+            _await_completed_run(call, started["handle"])
+    finally:
+        bridge.disconnect()
+        fx.ctrl.teardown_cfg_editor(editor_id)
+
+
 def test_oversized_context_read_returns_error_without_advancing_guard(
     fx, tmp_path: Path
 ) -> None:

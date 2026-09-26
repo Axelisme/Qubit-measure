@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26，bounded RPC response failure，GUI 92 / WIRE 63
+**Last updated:** 2026-09-26，snapshot-only Run guards，GUI 93 / WIRE 63
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -121,8 +121,12 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 62`, `GUI_VERSION = 90`, and
-`MCP_VERSION = 82` (defined in `zcu_tools.mcp.measure.server`). WIRE 62 adds
+Current measure-gui values are `WIRE_VERSION = 63`, `GUI_VERSION = 93`, and
+`MCP_VERSION = 83` (defined in `zcu_tools.mcp.measure.server`). GUI 93 removes
+Run's context-content dependency after freezing cfg and device inputs; tab cfg,
+tab existence, SoC, devices and hardware exclusion remain protected. WIRE 63
+carries complete cached cfg observations; GUI 92 bounds response encoding failures.
+WIRE 62 adds
 `context.snapshot`, conditional full-read policy and certified resource creation
 to the live catalog. GUI 90 declares those policies; MCP 82 consumes them.
 GUI 89 reports
@@ -146,6 +150,11 @@ The GUI maintains a monotonic resource version table for context, SoC, devices,
 tabs, results, save paths, and editor sessions. Guarded mutation methods accept
 wire-hidden `expected_versions`; the remote adapter compares them atomically on
 the State owner thread before calling the controller.
+
+Run uses the observed cfg and device snapshots, not live md/ml. Its guard does
+not require exporting the entire context. Load, editor commit and writeback still
+use live context and retain their context guard; Run's change does not authorize
+removing those dependencies.
 
 MCP owns the agent baseline:
 

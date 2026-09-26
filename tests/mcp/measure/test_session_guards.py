@@ -28,6 +28,12 @@ def send(client: MeasureClient, method: str, params: dict[str, Any]) -> dict[str
     )
 
 
+def context_version_for_load(client: MeasureClient) -> int:
+    return send(client, "tab.load_data", {"tab_id": "t", "data_path": "result.h5"})[
+        "expected_versions"
+    ]["context"]
+
+
 @pytest.mark.parametrize(
     ("method", "params", "expected"),
     [
@@ -38,7 +44,6 @@ def send(client: MeasureClient, method: str, params: dict[str, Any]) -> dict[str
                 "tab:t:cfg": 3,
                 "tab:t": 1,
                 "soc": 2,
-                "context": 4,
                 "device:yoko": 5,
                 "device:sgs": 8,
                 "devices:__set__": 6,
@@ -98,7 +103,7 @@ def test_new_tab_receipt_establishes_only_the_created_tab_existence(
     ) == {"tab_id": "new-tab"}
     expected = send(client, "tab.run_start", {"tab_id": "new-tab"})["expected_versions"]
     assert expected["tab:new-tab"] == 1
-    assert expected["context"] == 0
+    assert context_version_for_load(client) == 0
 
 
 def test_only_explicit_full_tab_and_soc_reads_reveal_their_guard_versions(
@@ -118,14 +123,14 @@ def test_only_explicit_full_tab_and_soc_reads_reveal_their_guard_versions(
     before = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
     assert before["tab:t"] == 0
     assert before["soc"] == 0
-    assert before["context"] == 0
+    assert context_version_for_load(client) == 0
 
     client.call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": "t"}})
     client.call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
     after = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
     assert after["tab:t"] == 3
     assert after["soc"] == 4
-    assert after["context"] == 0
+    assert context_version_for_load(client) == 0
 
 
 def test_unseen_device_membership_is_guarded_at_zero(client: MeasureClient) -> None:
@@ -209,7 +214,7 @@ def test_stale_error_requires_a_new_read_before_refreshing_observed_versions(
         client.context.send_gui_rpc(method, params)
     retry = [p for name, p in client.transport.sent if name == method][-1]
     assert retry["expected_versions"][resource] == 6
-    assert retry["expected_versions"]["context"] == 9
+    assert context_version_for_load(client) == 9
 
 
 def test_cfg_snapshot_after_stale_refreshes_only_cfg(client: MeasureClient) -> None:
@@ -229,7 +234,7 @@ def test_cfg_snapshot_after_stale_refreshes_only_cfg(client: MeasureClient) -> N
     send(client, "tab.get_cfg", {"tab_id": "t"})
     retried = send(client, "tab.run_start", {"tab_id": "t"})
     assert retried["expected_versions"]["tab:t:cfg"] == 7
-    assert retried["expected_versions"]["context"] == 9
+    assert context_version_for_load(client) == 9
 
 
 def test_stale_error_identifies_changed_resources_through_the_rpc_boundary(
@@ -606,7 +611,7 @@ def test_successful_write_refreshes_only_changed_previously_seen_resources(
         == {}
     )
     expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
-    assert expected["context"] == 8
+    assert context_version_for_load(client) == 8
     assert expected["tab:t:cfg"] == 1
     assert expected["soc"] == 0
 
@@ -623,8 +628,7 @@ def test_invalid_write_receipt_does_not_advance_observations(
     with pytest.raises(RuntimeError) as error:
         client.context.send_gui_rpc("editor.commit", {"editor_id": "e", "name": "m"})
     assert getattr(error.value, "reason", None) == "incompatible_wire"
-    expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
-    assert expected["context"] == 7
+    assert context_version_for_load(client) == 7
 
 
 def test_write_does_not_approve_a_prior_unread_edit_to_the_same_cfg(
@@ -669,8 +673,7 @@ def test_write_reply_does_not_approve_a_later_unseen_gui_edit(
         "rpc_call",
         {"method": "editor.commit", "params": {"editor_id": "e", "name": "m"}},
     )
-    expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
-    assert expected["context"] == 8
+    assert context_version_for_load(client) == 8
 
 
 @pytest.mark.parametrize(
@@ -692,7 +695,7 @@ def test_unmapped_read_keeps_unrelated_baseline(
     set_versions(client, {"context": 8, "tab:t:cfg": 9, "soc": 4})
     send(client, method, params)
     expected = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
-    assert expected["context"] == 7
+    assert context_version_for_load(client) == 7
     assert expected["tab:t:cfg"] == 1
     assert expected["soc"] == 0
     assert expected["device:removed"] == 3

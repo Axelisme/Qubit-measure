@@ -31,7 +31,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:cfg",
                 "tab:{tab_id}",
                 "soc",
-                "context",
                 "device:*",
                 "devices:__set__",
             ),
