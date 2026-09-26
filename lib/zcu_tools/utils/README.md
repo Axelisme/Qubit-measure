@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-09-27 — datafile relocation
+**Last updated:** 2026-09-27 — debug helper merge
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 資料檔格式、讀寫與 streaming 見 `zcu_tools.datafile`。
@@ -86,6 +86,7 @@ linear regression。
 
 ## debug helpers
 
+`utils.debug.enable_debug`、`disable_debug` 與 `debug_scope` 設定、清除或暫時啟用指定 module namespace 的 debug logging。
 `utils.debug.log_current_exception` 透過 caller-owned logger 記錄目前 active
 exception；若 exception 來自 Pyro 且包含 `_pyroTraceback`，會把 remote traceback
 文字併入同一筆 log record，不直接 print 到 stdout / stderr。
