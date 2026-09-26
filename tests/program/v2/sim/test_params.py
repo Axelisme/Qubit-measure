@@ -21,7 +21,7 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     SweepValue,
 )
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs, s21, value_to_flux
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -394,7 +394,7 @@ class TestDefaultSimParamFluxPeriod:
     """
 
     def test_default_readout_blobs_are_visible_over_base_noise(self) -> None:
-        guide_ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
         guide = proper_flux_range(guide_ctx, expts=2)
         guide_start, guide_stop = _numeric_sweep_bounds(guide)
         guide_center = 0.5 * (guide_start + guide_stop)
@@ -414,7 +414,7 @@ class TestDefaultSimParamFluxPeriod:
     def test_guide_sweep_covers_at_least_one_period(self) -> None:
         # value_to_flux(v) = (v + flux_bias - flux_half) / flux_period + 0.5
         # The guide sweep should span at least one period for visible dispersion.
-        guide_ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
         guide = proper_flux_range(guide_ctx, expts=2)
         guide_start, guide_stop = _numeric_sweep_bounds(guide)
         p = DEFAULT_SIMPARAM

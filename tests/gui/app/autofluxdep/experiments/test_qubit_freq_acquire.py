@@ -134,7 +134,7 @@ def _configure_context(ctrl) -> None:
     the MockFluxProvisioner, which installs a FluxoniumPredictor derived from the
     mock soc's SimParams (matching the SimEngine's f01). Relying on that provisioned
     predictor exercises the real mock-connect path rather than a hand-built copy."""
-    ml = ctrl.state.exp_context.ml
+    ml = ctrl.state.session_env.ml
     ml.register_waveform(
         qub_drive={"style": "const", "length": 1.0},
     )
@@ -217,7 +217,7 @@ def test_plotter_update_runs_after_a_real_produce():
     result = builder.make_init_result(schema, flux)
     figure = Figure()
     plotter = builder.make_plotter(figure)
-    ctx = ctrl.state.exp_context
+    ctx = ctrl.state.session_env
     env = RunEnv(
         flux=0.0,
         flux_idx=0,
@@ -269,7 +269,7 @@ def test_good_fit_observes_prediction_residual_by_default():
         base=float(mock_flux_predictor(sim_params).predict_freq(0.0)), slope=50.0
     )
     before = predictor.predict_freq(0.0)
-    ctx = ctrl.state.exp_context
+    ctx = ctrl.state.session_env
     feedback = build_feedback_runtime([_Provider("qubit_freq", builder, schema)])
     env = RunEnv(
         flux=0.0,
@@ -370,9 +370,9 @@ def _mocked_qubit_freq_produce_env(
         flux=0.0,
         flux_idx=0,
         schema=schema,
-        soc=ctrl.state.exp_context.soc,
-        soccfg=ctrl.state.exp_context.soccfg,
-        ml=ctrl.state.exp_context.ml,
+        soc=ctrl.state.session_env.soc,
+        soccfg=ctrl.state.session_env.soccfg,
+        ml=ctrl.state.session_env.ml,
         flux_device=FAKE_FLUX_DEVICE_NAME,
         result=result,
         tools=Tools(predictor=predictor, feedback=feedback),

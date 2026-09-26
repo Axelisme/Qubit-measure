@@ -7,12 +7,12 @@ from typing import Any
 
 from zcu_tools.gui.app.autofluxdep.cfg.module_adapter import module_cfg_to_value
 from zcu_tools.gui.cfg import ReferenceValue
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 
 
 def ctx_md_float(ctx: Any | None, key: str) -> float | None:
     """Return a numeric MetaDict value from ``ctx`` when present."""
-    if not isinstance(ctx, ExpContext):
+    if not isinstance(ctx, SessionEnv):
         return None
     value = ctx.md.get(key)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -22,7 +22,7 @@ def ctx_md_float(ctx: Any | None, key: str) -> float | None:
 
 def ctx_module(ctx: Any | None, *names: str) -> Any | None:
     """Return the first ModuleLibrary module found in ``ctx`` under ``names``."""
-    if not isinstance(ctx, ExpContext):
+    if not isinstance(ctx, SessionEnv):
         return None
     for name in names:
         try:
@@ -41,7 +41,7 @@ def _seed_module_reference(
     accepted_types: tuple[str, ...],
 ) -> ReferenceValue | None:
     """Return the first compatible library module as a typed reference value."""
-    if not isinstance(ctx, ExpContext):
+    if not isinstance(ctx, SessionEnv):
         return None
     accepted = set(accepted_types)
     for key in library_keys:

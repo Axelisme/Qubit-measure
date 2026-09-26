@@ -8,11 +8,11 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 
 
 def test_resolve_arb_waveform_root_without_project_is_failed_precondition() -> None:
-    ctx = ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
 
     with pytest.raises(
         FailedPreconditionError,

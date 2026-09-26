@@ -23,7 +23,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.interactive import Action, PluginDefinition
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
-from zcu_tools.gui.app.measure.state import ExpContext, Session, State
+from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
@@ -41,7 +41,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 
 
 def _make_state(tab_id: str = "tab1") -> State:
-    ctx = ExpContext(
+    ctx = SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),
         soc=MagicMock(),

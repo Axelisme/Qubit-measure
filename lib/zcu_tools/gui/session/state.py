@@ -1,11 +1,11 @@
 """SessionState — the session-core slice of GUI app state.
 
-Holds what every measurement-session app shares: the active ``ExpContext``, the
+Holds what every measurement-session app shares: the active ``SessionEnv``, the
 multi-device set (``DeviceState`` keyed by name), the remembered startup prefs,
 and the optimistic-concurrency ``VersionTable`` (a single shared table — each app
 adds its own experiment-surface keys to the same table, decision 6). An app's
 own ``State`` subclasses this and adds its experiment slice (measure: tabs; a
-sibling app: its own surface), so ``state.exp_context`` / ``state.devices`` /
+sibling app: its own surface), so ``state.session_env`` / ``state.devices`` /
 ``state.version`` resolve uniformly across apps.
 
 Import-clean: ``BaseDeviceInfo`` is referenced only under TYPE_CHECKING (its
@@ -21,7 +21,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.owner import OwnerThreadGuard
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.version_table import VersionTable
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ DEFAULT_LEFT_PANEL_WIDTH = 500
 @dataclass
 class StartupPrefs:
     """Remembered startup preferences — the *prefill* values, distinct from the
-    active ``ExpContext``.
+    active ``SessionEnv``.
 
     These are what the setup dialog prefills and what persistence projects to
     disk; they are NOT the live connection/active-project state. Because the
@@ -126,10 +126,10 @@ class SessionState:
     remembered startup prefs, and the shared version table. App ``State``
     subclasses add their experiment-surface slice + version keys."""
 
-    def __init__(self, ctx: ExpContext) -> None:
+    def __init__(self, ctx: SessionEnv) -> None:
         self._owner_guard = OwnerThreadGuard()
-        self.exp_context: ExpContext = ctx
-        # Remembered startup prefs (prefill values), distinct from exp_context.
+        self.session_env: SessionEnv = ctx
+        # Remembered startup prefs (prefill values), distinct from session_env.
         # StartupService writes at apply/connect; PersistenceCaretaker projects.
         self.startup_prefs: StartupPrefs = StartupPrefs()
         # Device state SSOT. DeviceService writes here (on the Qt main thread,
@@ -141,8 +141,8 @@ class SessionState:
         # at their terminal slots; each app's experiment writers for their keys).
         self.version = VersionTable()
 
-    def set_context(self, ctx: ExpContext) -> None:
-        """Replace the whole ExpContext. Pure field swap — does NOT bump the
+    def set_context(self, ctx: SessionEnv) -> None:
+        """Replace the whole SessionEnv. Pure field swap — does NOT bump the
         ``context`` resource version, because the same setter is used to swap
         non-md/ml fields (soc/soccfg via connect, predictor via load/clear).
 
@@ -156,7 +156,7 @@ class SessionState:
         canonical anchor on ``ContextService.set_md_attr``.
         """
         self._assert_owner()
-        self.exp_context = ctx
+        self.session_env = ctx
 
     def set_startup_prefs(self, prefs: StartupPrefs) -> None:
         """Replace remembered startup preferences on the owner thread."""

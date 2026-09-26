@@ -22,11 +22,11 @@ _VALID_WRITEBACK_SUBTABS = frozenset({"analysis", "post_analysis"})
 
 
 def _destination_context(adapter: RemoteControlAdapter) -> dict[str, object]:
-    """Current active ExpContext projection (destination at reply time).
+    """Current active SessionEnv projection (destination at reply time).
 
     Does not compare or store source identity; draft source is opaque.
     """
-    ctx = adapter.ctrl.get_exp_context()
+    ctx = adapter.ctrl.get_session_env()
     return {
         "active_label": ctx.active_label,
         "chip_name": ctx.chip_name,

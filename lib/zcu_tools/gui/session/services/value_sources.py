@@ -117,12 +117,12 @@ class ValueSourceBinder:
         specs: list[ValueProviderSpec] = [
             ValueProviderSpec(
                 ValueKey("predictor.loaded", bool),
-                lambda: self._state.exp_context.predictor is not None,
+                lambda: self._state.session_env.predictor is not None,
                 owner=_PREDICTOR_OWNER,
                 description="whether a Fluxonium predictor is loaded",
             )
         ]
-        if self._state.exp_context.predictor is not None:
+        if self._state.session_env.predictor is not None:
             specs.extend(
                 [
                     _float_source(
@@ -243,19 +243,19 @@ class ValueSourceBinder:
         self._registry.replace_owner(owner, specs)
 
     def _context_string(self, attr: str) -> str:
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         if not ctx.has_context():
             raise UnavailableValue(f"context.{attr}", "No experiment context")
         return str(getattr(ctx, attr))
 
     def _predictor_param(self, index: int) -> float:
-        predictor = self._state.exp_context.predictor
+        predictor = self._state.session_env.predictor
         if predictor is None:
             raise UnavailableValue("predictor.params", "No predictor loaded")
         return float(predictor.params[index])
 
     def _predictor_float(self, attr: str) -> float:
-        predictor = self._state.exp_context.predictor
+        predictor = self._state.session_env.predictor
         if predictor is None:
             raise UnavailableValue(f"predictor.{attr}", "No predictor loaded")
         return float(getattr(predictor, attr))

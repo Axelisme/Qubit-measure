@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.program.v2 import ModuleCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -47,7 +47,7 @@ def _readout_raw() -> dict[str, object]:
     }
 
 
-def _ctx(*, rich: bool) -> ExpContext:
+def _ctx(*, rich: bool) -> SessionEnv:
     md = MetaDict()
     ml = ModuleLibrary()
     if rich:
@@ -75,7 +75,7 @@ def _ctx(*, rich: bool) -> ExpContext:
             ),
             readout_rf=ModuleCfgFactory.from_raw(_readout_raw(), ml=ml),
         )
-    return ExpContext(md=md, ml=ml, soc=None, soccfg=None)
+    return SessionEnv(md=md, ml=ml, soc=None, soccfg=None)
 
 
 @pytest.mark.parametrize("name", _registry().list_names())

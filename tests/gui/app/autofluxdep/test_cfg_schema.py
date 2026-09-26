@@ -81,7 +81,7 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.gui.cfg.tree import read_value_path
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -130,8 +130,8 @@ def _ml() -> ModuleLibrary:
     return ml
 
 
-def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> ExpContext:
-    return ExpContext(
+def _ctx(md: MetaDict | None = None, ml: ModuleLibrary | None = None) -> SessionEnv:
+    return SessionEnv(
         md=md if md is not None else MetaDict(),
         ml=ml if ml is not None else ModuleLibrary(),
         soc=None,

@@ -78,7 +78,7 @@ class _LiveFixture(Fixture):
         from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
         from zcu_tools.gui.app.measure.state import Session
 
-        cfg = FakeAdapter().make_default_cfg(self.state.exp_context)
+        cfg = FakeAdapter().make_default_cfg(self.state.session_env)
         self._tab_id = "tab-live"
         # Inject a Session so has_tab(tab-live) is True.
         self.state.add_tab(
@@ -448,7 +448,7 @@ def test_set_field_section_target_rejected(lf):
 
 def test_context_get_md_keys(lf):
     # MagicMock md.keys() returns a MagicMock; patch to a concrete list.
-    lf.state.exp_context.md.keys = lambda: ["t1", "freq"]
+    lf.state.session_env.md.keys = lambda: ["t1", "freq"]
     sock = open_client(lf.service.port)
     try:
         resp = call(sock, "context.md_get")
@@ -459,7 +459,7 @@ def test_context_get_md_keys(lf):
 
 
 def test_context_get_md_attr_roundtrip(lf):
-    md = lf.state.exp_context.md
+    md = lf.state.session_env.md
     store = {"t1": 12.5}
     md.get = lambda key, default=None: store.get(key, default)
     sock = open_client(lf.service.port)
@@ -472,7 +472,7 @@ def test_context_get_md_attr_roundtrip(lf):
 
 
 def test_context_get_md_attr_unknown_rejected(lf):
-    md = lf.state.exp_context.md
+    md = lf.state.session_env.md
     md.get = lambda key, default=None: default
     sock = open_client(lf.service.port)
     try:
@@ -488,7 +488,7 @@ def test_context_get_ml_names(lf):
     # 'type' tag, waveforms the 'style' tag — so the stored values need those attrs.
     from types import SimpleNamespace
 
-    ml = lf.state.exp_context.ml
+    ml = lf.state.session_env.ml
     ml.modules = {
         "readout": SimpleNamespace(type="pulse"),
         "pi": SimpleNamespace(type="pulse"),
@@ -614,7 +614,7 @@ def test_tab_get_cfg_form_not_populated_rejected(qapp):  # noqa: ARG001
     f = Fixture()
     f.start()
     try:
-        cfg = FakeAdapter().make_default_cfg(f.state.exp_context)
+        cfg = FakeAdapter().make_default_cfg(f.state.session_env)
         f.state.add_tab(
             "bare",
             Session(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg),
@@ -816,10 +816,10 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):  # noqa: ARG001
 
 def _fakefreq_root():
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     cfg = FakeFreqAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
     ctrl.get_current_ml.return_value = ctx.ml
@@ -878,10 +878,10 @@ def _fluxdep_root(device_names: list[str]):
     from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
         OneToneFluxDepAdapter,
     )
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
     ctrl.get_current_ml.return_value = ctx.ml

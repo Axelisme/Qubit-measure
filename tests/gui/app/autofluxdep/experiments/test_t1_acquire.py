@@ -46,7 +46,7 @@ def test_t1_acquire_fits_finite_positive_t1():
     ctrl = build_core()
     sim_params = high_snr_simparams(20_000.0)
     connect_mock(ctrl, sim_params=sim_params)
-    ml = ctrl.state.exp_context.ml
+    ml = ctrl.state.session_env.ml
     predictor = mock_flux_predictor(sim_params)
 
     builder = T1Builder()

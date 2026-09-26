@@ -67,7 +67,7 @@ class TabService:
         populated). The persist/restore form of ``TabSnapshot`` is produced
         elsewhere (codec / restore) with the live fields left empty."""
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         is_running = self._state.is_tab_running(tab_id)
         interaction = TabInteractionState(
             global_run_active=self._state.is_run_active() and not is_running,
@@ -155,7 +155,7 @@ class TabService:
             from_dict is not None,
         )
         if from_dict is None:
-            cfg_schema = adapter.make_default_cfg(self._state.exp_context)
+            cfg_schema = adapter.make_default_cfg(self._state.session_env)
         else:
             cfg_schema = from_dict.cfg_schema
         self._state.add_tab(
@@ -172,7 +172,7 @@ class TabService:
         """The adapter's default cfg under the current context — the base schema
         WorkspaceService needs to decode a persisted raw cfg into a live one."""
         return self._registry.create(adapter_name).make_default_cfg(
-            self._state.exp_context
+            self._state.session_env
         )
 
     def list_adapter_names(self) -> list[str]:
@@ -212,7 +212,7 @@ class TabService:
         if tab.run.result is None:
             raise RuntimeError("No run result available to build analyze params")
         instance = tab.adapter.get_analyze_params(
-            tab.run.result, self._state.exp_context
+            tab.run.result, self._state.session_env
         )
         self._state.update_tab_analyze_param_instance(tab_id, instance)
         return instance
@@ -230,7 +230,7 @@ class TabService:
                 "No primary analyze result available to build post-analysis params"
             )
         instance = tab.adapter.get_post_analyze_params(
-            tab.analysis.result, self._state.exp_context
+            tab.analysis.result, self._state.session_env
         )
         self._state.update_tab_post_analyze_param_instance(tab_id, instance)
         return instance
@@ -244,16 +244,16 @@ class TabService:
         return self._state.get_tab(tab_id).post_analysis.result
 
     def get_tab_data_path(self, tab_id: str) -> str | None:
-        return self._state.get_tab(tab_id).effective_data_path(self._state.exp_context)
+        return self._state.get_tab(tab_id).effective_data_path(self._state.session_env)
 
     def get_tab_analysis_image_path(self, tab_id: str) -> str | None:
         return self._state.get_tab(tab_id).effective_analysis_image_path(
-            self._state.exp_context
+            self._state.session_env
         )
 
     def get_tab_post_analysis_image_path(self, tab_id: str) -> str | None:
         return self._state.get_tab(tab_id).effective_post_analysis_image_path(
-            self._state.exp_context
+            self._state.session_env
         )
 
     def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:

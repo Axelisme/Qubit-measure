@@ -31,9 +31,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    ExpContext,
     MetaDictWriteback,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -204,5 +204,5 @@ class FluxDepAdapter(
         cfg_raw["dev"] = dev_patch
         return req.ml.make_cfg(cfg_raw, FreqFluxCfg)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_qubit_flux"

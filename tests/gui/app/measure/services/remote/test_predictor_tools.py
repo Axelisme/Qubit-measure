@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.measure.state import ExpContext, State
+from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.services.predictor import (
@@ -30,7 +30,7 @@ from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 def _ctrl_backed_by_real_service() -> MagicMock:
     """A ctrl mock whose predictor methods delegate to a real PredictorService."""
     state = State(
-        ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
     )
     svc = PredictorService(state, EventBus())
     ctrl = MagicMock()

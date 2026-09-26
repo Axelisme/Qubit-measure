@@ -34,7 +34,7 @@ zero `isinstance`, no distinguishing a Node from a Service.
 **Run path (real acquire).** The app composes the shared session services
 (`gui/session`: connection / context / device / startup) and uses the shared
 setup / device / predictor dialogs; `State(AutoFluxDepState)` inherits
-`SessionState` and the run reads the active `exp_context`. Each measurement
+`SessionState` and the run reads the active `session_env`. Each measurement
 Node's `produce` builds the real run cfg from that context (`Builder.make_cfg`
 → `ml.make_cfg` lowering), writes this flux point's value into
 `cfg.dev[flux_device]` by device **name** (`set_flux_by_name` — the GUI picker

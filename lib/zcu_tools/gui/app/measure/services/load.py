@@ -90,7 +90,7 @@ class LoadService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         request = LoadDataRequest(data_path=data_path, md=ctx.md, ml=ctx.ml)
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
@@ -138,7 +138,7 @@ class LoadService:
             )
             if candidate is None:
                 return "not_applied"
-            validate_schema(candidate, self._state.exp_context.ml)
+            validate_schema(candidate, self._state.session_env.ml)
             prepared = self._cfg_editor.prepare_replacement(tab_id, candidate)
         except Exception:
             logger.exception("loaded config was not applied: tab_id=%r", tab_id)

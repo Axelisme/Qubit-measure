@@ -26,9 +26,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ParamMeta,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -55,7 +55,7 @@ def _cavity_freq_range(expts: int) -> Seed[SweepValue]:
     changes); otherwise a fixed fallback span around the available centre.
     """
 
-    def resolve(ctx: ExpContext) -> SweepValue:
+    def resolve(ctx: SessionEnv) -> SweepValue:
         r_f = md_get_float(ctx, "r_f", 6000.0)
         rabi_f = md_get_float(ctx, "rabi_f", 20.0)
         if md_has_key(ctx, "r_f") and md_has_key(ctx, "rabi_f"):
@@ -198,5 +198,5 @@ class BathFreqGainAdapter(
         items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg_snapshot))
         return items
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_bathreset_freqgain_{time.strftime('%m%d')}"

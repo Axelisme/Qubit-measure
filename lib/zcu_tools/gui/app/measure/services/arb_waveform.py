@@ -15,7 +15,7 @@ from zcu_tools.resources.waveform_assets import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
 
 
 ARB_WAVEFORMS_VERSION_KEY = "arb_waveforms"
@@ -28,7 +28,7 @@ class ArbWaveformService:
         self._state = state
 
     def root_path(self) -> Path:
-        root = resolve_arb_waveform_root(self._state.exp_context)
+        root = resolve_arb_waveform_root(self._state.session_env)
         root.mkdir(parents=True, exist_ok=True)
         return root
 
@@ -88,7 +88,7 @@ class ArbWaveformService:
         ArbWaveformDatabase.init(self.root_path())
 
     def _try_init_database(self) -> bool:
-        root = try_resolve_arb_waveform_root(self._state.exp_context)
+        root = try_resolve_arb_waveform_root(self._state.session_env)
         if root is None:
             return False
         root.mkdir(parents=True, exist_ok=True)
@@ -96,7 +96,7 @@ class ArbWaveformService:
         return True
 
 
-def resolve_arb_waveform_root(ctx: ExpContext) -> Path:
+def resolve_arb_waveform_root(ctx: SessionEnv) -> Path:
     """Resolve the qubit-scoped arbitrary waveform root from the active project."""
 
     root = try_resolve_arb_waveform_root(ctx)
@@ -107,7 +107,7 @@ def resolve_arb_waveform_root(ctx: ExpContext) -> Path:
     return root
 
 
-def try_resolve_arb_waveform_root(ctx: ExpContext) -> Path | None:
+def try_resolve_arb_waveform_root(ctx: SessionEnv) -> Path | None:
     """Resolve the arbitrary waveform root, or ``None`` before project setup."""
 
     if not ctx.database_path:

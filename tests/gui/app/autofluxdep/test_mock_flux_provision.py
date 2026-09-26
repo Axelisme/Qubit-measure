@@ -75,7 +75,7 @@ def test_mock_connect_registers_fake_flux_device(ctrl):
 def test_mock_connect_sets_soc_flux_device(ctrl):
     _connect_mock(ctrl)
 
-    soc = ctrl.state.exp_context.soc
+    soc = ctrl.state.session_env.soc
     assert soc is not None
     assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME
 
@@ -93,5 +93,5 @@ def test_reconnect_does_not_double_register_fake_flux(ctrl):
 
     assert ctrl.state.get_device(FAKE_FLUX_DEVICE_NAME) is not None
     assert dev.get_value() == 0.123
-    soc = ctrl.state.exp_context.soc
+    soc = ctrl.state.session_env.soc
     assert getattr(soc, "_sim_params").flux_device == FAKE_FLUX_DEVICE_NAME

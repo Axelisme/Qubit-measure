@@ -43,11 +43,11 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ParamMeta,
     RunRequest,
     SaveDataRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -129,7 +129,7 @@ class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):
 FakeFreqRunResult: TypeAlias = FreqResult
 
 
-def _freq_sweep_default(ctx: ExpContext) -> SweepValue:
+def _freq_sweep_default(ctx: SessionEnv) -> SweepValue:
     r_f = md_get_float(ctx, "r_f", 6000.0)
     rf_w_raw = ctx.md.get("rf_w")
     rf_w = float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
@@ -420,5 +420,5 @@ class FakeFreqAdapter(
             tags="fake/freq",
         )
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.res_name}_freq_{time.strftime('%m%d')}"

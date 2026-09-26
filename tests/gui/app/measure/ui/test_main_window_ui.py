@@ -21,7 +21,7 @@ from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import SocChangedPayload
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 
@@ -41,7 +41,7 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """
     ctrl.active_operation_count.return_value = 0
     ctrl.has_agent_connected.return_value = False
-    ctrl.get_exp_context.return_value = ExpContext(
+    ctrl.get_session_env.return_value = SessionEnv(
         md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None
     )
     return ctrl
@@ -582,7 +582,7 @@ def test_main_window_load_data_dialog_calls_controller(qapp, monkeypatch, tmp_pa
     ctrl.has_tab.return_value = True
     database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
     database_root.mkdir(parents=True)
-    ctrl.get_exp_context.return_value = ExpContext(
+    ctrl.get_session_env.return_value = SessionEnv(
         md=MagicMock(),
         ml=MagicMock(),
         soc=None,

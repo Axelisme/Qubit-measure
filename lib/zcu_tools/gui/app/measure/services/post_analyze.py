@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
 
     from ..state import RetiredPaneResources
     from .ports import AnalyzeStatePort, WritebackLifecyclePort
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 class _PostAnalyzeCapture:
     run_result: object | None
     analyze_result: object
-    context: ExpContext
+    context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object
 
@@ -87,7 +87,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 f"Tab {tab_id!r} has no primary analyze result to post-analyze"
             )
 
-        ctx = self._state.exp_context
+        ctx = self._state.session_env
         req = PostAnalyzeRequest(
             run_result=tab.run.result,
             analyze_result=analyze_result,

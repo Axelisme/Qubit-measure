@@ -562,7 +562,7 @@ def test_create_run_session_clones_ml_for_cfg_snapshots_and_module_source(
     tmp_path, monkeypatch
 ):
     ctrl = build_core(project=_project(tmp_path))
-    original_ml = ctrl.state.exp_context.ml
+    original_ml = ctrl.state.session_env.ml
     original_ml.register_module(
         drive=PulseCfg(
             waveform=ConstWaveformCfg(length=0.1),

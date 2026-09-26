@@ -10,13 +10,13 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     LoadDataRequest,
     MetaDictWriteback,
     NoAnalyzeParams,
     PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
+    SessionEnv,
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
@@ -66,7 +66,7 @@ class DummyAdapter:
             recommended="dummy",
         )
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         del ctx
         return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
@@ -110,7 +110,7 @@ class DummyAdapter:
         del req
         return []
 
-    def make_save_paths(self, ctx: ExpContext):
+    def make_save_paths(self, ctx: SessionEnv):
         del ctx
         raise NotImplementedError
 
@@ -122,7 +122,7 @@ class DummyAdapter:
         # same sentinel BaseAdapter returns when reflection finds nothing.
         return NoAnalyzeParams
 
-    def get_post_analyze_params(self, analyze_result: object, ctx: ExpContext) -> None:
+    def get_post_analyze_params(self, analyze_result: object, ctx: SessionEnv) -> None:
         del analyze_result, ctx
         raise NotImplementedError
 

@@ -12,7 +12,7 @@ from zcu_tools.experiment.v2_gui.role_registry import (
     ALL_ROLE_ENTRIES,
     register_all_roles,
 )
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
 from zcu_tools.gui.cfg import DirectValue, LiteralSpec, make_custom_reference_key
 from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
@@ -26,8 +26,8 @@ from .adapters._support._role_characterization import (
 )
 
 
-def _empty_ctx() -> ExpContext:
-    return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+def _empty_ctx() -> SessionEnv:
+    return SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 
 
 def test_register_all_roles_populates_catalog():

@@ -26,7 +26,7 @@ from zcu_tools.gui.app.autofluxdep.feedback import build_feedback_runtime
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
-from zcu_tools.gui.session.types import ExpContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 _READOUT = {
@@ -374,7 +374,7 @@ def test_lenrabi_make_cfg_uses_matching_pi_seed_for_first_pass_gain():
             "waveform": {"style": "const", "length": 0.24},
         }
     )
-    ctx = ExpContext(md=MetaDict(), ml=ml, soc=None, soccfg=None)
+    ctx = SessionEnv(md=MetaDict(), ml=ml, soc=None, soccfg=None)
     builder = LenRabiBuilder()
     env = RunEnv(
         flux=0.0,

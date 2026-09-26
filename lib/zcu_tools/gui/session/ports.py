@@ -29,7 +29,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceProtocol
-    from zcu_tools.gui.session.types import ExpContext
+    from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
     from zcu_tools.resources.context import ModuleLibrary
 
@@ -250,14 +250,14 @@ class ProjectIOPort(Protocol):
     def setup(self, result_dir: str) -> None: ...
     def list_contexts(self) -> list[str]: ...
     def get_active_label(self) -> str | None: ...
-    def use_context(self, label: str, base_ctx: ExpContext) -> ExpContext: ...
+    def use_context(self, label: str, base_ctx: SessionEnv) -> SessionEnv: ...
     def new_context(
         self,
-        base_ctx: ExpContext,
+        base_ctx: SessionEnv,
         value: float | None = None,
         unit: str = "none",
         clone_from: str | None = None,
-    ) -> ExpContext: ...
+    ) -> SessionEnv: ...
 
 
 @runtime_checkable

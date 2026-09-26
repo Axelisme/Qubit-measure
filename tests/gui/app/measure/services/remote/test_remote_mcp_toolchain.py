@@ -429,8 +429,8 @@ def _install_real_mock_soccfg(fx) -> None:
 
     from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
-    ctx = fx.state.exp_context
-    fx.state.exp_context = dataclasses.replace(ctx, soccfg=make_mock_soccfg())
+    ctx = fx.state.session_env
+    fx.state.session_env = dataclasses.replace(ctx, soccfg=make_mock_soccfg())
 
 
 def test_soc_info_returns_description_and_cfg(fx):
@@ -457,8 +457,8 @@ def test_soc_info_returns_description_and_cfg(fx):
 def test_soc_info_requires_connected_soc(fx):
     import dataclasses
 
-    ctx = fx.state.exp_context
-    fx.state.exp_context = dataclasses.replace(ctx, soc=None, soccfg=None)
+    ctx = fx.state.session_env
+    fx.state.session_env = dataclasses.replace(ctx, soc=None, soccfg=None)
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "soc.info")
@@ -479,7 +479,7 @@ def test_device_mutation_error_path_is_precondition_failed(fx):
 
 
 def test_context_md_write_and_delete(fx):
-    md = fx.state.exp_context.md
+    md = fx.state.session_env.md
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "context.md_set_attr", {"key": "bias", "value": 0.25})
@@ -603,7 +603,7 @@ def _add_fake_tab(fx, tab_id: str) -> None:
     from zcu_tools.gui.app.measure.state import Session
 
     adapter = FakeAdapter()
-    cfg = adapter.make_default_cfg(fx.state.exp_context)
+    cfg = adapter.make_default_cfg(fx.state.session_env)
     fx.state.add_tab(
         tab_id, Session(adapter_name="fake", adapter=adapter, cfg_schema=cfg)
     )

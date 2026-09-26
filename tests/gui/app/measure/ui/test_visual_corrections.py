@@ -62,7 +62,7 @@ def make_ctrl():
     exp_ctx = MagicMock()
     exp_ctx.md = md
     exp_ctx.ml = ml
-    ctrl.get_exp_context.return_value = exp_ctx
+    ctrl.get_session_env.return_value = exp_ctx
     return ctrl
 
 

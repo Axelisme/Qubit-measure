@@ -26,10 +26,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -49,7 +49,7 @@ _JPA_POWER_SEED_SPAN_DB = 5.0
 
 
 def jpa_power_sweep_seed(
-    ctx: ExpContext, *, expts: int = _JPA_POWER_SWEEP_EXPTS
+    ctx: SessionEnv, *, expts: int = _JPA_POWER_SWEEP_EXPTS
 ) -> SweepValue:
     """JPA pump sweep seed: centred on ``best_jpa_power`` when known, else a
     conservative low-power notebook-derived survey (-20..-5 dBm)."""
@@ -185,5 +185,5 @@ class JpaPowerAdapter(
             )
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_jpa_power_{time.strftime('%m%d')}"

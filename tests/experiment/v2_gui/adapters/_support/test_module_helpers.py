@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
 from typing import cast
 
@@ -148,10 +148,10 @@ def test_select_named_module_value_returns_none_when_preferred_missing():
     assert selected is None
 
 
-def _make_ctx(ml: ModuleLibrary) -> ExpContext:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+def _make_ctx(ml: ModuleLibrary) -> SessionEnv:
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    return ExpContext(
+    return SessionEnv(
         md=MetaDict(),
         ml=ml,
         soc=None,

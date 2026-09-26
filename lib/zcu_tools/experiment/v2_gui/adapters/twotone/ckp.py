@@ -25,9 +25,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -40,7 +40,7 @@ _CKP_QUB_FREQ_FALLBACK_MHZ = 5000.0
 
 
 def _rf_width_timing_seed(
-    ctx: ExpContext, *, numerator: float, offset: float = 0.0
+    ctx: SessionEnv, *, numerator: float, offset: float = 0.0
 ) -> float | EvalValue:
     coefficient = numerator / (2 * math.pi)
     if md_has_key(ctx, "rf_w"):
@@ -54,7 +54,7 @@ def _rf_width_timing_seed(
     return offset + coefficient / _CKP_RF_WIDTH_FALLBACK_MHZ
 
 
-def _res_pulse_length_seed(ctx: ExpContext) -> float | EvalValue:
+def _res_pulse_length_seed(ctx: SessionEnv) -> float | EvalValue:
     return _rf_width_timing_seed(
         ctx,
         numerator=5.1,
@@ -62,15 +62,15 @@ def _res_pulse_length_seed(ctx: ExpContext) -> float | EvalValue:
     )
 
 
-def _qub_pre_delay_seed(ctx: ExpContext) -> float | EvalValue:
+def _qub_pre_delay_seed(ctx: SessionEnv) -> float | EvalValue:
     return _rf_width_timing_seed(ctx, numerator=5.0)
 
 
-def _qub_post_delay_seed(ctx: ExpContext) -> float | EvalValue:
+def _qub_post_delay_seed(ctx: SessionEnv) -> float | EvalValue:
     return _rf_width_timing_seed(ctx, numerator=3.1)
 
 
-def _qub_freq_sweep_seed(ctx: ExpContext) -> SweepValue:
+def _qub_freq_sweep_seed(ctx: SessionEnv) -> SweepValue:
     if md_has_key(ctx, "q_f"):
         start: float | EvalValue = EvalValue(expr="q_f - 10")
         stop: float | EvalValue = EvalValue(expr="q_f + 5")
@@ -218,5 +218,5 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKP_Result, CKPAnalyzeResult, NoAnalyzePar
             ),
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_ckp_{time.strftime('%m%d')}"

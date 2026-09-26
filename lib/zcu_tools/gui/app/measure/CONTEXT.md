@@ -42,7 +42,7 @@ _Avoid_: 在 coordinator 裡 import qtpy / 監聽 Qt signal（破壞 Qt-free + �
 _Avoid_: caller, frontend
 
 **GuardService**:
-集中所有 domain guard 邏輯、統一發放 Permit 的 query service。讀 `State` 與 `ExpContext.readiness`，無副作用。是 guard 邏輯的單一所有者（避免散在各 client 漂移）。
+集中所有 domain guard 邏輯、統一發放 Permit 的 query service。讀 `State` 與 `SessionEnv.readiness`，無副作用。是 guard 邏輯的單一所有者（避免散在各 client 漂移）。
 
 **Controller**:
 View 專用的便利 façade —— 事件回調、error dialog 呈現。**不再是 guard 的擁有者**（guard 下放至受保護 service 方法，憑 Permit 型別強制）。
@@ -172,7 +172,7 @@ _Avoid_: per-param validation（那是 ParamSpec 的事）
 **撞到「會成環」= 幾乎一定是把 Reaction 誤當 Command。** 改走 EventBus 即解（Phase 98 `startup` 反應 `DEVICE_CHANGED` 即此）。`ControllerProtocol` / `_EditorCtrl` 等 narrow Protocol 是「需呼叫 owner（Controller/View）能力」時的 Command 受控形式（依賴介面非具體類）。
 _Avoid_: service 分層 tier、卡循環就往 ctrl 塞、把 reaction 寫成 command 互持
 
-**狀態放哪（兩軸正交，勿坍縮）**：軸 1「進不進 State」= 除 owner 外還有誰要**讀**（有 → 進 State）；軸 2「persist 投不投影」= 重啟後有無意義（有 → 投影）。**不可序列化只影響軸 2，不影響軸 1** —— State 可持有不可序列化的共享活物件（如 `ExpContext.soc`：多 service 讀 → 進 State；重啟連線沒了 → persist 跳過）。配套：State 存**成品**、初始化邏輯留 owner service（`add_tab`/`put_device` 只收已造好對象）；persist 是**選擇性投影**非全量序列化。見 `docs/adr/0004`。
+**狀態放哪（兩軸正交，勿坍縮）**：軸 1「進不進 State」= 除 owner 外還有誰要**讀**（有 → 進 State）；軸 2「persist 投不投影」= 重啟後有無意義（有 → 投影）。**不可序列化只影響軸 2，不影響軸 1** —— State 可持有不可序列化的共享活物件（如 `SessionEnv.soc`：多 service 讀 → 進 State；重啟連線沒了 → persist 跳過）。配套：State 存**成品**、初始化邏輯留 owner service（`add_tab`/`put_device` 只收已造好對象）；persist 是**選擇性投影**非全量序列化。見 `docs/adr/0004`。
 _Avoid_: 把「不可序列化」當「不能進 State」、把初始化邏輯搬進 State、persist 全量序列化整個 State
 
 **Service 角色（DDD+Hexagonal，見 `docs/adr/0005`）**：`services/` 的東西按**角色**而非**話題**聚合，每個必須說清是哪種 —— **App Service**（被動編排、無 domain 邏輯、經 port 依賴 infra、不依賴其他 app service）、**Aggregate Root**（一等公民帶**自己的行為**，外界經 id 進出，反模式=貧血 dataclass）、**Repository**（造/查/毀 aggregate）、**Driving Adapter**（user-facing，`MainWindow`+`RemoteControlAdapter`=兩個 driving adapter，user 可以是人或 another server）、**Driven Adapter**（persistence/driver/socket，**只經 port 被呼叫**）。三大系統性違規已由 Phase 99（原 M1–M6）遷移消除：貧血 aggregate（M2/M3 升 aggregate root）、app-service 互依（M4 改窄 port / 直讀 State，AST gate `test_app_service_decoupling` 守）、infra 未經 port（M1 `services/ports.py`）。M5（目錄 vertical-slice）決定不做、M6（RemoteControlAdapter 正名）由 ADR-0013 落地。
@@ -193,8 +193,8 @@ _Avoid_: 讓 memento 帶 live/不可序列化物件、startup/session 各自版�
 _Avoid_: 讓 Caretaker reach into各 service / State（god依賴）、讓 Caretaker認識 cfg codec、把 app-specific 投影責任洩漏出 owner service、在 app service 重複實作 shared codec
 
 **startup 預填值 `State.startup_prefs`**:
-「記住的 startup 偏好」（project chip/qub/res/dir/db + ip/port + left_panel_width），**與 active `ExpContext` 分開的一塊 State**。語意是「下次該預填什麼」非「當前 active 什麼」。**連線值與預填值不分**——因為重啟不自動連線，套用/連線時就把用過的值同步寫進 `startup_prefs`（寫入當下），capture 只讀它，restore 寫它且**不自動套 active context**（project 等 user 在 setup dialog 套用）。device 記憶集**不**進 startup_prefs（它在 `State.devices` 的 `remember` 旗標，capture 時即時投影）。
-_Avoid_: 把 startup_prefs 與 active ExpContext 混為一談、restore 時自動連線/套 project、capture 時才做「連線 vs 預填」二選一（改在寫入當下同步）
+「記住的 startup 偏好」（project chip/qub/res/dir/db + ip/port + left_panel_width），**與 active `SessionEnv` 分開的一塊 State**。語意是「下次該預填什麼」非「當前 active 什麼」。**連線值與預填值不分**——因為重啟不自動連線，套用/連線時就把用過的值同步寫進 `startup_prefs`（寫入當下），capture 只讀它，restore 寫它且**不自動套 active context**（project 等 user 在 setup dialog 套用）。device 記憶集**不**進 startup_prefs（它在 `State.devices` 的 `remember` 旗標，capture 時即時投影）。
+_Avoid_: 把 startup_prefs 與 active SessionEnv 混為一談、restore 時自動連線/套 project、capture 時才做「連線 vs 預填」二選一（改在寫入當下同步）
 
 ## 範例對話
 

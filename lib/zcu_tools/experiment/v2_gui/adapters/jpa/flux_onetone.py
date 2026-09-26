@@ -24,8 +24,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
-    ExpContext,
     RunRequest,
+    SessionEnv,
 )
 
 from ._shared import cached_device_snapshot, lower_jpa_flux_dev
@@ -139,5 +139,5 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, OneToneFluxResult]):
         # Pure preflight over cached/static data — never commands a live device.
         lower_jpa_flux_dev(raw_cfg, cached_device_snapshot())
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_jpa_flux_onetone_{time.strftime('%m%d')}"

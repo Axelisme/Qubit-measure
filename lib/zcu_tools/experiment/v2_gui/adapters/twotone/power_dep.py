@@ -15,7 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
-    ExpContext,
+    SessionEnv,
 )
 from zcu_tools.gui.cfg import (
     SweepValue,
@@ -98,5 +98,5 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
             .build()
         )
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_qubit_power_{time.strftime('%H%M')}"

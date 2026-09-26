@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import (
@@ -19,7 +19,7 @@ from tests.gui._adapter_fakes import DummyAdapter
 
 
 class OldAdapter(DummyAdapter):
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         del ctx
         return CfgSchema(
             spec=CfgSectionSpec(fields={"knob": ScalarSpec(label="Knob", type=int)}),

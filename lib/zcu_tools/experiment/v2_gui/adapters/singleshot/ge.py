@@ -22,12 +22,12 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     ParamMeta,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     PostWritebackRequest,
+    SessionEnv,
     T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
@@ -197,7 +197,7 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         )
 
     def get_post_analyze_params(
-        self, analyze_result: GEAnalyzeResult, ctx: ExpContext
+        self, analyze_result: GEAnalyzeResult, ctx: SessionEnv
     ) -> GEPostAnalyzeParams:
         del analyze_result, ctx
         return GEPostAnalyzeParams()
@@ -283,5 +283,5 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             ),
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_sh_ge_{time.strftime('%m%d')}"

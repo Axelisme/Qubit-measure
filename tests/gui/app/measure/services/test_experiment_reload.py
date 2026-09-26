@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabClosedPayload
 from zcu_tools.gui.app.measure.registry import Registry
@@ -43,7 +43,7 @@ class App:
 
 @pytest.fixture
 def app() -> App:
-    state = State(ExpContext(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
+    state = State(SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
     bus = BaseEventBus()
     registry = Registry()
     registry.register("demo", OldAdapter)
@@ -249,7 +249,7 @@ def test_partial_restore_retries_only_skipped_entries_without_stealing_selection
 
 def test_invalid_defaults_are_reported_without_discarding_other_tabs(app: App) -> None:
     class InvalidAdapter(OldAdapter):
-        def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+        def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
             raise ValueError("missing calibration")
 
     app.registry.register("bad", OldAdapter)

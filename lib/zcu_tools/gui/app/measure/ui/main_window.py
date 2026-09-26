@@ -799,7 +799,7 @@ class MainWindow(QMainWindow):
         self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
 
     def _load_data_dialog_start_dir(self) -> str:
-        return nearest_existing(self._ctrl.get_exp_context().database_path)
+        return nearest_existing(self._ctrl.get_session_env().database_path)
 
     def _on_load_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_load_data_clicked: tab_id=%r", tab_id)

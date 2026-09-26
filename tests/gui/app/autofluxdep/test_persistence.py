@@ -171,8 +171,8 @@ def test_startup_memento_persistence_roundtrip(tmp_path: Path):
     assert startup.ip == "10.0.0.2"
     assert startup.port == 7000
     assert restored.state.project is None
-    assert restored.state.exp_context.soc is None
-    assert restored.state.exp_context.soccfg is None
+    assert restored.state.session_env.soc is None
+    assert restored.state.session_env.soccfg is None
 
 
 def test_restore_old_memento_without_ui_defaults_auto_follow_true(tmp_path: Path):

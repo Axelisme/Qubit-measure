@@ -211,7 +211,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     )
     view_adapter = SimpleNamespace(render_view=render_view, tab_control=tab_control)
     view_adapter.ctrl = Mock2()
-    view_adapter.ctrl.get_exp_context.return_value = Mock2(
+    view_adapter.ctrl.get_session_env.return_value = Mock2(
         active_label="ctx",
         chip_name="c",
         qub_name="q",
@@ -277,7 +277,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
         writeback_control=writeback_control, tab_control=tab_control_wb
     )
     writeback_adapter.ctrl = Mock3()
-    writeback_adapter.ctrl.get_exp_context.return_value = Mock3(
+    writeback_adapter.ctrl.get_session_env.return_value = Mock3(
         active_label="ctx",
         chip_name="c",
         qub_name="q",

@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardError
@@ -32,7 +32,7 @@ from zcu_tools.gui.session.services.io_manager import IOManager
 
 
 def _make_controller(readiness: ContextReadiness) -> Controller:
-    ctx = ExpContext(
+    ctx = SessionEnv(
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),

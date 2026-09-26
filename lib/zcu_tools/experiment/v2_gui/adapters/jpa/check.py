@@ -25,9 +25,9 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
 )
 
 from ._shared import cached_device_snapshot, lower_jpa_rf_output_dev
@@ -134,5 +134,5 @@ class JpaCheckAdapter(
     ) -> JpaCheckAnalyzeResult:
         return run_figure_only_analyze(CheckExp, JpaCheckAnalyzeResult, req)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_jpa_check_{time.strftime('%m%d')}"

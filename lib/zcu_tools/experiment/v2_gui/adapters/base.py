@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    ExpContext,
     LoadDataRequest,
     NoAnalyzeParams,
     PostAnalyzeRequest,
@@ -21,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     SaveDataRequest,
     SavePaths,
+    SessionEnv,
     T_AnalyzeParams,
     T_AnalyzeResult,
     T_Cfg,
@@ -316,12 +316,12 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del req, raw_cfg
 
     @abstractmethod
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         """Return the filename stem used by the default save path template."""
 
     # -- analysis (raising no-op default; override when analysis != NONE) --
 
-    def get_analyze_params(self, result: T_Result, ctx: ExpContext) -> T_AnalyzeParams:
+    def get_analyze_params(self, result: T_Result, ctx: SessionEnv) -> T_AnalyzeParams:
         """Build the analyze parameter instance presented to the user.
 
         An adapter whose analyze-params are all-default-constructible (including
@@ -392,7 +392,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return hints.get("return", NoAnalyzeParams)
 
     def get_post_analyze_params(
-        self, analyze_result: T_AnalyzeResult, ctx: ExpContext
+        self, analyze_result: T_AnalyzeResult, ctx: SessionEnv
     ) -> Any:
         """Build the post-analysis param instance presented to the user.
 
@@ -425,7 +425,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     # -- shared implementation (provided once) -----------------------------
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         """Instantiate and validate a fresh cfg from the context-free definition."""
         schema = type(self).cfg_definition().instantiate(ctx)
         validate_schema(schema, ctx.ml)
@@ -497,14 +497,14 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         del req
         return []
 
-    def make_default_save_paths(self, ctx: ExpContext) -> SavePaths:
+    def make_default_save_paths(self, ctx: SessionEnv) -> SavePaths:
         """Default save path policy shared by most adapters."""
         if not ctx.database_path:
-            raise RuntimeError("ExpContext.database_path is required for save paths")
+            raise RuntimeError("SessionEnv.database_path is required for save paths")
         if not ctx.result_dir:
-            raise RuntimeError("ExpContext.result_dir is required for save paths")
+            raise RuntimeError("SessionEnv.result_dir is required for save paths")
         if not ctx.active_label:
-            raise RuntimeError("ExpContext.active_label is required for save paths")
+            raise RuntimeError("SessionEnv.active_label is required for save paths")
 
         stem = self.make_filename_stem(ctx)
         # ctx.database_path is already the dated data folder
@@ -520,7 +520,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             image_path=os.path.join(image_dir, f"{stem}.png"),
         )
 
-    def make_save_paths(self, ctx: ExpContext) -> SavePaths:
+    def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
         return self.make_default_save_paths(ctx)
 
     def save(self, req: SaveDataRequest[T_Result]) -> None:

@@ -411,7 +411,7 @@ def connect_mock(ctrl: Controller, *, sim_params: Any = None) -> None:
     ``QTimer.singleShot``, so we drive it through the controller's public connect
     API and pump a ``QEventLoop`` until the outcome signal fires (the same pattern
     measure-gui's tests use). The autouse ``qapp`` fixture has already created the
-    QApplication. On return, ``ctrl.state.exp_context.soc`` is the MockSoc and
+    QApplication. On return, ``ctrl.state.session_env.soc`` is the MockSoc and
     ``has_setup`` is true.
 
     FLUX-AWARE-MOCK: a mock connect also fires the shared MockFluxProvisioner,
@@ -692,7 +692,7 @@ def make_acquire_env(ctrl: Controller, *, flux: float, flux_idx: int, **kw: Any)
     """
     from zcu_tools.gui.session.services.mock_flux import FAKE_FLUX_DEVICE_NAME
 
-    ctx = ctrl.state.exp_context
+    ctx = ctrl.state.session_env
     return RunEnv(
         flux=flux,
         flux_idx=flux_idx,

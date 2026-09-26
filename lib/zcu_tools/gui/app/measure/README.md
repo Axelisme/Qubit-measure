@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-27 — measure app path rename
+**Last updated:** 2026-09-27 — session environment naming
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -52,7 +52,7 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
   `WritebackService` remains stage-agnostic and owns the display-only baseline
-  capture (S2): at draft creation it snapshots the destination `ExpContext` and
+  capture (S2): at draft creation it snapshots the destination `SessionEnv` and
   exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
   compact unified ledger: draft-owned unapplied items以粗體`target*`與`* = not applied`
   legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
@@ -263,7 +263,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
 7. Writeback items are generated from analysis results and edited through the same
    cfg-editor machinery before commit; `WritebackService.create_draft` snapshots
-   the destination `ExpContext` at creation and the ledger shows
+   the destination `SessionEnv` at creation and the ledger shows
    `current_summary` → `proposed_summary` per item (S2). Scalar MetaDict items
    show concrete values; module/waveform items show bounded change summaries and
    keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;

@@ -264,7 +264,7 @@ def test_writeback_runtime_errors_escape_handlers_unchanged(
     tab_control.get_tab_snapshot.return_value = snap3
     tab_control.has_tab.return_value = True
     ctrl_mock = Mock3()
-    ctrl_mock.get_exp_context.return_value = Mock3(
+    ctrl_mock.get_session_env.return_value = Mock3(
         active_label="ctx",
         chip_name="c",
         qub_name="q",

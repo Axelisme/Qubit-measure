@@ -24,7 +24,7 @@ from zcu_tools.gui.cfg import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context.metadict import MetaDict
 
 # MetaDict keys the ``singleshot/ge`` writeback owns (see GEAdapter writeback).
@@ -77,7 +77,7 @@ def read_chi_kappa(md: MetaDict) -> tuple[float, float]:
     return chi, kappa
 
 
-def readout_probe_freq(ctx: ExpContext) -> ScalarValue:
+def readout_probe_freq(ctx: SessionEnv) -> ScalarValue:
     """Default a probe tone to the readout/resonator frequency calibration."""
     if md_has_key(ctx, "readout_f"):
         return EvalValue(expr="readout_f")
@@ -87,7 +87,7 @@ def readout_probe_freq(ctx: ExpContext) -> ScalarValue:
 
 
 def readout_probe_freq_range(
-    ctx: ExpContext, expts: int, *, span_factor: float = 1.5
+    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
     """Default a probe frequency sweep around readout_f, falling back to r_f."""
     center_key = "readout_f" if md_has_key(ctx, "readout_f") else "r_f"

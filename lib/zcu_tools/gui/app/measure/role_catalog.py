@@ -22,13 +22,13 @@ from typing import Literal, TypeAlias
 from zcu_tools.gui.cfg import CfgSectionSpec, LiteralSpec, ReferenceValue
 from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, UnknownProgramShapeError
 
-from .adapter import ExpContext
+from .adapter import SessionEnv
 
 logger = logging.getLogger(__name__)
 
 RoleItemKind: TypeAlias = Literal["module", "waveform"]
 RoleShapeFactory: TypeAlias = Callable[[], CfgSectionSpec]
-RoleValueFactory: TypeAlias = Callable[[ExpContext], ReferenceValue]
+RoleValueFactory: TypeAlias = Callable[[SessionEnv], ReferenceValue]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,7 @@ class RoleEntry:
     """One named experiment-role template.
 
     ``make_value`` is the eval-aware default factory for this role: given the
-    live ``ExpContext`` it returns a ``ReferenceValue`` whose inner value carries
+    live ``SessionEnv`` it returns a ``ReferenceValue`` whose inner value carries
     md-linked ``EvalValue`` defaults.
 
     ``shape`` builds the matching context-free, fresh canonical Spec. Registration

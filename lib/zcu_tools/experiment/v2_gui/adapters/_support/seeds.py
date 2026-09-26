@@ -24,7 +24,7 @@ from .ctx_helpers import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
 
 T = TypeVar("T", covariant=True)
 
@@ -33,10 +33,10 @@ T = TypeVar("T", covariant=True)
 class Seed(Generic[T]):
     """A fresh-cfg default resolved only when a definition is instantiated."""
 
-    _resolver: Callable[[ExpContext], T]
+    _resolver: Callable[[SessionEnv], T]
     description: str
 
-    def resolve(self, ctx: ExpContext) -> T:
+    def resolve(self, ctx: SessionEnv) -> T:
         # Values such as SweepValue and ReferenceValue are mutable. Every
         # instantiation receives an isolated tree even for literal/custom seeds.
         return deepcopy(self._resolver(ctx))
@@ -47,7 +47,7 @@ def literal(value: T) -> Seed[T]:
     return Seed(lambda _ctx: snapshot, description=repr(snapshot))
 
 
-def custom(resolve: Callable[[ExpContext], T], *, description: str) -> Seed[T]:
+def custom(resolve: Callable[[SessionEnv], T], *, description: str) -> Seed[T]:
     """The single escape hatch for a named, low-frequency domain policy.
 
     The resolver must be a pure context lookup. Unlike :func:`literal`, this
@@ -72,7 +72,7 @@ def md(
     if not key.strip():
         raise ValueError("md seed key must not be empty")
 
-    def resolve(ctx: ExpContext) -> ScalarLeafInput:
+    def resolve(ctx: SessionEnv) -> ScalarLeafInput:
         if md_has_key(ctx, key):
             return EvalValue(expr=expr if expr is not None else key)
         return fallback
@@ -91,7 +91,7 @@ def scaled_md(
     if not key.strip():
         raise ValueError("scaled_md seed key must not be empty")
 
-    def resolve(ctx: ExpContext) -> float | EvalValue:
+    def resolve(ctx: SessionEnv) -> float | EvalValue:
         if md_has_key(ctx, key):
             return EvalValue(expr=f"{factor} * {key}")
         return fallback_value
@@ -107,7 +107,7 @@ class SweepDefault:
     stop: float | EvalValue | Seed[float | EvalValue]
     expts: int
 
-    def resolve(self, ctx: ExpContext) -> SweepValue:
+    def resolve(self, ctx: SessionEnv) -> SweepValue:
         return SweepValue(
             start=_resolve_input(self.start, ctx),
             stop=_resolve_input(self.stop, ctx),
@@ -160,7 +160,7 @@ def value_source(
 
     ref = ValueRef(key, type_name)
 
-    def resolve(ctx: ExpContext) -> ScalarLeafInput:
+    def resolve(ctx: SessionEnv) -> ScalarLeafInput:
         try:
             return cast(
                 ScalarLeafInput,
@@ -174,7 +174,7 @@ def value_source(
     return Seed(resolve, description=f"value source:{key}")
 
 
-def _resolve_input(value: T | Seed[T], ctx: ExpContext) -> T:
+def _resolve_input(value: T | Seed[T], ctx: SessionEnv) -> T:
     if isinstance(value, Seed):
         return value.resolve(ctx)
     return deepcopy(value)

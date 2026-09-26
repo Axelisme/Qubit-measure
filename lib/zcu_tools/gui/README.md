@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-27 — universal cfg tree and shared sweep range/sampling presentation
+**Last updated:** 2026-09-27 — session environment naming
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -43,7 +43,7 @@ raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag val
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
 Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
-並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、ExpContext、MetaDict、
+並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、MetaDict、
 ModuleLibrary、logical key或generation policy；measure與autoflux各自保有domain builder，只共用這層
 tree mechanics（ADR-0012、ADR-0045）。
 

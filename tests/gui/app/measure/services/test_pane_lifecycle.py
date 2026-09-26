@@ -8,9 +8,9 @@ import pytest
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
-    ExpContext,
     MetaDictWriteback,
     SavePaths,
+    SessionEnv,
 )
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import (
@@ -72,8 +72,8 @@ class _Bg:
         self.on_error = on_error
 
 
-def _state() -> tuple[State, str, MagicMock, ExpContext]:
-    ctx = ExpContext(
+def _state() -> tuple[State, str, MagicMock, SessionEnv]:
+    ctx = SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),
         soc=MagicMock(),
@@ -226,7 +226,7 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     service, bg = _analyze_service(state, writeback)
     service.start_analyze(AnalyzePermit(tab_id), "params")
 
-    new_ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    new_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     state.set_context(new_ctx)
     state.get_tab(tab_id).run.result = "changed-after-start"
     result = MagicMock(figure=None)

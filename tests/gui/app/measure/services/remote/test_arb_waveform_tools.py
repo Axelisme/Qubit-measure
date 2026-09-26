@@ -18,8 +18,8 @@ def _qt(qapp):  # noqa: ARG001
 def fixture(tmp_path: Path) -> Fixture:
     fx = Fixture()
     db_path = tmp_path / "Database" / "chip_a" / "q1" / "2026" / "06" / "Data_0626"
-    fx.state.exp_context = replace(
-        fx.state.exp_context,
+    fx.state.session_env = replace(
+        fx.state.session_env,
         chip_name="chip_a",
         qub_name="q1",
         database_path=str(db_path),
@@ -67,7 +67,7 @@ def test_set_list_and_preview_round_trip(fixture: Fixture, tmp_path: Path) -> No
 
 
 def test_list_without_project_database_path_returns_empty(fixture: Fixture) -> None:
-    fixture.state.exp_context = replace(fixture.state.exp_context, database_path="")
+    fixture.state.session_env = replace(fixture.state.session_env, database_path="")
 
     assert fixture.ctrl.list_arb_waveforms() == []
     assert fixture.ctrl.list_arb_waveform_infos() == []

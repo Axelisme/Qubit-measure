@@ -5,7 +5,7 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, HomophasalSamplingCfg
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import OneToneFreqAdapter
-from zcu_tools.gui.app.measure.adapter import ExpContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.adapter.types import RunRequest
@@ -242,7 +242,7 @@ def test_multi_axis_sweep_preserves_run_only_uniform():
 
 def test_onetone_freq_runtime_mode_and_readout_are_restored():
     adapter = OneToneFreqAdapter()
-    ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     current = adapter.make_default_cfg(ctx)
     raw = schema_to_raw_dict(current, ctx.md, ctx.ml)
     runtime = adapter.build_exp_cfg(

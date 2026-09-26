@@ -22,10 +22,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
@@ -50,7 +50,7 @@ SsAcStarkRunResult: TypeAlias = Any  # AcStarkResult (frozen domain dataclass)
 _RF_WIDTH_FALLBACK_MHZ = 5.0
 
 
-def _selected_qubit_pulse(ctx: ExpContext) -> PulseCfg | None:
+def _selected_qubit_pulse(ctx: SessionEnv) -> PulseCfg | None:
     # Match the pi_pulse role's library priority for stark_pulse2.
     for name in ("pi_amp", "pi_len"):
         pulse = ctx.ml.modules.get(name)
@@ -59,7 +59,7 @@ def _selected_qubit_pulse(ctx: ExpContext) -> PulseCfg | None:
     return None
 
 
-def _probe_length(ctx: ExpContext) -> float:
+def _probe_length(ctx: SessionEnv) -> float:
     pulse = _selected_qubit_pulse(ctx)
     if pulse is not None:
         length = pulse.waveform.length
@@ -75,7 +75,7 @@ def _probe_length(ctx: ExpContext) -> float:
     return 0.3  # Draft fallback until a calibrated pi pulse is available.
 
 
-def _qubit_frequency(ctx: ExpContext) -> float | EvalValue:
+def _qubit_frequency(ctx: SessionEnv) -> float | EvalValue:
     if md_has_key(ctx, "q_f"):
         return EvalValue(expr="q_f")
     pulse = _selected_qubit_pulse(ctx)
@@ -86,7 +86,7 @@ def _qubit_frequency(ctx: ExpContext) -> float | EvalValue:
     return float(pulse.freq)
 
 
-def _qubit_channel(ctx: ExpContext) -> int | EvalValue:
+def _qubit_channel(ctx: SessionEnv) -> int | EvalValue:
     for key in ("qub_ch", "qub_1_4_ch", "qub_4_5_ch"):
         if md_has_key(ctx, key):
             return EvalValue(expr=key)
@@ -94,7 +94,7 @@ def _qubit_channel(ctx: ExpContext) -> int | EvalValue:
     return pulse.ch if pulse is not None else 0
 
 
-def _qubit_mixer_frequency(ctx: ExpContext) -> DirectValue | EvalValue:
+def _qubit_mixer_frequency(ctx: SessionEnv) -> DirectValue | EvalValue:
     pulse = _selected_qubit_pulse(ctx)
     mixer_freq = pulse.mixer_freq if pulse is not None else None
     if mixer_freq is None:
@@ -105,7 +105,7 @@ def _qubit_mixer_frequency(ctx: ExpContext) -> DirectValue | EvalValue:
 
 
 def _rf_width_timing(
-    ctx: ExpContext, *, numerator: float, offset: float = 0.0
+    ctx: SessionEnv, *, numerator: float, offset: float = 0.0
 ) -> float | EvalValue:
     coefficient = numerator / (2 * math.pi)
     if md_has_key(ctx, "rf_w"):
@@ -116,19 +116,19 @@ def _rf_width_timing(
     return offset + coefficient / _RF_WIDTH_FALLBACK_MHZ
 
 
-def _cavity_tone_length(ctx: ExpContext) -> float | EvalValue:
+def _cavity_tone_length(ctx: SessionEnv) -> float | EvalValue:
     return _rf_width_timing(ctx, numerator=5.1, offset=_probe_length(ctx))
 
 
-def _qubit_pre_delay(ctx: ExpContext) -> float | EvalValue:
+def _qubit_pre_delay(ctx: SessionEnv) -> float | EvalValue:
     return _rf_width_timing(ctx, numerator=5.0)
 
 
-def _qubit_post_delay(ctx: ExpContext) -> float | EvalValue:
+def _qubit_post_delay(ctx: SessionEnv) -> float | EvalValue:
     return _rf_width_timing(ctx, numerator=3.1)
 
 
-def _freq_sweep_default(ctx: ExpContext) -> SweepValue:
+def _freq_sweep_default(ctx: SessionEnv) -> SweepValue:
     if md_has_key(ctx, "q_f"):
         return SweepValue(
             start=EvalValue(expr="q_f - 700.0"),
@@ -317,5 +317,5 @@ class SsAcStarkAdapter(
             ),
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_sh_ac_stark_{time.strftime('%m%d')}"

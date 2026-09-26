@@ -21,8 +21,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    ExpContext,
     NoAnalyzeParams,
+    SessionEnv,
 )
 from zcu_tools.gui.cfg import (
     SweepValue,
@@ -110,5 +110,5 @@ class RabiCheckAdapter(
     ) -> RabiCheckAnalyzeResult:
         return run_figure_only_analyze(RabiCheckExp, RabiCheckAnalyzeResult, req)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_reset_check_{time.strftime('%m%d')}"

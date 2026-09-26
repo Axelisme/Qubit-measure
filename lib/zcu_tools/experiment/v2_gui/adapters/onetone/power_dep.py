@@ -19,8 +19,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
-    ExpContext,
     RunRequest,
+    SessionEnv,
     require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
@@ -130,5 +130,5 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         earlystop_snr = self._earlystop_snr(raw_cfg)
         return PowerDepExp().run(soc, soccfg, cfg, earlystop_snr=earlystop_snr)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.res_name}_gain_{time.strftime('%H%M')}"

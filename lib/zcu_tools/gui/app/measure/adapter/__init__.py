@@ -5,7 +5,7 @@
 # vocabulary), so adapter authors import them from the adapter package.
 from zcu_tools.gui.session.types import (
     ContextReadiness,
-    ExpContext,
+    SessionEnv,
     SocCfgHandle,
     SocCfgProtocol,
     SocHandle,

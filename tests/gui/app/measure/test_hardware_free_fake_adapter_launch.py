@@ -78,7 +78,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     # Open tab via normal Controller path (not direct ExpTabWidget instantiation)
     # This goes through the production TabAddedPayload -> MainWindow.add_tab_widget path,
     # with MainWindow as the RenderHost (via ctrl.add_view(window) done in _build_window).
-    assert ctrl.get_exp_context().soc is None
+    assert ctrl.get_session_env().soc is None
     tab_id = ctrl.new_tab("fake/freq")
     QApplication.processEvents()
     QApplication.processEvents()

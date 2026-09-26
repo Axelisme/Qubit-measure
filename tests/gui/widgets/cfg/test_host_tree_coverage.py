@@ -70,7 +70,7 @@ def test_measure_gui_run_uses_sole_tree(qapp, monkeypatch):
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_exp_context.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
+    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
 
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     spec = CfgSectionSpec(
@@ -202,7 +202,7 @@ def test_writeback_edit_uses_sole_tree(qapp, monkeypatch):
 
     # Mock controller to return this draft for writeback edit
     ctrl.get_writeback_item_draft_for_pane = MagicMock(return_value=draft)
-    ctrl.get_exp_context.return_value = MagicMock(md=MetaDict(), ml=MagicMock())
+    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=MagicMock())
     # We need to directly test that WritebackWidget creates a CfgFormWidget that is tree
     # The edit dialog creates CfgFormWidget internally; we verify a standalone CfgFormWidget used there is tree
     w = CfgFormWidget()

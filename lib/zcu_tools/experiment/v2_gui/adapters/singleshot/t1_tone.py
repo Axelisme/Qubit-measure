@@ -26,10 +26,10 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ExpContext,
     MetaDictWriteback,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
     require_soc_handles,
@@ -48,7 +48,7 @@ from ._shared import read_ge_centers, readout_probe_freq
 SsT1ToneRunResult: TypeAlias = T1WithToneResult
 
 
-def _sweep_stop_default(ctx: ExpContext) -> float | EvalValue:
+def _sweep_stop_default(ctx: SessionEnv) -> float | EvalValue:
     key = "t1_with_tone" if md_has_key(ctx, "t1_with_tone") else "t1"
     if md_has_key(ctx, key):
         return EvalValue(expr=f"5.0 * {key}")
@@ -199,5 +199,5 @@ class SsT1ToneAdapter(
             ),
         ]
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_ss_t1_tone_{time.strftime('%m%d')}"

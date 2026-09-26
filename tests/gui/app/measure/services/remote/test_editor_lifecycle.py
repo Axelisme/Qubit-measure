@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
@@ -125,7 +125,7 @@ class Connections:
         self.library.waveforms["seed"] = WaveformCfgFactory.from_raw(
             {"style": "const", "length": 0.1}
         )
-        context = ExpContext(
+        context = SessionEnv(
             md=MetaDict(),
             ml=self.library,
             soc=None,

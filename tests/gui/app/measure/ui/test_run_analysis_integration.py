@@ -40,8 +40,8 @@ def make_ctrl():
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_exp_context.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
-    # For writeback baseline capture introspection, expose get_exp_context
+    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
+    # For writeback baseline capture introspection, expose get_session_env
     md = MetaDict()
     md.r_f = 6000.0
     # ModuleLibrary mock with one entry
@@ -50,7 +50,7 @@ def make_ctrl():
     exp_ctx = MagicMock()
     exp_ctx.md = md
     exp_ctx.ml = ml
-    ctrl.get_exp_context.return_value = exp_ctx
+    ctrl.get_session_env.return_value = exp_ctx
     # Writeback control fakes
     ctrl.progress_control.attach_progress.return_value = lambda: None
     return ctrl
@@ -402,10 +402,10 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
 
 
 def test_writeback_baseline_captured_via_service(qapp):
-    """S2: baseline captured at draft creation from ExpContext (service-owned, not adapter)."""
+    """S2: baseline captured at draft creation from SessionEnv (service-owned, not adapter)."""
     from unittest.mock import MagicMock
 
-    from zcu_tools.gui.app.measure.adapter import ExpContext
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.services.writeback import WritebackService
 
     md = MetaDict()
@@ -413,9 +413,9 @@ def test_writeback_baseline_captured_via_service(qapp):
     md.existing = 123
     ml = ModuleLibrary()
     # Create a fake context
-    ctx = ExpContext(md=md, ml=ml, soc=None, soccfg=None)
+    ctx = SessionEnv(md=md, ml=ml, soc=None, soccfg=None)
     ctrl = MagicMock()
-    ctrl.get_exp_context.return_value = ctx
+    ctrl.get_session_env.return_value = ctx
     # CfgEditor mock
     cfg_editor = MagicMock()
     cfg_editor.open_seeded.return_value = ("ed-1", ())

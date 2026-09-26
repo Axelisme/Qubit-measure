@@ -43,9 +43,9 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     NoAnalyzeParams,
     RunRequest,
+    SessionEnv,
     require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
@@ -182,7 +182,7 @@ class _SsT1ToneSweepBase(
         )
         return SsT1ToneSweepAnalyzeResult(figure=fig)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_ss_t1_tone_sweep_{self.filename_token}_{time.strftime('%m%d')}"
 
 

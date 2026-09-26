@@ -10,7 +10,7 @@ This package is import-clean: importing its leaf modules pulls in neither Qt nor
 matplotlib nor any ``zcu_tools.gui.app.*`` package, so it can sit *below* the
 apps without a back-edge. Submodules are imported on demand:
 
-- ``types`` — session value types (``ExpContext`` + readiness, the ``SocHandle`` /
+- ``types`` — session value types (``SessionEnv`` + readiness, the ``SocHandle`` /
   ``SocCfgHandle`` structural surfaces). No experiment cfg-tree coupling.
 - ``events`` — the session event vocabulary: ``SessionEvent`` + the data/SoC/
   device/predictor payloads, on the shared ``BaseEventBus`` (payload-type keyed).

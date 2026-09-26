@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, ExpContext
+from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.remote import (
@@ -33,8 +33,8 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 
-def make_ctx() -> ExpContext:
-    return ExpContext(
+def make_ctx() -> SessionEnv:
+    return SessionEnv(
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),

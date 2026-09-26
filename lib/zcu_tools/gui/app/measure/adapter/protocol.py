@@ -10,7 +10,6 @@ from .types import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     LoadDataRequest,
     NoAnalysisResult,
     NoAnalyzeParams,
@@ -19,6 +18,7 @@ from .types import (
     RunRequest,
     SaveDataRequest,
     SavePaths,
+    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -58,11 +58,11 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Return the static human-facing orientation guide (no instance state)."""
         ...
 
-    def make_default_cfg(self, ctx: ExpContext) -> CfgSchema:
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         """Compose the static spec with context-derived default values."""
         ...
 
-    def make_save_paths(self, ctx: ExpContext) -> SavePaths:
+    def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
         """Resolve the save-path policy for the given context."""
         ...
 
@@ -71,7 +71,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Return the analyze-params dataclass type (static, no instance)."""
         ...
 
-    def get_analyze_params(self, result: Any, ctx: ExpContext) -> Any:
+    def get_analyze_params(self, result: Any, ctx: SessionEnv) -> Any:
         """Build the analyze parameter instance presented to the user."""
         ...
 
@@ -96,7 +96,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Return the post-analysis param dataclass type (post_analysis cap)."""
         ...
 
-    def get_post_analyze_params(self, analyze_result: Any, ctx: ExpContext) -> Any:
+    def get_post_analyze_params(self, analyze_result: Any, ctx: SessionEnv) -> Any:
         """Build the post-analysis param instance presented to the user."""
         ...
 

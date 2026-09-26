@@ -21,7 +21,7 @@ from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
-    ExpContext,
+    SessionEnv,
 )
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
@@ -64,8 +64,8 @@ from tests.gui._completion_helpers import (
 # ---------------------------------------------------------------------------
 
 
-def _make_ctx() -> ExpContext:
-    return ExpContext(
+def _make_ctx() -> SessionEnv:
+    return SessionEnv(
         md=MagicMock(),
         ml=MagicMock(),
         soc=MagicMock(),  # simulate connected soc
@@ -148,7 +148,7 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:  # noqa: ARG001
 
 def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
     cf.state.set_context(
-        dataclasses.replace(cf.state.exp_context, md=MetaDict(), ml=ModuleLibrary())
+        dataclasses.replace(cf.state.session_env, md=MetaDict(), ml=ModuleLibrary())
     )
     tab_id = cf.ctrl.new_tab("twotone/flux_dep")
     values = np.linspace(-5.0, 5.0, 60)
@@ -165,7 +165,7 @@ def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
     return tab_id, token
 
 
-def _default_fake_schema(ctx: ExpContext) -> CfgSchema:
+def _default_fake_schema(ctx: SessionEnv) -> CfgSchema:
     return FakeAdapter().make_default_cfg(ctx)
 
 
@@ -583,7 +583,7 @@ def test_draft_context_rejects_real_run_and_save(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
-            cf.state.exp_context,
+            cf.state.session_env,
             active_label="",
             readiness=ContextReadiness.DRAFT,
         )
@@ -606,7 +606,7 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
-            cf.state.exp_context,
+            cf.state.session_env,
             soc=None,
             soccfg=None,
             active_label="",
@@ -759,7 +759,7 @@ def test_reset_tab_cfg_restores_adapter_default(cf):
 
     returned = cf.ctrl.reset_tab_cfg(tab_id)
 
-    default = _default_fake_schema(cf.state.exp_context)
+    default = _default_fake_schema(cf.state.session_env)
     assert returned.value.fields["reps"] == default.value.fields["reps"]
     # State now holds the returned default, not the mutated draft.
     committed = cf.state.get_tab(tab_id).cfg_schema
@@ -874,7 +874,7 @@ def test_persist_then_restore_app_state(tmp_path):
     capture (flush) on one Controller, restore on a fresh one sharing the dir."""
     cf = ControllerFixture(cache_dir=tmp_path)
     tab_id = cf.ctrl.new_tab("fake")
-    schema = _default_fake_schema(cf.state.exp_context)
+    schema = _default_fake_schema(cf.state.session_env)
     cf.ctrl.update_tab_cfg(tab_id, schema)
     resolved = cf.ctrl.apply_startup_project(
         StartupProjectRequest("chip", "qub", "res")
@@ -896,7 +896,7 @@ def test_persist_then_restore_app_state(tmp_path):
     assert startup.scope_id == resolved["scope_id"]
     assert startup.ip == "10.0.0.2"
     assert startup.port == 7000
-    assert cf_restored.state.exp_context.result_dir == "/tmp/zcu_result"
+    assert cf_restored.state.session_env.result_dir == "/tmp/zcu_result"
 
 
 def test_restore_tab_events_use_system_origin(tmp_path) -> None:

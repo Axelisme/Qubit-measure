@@ -16,8 +16,8 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
-    ExpContext,
     NoAnalyzeParams,
+    SessionEnv,
 )
 
 from ._shared import read_ge_centers
@@ -106,5 +106,5 @@ class CheckAdapter(
         fig = CheckExp().analyze(g_center, e_center, radius, result=req.run_result)
         return CheckAnalyzeResult(figure=fig)
 
-    def make_filename_stem(self, ctx: ExpContext) -> str:
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_sh_check_{time.strftime('%m%d')}"

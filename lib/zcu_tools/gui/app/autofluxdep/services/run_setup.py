@@ -67,13 +67,13 @@ def build_run_tools(
     providers: Sequence[PlacedNode],
 ) -> Tools:
     """Build the sweep's run-lived predictor and feedback capabilities."""
-    raw = state.exp_context.predictor
+    raw = state.session_env.predictor
     predictor = (
         FluxoniumPredictorAdapter(fluxonium=raw)
         if raw is not None
         else SimplePredictor()
     )
-    feedback = build_feedback_runtime(providers, md=state.exp_context.md)
+    feedback = build_feedback_runtime(providers, md=state.session_env.md)
     return Tools(predictor=predictor, feedback=feedback)
 
 
@@ -84,7 +84,7 @@ def allocate_run_results(
 ) -> dict[str, Any]:
     """Pre-allocate each user provider's sweep Result."""
     results: dict[str, Any] = {}
-    md = state.exp_context.md
+    md = state.session_env.md
     for node in enabled_nodes:
         result = node.builder.make_init_result(node.schema, flux, md=md)
         if result is not None:
@@ -99,7 +99,7 @@ def build_run_cfg_snapshots(
     ml: Any | None = None,
 ) -> dict[str, RunCfgSnapshot]:
     """Lower each enabled node's run-start cfg and validate override paths."""
-    ctx = state.exp_context
+    ctx = state.session_env
     lowering_ml = ctx.ml if ml is None else ml
     snapshots: dict[str, RunCfgSnapshot] = {}
     for node in enabled_nodes:
@@ -156,7 +156,7 @@ def create_run_session(
     flux_unit_resolver: Callable[[str], str] | None = None,
 ) -> RunSession:
     """Create the sweep-lived RunSession from the current State snapshot."""
-    ctx = state.exp_context
+    ctx = state.session_env
     run_ml = ctx.ml.clone()
     enabled_names = {node.name for node in enabled_nodes}
     if not state.run_results or not set(state.run_results).issubset(enabled_names):
@@ -209,7 +209,7 @@ def run_dry(
 ) -> InfoStore:
     """Run the dependency model headless with the same provider/cfg setup."""
     providers = build_run_providers(enabled_nodes)
-    ctx = state.exp_context
+    ctx = state.session_env
     run_ml = ml
     lowering_ml = ctx.ml
     if run_ml is None:

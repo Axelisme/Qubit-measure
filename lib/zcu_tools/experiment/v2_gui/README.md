@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-27 — measure app path rename
+**Last updated:** 2026-09-27 — session environment naming
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -73,7 +73,7 @@ Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
 `ReferenceSpec(kind="module" | "waveform")`與`ReferenceValue`。kind由domain factory顯式
 設定，role/default assembly不再依兩套平行shared class分派。
 
-Adapter cfg由context-free `MeasureCfgBuilder`單段宣告；builder不接`ExpContext`，只有
+Adapter cfg由context-free `MeasureCfgBuilder`單段宣告；builder不接`SessionEnv`，只有
 `MeasureCfgDefinition.instantiate(ctx)`解析fresh defaults。`pulse/readout/reset`的
 `ModuleInit.SMART`優先引用ModuleLibrary calibrated entry，required miss退回inline blank、optional
 miss產生`None`；`ModuleInit.INLINE`永遠使用fresh blank；`ModuleInit.DISABLED`只允許optional ref且
