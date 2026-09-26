@@ -383,12 +383,54 @@ ScalarLeafInput: TypeAlias = (
 )
 
 
+def resolved_direct_number(value: int | float | DirectValue) -> int | float | None:
+    """Read a numeric carrier without reparsing text or substituting an old value."""
+    number = value.value if isinstance(value, DirectValue) else value
+    if number is None:
+        return None
+    if isinstance(number, bool) or not isinstance(number, (int, float)):
+        raise TypeError("Expected a direct numeric value")
+    return number
+
+
+def _normalize_range_text(
+    value: DirectValue, label: str, type_: type, minimum: float | None = None
+) -> DirectValue:
+    number = resolved_direct_number(value)
+    if number is None:
+        return value
+    if type(number) is not type_:
+        raise TypeError(f"{label} expects {type_.__name__}")
+    try:
+        finite = math.isfinite(number)
+    except OverflowError:
+        finite = False
+    if finite and (minimum is None or number >= minimum):
+        return value
+    error = f"{label} must be finite"
+    if minimum is not None:
+        error += f" and >= {minimum:g}"
+    if value.raw is None:
+        raise ValueError(error)
+    return DirectValue(None, raw=value.raw, error=error)
+
+
+def _normalize_sweep_points(value: int | DirectValue) -> int | DirectValue:
+    if isinstance(value, DirectValue):
+        return _normalize_range_text(value, "Sweep points", int, 1)
+    if type(value) is not int:
+        raise TypeError("Sweep points must be an integer")
+    if value < 1:
+        raise ValueError("SweepValue.expts must be >= 1")
+    return value
+
+
 @dataclass
 class SweepValue:
     start: float | ScalarValue
     stop: float | ScalarValue
-    expts: int
-    step: float = 0.1
+    expts: int | DirectValue
+    step: float | DirectValue = 0.1
     # ``auto_norm`` (init-only) derives ``step`` from start/stop/expts at
     # construction so that any direct ``SweepValue(start, stop, expts=N)`` (the
     # 16 adapter defaults, session codec, inheritance) is self-consistent — step
@@ -401,43 +443,58 @@ class SweepValue:
     auto_norm: InitVar[bool] = True
 
     def __post_init__(self, auto_norm: bool) -> None:
-        if self.expts < 1:
-            raise ValueError("SweepValue.expts must be >= 1")
-        start = self.start
-        stop = self.stop
-        if isinstance(start, DirectValue) and start.error is None:
-            start = start.value
-        if isinstance(stop, DirectValue) and stop.error is None:
-            stop = stop.value
+        self.expts = _normalize_sweep_points(self.expts)
+        if isinstance(self.start, DirectValue):
+            self.start = _normalize_range_text(self.start, "Sweep start", float)
+        if isinstance(self.stop, DirectValue):
+            self.stop = _normalize_range_text(self.stop, "Sweep stop", float)
+        if isinstance(self.step, DirectValue):
+            self.step = _normalize_range_text(self.step, "Sweep step", float)
+        start = self.start.value if isinstance(self.start, DirectValue) else self.start
+        stop = self.stop.value if isinstance(self.stop, DirectValue) else self.stop
+        points = resolved_direct_number(self.expts)
         if (
             auto_norm
+            and not isinstance(self.step, DirectValue)
+            and points is not None
             and isinstance(start, (int, float))
             and isinstance(stop, (int, float))
         ):
             self.step = (
-                0.0
-                if self.expts == 1
-                else (float(stop) - float(start)) / (self.expts - 1)
+                0.0 if points == 1 else (float(stop) - float(start)) / (points - 1)
             )
 
 
 @dataclass
 class CenteredSweepValue:
     center: float | ScalarValue
-    span: float
-    expts: int
-    step: float = 0.1
+    span: float | DirectValue
+    expts: int | DirectValue
+    step: float | DirectValue = 0.1
     auto_norm: InitVar[bool] = True
 
     def __post_init__(self, auto_norm: bool) -> None:
-        if self.expts < 1:
-            raise ValueError("CenteredSweepValue.expts must be >= 1")
-        span = float(self.span)
-        if not math.isfinite(span) or span < 0.0:
-            raise ValueError("CenteredSweepValue.span must be finite and >= 0")
-        self.span = span
-        if auto_norm:
-            self.step = 0.0 if self.expts == 1 else span / (self.expts - 1)
+        self.expts = _normalize_sweep_points(self.expts)
+        if isinstance(self.center, DirectValue):
+            self.center = _normalize_range_text(self.center, "Sweep center", float)
+        if isinstance(self.span, DirectValue):
+            self.span = _normalize_range_text(self.span, "Sweep span", float, 0)
+        else:
+            span = float(self.span)
+            if not math.isfinite(span) or span < 0.0:
+                raise ValueError("CenteredSweepValue.span must be finite and >= 0")
+            self.span = span
+        if isinstance(self.step, DirectValue):
+            self.step = _normalize_range_text(self.step, "Sweep step", float, 0)
+        span = resolved_direct_number(self.span)
+        points = resolved_direct_number(self.expts)
+        if (
+            auto_norm
+            and not isinstance(self.step, DirectValue)
+            and span is not None
+            and points is not None
+        ):
+            self.step = 0.0 if points == 1 else span / (points - 1)
 
 
 @dataclass

@@ -6,6 +6,8 @@ covers the exact cfg payload and value-tree rebuild transforms.
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from typing import cast
 
 import pytest
@@ -104,6 +106,64 @@ def test_direct_sweep_text_round_trips_and_lowers_to_numeric_range(
     )
     assert raw["axis"] == pytest.approx(expected)
     assert value.step == pytest.approx(expected_step)
+
+
+@pytest.mark.parametrize(
+    ("centered", "part"),
+    [
+        (False, "expts"),
+        (False, "step"),
+        (True, "span"),
+        (True, "expts"),
+        (True, "step"),
+    ],
+)
+@pytest.mark.parametrize(
+    "entry",
+    [DirectValue(None, raw=""), DirectValue(None, raw="1e", error="Invalid number")],
+)
+def test_sweep_control_carriers_round_trip_and_block_finished_cfg(
+    centered, part, entry
+):
+    from zcu_tools.gui.cfg.lowering import lower_finished_cfg
+
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    initial = CenteredSweepValue(0.0, 1.0, 5) if centered else SweepValue(0.0, 1.0, 5)
+    value = replace(initial, **{part: entry}, auto_norm=False)
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"axis": spec}), CfgSectionValue(fields={"axis": value})
+    )
+    restored = raw_to_schema(schema, json.loads(json.dumps(schema_to_raw(schema))))
+    assert getattr(restored.value.fields["axis"], part) == entry
+    with pytest.raises(RuntimeError, match=rf"axis\.{part}"):
+        lower_finished_cfg(
+            restored,
+            resolve_expression=None,
+            resolve_reference=None,
+            make_range=lambda start, stop, *, expts: (start, stop, expts),
+        )
+
+
+def test_sweep_control_raw_and_canonical_step_survive_codec_and_lowering():
+    from zcu_tools.gui.cfg.binding import SweepEditor
+    from zcu_tools.gui.cfg.lowering import lower_finished_cfg
+
+    value = SweepEditor.update_step(
+        SweepValue(0.0, 1.0, 5), DirectValue(0.3, raw="0.30")
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"axis": SweepSpec()}),
+        CfgSectionValue(fields={"axis": value}),
+    )
+    restored = raw_to_schema(schema, json.loads(json.dumps(schema_to_raw(schema))))
+    assert restored.value == schema.value
+    result = lower_finished_cfg(
+        restored,
+        resolve_expression=None,
+        resolve_reference=None,
+        make_range=lambda start, stop, *, expts: (start, stop, expts),
+    )
+    assert result["axis"] == (0.0, 1.0, 4)
 
 
 def test_complex_direct_value_has_lossless_json_codec_and_typed_lowering() -> None:

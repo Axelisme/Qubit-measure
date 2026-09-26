@@ -230,7 +230,23 @@ def _static_center_value(value: object, *, path: str) -> float | None:
     return center
 
 
+def _resolve_range_input[T: (int, float)](
+    value: T | DirectValue, type_: type[T], *, path: str, label: str
+) -> T:
+    direct = value if isinstance(value, DirectValue) else DirectValue(value)
+    _validate_scalar(ScalarSpec(label, type_), direct, path)
+    if direct.value is None:
+        raise RuntimeError(f"Config field '{path}' ({label}) is incomplete")
+    return type_(direct.value)
+
+
 def _validate_sweep_direct_edges(value: SweepValue, full_path: str) -> None:
+    _resolve_range_input(
+        value.expts, int, path=f"{full_path}.expts", label="Sweep points"
+    )
+    _resolve_range_input(
+        value.step, float, path=f"{full_path}.step", label="Sweep step"
+    )
     for name, edge in (("start", value.start), ("stop", value.stop)):
         if isinstance(edge, DirectValue):
             _resolve_sweep_edge(
@@ -245,7 +261,16 @@ def _validate_centered_sweep_contract(
     *,
     center: float | None = None,
 ) -> None:
-    if value.expts > 1 and value.span <= 0.0:
+    points = _resolve_range_input(
+        value.expts, int, path=f"{full_path}.expts", label="Sweep points"
+    )
+    span = _resolve_range_input(
+        value.span, float, path=f"{full_path}.span", label="Sweep span"
+    )
+    _resolve_range_input(
+        value.step, float, path=f"{full_path}.step", label="Sweep step"
+    )
+    if points > 1 and span <= 0.0:
         raise RuntimeError(
             f"Config field '{full_path}' ({spec.label}) centered sweep span must be "
             "greater than 0 when expts > 1"
@@ -315,6 +340,33 @@ def _select_reference_spec(
     )
 
 
+def _lower_centered_sweep(
+    spec: CenteredSweepSpec,
+    value: CenteredSweepValue,
+    *,
+    full_path: str,
+    resolve_expression: ExpressionResolver | None,
+    make_range: RangeFactory,
+) -> object:
+    center = _resolve_sweep_edge(
+        value.center,
+        resolve_expression,
+        path=f"{full_path}.center",
+        label="Sweep center",
+    )
+    _validate_centered_sweep_contract(spec, value, full_path, center=center)
+    points = _resolve_range_input(
+        value.expts, int, path=f"{full_path}.expts", label="Sweep points"
+    )
+    if points == 1:
+        return make_range(center, center, expts=1)
+    span = _resolve_range_input(
+        value.span, float, path=f"{full_path}.span", label="Sweep span"
+    )
+    half_span = span / 2.0
+    return make_range(center - half_span, center + half_span, expts=points)
+
+
 def _lower_section(
     spec: CfgSectionSpec,
     value: CfgSectionValue,
@@ -381,28 +433,22 @@ def _lower_section(
                 path=".".join([*path, key, "stop"]),
                 label="Sweep stop",
             )
-            result[key] = make_range(start, stop, expts=node_value.expts)
+            points = _resolve_range_input(
+                node_value.expts,
+                int,
+                path=".".join([*path, key, "expts"]),
+                label="Sweep points",
+            )
+            result[key] = make_range(start, stop, expts=points)
 
         elif isinstance(node_spec, CenteredSweepSpec):
             assert isinstance(node_value, CenteredSweepValue)
-            full_path = ".".join([*path, key])
-            center = _resolve_sweep_edge(
-                node_value.center,
-                resolve_expression,
-                path=f"{full_path}.center",
-                label="Sweep center",
-            )
-            _validate_centered_sweep_contract(
-                node_spec, node_value, full_path, center=center
-            )
-            if node_value.expts == 1:
-                result[key] = make_range(center, center, expts=1)
-                continue
-            half_span = float(node_value.span) / 2.0
-            result[key] = make_range(
-                center - half_span,
-                center + half_span,
-                expts=node_value.expts,
+            result[key] = _lower_centered_sweep(
+                node_spec,
+                node_value,
+                full_path=".".join([*path, key]),
+                resolve_expression=resolve_expression,
+                make_range=make_range,
             )
 
         elif isinstance(node_spec, ReferenceSpec):

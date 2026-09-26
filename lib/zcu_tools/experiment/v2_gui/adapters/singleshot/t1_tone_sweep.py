@@ -52,6 +52,7 @@ from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
     SweepValue,
+    resolved_direct_number,
 )
 
 from ._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
@@ -96,7 +97,9 @@ class _SsT1ToneSweepBase(
         outer_key = cls.outer_key
         outer_label = cls.outer_label
         outer_default = deepcopy(cls.outer_default)
-        outer_expts = outer_default.expts
+        outer_expts = resolved_direct_number(outer_default.expts)
+        if not isinstance(outer_expts, int):
+            raise TypeError("Outer sweep default requires an integer point count")
         outer_sweep = (
             custom(
                 lambda ctx: readout_probe_freq_range(ctx, outer_expts),

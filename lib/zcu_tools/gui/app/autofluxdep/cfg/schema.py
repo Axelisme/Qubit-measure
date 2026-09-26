@@ -38,6 +38,7 @@ from zcu_tools.gui.cfg import (
     read_value_path,
     replace_value_path,
     resolve_spec_path,
+    resolved_direct_number,
     schema_to_raw,
     select_ref_value_spec,
 )
@@ -136,7 +137,9 @@ def _ensure_centered_sweep_assignment(
     spec: CenteredSweepSpec,
     value: CenteredSweepValue,
 ) -> None:
-    if value.expts > 1 and value.span <= 0.0:
+    points = resolved_direct_number(value.expts)
+    span = resolved_direct_number(value.span)
+    if points is not None and span is not None and points > 1 and span <= 0.0:
         raise ValueError(
             f"Param {key!r} centered sweep span must be greater than 0 when expts > 1"
         )
@@ -565,14 +568,14 @@ def _jsonify_value_node(spec: CfgNodeSpec, value: Any) -> Any:
         return {
             "start": _knob_scalar_value(value.start),
             "stop": _knob_scalar_value(value.stop),
-            "expts": int(value.expts),
+            "expts": _knob_scalar_value(value.expts),
         }
     if isinstance(value, CenteredSweepValue):
         return {
             "center": _knob_scalar_value(value.center),
-            "span": float(value.span),
-            "expts": int(value.expts),
-            "step": float(value.step),
+            "span": _knob_scalar_value(value.span),
+            "expts": _knob_scalar_value(value.expts),
+            "step": _knob_scalar_value(value.step),
         }
     if isinstance(value, DirectValue):
         return _knob_scalar_value(value.value)

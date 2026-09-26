@@ -1522,6 +1522,39 @@ def test_locked_center_accepts_direct_text_carrier_without_losing_numeric_projec
     assert float(detune.stop) == pytest.approx(10.0)
 
 
+def test_centered_sweep_control_carriers_project_numeric_knobs_and_block_invalid_lowering():
+    schema = QubitFreqBuilder().make_default_schema()
+    schema.set_field(
+        "detune_sweep",
+        CenteredSweepValue(
+            0.0,
+            span=DirectValue(20.0, raw="20.00"),
+            expts=DirectValue(5, raw="005"),
+            step=DirectValue(5.0, raw="5e0"),
+        ),
+    )
+    assert schema.read_knobs()["detune_sweep"] == {
+        "center": 0.0,
+        "span": 20.0,
+        "expts": 5,
+        "step": 5.0,
+    }
+    detune = schema.lower(None)["detune_sweep"]
+    assert detune.expts == 5
+    assert float(detune.start) == pytest.approx(-10.0)
+    assert float(detune.stop) == pytest.approx(10.0)
+
+    invalid = CenteredSweepValue(
+        0.0,
+        span=DirectValue(None, raw="1e", error="Invalid number"),
+        expts=5,
+    )
+    schema.set_field("detune_sweep", invalid)
+    assert schema.read_knobs()["detune_sweep"]["span"] is None
+    with pytest.raises(RuntimeError, match="span"):
+        schema.lower(None)
+
+
 def test_locked_center_rejects_invalid_direct_text_carrier():
     schema = QubitFreqBuilder().make_default_schema()
     before = schema.read_knobs()

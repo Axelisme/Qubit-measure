@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-26，numeric text、sweep edge 與 reference snapshot 狀態
+**Last updated:** 2026-09-26，sweep control raw／resolved 與 reference snapshot 狀態
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -42,7 +42,10 @@ static → optional dynamic → lower、snapshot/relink與error contract（ADR-0
 raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag validation不由app重複實作。
 Numeric 與 complex ScalarSpec 的 direct text 由 ScalarField 解析，保存 raw 與 error；
 Widget 只傳入文字並顯示 model 狀態，invalid text 不沿用舊有效值。Sweep start/stop 與
-center 同樣保留 direct raw/error，codec 可往返，finished cfg 拒絕 incomplete/invalid edge。
+center 同樣保留 direct raw/error。Sweep points／step 與 centered span 也保存 model-owned
+文字與解析狀態，codec 可往返，finished cfg 拒絕任一 incomplete/invalid control。
+Step 文字反推 points 後保存實際 canonical step；Widget 同時呈現 raw 與 resolved，
+重建 form 不清除未完成輸入。Typed setters 仍拒絕非法型別／範圍。
 Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值使用 `{"__complex__": [re, im]}`
 並由 shared codec 編解碼；磁碟 expression 仍只保存 expr，不作為執行快照。
 

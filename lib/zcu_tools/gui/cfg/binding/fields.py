@@ -4,7 +4,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import cast
+from typing import Literal, cast
 
 from ..inheritance import make_default_value, select_ref_value_spec
 from ..model import (
@@ -23,6 +23,7 @@ from ..model import (
     ScalarValue,
     SweepSpec,
     SweepValue,
+    resolved_direct_number,
 )
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 from .range import CenteredSweepEditor, SweepEditor
@@ -105,6 +106,18 @@ class CfgField(ABC):
             raise RuntimeError(f"{type(self).__name__} is closed")
 
 
+def _parse_direct_text(spec: ScalarSpec, text: str) -> DirectValue:
+    if spec.type not in (int, float, complex, str):
+        raise TypeError(f"Text input is unsupported for {spec.type.__name__}")
+    if not text.strip() and (spec.optional or spec.type is not str):
+        return DirectValue(None, raw=text)
+    try:
+        parsed = spec.type(text.strip() if spec.optional else text)
+    except ValueError as exc:
+        return DirectValue(None, raw=text, error=str(exc))
+    return DirectValue(parsed, raw=text)
+
+
 class ScalarField(CfgField):
     spec: ScalarSpec
 
@@ -157,18 +170,7 @@ class ScalarField(CfgField):
     def set_text(self, text: str) -> None:
         """Store direct input text and its parse result, including invalid input."""
         self._require_open()
-        if self.spec.type not in (int, float, complex, str):
-            raise TypeError(f"Text input is unsupported for {self.spec.type.__name__}")
-        if not text.strip() and (self.spec.optional or self.spec.type is not str):
-            value = DirectValue(None, raw=text)
-        else:
-            try:
-                parsed = self.spec.type(text.strip() if self.spec.optional else text)
-            except ValueError as exc:
-                value = DirectValue(None, raw=text, error=str(exc))
-            else:
-                value = DirectValue(parsed, raw=text)
-        self.set_value(value)
+        self.set_value(_parse_direct_text(self.spec, text))
 
     def _validate_direct_value(self, value: DirectValue) -> None:
         raw = value.value
@@ -342,6 +344,7 @@ class SweepField(CfgField):
             stop=self._edge_value(self.stop_field.get_value()),
             expts=self._expts,
             step=self._step,
+            auto_norm=False,
         )
 
     def set_value(self, value: object) -> None:
@@ -350,7 +353,27 @@ class SweepField(CfgField):
             raise TypeError(
                 f"SweepField expects SweepValue, got {type(value).__name__}"
             )
-        canonical = SweepEditor.canonicalize(value)
+        self._apply_value(SweepEditor.canonicalize(value))
+
+    def set_text(self, edge: Literal["expts", "step"], text: str) -> None:
+        self._require_open()
+        if edge == "expts":
+            edit = SweepEditor.update_expts
+            type_ = int
+        elif edge == "step":
+            edit = SweepEditor.update_step
+            type_ = float
+        else:
+            raise ValueError(f"Unknown sweep input: {edge!r}")
+        value = _parse_direct_text(ScalarSpec(f"Sweep {edge}", type_), text)
+        current = self.get_value()
+        try:
+            candidate = edit(current, value)
+        except (ValueError, OverflowError) as exc:
+            candidate = edit(current, DirectValue(None, raw=text, error=str(exc)))
+        self._apply_value(candidate)
+
+    def _apply_value(self, canonical: SweepValue) -> None:
         self._updating = True
         try:
             self.start_field.set_value(self._coerce_edge(canonical.start))
@@ -405,17 +428,24 @@ class SweepField(CfgField):
     def _on_child_change(self, *_: object) -> None:
         if self._updating:
             return
-        canonical = SweepEditor.canonicalize(self.get_value())
-        self._expts = canonical.expts
-        self._step = canonical.step
-        self._refresh_validity()
-        self.on_change.emit(canonical)
+        self._apply_value(SweepEditor.canonicalize(self.get_value()))
 
     def _on_child_validity_changed(self, *_: object) -> None:
         self._refresh_validity()
 
     def _refresh_validity(self) -> None:
-        self._set_valid(self.start_field.is_valid() and self.stop_field.is_valid())
+        value = self.get_value()
+        edges_valid = all(
+            not isinstance(edge, DirectValue) or edge.value is not None
+            for edge in (value.start, value.stop)
+        )
+        self._set_valid(
+            self.start_field.is_valid()
+            and self.stop_field.is_valid()
+            and edges_valid
+            and resolved_direct_number(value.expts) is not None
+            and resolved_direct_number(value.step) is not None
+        )
 
 
 class CenteredSweepField(CfgField):
@@ -459,6 +489,7 @@ class CenteredSweepField(CfgField):
             span=self._span,
             expts=self._expts,
             step=self._step,
+            auto_norm=False,
         )
 
     def set_value(self, value: object) -> None:
@@ -470,6 +501,30 @@ class CenteredSweepField(CfgField):
             )
         canonical = CenteredSweepEditor.canonicalize(value)
         self._validate_value(canonical)
+        self._apply_value(canonical)
+
+    def set_text(self, edge: Literal["span", "expts", "step"], text: str) -> None:
+        self._require_open()
+        type_ = float
+        if edge == "span":
+            edit = CenteredSweepEditor.update_span
+        elif edge == "expts":
+            edit = CenteredSweepEditor.update_expts
+            type_ = int
+        elif edge == "step":
+            edit = CenteredSweepEditor.update_step
+        else:
+            raise ValueError(f"Unknown centered sweep input: {edge!r}")
+        value = _parse_direct_text(ScalarSpec(f"Sweep {edge}", type_), text)
+        current = self.get_value()
+        try:
+            candidate = edit(current, value)
+            self._validate_value(candidate)
+        except (ValueError, OverflowError) as exc:
+            candidate = edit(current, DirectValue(None, raw=text, error=str(exc)))
+        self._apply_value(candidate)
+
+    def _apply_value(self, canonical: CenteredSweepValue) -> None:
         self._updating = True
         try:
             self.center_field.set_value(self._coerce_center(canonical.center))
@@ -524,7 +579,9 @@ class CenteredSweepField(CfgField):
         return float(value.value)
 
     def _validate_value(self, value: CenteredSweepValue) -> None:
-        if value.expts > 1 and value.span <= 0.0:
+        points = resolved_direct_number(value.expts)
+        span = resolved_direct_number(value.span)
+        if points is not None and span is not None and points > 1 and span <= 0.0:
             raise ValueError("Centered sweep span must be > 0 when expts > 1")
         if self.spec.locked_center is None:
             return
@@ -564,18 +621,24 @@ class CenteredSweepField(CfgField):
     def _on_child_change(self, *_: object) -> None:
         if self._updating:
             return
-        canonical = CenteredSweepEditor.canonicalize(self.get_value())
-        self._span = canonical.span
-        self._expts = canonical.expts
-        self._step = canonical.step
-        self._refresh_validity()
-        self.on_change.emit(canonical)
+        self._apply_value(CenteredSweepEditor.canonicalize(self.get_value()))
 
     def _on_child_validity_changed(self, *_: object) -> None:
         self._refresh_validity()
 
     def _refresh_validity(self) -> None:
-        self._set_valid(self.center_field.is_valid())
+        value = self.get_value()
+        valid = self.center_field.is_valid() and all(
+            resolved_direct_number(part) is not None
+            for part in (value.span, value.expts, value.step)
+        )
+        if isinstance(value.center, DirectValue) and value.center.value is None:
+            valid = False
+        try:
+            self._validate_value(value)
+        except ValueError:
+            valid = False
+        self._set_valid(valid)
 
 
 class SectionField(CfgField):

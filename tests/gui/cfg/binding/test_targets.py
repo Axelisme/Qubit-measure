@@ -18,6 +18,7 @@ from zcu_tools.gui.cfg.binding import (
     LegacySettablePathError,
     SettablePathError,
     SettableTargetKind,
+    SweepField,
 )
 
 from ._fakes import BindingPorts
@@ -107,6 +108,25 @@ def test_sweep_edges_use_canonical_rules() -> None:
     assert draft.resolve_target("sweep.step").get_value() == pytest.approx(2.0)
     with pytest.raises(SettablePathError, match="integer"):
         draft.set_target("sweep.expts", 2.0)
+
+
+def test_sweep_target_observes_unfinished_text_and_typed_edit_recovers() -> None:
+    draft = _mixed_draft()
+    sweep = draft.root.fields["sweep"]
+    assert isinstance(sweep, SweepField)
+    sweep.set_text("expts", "1e")
+    invalid = draft.resolve_target("sweep.expts").get_value()
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == "1e" and invalid.value is None
+    before = draft.snapshot()
+    with pytest.raises(SettablePathError):
+        draft.set_target("sweep.expts", 2.5)
+    assert draft.snapshot().value == before.value
+    draft.set_target("sweep.expts", 5)
+    assert draft.resolve_target("sweep.expts").get_value() == 5
+    assert sweep.is_valid()
+    assert invalid.raw == "1e" and invalid.value is None
+    draft.close()
 
 
 def test_reference_bare_label_is_normalized_and_legacy_aliases_do_not_mutate() -> None:

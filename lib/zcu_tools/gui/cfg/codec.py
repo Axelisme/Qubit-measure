@@ -141,16 +141,16 @@ def _node_value_to_raw(
         return {
             "start": _sweep_edge_to_raw(value.start),
             "stop": _sweep_edge_to_raw(value.stop),
-            "expts": value.expts,
-            "step": value.step,
+            "expts": _range_input_to_raw(value.expts),
+            "step": _range_input_to_raw(value.step),
         }
     if isinstance(spec, CenteredSweepSpec):
         assert isinstance(value, CenteredSweepValue)
         return {
             "center": _sweep_edge_to_raw(value.center),
-            "span": value.span,
-            "expts": value.expts,
-            "step": value.step,
+            "span": _range_input_to_raw(value.span),
+            "expts": _range_input_to_raw(value.expts),
+            "step": _range_input_to_raw(value.step),
         }
     if isinstance(spec, CfgSectionSpec):
         assert isinstance(value, CfgSectionValue)
@@ -178,6 +178,18 @@ def _node_value_to_raw(
             ),
         }
     return _to_json_compatible(value)
+
+
+def _range_input_to_raw(value: int | float | DirectValue) -> object:
+    return _sweep_edge_to_raw(value) if isinstance(value, DirectValue) else value
+
+
+def _parse_range_input[T: (int, float)](raw: object, type_: type[T]) -> T | DirectValue:
+    if isinstance(raw, dict) and raw.get("__kind") == "direct":
+        return _decode_direct_wire(raw, ScalarSpec("Sweep input", type_))
+    if not isinstance(raw, (int, float, str)):
+        raise TypeError("Sweep input must be numeric or a direct carrier")
+    return type_(raw)
 
 
 def _sweep_edge_to_raw(value: float | ScalarValue) -> object:
@@ -229,22 +241,22 @@ def _node_value_from_raw(
         if isinstance(raw, dict):
             start = _parse_sweep_edge(raw["start"])
             stop = _parse_sweep_edge(raw["stop"])
-            expts = int(raw["expts"])
+            expts = _parse_range_input(raw["expts"], int)
             step_raw = raw.get("step")
             if step_raw is None:
                 raise RuntimeError("Sweep step is required in session payload")
-            step = float(step_raw)
+            step = _parse_range_input(step_raw, float)
             return SweepValue(start=start, stop=stop, expts=expts, step=step)
         raise RuntimeError("Sweep payload must be an object")
     if isinstance(spec, CenteredSweepSpec):
         if isinstance(raw, dict):
             center = _parse_sweep_edge(raw["center"])
-            span = float(raw["span"])
-            expts = int(raw["expts"])
+            span = _parse_range_input(raw["span"], float)
+            expts = _parse_range_input(raw["expts"], int)
             step_raw = raw.get("step")
             if step_raw is None:
                 raise RuntimeError("Centered sweep step is required in session payload")
-            step = float(step_raw)
+            step = _parse_range_input(step_raw, float)
             return CenteredSweepValue(
                 center=center,
                 span=span,

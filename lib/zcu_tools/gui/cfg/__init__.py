@@ -52,6 +52,7 @@ from .model import (
     SweepSpec,
     SweepValue,
     default_value_for_type,
+    resolved_direct_number,
 )
 from .reference_key import (
     is_custom_reference_key,
@@ -114,6 +115,7 @@ __all__ = [
     "read_value_path",
     "replace_value_path",
     "resolve_spec_path",
+    "resolved_direct_number",
     "schema_to_raw",
     "select_ref_value_spec",
     "validate_finished_cfg",

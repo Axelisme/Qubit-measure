@@ -1059,7 +1059,7 @@ def test_populate_sweep_field_round_trip(qapp, ctrl):
 
 
 def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
-    from qtpy.QtWidgets import QLabel, QSizePolicy
+    from qtpy.QtWidgets import QLabel, QLineEdit, QSizePolicy
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget
 
@@ -1081,13 +1081,14 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
 
     field = cast(CenteredSweepField, model.fields["f"])
     assert field.center_field.spec.editable is False
-    assert sweep_widget._center_widget.isEnabled() is False
-    for value_widget in (
-        sweep_widget._center_widget,
-        sweep_widget._span,
-        sweep_widget._expts,
-        sweep_widget._step,
-    ):
+    span_input = sweep_widget.findChild(QLineEdit, "span")
+    points_input = sweep_widget.findChild(QLineEdit, "expts")
+    assert span_input is not None
+    assert points_input is not None
+    center_input = sweep_widget.findChild(QLineEdit)
+    assert center_input is not None
+    assert not center_input.isEnabled()
+    for value_widget in sweep_widget.findChildren(QLineEdit):
         assert (
             value_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
         )
@@ -1106,23 +1107,26 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
     qapp.processEvents()
     assert abs(center_cell.width() - span_cell.width()) <= 1
 
-    sweep_widget._span.setValue(120.0)
-    sweep_widget._expts.setValue(121)
+    span_input.setText("120.0")
+    points_input.setText("121")
     out = w.read_values()
 
     sv = out.fields["f"]
     assert isinstance(sv, CenteredSweepValue)
     assert sv.center == pytest.approx(0.0)
-    assert sv.span == pytest.approx(120.0)
-    assert sv.expts == 121
+    assert sv.span == DirectValue(120.0, raw="120.0")
+    assert sv.expts == DirectValue(121, raw="121")
     assert sv.step == pytest.approx(1.0)
 
-    sweep_widget._span.setValue(0.0)
-    out = w.read_values()
-    sv = out.fields["f"]
+    span_input.setText("0.0")
+    sv = w.read_values().fields["f"]
     assert isinstance(sv, CenteredSweepValue)
-    assert sv.span == pytest.approx(120.0)
-    assert sweep_widget._span.value() == pytest.approx(120.0)
+    assert isinstance(sv.span, DirectValue)
+    assert sv.span.value is None
+    assert sv.span.raw == "0.0"
+    assert sv.span.error is not None
+    assert span_input.text() == "0.0"
+    assert not field.is_valid()
 
 
 def test_populate_sweep_field_step_preserved(qapp, ctrl):
@@ -1142,6 +1146,7 @@ def test_populate_sweep_field_step_preserved(qapp, ctrl):
 
 
 def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
@@ -1154,16 +1159,19 @@ def test_sweep_widget_step_change_recomputes_expts_and_stop(qapp, ctrl):
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
-    sweep_widget._step.setValue(0.2)
+    entry = sweep_widget.findChild(QLineEdit, "step")
+    assert entry is not None
+    entry.setText("0.2")
     out = w.read_values()
     sv = out.fields["f"]
     assert isinstance(sv, SweepValue)
     assert sv.expts == 6
     assert sv.stop == pytest.approx(1.0)
-    assert sv.step == pytest.approx(0.2)
+    assert sv.step == DirectValue(0.2, raw="0.2")
 
 
 def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import SweepWidget
 
@@ -1176,11 +1184,80 @@ def test_sweep_widget_non_step_change_recomputes_step(qapp, ctrl):
     sweep_widget = w.findChild(SweepWidget)
     assert sweep_widget is not None
 
-    sweep_widget._expts.setValue(5)
+    entry = sweep_widget.findChild(QLineEdit, "expts")
+    assert entry is not None
+    entry.setText("5")
     out = w.read_values()
     sv = out.fields["f"]
     assert isinstance(sv, SweepValue)
     assert sv.step == pytest.approx(0.25)
+
+
+@pytest.mark.parametrize(
+    ("centered", "part"),
+    [
+        (False, "expts"),
+        (False, "step"),
+        (True, "span"),
+        (True, "expts"),
+        (True, "step"),
+    ],
+)
+@pytest.mark.parametrize("text", ["", "1e"])
+def test_sweep_text_survives_form_recreation(qapp, ctrl, centered, part, text):
+    from qtpy.QtWidgets import QLineEdit
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    spec = CenteredSweepSpec() if centered else SweepSpec()
+    value = CenteredSweepValue(0.0, 1.0, 5) if centered else SweepValue(0.0, 1.0, 5)
+    form = CfgFormWidget()
+    root = _attach(form, _schema({"axis": spec}, {"axis": value}), ctrl)
+    entry = form.findChild(QLineEdit, part)
+    assert entry is not None
+    entry.setText(text)
+    snapshot = form.read_schema()
+    saved = getattr(snapshot.value.fields["axis"], part)
+    assert isinstance(saved, DirectValue)
+    assert saved.raw == text
+    assert saved.value is None
+    assert not root.is_valid()
+    form.detach()
+
+    restored = CfgFormWidget()
+    restored_root = _attach(restored, snapshot, ctrl)
+    restored_input = restored.findChild(QLineEdit, part)
+    assert restored_input is not None
+    assert restored_input.text() == text
+    assert not restored_root.is_valid()
+    restored_input.setText("5" if part == "expts" else "0.25")
+    assert restored_root.is_valid()
+    assert saved.raw == text and saved.value is None
+    restored.detach()
+    root.teardown()
+    restored_root.teardown()
+
+
+def test_sweep_step_shows_canonical_value_without_replacing_raw(qapp, ctrl):
+    from qtpy.QtWidgets import QLabel, QLineEdit
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    form = CfgFormWidget()
+    root = _attach(
+        form, _schema({"axis": SweepSpec()}, {"axis": SweepValue(0.0, 1.0, 5)}), ctrl
+    )
+    entry = form.findChild(QLineEdit, "step")
+    assert entry is not None
+    entry.setText("0.3")
+    value = form.read_values().fields["axis"]
+    assert isinstance(value, SweepValue)
+    assert value.expts == 4
+    assert isinstance(value.step, DirectValue)
+    assert value.step.raw == entry.text() == "0.3"
+    assert value.step.value == pytest.approx(1 / 3)
+    labels = [label.text() for label in form.findChildren(QLabel)]
+    assert f"step = {value.step.value}" in labels
+    form.detach()
+    root.teardown()
 
 
 def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):

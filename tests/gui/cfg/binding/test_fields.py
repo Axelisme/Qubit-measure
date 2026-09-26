@@ -476,6 +476,76 @@ def test_centered_sweep_snapshot_preserves_incomplete_center_and_recovers() -> N
     field.teardown()
 
 
+@pytest.mark.parametrize(
+    ("centered", "part", "bad", "good"),
+    [
+        (False, "expts", "1e", "005"),
+        (True, "expts", "0", "005"),
+        (False, "expts", "9" * 400, "005"),
+        (False, "step", "1e", "0.3"),
+        (True, "step", "-1", "0.3"),
+        (True, "span", "-1", "2.00"),
+        (True, "span", "0", "2.00"),
+    ],
+)
+def test_sweep_text_controls_keep_invalid_state_and_recover(centered, part, bad, good):
+    ports = BindingPorts()
+    field = (
+        CenteredSweepField(
+            CenteredSweepSpec(), ports.evaluate, CenteredSweepValue(2.0, 1.0, 5)
+        )
+        if centered
+        else SweepField(SweepSpec(), ports.evaluate, SweepValue(0.0, 1.0, 5))
+    )
+    field.set_text(part, bad)
+    invalid = field.get_value()
+    invalid_input = getattr(invalid, part)
+    assert isinstance(invalid_input, DirectValue)
+    assert invalid_input.raw == bad
+    assert invalid_input.value is None
+    assert invalid_input.error is not None
+    assert not field.is_valid()
+
+    field.set_text(part, good)
+    recovered = field.get_value()
+    recovered_input = getattr(recovered, part)
+    assert isinstance(recovered_input, DirectValue)
+    assert recovered_input.raw == good
+    assert recovered_input.error is None
+    assert field.is_valid()
+    assert getattr(invalid, part) == invalid_input
+    if part == "step":
+        assert recovered.expts == 4
+        assert recovered_input.value == pytest.approx(1.0 / 3.0)
+    field.teardown()
+
+
+@pytest.mark.parametrize("points", [0, 1.5, True])
+def test_typed_sweep_points_reject_invalid_values_without_mutation(points):
+    field = SweepField(SweepSpec(), BindingPorts().evaluate, SweepValue(0.0, 1.0, 5))
+    before = field.get_value()
+    with pytest.raises((TypeError, ValueError)):
+        field.update_expts(points)
+    assert field.get_value() == before
+    field.teardown()
+
+
+@pytest.mark.parametrize("text", ["nan", "inf", "-inf"])
+def test_nonfinite_sweep_edge_text_is_model_error_not_callback_failure(text):
+    field = SweepField(SweepSpec(), BindingPorts().evaluate, SweepValue(0.0, 1.0, 5))
+    field.start_field.set_text(text)
+    invalid = field.get_value().start
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == text
+    assert invalid.value is None
+    assert invalid.error is not None
+    assert not field.is_valid()
+    field.start_field.set_text("0.20")
+    assert field.is_valid()
+    assert field.get_value().step == pytest.approx(0.2)
+    field.teardown()
+
+
 def test_sweep_fields_keep_canonical_step_rules() -> None:
     ports = BindingPorts()
     sweep = SweepField(
