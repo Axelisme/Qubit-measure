@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEvent, QEventLoop, Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtGui import QFocusEvent, QKeyEvent  # type: ignore[attr-defined]
+from qtpy.QtCore import QEventLoop, QPoint, Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtTest import QTest  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QLabel,
@@ -100,6 +100,16 @@ def _pointer(
     if exact:
         event.xdata = x
     canvas.callbacks.process(name, event)
+
+
+def _qt_click(canvas: FigureCanvasQTAgg, x: float, y: float = 4.5) -> None:
+    px, py = canvas.figure.axes[0].transData.transform((x, y))
+    # PyQt6 stubs model QTest's C++ namespace functions as instance methods.
+    QTest.mouseClick(  # pyright: ignore[reportCallIssue]
+        canvas,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(int(px), canvas.height() - int(py)),
+    )
 
 
 def test_click_follow_and_click_place_use_latest_committed_state(qapp):
@@ -203,21 +213,24 @@ def test_equal_line_second_click_discards_preview_without_a_commit(qapp):
 def test_preview_cancels_on_escape_hide_and_finish_uses_committed_values(qapp):
     widget, _plugin, session, _env, completed, _cancel, canvas = _frontend(qapp)
     start = session.snapshot()
-    _pointer(canvas, "button_press_event", start.flux_half)
-    _pointer(canvas, "button_release_event", start.flux_half)
+    updates: list[object] = []
+    session.subscribe(lambda: updates.append(session.snapshot()))
+    _qt_click(canvas, start.flux_half)
+    assert qapp.focusWidget() is canvas
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.5)
-    widget.keyPressEvent(
-        QKeyEvent(
-            QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier
-        )
-    )
+    assert widget.preview_active
+    QTest.keyClick(canvas, Qt.Key.Key_Escape)  # pyright: ignore[reportCallIssue]
+    qapp.processEvents()
     assert widget.preview_active is False
     assert session.snapshot() == start
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.7)
     assert widget.preview_active is False
-    _pointer(canvas, "button_press_event", start.flux_half)
-    _pointer(canvas, "button_release_event", start.flux_half)
+    _qt_click(canvas, start.flux_half + 0.7)
+    assert session.snapshot() == start
+    assert updates == []
+    _qt_click(canvas, start.flux_half)
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.4)
+    assert widget.preview_active
     widget.hide()
     assert widget.preview_active is False
     assert session.snapshot() == start
@@ -260,22 +273,31 @@ def test_tab_switch_and_focus_loss_cancel_preview_without_canceling_analysis(qap
     canvas.draw()
     start = session.snapshot()
 
-    _pointer(canvas, "button_press_event", start.flux_half)
-    _pointer(canvas, "button_release_event", start.flux_half)
+    updates: list[object] = []
+    session.subscribe(lambda: updates.append(session.snapshot()))
+    _qt_click(canvas, start.flux_half)
+    assert qapp.focusWidget() is canvas
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.4)
     assert widget.preview_active
-    qapp.sendEvent(widget, QFocusEvent(QEvent.Type.FocusOut))
+    control = _button(widget, "Swap Lines")
+    control.setFocus()
+    qapp.processEvents()
+    assert qapp.focusWidget() is control
     assert not widget.preview_active
     assert session.snapshot() == start
+    _qt_click(canvas, start.flux_half + 0.4)
+    assert session.snapshot() == start
+    assert updates == []
 
-    _pointer(canvas, "button_press_event", start.flux_half)
-    _pointer(canvas, "button_release_event", start.flux_half)
+    _qt_click(canvas, start.flux_half)
     _pointer(canvas, "motion_notify_event", start.flux_half + 0.4)
+    assert widget.preview_active
     stack.setCurrentWidget(other)
     qapp.processEvents()
     assert not widget.preview_active
     assert session.snapshot() == start
     assert cancelled == []
+    assert updates == []
     widget.teardown()
     stack.deleteLater()
 

@@ -9,8 +9,8 @@ from typing import Any, cast
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QFocusEvent, QHideEvent, QKeyEvent  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, QObject, Qt  # type: ignore[attr-defined]
+from qtpy.QtGui import QHideEvent, QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QHBoxLayout,
@@ -52,6 +52,7 @@ class FluxPickFrontend(InteractiveFrontend):
         self._request_cancel = request_cancel
         self._figure = Figure(figsize=(8, 5))
         self._canvas = FigureCanvasQTAgg(self._figure)
+        self._canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         state = session.snapshot()
         inputs = plugin.inputs
         self._picker = TwoLinePicker(
@@ -92,6 +93,7 @@ class FluxPickFrontend(InteractiveFrontend):
         root = QHBoxLayout(self)
         root.addWidget(self._canvas, stretch=1)
         root.addWidget(controls)
+        self._canvas.installEventFilter(self)
         self._canvas.mpl_connect("button_press_event", self._on_press)
         self._canvas.mpl_connect("motion_notify_event", self._on_move)
         self._unsubscribe = session.subscribe(self._on_committed)
@@ -134,6 +136,8 @@ class FluxPickFrontend(InteractiveFrontend):
         if role is None:
             if self._picker.is_main_axes(event.inaxes):
                 self._picker.on_press(event.xdata)
+                if self._picker.selected_role is not None:
+                    self._canvas.setFocus(Qt.FocusReason.MouseFocusReason)
             return
         x = event.xdata
         if (
@@ -217,6 +221,7 @@ class FluxPickFrontend(InteractiveFrontend):
         if self._retired:
             return
         self._retired = True
+        self._canvas.removeEventFilter(self)
         self._unsubscribe()
         self._unsubscribe_alignment()
         self._picker.show_state(self._committed)
@@ -229,16 +234,16 @@ class FluxPickFrontend(InteractiveFrontend):
         ):
             widget.setEnabled(False)
 
-    def keyPressEvent(self, a0: QKeyEvent | None) -> None:
-        if a0 is not None and a0.key() == Qt.Key.Key_Escape:
-            self.cancel_preview()
-            a0.accept()
-        else:
-            super().keyPressEvent(a0)
-
-    def focusOutEvent(self, a0: QFocusEvent | None) -> None:
-        self.cancel_preview()
-        super().focusOutEvent(a0)
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is self._canvas and a1 is not None:
+            if a1.type() == QEvent.Type.FocusOut:
+                self.cancel_preview()
+            elif a1.type() == QEvent.Type.KeyPress:
+                key_event = cast(QKeyEvent, a1)
+                if key_event.key() == Qt.Key.Key_Escape:
+                    self.cancel_preview()
+                    return True
+        return super().eventFilter(a0, a1)
 
     def hideEvent(self, a0: QHideEvent | None) -> None:
         self.cancel_preview()
