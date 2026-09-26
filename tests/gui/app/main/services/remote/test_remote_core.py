@@ -16,7 +16,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from threading import Thread
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -38,13 +37,16 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import WaveformCfgFactory
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
+from ._helpers import call_mcp_with_qt as _call_mcp_with_qt
+from ._helpers import mcp_client as _mcp_client
 
 # Poll real socket workers while delivering owner-thread Qt events.
 pytestmark = pytest.mark.uses_wall_clock
@@ -430,32 +432,6 @@ def test_token_gated_when_set(qapp):
         f.stop()
 
 
-def _call_mcp_with_qt(
-    tools: ToolTable, name: str, arguments: dict[str, Any]
-) -> dict[str, Any]:
-    result: list[dict[str, Any]] = []
-    errors: list[Exception] = []
-
-    def invoke() -> None:
-        try:
-            result.append(tools[name]["handler"](arguments))
-        except Exception as exc:  # noqa: BLE001 - propagate worker failures to test thread
-            errors.append(exc)
-
-    worker = Thread(target=invoke, daemon=True)
-    worker.start()
-    deadline = time.monotonic() + 5
-    while worker.is_alive() and time.monotonic() < deadline:
-        QCoreApplication.processEvents()
-        time.sleep(0.005)
-    worker.join(timeout=0)
-    assert not worker.is_alive(), "MCP tool did not receive a GUI reply"
-    if errors:
-        raise errors[0]
-    assert len(result) == 1
-    return result[0]
-
-
 def test_measure_connect_authenticates_and_reconnects_to_token_gated_gui(
     qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -528,36 +504,6 @@ def _prepare_guarded_context(fx: _Fixture, ml: ModuleLibrary | None = None) -> N
     )
     fx.state.version.bump("context")
     fx.state.version.bump("soc")
-
-
-def _mcp_client(
-    port: int, tmp_path: Path
-) -> tuple[McpBridge, Callable[[str, dict[str, Any]], dict[str, Any]]]:
-    config = MCPBridgeConfig(
-        tool_prefix="",
-        server_display_name="measure-test",
-        server_instructions="",
-        app_name="gui",
-        default_port=port,
-        mcp_version=82,
-        wire_version=WIRE_VERSION,
-        pid_file=tmp_path / "unused.pid",
-        log_file=tmp_path / "unused.log",
-        run_script_name="run_measure_gui.py",
-    )
-
-    def resolver(config: MCPBridgeConfig, requested: int | None) -> int:
-        return config.default_port if requested is None else requested
-
-    session = MeasureMcpSession(
-        config, resolve_connect_port=resolver, port_is_open=lambda _: True
-    )
-    bridge = McpBridge(config)
-    session.attach_bridge(bridge)
-    tools = build_measure_tools(
-        MeasureToolContext(config, session, resolve_connect_port=resolver)
-    )
-    return bridge, partial(_call_mcp_with_qt, tools)
 
 
 def _await_completed_run(

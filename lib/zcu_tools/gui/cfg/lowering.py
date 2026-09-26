@@ -21,6 +21,7 @@ from .model import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
+    require_finite_scalar,
 )
 from .reference_key import parse_custom_reference_key
 
@@ -126,11 +127,15 @@ def _coerce_eval_result(
     value: int | float | complex, type_: type
 ) -> int | float | complex:
     if type_ is complex:
-        return complex(value)
+        result = complex(value)
+        require_finite_scalar(result)
+        return result
     if isinstance(value, complex):
         raise RuntimeError("Complex expression result cannot target a real field")
     if type_ is float:
-        return float(value)
+        result = float(value)
+        require_finite_scalar(result)
+        return result
     if type_ is int:
         if not float(value).is_integer():
             raise RuntimeError(f"Expression result {value!r} is not an integer")
@@ -602,6 +607,15 @@ def _validate_scalar_node(spec: ScalarSpec, node_value: object, full_path: str) 
     _validate_scalar(spec, node_value, full_path)
 
 
+def _ensure_scalar_finite(value: object, spec: ScalarSpec, path: str) -> None:
+    if not isinstance(value, (float, complex)):
+        return
+    try:
+        require_finite_scalar(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Config field '{path}' ({spec.label}): {exc}") from exc
+
+
 def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) -> None:
     error = (
         node_value.error
@@ -640,6 +654,7 @@ def _validate_scalar(spec: ScalarSpec, node_value: DirectValue, full_path: str) 
             f"Config field '{full_path}' value {value!r} is not compatible with "
             f"spec type {spec.type.__name__}"
         )
+    _ensure_scalar_finite(value, spec, full_path)
     if spec.choices is not None and value not in spec.choices:
         raise RuntimeError(
             f"Config field '{full_path}' value {value!r} is not in allowed choices "

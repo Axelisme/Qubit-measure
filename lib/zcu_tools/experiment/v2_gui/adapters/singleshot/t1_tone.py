@@ -83,10 +83,10 @@ class SsT1ToneAdapter(
             "Runs on real hardware."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; run "
-            "fast-fails if any is missing. "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
+            "calibration fails before hardware. "
             "Optionally reads 'confusion_matrix' to readout-correct populations "
             "at analyze time; 't1_with_tone' or 't1' to seed the sweep stop "
             "(default 5*t1, fallback 100 us); 'q_f' / 'qub_ch' for the pi "
@@ -103,7 +103,8 @@ class SsT1ToneAdapter(
             "MetaDict 't1_with_tone' (us)."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. Use 'uniform=False' (default) to "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
+            "Use 'uniform=False' (default) to "
             "cluster points along the expected exponential decay while preserving "
             "the configured window and point count; use 'uniform=True' for a "
             "linear sweep. The probe-tone gain and frequency are set inside the "

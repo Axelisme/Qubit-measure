@@ -71,10 +71,10 @@ class SsAmpRabiAdapter(
             "population curves during live view and analysis. Runs on real hardware."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; run "
-            "fast-fails if any is missing. Those values support live classification; "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
+            "calibration fails before hardware. These values support live classification; "
             "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_gain' "
             "to seed the sweep stop (4*pi_gain when calibrated; fallback sweep "
             "0.03–0.2 us); "
@@ -92,7 +92,8 @@ class SsAmpRabiAdapter(
         recommended=(
             "Set Initial State to the predominant state before the swept drive pulse "
             "(at zero length/gain), even when the first sweep point is nonzero. "
-            "Run after 'singleshot/ge'. A sweep spanning a few pi gains "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
+            "A sweep spanning a few pi gains "
             "captures a full oscillation. Review the measured population curves "
             "and overlaid joint-fit curves before applying all four calibration "
             "proposals."

@@ -55,10 +55,10 @@ class SsT1Adapter(
             "Runs on real hardware."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; run "
-            "fast-fails if any is missing. "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
+            "calibration fails before hardware. "
             "Optionally reads 'confusion_matrix' to readout-correct populations "
             "at analyze time; 't1' to seed the sweep stop (default 5*t1, "
             "fallback 100 us); 'q_f' / 'qub_ch' for the pi pulse; 'r_f' / "
@@ -74,7 +74,8 @@ class SsT1Adapter(
             "MetaDict."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. A delay sweep reaching ~5*T1 lets the "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
+            "A delay sweep reaching ~5*T1 lets the "
             "decay flatten; with no prior 't1', the sweep spans 0–100 us. "
             "Set 'uniform=True' to sweep linearly; leave False to cluster more "
             "points along the expected exponential decay while preserving the "

@@ -546,9 +546,10 @@ class ContextService:
     def rename_ml_module(self, old: str, new: str) -> None:
         """Rename an ml module by re-registering under ``new`` and deleting ``old``.
 
-        References (cfg ``chosen_key == old``) are NOT migrated — they degrade
-        to inline Custom via the ModuleRefLiveField self-heal on the single
-        ML_CHANGED below (the value is preserved). New-name clash fails fast.
+        LINKED cfg references keep ``old`` and become invalid while it is missing;
+        restoring the key relinks them. MODIFIED references keep their inline
+        Custom values. The single ML_CHANGED below refreshes drafts. A clash
+        at the new name fails fast.
         """
         if not self.has_context():
             raise FailedPreconditionError("No experiment context.")

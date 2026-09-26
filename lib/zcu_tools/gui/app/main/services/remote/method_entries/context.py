@@ -156,9 +156,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_ml_del_module",
         MethodSpec(
             5.0,
-            "Delete one ModuleLibrary module. Echoes {deleted: name}. cfg refs pointing "
-            "at this entry degrade to inline Custom (the value is kept inline, not lost); "
-            "to re-link, edit them.",
+            "Delete one ModuleLibrary module. Echoes {deleted: name}. LINKED cfg refs "
+            "keep the missing key and become invalid until it returns or is edited; "
+            "MODIFIED refs retain their inline Custom value.",
             (_str("name", "Module name"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
@@ -168,9 +168,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_ml_del_waveform",
         MethodSpec(
             5.0,
-            "Delete one ModuleLibrary waveform. Echoes {deleted: name}. cfg refs pointing "
-            "at this entry degrade to inline Custom (the value is kept inline, not lost); "
-            "to re-link, edit them.",
+            "Delete one ModuleLibrary waveform. Echoes {deleted: name}. LINKED cfg refs "
+            "keep the missing key and become invalid until it returns or is edited; "
+            "MODIFIED refs retain their inline Custom value.",
             (_str("name", "Waveform name"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
@@ -181,8 +181,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Rename a ModuleLibrary module old→new (clash fails fast). Echoes "
-            "{renamed: new}. cfg refs to 'old' degrade to inline Custom (the value is "
-            "kept inline, not lost); to re-link, edit them.",
+            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
+            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
             (_str("old", "Current module name"), _str("new", "New module name")),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
@@ -193,8 +193,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Rename a ModuleLibrary waveform old→new (clash fails fast). Echoes "
-            "{renamed: new}. cfg refs to 'old' degrade to inline Custom (the value is "
-            "kept inline, not lost); to re-link, edit them.",
+            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
+            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
             (_str("old", "Current waveform name"), _str("new", "New waveform name")),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),

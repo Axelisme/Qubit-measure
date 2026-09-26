@@ -64,11 +64,11 @@ class MistPowerFreqAdapter(
             "per-point fit)."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; the run "
-            "classifies each shot against them and fast-fails if any is "
-            "missing. Optionally reads 'confusion_matrix' (readout correction), "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. The run classifies each "
+            "shot using these values; missing or invalid cfg calibration fails "
+            "before hardware. Optionally reads 'confusion_matrix' (readout correction), "
             "'ac_stark_coeff' and 'log_scale' at analyze time; 't1' to set the "
             "relax delay; 'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the "
             "probe drive and frequency sweep."
@@ -82,7 +82,7 @@ class MistPowerFreqAdapter(
             "No writeback — the population landscapes are read off the plot by eye."
         ),
         recommended=(
-            "Run after 'singleshot/ge' has calibrated the discrimination. Sweep "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep "
             "the probe gain across the MIST onset and the frequency around the "
             "qubit/resonator line of interest."
         ),

@@ -47,6 +47,44 @@ def _library(
     return ml
 
 
+@pytest.mark.parametrize(
+    ("type_", "value"),
+    [
+        (float, DirectValue(float("inf"))),
+        (float, EvalValue("md.value", resolved=float("nan"))),
+        (complex, DirectValue(complex(1, float("nan")))),
+        (complex, EvalValue("md.value", resolved=complex(float("inf"), 2))),
+    ],
+)
+def test_frozen_lowering_rejects_nonfinite_scalar_before_execution(
+    type_: type, value: DirectValue | EvalValue
+) -> None:
+    schema = _schema({"value": ScalarSpec("Value", type_)}, {"value": value})
+    with pytest.raises(RuntimeError, match="finite"):
+        lower_resolved_cfg(
+            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+        )
+
+
+@pytest.mark.parametrize(
+    ("type_", "nonfinite"),
+    [(float, float("inf")), (complex, complex(1, float("nan")))],
+)
+def test_live_lowering_rejects_nonfinite_expression(
+    type_: type, nonfinite: float | complex
+) -> None:
+    schema = _schema(
+        {"value": ScalarSpec("Value", type_)}, {"value": EvalValue("md.value")}
+    )
+    with pytest.raises(RuntimeError, match="finite"):
+        lower_finished_cfg(
+            schema,
+            resolve_expression=lambda _: nonfinite,
+            resolve_reference=None,
+            make_range=lambda start, stop, *, expts: (start, stop, expts),
+        )
+
+
 def test_resolved_lowering_uses_per_node_cached_shapes_and_keeps_sources() -> None:
     from copy import deepcopy
 

@@ -24,6 +24,7 @@ from ..model import (
     ScalarValue,
     SweepSpec,
     SweepValue,
+    require_finite_scalar,
     resolved_direct_number,
 )
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
@@ -114,6 +115,8 @@ def _parse_direct_text(spec: ScalarSpec, text: str) -> DirectValue:
         return DirectValue(None, raw=text)
     try:
         parsed = spec.type(text.strip() if spec.optional else text)
+        if isinstance(parsed, (float, complex)):
+            require_finite_scalar(parsed)
     except ValueError as exc:
         return DirectValue(None, raw=text, error=str(exc))
     return DirectValue(parsed, raw=text)
@@ -182,6 +185,8 @@ class ScalarField(CfgField):
                 f"ScalarField {self.spec.label!r} expects "
                 f"{self.spec.type.__name__}, got {type(raw).__name__}"
             )
+        if isinstance(raw, (float, complex)):
+            require_finite_scalar(raw)
 
     def available_options(self) -> tuple[object, ...] | None:
         self._require_open()
@@ -271,11 +276,15 @@ def _coerce_eval_result(
     if isinstance(value, bool):
         raise RuntimeError("Expression evaluator returned bool instead of a number")
     if type_ is complex:
-        return complex(value)
+        result = complex(value)
+        require_finite_scalar(result)
+        return result
     if isinstance(value, complex):
         raise RuntimeError("Complex expression result cannot target a real field")
     if type_ is float:
-        return float(value)
+        result = float(value)
+        require_finite_scalar(result)
+        return result
     if type_ is int:
         if not float(value).is_integer():
             raise RuntimeError(f"Expression result {value!r} is not an integer")

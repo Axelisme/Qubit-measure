@@ -162,10 +162,11 @@ class SsAcStarkAdapter(
             "hardware."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict — run 'singleshot/ge' first and apply its writeback so "
-            "'g_center' / 'e_center' / 'ge_radius' are present; the run "
-            "classifies each shot against them and fast-fails if any is missing. "
+            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
+            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "defaults with 'singleshot/ge' writeback. The run classifies each "
+            "shot using these values; missing or invalid cfg calibration fails "
+            "before hardware. "
             "ANALYSIS additionally REQUIRES 'chi' (dispersive shift, MHz) and "
             "'rf_w' (resonator linewidth kappa, MHz) — both feed the AC-Stark "
             "coefficient fit and analyze fast-fails if either is missing (run "
@@ -188,7 +189,8 @@ class SsAcStarkAdapter(
             "read it to rescale their x-axis to photon number."
         ),
         recommended=(
-            "Run after 'singleshot/ge' and after the dispersive-shift "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'; run "
+            "after the dispersive-shift "
             "experiment has set 'chi' / 'rf_w'. Sweep the Stark gain across the "
             "onset and the probe frequency around the qubit line."
         ),

@@ -11,6 +11,11 @@ def default_value_for_type(type_: type) -> object:
     return defaults.get(type_, None)
 
 
+def require_finite_scalar(value: float | complex) -> None:
+    if not (math.isfinite(value.real) and math.isfinite(value.imag)):
+        raise ValueError("Scalar value must be finite")
+
+
 # ---------------------------------------------------------------------------
 # Spec tree — static, defined by Adapter, never mutated
 # ---------------------------------------------------------------------------

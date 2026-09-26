@@ -47,6 +47,66 @@ def test_complex_scalar_expression_direct_input_and_invalid_recovery() -> None:
     assert field.is_valid()
 
 
+@pytest.mark.parametrize(
+    ("type_", "text", "valid"),
+    [
+        (float, "nan", 2.5),
+        (float, "-inf", 2.5),
+        (complex, "(nan+2j)", 1 + 2j),
+        (complex, "(1+infj)", 1 + 2j),
+    ],
+)
+def test_scalar_nonfinite_direct_input_preserves_invalid_raw_and_recovers(
+    type_: type, text: str, valid: float | complex
+) -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Value", type_), ports.evaluate, ports.provide, DirectValue(valid)
+    )
+    field.set_text(text)
+    invalid = field.get_value()
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == text
+    assert invalid.value is None
+    assert invalid.error is not None and "finite" in invalid.error
+    assert not field.is_valid()
+    field.set_text(str(valid))
+    assert field.is_valid()
+    assert field.get_value() == DirectValue(valid, raw=str(valid))
+
+
+@pytest.mark.parametrize(
+    ("type_", "nonfinite", "valid"),
+    [
+        (float, float("nan"), 2.5),
+        (float, float("inf"), 2.5),
+        (complex, complex(float("nan"), 1), 1 + 2j),
+        (complex, complex(1, float("inf")), 1 + 2j),
+    ],
+)
+def test_scalar_nonfinite_expression_is_invalid_then_refreshes(
+    type_: type, nonfinite: float | complex, valid: float | complex
+) -> None:
+    ports = BindingPorts()
+    current = [nonfinite]
+    field = ScalarField(
+        ScalarSpec("Value", type_),
+        lambda expression: current[0],
+        ports.provide,
+        EvalValue("x"),
+    )
+    invalid = field.get_value()
+    assert isinstance(invalid, EvalValue)
+    assert invalid.expr == "x"
+    assert invalid.resolved is None
+    assert invalid.error is not None and "finite" in invalid.error
+    assert not field.is_valid()
+    current[0] = valid
+    field.refresh_expressions()
+    assert field.is_valid()
+    assert field.get_value() == EvalValue("x", resolved=valid)
+
+
 def test_complex_expression_cannot_enter_real_field() -> None:
     ports = BindingPorts()
     field = ScalarField(
@@ -293,6 +353,25 @@ def test_scalar_field_rejects_wrong_runtime_type_before_mutation(
         field.set_value(value)
 
     assert field.get_value() == DirectValue(7)
+    changed.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("type_", "nonfinite", "valid"),
+    [(float, float("nan"), 2.0), (complex, complex(0, float("inf")), 1 + 2j)],
+)
+def test_nonfinite_typed_scalar_fails_before_mutation(
+    type_: type, nonfinite: float | complex, valid: float | complex
+) -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Value", type_), ports.evaluate, ports.provide, DirectValue(valid)
+    )
+    changed = MagicMock()
+    field.on_change.connect(changed)
+    with pytest.raises(ValueError, match="finite"):
+        field.set_value(DirectValue(nonfinite))
+    assert field.get_value() == DirectValue(valid)
     changed.assert_not_called()
 
 

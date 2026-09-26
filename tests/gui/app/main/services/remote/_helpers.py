@@ -11,6 +11,9 @@ import json
 import socket
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -22,12 +25,17 @@ from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.main.services.remote.wire_version import WIRE_VERSION
 from zcu_tools.gui.app.main.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import remote_error_from_expected
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
+from zcu_tools.mcp.measure.assembly import build_measure_tools
+from zcu_tools.mcp.measure.session import MeasureMcpSession
+from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 def make_ctx() -> ExpContext:
@@ -319,9 +327,58 @@ def call(
     return recv_response(sock, rid, timeout_s)
 
 
+def call_mcp_with_qt(
+    tools: ToolTable, name: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    # A Future propagates the worker's exception when the Qt-pumping owner reads it.
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        worker = pool.submit(tools[name]["handler"], arguments)
+        deadline = time.monotonic() + 5
+        while not worker.done() and time.monotonic() < deadline:
+            QCoreApplication.processEvents()
+            time.sleep(0.005)
+        assert worker.done(), "MCP tool did not receive a GUI reply"
+        return worker.result()
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def mcp_client(
+    port: int, tmp_path: Path
+) -> tuple[McpBridge, Callable[[str, dict[str, Any]], dict[str, Any]]]:
+    config = MCPBridgeConfig(
+        tool_prefix="",
+        server_display_name="measure-test",
+        server_instructions="",
+        app_name="gui",
+        default_port=port,
+        mcp_version=82,
+        wire_version=WIRE_VERSION,
+        pid_file=tmp_path / "unused.pid",
+        log_file=tmp_path / "unused.log",
+        run_script_name="run_measure_gui.py",
+    )
+
+    def resolver(config: MCPBridgeConfig, requested: int | None) -> int:
+        return config.default_port if requested is None else requested
+
+    session = MeasureMcpSession(
+        config, resolve_connect_port=resolver, port_is_open=lambda _: True
+    )
+    bridge = McpBridge(config)
+    session.attach_bridge(bridge)
+    tools = build_measure_tools(
+        MeasureToolContext(config, session, resolve_connect_port=resolver)
+    )
+    return bridge, partial(call_mcp_with_qt, tools)
+
+
 __all__ = [
     "Fixture",
     "call",
+    "call_mcp_with_qt",
+    "mcp_client",
     "make_ctx",
     "make_view",
     "open_client",
