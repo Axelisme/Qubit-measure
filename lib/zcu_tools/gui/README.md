@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-26，完整 cached cfg observation
+**Last updated:** 2026-09-26，resolved-only lowering
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -39,6 +39,11 @@ default/inheritance helpers、raw persistence codec、domain-free raw spec walk�
 validation/lowering。materialization walker把missing scalar/section、reference shape與Sweep carrier交給
 窄policy，不理解program vocabulary；lowering只依賴expression/reference/range三個callable ports，維持
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
+`lower_resolved_cfg(schema, make_range=...)` 是另一个明確的 snapshot-only 入口，不接
+expression/reference resolver。它隔離複製後，以已解析 scalar 與各 reference 自身的 cached
+shape 重用既有 static validation/lowering；error 或尚未 resolved 一律拒絕，不解析 raw，
+也不重新推導輸入 controls。原 schema 與回傳 mutable data 互相隔離。
+`lower_finished_cfg` 的 live validation/relink 政策不變；呼叫者自行選擇契約。
 raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag validation不由app重複實作。
 Numeric 與 complex ScalarSpec 的 direct text 由 ScalarField 解析，保存 raw 與 error；
 Widget 只傳入文字並顯示 model 狀態，invalid text 不沿用舊有效值。

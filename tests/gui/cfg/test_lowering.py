@@ -1,4 +1,4 @@
-"""Characterization tests for finished-cfg lowering behavior."""
+"""Live-context and resolved-only finished-cfg lowering contracts."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
     lower_finished_cfg,
+    lower_resolved_cfg,
 )
 from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import SweepCfg
@@ -44,6 +45,179 @@ def _library(
     ml.modules = {} if modules is None else modules
     ml.waveforms = {} if waveforms is None else waveforms
     return ml
+
+
+def test_resolved_lowering_uses_per_node_cached_shapes_and_keeps_sources() -> None:
+    from copy import deepcopy
+
+    first = CfgSectionSpec(label="First", fields={"gain": ScalarSpec("Gain", float)})
+    second = CfgSectionSpec(label="Second", fields={"count": ScalarSpec("Count", int)})
+    schema = _schema(
+        {
+            "first": ReferenceSpec("module", [first, second]),
+            "second": ReferenceSpec("module", [first, second]),
+            "center": ScalarSpec("Center", complex),
+            "optional": ScalarSpec("Optional", float, optional=True),
+        },
+        {
+            "first": ReferenceValue(
+                "same_library_key",
+                CfgSectionValue({"gain": EvalValue("gain", resolved=0.25)}),
+                resolved_label="First",
+            ),
+            "second": ReferenceValue(
+                "same_library_key",
+                CfgSectionValue({"count": DirectValue(3)}),
+                resolved_label="Second",
+            ),
+            "center": EvalValue("center", resolved=1 + 2j),
+            "optional": DirectValue(None),
+        },
+    )
+    previous = deepcopy(schema)
+    result = lower_resolved_cfg(
+        schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+    )
+    assert result == {"first": {"gain": 0.25}, "second": {"count": 3}, "center": 1 + 2j}
+    assert schema == previous
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        EvalValue("source"),
+        EvalValue("source", resolved=2.0, error="lookup failed"),
+        EvalValue("source", resolved=2.0, validation_error="choice missing"),
+        DirectValue(None, raw="1e", error="invalid input"),
+        DirectValue(2.0, validation_error="choice missing"),
+    ],
+)
+def test_resolved_lowering_rejects_unresolved_or_invalid_scalar(value) -> None:
+    schema = _schema(
+        {"frequency": ScalarSpec("Frequency", float)}, {"frequency": value}
+    )
+    with pytest.raises(RuntimeError, match="frequency"):
+        lower_resolved_cfg(
+            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+        )
+
+
+@pytest.mark.parametrize(
+    ("label", "error"),
+    [(None, None), ("Missing", None), ("Shape", "catalog entry missing")],
+)
+def test_resolved_lowering_requires_valid_cached_reference_shape(label, error) -> None:
+    shape = CfgSectionSpec(label="Shape", fields={"gain": ScalarSpec("Gain", float)})
+    schema = _schema(
+        {"drive": ReferenceSpec("module", [shape])},
+        {
+            "drive": ReferenceValue(
+                "<Custom:Shape>",
+                CfgSectionValue({"gain": DirectValue(0.25)}),
+                resolved_label=label,
+                error=error,
+            )
+        },
+    )
+    with pytest.raises(RuntimeError):
+        lower_resolved_cfg(
+            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+        )
+
+
+@pytest.mark.parametrize(
+    ("spec", "value", "message"),
+    [
+        (ScalarSpec("Count", int), EvalValue("count", resolved=2.5), "not compatible"),
+        (
+            ScalarSpec("Count", int, choices=[1, 2]),
+            EvalValue("count", resolved=3),
+            "allowed choices",
+        ),
+        (
+            ScalarSpec("Optional", float, optional=True),
+            EvalValue("optional"),
+            "unresolved",
+        ),
+    ],
+)
+def test_resolved_lowering_keeps_static_type_and_choice_validation(
+    spec, value, message
+) -> None:
+    schema = _schema({"value": spec}, {"value": value})
+    with pytest.raises(RuntimeError, match=message):
+        lower_resolved_cfg(
+            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+        )
+
+
+def test_resolved_lowering_ranges_keep_cached_edges_and_optional_ref() -> None:
+    from copy import deepcopy
+
+    schema = _schema(
+        {
+            "sweep": SweepSpec(),
+            "centered": CenteredSweepSpec(),
+            "disabled": ReferenceSpec(
+                "module", [CfgSectionSpec(label="Shape")], optional=True
+            ),
+        },
+        {
+            "sweep": SweepValue(
+                EvalValue("start", resolved=0.0),
+                EvalValue("stop", resolved=1.0),
+                4,
+                DirectValue(1 / 3, raw="0.3"),
+                auto_norm=False,
+            ),
+            "centered": CenteredSweepValue(EvalValue("center", resolved=5.0), 4.0, 3),
+            "disabled": None,
+        },
+    )
+    previous = deepcopy(schema)
+    result = lower_resolved_cfg(
+        schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+    )
+    assert result == {"sweep": (0.0, 1.0, 4), "centered": (3.0, 7.0, 3)}
+    assert schema == previous
+
+
+def test_resolved_lowering_rejects_incomplete_step_and_locked_center_mismatch() -> None:
+    incomplete = _schema(
+        {"sweep": SweepSpec()},
+        {
+            "sweep": SweepValue(
+                0.0,
+                1.0,
+                4,
+                DirectValue(None, raw="1e", error="invalid step"),
+                auto_norm=False,
+            )
+        },
+    )
+    locked = _schema(
+        {"sweep": CenteredSweepSpec(locked_center=0.0)},
+        {"sweep": CenteredSweepValue(EvalValue("center", resolved=2.0), 4.0, 3)},
+    )
+    for schema, message in ((incomplete, "step"), (locked, "locked")):
+        with pytest.raises(RuntimeError, match=message):
+            lower_resolved_cfg(
+                schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+            )
+
+
+def test_resolved_lowering_detaches_mutable_literal_results() -> None:
+    literal = {"values": [1, 2]}
+    schema = _schema({"fixed": LiteralSpec(literal)}, {"fixed": DirectValue(literal)})
+    result = lower_resolved_cfg(
+        schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
+    )
+    literal["values"].append(3)
+    assert result == {"fixed": {"values": [1, 2]}}
+    fixed = result["fixed"]
+    assert isinstance(fixed, dict)
+    fixed["values"].append(4)
+    assert literal == {"values": [1, 2, 3]}
 
 
 def test_lowers_scalar_literal_optional_section_and_device() -> None:

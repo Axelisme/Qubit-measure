@@ -59,6 +59,7 @@ from .reference_key import (
     make_custom_reference_key,
     parse_custom_reference_key,
 )
+from .resolved import lower_resolved_cfg
 from .schema_assembler import (
     USE_SPEC_DEFAULT,
     CfgSchemaAssembler,
@@ -107,6 +108,7 @@ __all__ = [
     "inherit_from",
     "is_custom_reference_key",
     "lower_finished_cfg",
+    "lower_resolved_cfg",
     "make_default_value",
     "materialize_spec_value",
     "make_custom_reference_key",
