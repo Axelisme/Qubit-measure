@@ -193,6 +193,11 @@ def _resolve_sweep_edge(
     path: str,
     label: str,
 ) -> float:
+    if isinstance(value, DirectValue):
+        _validate_scalar(ScalarSpec(label, float), value, path)
+        if value.value is None:
+            raise RuntimeError(f"Config field '{path}' ({label}) is incomplete")
+        return float(cast(float, value.value))
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, EvalValue):
@@ -225,6 +230,14 @@ def _static_center_value(value: object, *, path: str) -> float | None:
     return center
 
 
+def _validate_sweep_direct_edges(value: SweepValue, full_path: str) -> None:
+    for name, edge in (("start", value.start), ("stop", value.stop)):
+        if isinstance(edge, DirectValue):
+            _resolve_sweep_edge(
+                edge, None, path=f"{full_path}.{name}", label=f"Sweep {name}"
+            )
+
+
 def _validate_centered_sweep_contract(
     spec: CenteredSweepSpec,
     value: CenteredSweepValue,
@@ -236,6 +249,10 @@ def _validate_centered_sweep_contract(
         raise RuntimeError(
             f"Config field '{full_path}' ({spec.label}) centered sweep span must be "
             "greater than 0 when expts > 1"
+        )
+    if isinstance(value.center, DirectValue):
+        center = _resolve_sweep_edge(
+            value.center, None, path=f"{full_path}.center", label="Sweep center"
         )
     if spec.locked_center is None:
         return
@@ -482,6 +499,7 @@ def _validate_static_node(
                 f"Config field '{full_path}' must be a SweepValue, "
                 f"got {type(node_value).__name__}"
             )
+        _validate_sweep_direct_edges(node_value, full_path)
         return
 
     if isinstance(spec, CenteredSweepSpec):

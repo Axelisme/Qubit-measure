@@ -324,6 +324,12 @@ def read_scalar_widget(w: QWidget, spec: ScalarSpec) -> Any:
     return read_value_widget(w, spec.type, fallback=None)
 
 
+def _direct_input_text(value: DirectValue) -> str:
+    if value.raw is not None:
+        return value.raw
+    return "" if value.value is None else str(value.value)
+
+
 def _widget_default_for_direct_value(value: DirectValue, spec: ScalarSpec) -> Any:
     if (spec.optional or spec.type is complex) and value.raw is not None:
         return value.raw
@@ -419,7 +425,7 @@ class ScalarWidget(BaseLiveWidget):
                 field.set_value(EvalValue(expr=inp.text().strip()))
                 self._sync_eval_ghost(field.get_value())
             elif isinstance(inp, QLineEdit) and (
-                field.spec.optional or field.spec.type is complex
+                field.spec.optional or field.spec.type in (int, float, complex)
             ):
                 field.set_text(inp.text())
             else:
@@ -460,12 +466,8 @@ class ScalarWidget(BaseLiveWidget):
                     inp.setCurrentIndex(idx)
             elif isinstance(inp, QCheckBox):
                 inp.setChecked(bool(raw))
-            elif isinstance(inp, QSpinBox):
-                inp.setValue(int(raw))
-            elif isinstance(inp, TrimDoubleSpinBox):
-                inp.setValue(float(raw))
             elif isinstance(inp, QLineEdit):
-                inp.setText(str(raw))
+                inp.setText(_direct_input_text(val))
         finally:
             self._updating = False
 
@@ -492,14 +494,25 @@ class ScalarWidget(BaseLiveWidget):
             self._sync_eval_ghost(value)
         else:
             raw = _widget_default_for_direct_value(value, field.spec)
-            self._input = make_value_widget(
-                field.spec.type,
-                raw,
-                _dynamic_choices_for_scalar(field, raw),
-                field.spec.editable,
-                field.spec.decimals,
-                field.spec.optional,
-            )
+            choices = _dynamic_choices_for_scalar(field, raw)
+            if field.spec.type in (int, float, complex) and choices is None:
+                # Parsing and incomplete state belong to ScalarField. Spinbox
+                # validation would silently restore an earlier value on blur.
+                inp = QLineEdit(_direct_input_text(value))
+                inp.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
+                inp.setEnabled(field.spec.editable)
+                if field.spec.optional:
+                    inp.setPlaceholderText("(none)")
+                self._input = inp
+            else:
+                self._input = make_value_widget(
+                    field.spec.type,
+                    raw,
+                    choices,
+                    field.spec.editable,
+                    field.spec.decimals,
+                    field.spec.optional,
+                )
             self._layout.addWidget(self._input, stretch=1)
             self._connect_direct_input()
 
@@ -512,6 +525,8 @@ class ScalarWidget(BaseLiveWidget):
                 continue
             widget = item.widget()
             if widget is not None:
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
 
     def _connect_direct_input(self) -> None:

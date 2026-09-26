@@ -1486,6 +1486,57 @@ def test_path_schema_scalar_default_preserves_eval_value():
     assert schema.lower(None, md=md)["qub_gain"] == 0.25
 
 
+def test_sweep_direct_text_carriers_project_to_numeric_knobs():
+    schema = _sectioned_test_schema()
+    schema.set_field(
+        "detune_sweep",
+        SweepValue(
+            DirectValue(-2.0, raw="-2.00"),
+            DirectValue(2.0, raw="2e0"),
+            5,
+        ),
+    )
+
+    assert schema.read_knobs()["detune_sweep"] == {
+        "start": -2.0,
+        "stop": 2.0,
+        "expts": 5,
+    }
+
+
+def test_locked_center_accepts_direct_text_carrier_without_losing_numeric_projection():
+    schema = QubitFreqBuilder().make_default_schema()
+    schema.set_field(
+        "detune_sweep",
+        CenteredSweepValue(DirectValue(0.0, raw="0.00"), span=20.0, expts=5),
+    )
+
+    assert schema.read_knobs()["detune_sweep"] == {
+        "center": 0.0,
+        "span": 20.0,
+        "expts": 5,
+        "step": 5.0,
+    }
+    detune = schema.lower(None)["detune_sweep"]
+    assert float(detune.start) == pytest.approx(-10.0)
+    assert float(detune.stop) == pytest.approx(10.0)
+
+
+def test_locked_center_rejects_invalid_direct_text_carrier():
+    schema = QubitFreqBuilder().make_default_schema()
+    before = schema.read_knobs()
+    with pytest.raises(ValueError, match="invalid center"):
+        schema.set_field(
+            "detune_sweep",
+            CenteredSweepValue(
+                DirectValue(None, raw="-", error="invalid center"),
+                span=20.0,
+                expts=5,
+            ),
+        )
+    assert schema.read_knobs() == before
+
+
 def test_sectioned_schema_read_knobs_is_flat_json_friendly():
     schema = _sectioned_test_schema()
     schema.set_field("qub_gain", EvalValue("gain"))

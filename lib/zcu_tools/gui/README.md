@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-26 — model-owned direct text and complex scalars
+**Last updated:** 2026-09-26，numeric text 與 sweep edge raw carriers
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -40,8 +40,10 @@ validation/lowering。materialization walker把missing scalar/section、referenc
 窄policy，不理解program vocabulary；lowering只依賴expression/reference/range三個callable ports，維持
 static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
 raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag validation不由app重複實作。
-Complex ScalarSpec 使用一般 direct/eval 路徑，ScalarField 解析 direct text，保存 raw 與 error，
-invalid text 不沿用舊有效值。Cfg codec 與 editor 的 complex 值使用 `{"__complex__": [re, im]}`
+Numeric 與 complex ScalarSpec 的 direct text 由 ScalarField 解析，保存 raw 與 error；
+Widget 只傳入文字並顯示 model 狀態，invalid text 不沿用舊有效值。Sweep start/stop 與
+center 同樣保留 direct raw/error，codec 可往返，finished cfg 拒絕 incomplete/invalid edge。
+Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值使用 `{"__complex__": [re, im]}`
 並由 shared codec 編解碼；磁碟 expression 仍只保存 expr，不作為執行快照。
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、

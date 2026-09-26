@@ -300,6 +300,41 @@ def test_optional_scalar_widget_is_line_edit_empty_for_none(qapp):
     assert read_scalar_widget(w, spec) is None
 
 
+def test_sweep_widget_publishes_incomplete_edge_in_form_snapshot(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit
+    from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
+    schema = _schema(
+        {"axis": SweepSpec()},
+        {"axis": SweepValue(0.0, 1.0, 5)},
+    )
+    widget = CfgFormWidget()
+    draft = _attach(widget, schema, ctrl)
+    try:
+        entry = widget.findChild(QLineEdit)
+        assert entry is not None
+        entry.setText("1e")
+        value = widget.read_values().fields["axis"]
+        assert isinstance(value, SweepValue)
+        assert isinstance(value.start, DirectValue)
+        assert value.start.raw == "1e"
+        assert value.start.value is None
+        assert value.start.error is not None
+        assert not draft.is_valid()
+
+        entry.setText("0.20")
+        recovered = widget.read_values().fields["axis"]
+        assert isinstance(recovered, SweepValue)
+        assert recovered.start == DirectValue(0.2, raw="0.20")
+        assert recovered.step == pytest.approx(0.2)
+        assert draft.is_valid()
+    finally:
+        widget.detach()
+        widget.close()
+        widget.deleteLater()
+        draft.teardown()
+
+
 def test_complex_direct_widget_keeps_partial_input_in_model(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget
@@ -338,14 +373,15 @@ def test_optional_scalar_widget_round_trips_value(qapp):
     assert read_scalar_widget(w, spec) is None
 
 
-def test_optional_numeric_edit_is_owned_by_model_and_survives_widget_recreation(
-    qapp, ctrl
+@pytest.mark.parametrize("optional", [False, True])
+def test_numeric_edit_is_owned_by_model_and_survives_widget_recreation(
+    qapp, ctrl, optional
 ):
     from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget
 
     field = _scalar_field(
-        ctrl, ScalarSpec("Mixer", float, optional=True), DirectValue(5.0)
+        ctrl, ScalarSpec("Mixer", float, optional=optional), DirectValue(5.0)
     )
     widget = ScalarWidget(field)
     try:
@@ -565,7 +601,7 @@ def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
 
 
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
-    from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
     from zcu_tools.meta_tool import MetaDict
 
@@ -583,10 +619,10 @@ def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
     assert isinstance(value, DirectValue)
     # unset scalar is value=None (ADR-0010) — no placeholder default
     assert value.value is None
-    assert w._mode == "direct"
-    spin = w.findChild(QDoubleSpinBox)
-    assert spin is not None
-    assert spin.value() == pytest.approx(0.0)
+    entry = w.findChild(QLineEdit)
+    assert entry is not None
+    assert entry.text() == ""
+    assert not field.is_valid()
 
 
 # ---------------------------------------------------------------------------
@@ -730,7 +766,7 @@ def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
 
 
 def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
-    from qtpy.QtWidgets import QScrollArea, QSpinBox  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit, QScrollArea
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
@@ -746,7 +782,7 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         assert scroll.isEnabled()
 
         assert w._root_widget is not None
-        spin = w._root_widget.findChild(QSpinBox)
+        spin = w._root_widget.findChild(QLineEdit)
         assert spin is not None
         assert spin.isEnabled()
 
@@ -765,7 +801,7 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         assert w.isEnabled()
         assert scroll.isEnabled()
         assert w._root_widget is not None and not w._root_widget.isEnabled()
-        reattached_spin = w._root_widget.findChild(QSpinBox)
+        reattached_spin = w._root_widget.findChild(QLineEdit)
         assert reattached_spin is not None
         assert not reattached_spin.isEnabled()
 
@@ -984,7 +1020,7 @@ def test_read_schema_returns_cfg_schema(qapp, ctrl):
 
 
 def test_read_values_does_not_mutate_original(qapp, ctrl):
-    from qtpy.QtWidgets import QSpinBox  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = _schema(
@@ -994,9 +1030,9 @@ def test_read_values_does_not_mutate_original(qapp, ctrl):
     w = CfgFormWidget()
     _attach(w, schema, ctrl)
 
-    spin = w.findChild(QSpinBox)
-    assert spin is not None
-    spin.setValue(999)
+    entry = w.findChild(QLineEdit)
+    assert entry is not None
+    entry.setText("999")
 
     out = w.read_values()
     assert out.fields["reps"].value == 999  # type: ignore[union-attr]
@@ -1952,7 +1988,7 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
 def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from typing import Any, cast
 
-    from qtpy.QtWidgets import QDoubleSpinBox
+    from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.meta_tool import ModuleLibrary
@@ -1997,10 +2033,9 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     assert ref_widget._combo.currentText() == "Lib: my_pulse"
     assert cast(ReferenceField, ref_widget._field).is_modified() is False
 
-    # 2. Simulate user edits the inner value via spinbox (leaf widget in tree, not inside ReferenceWidget)
-    spin = w.findChild(QDoubleSpinBox)
-    assert spin is not None
-    spin.setValue(8000.0)
+    # Edit the displayed library frequency through its text input.
+    entry = next(w for w in w.findChildren(QLineEdit) if w.text() == "7000.0")
+    entry.setText("8000.0")
 
     # Verify is_modified is True and combobox text has (modified) suffix
     assert cast(ReferenceField, ref_widget._field).is_modified() is True

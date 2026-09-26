@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from ..model import CenteredSweepValue, EvalValue, SweepValue
+from ..model import CenteredSweepValue, DirectValue, EvalValue, ScalarValue, SweepValue
 
 
 class SweepEditor:
@@ -25,7 +25,7 @@ class SweepEditor:
         )
 
     @staticmethod
-    def update_start(value: SweepValue, start: float | EvalValue) -> SweepValue:
+    def update_start(value: SweepValue, start: float | ScalarValue) -> SweepValue:
         return SweepEditor.canonicalize(
             SweepValue(
                 start=start,
@@ -37,7 +37,7 @@ class SweepEditor:
         )
 
     @staticmethod
-    def update_stop(value: SweepValue, stop: float | EvalValue) -> SweepValue:
+    def update_stop(value: SweepValue, stop: float | ScalarValue) -> SweepValue:
         return SweepEditor.canonicalize(
             SweepValue(
                 start=value.start,
@@ -90,8 +90,11 @@ class SweepEditor:
         return start, stop
 
     @staticmethod
-    def _resolved_edge(value: float | EvalValue) -> float | None:
-        resolved = value.resolved if isinstance(value, EvalValue) else value
+    def _resolved_edge(value: float | ScalarValue) -> float | None:
+        if isinstance(value, DirectValue):
+            resolved = value.value if value.error is None else None
+        else:
+            resolved = value.resolved if isinstance(value, EvalValue) else value
         if resolved is None:
             return None
         numeric = float(resolved)
@@ -119,7 +122,7 @@ class CenteredSweepEditor:
 
     @staticmethod
     def update_center(
-        value: CenteredSweepValue, center: float | EvalValue
+        value: CenteredSweepValue, center: float | ScalarValue
     ) -> CenteredSweepValue:
         return CenteredSweepEditor.canonicalize(
             CenteredSweepValue(

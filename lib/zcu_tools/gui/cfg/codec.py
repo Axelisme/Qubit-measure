@@ -25,6 +25,7 @@ from .model import (
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
+    ScalarValue,
     SweepSpec,
     SweepValue,
     _reference_discriminator_key,
@@ -179,7 +180,9 @@ def _node_value_to_raw(
     return _to_json_compatible(value)
 
 
-def _sweep_edge_to_raw(value: float | EvalValue) -> object:
+def _sweep_edge_to_raw(value: float | ScalarValue) -> object:
+    if isinstance(value, DirectValue):
+        return _node_value_to_raw(ScalarSpec("Sweep edge", float), value)
     if isinstance(value, EvalValue):
         return {"__kind": "eval", "expr": value.expr}
     return float(value)
@@ -292,7 +295,9 @@ def decode_complex(value: object) -> complex:
     return complex(real, imag)
 
 
-def _parse_sweep_edge(raw: object) -> float | EvalValue:
+def _parse_sweep_edge(raw: object) -> float | ScalarValue:
+    if isinstance(raw, dict) and raw.get("__kind") == "direct":
+        return _decode_direct_wire(raw, ScalarSpec("Sweep edge", float))
     if (
         isinstance(raw, dict)
         and raw.get("__kind") == "eval"

@@ -23,8 +23,8 @@ from typing import Any, cast
 
 import pytest
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QAbstractSpinBox,
     QGroupBox,
+    QLineEdit,
     QScrollArea,
     QVBoxLayout,
 )
@@ -866,7 +866,7 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
             form._default_form._root_widget is not None
             and not form._default_form._root_widget.isEnabled()
         )
-        default_editor = form._default_form._root_widget.findChild(QAbstractSpinBox)
+        default_editor = form._default_form._root_widget.findChild(QLineEdit)
         assert default_editor is not None and not default_editor.isEnabled()
 
         assert form._generation_form is not None
@@ -877,9 +877,7 @@ def test_read_only_lock_keeps_values_visible(ctrl_node, qapp):
             form._generation_form._root_widget is not None
             and not form._generation_form._root_widget.isEnabled()
         )
-        generation_editor = form._generation_form._root_widget.findChild(
-            QAbstractSpinBox
-        )
+        generation_editor = form._generation_form._root_widget.findChild(QLineEdit)
         assert generation_editor is not None and not generation_editor.isEnabled()
         # the model (values) is untouched — "what this run used" stays visible
         reps_value = form._default_draft.root.fields["reps"].get_value()

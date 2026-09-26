@@ -383,7 +383,7 @@ class SweepField(CfgField):
 
     @staticmethod
     def _coerce_edge(value: object) -> ScalarValue:
-        if isinstance(value, EvalValue):
+        if isinstance(value, (DirectValue, EvalValue)):
             return value
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return DirectValue(float(value))
@@ -392,11 +392,14 @@ class SweepField(CfgField):
         )
 
     @staticmethod
-    def _edge_value(value: ScalarValue) -> float | EvalValue:
-        if isinstance(value, EvalValue):
+    def _edge_value(value: ScalarValue) -> float | ScalarValue:
+        if (
+            isinstance(value, EvalValue)
+            or value.raw is not None
+            or value.error is not None
+            or value.value is None
+        ):
             return value
-        if value.value is None:
-            raise TypeError("Sweep edge DirectValue is unset (None)")
         return float(value.value)
 
     def _on_child_change(self, *_: object) -> None:
@@ -501,7 +504,7 @@ class CenteredSweepField(CfgField):
 
     @staticmethod
     def _coerce_center(value: object) -> ScalarValue:
-        if isinstance(value, EvalValue):
+        if isinstance(value, (DirectValue, EvalValue)):
             return value
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return DirectValue(float(value))
@@ -510,11 +513,14 @@ class CenteredSweepField(CfgField):
         )
 
     @staticmethod
-    def _center_value(value: ScalarValue) -> float | EvalValue:
-        if isinstance(value, EvalValue):
+    def _center_value(value: ScalarValue) -> float | ScalarValue:
+        if (
+            isinstance(value, EvalValue)
+            or value.raw is not None
+            or value.error is not None
+            or value.value is None
+        ):
             return value
-        if value.value is None:
-            raise TypeError("Centered sweep center DirectValue is unset (None)")
         return float(value.value)
 
     def _validate_value(self, value: CenteredSweepValue) -> None:
@@ -540,8 +546,12 @@ class CenteredSweepField(CfgField):
             )
 
     @staticmethod
-    def _resolved_center(value: float | EvalValue) -> float | None:
-        raw: object = value.resolved if isinstance(value, EvalValue) else value
+    def _resolved_center(value: float | ScalarValue) -> float | None:
+        raw: object
+        if isinstance(value, DirectValue):
+            raw = value.value if value.error is None else None
+        else:
+            raw = value.resolved if isinstance(value, EvalValue) else value
         if raw is None:
             return None
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):

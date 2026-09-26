@@ -435,6 +435,47 @@ def test_scalar_field_empty_dynamic_options_respect_required_and_optional_semant
     assert field.is_valid() is expected_valid
 
 
+def test_sweep_snapshot_preserves_incomplete_edge_and_recovers() -> None:
+    ports = BindingPorts()
+    field = SweepField(SweepSpec(), ports.evaluate, SweepValue(0.0, 1.0, 5))
+
+    field.start_field.set_text("1e")
+    invalid = field.get_value().start
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == "1e"
+    assert invalid.value is None
+    assert invalid.error is not None
+    assert not field.is_valid()
+
+    field.start_field.set_text("0.20")
+    recovered = field.get_value()
+    assert recovered.start == DirectValue(0.2, raw="0.20")
+    assert recovered.step == pytest.approx(0.2)
+    assert field.is_valid()
+    field.teardown()
+
+
+def test_centered_sweep_snapshot_preserves_incomplete_center_and_recovers() -> None:
+    ports = BindingPorts()
+    field = CenteredSweepField(
+        CenteredSweepSpec(), ports.evaluate, CenteredSweepValue(2.0, 4.0, 5)
+    )
+    field.center_field.set_text("-")
+    invalid = field.get_value().center
+    assert isinstance(invalid, DirectValue)
+    assert invalid.raw == "-"
+    assert invalid.value is None
+    assert invalid.error is not None
+    assert not field.is_valid()
+
+    field.center_field.set_text("3.00")
+    recovered = field.get_value()
+    assert recovered.center == DirectValue(3.0, raw="3.00")
+    assert recovered.step == pytest.approx(1.0)
+    assert field.is_valid()
+    field.teardown()
+
+
 def test_sweep_fields_keep_canonical_step_rules() -> None:
     ports = BindingPorts()
     sweep = SweepField(

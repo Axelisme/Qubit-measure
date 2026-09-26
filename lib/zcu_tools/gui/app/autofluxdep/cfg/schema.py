@@ -115,6 +115,10 @@ def _centered_sweep_center_for_assignment(
     key: str, value: CenteredSweepValue
 ) -> float | None:
     center = value.center
+    if isinstance(center, DirectValue):
+        if center.error is not None:
+            raise ValueError(f"Param {key!r} centered sweep center: {center.error}")
+        center = center.value
     if isinstance(center, EvalValue):
         if center.resolved is None:
             return None
@@ -590,6 +594,8 @@ def _jsonify_value_tree(spec: CfgSectionSpec, value: CfgSectionValue) -> dict[st
 
 
 def _knob_scalar_value(value: object) -> object:
+    if isinstance(value, DirectValue):
+        return _knob_scalar_value(value.value)
     if isinstance(value, EvalValue):
         return _knob_eval_value(value)
     if isinstance(value, np.generic):
