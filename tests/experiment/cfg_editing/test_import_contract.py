@@ -9,28 +9,28 @@ import textwrap
 from pathlib import Path
 
 
-def test_measure_cfg_import_is_app_runtime_and_qt_clean() -> None:
+def test_cfg_editing_import_is_app_runtime_and_qt_clean() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script = textwrap.dedent(
         f"""
         import sys
         sys.path.insert(0, {str(repo_root / "lib")!r})
-        import zcu_tools.gui.measure_cfg  # noqa: F401
+        import zcu_tools.experiment.cfg_editing  # noqa: F401
 
+        # The experiment root eagerly imports base and its device/datafile dependencies (D6, documentation-structure-refresh).
         forbidden = (
             "zcu_tools.gui.app",
             "zcu_tools.gui.session",
-            "zcu_tools.experiment",
+            "zcu_tools.experiment.v2",
             "zcu_tools.resources",
             "zcu_tools.program",
-            "zcu_tools.device",
             "zcu_tools.notebook",
             "qtpy",
             "PyQt",
             "PySide",
         )
         leaked = sorted(name for name in sys.modules if name.startswith(forbidden))
-        assert not leaked, f"importing gui.measure_cfg leaked: {{leaked}}"
+        assert not leaked, f"importing experiment.cfg_editing leaked: {{leaked}}"
         """
     )
     proc = subprocess.run(
@@ -43,18 +43,19 @@ def test_measure_cfg_import_is_app_runtime_and_qt_clean() -> None:
     assert proc.returncode == 0, proc.stderr
 
 
-def test_measure_cfg_source_has_no_forbidden_runtime_imports() -> None:
+def test_cfg_editing_source_has_no_forbidden_runtime_imports() -> None:
     catalog_dir = (
         Path(__file__).resolve().parents[3]
         / "lib"
         / "zcu_tools"
-        / "gui"
-        / "measure_cfg"
+        / "experiment"
+        / "cfg_editing"
     )
+    # The experiment root eagerly imports base and its device/datafile dependencies (D6, documentation-structure-refresh).
     forbidden = (
         "zcu_tools.gui.app",
         "zcu_tools.gui.session",
-        "zcu_tools.experiment",
+        "zcu_tools.experiment.v2",
         "zcu_tools.resources",
         "zcu_tools.program",
         "zcu_tools.device",
@@ -80,14 +81,14 @@ def test_measure_cfg_source_has_no_forbidden_runtime_imports() -> None:
     assert not offenders, "\n".join(offenders)
 
 
-def test_gui_cfg_import_does_not_load_measure_cfg() -> None:
+def test_gui_cfg_import_does_not_load_cfg_editing() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script = textwrap.dedent(
         f"""
         import sys
         sys.path.insert(0, {str(repo_root / "lib")!r})
         import zcu_tools.gui.cfg  # noqa: F401
-        assert "zcu_tools.gui.measure_cfg" not in sys.modules
+        assert "zcu_tools.experiment.cfg_editing" not in sys.modules
         """
     )
     proc = subprocess.run(

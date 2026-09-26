@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-27 — measure app path rename
+**Last updated:** 2026-09-27 — cfg editing relocation
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -14,10 +14,10 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
   adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
-- `specs/`：`gui.measure_cfg`的main policy adapter；只綁定Arb asset choices與readout
+- `specs/`：`experiment.cfg_editing`的main policy adapter；只綁定Arb asset choices與readout
   cross-shape inheritance，不擁有program field/label清單。
 - `cfg_schemas.py`：main raw/typed cfg normalization與policy facade；全七種module/六種waveform的
-  spec walk、missing/nested/reference規則由`gui.measure_cfg`materializer擁有。
+  spec walk、missing/nested/reference規則由`experiment.cfg_editing`materializer擁有。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
   implementation；package `__init__` 只做 lazy public re-export，讓
   `services.remote.method_specs` public import path 不載入 Qt-bound service code。
@@ -120,7 +120,7 @@ Shared layers:
 
 - `zcu_tools.gui.cfg`：Qt-free Spec/Value model、`CfgSchema` data carrier、inheritance、
   persistence codec、domain-free raw spec walk與generic finished-cfg validation/lowering ports。
-- `zcu_tools.gui.measure_cfg`：Qt-free closed program module/waveform shape catalog與fresh Spec
+- `zcu_tools.experiment.cfg_editing`：Qt-free closed program module/waveform shape catalog與fresh Spec
   factories，以及program missing/nested/reference/subset materialization policy；main以app-local policy
   啟用Arb choices、readout inheritance與完整7+6 materializable catalog。
 - `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
@@ -365,7 +365,7 @@ measure composition在`ui/cfg_binding.py`以generic `QLineEdit -> keepalive obje
 `ValueSourceInputController`，保留eval input的completion與resolve-on-space；shared binding仍
 不import ValueRef或session，shared widget只接收generic enhancer callable。
 
-ModuleLibrary reference enumeration只以`gui.measure_cfg.program_shape_for_input`讀root discriminator；
+ModuleLibrary reference enumeration只以`experiment.cfg_editing.program_shape_for_input`讀root discriminator；
 不normalize typed cfg或建立Spec/Value。resolve才呼main materializer façade一次。Experiment
 composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `RoleEntry`；catalog
 registration只驗shape/kind，Controller create依序取得value與fresh shape並直接組`CfgSchema`，不從

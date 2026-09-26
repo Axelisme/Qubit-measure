@@ -19,8 +19,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
+from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, UnknownProgramShapeError
 from zcu_tools.gui.cfg import CfgSectionSpec, LiteralSpec, ReferenceValue
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES, UnknownProgramShapeError
 
 from .adapter import ExpContext
 

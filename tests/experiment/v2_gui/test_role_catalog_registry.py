@@ -8,6 +8,7 @@ import hashlib
 import json
 
 import pytest
+from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.experiment.v2_gui.role_registry import (
     ALL_ROLE_ENTRIES,
     register_all_roles,
@@ -15,7 +16,6 @@ from zcu_tools.experiment.v2_gui.role_registry import (
 from zcu_tools.gui.app.measure.adapter import ExpContext
 from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry
 from zcu_tools.gui.cfg import DirectValue, LiteralSpec, make_custom_reference_key
-from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from .adapters._support._role_characterization import (

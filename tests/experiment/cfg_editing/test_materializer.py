@@ -3,6 +3,13 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
+from zcu_tools.experiment.cfg_editing import (
+    PROGRAM_SHAPES,
+    ProgramMaterializationPolicy,
+    ProgramSpecPolicy,
+    materialize_program_module,
+    materialize_program_waveform,
+)
 from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
@@ -12,13 +19,6 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
     parse_custom_reference_key,
-)
-from zcu_tools.gui.measure_cfg import (
-    PROGRAM_SHAPES,
-    ProgramMaterializationPolicy,
-    ProgramSpecPolicy,
-    materialize_program_module,
-    materialize_program_waveform,
 )
 
 _ALL_MODULES = frozenset(shape.discriminator for shape in PROGRAM_SHAPES.modules())
