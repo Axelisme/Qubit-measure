@@ -27,7 +27,7 @@ from zcu_tools.experiment.v2.onetone.freq import (
     FreqResult,
     FreqSweepCfg,
 )
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,

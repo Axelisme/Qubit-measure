@@ -1,8 +1,8 @@
-# `zcu_tools.experiment.v2.runner` — experiment runtime
+# `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-07-07 — external stop flag API
+**Last updated:** 2026-09-27 — external stop flag API
 
-`runner/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
+`runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
 acquire；executor 類流程用 `ResultTree` 實作 executor-owned `BufferProtocol`，再交給同一個
 `Schedule` 編排 outer loop，並用 `MultiMeasurementExecutor` 共用 result initialization、
@@ -153,7 +153,7 @@ leaf measurement 取得 `ScheduleStep` 後，通常用
 的 caller 入口以 explicit keyword deps 提供穩定依賴，executor 在 run 內組完整 typed
 env 給 root `Schedule`。
 
-executor leaf contract 由 `runner/task.py` 擁有：
+executor leaf contract 由 `runtime/task.py` 擁有：
 
 - `Acquirer[T_Cfg, T_Env, T_Result]`：`init` / `run` / `cleanup` /
   `get_default_result`。
@@ -203,7 +203,7 @@ executor leaf contract 由 `runner/task.py` 擁有：
 
 ## 測試
 
-`tests/experiment/v2/runner/test_flow.py` 覆蓋 Schedule、typed env、SignalBuffer、
+`tests/experiment/v2/runtime/test_flow.py` 覆蓋 Schedule、typed env、SignalBuffer、
 ProgramBuilder、host scan/repeat/batch、ProgramBuilder retry、`ScheduleOutcome` 與
 decimated acquire。
 `test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與

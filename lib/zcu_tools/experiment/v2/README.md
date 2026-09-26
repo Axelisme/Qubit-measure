@@ -1,8 +1,8 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-09-26 — canonical-only experiment loading
+**Last updated:** 2026-09-27 — canonical-only experiment loading
 
-這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runner/` 的細節另見 `runner/README.md`。
+這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runtime/` 的細節另見 `runtime/README.md`。
 
 ---
 
@@ -14,7 +14,7 @@
   - `AbsExperiment[T_Result, T_Config]`：最小基底，只提供 `last_result` 快取（不保留 `last_cfg`），`run` / `analyze` 由各子類別自行實作。
   - `PersistableExperiment[T_Result, T_Config]`：opt-in 持久化基底，宣告 class-level `AXES_SPEC`（`AxesSpec`）後即繼承共用的 `save()` / `load()`（見「持久化」一節）。
   - `ExperimentProtocol`：結構性合約（runtime_checkable），描述所有實驗共有的 `last_result` / `run` / `analyze` / `save` / `load` 表面，刻意開放讓實驗自行擴充方法。
-- runtime 層（`runner/`）
+- runtime 層（`runtime/`）
   - 一般 Experiment：`SignalBuffer` / `Schedule` / `ProgramBuilder` 表達 Python-like acquire、host loop、batch、ProgramBuilder retry 與 stop。
   - executor workflow：`ResultTree` 實作 executor-owned `BufferProtocol`，持有 outer loop result tree、per-measurement subscription 與 stacked result cache；`Schedule` 編排 outer loop；`MultiMeasurementExecutor` 提供 combined liveplot、recording、retry、measurement init/cleanup、partial-result outcome、figure/writer cleanup 與 `last_cfg` / `last_result` lifecycle。
 
@@ -30,7 +30,7 @@ Experiment 是使用者（notebook）呼叫的入口；一般 `*Exp.run()` 以 `
 experiment/v2/
 ├── __init__.py              # 暴露 onetone / twotone / singleshot / ... 子模組與 LookbackExp
 ├── lookback.py              # LookbackExp（decimated readout trace，用來校準 trig_offset）
-├── runner/                  # experiment runtime（見 runner/README.md）
+├── runtime/                  # experiment runtime（見 runtime/README.md）
 ├── utils/                   # 共用工具（merge_result_list, sweep2array, round_zcu_*, SNR）+ tracker/（KMeansTracker / MomentTracker）
 ├── onetone/                 # Readout 光譜：freq, power_dep, flux_dep, SA
 ├── twotone/                 # Qubit 光譜 + 時域（rabi, time_domain, reset, ro_optimize, rb, ...）
@@ -212,7 +212,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 ## Signal/Raw 處理慣例
 
 - **`raw` 格式**：QICK 回傳的 raw 一般是 `list[ndarray]`，第一個元素 shape 為 `(nro, ..., 2)`（IQ 兩個實數）。
-- **`default_raw2signal_fn`**：Schedule 路徑使用 `runner/schedule.py` 的預設轉換：`raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
+- **`default_raw2signal_fn`**：Schedule 路徑使用 `runtime/schedule.py` 的預設轉換：`raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
 - **客製化 `raw2signal_fn`**：integrated acquire 用 `build_and_acquire(raw2signal_fn=...)` / `run_program(raw2signal_fn=...)`；decimated trace 用 `build_and_acquire_decimated(raw2signal_fn=...)` / `run_program_decimated(raw2signal_fn=...)`。`ProgramBuilder.set_raw2signal_fn(...)` 可設定同一個 builder 的預設轉換。
 - **`signal2real` 函式**：每個 Exp 檔案會定義 local 的 `xxx_signal2real`（通常 `np.abs`），給 liveplot 用；analyze 階段可能換成 phase / real。
 - **scalar/array 邊界**：座標轉換工具（例如 value↔flux）可接受 scalar 或 ndarray；若後續 plotting/analysis 需要 indexing、min/max 或與另一個 sweep array 對齊，呼叫端在邊界用 `np.asarray(..., dtype=...)` 正規化成 ndarray，而不是用型別宣告假設回傳一定是 array。
@@ -224,14 +224,14 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。
 
-兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runner/multi_executor.py`，見 `runner/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、`ResultTree` per-measurement plot update、measurement init/cleanup、per-measurement retry、error/stop partial result、figure/writer `try/finally` cleanup 與 `last_cfg` / `last_result` / `last_run_outcome`。子類別各自只實作 `run()` 的 cfg/env 前置與 `Schedule` outer loop。
+兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runtime/multi_executor.py`，見 `runtime/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、`ResultTree` per-measurement plot update、measurement init/cleanup、per-measurement retry、error/stop partial result、figure/writer `try/finally` cleanup 與 `last_cfg` / `last_result` / `last_run_outcome`。子類別各自只實作 `run()` 的 cfg/env 前置與 `Schedule` outer loop。
 
 - `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 runner-owned `MeasurementBundle` / `MeasurementTask`，caller 以 explicit keyword deps 提供 `soc`、`soccfg`、`ml`、`predictor`；executor 在 run 內組 `FluxDepEnv`，用 root `Schedule.scan("flux", ...)` 掃 flux，並與 `FluxoniumPredictor` 協作，於每個 flux step 更新 typed `FluxDepInfoTracker`、設定 flux device，再交由 base executor 的 batch helper 執行 measurement。
 - `OvernightExecutor`（`overnight/executor.py`）：caller 以 explicit keyword deps 提供 `soc`、`soccfg`；executor 在 run 內組 `OvernightEnv`，用 root `Schedule.repeat("Iter", ...)` 在時間軸上重複 measurement batch，並以 `trigger_update(flush=True)` 強制送出 per-measurement liveplot event。
 
 兩者的 `retry_time` 是 per-measurement、per-flux/time-step 預算；`record_animation(mp4_path)` 需要 `ffmpeg`。
 
-executor leaf contract 由 `runner/task.py` 擁有：`Acquirer`、`TaskPlotter`、`TaskPersister`、`MeasurementBundle`、`ComposedMeasurementBundle` 與 direct-implementation `MeasurementTask`。app-local duplicated ABC 不保留；每個 leaf 取得 `ScheduleStep` 後建立 child-local buffer，再用該 step 的 `ProgramBuilder` 直接執行 QICK acquire。
+executor leaf contract 由 `runtime/task.py` 擁有：`Acquirer`、`TaskPlotter`、`TaskPersister`、`MeasurementBundle`、`ComposedMeasurementBundle` 與 direct-implementation `MeasurementTask`。app-local duplicated ABC 不保留；每個 leaf 取得 `ScheduleStep` 後建立 child-local buffer，再用該 step 的 `ProgramBuilder` 直接執行 QICK acquire。
 
 ---
 

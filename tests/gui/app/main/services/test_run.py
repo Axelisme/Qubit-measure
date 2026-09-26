@@ -22,7 +22,7 @@ import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Schedule, SignalBuffer, current_stop_signal
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer, current_stop_signal
 from zcu_tools.gui.app.main.adapter import (
     AdapterCapabilities,
     RunRequest,

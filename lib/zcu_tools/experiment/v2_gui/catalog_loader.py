@@ -343,7 +343,7 @@ def make_catalog_loader() -> SourceExperimentCatalogLoader:
             "zcu_tools.experiment.v2_gui.registry",
         ),
         preserved_modules=(
-            "zcu_tools.experiment.v2.runner",
+            "zcu_tools.experiment.v2.runtime",
             "zcu_tools.experiment.v2.utils",
             "zcu_tools.experiment.v2_gui.adapters.base",
             "zcu_tools.experiment.v2_gui.adapters._support",

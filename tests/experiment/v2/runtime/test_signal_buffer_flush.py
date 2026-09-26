@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.v2.runner import SignalBuffer
+from zcu_tools.experiment.v2.runtime import SignalBuffer
 from zcu_tools.utils import func_tools
 
 
