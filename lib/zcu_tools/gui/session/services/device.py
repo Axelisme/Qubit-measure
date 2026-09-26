@@ -154,8 +154,8 @@ class ActiveDeviceOperation:
     kind: OperationKind
     snapshot: DeviceSnapshot
     # The operation handle (runner token), so a concurrent-enumeration reader can
-    # drive gui_op_poll / gui_op_wait per in-flight op without re-resolving it by
-    # device name.
+    # await each in-flight GUI operation by token, or expose it through MCP
+    # status() as an agent handle, without re-resolving by device name.
     token: int
 
 
@@ -434,7 +434,7 @@ class DeviceService:
         # device: it reuses the stored type/address. Return the connect
         # operation's token so the wire/MCP layers can expose it as an async
         # handle (FC1 — reconnect must produce an operation_id like the other
-        # device starts, otherwise gui_op_wait cannot track a name-only reconnect).
+        # device starts, otherwise MCP wait(op) cannot track a name-only reconnect).
         dev = self._require_device(name)
         if not dev.is_memory_only():
             raise FailedPreconditionError(

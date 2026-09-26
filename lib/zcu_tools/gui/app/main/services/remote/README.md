@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — operation cancellation and prompt wait (GUI 88, WIRE 61)
+**Last updated:** 2026-09-26 — failed-operation cancellation (GUI 89, WIRE 61)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -116,11 +116,13 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 88`, and
-`MCP_VERSION = 80` (defined in `zcu_tools.mcp.measure.server`). GUI 88 makes the
-domain cancel RPCs internal in the MCP catalog, requiring `cancel(op)`, and
-bounds `notify.await` to 600 seconds so the catalog transport deadline is longer
-than every accepted wait. GUI 87 corrected no-project RPC guidance. WIRE 61 adds
+Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 89`, and
+`MCP_VERSION = 81` (defined in `zcu_tools.mcp.measure.server`). GUI 89 reports
+an already failed operation as `operation_failed` on cancel, rather than
+`finished`; MCP 81 likewise reports failure when the short cancellation wait
+observes a failed outcome. GUI 88 made domain cancel RPCs internal in the MCP
+catalog and bounded `notify.await` to 600 seconds. GUI 87 corrected no-project
+RPC guidance. WIRE 61 adds
 `__agent_write_versions` to replies for catalog-declared writes: each changed
 resource carries its versions before and after that handler on the owner thread.
 WIRE 60 adds `rpc.catalog.reveals_without` for partial reads; MCP samples the

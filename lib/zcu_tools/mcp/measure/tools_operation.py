@@ -7,6 +7,7 @@ import time
 from functools import partial
 from typing import Any
 
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
@@ -123,7 +124,14 @@ def cancel(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     outcome = wait(ctx, {"op": op, "timeout": 0.25})
     if outcome["status"] == "cancelled":
         return {"status": "cancelled"}
-    if outcome["status"] in ("finished", "failed"):
+    if outcome["status"] == "failed":
+        error = outcome.get("error", {})
+        raise GuiRpcError(
+            f"operation {op} failed: {error.get('message', 'unknown failure')}",
+            reason="operation_failed",
+            code="precondition_failed",
+        )
+    if outcome["status"] == "finished":
         return {"status": "finished"}
     return {"status": "cancelling"}
 

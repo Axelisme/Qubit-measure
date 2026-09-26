@@ -137,4 +137,5 @@ WIRE_VERSION = 61
 # v86: tab.run_start live catalog describes its MCP handle and wait path.
 # v87: no-project remote errors point to the current startup.apply RPC entry.
 # v88: route MCP cancellation only through opaque op handles; bound notify.await.
-GUI_VERSION = 88
+# v89: report already failed operations as errors when cancellation is requested.
+GUI_VERSION = 89

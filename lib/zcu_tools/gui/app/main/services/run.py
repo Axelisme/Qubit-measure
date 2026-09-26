@@ -225,7 +225,7 @@ class RunService:
         was issued), False when no run was in flight (a graceful no-op). This is
         NOT a claim that the worker has stopped: the worker self-judges 'cancelled'
         and emits its terminal asynchronously (ADR-0019) — the true terminal is
-        observed via gui_op_wait/poll on the run handle.
+        observed via the GUI's operation.await RPC or the MCP wait(op) tool.
         """
         logger.info("cancel_run")
         # Async notification: set the operation's stop_event via the handle.

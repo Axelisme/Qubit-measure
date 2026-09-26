@@ -131,6 +131,25 @@ def test_cancel_by_handle_uses_owner_hook_and_preserves_other_operations() -> No
         facet.cancel_operation(999)
 
 
+def test_cancel_does_not_report_a_failed_operation_as_finished() -> None:
+    handles = OperationHandles()
+    token = handles.create(origin=EventOrigin(kind="user"))
+    handles.settle(token, OperationOutcome("failed", error="ramp failed"))
+    facet = OperationControlFacet(
+        handles=handles,
+        progress=RecordingProgress(CallLog()),
+        run_analyze=cast(Any, SimpleNamespace()),
+        device=cast(Any, SimpleNamespace()),
+    )
+
+    with pytest.raises(FailedPreconditionError, match="ramp failed") as exc_info:
+        facet.cancel_operation(token)
+    assert exc_info.value.reason_code == "operation_failed"
+    assert handles.known_outcome(token) == OperationOutcome(
+        "failed", error="ramp failed"
+    )
+
+
 def test_operation_control_routes_progress_to_progress_service() -> None:
     log = CallLog()
     progress = RecordingProgress(log)

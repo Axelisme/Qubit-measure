@@ -282,6 +282,31 @@ def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(
     assert ("operation.progress", {"operation_id": 999}) not in client.transport.sent
 
 
+def test_cancel_reports_failure_during_its_short_wait(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    op = discover_operation(client, 31)
+    client.transport.replies["operation.cancel"] = {
+        "ok": True,
+        "result": {"status": "cancelling"},
+    }
+    client.transport.replies["operation.await"] = {
+        "ok": True,
+        "result": {
+            "reason": "completed",
+            "status": "failed",
+            "error": {"reason": "failed", "message": "ramp failed"},
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="ramp failed") as exc_info:
+        client.call("cancel", {"op": op})
+    assert getattr(exc_info.value, "reason", None) == "operation_failed"
+    assert (
+        "operation.await",
+        {"operation_id": 31, "timeout": 0.25},
+    ) in client.transport.sent
+
+
 def test_wait_rejects_bad_timeout_without_sending_an_operation(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     for timeout in (-1, 301, float("nan"), True):

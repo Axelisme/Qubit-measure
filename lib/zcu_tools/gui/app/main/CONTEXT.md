@@ -19,7 +19,7 @@ _Avoid_: guard token, ticket, voucher
 - **poll**（`poll(token)`）：非阻塞查 outcome（pending → None）。**主線唯一能用的等待原語**（主線不能阻塞 await，用 QTimer 週期 poll 替代）。
 - **cancel**（`cancel(token)` / `cancel_all() → list[token]`）：**異步通知式** —— 只 `set` 該 token 的 stop_event 即返回，**不等待**。「停了沒」由之後 `poll` 查。register 時把 worker 的 **stop_event（純數據 handle，非 callback）** 一起交給 Registry，故 Registry 是 cancel 唯一入口（不再散在各 worker by-name）。**worker 自己負責把 stop 信號翻成 cancelled outcome**（`stop_event.is_set()` → emit cancelled，run/device worker 對齊）—— cancel 端純信號傳遞、無副作用、無 callback IoC（符合「用傳遞不用共享」）。cancel 是 handle 的天然能力（≈ Go context：Registry 持 sender=event.set，worker 持 receiver=event+自判），**非**互斥職責，不違背下方 _Avoid_。
 
-**outcome = `OperationOutcome`**（中性 status finished/failed/cancelled + error，**不帶 result**；result 走原有 snapshot/query）。啟動回 `operation_id`（= token），`operation.await(operation_id)` 阻塞取 outcome；查無 token=視為 finished（不 hang）。**三層分工**同版本號：operation_id 是 RPC↔mcp 簿記。Phase 171 起 START reply 直接外露 operation handle，agent 用泛型 `gui_op_wait(handle)` / `gui_op_poll(handle)` await（涵蓋 device connect/disconnect/apply 與 run，不再走語義名翻譯工具）。
+**outcome = `OperationOutcome`**（中性 status finished/failed/cancelled + error，**不帶 result**；result 走原有 snapshot/query）。啟動回 `operation_id`（= token），`operation.await(operation_id)` 阻塞取 outcome；共用 handle 的舊式查詢允許未知 token 視為 finished；measure-gui 的 remote/agent 入口對未知或淘汰的 token 報錯，不假稱完成。**三層分工**同版本號：GUI `operation_id` 是 RPC↔MCP 簿記，MCP 將它映成不跨 GUI 重啟沿用的 `op`。agent 以 `status()` 索引 GUI 或 agent 發起的操作，以 `wait(op)` 查看終態及 Stop feedback；`cancel(op)` 依實際 handle 要求取消。
 
 **cancel 不保證即停**：cancel 是「請求」，能否停是 operation 自己的事。run/device 有 stop polling point 會停；**connect 是阻塞網絡調用、無 stop 點 → 收到 cancel 仍跑到自然完成/超時**。關閉流程（closeEvent / app.shutdown）`cancel_all` 後用 QTimer poll 等所有 token settle，**超時則強關**（kill 沒停的 connect）。
 _Avoid_: 讓 outcome 帶 result payload、把 operation_id 暴露給 agent、把**互斥邏輯**混進 Registry（cancel 是 handle 能力、不是互斥；_Avoid_ 防的是把 exclusion 塞進 Registry）、期望 await 真協程讓出（是 off-main thread 模擬，見 qasync spike 備案）、期望 cancel 同步等待（會死鎖主線 / 卡死在不可中斷的 connect）
@@ -138,12 +138,12 @@ _Avoid_: 用 wall-clock 時戳取代版本號、在 worker thread bump、把 bum
 _Avoid_: 把它當永久鎖、讓 RPC 端懂「什麼叫 stale」或「run 依賴什麼」(那是 mcp policy)、在比對前 auto-refresh(會抹掉真人的變動)
 
 **expected_versions**（wire-only,MCP-hidden）:
-guard 操作的 optional 參數,由 mcp 依 `_GUARD_DEPS`(依賴對應表:run→cfg/tab/soc/context/device:*;save→result/save_path;commit→editor/context)從 last-seen 組出。`ParamSpec.mcp_hidden=True` → 驗證+達 handler 但**不進 MCP inputSchema**(版本號不洩漏給 agent)。mcp 每次成功 RPC 後 `_refresh_versions()` 更新 last-seen(每次 round-trip = agent 觀察到當前,故不擋自己;真人在兩 RPC 間的改動才被擋)。
+guard 操作的 optional 參數,由 mcp 依 `_GUARD_DEPS`(依賴對應表:run→cfg/tab/soc/context/device:*;save→result/save_path;commit→editor/context)從 last-seen 組出。`ParamSpec.mcp_hidden=True` → 驗證+達 handler 但**不進 MCP inputSchema**(版本號不洩漏給 agent)。MCP 的 last-seen 只由確實揭露資源的完整讀取或成功寫入回執推進受影響且先前已觀察的版本；`status()` 等其他讀取不刷新整張表。GUI 使用者的未讀編輯保持 stale，須重讀受影響內容後才重試。
 _Avoid_: 讓 expected_versions 出現在 agent schema、讓 agent 自己組版本、save 依賴 cfg(存檔來自 result 自帶 cfg_snapshot)
 
-**Notification face**（diagnostic piggyback，正交於版本表）:
-GUI 端 EventBus 照常 push 全部 event 上 wire，但 **mcp 端只放行 diagnostic**（resource-change event 丟棄，無 `gui_events_*` agent 工具，Phase 120c-2）。agent 不再「訂閱 + poll 收什麼變了」：resource 變動靠版本 guard 撞牆告知（語義 stale 清單），async 完成靠泛型 `gui_op_poll`/`gui_op_wait`，background 通知靠每個 tool reply 的 diagnostic piggyback。與版本 guard 是兩條獨立的線(通知=質化「變了什麼」、版本=量化「擋不擋」)。
-_Avoid_: 把版本號塞進 event payload、把通知面與版本 guard 綁在一起、輪詢 snapshot 自己 diff(改用 guard 撞牆 + poll/wait)
+**Operation feedback**（與版本 guard 分開）:
+GUI 端 EventBus 與 remote wire push 留給其他 consumers；measure MCP 不訂閱、不排隊、不 piggyback event 或 diagnostic。agent 在 `wait(op)` 的 `operation.await` request/reply 中取得終態、錯誤與 Send & Stop feedback；資源改動由 guard 回報 stale 資源，再從相應 getter 重讀。
+_Avoid_: 把版本號塞進 event payload、把通知與版本 guard 綁在一起、以 event 或無關的 `status()` 查詢更新未讀版本。
 
 **Off-main handler**（`MethodSpec.off_main_thread`）:
 標記一個 wire method 的 handler **不 marshal 上 Qt main thread**,而在 IO worker thread 直接執行。唯一用途:blocking 等待型 handler（`operation.await`）—— 若上主線,handler 用 `evt.wait()` 阻塞會卡住 main thread event loop,而它等的 worker terminal signal 正需要 event loop 處理 → **死鎖到 timeout**。移出主線後 event loop 恢復轉動,`threading.Event` 跨 thread 喚醒正常。

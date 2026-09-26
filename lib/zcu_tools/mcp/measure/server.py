@@ -44,7 +44,7 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
 from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 
-MCP_VERSION = 80
+MCP_VERSION = 81
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect (no instrument is connected by
@@ -62,8 +62,9 @@ error reasons. Mutations are never automatically retried after disconnect,
 timeout, stale_version or busy; read the current state before choosing to retry.
 Use status for the current GUI session and all live operations, wait(op) for a
 bounded outcome, and cancel(op) only when the domain operation supports it.
-A failed operation is a wait result, not a failed tool call. The server drops
-its socket on exit but does not close the GUI. There are no
+wait(op) reports a failed operation as data; cancel(op) on a failed operation
+raises operation_failed instead of reporting success. The server drops its
+socket on exit but does not close the GUI. There are no
 subscribed MCP events: read snapshots or wait on operation handles instead.
 Follow the run-measure-gui skill for hardware safety and measurement workflow.
 """

@@ -61,7 +61,7 @@ class OperationControlPort(Protocol):
     def cancel_operation(
         self, operation_id: int
     ) -> Literal["cancelling", "cancelled", "finished"]:
-        """Request cancellation by op through its owning domain's existing hook."""
+        """Request cancellation, or report an already failed outcome as an error."""
         ...
 
 
@@ -95,6 +95,11 @@ class OperationControlFacet:
         """Address the existing domain hook by its live handle on the owner thread."""
         outcome = self._handles.known_outcome(operation_id)
         if outcome is not None:
+            if outcome.status == "failed":
+                raise FailedPreconditionError(
+                    f"operation {operation_id} failed: {outcome.error or 'unknown failure'}",
+                    reason_code="operation_failed",
+                )
             return "cancelled" if outcome.status == "cancelled" else "finished"
         if not self._handles.has_cancel_hook(operation_id):
             raise FailedPreconditionError(
