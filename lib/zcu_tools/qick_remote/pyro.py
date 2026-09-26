@@ -13,8 +13,6 @@ import Pyro4
 import Pyro4.naming
 from qick import QickConfig
 
-from zcu_tools.bitfiles import get_bitfile
-
 
 def setup_pyro4() -> None:
     # use dill instead of pickle
@@ -60,6 +58,9 @@ def start_server(
     port: int, ns_port: int, version: Literal["v1", "v2"] = "v1", iface="eth0", **kwargs
 ) -> None:
     from qick import QickSoc
+
+    # Board-only import: the board entry point must put the repo root on sys.path.
+    from bitfiles import get_bitfile
 
     print("looking for nameserver . . .")
     ns = Pyro4.locateNS(host="0.0.0.0", port=ns_port)

@@ -2,8 +2,10 @@
 """This file starts a pyro nameserver and the proxying server."""
 
 import argparse
+import sys
 import threading
 import time
+from pathlib import Path
 
 ############
 # parse command line arguments
@@ -21,7 +23,9 @@ args = parser.parse_args()
 # start the nameserver process
 
 
-from zcu_tools.remote.pyro import start_nameserver, start_server  # noqa
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from zcu_tools.qick_remote.pyro import start_nameserver, start_server  # noqa
 
 ns_t = threading.Thread(
     target=start_nameserver, kwargs=dict(ns_port=args.ns_port), daemon=True

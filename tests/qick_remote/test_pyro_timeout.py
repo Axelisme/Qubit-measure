@@ -18,7 +18,7 @@ import pytest
 
 Pyro4 = pytest.importorskip("Pyro4")
 
-from zcu_tools.remote.pyro import make_soc_proxy
+from zcu_tools.qick_remote.pyro import make_soc_proxy
 
 
 def test_make_soc_proxy_sets_commtimeout_before_locate_ns(monkeypatch):
@@ -79,7 +79,7 @@ def test_make_soc_proxy_restores_timeout_after_success(monkeypatch):
 
     monkeypatch.setattr(Pyro4, "locateNS", fake_locate_ns)
     monkeypatch.setattr(Pyro4, "Proxy", FakeProxy)
-    monkeypatch.setattr("zcu_tools.remote.pyro.QickConfig", FakeQickConfig)
+    monkeypatch.setattr("zcu_tools.qick_remote.pyro.QickConfig", FakeQickConfig)
 
     # Set a known global state before the call.
     monkeypatch.setattr(Pyro4.config, "COMMTIMEOUT", initial_timeout)
