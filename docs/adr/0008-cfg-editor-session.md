@@ -13,7 +13,7 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 
 - **(a) agent 改 cfg 必對 user 即時可見（WYSIWYG）**——不能背著 user 改。
 - **(b) widget 未開時 agent 也要能編輯**——writeback 草稿 / 未開的 tab，沒有 widget 但 agent 要能調。
-- **(c) 表達 EvalValue 與 ref 切換**：欄位值可引用 MetaDict（`freq = r_f − 0.1`，commit 才 eval）；module/waveform 含 ModuleRef/WaveformRef，切換會**動態改變後續可填欄位**，agent 必須「切 ref → 看新欄位 → 再填」漸進進行（無法一次送整份 raw）——這是引入**有狀態 session** 的不可替代理由。
+- **(c) 表達 EvalValue 與 ref 切換**：欄位值可引用 MetaDict，例如 `freq = r_f - 0.1`，binding 解析並保存 expr/resolved/error；module/waveform 使用 reference 節點，切換會**動態改變後續可填欄位**，agent 必須「切 ref → 看新欄位 → 再填」漸進進行（無法一次送整份 raw）——這是引入**有狀態 session** 的不可替代理由。
 
 ## 決策
 
@@ -21,13 +21,13 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 
 - **attach/detach**：`CfgFormWidget.attach(draft)` 接一個 service-owned `CfgDraft`、從 `draft.root` build widget tree；`detach()` disconnect + `deleteLater`，**不 close draft**。widget 的 Qt 重畫經 draft/field `on_change` 取得。
 - **gc 生命週期**：`open(..., gc)`。`gc=True`（agent 自開 ml-entry）受 LRU + 斷線回收；`gc=False`（UI-owned：tab / inspect / writeback）只由 owner 顯式 `teardown`。tab cfg / writeback 草稿種子用 `open_seeded`（無 item_kind → teardown-only、拒絕 commit）。
-- **draft / committed**：session = draft，`State.cfg_schema` = committed（run/save/persist 讀的 SSOT）。tab session 改動經 auto-commit（widget `on_change` → `schema_changed` → `update_tab_cfg`）即時同步進 State；run/save 前一道**強制 commit = valid 驗證閘**（draft invalid → fail-fast）。
+- **draft / tab snapshot**：session 持有可編輯的 `CfgDraft`，State 保存該 tab 的完整當前 snapshot。Active draft 的變更由 CfgEditorService 同步發布，composition root 將 tab owner 的 snapshot 寫入 State 並推進整份 cfg revision。Invalid raw、解析結果與錯誤同樣發布，不等待 Widget timer；Widget 在 measure tab 只輸入與呈現，不再經 `schema_changed` 回寫 cfg。Prepared／retired drafts 不發布，inspect／writeback owners 不寫入 tab State。發布不等於 ml/md commit，也不表示 cfg 已通過執行驗證。
 - **commit 只交 CfgSchema 快照**：`CfgEditorSession.commit` 不 lower、不 register，只交出**未-lower 的 `CfgSchema`**；`CfgEditorService.commit(editor_id, name)` 把它交給 ContextService 經 write port 落地（lowering + register 歸 ContextService，見 [[0006]]）。
 - **external refresh 歸 service**（[[0004]] Reaction）：service 訂閱 `MD/ML/CONTEXT/DEVICE_CHANGED`，明確映射到每個 draft 的 `refresh_expressions()`、`refresh_references()` 與 `refresh_options(source_id)`。職責跟著 draft 所有權從 widget 移到 service。
-- **eval value** 以 tagged 形式 `{"__kind":"eval","expr":...}` 上 wire；**ref 切換漸進**：`editor.set_field` 回「以被改 path 為根的子樹 paths」+ valid，讓 agent 探索切換後新浮現的結構；commit 失敗保留 session。
+- **完整 observation**：`CfgDraft.observe()` 回傳 detached、含 Literal／readonly 的 nominal tree，保留 raw、validity、resolved 與 cached reference metadata；GUI 與 agent 讀取同一份 model 狀態，remote 只做 typed projection，不現場 resolve。讀取要建立 cfg observation baseline，必須成功讀取無 prefix 的完整 cfg；prefix 與裸版本不代表完整內容已見。Persistence 的 expression tag 只存 expr，不能代替 observation 或執行快照。Ref 切換後 agent 重讀新結構；commit 失敗保留 session。
 - **失效訪問**：任何原因消失的 editor_id（LRU / tab close / commit / discard / 斷線）一律回 `unknown editor session`（INVALID_PARAMS），**不帶 reason 區分**（修復動作都是重開）。
-- **editor 專屬變更流**（`editor_changed{editor_id, paths}` / `editor_closed{editor_id, reason}`，**不走全域 EventBus**）：機制在 RPC/GUI 端完整保留（GUI 內部用）；但 **agent 不 subscribe**（[[0002]] Phase 120c）——agent 改為「下次 `editor.set_field` 撞 `unknown editor session` 才知 session 沒了」，與樂觀模型一致（撞牆→重開）。
-- **tab cfg 讀/寫/發現全收斂到 session model**（[[0013]] F11）：`tab.list_paths`（讀）、`editor.set_field`（寫）、tab snapshot 暴露的 `editor_id`（發現）三者都對該 tab 的 editor session model，**agent 與人同一棵**。原 `cfg.set_field` RPC / `get_tab_live_model_root`（戳 View 的另一棵 model）已刪。
+- **editor 專屬變更流**（`editor_changed{editor_id, paths}` / `editor_closed{editor_id, reason}`，**不走全域 EventBus**）：service 保留內部變更流；measure MCP 使用 request/reply，**agent 不 subscribe**——agent 改為「下次 `editor.set_field` 撞 `unknown editor session` 才知 session 沒了」，與樂觀模型一致（撞牆→重開）。
+- **tab cfg 讀/寫/發現全收斂到 session model**（[[0013]] F11）：`tab.get_cfg`／`editor.get` 的完整 observation、`editor.set_field` 的 mutation、tab snapshot 暴露的 `editor_id` 都對該 tab 的 editor session model，**agent 與人同一棵**。原 `cfg.set_field` RPC / `get_tab_live_model_root`（戳 View 的另一棵 model）已刪。
 
 ## writeback opaque draft（建立在 service-owned 上）
 
