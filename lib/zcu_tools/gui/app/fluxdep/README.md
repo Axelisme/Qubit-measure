@@ -1,4 +1,4 @@
-**Last updated:** 2026-07-12 — owner-thread runtime adapters
+**Last updated:** 2026-09-27 — owner-thread runtime adapters
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -110,7 +110,7 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   matplotlib backend，建立 `QApplication` 後處理 `ensure_host()` /
   `aboutToQuit→set_shutting_down(True)` / adapter start-stop。`app.py` 的
   behavior 只做 controller/window/adapter wiring；process entrypoint 只在
-  `script/run_fluxdep_gui.py`。
+  `scripts/run_fluxdep_gui.py`。
 - **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
   `enter=` CM 組合 `routing_scope(diag_container)` + `use_pbar_factory(factory)`，由 runner
   在 worker 執行緒**於 thunk 內**進入（ContextVar 在 QThreadPool worker 裡看不到主執行緒的
@@ -239,7 +239,7 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
 
 ## Entry Points
 
-- `script/run_fluxdep_gui.py` — 啟動（`--control-port` 開 read-only RPC 給 agent/MCP）。
+- `scripts/run_fluxdep_gui.py` — 啟動（`--control-port` 開 read-only RPC 給 agent/MCP）。
 - `.mcp.json` 註冊 `fluxdep-gui` MCP server；skill `run-fluxdep-gui`
   (`.claude/skills/`，三副本同步 .agent/.codex；`sync_skills.sh` 只同步 SKILL.md) 只含
   SKILL.md。GUI 不提供操作 RPC；socket 層驗證限於 launch + read-only state。

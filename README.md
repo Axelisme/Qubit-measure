@@ -1,6 +1,6 @@
 # ZCU-Tools
 
-**Last updated:** 2026-09-26 — canonical experiment data
+**Last updated:** 2026-09-27 — canonical experiment data
 
 ZCU-Tools 是 ZCU216/QICK 平台上的量子量測工具集。工作站端負責 GUI、
 Notebook、MCP automation、資料分析與模擬；ZCU 板端只跑 Pyro server，讓工作站
@@ -10,7 +10,7 @@ Notebook、MCP automation、資料分析與模擬；ZCU 板端只跑 Pyro server
 
 - Python 3.13（repo 預設）：GUI、量測 runtime、MCP bridge，使用 NumPy 2.x。
 - Python 3.12：`design` / `quantum-metal` / Ansys stack，使用 NumPy 1.26.x。
-- ZCU 板端：PYNQ Python 3.8，只使用 `script/start_server.py`；這個腳本維持
+- ZCU 板端：PYNQ Python 3.8，只使用 `scripts/start_server.py`；這個腳本維持
   Python 3.8 相容。
 
 ## Install
@@ -25,20 +25,20 @@ uv sync --python 3.12 --extra all  # includes design stack when needed
 `qick` 由 `client` extra 從 upstream Git 安裝。板端若不使用同一個 uv 環境，需在
 板上另行安裝或放置 QICK。
 
-## Main Entry Points
+## Main entry points
+
+工作站使用該 worktree 的 Python：
 
 ```bash
-.venv/bin/python script/start_server.py --port <port> --soc v2
-.venv/bin/python script/run_measure_gui.py
-.venv/bin/python script/run_fluxdep_gui.py
-.venv/bin/python script/run_dispersive_gui.py
-.venv/bin/python script/run_autofluxdep_gui.py
-.venv/bin/python script/generate_fluxonium_sample.py --help
+uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
+uv run --directory <worktree> --no-sync -- python scripts/run_fluxdep_gui.py
+uv run --directory <worktree> --no-sync -- python scripts/generate_fluxonium_sample.py --help
 ```
 
-`run_measure_gui.py` 是主要量測 GUI；`fluxdep` / `dispersive` GUI 負責
-Fluxonium 參數與讀出腔擬合；`autofluxdep` GUI 負責自動 flux sweep workflow。
-Notebook 仍可直接呼叫 `zcu_tools.experiment.v2` 與 `zcu_tools.notebook` helper。
+板端使用獨立的 PYNQ Python 3.8 環境啟動 `scripts/start_server.py` 或
+`scripts/start_server.ipynb`，不使用工作站的環境。GUI、資料作業與模擬資料庫的
+其餘入口、輸入輸出及副作用見 [scripts/README.md](scripts/README.md)；品質工具的
+執行方式見 [tools/README.md](tools/README.md)。
 
 ## Package Map
 

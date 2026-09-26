@@ -291,7 +291,7 @@ def scope_for(path: str) -> str:
     return {
         "lib": "production",
         "tests": "tests",
-        "script": "scripts",
+        "scripts": "scripts",
         "tools": "tools",
     }.get(path.split("/", 1)[0], "other")
 

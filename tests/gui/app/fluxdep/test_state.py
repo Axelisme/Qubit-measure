@@ -210,7 +210,7 @@ def test_project_info_root_dir_anchors_derived_defaults():
 
     # root_dir (the repo root, injected by the entry script) anchors the derived
     # defaults there instead of leaving them relative to cwd — the .bat-launcher
-    # fix: a launcher that cd's into script/ must not scope defaults under script/.
+    # fix: a launcher that cd's into scripts/ must not scope defaults under scripts/.
     root = os.path.join(os.sep, "repo")
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1", root_dir=root)
     assert p.result_dir == os.path.join(root, "result", "Q5_2D", "Q1")

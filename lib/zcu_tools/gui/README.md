@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-02 — universal cfg tree and shared sweep range/sampling presentation
+**Last updated:** 2026-09-27 — universal cfg tree and shared sweep range/sampling presentation
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -96,7 +96,7 @@ exit-code handling. Apps expose a fixed `GuiRuntimeBehavior.spec` class variable
 for static process contract and implement `assemble(control)` for app-local
 controller/window/adapter wiring. Launch-time CLI values stay in
 `GuiLaunchOptions` and behavior constructor arguments. App modules expose
-behavior classes; standalone `script/run_*_gui.py` launchers are the process
+behavior classes; standalone `scripts/run_*_gui.py` launchers are the process
 entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
@@ -276,7 +276,7 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All four `script/run_*_gui.py` launchers and
+GUI entry point configures logging. All four `scripts/run_*_gui.py` launchers and
 the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
 rolling their own handler set.
 

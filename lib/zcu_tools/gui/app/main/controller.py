@@ -241,8 +241,8 @@ class Controller(SessionControllerMixin):
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
         # under. The entry script injects the repo root (Path(__file__).parent...)
-        # so a .bat launcher that cd's into script/ does not scope defaults under
-        # script/. None falls back to cwd — fine for tests / direct `python -m`
+        # so a .bat launcher that cd's into scripts/ does not scope defaults under
+        # scripts/. None falls back to cwd — fine for tests / direct `python -m`
         # runs from the repo root, where cwd already IS the repo root.
         import os
 
@@ -1266,7 +1266,7 @@ class Controller(SessionControllerMixin):
         """The base directory default result/database paths are anchored under
         (the repo root, injected by the entry script). Setup dialog + startup RPC
         derive defaults through ``derive_project_paths`` against this, NOT cwd, so
-        a .bat launcher that cd's into script/ still scopes under the repo root."""
+        a .bat launcher that cd's into scripts/ still scopes under the repo root."""
         return self._project_root
 
     # ------------------------------------------------------------------

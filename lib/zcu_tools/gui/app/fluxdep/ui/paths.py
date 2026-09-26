@@ -18,8 +18,8 @@ from zcu_tools.gui.project import ProjectInfo, nearest_existing
 # database (fluxonium*.h5), a shared resource unrelated to a chip/qubit, so it is
 # NOT derived from the project (cf. the project's database_path, the *raw
 # spectrum* root). A repo-relative fragment: callers join it under the injected
-# repo root (``_sim_db_dir(root)``) so a .bat launcher that cd's into script/
-# still finds it under the repo, not under script/Database/simulation.
+# repo root (``_sim_db_dir(root)``) so a .bat launcher that cd's into scripts/
+# still finds it under the repo, not under scripts/Database/simulation.
 _SIM_DB_REL = os.path.join("Database", "simulation")
 
 

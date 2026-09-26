@@ -17,7 +17,7 @@ from pathlib import Path
 
 from zcu_tools.gui.launcher import add_runtime_cli_options, runtime_options_from_args
 
-# Repo root: this script lives in script/, so its parent is the root.
+# Repo root: this script lives in scripts/, so its parent is the root.
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
@@ -82,9 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     # Anchor default result/database paths at the repo root (this script lives in
-    # script/, so its parent is the repo root) rather than cwd — a .bat launcher
-    # does `cd /d "%~dp0"` into script/, which would otherwise scope defaults
-    # under script/.
+    # scripts/, so its parent is the repo root) rather than cwd — a .bat launcher
+    # does `cd /d "%~dp0"` into scripts/, which would otherwise scope defaults
+    # under scripts/.
     project_root = str(PROJECT_ROOT)
 
     from zcu_tools.gui.app.main.app import MeasureGuiBehavior
