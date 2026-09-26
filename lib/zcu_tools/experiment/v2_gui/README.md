@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-26 — canonical load and flux interactive adapters
+**Last updated:** 2026-09-27 — canonical load and flux interactive adapters
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -24,7 +24,7 @@ experiment/v2_gui/
 
 `catalog_loader` 由 launcher 注入 GUI framework，僅支援 standalone source deployment。重載
 `experiment.v2`、concrete adapters 與 adapter registry，包含 package exports；保留
-`v2.runner`、`v2.utils`、adapter `base`／`_support`、role factories 與 framework identity。
+`v2.runtime`、`v2.utils`、adapter `base`／`_support`、role factories 與 framework identity。
 Preflight 發現固定專案 source 變更，或受控 import 期間發現新增固定 dependency 時要求重啟；
 新增未被載入的固定檔案不阻擋。這些檢查不涵蓋所有延後或動態載入的依賴。
 新增 adapter 仍須加入 `registry.py`，不是自動掃描 class 註冊。

@@ -12,7 +12,7 @@ from pydantic import Field
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import (
+from zcu_tools.experiment.v2.runtime import (
     MeasurementTask,
     MultiMeasurementExecutor,
     Schedule,

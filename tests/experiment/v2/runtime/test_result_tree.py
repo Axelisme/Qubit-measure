@@ -6,7 +6,7 @@ from typing import Any, TypeAlias, cast
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.experiment.v2.runner import ResultTree, ResultUpdateEvent, Schedule
+from zcu_tools.experiment.v2.runtime import ResultTree, ResultUpdateEvent, Schedule
 from zcu_tools.experiment.v2.utils import Result
 
 LeafResult: TypeAlias = dict[str, NDArray[np.float64]]
@@ -159,7 +159,7 @@ def test_result_tree_invalidates_only_updated_measurement_cache() -> None:
 
 
 def test_signal_buffer_flush_keeps_public_update_shape() -> None:
-    from zcu_tools.experiment.v2.runner import SignalBuffer
+    from zcu_tools.experiment.v2.runtime import SignalBuffer
 
     updates: list[np.ndarray] = []
     buffer = SignalBuffer(

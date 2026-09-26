@@ -5,7 +5,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.device import device_setup_cancel_scope
-from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
+from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,

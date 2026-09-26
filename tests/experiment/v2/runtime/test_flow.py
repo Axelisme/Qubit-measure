@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from pydantic import ConfigDict
 from zcu_tools.experiment import ExpCfgModel
-from zcu_tools.experiment.v2.runner import (
+from zcu_tools.experiment.v2.runtime import (
     Schedule,
     ScheduleOutcomeError,
     ScheduleStep,

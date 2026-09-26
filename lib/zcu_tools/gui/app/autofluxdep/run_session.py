@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
-from zcu_tools.experiment.v2.runner import StopSignal, schedule_stop_scope
+from zcu_tools.experiment.v2.runtime import StopSignal, schedule_stop_scope
 from zcu_tools.gui.app.autofluxdep.cfg import RunCfgSnapshot
 from zcu_tools.gui.app.autofluxdep.derivation import SmoothingService
 from zcu_tools.gui.app.autofluxdep.nodes.builder import PlacedNode

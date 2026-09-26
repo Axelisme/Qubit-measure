@@ -26,7 +26,7 @@ from numpy.typing import NDArray
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import ScheduleOutcome
+from zcu_tools.experiment.v2.runtime import ScheduleOutcome
 from zcu_tools.experiment.v2.utils import estimate_snr
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.profiling import PerfStats, elapsed_ms, perf_now
