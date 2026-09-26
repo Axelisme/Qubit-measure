@@ -1,5 +1,7 @@
 # `tests/` — test suite
 
+**Last updated:** 2026-09-27 — entry routing; datafile, resources, cfg_editing test owners
+
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
 ## 放置新增測試
