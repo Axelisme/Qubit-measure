@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import save_labber_data
 from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
-from zcu_tools.utils.datasaver import save_labber_data
 
 
 @pytest.fixture(autouse=True, name="_drain_qt_events")

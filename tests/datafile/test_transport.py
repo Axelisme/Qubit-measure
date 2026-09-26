@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from zcu_tools.utils.datasaver.transport import download_from_server, upload_to_server
+from zcu_tools.datafile.transport import download_from_server, upload_to_server
 
 
 @dataclass

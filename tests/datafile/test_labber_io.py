@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.utils.datasaver import (
+from zcu_tools.datafile import (
     Axis,
     LabberData,
     load_labber_data,

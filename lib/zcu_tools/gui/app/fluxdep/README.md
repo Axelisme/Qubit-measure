@@ -83,7 +83,7 @@ view 只暴露查詢，不暴露 mutation。
 ## Key Design Decisions
 
 ### 領域邊界：不碰 experiment.v2
-LoadService 用底層 `load_data`(utils/datasaver) + `format_rawdata`(persistance)，
+LoadService 用底層 `load_data`(datafile) + `format_rawdata`(persistance)，
 **不 import `experiment.v2`**（避免把 measure 實驗層拖進來）。OneTone/TwoTone
 載入完全相同；`spec_type` 只是 metadata，下游選點工具才分支。
 

@@ -144,7 +144,7 @@ class ResultScopeManager:
         return self._project_root / "result"
 
     def derive_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
-        from zcu_tools.utils.datasaver import get_datafolder_path
+        from zcu_tools.datafile import get_datafolder_path
 
         result_dir = self.result_root / chip_name / qub_name
         database_path = get_datafolder_path(

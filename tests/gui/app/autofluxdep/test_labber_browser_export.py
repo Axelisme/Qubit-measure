@@ -9,6 +9,7 @@ from typing import Any
 import h5py
 import numpy as np
 import pytest
+from zcu_tools.datafile import load_labber_data
 from zcu_tools.gui.app.autofluxdep.experiments._support.result import (
     QubitFreqResult,
     Sweep1DResult,
@@ -26,7 +27,6 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_manifest,
 )
 from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
-from zcu_tools.utils.datasaver import load_labber_data
 
 from ._helpers import make_builder, place
 

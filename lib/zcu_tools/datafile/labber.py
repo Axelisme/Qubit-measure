@@ -13,7 +13,7 @@ Everything is described by ``(name, unit, values)`` triples.  Axes are listed
 **inner axis first** (the inner axis is the last axis of the data array)::
 
     import numpy as np
-    from zcu_tools.utils.datasaver import save_labber_data, load_labber_data
+    from zcu_tools.datafile import save_labber_data, load_labber_data
 
     freq  = np.linspace(4e9, 5e9, 201)
     power = np.linspace(-30, 0, 11)
@@ -48,7 +48,7 @@ Everything is described by ``(name, unit, values)`` triples.  Axes are listed
 :func:`save_labber_data` / :func:`load_labber_data` are thin wrappers around the
 :class:`LabberData` model, which can be used directly::
 
-    from zcu_tools.utils.datasaver import Axis, LabberData
+    from zcu_tools.datafile import Axis, LabberData
 
     ld = LabberData(("S21", "", z2d),
                     axes=[("Frequency","Hz",freq), ("Power","dBm",power)])
