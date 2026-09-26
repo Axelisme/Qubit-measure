@@ -145,4 +145,5 @@ WIRE_VERSION = 63
 # v90: expose explicit context, tab, and SoC guard observations in the live catalog.
 # v91: cfg reads project CfgDraft observations without resolving live sources.
 # v92: return bounded errors for unencodable replies; disconnect on failed delivery.
-GUI_VERSION = 94
+# v95: bound per-client outbound bytes, including the in-flight frame.
+GUI_VERSION = 95

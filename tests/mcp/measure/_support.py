@@ -37,7 +37,7 @@ class WireTransport:
         self,
         deliver_reply: Callable[[dict[str, Any]], None],
         deliver_event: Callable[[dict[str, Any]], None],
-        on_closed: Callable[[], None],
+        on_closed: Callable[[Exception | None], None],
     ) -> None:
         self.deliver_reply = deliver_reply
         self.deliver_event = deliver_event

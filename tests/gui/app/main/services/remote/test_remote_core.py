@@ -86,8 +86,8 @@ class _Fixture:
         if not self.registry.has("fake"):
             self.registry.register("fake", FakeAdapter)
         self.view = _make_view()
-        io_manager = IOManager()
-        io_manager._em = MagicMock(current_label="ctx001")
+        io_manager = MagicMock(spec=IOManager, has_project=True, has_context=True)
+        io_manager.get_active_label.return_value = "ctx001"
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,
@@ -122,11 +122,11 @@ def fx(qapp):
     f.stop()
 
 
-def _send(sock: socket.socket, obj: dict) -> None:
+def _send(sock: socket.socket, obj: dict[str, Any]) -> None:
     sock.sendall((json.dumps(obj) + "\n").encode("utf-8"))
 
 
-def _recv_response(sock: socket.socket, timeout_s: float = 3.0) -> dict:
+def _recv_response(sock: socket.socket, timeout_s: float = 3.0) -> dict[str, Any]:
     """Wait for one NDJSON response, pumping the Qt event loop in between."""
     app = QCoreApplication.instance()
     assert app is not None
@@ -139,7 +139,7 @@ def _recv_response(sock: socket.socket, timeout_s: float = 3.0) -> dict:
             if chunk:
                 buf.extend(chunk)
                 if b"\n" in buf:
-                    line, _, rest = bytes(buf).partition(b"\n")
+                    line, _, _ = bytes(buf).partition(b"\n")
                     return json.loads(line.decode("utf-8"))
                     # rest discarded — single-response helper
             else:

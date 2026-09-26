@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-26，8 MiB RPC message limit
+**Last updated:** 2026-09-26，bounded RPC send/receive and backlog
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -21,6 +21,8 @@ Shared framing 的 request/response 上限為 8 MiB UTF-8 bytes，不含換行�
 仍採單則 NDJSON 訊息，不分批；完整 context read 必須成功才建立 guard baseline。
 Per-client writer 在 socket backpressure 時保存尚未送出的 byte cursor，等待可寫後接續；
 不重送整則訊息，停止或斷線會退出等待並釋放連線。
+每個 client 的待送預算為16 MiB，包含 queue 與 writer 持有的完整 encoded frame；
+完成交付才釋放預算，超出則中止該連線，IO owner 清空 queue 並釋放 app context。
 Shared endpoint 無法編碼 RPC 回覆時送有界的 `internal` error，reason 為
 `response_encoding_failed`。Handler 可能已執行，caller 不可因回覆失敗而盲目重送 mutation。
 若 correlated fallback 仍無法編碼，或 reply queue 拒收，就中止該連線，交 IO owner

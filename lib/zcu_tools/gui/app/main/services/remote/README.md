@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26，8 MiB RPC message limit，GUI 94 / WIRE 63
+**Last updated:** 2026-09-26，bounded RPC backlog，GUI 95 / WIRE 63
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -50,6 +50,9 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
   `internal` error with reason `response_encoding_failed`. The handler may have
   executed, so callers must inspect state before retrying a mutation. If the
   fallback cannot fit or the reply queue rejects delivery, the connection closes.
+  Each client has a 16 MiB encoded-byte budget including its in-flight frame;
+  exceeding it closes that client and releases its backlog. MCP rejects oversized
+  requests before sending and closes on oversized incoming frames with an explicit error.
 - A failed full read does not advance the MCP observation baseline. Large context
   export is not a framing exception or an implicit partial read.
 - Error codes are closed and typed in `gui.remote.errors`.
@@ -122,8 +125,8 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 63`, `GUI_VERSION = 94`, and
-`MCP_VERSION = 83` (defined in `zcu_tools.mcp.measure.server`). GUI 93 removes
+Current measure-gui values are `WIRE_VERSION = 63`, `GUI_VERSION = 95`, and
+`MCP_VERSION = 84` (defined in `zcu_tools.mcp.measure.server`). GUI 93 removes
 Run's context-content dependency after freezing cfg and device inputs; tab cfg,
 tab existence, SoC, devices and hardware exclusion remain protected. WIRE 63
 carries complete cached cfg observations; GUI 92 bounds response encoding failures.

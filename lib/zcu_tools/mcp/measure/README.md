@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-26，完整 cached cfg observation
+**Last updated:** 2026-09-26，MCP framing failure contract
 
 # `zcu_tools/mcp/measure/`
 
@@ -11,6 +11,13 @@
 - 資源版本由 GUI owner bump。MCP 在完整 read 前取保守版本，成功後只更新 catalog 指定的資源；`prefix` 局部讀取不揭露整份 cfg，status 的 orientation reads 不吸收其他資源。GUI catalog 宣告哪些寫入回傳 owner-thread 前後版本；MCP 只更新該次變更且寫入前版本符合既有觀察的資源，不吸收別的 GUI 編輯。新建 `tab.new` 回執只確立新 tab 的存在版本，不把未讀 cfg 或其他資源當成已觀察。stale 拒絕不刷新 baseline，需重讀資源後才由呼叫者決定是否重試；斷線或 transport timeout 不自動重送。
 - 接手既有或重啟後的 GUI 時，明確呼叫 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)` 和 `context.snapshot`，分別重讀 tab 存在、完整 SoC cfg、目前 active label 與所有可序列化 md/ml cfg。`context.snapshot` 可能回傳大型敏感資料，遇無法序列化的值會失敗且不刷新版本；摘要、局部 getter 與裸 `resources.versions` 都不能替代完整讀取。
 - `bridge` 只管 socket/GUI subprocess。`connect(token=...)` 使用現有 GUI control-token 認證；session 留住本次憑證供斷線後重新握手，顯式切換 port 不沿用前一 GUI 的 token。未授權與 wire 不相容分別回報；MCP 工具記錄遮蔽 token。`connect(launch=...)` 對已由此 bridge 啟動且仍活著的 GUI 不會在另一個空 port 假裝再次啟動；MCP 清理只斷線，不殺 GUI。所有硬體 gate、取消與 operation 結果都仍歸 GUI owners。
+
+## 傳輸上限
+
+Shared SocketTransport 送出前與接收逐幀使用 shared framing 的8 MiB UTF-8 bytes上限，
+不含換行，不分批。超限request在送出前拒絕，既有連線仍可使用；超限response會關閉
+該連線並使pending RPC收到明確的message_too_large錯誤，不能假定mutation未執行。
+兩者都不自動重送；重新連線仍走既有catalog與observation重建流程。
 
 ## Cfg 讀取
 

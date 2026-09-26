@@ -51,8 +51,10 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
+from zcu_tools.gui.remote.errors import RemoteError
+from zcu_tools.gui.remote.framing import MAX_LINE_BYTES, encode_line
 from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
 
 logger = logging.getLogger(__name__)
@@ -176,10 +178,24 @@ class GuiTransportTimeoutError(TimeoutError):
         )
 
 
+class GuiMessageTooLargeError(ValueError):
+    """A request was not sent, or an oversized incoming frame closed the socket."""
+
+    def __init__(self, direction: Literal["request", "response"]) -> None:
+        self.direction = direction
+        self.reason = "message_too_large"
+        detail = (
+            "The request was not sent."
+            if direction == "request"
+            else "The request may have executed; inspect state before retrying."
+        )
+        super().__init__(f"GUI {direction} exceeds {MAX_LINE_BYTES} bytes. {detail}")
+
+
 # A line arrived from the GUI: route it (reply keyed by id / event push).
 DeliverFn = Callable[[dict[str, Any]], None]
-# The transport closed (real socket dropped): wake any pending RPC waiters.
-OnClosedFn = Callable[[], None]
+# A terminal transport failure wakes pending RPCs with its cause, without replay.
+OnClosedFn = Callable[[Exception | None], None]
 
 
 class Transport(Protocol):
@@ -265,7 +281,10 @@ class SocketTransport:
         self._reader_thread.start()
 
     def send_line(self, payload: dict[str, Any]) -> None:
-        data = (json.dumps(payload) + "\n").encode("utf-8")
+        try:
+            data = encode_line(payload)
+        except RemoteError as exc:
+            raise GuiMessageTooLargeError("request") from exc
         with self._sock_lock:
             if self._sock is None:
                 raise RuntimeError("transport not open")
@@ -288,7 +307,8 @@ class SocketTransport:
         """Sole reader of the GUI socket; routes replies, hands events to hook."""
         buf = bytearray()
         sock: socket.socket | None = None
-        while not self._reader_stop.is_set():
+        failure: Exception | None = None
+        while not self._reader_stop.is_set() and failure is None:
             sock = self._sock
             if sock is None:
                 return
@@ -303,6 +323,10 @@ class SocketTransport:
             buf.extend(chunk)
             while True:
                 nl = buf.find(b"\n")
+                frame_size = len(buf) if nl < 0 else nl
+                if frame_size > MAX_LINE_BYTES:
+                    failure = GuiMessageTooLargeError("response")
+                    break
                 if nl < 0:
                     break
                 line = bytes(buf[:nl])
@@ -318,7 +342,7 @@ class SocketTransport:
             self._sock = None
         sock.close()
         if self._on_closed is not None:
-            self._on_closed()
+            self._on_closed(failure)
 
     def _route_line(self, line: bytes) -> None:
         try:
@@ -355,7 +379,7 @@ class McpBridge:
         self._rid_cond = threading.Condition()
         self._rid_counter = 0
         self._pending: dict[str, dict[str, Any]] = {}
-        self._proc: subprocess.Popen | None = None
+        self._proc: subprocess.Popen[bytes] | None = None
         # The wire transport. None until connect()/launch() builds a real
         # SocketTransport, or a test injects a fake via set_transport / the ctor.
         self._transport: Transport | None = None
@@ -373,7 +397,7 @@ class McpBridge:
             transport.attach(
                 self._deliver_reply,
                 self._deliver_event,
-                lambda: self._on_socket_closed(transport),
+                lambda failure: self._on_socket_closed(transport, failure),
             )
 
     def _deliver_event(self, msg: dict[str, Any]) -> None:
@@ -381,13 +405,17 @@ class McpBridge:
         if self._on_event is not None:
             self._on_event(msg)
 
-    def _on_socket_closed(self, transport: Transport) -> None:
+    def _on_socket_closed(
+        self, transport: Transport, failure: Exception | None
+    ) -> None:
         # Ignore late callbacks from a retired socket after a reconnect.
         with self._rid_cond:
             if self._transport is not transport:
                 return
             for holder in self._pending.values():
-                holder["error"] = "GUI socket closed unexpectedly."
+                holder["error"] = failure or ConnectionError(
+                    "GUI socket closed unexpectedly."
+                )
                 holder["done"] = True
             self._pending.clear()
             self._rid_cond.notify_all()
@@ -464,6 +492,11 @@ class McpBridge:
             self._pending[rid] = holder
         try:
             transport.send_line({"id": rid, "method": method, "params": params})
+        except GuiMessageTooLargeError:
+            # Local preflight failure: no bytes were sent, so this connection is safe.
+            with self._rid_cond:
+                self._pending.pop(rid, None)
+            raise
         except Exception:
             with self._rid_cond:
                 self._pending.pop(rid, None)
@@ -484,7 +517,7 @@ class McpBridge:
             self._close_timed_out_transport(transport)
             raise GuiTransportTimeoutError(method, timeout_seconds)
         if "error" in holder and "message" not in holder:
-            raise ConnectionError(holder["error"])
+            raise holder["error"]
         return holder["message"]
 
     def wire_version_note(self) -> str:
@@ -572,7 +605,7 @@ class McpBridge:
         port: int,
         token: str | None = None,
         auto_connect: bool = True,
-        extra_args: list | None = None,
+        extra_args: list[str] | None = None,
     ) -> str:
         """Fork the GUI subprocess on ``port``, wait until ready, maybe connect.
 
@@ -678,14 +711,14 @@ class McpBridge:
         proc = self._proc
         return proc is not None and proc.poll() is None
 
-    def _pid_for_stop(self) -> tuple[int | None, subprocess.Popen | None]:
+    def _pid_for_stop(self) -> tuple[int | None, subprocess.Popen[bytes] | None]:
         proc = self._proc
         if proc is not None and proc.poll() is None:
             return proc.pid, proc
         return self._read_pid_file(), None
 
     def _await_exit(
-        self, pid: int, proc: subprocess.Popen | None, timeout: float
+        self, pid: int, proc: subprocess.Popen[bytes] | None, timeout: float
     ) -> bool:
         if proc is not None:
             try:
@@ -1057,6 +1090,7 @@ def run_stdio_loop(
 
 __all__ = [
     "GuiAuthenticationError",
+    "GuiMessageTooLargeError",
     "GuiTransportTimeoutError",
     "McpBridge",
     "MCPBridgeConfig",

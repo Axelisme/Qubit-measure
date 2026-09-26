@@ -155,6 +155,39 @@ def test_backpressured_client_does_not_block_other_clients_or_cleanup(
     assert router.calls == ["large_result", "small"]
 
 
+def test_large_reply_backlog_disconnects_slow_client_and_preserves_healthy_client(
+    endpoint: tuple[NdjsonRpcEndpoint, _Router],
+) -> None:
+    server, router = endpoint
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as slow:
+        slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8192)
+        slow.settimeout(3)
+        slow.connect(("127.0.0.1", server.port))
+        _send(slow, "large_result", "first")
+        assert slow.recv(1) == b"{"
+        _send(slow, "large_result", "second")
+        _send(slow, "large_result", "third")
+        assert router.closed.wait(timeout=3)
+        with socket.create_connection(("127.0.0.1", server.port), timeout=3) as healthy:
+            _send(healthy, "small")
+            assert _response(healthy)["result"] == {"value": 42}
+    assert router.calls == ["large_result"] * 3 + ["small"]
+
+
+def test_completed_large_replies_release_outbound_capacity(
+    endpoint: tuple[NdjsonRpcEndpoint, _Router],
+) -> None:
+    server, router = endpoint
+    with socket.create_connection(("127.0.0.1", server.port), timeout=3) as client:
+        for number in range(4):
+            _send(client, "large_result", str(number))
+            reply = _response(client)
+            assert reply["id"] == str(number)
+            assert reply["result"] == {"value": "x" * (MAX_LINE_BYTES - 1024)}
+        assert not router.closed.is_set()
+    assert router.calls == ["large_result"] * 4
+
+
 @pytest.mark.parametrize("method", ["unserializable_result", "reject_reply"])
 def test_undeliverable_reply_disconnects_and_releases_client_without_stopping_server(
     endpoint: tuple[NdjsonRpcEndpoint, _Router], method: str

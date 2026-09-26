@@ -1,31 +1,23 @@
-"""Tests for McpBridge internals.
-
-``launched_gui`` — the cleanup-on-exit ownership guard.
-``launched_gui`` distinguishes a GUI this bridge *launched* (``gui_launch`` sets
-``_proc``) from one it merely *attached* to (lazy auto-connect leaves ``_proc``
-None). The exit-cleanup path guards on it so an attach-only server never stops a
-GUI another process owns — the bug being that closing the external-terminal
-agent killed the user's GUI via the shared pid-file fallback in ``stop()``.
-
-``_port_is_open`` — the fast-fail probe used by ``_ensure_connected``.
-Used before a full TCP connect in ``_ensure_connected`` so that a cold start
-(no GUI listening) returns an actionable error in ~0.5s instead of hanging
-~30s until the socket timeout fires.
-"""
+"""McpBridge ownership, transport failure, and framing contracts."""
 
 from __future__ import annotations
 
+import json
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 import pytest
+from zcu_tools.gui.remote.framing import MAX_LINE_BYTES, encode_line
 from zcu_tools.mcp.core.bridge import (
+    GuiMessageTooLargeError,
     GuiTransportTimeoutError,
     McpBridge,
     MCPBridgeConfig,
-    _port_is_open,
+    SocketTransport,
 )
 
 
@@ -61,7 +53,7 @@ class _SilentTransport:
     def __init__(self) -> None:
         self.closed = False
         self.sent: list[dict[str, Any]] = []
-        self._on_closed: Callable[[], None] | None = None
+        self._on_closed: Callable[[Exception | None], None] | None = None
 
     def attach(self, deliver_reply, deliver_event, on_closed) -> None:
         del deliver_reply, deliver_event
@@ -81,7 +73,6 @@ class _SilentTransport:
 def test_launched_gui_false_when_attached_only(tmp_path: Path) -> None:
     # Lazy auto-connect attaches without launching -> _proc stays None -> not ours.
     bridge = McpBridge(_config(tmp_path))
-    assert bridge._proc is None
     assert bridge.launched_gui is False
 
 
@@ -106,12 +97,11 @@ def test_launched_gui_ignores_shared_pid_file(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
     cfg.pid_file.write_text("4242")
     bridge = McpBridge(cfg)
-    assert bridge._read_pid_file() == 4242  # pid file is readable...
-    assert bridge.launched_gui is False  # ...but launched_gui ignores it
+    assert bridge.launched_gui is False
 
 
 # ---------------------------------------------------------------------------
-# _port_is_open — fast-fail probe for _ensure_connected (BUG-3 fix)
+# Public socket connection outcomes
 # ---------------------------------------------------------------------------
 
 
@@ -126,21 +116,28 @@ def _find_free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def test_port_is_open_returns_false_for_closed_port() -> None:
-    # _ensure_connected calls _port_is_open before the full TCP connect so a
-    # cold start (no GUI on the port) fails fast (~0.5s) instead of hanging ~30s.
-    port = _find_free_port()
-    # Nothing is listening on the port — probe must return False immediately.
-    assert _port_is_open(port) is False
+@pytest.mark.requires_loopback
+def test_socket_transport_rejects_closed_port() -> None:
+    transport = SocketTransport("connection-test")
+    try:
+        with pytest.raises(ConnectionRefusedError):
+            transport.open(_find_free_port())
+        assert not transport.is_open
+    finally:
+        transport.close()
 
 
-def test_port_is_open_returns_true_for_listening_port() -> None:
-    # Sanity-check the positive path: a real listening socket is detected.
+@pytest.mark.requires_loopback
+def test_socket_transport_connects_to_listening_port() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
         srv.bind(("127.0.0.1", 0))
         srv.listen(1)
-        port = int(srv.getsockname()[1])
-        assert _port_is_open(port) is True
+        transport = SocketTransport("connection-test")
+        try:
+            transport.open(srv.getsockname()[1])
+            assert transport.is_open
+        finally:
+            transport.close()
 
 
 def test_send_rpc_raw_timeout_closes_transport(tmp_path: Path) -> None:
@@ -153,7 +150,6 @@ def test_send_rpc_raw_timeout_closes_transport(tmp_path: Path) -> None:
     assert exc_info.value.method == "slow.method"
     assert transport.closed is True
     assert bridge.is_connected is False
-    assert bridge._pending == {}
     assert transport.sent[0]["method"] == "slow.method"
 
 
@@ -191,3 +187,104 @@ def test_version_note_compares_wire_but_only_reports_gui_code(
         assert "wire v1" in note
         assert f"gui code v{gui_version}" in note
         assert "mcp code v1" in note
+
+
+def _attach_peer(bridge: McpBridge, listener: socket.socket) -> socket.socket:
+    transport = SocketTransport("frame-test")
+    bridge.set_transport(transport)
+    transport.open(listener.getsockname()[1])
+    peer, _ = listener.accept()
+    peer.settimeout(3)
+    return peer
+
+
+@pytest.fixture
+def wire_bridge(
+    tmp_path: Path,
+) -> Iterator[tuple[McpBridge, socket.socket, socket.socket]]:
+    bridge = McpBridge(_config(tmp_path))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(3)
+        try:
+            with _attach_peer(bridge, listener) as peer:
+                yield bridge, listener, peer
+        finally:
+            bridge.disconnect()
+
+
+def _read_request(peer: socket.socket) -> dict[str, Any]:
+    with peer.makefile("rb") as reader:
+        return json.loads(reader.readline(MAX_LINE_BYTES + 2))
+
+
+def _assert_small_rpc(bridge: McpBridge, peer: socket.socket) -> None:
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        reply = worker.submit(bridge.send_rpc_raw, "small", {}, 3)
+        request = _read_request(peer)
+        assert request["method"] == "small"
+        peer.sendall(encode_line({"id": request["id"], "ok": True, "result": 42}))
+        assert reply.result(timeout=3)["result"] == 42
+
+
+@pytest.mark.requires_loopback
+def test_oversized_request_is_not_sent_and_connection_remains_usable(
+    wire_bridge: tuple[McpBridge, socket.socket, socket.socket],
+) -> None:
+    bridge, _, peer = wire_bridge
+    # UTF-8 bytes, not character count. This exceeds the budget only after encoding.
+    with pytest.raises(GuiMessageTooLargeError, match="request.*not sent") as caught:
+        bridge.send_rpc_raw("mutate", {"value": "é" * (MAX_LINE_BYTES // 2)}, 3)
+    assert caught.value.reason == "message_too_large"
+    assert bridge.is_connected
+    # The first actual wire request is small; mutate was not partially transmitted.
+    _assert_small_rpc(bridge, peer)
+
+
+@pytest.mark.requires_loopback
+def test_exact_limit_response_and_following_frames_remain_usable(
+    wire_bridge: tuple[McpBridge, socket.socket, socket.socket],
+) -> None:
+    bridge, _, peer = wire_bridge
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        reply = worker.submit(bridge.send_rpc_raw, "large", {}, 5)
+        request = _read_request(peer)
+        response = {"id": request["id"], "ok": True, "result": ""}
+        overhead = len(encode_line(response)) - 1
+        response["result"] = "x" * (MAX_LINE_BYTES - overhead)
+        peer.sendall(
+            encode_line(response) + encode_line({"event": "notice", "payload": {}})
+        )
+        assert reply.result(timeout=5) == response
+    assert bridge.is_connected
+    _assert_small_rpc(bridge, peer)
+
+
+@pytest.mark.requires_loopback
+@pytest.mark.parametrize("terminated", [False, True])
+def test_oversized_response_fails_explicitly_and_reconnect_does_not_replay(
+    wire_bridge: tuple[McpBridge, socket.socket, socket.socket], terminated: bool
+) -> None:
+    bridge, listener, peer = wire_bridge
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        reply = worker.submit(bridge.send_rpc_raw, "mutate", {}, 5)
+        request = _read_request(peer)
+        assert request["method"] == "mutate"
+        # Exercise a coalesced preceding frame as well as a fragmented oversized frame.
+        prefix = encode_line({"event": "notice", "payload": {}})
+        data = prefix + json.dumps(
+            {"id": request["id"], "ok": True, "result": "x" * MAX_LINE_BYTES}
+        ).encode("utf-8")
+        if terminated:
+            data += b"\n"
+        with suppress(BrokenPipeError, ConnectionResetError):
+            peer.sendall(data)
+        with pytest.raises(
+            GuiMessageTooLargeError, match="response.*may have executed"
+        ):
+            reply.result(timeout=5)
+    assert not bridge.is_connected
+    bridge.disconnect()
+    with _attach_peer(bridge, listener) as recovered:
+        _assert_small_rpc(bridge, recovered)
