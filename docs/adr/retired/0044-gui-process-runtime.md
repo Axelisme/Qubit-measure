@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。跨模組邊界由 [ADR-0064](../0064-process-startup.md) 接替；局部 API 見 [`gui/README.md`](../../../lib/zcu_tools/gui/README.md)。以下保留歷史正文。
+
 # 0044 — GUI process runtime spec and behavior
 
 **Status:** accepted.
