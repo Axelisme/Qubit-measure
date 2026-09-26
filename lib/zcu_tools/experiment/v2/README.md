@@ -97,7 +97,7 @@ Singleshot Rabi joint fit依analysis選擇有衰減或純cosine population dynam
 `t_r`，結果以`None`表示該參數不適用；兩種模式共用raw-IQ calibration與confusion
 matrix的估計流程。
 
-詳見 [[0027]]。
+檔案格式細節見 [datafile README](../../datafile/README.md)。
 
 ---
 

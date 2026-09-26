@@ -1,7 +1,7 @@
 """Regression tests for datafile path helpers.
 
 The dict save/load layer (save_data / load_data / save_local_data /
-load_local_data) is gone (ADR-0027); persistence is native labber_io. These
+load_local_data) is gone (see ADR-0063 and lib/zcu_tools/datafile/README.md); persistence is native labber_io. These
 tests cover the surviving path helpers: reserve_labber_filepath / format_ext /
 remove_ext.
 """

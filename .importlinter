@@ -66,7 +66,8 @@ source_modules =
 forbidden_modules =
     zcu_tools.gui.app.main
 
-# ADR-0028: notebook and GUI are adapters of the analysis kernel.
+# lib/zcu_tools/analysis/fluxdep/README.md: notebook and GUI are adapters of the
+# analysis kernel (formerly ADR-0028).
 [importlinter:contract:fluxdep-kernel-no-adapters]
 name = C6: fluxdep kernel does not depend on its adapters
 type = forbidden

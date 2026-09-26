@@ -178,7 +178,7 @@ _Avoid_: 把「不可序列化」當「不能進 State」、把初始化邏輯�
 **Service 角色（DDD+Hexagonal，見 `docs/adr/0005`）**：`services/` 的東西按**角色**而非**話題**聚合，每個必須說清是哪種 —— **App Service**（被動編排、無 domain 邏輯、經 port 依賴 infra、不依賴其他 app service）、**Aggregate Root**（一等公民帶**自己的行為**，外界經 id 進出，反模式=貧血 dataclass）、**Repository**（造/查/毀 aggregate）、**Driving Adapter**（user-facing，`MainWindow`+`RemoteControlAdapter`=兩個 driving adapter，user 可以是人或 another server）、**Driven Adapter**（persistence/driver/socket，**只經 port 被呼叫**）。三大系統性違規已由 Phase 99（原 M1–M6）遷移消除：貧血 aggregate（M2/M3 升 aggregate root）、app-service 互依（M4 改窄 port / 直讀 State，AST gate `test_app_service_decoupling` 守）、infra 未經 port（M1 `services/ports.py`）。M5（目錄 vertical-slice）決定不做、M6（RemoteControlAdapter 正名）由 ADR-0013 落地。
 _Avoid_: 按話題聚合 service、entity 寫成哑 dataclass（貧血）、app service 互相依賴、直接 import 基礎設施（繞過 port）
 
-### 持久化（Persistence，Memento + Caretaker，見 `docs/adr/0015`）
+### 持久化（Persistence，Memento + Caretaker，見 `docs/adr/0063-persistence-ownership.md`）
 
 **SingleFileCaretaker**（Memento 的 Caretaker，**Driven Adapter**）:
 共用的單檔存讀機制，由 `MeasureGuiBehavior.before_show` 以 main-local codec 組合並注入 Controller。main 擁有 memento schema/version、filename、originator 與 lifecycle trigger；shared caretaker 只處理 JSON、cache path、default degradation 與 atomic replace，**不訂 event、不碰 UI、不碰 State、不懂 cfg**。`flush()` 每次重新 capture；main 只在 startup restore 與 close flush 觸發。

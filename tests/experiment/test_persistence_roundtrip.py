@@ -1,4 +1,4 @@
-"""Regression test for the ADR-0027 PersistableExperiment save/load round-trip.
+"""Regression test for the PersistableExperiment save/load round-trip (ADR-0063).
 
 Exercises the *base-level* persistence mechanism end-to-end against a real
 on-disk Labber HDF5 file (no labber_io mocking): a minimal in-test
@@ -7,7 +7,7 @@ with known numpy arrays, ``save()`` it to ``tmp_path``, ``load()`` it back, and
 assert axis values, the complex z array, the cfg snapshot, and the inner-first
 shape invariant all round-trip.
 
-ADR-0027 invariants under test:
+Persistence invariants under test (ADR-0063; formerly ADR-0027):
 - axes are inner-first: ``z.shape == tuple(len(ax) for ax in reversed(axes))``;
 - ``load`` is the exact inverse of ``save`` (zero caller-side transpose);
 - per-axis ``scale`` is applied on save (disk = memory * scale) and undone on
