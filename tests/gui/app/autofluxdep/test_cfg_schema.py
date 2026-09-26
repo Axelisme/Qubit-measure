@@ -82,8 +82,8 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.cfg.tree import read_value_path
 from zcu_tools.gui.session.types import ExpContext
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import PulseReadoutCfg, SweepCfg
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from ._helpers import (
     NodeFieldSpec,

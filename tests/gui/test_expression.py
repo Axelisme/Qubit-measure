@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.session.expression import coerce_eval_result, evaluate_numeric_expr
-from zcu_tools.meta_tool import MetaDict
+from zcu_tools.resources.context import MetaDict
 
 
 def test_evaluate_numeric_expr_uses_metadict_variables():

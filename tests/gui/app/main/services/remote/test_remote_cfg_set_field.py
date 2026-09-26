@@ -809,7 +809,7 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):  # noqa: ARG001
 def _fakefreq_root():
     from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     cfg = FakeFreqAdapter().make_default_cfg(ctx)
@@ -871,7 +871,7 @@ def _fluxdep_root(device_names: list[str]):
         OneToneFluxDepAdapter,
     )
     from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     ctx = ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
     cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)

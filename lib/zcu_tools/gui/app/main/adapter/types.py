@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from zcu_tools.experiment.cfg_model import ExpCfgModel
-    from zcu_tools.meta_tool import ModuleLibrary
-    from zcu_tools.meta_tool.metadict import MetaDict
+    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.context.metadict import MetaDict
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 

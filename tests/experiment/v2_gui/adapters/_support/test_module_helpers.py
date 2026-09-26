@@ -21,13 +21,13 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ReferenceValue,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import (
     AbsReadoutCfg,
     ModuleCfgFactory,
     PulseReadoutCfg,
     WaveformCfgFactory,
 )
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def test_schema_from_module_returns_none_for_none():

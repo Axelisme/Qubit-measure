@@ -9,8 +9,8 @@ from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.resources.context import ModuleLibrary
 
 
 def resolve_module_ref(value: Any, info: ValidationInfo) -> Any:

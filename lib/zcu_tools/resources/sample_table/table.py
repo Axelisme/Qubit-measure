@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .syncfile import SyncFile, auto_sync
+from ..syncfile import SyncFile, auto_sync
 
 
 class SampleTable(SyncFile):

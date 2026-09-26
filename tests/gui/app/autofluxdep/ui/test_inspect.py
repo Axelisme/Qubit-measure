@@ -21,8 +21,8 @@ import pytest
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.session.events import MdChangedPayload
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.autofluxdep.controller import Controller

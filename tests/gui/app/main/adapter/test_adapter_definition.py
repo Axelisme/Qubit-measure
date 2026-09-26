@@ -7,8 +7,8 @@ from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.app.main.registry import Registry
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _registry() -> Registry:

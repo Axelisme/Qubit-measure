@@ -30,7 +30,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 %autoreload 2
-from zcu_tools.meta_tool import QubitParams
+from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.simulate import mA2flx
 from zcu_tools.simulate.fluxonium import (
     calculate_system_n_oper_vs_flx,

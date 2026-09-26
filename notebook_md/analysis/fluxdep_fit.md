@@ -33,7 +33,7 @@ import numpy as np
 %autoreload 2
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 import zcu_tools.notebook.analysis.fluxdep as zf
-from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.notebook.persistance import SpectrumResult
 from zcu_tools.notebook.utils import savefig
 from zcu_tools.simulate import value2flux, flux2value

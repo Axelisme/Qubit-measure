@@ -798,7 +798,7 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
 
 def _make_ctrl_with_md(flx_int: float = 0.5) -> MagicMock:
     """Build a ctrl mock pre-loaded with a MetaDict containing flx_int."""
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.flx_int = flx_int

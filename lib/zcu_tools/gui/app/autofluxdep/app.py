@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 def _make_empty_ctx():
     """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
     from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     return ExpContext(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
 

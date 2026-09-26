@@ -14,7 +14,7 @@ from zcu_tools.gui.session.services.startup import (
     StartupProjectRequest,
     StartupService,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _make_service(tmp_path) -> tuple[StartupService, MagicMock, MagicMock, State]:

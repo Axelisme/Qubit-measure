@@ -25,7 +25,7 @@ from zcu_tools.gui.cfg import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.meta_tool.metadict import MetaDict
+    from zcu_tools.resources.context.metadict import MetaDict
 
 # MetaDict keys the ``singleshot/ge`` writeback owns (see GEAdapter writeback).
 _G_CENTER_KEY = "g_center"

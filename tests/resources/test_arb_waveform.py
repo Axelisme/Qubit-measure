@@ -4,7 +4,7 @@ import json
 
 import numpy as np
 import pytest
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,
     ArbWaveformError,

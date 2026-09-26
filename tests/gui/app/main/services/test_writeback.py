@@ -31,7 +31,7 @@ from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _make_state_with_tab(tab_id: str = "t1") -> State:

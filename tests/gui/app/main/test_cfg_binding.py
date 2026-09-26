@@ -7,7 +7,7 @@ import pytest
 import zcu_tools.gui.app.main.cfg_binding as binding_module
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.measure_cfg import ProgramShape, UnknownProgramShapeError
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _bindings(ml: ModuleLibrary | None = None) -> tuple[MeasureCfgBindings, MagicMock]:

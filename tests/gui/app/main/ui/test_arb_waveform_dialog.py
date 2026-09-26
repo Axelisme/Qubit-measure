@@ -9,7 +9,7 @@ from zcu_tools.gui.app.main.ui.arb_waveform_dialog import (
     ArbWaveformDialog,
     _PreviewCanvas,
 )
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformInfo,
     FormulaRecipe,
@@ -428,7 +428,7 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:  # no
     a failed selection leaves the draft intact — its recipe cannot be saved
     under the unloadable key (item-3 fail-fast / consistency fix).
     """
-    from zcu_tools.meta_tool import ArbWaveformError
+    from zcu_tools.resources.waveform_assets import ArbWaveformError
 
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]

@@ -203,7 +203,7 @@ def test_export_params_writes_json(tmp_path):
     path = svc.export_params(out)
     assert path == out
 
-    from zcu_tools.meta_tool import QubitParams
+    from zcu_tools.resources.qubit_params import QubitParams
 
     fluxdep_fit = QubitParams(out, readonly=True).require_fluxdep_fit()
     assert fluxdep_fit.params == (5.0, 1.2, 0.4)

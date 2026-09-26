@@ -18,7 +18,7 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.resources.context import ModuleLibrary
 
 
 class RuntimeCfg(ExpCfgModel):

@@ -38,10 +38,12 @@ import numpy as np
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
 import zcu_tools.program.v2 as zp
-from zcu_tools.meta_tool import (
-    ExperimentManager,
+from zcu_tools.resources.context import (
+    ContextManager,
     MetaDict,
     ModuleLibrary,
+)
+from zcu_tools.resources.sample_table import (
     SampleTable,
     validate_sample_table_v2,
 )
@@ -64,7 +66,7 @@ database_path = create_datafolder(
     name=os.path.join(chip_name, qub_name),
 )
 
-em = ExperimentManager(os.path.join(result_dir, "exps"))
+em = ContextManager(os.path.join(result_dir, "exps"))
 ml = ModuleLibrary()
 md = MetaDict()
 ```

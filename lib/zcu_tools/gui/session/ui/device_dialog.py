@@ -49,7 +49,7 @@ from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
 
 @runtime_checkable

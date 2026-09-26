@@ -402,7 +402,7 @@ def test_scalar_widget_minimum_width_reduced(qapp):
 
 def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.r_f = 6000.0
@@ -420,7 +420,7 @@ def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
 
 def test_scalar_widget_eval_mode_marks_unresolved_red(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
     field = _scalar_field(
@@ -441,7 +441,7 @@ def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctr
     from zcu_tools.gui.session.value_lookup import ValueInfo
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.r_f = 6000.0
@@ -477,7 +477,7 @@ def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctr
 def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.r_f = 6000.0
@@ -502,7 +502,7 @@ def test_scalar_widget_eval_menu_extends_standard_line_edit_menu(qapp, ctrl):
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
     from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     ctrl.get_current_md.return_value = MetaDict()
     field = _scalar_field(
@@ -716,7 +716,7 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
 def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     """The widget reflects expression refreshes from its attached draft."""
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     md.r_f = 6000.0
@@ -1890,7 +1890,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
     from qtpy.QtWidgets import QDoubleSpinBox
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     ml = ModuleLibrary()
     ml.modules["my_pulse"] = cast(Any, {"type": "readout/direct", "ro_freq": 7000.0})
@@ -1943,7 +1943,7 @@ def test_module_ref_widget_modified_label_and_no_overwrite(qapp, ctrl):
 
     # 3. Trigger MD_CHANGED and verify it does not overwrite modified value
     from zcu_tools.gui.session.events import MdChangedPayload
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
     md = MetaDict()
     ctrl.get_bus.return_value.emit(MdChangedPayload(md=md))
@@ -2093,7 +2093,7 @@ def test_module_ref_missing_library_shows_red_badge_and_invalid(qapp, ctrl):
     from zcu_tools.gui.cfg import LiteralSpec
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     pulse_spec = CfgSectionSpec(
         label="Pulse",
@@ -2147,7 +2147,7 @@ def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
     from zcu_tools.gui.app.main.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     # Library case: ML contains a Direct Readout module, reference points at it
     ml = ModuleLibrary()
@@ -2191,7 +2191,7 @@ def test_reference_identity_change_reapplies_folding(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
     from zcu_tools.gui.widgets.cfg.structure import TreeCfgWidget
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     ml = ModuleLibrary()
     ml.modules["lib_ro"] = {"type": "readout/direct", "ro_freq": 7000.0}  # type: ignore[assignment]

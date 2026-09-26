@@ -21,7 +21,7 @@ from zcu_tools.gui.event_bus import BasePayload, OriginKind
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class SessionEvent(str, Enum):

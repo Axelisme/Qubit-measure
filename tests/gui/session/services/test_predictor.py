@@ -359,7 +359,11 @@ def test_calibrate_flux_bias_invalid_transition_raises():
 
 def _write_params_json(path, *, with_fluxdep: bool = True) -> None:
     if with_fluxdep:
-        from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+        from zcu_tools.resources.qubit_params import (
+            FluxDepFit,
+            ParamsProject,
+            QubitParams,
+        )
 
         params = QubitParams(path)
         params.ensure_project(ParamsProject("fake_qubit", "fake_qubit"))
@@ -374,7 +378,7 @@ def _write_params_json(path, *, with_fluxdep: bool = True) -> None:
             )
         )
     else:
-        from zcu_tools.meta_tool import ParamsProject, QubitParams
+        from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 
         QubitParams(path).ensure_project(ParamsProject("fake_qubit", "fake_qubit"))
 

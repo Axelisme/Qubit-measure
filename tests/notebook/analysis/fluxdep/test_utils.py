@@ -18,9 +18,9 @@ import numpy as np
 import pandas as pd
 import pytest
 from plotly.graph_objects import Scatter
-from zcu_tools.meta_tool import SampleFluxFrame, SampleTableV2Error
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
 from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.resources.sample_table import SampleFluxFrame, SampleTableV2Error
 
 
 def _sample_points_trace(fig) -> Scatter:
@@ -237,7 +237,7 @@ def test_plot_md_helper_calls_bind_to_current_api() -> None:
     fail here in CI instead of at the hardware.
     """
     import zcu_tools.notebook.analysis.plot as zp
-    from zcu_tools.meta_tool import sample_schema
+    from zcu_tools.resources.sample_table import schema as sample_schema
 
     plot_md = (
         Path(__file__).resolve().parents[4] / "notebook_md" / "analysis" / "plot.md"

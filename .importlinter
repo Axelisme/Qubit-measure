@@ -41,7 +41,7 @@ source_modules =
 forbidden_modules =
     zcu_tools.gui.app
     zcu_tools.experiment
-    zcu_tools.meta_tool
+    zcu_tools.resources
 
 # ADR-0045: shared renderers receive policy through ports.
 [importlinter:contract:cfg-widgets-no-runtime]
@@ -52,7 +52,7 @@ source_modules =
 forbidden_modules =
     zcu_tools.gui.app
     zcu_tools.experiment
-    zcu_tools.meta_tool
+    zcu_tools.resources
     zcu_tools.gui.session
     zcu_tools.device
     zcu_tools.notebook

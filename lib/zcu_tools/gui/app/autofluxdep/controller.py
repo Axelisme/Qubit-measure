@@ -130,7 +130,7 @@ from zcu_tools.gui.session.services.predictor import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH
-from zcu_tools.meta_tool import QubitParams, QubitParamsError
+from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver

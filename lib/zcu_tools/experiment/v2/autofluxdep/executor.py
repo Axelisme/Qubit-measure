@@ -18,7 +18,7 @@ from zcu_tools.experiment.v2.runner import (
     Schedule,
 )
 from zcu_tools.experiment.v2.utils import Result
-from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.resources.context import ModuleLibrary
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 from .env import FluxDepEnv, FluxDepInfoTracker

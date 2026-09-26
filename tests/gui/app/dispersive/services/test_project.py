@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.dispersive.services.project import ProjectService
 from zcu_tools.gui.app.dispersive.state import DEFAULT_BARE_RF, DispersiveState
-from zcu_tools.meta_tool import DispersiveFit, FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.qubit_params import (
+    DispersiveFit,
+    FluxDepFit,
+    ParamsProject,
+    QubitParams,
+)
 
 
 def test_load_fit_inputs_reads_params_and_seeds_bare_rf(params_json):

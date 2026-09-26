@@ -26,15 +26,15 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
-from zcu_tools.meta_tool import (
+from zcu_tools.notebook.analysis.fluxdep.fitting import search_in_database
+from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
+from zcu_tools.resources.qubit_params import (
     FluxDepFit,
     ParamsProject,
     QubitParams,
     params_path_for_result_dir,
 )
-from zcu_tools.notebook.analysis.fluxdep.fitting import search_in_database
-from zcu_tools.notebook.persistance import TransitionDict
-from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 
 logger = logging.getLogger(__name__)
 

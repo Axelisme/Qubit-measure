@@ -25,7 +25,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueRef,
     resolve_value_ref,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 logger = logging.getLogger(__name__)
 

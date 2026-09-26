@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.wire import optional_bool, require_str
-from zcu_tools.meta_tool import ArbWaveformError
+from zcu_tools.resources.waveform_assets import ArbWaveformError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter

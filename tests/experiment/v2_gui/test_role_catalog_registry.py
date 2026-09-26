@@ -16,7 +16,7 @@ from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.app.main.role_catalog import RoleCatalog, RoleEntry
 from zcu_tools.gui.cfg import DirectValue, LiteralSpec, make_custom_reference_key
 from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from .adapters._support._role_characterization import (
     GOLDEN_PATH as _GOLDEN_PATH,

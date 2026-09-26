@@ -17,11 +17,10 @@ import jupytext
 import numpy as np
 import pandas as pd
 import pytest
-
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.experiment.v2.lookback import LookbackExp
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.sample_table import (
     SampleTable,
     SampleTableV2Error,
     validate_sample_table_v2,

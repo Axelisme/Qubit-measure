@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import TypedDict  # extra_items (PEP 728) not in stdlib 3.13
 
-from zcu_tools.meta_tool import QubitParams
+from zcu_tools.resources.qubit_params import QubitParams
 
 
 def format_rawdata(

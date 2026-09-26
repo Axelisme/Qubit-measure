@@ -4,7 +4,7 @@ import json
 from typing import Any, cast
 
 import pytest
-from zcu_tools.meta_tool import ExperimentManager, MetaDict
+from zcu_tools.resources.context import ContextManager, MetaDict
 
 
 def test_metadict_complex_roundtrip_uses_tagged_encoding(tmp_path) -> None:
@@ -97,6 +97,6 @@ def test_metadict_update_batches_persisted_write(tmp_path) -> None:
 
 
 def test_experiment_manager_str_without_active_context(tmp_path) -> None:
-    em = ExperimentManager(tmp_path)
+    em = ContextManager(tmp_path)
 
     assert "active=None" in str(em)

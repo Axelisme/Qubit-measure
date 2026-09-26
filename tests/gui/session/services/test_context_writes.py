@@ -25,7 +25,7 @@ from zcu_tools.gui.session.services.context import (
     MlEntryValidationError,
 )
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 _READOUT_RAW = {
     "type": "readout/direct",

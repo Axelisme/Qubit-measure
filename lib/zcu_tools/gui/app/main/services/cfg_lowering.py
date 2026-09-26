@@ -21,7 +21,7 @@ from zcu_tools.gui.session.services.context import MlEntryValidationError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.cfg import CfgSchema
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def lower_module(schema: CfgSchema, ml: ModuleLibrary, md: MetaDict) -> object:

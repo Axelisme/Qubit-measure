@@ -15,8 +15,8 @@ from zcu_tools.gui.app.main.ui.inspect_dialog import (
     _MdCreateDialog,
     _MlCreateDialog,
 )
-from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.resources.context import ModuleLibrary
 
 
 def _make_ml() -> ModuleLibrary:

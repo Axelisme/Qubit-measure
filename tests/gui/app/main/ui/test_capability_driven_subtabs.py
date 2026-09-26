@@ -310,7 +310,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     from zcu_tools.gui.app.main.state import Session, State
     from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
     from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     exp_ctx = ExpContext(
         md=MetaDict(),

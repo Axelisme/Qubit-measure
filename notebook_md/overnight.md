@@ -23,7 +23,7 @@ import numpy as np
 
 %autoreload 2
 import zcu_tools.experiment.v2.overnight as zeo
-from zcu_tools.meta_tool import ExperimentManager
+from zcu_tools.resources.context import ContextManager
 from zcu_tools.datafile import create_datafolder
 from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
 ```
@@ -38,7 +38,7 @@ result_dir = f"../result/{chip_name}/{qub_name}"
 database_path = create_datafolder(
     str(Path.cwd().parent), name=str(Path(chip_name, qub_name))
 )
-em = ExperimentManager(f"{result_dir}/exps")
+em = ContextManager(f"{result_dir}/exps")
 ml, md = em.use_flux(label="0303_1.800mA", readonly=True)
 ```
 

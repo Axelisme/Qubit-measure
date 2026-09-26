@@ -4,7 +4,7 @@
 
 此 Qt-free package 是 program/v2 module/waveform GUI shape 的唯一 owner。`PROGRAM_SHAPES`
 固定列出七種 module 與六種 waveform discriminator、label與fresh Spec factory；它不做runtime
-registration，也不import program runtime、app、session、experiment、Qt或`meta_tool`。
+registration，也不import program runtime、app、session、experiment、Qt或`resources`。
 
 每次`ProgramShape.make_spec(policy)`都建立deep-fresh tree。`ProgramSpecPolicy`只容許兩個跨app
 差異：Arb data的choices source，以及Direct/Pulse Readout間的inheritance hook。main與autoflux

@@ -5,7 +5,7 @@ from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,
     ArbWaveformInfo,

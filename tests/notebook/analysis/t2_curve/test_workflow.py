@@ -8,7 +8,6 @@ import pytest
 import zcu_tools.notebook.analysis.t2_curve.workflow as workflow
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
-from zcu_tools.meta_tool import SampleTableV2Error
 from zcu_tools.notebook.analysis.fit_tools import F01FluxCorrectionResult
 from zcu_tools.notebook.analysis.t2_curve import (
     FluxResidualWeighting,
@@ -33,6 +32,7 @@ from zcu_tools.notebook.analysis.t2_curve import (
     run_t2_curve_analysis,
     thermal_photon_gamma_phi_per_us,
 )
+from zcu_tools.resources.sample_table import SampleTableV2Error
 
 _KAPPA_OVER_2PI_MHZ = 14.754
 

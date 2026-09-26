@@ -15,7 +15,7 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.program.v2 import SweepCfg
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 _REFERENCE_KINDS = frozenset({"module", "waveform"})
 

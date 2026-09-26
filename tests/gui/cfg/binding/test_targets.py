@@ -197,7 +197,7 @@ def test_all_production_measure_schemas_have_unambiguous_target_grammar() -> Non
     from zcu_tools.experiment.v2_gui.registry import register_all
     from zcu_tools.gui.app.main.adapter import ExpContext
     from zcu_tools.gui.app.main.registry import Registry
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     registry = Registry()
     register_all(registry)

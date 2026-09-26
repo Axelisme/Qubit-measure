@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.dispersive.services.export import ExportService
 from zcu_tools.gui.app.dispersive.state import DispersiveState
-from zcu_tools.meta_tool import QubitParams
+from zcu_tools.resources.qubit_params import QubitParams
 
 
 def test_export_writes_dispersive_and_preserves_fluxdep_fit(params_json):

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
-from zcu_tools.meta_tool.syncfile import auto_sync
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.syncfile import auto_sync
 
 
 def test_syncfile_has_persistence_false_without_path() -> None:

@@ -22,8 +22,8 @@ from zcu_tools.gui.cfg import (
     SweepValue,
     lower_finished_cfg,
 )
-from zcu_tools.meta_tool import MetaDict
 from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.resources.context import MetaDict
 
 
 def _schema(

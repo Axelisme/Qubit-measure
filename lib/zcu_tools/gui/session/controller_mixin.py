@@ -72,7 +72,7 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class SessionControllerMixin:
@@ -125,7 +125,7 @@ class SessionControllerMixin:
         device's current state (never set). ``bind_device=None`` makes an unbound
         context (unit="none", no value). ``clone_from`` is the label of an existing
         context to clone its ml/md from. The new context's label is derived
-        automatically by ``ExperimentManager`` — callers cannot name it directly.
+        automatically by ``ContextManager`` — callers cannot name it directly.
         """
         if bind_device is not None:
             unit = self._dev_svc.get_device_unit_strict(bind_device)

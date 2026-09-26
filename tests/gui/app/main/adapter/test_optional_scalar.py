@@ -24,7 +24,7 @@ from zcu_tools.gui.cfg.codec import (
     _section_value_from_raw,
     _section_value_to_raw,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _spec() -> CfgSectionSpec:

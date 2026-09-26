@@ -32,12 +32,12 @@ from zcu_tools.gui.app.autofluxdep.services.run_store import (
     load_journal_events,
     load_manifest,
 )
-from zcu_tools.meta_tool.sample_schema import (
+from zcu_tools.resources.sample_table.schema import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
     validate_sample_table_v2,
 )
-from zcu_tools.meta_tool.table import SampleTable
+from zcu_tools.resources.sample_table.table import SampleTable
 
 DATE_COLUMN = "date"
 

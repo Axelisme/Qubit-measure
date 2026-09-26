@@ -19,7 +19,7 @@ from zcu_tools.gui.app.dispersive.event_bus import (
 )
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 
 
 def _stub(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):

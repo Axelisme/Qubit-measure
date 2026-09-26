@@ -10,7 +10,7 @@ from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def test_event_bus_dispatches_by_payload_type() -> None:
