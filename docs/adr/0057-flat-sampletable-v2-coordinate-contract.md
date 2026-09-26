@@ -58,11 +58,10 @@ mA），magnitude 也無法可靠分辨（A/mA domains 可重疊）。generic `S
    輸入，產出完整 target v2 table（coordinate columns 在前，measurement columns
    與 row order 原樣保留）。
 
-7. **Operator-owned data migration**。`script/migrate_sample_table_v2.py` 以
-   `SOURCE DEST --dev-value-column --dev-value-unit [--flux-column]
-   [--flux-int --flux-period --frame-unit]` 操作；預設 dry-run，`--write` 只寫入
-   distinct dest，temp-file + no-clobber。工具不自動掃描或改寫任何既有 CSV；
-   user-owned 資料的實際改寫由 operator 以 file-scoped mutation authority 執行。
+7. **Operator-owned data migration**。`migrate_sample_table_v2` 保留為 explicit pure
+   DataFrame 轉換；原 `script/migrate_sample_table_v2.py` CLI 已退休。函式不掃描或
+   改寫任何既有 CSV；operator 若將結果寫入新檔，須另外取得 file-scoped mutation
+   authority，並自行確保 source/destination 不相同、目的地不被覆蓋。
 
 8. **generic `SampleTable` 維持 schema-free**。v2 policy 住在
    `meta_tool/sample_schema.py`，不進入 reusable storage module。
@@ -92,8 +91,8 @@ mA），magnitude 也無法可靠分辨（A/mA domains 可重疊）。generic `S
   不依賴外部 context。
 - Producer 與 consumer 解耦：producer 只負責寫 valid v2，consumer 只負責解析，
   解析失敗 fast-fail；沒有 runtime dual-schema compatibility layer。
-- Legacy 資料必須經 operator 執行 migration script 才能被 v2 consumers 使用；
-  migration 的輸出是完整 v2，輸入不被修改。
+- Legacy 資料須由 operator 顯式呼叫 pure migration API 並保存完整 v2 檔案，
+  v2 consumers 才能使用；repo 不提供 CSV migration CLI，函式不修改輸入。
 - 修正與對齊都顯式、bounded、且只作用於 fitted-derived rows，不把分析假設固化進
   persisted 資料。
 

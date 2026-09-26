@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-25 — test structure policy
+**Last updated:** 2026-09-26 — canonical load test ownership
 
 本頁是整個 `tests/` 套件新增、拆分與搬遷測試的結構規則，也保留硬體與 GUI 測試的領域注意事項。
 測試行為與驗證流程以 [AGENTS.md](../AGENTS.md) 為準。
@@ -412,7 +412,6 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 
 load-result feature 的 targeted tests 分散在對應 ownership：
 `tests/experiment/v2_gui/adapters/test_base_load.py` 鎖 adapter default load contract；
-`tests/experiment/v2_gui/adapters/test_legacy_load.py` 鎖 adapter legacy single-file fallback；
 `tests/gui/app/main/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/app/main/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
 `tests/gui/app/main/services/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。

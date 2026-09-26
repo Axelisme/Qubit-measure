@@ -86,7 +86,6 @@ class OneToneFreqAdapter(
 ):
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
-    legacy_migration_experiment: ClassVar[str | None] = "onetone/freq"
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
