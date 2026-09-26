@@ -72,8 +72,8 @@ before/after；這是人工審查提示，不是自動判定設定變弱，也�
 較耗時的兩項**刻意留在外面**；快速 gate 不替代 collection 與行為測試：
 
 ```bash
-uv run --no-sync -- python tools/check_pytest_collection.py   # 約 30 秒
-uv run --no-sync -- pytest -n auto --dist=worksteal           # 約 2 分鐘
+uv run --no-sync -- python tools/check_pytest_collection.py
+uv run --no-sync -- pytest -n auto --dist=worksteal
 ```
 
 `--dist=worksteal` 維持 command-level，因 parity intentionally disables pytest plugin autoload；
