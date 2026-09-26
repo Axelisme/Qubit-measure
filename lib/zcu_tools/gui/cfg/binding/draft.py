@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..model import CfgSchema
 from .fields import CallbackList, SectionField
+from .observation import CfgNodeObservation, observe_cfg
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 from .targets import SettableTarget, iter_settable_targets, resolve_settable_target
 
@@ -38,6 +39,11 @@ class CfgDraft:
     def snapshot(self) -> CfgSchema:
         self._require_open()
         return CfgSchema(spec=self._root.spec, value=self._root.get_value())
+
+    def observe(self) -> CfgNodeObservation:
+        """Read complete cached model state, including non-editable fields."""
+        self._require_open()
+        return observe_cfg(self._root)
 
     def is_valid(self) -> bool:
         self._require_open()

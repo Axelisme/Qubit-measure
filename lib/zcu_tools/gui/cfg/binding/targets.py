@@ -277,12 +277,6 @@ def _centered_sweep_targets(
 
 
 def _reference_target(path: str, reference: ReferenceField) -> SettableTarget:
-    def choices() -> tuple[object, ...]:
-        return (
-            *(spec.label for spec in reference.spec.allowed),
-            *reference.available_keys(),
-        )
-
     def set_value(value: object) -> None:
         if not isinstance(value, str):
             raise SettablePathError(
@@ -310,7 +304,7 @@ def _reference_target(path: str, reference: ReferenceField) -> SettableTarget:
         affects_path_shape=True,
         _get=reference.get_chosen_key,
         _set=set_value,
-        _choices=choices,
+        _choices=reference.available_options,
     )
 
 

@@ -11,16 +11,19 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    LiteralSpec,
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
     SweepSpec,
+    SweepValue,
     make_default_value,
 )
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
     CfgDraft,
     ReferenceField,
+    ResolvedReference,
     ScalarField,
     SectionField,
     SweepField,
@@ -42,6 +45,125 @@ def _new_draft(
     )
 
 
+@pytest.mark.parametrize("required", [False, True])
+def test_observation_includes_locked_values_and_cached_input_state(
+    required: bool,
+) -> None:
+    ports = BindingPorts()
+    ports.expressions["freq"] = 2.0
+    ports.options["rig"] = ("flux",)
+    spec = CfgSectionSpec(
+        fields={
+            "fixed": LiteralSpec(7),
+            "freq": ScalarSpec("Frequency", float, editable=False),
+            "device": ScalarSpec(
+                "Device", str, choices_source="rig", required=required
+            ),
+            "axis": SweepSpec(),
+        }
+    )
+    value = CfgSectionValue(
+        {
+            "fixed": DirectValue(7),
+            "freq": EvalValue("freq"),
+            "device": DirectValue("flux"),
+            "axis": SweepValue(0.0, 1.0, 5),
+        }
+    )
+    draft = _new_draft(ports, spec, value)
+    try:
+        sweep = draft.root.fields["axis"]
+        assert isinstance(sweep, SweepField)
+        sweep.set_text("expts", "1e")
+        ports.expressions["freq"] = 9.0
+        ports.options["rig"] = ("bias",)
+        observed = draft.observe()
+        assert not observed.valid
+        assert observed.value == draft.snapshot().value
+        assert observed.children["fixed"].value == DirectValue(7)
+        frequency = observed.children["freq"]
+        assert isinstance(frequency.spec, ScalarSpec)
+        assert not frequency.spec.editable
+        assert frequency.value == EvalValue("freq", resolved=2.0)
+        expected_options = ("flux",) if required else ("", "flux")
+        assert observed.children["device"].options == expected_options
+        axis = observed.children["axis"].value
+        assert isinstance(axis, SweepValue)
+        assert isinstance(axis.expts, DirectValue)
+        assert axis.expts.raw == "1e" and axis.expts.error is not None
+        draft.refresh_expressions()
+        draft.refresh_options("rig")
+        current = draft.observe()
+        assert current.children["freq"].value == EvalValue("freq", resolved=9.0)
+        assert frequency.value == EvalValue("freq", resolved=2.0)
+        device = current.children["device"]
+        assert not device.valid
+        assert device.options == (("bias",) if required else ("", "bias"))
+        assert isinstance(device.value, DirectValue)
+        assert device.value.validation_error is not None
+    finally:
+        draft.close()
+
+
+def test_observation_preserves_reference_shape_and_disabled_optional_state() -> None:
+    ports = BindingPorts()
+    shape = CfgSectionSpec(label="Pulse", fields={"gain": ScalarSpec("Gain", float)})
+    gain = CfgSectionValue({"gain": DirectValue(0.25)})
+    ports.references[("module", "drive_lib")] = ResolvedReference("Pulse", gain)
+    spec = CfgSectionSpec(
+        fields={"drive": ReferenceSpec("module", [shape], optional=True)}
+    )
+    draft = _new_draft(
+        ports, spec, CfgSectionValue({"drive": ReferenceValue("drive_lib", gain)})
+    )
+    try:
+        ports.references.clear()
+        previous = draft.observe().children["drive"]
+        assert previous.valid
+        assert previous.options == ("Pulse", "drive_lib")
+        assert previous.children["gain"].value == DirectValue(0.25)
+        assert isinstance(previous.value, ReferenceValue)
+        assert previous.value.resolved_label == "Pulse"
+        draft.refresh_references()
+        missing = draft.observe().children["drive"]
+        assert not missing.valid
+        assert isinstance(missing.value, ReferenceValue)
+        assert missing.value.error is not None
+        assert previous.value.error is None
+        assert missing.children["gain"].value == DirectValue(0.25)
+        reference = draft.root.fields["drive"]
+        assert isinstance(reference, ReferenceField)
+        reference.set_enabled(False)
+        disabled = draft.observe().children["drive"]
+        assert disabled.valid
+        assert disabled.value is None
+        assert disabled.children == {}
+    finally:
+        draft.close()
+
+
+def test_observation_data_and_model_are_detached_in_both_directions() -> None:
+    draft = _new_draft(
+        BindingPorts(),
+        CfgSectionSpec(fields={"count": ScalarSpec("Count", int)}),
+        CfgSectionValue({"count": DirectValue(2)}),
+    )
+    try:
+        observed = draft.observe()
+        draft.set_target("count", 3)
+        assert observed.children["count"].value == DirectValue(2)
+        assert isinstance(observed.spec, CfgSectionSpec)
+        assert isinstance(observed.value, CfgSectionValue)
+        observed.spec.fields.clear()
+        observed.value.fields["count"] = DirectValue(99)
+        observed.children.clear()
+        current = draft.observe()
+        assert set(current.children) == {"count"}
+        assert current.children["count"].value == DirectValue(3)
+    finally:
+        draft.close()
+
+
 def test_close_invalidates_cached_root_and_scalar_and_is_idempotent() -> None:
     ports = BindingPorts()
     ports.expressions["x"] = 1
@@ -57,6 +179,7 @@ def test_close_invalidates_cached_root_and_scalar_and_is_idempotent() -> None:
     draft_operations = (
         lambda: draft.root,
         draft.snapshot,
+        draft.observe,
         draft.is_valid,
         draft.refresh_expressions,
         draft.refresh_options,
@@ -151,6 +274,7 @@ def test_close_invalidates_reference_public_surface_and_nested_field() -> None:
 
     operations = (
         reference.available_keys,
+        reference.available_options,
         reference.is_modified,
         reference.has_missing_library_ref,
         reference.get_chosen_key,

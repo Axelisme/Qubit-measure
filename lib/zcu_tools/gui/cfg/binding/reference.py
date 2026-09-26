@@ -112,6 +112,11 @@ class ReferenceField(CfgField):
         self._require_open()
         return self._available_keys
 
+    def available_options(self) -> tuple[str, ...]:
+        """Return canonical custom labels and cached library keys for readers."""
+        self._require_open()
+        return (*(spec.label for spec in self.spec.allowed), *self._available_keys)
+
     def _load_available_keys(self) -> tuple[str, ...]:
         allowed_labels = frozenset(item.label for item in self.spec.allowed)
         return tuple(self._references.keys(self.spec.kind, allowed_labels))

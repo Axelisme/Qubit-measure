@@ -9,6 +9,7 @@ from .fields import (
     SectionField,
     SweepField,
 )
+from .observation import CfgNodeObservation
 from .ports import (
     ExpressionEvaluator,
     OptionProvider,
@@ -30,6 +31,7 @@ __all__ = [
     "CenteredSweepField",
     "CfgDraft",
     "CfgField",
+    "CfgNodeObservation",
     "ExpressionEvaluator",
     "LibraryBindingState",
     "LegacySettablePathError",

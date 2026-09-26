@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-26，scalar 選項與 sweep/reference snapshot 狀態
+**Last updated:** 2026-09-26，完整 cached cfg observation
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -86,7 +86,11 @@ ReferenceValue 的 runtime snapshot 保存 chosen_key、resolved_label 與 error
 重新 attach 時由 binding 解析當前 catalog。
 
 `zcu_tools.gui.cfg.binding`擁有Qt-free的`CfgDraft`、field tree與sweep editors。
-`CfgDraft`集中snapshot、validity、refresh與close lifecycle；field只依賴expression evaluator、
+`CfgDraft`集中snapshot、validity、refresh與close lifecycle。`observe()` 回 detached
+`CfgNodeObservation` tree，包含 Literal／readonly、cached options、active reference shape、
+完整 value carriers 與 validity；不查 live sources，不修改 model，也不代替 persistence codec。
+Remote viewer 可投影這份 nominal read contract，不必重建 field-subtype traversal。
+field只依賴expression evaluator、
 opaque option provider與reference catalog三個窄ports，不持controller/environment aggregate。
 scalar field在建構與修改時依宣告型別Fast Fail；section/reference的whole-value更新先完成純資料
 key檢查與replacement build，再一次提交，不會留下partial tree或中間validity event。leaf edit只
