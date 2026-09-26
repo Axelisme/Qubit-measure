@@ -69,7 +69,7 @@ blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
 
 ---
 
-## 持久化：PersistableExperiment + AxesSpec（ADR-0027）
+## 持久化：PersistableExperiment + AxesSpec（[ADR-0063](../../../../docs/adr/0063-persistence-ownership.md)）
 
 實驗量測資料的存取走 **labber_io 原生 axes-list**，而非舊版的 dict 殼。
 

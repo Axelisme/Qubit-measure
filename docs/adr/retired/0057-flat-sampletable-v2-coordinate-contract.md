@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [SampleTable](../../../lib/zcu_tools/resources/sample_table/README.md) 與 [fit tools](../../../lib/zcu_tools/notebook/analysis/fit_tools/README.md)。以下保留歷史正文。
+
 # ADR-0057：SampleTable v2 以平鋪 coordinate schema 定義跨模組 persistence contract
 
 **狀態：** accepted

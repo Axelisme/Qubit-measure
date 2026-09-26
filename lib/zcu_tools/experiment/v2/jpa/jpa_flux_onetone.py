@@ -65,7 +65,7 @@ class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
-    # Axes are declared inner-first (ADR-0027): inner (fastest-varying) axis is
+    # Axes are declared inner-first (ADR-0063): inner (fastest-varying) axis is
     # freqs (stored as Hz on disk, MHz in memory); outer axis is jpa flux (a.u.).
     # signals.shape == (len(fluxes), len(freqs)); non-square sweeps round-trip.
     AXES_SPEC = AxesSpec(

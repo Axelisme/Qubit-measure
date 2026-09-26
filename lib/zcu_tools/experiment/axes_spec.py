@@ -1,4 +1,4 @@
-"""Declarative, per-experiment persistence spec (ADR-0027).
+"""Declarative, per-experiment persistence spec (ADR-0063).
 
 An ``AxesSpec`` decouples an experiment's in-memory frozen Result dataclass from
 its on-disk (Labber) representation, and drives the base ``save()``/``load()``
@@ -347,7 +347,7 @@ class RoleSpec:
 
 @dataclass(frozen=True)
 class GroupedAxesSpec(Generic[T_Result, T_Config]):
-    """Experiment-level grouped persistence contract (ADR-0027)."""
+    """Experiment-level grouped persistence contract (ADR-0063)."""
 
     roles: tuple[RoleSpec, ...]
     result_type: type[T_Result]

@@ -1,7 +1,7 @@
 """Path helpers for experiment data files.
 
 The dict-based ``save_data`` / ``load_data`` / ``save_local_data`` /
-``load_local_data`` layer is gone (ADR-0027). This module retains the
+``load_local_data`` layer is gone (ADR-0063). This module retains the
 filesystem-path helpers: datafolder layout, extension normalization, and caller
 path reservation.
 """

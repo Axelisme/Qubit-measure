@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [autofluxdep](../../../lib/zcu_tools/gui/app/autofluxdep/README.md) 與 [ADR-0062](../0062-experiment-workflow.md)。以下保留歷史正文。
+
 ---
 status: accepted
 ---

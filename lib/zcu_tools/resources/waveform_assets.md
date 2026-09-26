@@ -48,6 +48,8 @@ data = ArbWaveformDatabase.load("my_pulse")
 - `idata`、`qdata`、`time` 必須是一維、同長度、finite array；`time[0] == 0` 且嚴格遞增，單位固定為 us。
 - `Abs = hypot(I, Q)` 必須落在 `[0, 1]`；I/Q 可為負值。
 - formula recipe 是可選資料；用 recipe 生成等於完全覆寫原本 data，並把 recipe 一起寫入同一個 `.npz`。
+- `import_data`、`import_file` 與 `create_from_formula` 預設在 key collision 時拒絕；caller 明示 `overwrite=True` 才可覆寫。`rename` 永不覆蓋新 key；`update_formula` 覆寫既有 playback arrays 與 recipe。`save` 是固定覆寫的 raw asset 便利入口。
+- `rename`／`delete` 後，舊 key 的 ModuleLibrary 引用可能失效；repository 不修改引用，使用端在載入缺失 asset 時報錯。
 - `ArbWaveform`（`program/v2/modules/waveform.py`）在建立波形時 lazy load asset，以完整 asset 時間軸（`time[-1]`）作為播放長度，依 generator 的 sample rate 用 `np.interp` 重採樣 I/Q；不截斷、不重設時間軸。
 
 **Preview helper（ADR-0034）**：`prepare_preview_series(data, normalize: bool) -> ArbWaveformPreview` 是純 numpy domain 函式，統一計算 peak-normalize（可選）+ I/Q/Abs 三條 series。GUI dialog 與 agent PNG service 共用此 helper，而非各自重寫 normalization 算式。

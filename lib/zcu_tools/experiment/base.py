@@ -1,4 +1,4 @@
-"""Experiment interface (Protocol) + base implementation (ADR-0027).
+"""Experiment interface (Protocol) + base implementation (ADR-0063).
 
 ``AbsExperiment`` provides the common, signature-identical persistence pair
 (``save``/``load``) driven by a per-experiment ``AXES_SPEC`` (native labber_io
