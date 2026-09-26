@@ -51,7 +51,7 @@ remain unchanged; every GUI app bumps only its code revision.
 - Endpoint synchronization remains domain-free and never holds its registry
   lock across application serialization or cfg traversal.
 
-This decision preserves the editor ownership of [[0008]], the diagnostic and
+This decision preserves the editor ownership of [[0065]], the diagnostic and
 second-view boundaries of [[0013]], the pure transport split of [[0014]], and
 the producer-domain ownership of [[0021]].  It does not alter the internal event
 facts or View reaction matrix established by [[0048]].

@@ -7,6 +7,8 @@ status: accepted
 **狀態：** accepted（2026-07-10）。
 **關聯：** [[0011]]、[[0062]]、[[0045]]、[[0051]]。
 
+> 現行定位：跨 owner 分工見 [[0065]]。本文的 live-key／embedded snapshot 是現行 lowering 說明，不代表已落實核准的 refresh／override／revision 目標。
+
 ## 背景
 
 measure-gui 與 autofluxdep-gui 使用相同的 finished-cfg static validation、dynamic

@@ -67,7 +67,7 @@ vocabulary，不forward shared generic names。role/module conversion policy仍�
 domain，不下沉到shared core。role registration同時攜帶context-free fresh shape factory與eval-aware
 value factory；named role沿用`ROLE_FACTORIES.shape`，blank role直接依`experiment.cfg_editing` closed catalog
 順序產生。role seed與library adopt policy仍由experiment層擁有
-（ADR-0045、ADR-0046、ADR-0051）。
+（ADR-0065；catalog 詳見 `experiment.cfg_editing/README.md`）。
 
 Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
 `ReferenceSpec(kind="module" | "waveform")`與`ReferenceValue`。kind由domain factory顯式

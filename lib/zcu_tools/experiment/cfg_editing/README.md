@@ -25,3 +25,5 @@ runtime closed set parity由tests顯式比較program cfg classes。
 object只讀`type`/`style` attribute，不呼`to_dict()`、Spec factory或materializer。missing、non-string與
 unknown discriminator都Fast Fail；Library enumeration使用inspection，只有resolve/edit才走各app
 materializer façade。
+
+目前兩個 app 仍各自正規化 runtime object，measure 的 library-entry 編輯由 app service 從 raw entry 建 schema。實驗側 library-entry editing port 與 read／validate／commit 收斂尚未落實；範圍與轉正條件見 [Cfg draft](../../../../docs/adr/draft/cfg-editing-boundaries.md)。跨 owner 分工見 [ADR-0065](../../../../docs/adr/0065-cfg-editing.md)。

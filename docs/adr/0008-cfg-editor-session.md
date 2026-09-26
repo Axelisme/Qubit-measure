@@ -7,6 +7,8 @@ status: accepted
 **狀態：** accepted（已實作）。
 **關聯：** external-refresh 是 [[0004]] Reaction 標準模式；commit 的 ml/md 寫入歸 [[0006]] 單一權威；tab cfg 讀寫收斂見 [[0013]] F11；agent 樂觀模型見 [[0002]]。
 
+> 現行定位：measure 的 headless session／writeback 局部契約仍可用；tab 的強制雙樹與 auto-commit 不作跨 app 目標。
+
 ## 脈絡
 
 agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、ModuleLibrary 的 module/waveform entry、analyze 算出的 writeback 草稿。三個耦合需求：

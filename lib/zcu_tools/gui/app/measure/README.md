@@ -355,7 +355,7 @@ generic model、spec walk、inheritance、codec、static/dynamic validation與lo
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter只把current
 `MetaDict` expression evaluator、measure-owned module/waveform resolver與`SweepCfg`
 factory組成三個窄ports；adapter package不import或forward shared cfg public names，也不保留
-第二份algorithm或model/inheritance/codec implementation（ADR-0045、ADR-0046）。
+第二份algorithm或model/inheritance/codec implementation（ADR-0065）。
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
@@ -387,9 +387,10 @@ inside a full-width form row.
 
 Linked module / waveform reference fields preserve their embedded value snapshot
 when the library key is missing. The field stays library-keyed and invalid so
-re-adding the same key relinks it, including restored overridden refs whose key
-is absent at load time, while persistence can still serialize the snapshot
-without consulting `ModuleLibrary`.
+re-adding the same key relinks it, while persistence can still serialize the snapshot without consulting
+`ModuleLibrary`. Restored overridden refs whose key is missing can instead
+become custom references; this does not implement the approved override dependency
+semantics (see [Cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)).
 
 Adapter cfg authoring lives in `experiment/v2_gui` as a context-free
 `MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
@@ -397,7 +398,7 @@ field order, role, lock and deferred typed Seed; fresh `instantiate(ctx)` only r
 value defaults, then `BaseAdapter.make_default_cfg` validates the finished schema.
 The framework protocol does not expose a static spec query. Shared
 `CfgSchemaAssembler` owns only paired-tree mechanics and has no measure domain/context
-knowledge (ADR-0012、ADR-0045).
+knowledge (ADR-0012、ADR-0065).
 
 `CfgFormWidget`由`zcu_tools.gui.widgets.cfg`擁有，measure UI直接import shared owner。
 每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
