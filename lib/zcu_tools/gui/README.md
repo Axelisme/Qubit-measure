@@ -38,21 +38,21 @@ leaf、sweep直接edge、reference `.ref`與直接child；legacy `.sweep`/`.valu
 default/inheritance helpers、raw persistence codec、domain-free raw spec walk，以及generic finished-cfg
 validation/lowering。materialization walker把missing scalar/section、reference shape與Sweep carrier交給
 窄policy，不理解program vocabulary；lowering只依賴expression/reference/range三個callable ports，維持
-static → optional dynamic → lower、snapshot/relink與error contract（ADR-0046）。
+static → optional dynamic → lower、snapshot/relink 的現行行為（ADR-0065；局部 lowering 契約見 ADR-0046）。
 raw persistence codec也公開唯一scalar carrier decoder；eval/direct tag validation不由app重複實作。
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
 Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
 並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、MetaDict、
 ModuleLibrary、logical key或generation policy；measure與autoflux各自保有domain builder，只共用這層
-tree mechanics（ADR-0012、ADR-0045）。
+tree mechanics（ADR-0065；局部 authoring 見 ADR-0012）。
 
 generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adapter facade只暴露
 framework contract、request/result/writeback/analyze params與protocol signature需要的session
 vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
 `NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
 normalization與policy binding留在`cfg.module_adapter`，program shape/spec與raw missing/subset policy由
-`experiment.cfg_editing`擁有（ADR-0051）。
+`experiment.cfg_editing`擁有（ADR-0065；catalog 細節見其 README）。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
 allowed shapes並拒絕inconsistent leaf types；`read_value_path`/`replace_value_path`穿value section與

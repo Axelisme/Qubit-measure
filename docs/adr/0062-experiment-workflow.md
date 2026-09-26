@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-關聯 [[0026]]（operation 與取消）、[[0063]]（單一實驗資料與 run artifact 的保存權威）、[prediction owner](../../lib/zcu_tools/simulate/fluxonium/README.md)（物理 prediction 能力）、[[0045]]／[[0046]]（通用 cfg 模型與 lowering）。兩套 workflow 的具體節點介面不同，不因共用本篇而相互轉換。
+關聯 [[0026]]（operation 與取消）、[[0063]]（單一實驗資料與 run artifact 的保存權威）、[prediction owner](../../lib/zcu_tools/simulate/fluxonium/README.md)（物理 prediction 能力）、[[0065]]（cfg owner 與使用邊界）。兩套 workflow 的具體節點介面不同，不因共用本篇而相互轉換。
 
 ## 問題與決策
 

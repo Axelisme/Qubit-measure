@@ -7,6 +7,8 @@ status: accepted
 **狀態：** accepted（2026-07-11）。
 **關聯：** [[0020]]、[[0045]]、[[0046]]、[[0050]]。
 
+> 現行定位：跨 owner 分工見 [[0065]]。本篇 `gui.measure_cfg` 路徑已過時；現行 catalog／materializer owner 是 `experiment.cfg_editing`，app normalization 尚未收斂。
+
 ## 背景
 
 measure-gui 與 autofluxdep-gui 編輯同一套 program/v2 module/waveform cfg，但各自維護

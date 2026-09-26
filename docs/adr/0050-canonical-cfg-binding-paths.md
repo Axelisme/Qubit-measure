@@ -4,6 +4,8 @@ status: accepted
 
 # 0050 — Canonical cfg binding paths
 
+> 現行定位：binding grammar 仍有效；batch 成功前綴是現況，不代表已落實核准的 atomic edit batch。目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，跨 owner 分工見 [[0065]]。
+
 ## Context
 
 Cfg mutation and listing previously used a second field-subtype grammar in the
