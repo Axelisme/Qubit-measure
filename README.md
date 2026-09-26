@@ -1,92 +1,23 @@
 # ZCU-Tools
 
-**Last updated:** 2026-09-27 — QICK board assets and remote package
+ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI、Notebook、分析與模擬；ZCU 板端提供 QICK Pyro server。連接硬體前，先確認板端環境與資產版本。板端部署和相容性尚未在硬體上核實。
 
-ZCU-Tools 是 ZCU216/QICK 平台上的量子量測工具集。工作站端負責 GUI、
-Notebook、MCP automation、資料分析與模擬；ZCU 板端只跑 Pyro server，讓工作站
-透過 QICK 控制 FPGA 與量測流程。
+## 執行環境
 
-## Runtime Profiles
+- 工作站預設 Python 3.13，供 GUI、量測 runtime 與 MCP 使用；`design` / `quantum-metal` / Ansys stack 使用 Python 3.12。
+- ZCU 板端獨立使用 PYNQ Python 3.8，不共用工作站的 uv 環境。
 
-- Python 3.13（repo 預設）：GUI、量測 runtime、MCP bridge，使用 NumPy 2.x。
-- Python 3.12：`design` / `quantum-metal` / Ansys stack，使用 NumPy 1.26.x。
-- ZCU 板端：PYNQ Python 3.8，只使用 `scripts/start_server.py`；這個腳本維持
-  Python 3.8 相容。
-
-## Install
-
-```bash
-uv sync --extra gui
-uv sync --extra client
-uv sync --extra all
-uv sync --python 3.12 --extra all  # includes design stack when needed
-```
-
-`qick` 由 `client` extra 從 upstream Git 安裝。板端若不使用同一個 uv 環境，需在
-板上另行安裝或放置 QICK。
-
-## Main entry points
-
-工作站使用該 worktree 的 Python：
+工作站在目標 worktree 安裝所需 profile；例如量測 GUI 使用 `uv sync --directory <worktree> --extra gui`。`client` extra 會從 upstream Git 安裝 QICK。其他環境要求依 [repo 操作指引](CLAUDE.md) 和 [腳本入口](scripts/README.md) 確認。
 
 ```bash
 uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
-uv run --directory <worktree> --no-sync -- python scripts/run_fluxdep_gui.py
-uv run --directory <worktree> --no-sync -- python scripts/generate_fluxonium_sample.py --help
 ```
 
-板端使用獨立的 PYNQ Python 3.8 環境啟動 `scripts/start_server.py` 或
-`scripts/start_server.ipynb`，不使用工作站的環境。板端部署需包含 repo-root
-[`bitfiles/`](bitfiles/README.md) 與 `lib`；`zcu_tools.qick_remote` 提供 QICK Pyro
-連線。板端部署及資產版本相容性待核實，尚未在硬體上測試。GUI、資料作業與模擬資料庫的
-其餘入口、輸入輸出及副作用見 [scripts/README.md](scripts/README.md)；品質工具的
-執行方式見 [tools/README.md](tools/README.md)。
+板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 `start_server.ipynb`；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘 GUI、資料處理與模擬入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。
 
-## Package Map
+## 從哪裡讀起
 
-- `zcu_tools.program.v2`：QICK ASM / modular pulse / IR / mock SoC。
-- `zcu_tools.experiment.v2`：Notebook 與 GUI adapter 共用的實驗實作、
-  Schedule-based acquisition runtime、canonical persistence。
-- `zcu_tools.experiment.v2_gui`：把 experiment 包成 measure-gui adapter。
-- `zcu_tools.gui`：Qt GUI framework、shared session core、shared remote transport。
-- `zcu_tools.mcp`：GUI-facing MCP bridge 與 agent-memory server。
-- `zcu_tools.qick_remote`：QICK／SoC Pyro client 與板端 server 支援；板端資產留在 repo-root `bitfiles/`。
-- `zcu_tools.resources`：`ContextManager`、`MetaDict`、`ModuleLibrary`、arbitrary
-  waveform asset store。
-- `zcu_tools.device`：儀器 driver 與 `GlobalDeviceManager`。
-- `zcu_tools.analysis` / `zcu_tools.notebook.analysis`：GUI-neutral analysis kernel
-  與 notebook-facing workflow。
-- `zcu_tools.simulate.fluxonium`：Fluxonium prediction engine。
-- `zcu_tools.plotting.liveplot`：Notebook / experiment runtime 的即時繪圖，GUI 透過註冊 backend 接入。
-- `zcu_tools.datafile`：Labber-style HDF5 persistence facade。
-
-## Data Layout
-
-- `result/<chip>/<qub>/params.json` 是 project scope 的身分與 handoff 檔。
-- `result/<chip>/<qub>/...` 放分析輸出、圖片、GUI state 與 context-local metadata。
-- `Database/<chip>/<qub>/...` 放 canonical experiment data file。
-- `ModuleLibrary` 與 `MetaDict` 由 `ContextManager` 管理；GUI 和 Notebook 共用同一個
-  project/context 概念。
-
-一般 experiment 與 measure GUI 只載入 canonical HDF5；帶明確 marker 的 autofluxdep
-streaming grouped v1 仍由其專用 loader 處理。Legacy artifact 不由 runtime 載入或
-自動轉換；舊 converter/CLI 已退休。
-
-## Documentation Map
-
-- `CLAUDE.md` / `AGENTS.md`：repo 操作規則、agent 角色、文件更新規則。
-- `docs/CONTEXT.md`：跨模組 domain language。
-- `docs/adr/`：跨模組架構決策。
-- 各 `lib/**/README.md` 與 `tests/README.md`：模組 cheat-sheet；修改該模組前先讀。
-
-## Quality Gates
-
-```bash
-uv run pyright
-uv run pytest -n auto
-uv run ruff check --select I --fix
-uv run ruff format
-```
-
-本 repo 執行 Python 腳本時使用 `.venv/bin/python`。測試放在 `tests/`，路徑對應被測
-模組，使用 pytest，避免外部狀態依賴。
+- [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
+- [領域詞彙](docs/CONTEXT.md) 與 [量測程式](lib/zcu_tools/experiment/v2/README.md)與[GUI](lib/zcu_tools/gui/README.md)的 README 提供實作定位；跨模組決策見 [ADR](docs/adr/README.md)。
+- [測試目錄與 fixture](tests/README.md) 說明案例歸屬；[程式碼品質](docs/code-quality.md) 說明 review 判準。
+- [品質工具](tools/README.md) 說明 gate、ratchet 與報表的執行及判讀。開發操作與環境仍依 [repo 操作指引](CLAUDE.md)。

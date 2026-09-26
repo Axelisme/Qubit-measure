@@ -1,21 +1,20 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-09-26 — canonical load test ownership
-
-本頁是整個 `tests/` 套件新增、拆分與搬遷測試的結構規則，也保留硬體與 GUI 測試的領域注意事項。
-測試行為與驗證流程以 [AGENTS.md](../AGENTS.md) 為準。
+本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
 ## 放置新增測試
 
 1. 先找同一個可觀察行為或契約的既有測試檔。新增 regression 優先放在該檔；同一 owner
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
-   `T1` 等名稱若是領域實體或真實物理量，仍可作檔名的一部分，不能只靠字面判定為 ticket 名。
+   `T1` 等名稱也可能是真實物理量，依情境判讀，不靠字面判為 ticket 名。
 2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/` 和
    `tests/tools/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
+   Notebook 專用且已抽離的 helper 仍在其模組路徑驗證介面，不必提升為通用工具。
 3. 案例按情境與預期結果命名，從模組接縫或公開契約檢查可觀察結果。
    文件、靜態內容、設定值及腳本旗標直接審閱；既有白箱或靜態檢查案例不因本頁宣稱已搬遷。
+   不新增頂層 unit／integration／e2e 目錄，亦不測 Notebook／腳本的主要內容。
 
 ## Fixture 與測試支援碼
 

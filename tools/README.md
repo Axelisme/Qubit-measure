@@ -1,8 +1,6 @@
 # tools/
 
-**Last updated:** 2026-09-26
-
-`tools/` 放 repo 內部的品質檢查。`scripts/` 放使用者入口——板端 server、GUI 啟動、資料工具。
+`tools/` 放 repo 內部的品質檢查；review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者入口——板端 server、GUI 啟動、資料工具。
 兩者的讀者不同，不混用。
 
 本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
@@ -19,26 +17,26 @@ stdout。`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_
 ## 怎麼跑
 
 ```bash
-uv run --no-sync -- python tools/gate.py --base <lane 起點>
+uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起點>
 ```
 
-`gate.py` 是日常入口，約 2 秒。它依序執行：受影響檔案的 ruff import 排序與 formatter、
+`gate.py` 是日常入口。它依序執行：受影響檔案的 ruff import 排序與 formatter、
 `lint-imports`、然後 ratchet。
 
-**不給 `--base` 時它改報現況**——全樹的絕對數字，約 6 秒：
+**不給 `--base` 時它改報現況**，列出全樹的絕對數字：
 
 ```bash
-uv run --no-sync -- python tools/gate.py                  # 現況
-uv run --no-sync -- python tools/gate.py --with-pyright   # 加上 pyright，多約 40 秒
+uv run --directory <worktree> --no-sync -- python tools/gate.py                  # 現況
+uv run --directory <worktree> --no-sync -- python tools/gate.py --with-pyright   # 加上 pyright
 ```
 
 「這棵樹現在欠多少」和「這次改動有沒有加重」是兩個問題，所以給兩個答案。沒有 base 時不會
-默默退回 `merge-base HEAD main`——在長命分支上那是九百多個變更檔與數分鐘的 pyright。
+默默退回 `merge-base HEAD main`。在長命分支上，自動選用該基準可能掃入大量無關變更。
 
 ```text
 --base <ref>     判定基準。省略則改報現況
 --no-fix         不改寫檔案，只判定。CI 或想先看再決定要不要格式化時用
---with-pyright   現況模式加上 pyright（約 +40 秒）
+--with-pyright   現況模式加上 pyright
 ```
 
 `--no-fix` 會對同一批受影響檔案執行 import 排序檢查與 `ruff format --check`，不寫檔；
@@ -47,17 +45,14 @@ uv run --no-sync -- python tools/gate.py --with-pyright   # 加上 pyright，多
 `--no-fix` 之外，預設會實際執行 import 排序與 formatter，也就是說 **`gate.py` 會改你的檔案**。
 那是 `CLAUDE.md` §5 要求的步驟，放進來是為了不必記兩次。
 
-### 失敗長什麼樣
+### 失敗輸出
 
 ```text
 ok   ruff import sort
 ok   ruff format
 ok   import contracts
 FAIL ratchet
-2 changed Python file(s), base f1c774476
-    suppressions: tools/_p.py suppression:noqa 0 -> 1
-
-Run separately: python tools/check_pytest_collection.py; pytest -n auto --dist=worksteal
+    suppressions: <path> suppression:noqa 0 -> 1
 ```
 
 每行 regression 的形式是 `<detector>: <檔案> <規則> <base 計數> -> <candidate 計數>`。
@@ -74,7 +69,7 @@ before/after；這是人工審查提示，不是自動判定設定變弱，也�
 
 格式化排在最前面是有原因的：它會改寫程式碼，先量測再格式化的話，讀到結果時那個狀態已經不存在了。
 
-慢的兩項**刻意留在外面**，把它們折進來會讓一個兩秒的指令變成兩分鐘，然後所有人都學會跳過它：
+較耗時的兩項**刻意留在外面**；快速 gate 不替代 collection 與行為測試：
 
 ```bash
 uv run --no-sync -- python tools/check_pytest_collection.py   # 約 30 秒
@@ -194,28 +189,9 @@ uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyrigh
 
 ## 檢查項目
 
-| 檢查 | 守什麼 | 判讀 | 現況（2026-09-24） |
-| --- | --- | --- | --- |
-| `lint-imports` | 模組間的依賴方向，契約在 `.importlinter`；包含 experiment、shared session、cfg core/widgets、autofluxdep 與 analysis kernel | 硬性 | 綠 |
-| `check_pytest_collection.py` | 四種 pytest entrypoint／並行組合收集到相同的測試集 | 硬性 | 綠 |
-| `ruff check` | 結構：函式複雜度、分支數、statement 數、參數數、死碼、boolean trap | ratchet | 1492 |
-| `pyright` | 型別，以及跨模組存取 private 造成的封裝破口 | ratchet | 3871 |
-| `check_file_size.py` | 單檔行數上限 1000 | ratchet | 41 |
-| `check_test_path_correspondence.py` | 每個測試目錄的路徑對應一個實際存在的模組 | ratchet | 20 |
-| `check_test_structure.py` | 測試間直接 import、conftest import、覆蓋測試定義；命名另作 advisory | ratchet | 以 CLI 現況為準 |
-| `check_test_capabilities.py` | 測試模組宣告它用的 socket／subprocess／sleep | ratchet | 34 |
-| `check_suppressions.py` | 逃生口計量 | ratchet | 2349 |
-| `pytest -n auto` | 行為 | 硬性 | 見下方 candidate-bound 觀察 |
+`lint-imports` 與 `check_pytest_collection.py` 是獨立的硬性檢查；前者由 `gate.py` 呼叫，後者需另外執行。Ruff、Pyright、file size、test path／structure／capabilities 與 suppressions 等計量項由 `check_ratchet.py` 對照 base 判斷。單獨執行 detector 顯示現況，不代表 regression 驗收。pytest 行為選集仍需另跑。
 
-前兩項在上述歷史觀察通過。新的失敗仍需在相同環境比較 base/candidate，不能只憑歷史綠燈歸因本次變更。
-
-中間的計量檢查保留既有債務可見。**單獨執行它們只會看到既有狀態**，判定一律經由
-ratchet。
-
-`ruff` 與 `pyright` 的規則選擇記在 `pyproject.toml` 的註解裡，包含刻意排除哪些規則與原因。
-表中的數字是指定日期的歷史觀察，不是新規則啟用後的 baseline。新增 lint 規則與 missing-import
-檢查仍由 ratchet 判定；不為了開啟規則而順手改寫全庫。未安裝 `gdrive` 等 optional profile 時，
-相關 import 診斷保留可見，不以缺少第三方 type stub 為理由全域關閉 import 檢查。
+實際規則和掃描範圍見 `pyproject.toml`、`.importlinter` 與各 detector。新增 lint 規則與 missing-import 檢查仍由 ratchet 判定；optional profile 未安裝時的 import 診斷保留可見，不為消除診斷而全域關閉 import 檢查。
 
 ## 測試結構
 
@@ -315,20 +291,6 @@ ratchet 會把它讀成進步。
 ——把 `_foo` 改名成 `foo` 讓 `reportUnusedFunction` 不發作、把 5000 行拆成五個 999 行——
 只能靠 reviewer。
 
-## pytest 的 candidate-bound 觀察
+## 判讀一次測試執行
 
-2026-09-25 在 `bceedb3fe`、Python 3.13.11 主 checkout 環境，`pytest -n auto` 與
-`pytest -n auto --dist=worksteal` 各跑一次，兩次均為 6245 passed、7 skipped、2 warnings。
-`check_pytest_collection.py` 四種入口均收集 6252 tests。這些不是目前所有 candidate 的保證，
-兩次通過也不證明消除了順序依賴或 Qt flake；更新程式、環境或工具後需重新量測。
-
-以下是 main＋Load 起點 `18f22e46a` 與當時工具分支的歷史失敗線索，不是現況豁免：
-
-- `tests/gui/app/measure/ui/test_writeback_widget.py` 的三個 layout 測試每次失敗。
-- 每次執行約有一次 xdist worker 以 `Fatal Python error: Aborted`／`node down` 終止，發生在 Qt 物件的 GC
-  期間；被記為失敗的是當時在該 worker 上的舊 UI 測試，依排程而異，單獨重跑會通過。
-- `tests/gui/plotting/test_plotting.py::test_registry_evicts_gc_collected_figure` 間歇失敗：它比較全域
-  `WeakKeyDictionary` 的絕對筆數，同一 worker 上其他測試的 figure 在期間被 GC 就會改變計數。
-
-再次遇到這些症狀時保存 candidate、環境、選集與排程，建立可重現的失敗證據再定因。
-不能因症狀與歷史記錄相似就忽略失敗，也不能以單獨重跑通過取代原選集驗證。
+每次驗證記錄候選 commit、環境、測試選集、xdist 排程、exit status 與原始 log。collection 相同或一次通過不保證沒有順序依賴及 Qt 資源生命週期問題；worker 中止、間歇失敗與警告需要在相同選集重新調查，不能因個別重跑通過就宣告原失敗解除。歷史候選的通過數與失敗案例不是現況基準，也不是豁免。
