@@ -325,7 +325,7 @@ def read_scalar_widget(w: QWidget, spec: ScalarSpec) -> Any:
 
 
 def _widget_default_for_direct_value(value: DirectValue, spec: ScalarSpec) -> Any:
-    if spec.optional and value.raw is not None:
+    if (spec.optional or spec.type is complex) and value.raw is not None:
         return value.raw
     if value.value is None:
         # An optional unset scalar shows as an empty field (the "(none)" state),
@@ -418,7 +418,9 @@ class ScalarWidget(BaseLiveWidget):
                 assert isinstance(inp, QLineEdit)
                 field.set_value(EvalValue(expr=inp.text().strip()))
                 self._sync_eval_ghost(field.get_value())
-            elif field.spec.optional and isinstance(inp, QLineEdit):
+            elif isinstance(inp, QLineEdit) and (
+                field.spec.optional or field.spec.type is complex
+            ):
                 field.set_text(inp.text())
             else:
                 val = read_value_widget(inp, field.spec.type)
@@ -597,7 +599,7 @@ class ScalarWidget(BaseLiveWidget):
         return (
             spec.editable
             and field.available_options() is None
-            and spec.type in {int, float}
+            and spec.type in {int, float, complex}
         )
 
 

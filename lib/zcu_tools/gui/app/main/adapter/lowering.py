@@ -21,10 +21,10 @@ _REFERENCE_KINDS = frozenset({"module", "waveform"})
 
 
 def _make_expression_resolver(md: MetaDict) -> ExpressionResolver:
-    from zcu_tools.gui.session.expression import evaluate_numeric_expr
+    from zcu_tools.gui.session.expression import evaluate_scalar_expr
 
-    def resolve_expression(expr: str, /) -> int | float:
-        return evaluate_numeric_expr(expr, md)
+    def resolve_expression(expr: str, /) -> int | float | complex:
+        return evaluate_scalar_expr(expr, md)
 
     return resolve_expression
 

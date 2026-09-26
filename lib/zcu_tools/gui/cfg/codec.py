@@ -46,6 +46,8 @@ def decode_eval_wire(raw: object) -> EvalValue | None:
 
 
 def _to_json_compatible(value: object) -> object:
+    if isinstance(value, complex):
+        value = encode_complex(value)
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, list):
@@ -216,7 +218,7 @@ def _node_value_from_raw(
         if eval_value is not None:
             return eval_value
         if isinstance(raw, dict) and raw.get("__kind") == "direct":
-            return _decode_direct_wire(raw)
+            return _decode_direct_wire(raw, spec)
         if isinstance(raw, str) and raw.strip().startswith("="):
             raise RuntimeError("Legacy scalar '=expr' payload is unsupported")
         return DirectValue(raw)
@@ -257,14 +259,37 @@ def _node_value_from_raw(
     raise RuntimeError(f"Unsupported spec node for restore: {type(spec).__name__}")
 
 
-def _decode_direct_wire(raw: dict[str, object]) -> DirectValue:
+def _decode_direct_wire(raw: dict[str, object], spec: ScalarSpec) -> DirectValue:
     text = raw.get("raw")
     error = raw.get("error")
     if text is not None and not isinstance(text, str):
         raise ValueError("Direct input raw must be a string")
     if error is not None and not isinstance(error, str):
         raise ValueError("Direct input error must be a string")
-    return DirectValue(value=raw.get("value"), raw=text, error=error)
+    value = raw.get("value")
+    if spec.type is complex and value is not None:
+        value = decode_complex(value)
+    return DirectValue(value=value, raw=text, error=error)
+
+
+def encode_complex(value: complex) -> dict[str, list[float]]:
+    """Encode a complex scalar without formatting or precision loss."""
+    return {"__complex__": [value.real, value.imag]}
+
+
+def decode_complex(value: object) -> complex:
+    """Decode the explicit complex tag shared by cfg persistence and editing."""
+    if not isinstance(value, dict) or set(value) != {"__complex__"}:
+        raise ValueError("Complex scalar requires a __complex__ object")
+    parts = value["__complex__"]
+    if not isinstance(parts, list) or len(parts) != 2:
+        raise ValueError("Complex scalar requires two components")
+    real, imag = parts
+    if isinstance(real, bool) or not isinstance(real, (int, float)):
+        raise ValueError("Complex real component must be a real number")
+    if isinstance(imag, bool) or not isinstance(imag, (int, float)):
+        raise ValueError("Complex imaginary component must be a real number")
+    return complex(real, imag)
 
 
 def _parse_sweep_edge(raw: object) -> float | EvalValue:

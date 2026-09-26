@@ -1,6 +1,13 @@
 """Pure, app-independent GUI configuration model, inheritance, and codec."""
 
-from .codec import SessionCodecError, decode_eval_wire, raw_to_schema, schema_to_raw
+from .codec import (
+    SessionCodecError,
+    decode_complex,
+    decode_eval_wire,
+    encode_complex,
+    raw_to_schema,
+    schema_to_raw,
+)
 from .inheritance import (
     align_locked_literals,
     inherit_from,
@@ -70,6 +77,8 @@ __all__ = [
     "ChoiceBinding",
     "ChoiceSectionSpec",
     "DirectValue",
+    "decode_complex",
+    "encode_complex",
     "EvalValue",
     "ExpressionResolver",
     "FloatSpec",

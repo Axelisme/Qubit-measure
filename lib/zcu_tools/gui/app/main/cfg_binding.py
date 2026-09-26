@@ -11,7 +11,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
 from zcu_tools.gui.measure_cfg import ProgramCfgKind, program_shape_for_input
-from zcu_tools.gui.session.expression import evaluate_numeric_expr
+from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,
 )
@@ -59,8 +59,8 @@ class MeasureCfgBindings:
             references=self,
         )
 
-    def evaluate_expression(self, expression: str) -> int | float:
-        return evaluate_numeric_expr(expression, self._host.get_current_md())
+    def evaluate_expression(self, expression: str) -> int | float | complex:
+        return evaluate_scalar_expr(expression, self._host.get_current_md())
 
     def provide_options(self, source_id: str) -> Sequence[object]:
         if source_id == _DEVICES_SOURCE:

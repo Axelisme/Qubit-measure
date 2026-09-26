@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import cast
 
-from zcu_tools.gui.cfg import DirectValue, EvalValue
+from zcu_tools.gui.cfg import DirectValue, EvalValue, encode_complex
 from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget, SettableTargetKind
 
 
@@ -41,7 +41,11 @@ def _wire_value(value: object) -> object:
     if isinstance(value, EvalValue):
         return value.expr
     if isinstance(value, DirectValue):
-        return value.value
+        return (
+            encode_complex(value.value)
+            if isinstance(value.value, complex)
+            else value.value
+        )
     return value
 
 

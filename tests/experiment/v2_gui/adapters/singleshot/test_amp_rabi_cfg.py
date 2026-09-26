@@ -1,0 +1,135 @@
+"""Amp Rabi calibration follows the visible cfg instead of runtime md reads."""
+
+from unittest.mock import MagicMock
+
+import pytest
+from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
+from zcu_tools.experiment.utils import make_comment, parse_comment
+from zcu_tools.experiment.v2.singleshot.amp_rabi import AmpRabiCfg, AmpRabiExp
+from zcu_tools.experiment.v2_gui.adapters.singleshot.amp_rabi import SsAmpRabiAdapter
+from zcu_tools.gui.app.main.adapter import ExpContext, RunRequest
+from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.cfg import DirectValue, EvalValue
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+
+
+@pytest.fixture
+def calibration_draft():
+    md = MetaDict()
+    md.g_center = -1 + 0.25j
+    md.e_center = 2 - 0.5j
+    md.ge_radius = 0.75
+    ml = ModuleLibrary()
+    ctx = ExpContext(md=md, ml=ml, soc=None, soccfg=None)
+    host = MagicMock()
+    host.get_current_md.return_value = md
+    host.get_current_ml.return_value = ml
+    host.list_device_names.return_value = []
+    host.list_arb_waveforms.return_value = []
+    schema = SsAmpRabiAdapter.cfg_definition().instantiate(ctx)
+    draft = MeasureCfgBindings(host).new_draft(schema)
+    try:
+        yield md, ml, draft
+    finally:
+        draft.close()
+
+
+def test_amp_rabi_missing_calibration_is_invalid_and_cannot_acquire(
+    calibration_draft, monkeypatch
+):
+    md, ml, draft = calibration_draft
+    draft.set_target("g_center", EvalValue("missing_center"))
+    assert not draft.is_valid()
+    acquire = MagicMock()
+    monkeypatch.setattr(AmpRabiExp, "run", acquire)
+    request = RunRequest(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock())
+    with pytest.raises(RuntimeError, match="missing_center"):
+        SsAmpRabiAdapter().run(request, draft.snapshot())
+    acquire.assert_not_called()
+
+
+def test_amp_rabi_uses_cfg_calibration_after_md_changes(calibration_draft, monkeypatch):
+    md, ml, draft = calibration_draft
+    snapshot = draft.snapshot()
+    assert snapshot.value.fields["g_center"] == EvalValue(
+        "g_center", resolved=-1 + 0.25j
+    )
+    assert snapshot.value.fields["e_center"] == EvalValue("e_center", resolved=2 - 0.5j)
+    assert snapshot.value.fields["radius"] == EvalValue("ge_radius", resolved=0.75)
+    md.g_center = 100 + 100j
+    observed = []
+
+    def record_run(self, soc, soccfg, cfg):
+        observed.append(cfg)
+        return "acquired"
+
+    def materialize(raw, cfg_type, *, ml):
+        return assemble_experiment_cfg(raw, cfg_type, ml=ml, device_snapshot={})
+
+    monkeypatch.setattr(AmpRabiExp, "run", record_run)
+    monkeypatch.setattr(
+        "zcu_tools.experiment.v2_gui.adapters.base.make_cfg", materialize
+    )
+    request = RunRequest(md=md, ml=ml, soc=MagicMock(), soccfg=MagicMock())
+    result = SsAmpRabiAdapter().run(request, snapshot)
+    assert result == "acquired"
+    cfg = observed[0]
+    assert (cfg.g_center, cfg.e_center, cfg.radius) == (-1 + 0.25j, 2 - 0.5j, 0.75)
+
+
+def test_amp_rabi_experiment_result_preserves_calibration_used_for_live_classification(
+    calibration_draft, monkeypatch
+):
+    import numpy as np
+    from zcu_tools.experiment.v2.runner import ProgramBuilder
+    from zcu_tools.experiment.v2.singleshot import amp_rabi
+
+    md, ml, draft = calibration_draft
+    draft.set_target("shots", 2)
+    cfg = assemble_experiment_cfg(
+        schema_to_raw_dict(draft.snapshot(), md, ml),
+        AmpRabiCfg,
+        ml=ml,
+        device_snapshot={},
+    )
+    viewer = MagicMock()
+    viewer.__enter__.return_value = viewer
+    monkeypatch.setattr(amp_rabi, "LivePlot1D", lambda *args, **kwargs: viewer)
+    monkeypatch.setattr(amp_rabi, "setup_devices", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        amp_rabi, "sweep2array", lambda *args, **kwargs: np.array([0.1])
+    )
+    monkeypatch.setattr(ProgramBuilder, "build", lambda *args, **kwargs: MagicMock())
+    monkeypatch.setattr(
+        amp_rabi,
+        "raw_shots_to_signal",
+        lambda _program: np.array([-1 + 0.25j, 2 - 0.5j]),
+    )
+    with pytest.warns(UserWarning, match="reps will be overwritten"):
+        result = AmpRabiExp().run(MagicMock(), MagicMock(), cfg)
+    np.testing.assert_array_equal(
+        viewer.update.call_args.args[1], [[0.5], [0.5], [0.0]]
+    )
+    assert result.cfg_snapshot is not None
+    assert result.cfg_snapshot.g_center == -1 + 0.25j
+    assert result.cfg_snapshot.e_center == 2 - 0.5j
+    assert result.cfg_snapshot.radius == 0.75
+    cfg.g_center = 10j
+    assert result.cfg_snapshot.g_center == -1 + 0.25j
+
+
+def test_amp_rabi_direct_override_and_experiment_comment_round_trip(calibration_draft):
+    md, ml, draft = calibration_draft
+    draft.set_target("g_center", DirectValue(3 + 4j))
+    raw = schema_to_raw_dict(draft.snapshot(), md, ml)
+    cfg = assemble_experiment_cfg(raw, AmpRabiCfg, ml=ml, device_snapshot={})
+    assert cfg.g_center == 3 + 4j
+    assert md.g_center == -1 + 0.25j
+    saved, _, _ = parse_comment(make_comment(cfg))
+    restored = AmpRabiCfg.model_validate(saved)
+    assert (restored.g_center, restored.e_center, restored.radius) == (
+        3 + 4j,
+        2 - 0.5j,
+        0.75,
+    )

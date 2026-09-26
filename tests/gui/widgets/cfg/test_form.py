@@ -300,6 +300,31 @@ def test_optional_scalar_widget_is_line_edit_empty_for_none(qapp):
     assert read_scalar_widget(w, spec) is None
 
 
+def test_complex_direct_widget_keeps_partial_input_in_model(qapp, ctrl):
+    from qtpy.QtWidgets import QLineEdit
+    from zcu_tools.gui.widgets.cfg.fields.common import ScalarWidget
+
+    field = _scalar_field(ctrl, ScalarSpec("Center", complex), DirectValue(1 + 2j))
+    widget = ScalarWidget(field)
+    try:
+        entry = widget.findChild(QLineEdit)
+        assert entry is not None
+        entry.setText("2-")
+        assert not field.is_valid()
+        value = field.get_value()
+        assert isinstance(value, DirectValue)
+        assert value.raw == "2-"
+        assert value.value is None
+        entry.setText("2-3j")
+        assert field.is_valid()
+        assert field.get_value() == DirectValue(2 - 3j, raw="2-3j")
+    finally:
+        widget.teardown()
+        widget.close()
+        widget.deleteLater()
+        field.teardown()
+
+
 def test_optional_scalar_widget_round_trips_value(qapp):
     from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg.fields import make_scalar_widget, read_scalar_widget

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-25 — GE fit symmetry and population constraints
+**Last updated:** 2026-09-26 — Amp Rabi calibration cfg
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -167,6 +167,11 @@ opaque draft，adapter不接觸Writeback implementation。
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 `singleshot/amp_rabi`沒有此選項，固定用無衰減joint fit。此選擇不屬於量測cfg，
 不改變raw-IQ acquisition。
+
+`singleshot/amp_rabi` 的 `g_center`、`e_center` 與 `radius` 是正式 experiment cfg 欄位，
+預設以一般 expression 引用 md 的 g_center/e_center/ge_radius，缺值保持 invalid。
+Operator 可切換 direct complex 值；adapter 沿用 BaseAdapter.run，不另外傳入校正參數。
+Result cfg_snapshot 包含實際使用的三個值；其他 singleshot 的遷移不由此段宣稱完成。
 
 Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
 新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，

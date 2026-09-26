@@ -59,6 +59,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
     EvalValue,
+    decode_complex,
     decode_eval_wire,
 )
 from zcu_tools.gui.cfg.binding import (
@@ -754,6 +755,11 @@ def _decode_value(value: object) -> object:
         raise CfgEditorError(str(exc)) from exc
     if ref is not None:
         return ref
+    if isinstance(value, dict) and "__complex__" in value:
+        try:
+            return decode_complex(value)
+        except ValueError as exc:
+            raise CfgEditorError(str(exc)) from exc
     if isinstance(value, dict) and value.get("__kind") == "eval":
         decoded = decode_eval_wire(value)
         if decoded is None:

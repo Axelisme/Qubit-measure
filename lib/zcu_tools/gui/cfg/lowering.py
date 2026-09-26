@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Collection
-from typing import Protocol, TypeAlias
+from typing import Protocol, TypeAlias, cast
 
 from .model import (
     CenteredSweepSpec,
@@ -32,7 +32,7 @@ _LOCKED_CENTER_ABS_TOL = 1e-12
 
 
 class ExpressionResolver(Protocol):
-    def __call__(self, expr: str, /) -> int | float: ...
+    def __call__(self, expr: str, /) -> int | float | complex: ...
 
 
 class ReferenceResolver(Protocol):
@@ -122,14 +122,20 @@ def lower_finished_cfg(
     )
 
 
-def _coerce_eval_result(value: int | float, type_: type) -> int | float:
+def _coerce_eval_result(
+    value: int | float | complex, type_: type
+) -> int | float | complex:
+    if type_ is complex:
+        return complex(value)
+    if isinstance(value, complex):
+        raise RuntimeError("Complex expression result cannot target a real field")
     if type_ is float:
         return float(value)
     if type_ is int:
         if not float(value).is_integer():
             raise RuntimeError(f"Expression result {value!r} is not an integer")
         return int(value)
-    raise RuntimeError(f"Eval mode only supports int or float, got {type_!r}")
+    raise RuntimeError(f"Eval mode only supports int, float or complex, got {type_!r}")
 
 
 def _resolve_eval(
@@ -139,7 +145,7 @@ def _resolve_eval(
     path: str,
     label: str,
     type_: type = float,
-) -> int | float:
+) -> int | float | complex:
     if value.resolved is not None:
         resolved = value.resolved
         # A committed snapshot remains authoritative, but drift must stay visible.
@@ -148,7 +154,7 @@ def _resolve_eval(
                 fresh = resolve_expression(value.expr)
             except Exception:
                 fresh = None
-            if fresh is not None and isinstance(fresh, (int, float)):
+            if fresh is not None:
                 if _coerce_eval_result(fresh, type_) != _coerce_eval_result(
                     resolved, type_
                 ):
@@ -173,7 +179,7 @@ def _resolve_eval(
         raise RuntimeError(
             f"Config field '{path}' ({label}) expression {value.expr!r} is unresolved"
         )
-    if not isinstance(resolved, (int, float)):
+    if not isinstance(resolved, (int, float, complex)):
         raise RuntimeError(
             f"Config field '{path}' ({label}) resolved to non-numeric value"
         )
@@ -190,14 +196,15 @@ def _resolve_sweep_edge(
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, EvalValue):
-        return float(
+        return cast(
+            float,
             _resolve_eval(
                 value,
                 resolve_expression,
                 path=path,
                 label=label,
                 type_=float,
-            )
+            ),
         )
     raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
 

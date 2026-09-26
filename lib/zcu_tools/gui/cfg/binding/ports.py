@@ -8,7 +8,7 @@ from ..model import CfgSectionValue
 
 
 class ExpressionEvaluator(Protocol):
-    def __call__(self, expression: str) -> int | float: ...
+    def __call__(self, expression: str) -> int | float | complex: ...
 
 
 class OptionProvider(Protocol):

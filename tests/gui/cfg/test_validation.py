@@ -39,6 +39,17 @@ def _library(*, modules: dict[str, object] | None = None) -> MagicMock:
     return ml
 
 
+def test_complex_live_value_cannot_lower_to_real_scalar() -> None:
+    md = MetaDict()
+    md.frequency = 1 + 2j
+    schema = _schema(
+        {"frequency": ScalarSpec("Frequency", float)},
+        {"frequency": EvalValue("frequency", resolved=5.0)},
+    )
+    with pytest.raises(RuntimeError, match="cannot target a real field"):
+        schema_to_raw_dict(schema, md, None)
+
+
 def test_static_validation_fast_fails_missing_and_extra_fields() -> None:
     missing = _schema({"count": ScalarSpec("Count", int)}, {})
     with pytest.raises(RuntimeError) as missing_error:

@@ -351,7 +351,7 @@ class DirectValue:
     """A directly-entered scalar value with optional input text and parse error.
 
     ``value=None`` means unset when ``error`` is absent. Scalar types are
-    int/float/str/bool, whose legal values are never ``None``.
+    int/float/complex/str/bool, whose legal values are never ``None``.
     Text parsing failures retain ``raw``
     and ``error`` with no parsed value, so invalid input cannot reuse an earlier
     valid value. The wrapper also preserves direct mode while unset or invalid."""
@@ -378,7 +378,9 @@ ScalarValue: TypeAlias = DirectValue | EvalValue
 
 # Accepted input for the value-tree fluent ``with_field``: a raw scalar (wrapped
 # in DirectValue) or an already-built scalar value.
-ScalarLeafInput: TypeAlias = int | float | str | bool | DirectValue | EvalValue
+ScalarLeafInput: TypeAlias = (
+    int | float | complex | str | bool | DirectValue | EvalValue
+)
 
 
 @dataclass

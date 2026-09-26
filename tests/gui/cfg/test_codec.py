@@ -45,6 +45,21 @@ def test_invalid_direct_text_round_trips_without_becoming_optional_unset() -> No
         validate_finished_cfg(restored, resolve_reference=None)
 
 
+def test_complex_direct_value_has_lossless_json_codec_and_typed_lowering() -> None:
+    import json
+
+    from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
+
+    value = DirectValue(0.123456789123456 + 9.876543219876543j)
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"center": ScalarSpec("Center", complex)}),
+        CfgSectionValue(fields={"center": value}),
+    )
+    restored = raw_to_schema(schema, json.loads(json.dumps(schema_to_raw(schema))))
+    assert restored.value.fields["center"] == value
+    assert schema_to_raw_dict(restored, None, None) == {"center": value.value}
+
+
 def test_decode_eval_wire_carriers() -> None:
     assert decode_eval_wire({"__kind": "eval", "expr": "x + 1"}) == EvalValue(
         expr="x + 1"

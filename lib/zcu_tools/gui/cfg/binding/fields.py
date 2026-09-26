@@ -157,7 +157,7 @@ class ScalarField(CfgField):
     def set_text(self, text: str) -> None:
         """Store direct input text and its parse result, including invalid input."""
         self._require_open()
-        if self.spec.type not in (int, float, str):
+        if self.spec.type not in (int, float, complex, str):
             raise TypeError(f"Text input is unsupported for {self.spec.type.__name__}")
         if not text.strip() and (self.spec.optional or self.spec.type is not str):
             value = DirectValue(None, raw=text)
@@ -261,16 +261,22 @@ class ScalarField(CfgField):
         self._set_valid(valid)
 
 
-def _coerce_eval_result(value: int | float, type_: type) -> int | float:
+def _coerce_eval_result(
+    value: int | float | complex, type_: type
+) -> int | float | complex:
     if isinstance(value, bool):
         raise RuntimeError("Expression evaluator returned bool instead of a number")
+    if type_ is complex:
+        return complex(value)
+    if isinstance(value, complex):
+        raise RuntimeError("Complex expression result cannot target a real field")
     if type_ is float:
         return float(value)
     if type_ is int:
         if not float(value).is_integer():
             raise RuntimeError(f"Expression result {value!r} is not an integer")
         return int(value)
-    raise RuntimeError(f"Eval mode only supports int or float, got {type_!r}")
+    raise RuntimeError(f"Eval mode only supports int, float or complex, got {type_!r}")
 
 
 class LiteralField(CfgField):

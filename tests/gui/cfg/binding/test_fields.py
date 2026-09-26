@@ -24,6 +24,44 @@ from zcu_tools.gui.cfg.binding import (
 from ._fakes import BindingPorts
 
 
+def test_complex_scalar_expression_direct_input_and_invalid_recovery() -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Center", complex),
+        lambda expression: -1 + 2j,
+        ports.provide,
+        EvalValue("g_center"),
+    )
+    assert field.get_value() == EvalValue("g_center", resolved=-1 + 2j)
+    assert field.is_valid()
+    field.set_text("3-4j")
+    assert field.get_value() == DirectValue(3 - 4j, raw="3-4j")
+    field.set_text("3-")
+    assert not field.is_valid()
+    value = field.get_value()
+    assert isinstance(value, DirectValue)
+    assert value.value is None
+    assert value.raw == "3-"
+    field.set_text("1j")
+    assert field.get_value() == DirectValue(1j, raw="1j")
+    assert field.is_valid()
+
+
+def test_complex_expression_cannot_enter_real_field() -> None:
+    ports = BindingPorts()
+    field = ScalarField(
+        ScalarSpec("Frequency", float),
+        lambda expression: 1j,
+        ports.provide,
+        EvalValue("g_center"),
+    )
+    assert not field.is_valid()
+    value = field.get_value()
+    assert isinstance(value, EvalValue)
+    assert value.resolved is None
+    assert value.error
+
+
 def test_scalar_field_resolves_expressions_and_refreshes_snapshot() -> None:
     ports = BindingPorts()
     ports.expressions["freq"] = 5
