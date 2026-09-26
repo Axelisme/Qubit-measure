@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-09-27 — liveplot import path
+**Last updated:** 2026-09-27 — liveplot import path; executor workflow ADR 分流
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runtime/` 的細節另見 `runtime/README.md`。
 
@@ -222,7 +222,7 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 ## Executor 模式（`autofluxdep` / `overnight`）
 
-當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。
+當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。跨模組的 runtime／workflow 邊界見 ADR-0062。
 
 兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`runtime/multi_executor.py`，見 `runtime/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、`ResultTree` per-measurement plot update、measurement init/cleanup、per-measurement retry、error/stop partial result、figure/writer `try/finally` cleanup 與 `last_cfg` / `last_result` / `last_run_outcome`。子類別各自只實作 `run()` 的 cfg/env 前置與 `Schedule` outer loop。
 

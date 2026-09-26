@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0040 — autofluxdep run result artifact
 
-關聯 [[0018]]（autofluxdep resolver-builder boundary）、[[0027]]（一般 experiment data persistence）、[[0038]]（executor workflow collection 不納入單一 Experiment Result）。
+關聯 [[0062]]（autofluxdep resolver 與 executor workflow collection 的邊界）、[[0027]]（一般 experiment data persistence）。
 
 ## 脈絡
 

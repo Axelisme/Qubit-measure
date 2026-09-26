@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-09-27 — external stop flag API
+**Last updated:** 2026-09-26 — executor workflow ADR 分流
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -130,7 +130,7 @@ with Schedule(cfg, signals_buffer) as sched:
 
 ## Executor Scaffold
 
-`MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow。
+`MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow。跨模組分工見 ADR-0062。
 base executor 擁有 common run lifecycle：建立 default outer result、combined liveplot
 layout、FFmpeg writer、`ResultTree` subscriptions、`Schedule` scope、measurement
 init/cleanup、per-measurement retry、stop/error partial handling、writer finish、
@@ -179,7 +179,7 @@ executor leaf contract 由 `runtime/task.py` 擁有：
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
   仍是 `completed`。
-- `Schedule.outcome` 記錄 run 結果：`completed`、`stopped`、`interrupted` 或
+- `Schedule.outcome` 記錄 run 結果（資料保留不等於 operation 成功）：`completed`、`stopped`、`interrupted` 或
   `failed`。stop / `KeyboardInterrupt` / program build、acquire 或分析例外都會設定 `StopSignal`
   並保留目前已寫入 buffer / result tree 的 partial result；已寫入的 slot 保留，
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire

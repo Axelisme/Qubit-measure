@@ -5,7 +5,7 @@ status: accepted
 # 0046 — Shared cfg lowering ports
 
 **狀態：** accepted（2026-07-10）。
-**關聯：** [[0011]]、[[0043]]、[[0045]]、[[0051]]。
+**關聯：** [[0011]]、[[0062]]、[[0045]]、[[0051]]。
 
 ## 背景
 
@@ -63,7 +63,7 @@ closed catalog辨識所有合法 measure module discriminator，使合法但不�
 missing/relink semantics保持不變。
 
 `NodeCfgSchema.logical_paths`、generation persistence、`OverridePlan`、Qt form/live model與
-node builders不屬於本決策，維持 [[0043]] dataflow。
+node builders不屬於本決策，維持 [[0062]] dataflow。
 
 ## 後果
 

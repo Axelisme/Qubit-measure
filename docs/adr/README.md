@@ -35,7 +35,6 @@
 - [0011 — CfgSchema validate boundary](0011-cfgschema-validate-boundary.md)：成品邊界做靜態結構驗證。
 - [0012 — Context-free measure cfg definition](0012-cfgbuilder-value-layer-fluent-assembly.md)：adapter以單一definition宣告static shape、domain verbs與deferred typed defaults。
 - [0036 — Adapter capability contract](0036-adapter-capability-contract-validated-at-import.md)：adapter顯式宣告capabilities，import-time validation抓宣告與hook不一致，Load所有driving paths共用`load_data` gate。
-- [0043 — Autofluxdep runtime cfg override plan](0043-autofluxdep-runtime-cfg-override-plan.md)：Default cfg run-start snapshot、builder-declared OverridePlan、runtime patch enforcement、remote/artifact exposure 與 cfg form decoration。
 - [0045 — Shared GUI cfg core ownership](0045-shared-gui-cfg-core-ownership.md)：`gui.cfg` 擁有Qt-free core，`gui.widgets.cfg`擁有instance-registry Qt renderer，measure adapter與autoflux cfg barrel只暴露app-owned API；lowering ports見 [[0046]]。
 - [0046 — Shared cfg lowering ports](0046-shared-cfg-lowering-ports.md)：finished-cfg algorithm由shared core擁有，app以expression/reference/range三個窄port提供runtime policy。
 - [0050 — Canonical cfg binding paths](0050-canonical-cfg-binding-paths.md)：binding擁有唯一typed path grammar與batch net diff；remote只投影target。
@@ -60,9 +59,10 @@
 - [0040 — Autofluxdep run result artifact](0040-autofluxdep-run-result-artifact.md)：autofluxdep run output 以 run directory、journal 與 per-node streaming Labber-readable HDF5 作 canonical artifact。
 - [0057 — Flat SampleTable v2 coordinate contract](0057-flat-sampletable-v2-coordinate-contract.md)：五欄平鋪 coordinate（flux/dev_value/dev_unit/flux_int/flux_period）與 A/V base unit、explicit provenance precedence；legacy 可用仍存在的 pure migration API 顯式轉換，CSV CLI 已退休。
 
-## Experiment Runtime
+## Experiment runtime／Autofluxdep workflow
 
-- [0038 — Executor ResultTree](0038-executor-result-tree.md)：executor workflow 使用 ResultTree、per-measurement update event、template-method lifecycle 與 MeasurementBundle contract。
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：runtime、executor、GUI Node、run snapshot、feedback 與 RunSession 的責任分界。
+
 
 ## Analysis / Simulation / Waveform
 
@@ -83,11 +83,22 @@
 - [0016 — notebook liveplot auto close](0016-notebook-liveplot-auto-close-default.md)：notebook liveplot 預設 auto-close，不依賴 ipympl 私有協議。
 - [0017 — Worker-thread plotting](0017-worker-thread-plotting.md)：worker 直接畫圖時 marshal；只通知時走 queued signal。
 
-## Autofluxdep / Agents
+## Agents
 
-- [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：autofluxdep node/service 共用 requires/provides/produce 介面。
-- [0041 — Autofluxdep feedback framework](0041-autofluxdep-feedback-framework.md)：generic scalar estimator/controller 由 run-lived feedback capability 提供，node 擁有 composition/gates/clamp。
-- [0042 — Autofluxdep feedback confidence reversion](0042-autofluxdep-feedback-confidence-reversion.md)：feedback sample 帶 confidence/query age，node 依 domain prior 平滑退回 base prediction 或 open-loop gain。
+- [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；現行跨模組分工見 0062，未落實的依賴目標見 draft。
 - [0022 — Worktree coordination](0022-agent-coordination-worktree.md)：多 agent / 長線 orchestration 使用 `.agent_state/` worktree protocol，主 checkout merge 由 merge queue 序列化。
 - [0023 — Cooperative interrupt feedback](0023-cooperative-interrupt-feedback-wakeup.md)：由 [[0025]] 取代；保留為被取代設計的定位點。
 - [0024 — Agent launch UI retirement](0024-embedded-agent-session-architecture.md)：measure-gui 不內建 Agent launch UI；agent 啟動由外部 CLI/MCP workflow 負責。
+
+## Draft
+
+- [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
+
+## Retired
+
+以下舊篇保留原號與正文，現行設計見 0062。
+
+- [0038 — Executor ResultTree](retired/0038-executor-result-tree.md)：結果樹與 executor 局部用法移至 runtime README。
+- [0041 — Autofluxdep feedback framework](retired/0041-autofluxdep-feedback-framework.md)：feedback 跨模組邊界接入 0062，slot 細節移至 app README。
+- [0042 — Autofluxdep feedback confidence reversion](retired/0042-autofluxdep-feedback-confidence-reversion.md)：freshness 邊界接入 0062，公式移至 app README。
+- [0043 — Autofluxdep runtime cfg override plan](retired/0043-autofluxdep-runtime-cfg-override-plan.md)：cfg 邊界接入 0062，snapshot／decoration 細節移至 app README。
