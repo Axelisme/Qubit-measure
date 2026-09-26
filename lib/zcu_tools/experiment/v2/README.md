@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2` — experiment runtime
 
-**Last updated:** 2026-09-27 — liveplot import path; executor workflow ADR 分流
+**Last updated:** 2026-09-27 — liveplot import path; executor workflow ADR 分流與 flux tracker 契約
 
 這份筆記整理 `experiment/v2/` 的整體設計，說明 Experiment 層與 runtime 層的分工、典型實驗的撰寫範本，以及各子模組的角色。`runtime/` 的細節另見 `runtime/README.md`。
 
@@ -228,6 +228,10 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):          # 主要 Cfg = program cfg + 
 
 - `FluxDepExecutor`（`autofluxdep/executor.py`）：註冊多個 runner-owned `MeasurementBundle` / `MeasurementTask`，caller 以 explicit keyword deps 提供 `soc`、`soccfg`、`ml`、`predictor`；executor 在 run 內組 `FluxDepEnv`，用 root `Schedule.scan("flux", ...)` 掃 flux，並與 `FluxoniumPredictor` 協作，於每個 flux step 更新 typed `FluxDepInfoTracker`、設定 flux device，再交由 base executor 的 batch helper 執行 measurement。
 - `OvernightExecutor`（`overnight/executor.py`）：caller 以 explicit keyword deps 提供 `soc`、`soccfg`；executor 在 run 內組 `OvernightEnv`，用 root `Schedule.repeat("Iter", ...)` 在時間軸上重複 measurement batch，並以 `trigger_update(flush=True)` 強制送出 per-measurement liveplot event。
+
+`autofluxdep/env.py` 的 `FluxDepInfoTracker` 為每次 run 建立一份追蹤狀態。每個 flux step 的 `start_step(...)` 重設 `current`，並填入當步的 `flux_value`、`flux_idx`、`cur_m`、`m_ratio`；後續 `update(...)` 把欄位值深拷貝到 `current`。`first` 保留各欄位第一次非 `None` 的更新值；`last` 記錄各欄位最近一次更新值，更新為 `None` 時也會覆蓋舊值。未寫入的欄位初始值為 `None`。
+
+必要欄位用 `require(name, task_name=...)` 從當步 `current` 取值；值為 `None` 時立即拋 `ValueError`，`flux_value`、`flux_idx`、`predict_freq` property 也經由 `require`。可選的 `best_ro_freq`、`best_ro_gain` property 則可回傳 `None`。`update`、`require`、`last_or` 遇到未知欄位名都拋 `AttributeError`。`last_or(name, fallback)` 只在該欄位的 `last` 為 `None` 時回傳明確提供的 fallback，否則回傳 `last`；caller 除將當次測量值當作平滑 fallback，也把 `0` 用作 `qubfreq_success_idx`／`lenrabi_success_idx` 尚無前次成功索引時的 fallback。
 
 兩者的 `retry_time` 是 per-measurement、per-flux/time-step 預算；`record_animation(mp4_path)` 需要 `ffmpeg`。
 
