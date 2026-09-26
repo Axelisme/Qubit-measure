@@ -45,6 +45,9 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
+# Poll real socket workers while delivering owner-thread Qt events.
+pytestmark = pytest.mark.uses_wall_clock
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

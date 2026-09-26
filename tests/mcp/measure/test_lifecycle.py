@@ -17,6 +17,9 @@ from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 
 from ._support import make_client
 
+# Real loopback disconnects are observed by the bridge's reader thread.
+pytestmark = pytest.mark.uses_wall_clock
+
 
 class LoopbackGui:
     """One disposable GUI wire incarnation, without a process or instrument."""
