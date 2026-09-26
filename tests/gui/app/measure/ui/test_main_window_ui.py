@@ -699,7 +699,7 @@ def test_main_window_tab_actions_forward_to_private_handlers(qapp, monkeypatch):
 
 def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
     from qtpy.QtWidgets import QDialog
-    from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+    from zcu_tools.gui.app.measure.remote.dialogs import DialogName
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _apply_window_defaults(MagicMock())

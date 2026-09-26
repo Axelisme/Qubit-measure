@@ -18,8 +18,8 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     """
 
     # Import the measure-gui adapter (representative of all four).
-    from zcu_tools.gui.app.measure.services.remote import RemoteControlAdapter
-    from zcu_tools.gui.app.measure.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
+    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -62,8 +62,8 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
 def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscription(
     qapp,
 ) -> None:
-    from zcu_tools.gui.app.measure.services.remote import RemoteControlAdapter
-    from zcu_tools.gui.app.measure.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
+    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus, EventMeta
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -106,8 +106,8 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
 def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     """RemoteControlServiceBase.start() also rolls back after advertise failure."""
 
-    from zcu_tools.gui.app.measure.services.remote import RemoteControlAdapter
-    from zcu_tools.gui.app.measure.services.remote.events import EVENT_SERIALIZERS
+    from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
+    from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
     from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler

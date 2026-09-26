@@ -1,9 +1,9 @@
-**Last updated:** 2026-09-27 — owner-thread runtime adapters
+**Last updated:** 2026-09-27 — app-local remote layout
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
 MCP server entry 位於 `zcu_tools.mcp.fluxdep.server`；本 package 只包含 GUI app、
-state/services/UI 與 GUI-process remote adapter。Import path 固定為
+state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Import path 固定為
 `zcu_tools.gui.app.fluxdep.*`。
 
 ## Module Purpose
@@ -75,7 +75,7 @@ view 只暴露查詢，不暴露 mutation。
   各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；`ui/interactive/display.contrast_limits`
   一份供 find_points/result_preview。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
-- **`services/remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
+- **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
   （`gui/remote/control_service`，零 policy 覆寫），讓 agent **只讀**觀測（無任何 mutation RPC）。MCP
   entrypoint 位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在
   `zcu_tools/mcp/core/bridge`。

@@ -29,8 +29,8 @@ from ._helpers import Fixture, call, open_client
 
 def test_remote_path_projection_has_no_field_or_editor_subtype_grammar() -> None:
     source_path = (
-        Path(__file__).parents[6]
-        / "lib/zcu_tools/gui/app/measure/services/remote/path_resolver.py"
+        Path(__file__).parents[5]
+        / "lib/zcu_tools/gui/app/measure/remote/path_resolver.py"
     )
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -98,7 +98,7 @@ class _LiveFixture(Fixture):
 
     def get_value(self, path: str):
         """Read the current value of a path off the live session draft."""
-        from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+        from zcu_tools.gui.app.measure.remote.path_resolver import (
             project_target_entries,
         )
 
@@ -302,7 +302,7 @@ def _single_point_centered_sweep_root():
 
 
 def test_resolver_centered_sweep_edges(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
         project_target_entries,
     )
@@ -338,7 +338,7 @@ def test_resolver_centered_sweep_rejects_start_stop_edges(qapp):  # noqa: ARG001
 
 
 def test_resolver_centered_sweep_rejects_locked_center_mismatch(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
     )
     from zcu_tools.gui.cfg.binding import SettablePathError
@@ -382,7 +382,7 @@ def test_resolver_centered_sweep_value_errors_are_remote_errors(
 def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
     qapp,  # noqa: ARG001
 ):
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
     )
     from zcu_tools.gui.cfg.binding import SettablePathError
@@ -736,7 +736,7 @@ def _node(tree: dict[str, object], dotted: str) -> Any:
 
 
 def test_tree_enum_scalar_leaf_has_value_and_choices(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
     )
 
@@ -748,7 +748,7 @@ def test_tree_enum_scalar_leaf_has_value_and_choices(qapp):  # noqa: ARG001
 
 
 def test_tree_moduleref_node_current_options_and_variant_subtree(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
     )
 
@@ -764,7 +764,7 @@ def test_tree_moduleref_node_current_options_and_variant_subtree(qapp):  # noqa:
 
 
 def test_tree_moduleref_only_chosen_variant_expanded(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
     )
 
@@ -779,7 +779,7 @@ def test_tree_moduleref_only_chosen_variant_expanded(qapp):  # noqa: ARG001
 
 
 def test_tree_omits_immutable_literal_fields(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
     )
 
@@ -792,7 +792,7 @@ def test_tree_omits_immutable_literal_fields(qapp):  # noqa: ARG001
 
 
 def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         build_settable_tree,
     )
 
@@ -838,7 +838,7 @@ def test_unknown_field_suggests_matching_descendant_path(qapp):  # noqa: ARG001
 
 
 def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         project_target_entries,
     )
 
@@ -854,7 +854,7 @@ def test_moduleref_bare_label_normalized_to_custom_tag(qapp):  # noqa: ARG001
 
 
 def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         project_target_entries,
     )
 
@@ -891,7 +891,7 @@ def _fluxdep_root(device_names: list[str]):
 
 
 def _device_value(root, path: str = "dev.flux_dev"):
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         project_target_entries,
     )
 
@@ -899,7 +899,7 @@ def _device_value(root, path: str = "dev.flux_dev"):
 
 
 def test_device_selector_advertises_scalar_leaf_path(qapp):  # noqa: ARG001
-    from zcu_tools.gui.app.measure.services.remote.path_resolver import (
+    from zcu_tools.gui.app.measure.remote.path_resolver import (
         project_target_entries,
     )
 

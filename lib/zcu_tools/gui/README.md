@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-09-27 — cfg editing relocation; session environment naming
+**Last updated:** 2026-09-27 — app-local remote layout
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -134,7 +134,7 @@ marshalling). Read a dialog's outcome from its `accepted` / `finished` signal
 instead of `exec()`'s return value, set `WA_DeleteOnClose`, and hold an instance
 reference so `open()`'s immediate return does not let it be garbage-collected.
 The measure registry path (`MainWindow.open_dialog` / `close_dialog`) is detailed
-in `app/measure/services/remote/README.md`. The sole intentional `exec()` is the
+in `app/measure/remote/README.md`. The sole intentional `exec()` is the
 global unhandled-exception presenter in `app/measure/ui/error_handler.py`, where the
 process is already crashing and the message must block.
 

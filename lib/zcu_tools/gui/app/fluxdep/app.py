@@ -42,7 +42,7 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         from zcu_tools.gui.app.fluxdep.controller import Controller
         from zcu_tools.gui.app.fluxdep.event_bus import EventBus
-        from zcu_tools.gui.app.fluxdep.services.remote.service import (
+        from zcu_tools.gui.app.fluxdep.remote.service import (
             RemoteControlAdapter,
         )
         from zcu_tools.gui.app.fluxdep.state import FluxDepState

@@ -38,10 +38,10 @@ _BOOTSTRAP["bootstrap_standalone_server"](
 
 # NOTE: absolute imports (NOT relative) — this module is launched as a script
 # (``python .../server.py`` per .mcp.json), so it has no parent package.
-from zcu_tools.gui.app.fluxdep.services.remote.method_specs import (  # noqa: E402
+from zcu_tools.gui.app.fluxdep.remote.method_specs import (  # noqa: E402
     METHOD_SPECS,
 )
-from zcu_tools.gui.app.fluxdep.services.remote.wire_version import (  # noqa: E402
+from zcu_tools.gui.app.fluxdep.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402

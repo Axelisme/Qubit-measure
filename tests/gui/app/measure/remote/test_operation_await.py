@@ -18,11 +18,11 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.services.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.measure.services.remote.handlers.operation import (
+from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.measure.remote.handlers.operation import (
     _h_operation_progress,
 )
-from zcu_tools.gui.app.measure.services.remote.service import RemoteControlAdapter
+from zcu_tools.gui.app.measure.remote.service import RemoteControlAdapter
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.operation_handles import AwaitResult, OperationOutcome
 

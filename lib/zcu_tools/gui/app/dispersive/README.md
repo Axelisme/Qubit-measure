@@ -1,9 +1,9 @@
-**Last updated:** 2026-09-27 — shared edelay branch discovery
+**Last updated:** 2026-09-27 — app-local remote layout
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
 MCP server entry 位於 `zcu_tools.mcp.dispersive.server`；本 package 只包含 GUI app、
-state/services/UI 與 GUI-process remote adapter。Import path 固定為
+state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Import path 固定為
 `zcu_tools.gui.app.dispersive.*`。
 
 ## Module Purpose
@@ -16,7 +16,7 @@ state/services/UI 與 GUI-process remote adapter。Import path 固定為
 
 ## 架構（對標 fluxdep，骨架共用、領域各寫）
 
-分層：`app.py`（composition root，`DispersiveGuiBehavior.spec` 宣告 process contract，`assemble()` 只做 controller/window/adapter wiring；bootstrap 由 `gui.runtime` 統一處理，process entrypoint 只在 `scripts/run_dispersive_gui.py`）→ `state.py`（被動 DispersiveState + VersionTable）→ `controller.py`（命令 façade，emit EventBus；**繼承共用 `BaseController`**/`gui/controller_base` 取 state/bus/project_root + `_emit`，façade body 各 app）→ `services/`（純 sync Qt-free）→ `services/remote/`（read-only RPC + MCP）→ `ui/`（**單流程面板**）→ `event_bus.py`。
+分層：`app.py`（composition root，`DispersiveGuiBehavior.spec` 宣告 process contract，`assemble()` 只做 controller/window/adapter wiring；bootstrap 由 `gui.runtime` 統一處理，process entrypoint 只在 `scripts/run_dispersive_gui.py`）→ `state.py`（被動 DispersiveState + VersionTable）→ `controller.py`（命令 façade，emit EventBus；**繼承共用 `BaseController`**/`gui/controller_base` 取 state/bus/project_root + `_emit`，façade body 各 app）→ `services/`（純 sync Qt-free）→ `remote/`（與 `ui/` 平級的 read-only driving adapter；MCP bridge 另在 `mcp/`）→ `ui/`（**單流程面板**）→ `event_bus.py`。
 
 **與 fluxdep 的關鍵差異**：dispersive 是**單 onetone、單一線性流程**，不是 fluxdep 的「多 spectrum 集合 + 左 list 右 stacked」。`PipelinePanelWidget` 佈局：**控件壓在上方緊湊排**（step1/2/3 並排一排，**只放按鈕**）、**底下一條共用 info bar**（`_build_info_row`，把 step1 inputs 文字 + step2 onetone 狀態移來這，讓 step1/2/3 box 變矮）、再 step4 tune、**最下一個 QTabWidget 共用大圖區**（Preprocess / Tune 兩 tab）。前一步完成才 enable 下一步。step3 preprocess / step4 tune 各自獨立 **busy/indeterminate** progress bar（compute 都是黑盒，無百分比），`_begin_progress`/`_end_progress` 顯/隱、`_active_progress` 記當前。**step4 自身佈局**：上方 g / r_f 兩條 QSlider **垂直排**（各一列：名稱+slider+數值）；下方一橫列左 = Add sample flux / Clear samples / **Auto tune** / Use these g/r_f，右（push）= Export 按鈕（+label）。**沒有獨立 step5**：export 收進 step4 右下角（`_export_btn` gate on has_result，非整個 box）。`_inputs_label`/`_onetone_label` 在 info bar（不在 step1/2 box 內）。
 
@@ -27,11 +27,11 @@ state/services/UI 與 GUI-process remote adapter。Import path 固定為
 - `zcu_tools.gui.remote.{errors,framing,param_spec,wire}`（傳遞依賴——經共用 transport 層帶入，dispersive 不直接 import）。**dispersive 的 worker 不畫圖（compute/record 模式），故不依賴 `zcu_tools.gui.plotting`（ADR-0017 R4 不適用）。**
 - `zcu_tools.gui.remote`：transport 機制三方共用。RPC 方法登錄 `MethodSpec/BoundMethod/build_method_registry`（`method_spec.py`）；GUI 側傳輸 `NdjsonRpcEndpoint`（`rpc_endpoint.py` —— socket 生命週期 + accept loop + NDJSON framing + per-client writer/outbound queue + 內建 `wire.version`/auth handshake + reply 編碼 + `broadcast` push fan-out + 主執行緒 marshal primitive + `ClientLink`）；MCP-server 側傳輸 `McpBridge`（住 `zcu_tools.mcp.core.bridge` —— socket 狀態為 instance attrs、send_rpc_raw/connect/disconnect/launch/stop/reader thread/RID routing + 注入 on_event hook）。
 - `zcu_tools.gui.event_bus`：`BaseEventBus`/`BasePayload` 三方共用機制。
-- wire 版本常數 `services/remote/wire_version.py` 留各 app（dispersive **WIRE=4/GUI=6**：EventBus push 含 seq/origin）。每 app 各自演化 wire 契約故不入共用 `remote.wire`。
+- wire 版本常數 `remote/wire_version.py` 留各 app（dispersive **WIRE=4/GUI=6**：EventBus push 含 seq/origin）。每 app 各自演化 wire 契約故不入共用 `remote.wire`。
 
 ### 領域各 app 自有（共用機制之上）
 - `event_bus.py`：dispersive 的 payload 型別 + `EventBus`（建在共用 `BaseEventBus` 上）。
-- `services/remote/service.py`（RemoteControlAdapter）：**subclass 共用 `RemoteControlServiceBase`**（`gui/remote/control_service`），router scaffolding（route / events.* / `_dispatch_on_owner` bare marshal / EventBus subscribe/serialize/broadcast，底層委 `NdjsonRpcEndpoint`）全在 base。dispersive read-only → **零 policy 覆寫**（`_get_bus` 用 base 預設 `ctrl.bus`、serializers 以 payload `type` 為 key），本檔只剩 domain 注入（method registry / serializers / 版本 / `server_name="DispersiveRemoteServer"`）。
+- `remote/service.py`（RemoteControlAdapter）：**subclass 共用 `RemoteControlServiceBase`**（`gui/remote/control_service`），router scaffolding（route / events.* / `_dispatch_on_owner` bare marshal / EventBus subscribe/serialize/broadcast，底層委 `NdjsonRpcEndpoint`）全在 base。dispersive read-only → **零 policy 覆寫**（`_get_bus` 用 base 預設 `ctrl.bus`、serializers 以 payload `type` 為 key），本檔只剩 domain 注入（method registry / serializers / 版本 / `server_name="DispersiveRemoteServer"`）。
 - `ui/error_messages.py`：用共用 `gui/error_messages` framework（`normalize_raw`/`details_tail`/`friendly_from_rules`/`fit_io_redirect`），domain rule（`friendly_io_message` + `_FIT_RULES`）各 app。其餘領域自有。`ProjectDialog` 來自共用 `gui/widgets/project_dialog.py`（`db_label="One-tone dir"`），可用 project root 掃描到的 `result/**/params.json` result scope 選既有 chip/qubit；`ProjectInfo`/`default_*`/`nearest_existing` 在共用 `gui/project.py`（Qt-free）。本目錄不含 app-local project dialog。
 
 ## 計算全走 worker（避免 GUI 卡頓）

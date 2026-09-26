@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
-from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 

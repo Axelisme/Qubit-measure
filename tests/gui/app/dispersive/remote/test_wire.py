@@ -1,6 +1,6 @@
 """Dispersive remote wire and GUI revision constants."""
 
-from zcu_tools.gui.app.dispersive.services.remote.wire_version import (
+from zcu_tools.gui.app.dispersive.remote.wire_version import (
     GUI_VERSION,
     WIRE_VERSION,
 )

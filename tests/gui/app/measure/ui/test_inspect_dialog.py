@@ -168,7 +168,7 @@ def test_inspect_dialog_init_and_refresh(qapp):
 
 def test_inspect_dialog_toolbar_has_arb_waveforms_before_refresh(qapp):
     from qtpy.QtWidgets import QWidget
-    from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+    from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 
     class Parent(QWidget):
         def __init__(self) -> None:

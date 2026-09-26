@@ -6,25 +6,25 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.services.remote.handlers.analysis import _h_tab_analyze
-from zcu_tools.gui.app.measure.services.remote.handlers.connection_device import (
+from zcu_tools.gui.app.measure.remote.handlers.analysis import _h_tab_analyze
+from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     _h_device_connect,
     _h_soc_connect,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.context import _h_value_read
-from zcu_tools.gui.app.measure.services.remote.handlers.editor import (
+from zcu_tools.gui.app.measure.remote.handlers.context import _h_value_read
+from zcu_tools.gui.app.measure.remote.handlers.editor import (
     _h_editor_commit,
     _h_editor_set_field,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.run_save import (
+from zcu_tools.gui.app.measure.remote.handlers.run_save import (
     _h_tab_load_data,
     _h_tab_run_start,
     _h_tab_save_data,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.view import (
+from zcu_tools.gui.app.measure.remote.handlers.view import (
     _h_tab_get_figure,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.writeback import (
+from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     _h_tab_writeback_apply,
     _h_tab_writeback_set,
 )

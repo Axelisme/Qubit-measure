@@ -7,7 +7,7 @@ import pytest
 from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
     OneToneFreqAnalyzeParams,
 )
-from zcu_tools.gui.app.measure.services.remote.handlers.analysis import (
+from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     _h_tab_analyze,
     _h_tab_get_analyze_params,
 )

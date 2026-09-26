@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
-from zcu_tools.gui.app.measure.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     DeviceSetupStartedPayload,
@@ -577,7 +577,7 @@ def test_save_image_delegates_to_save_control(fx):
 
 def test_save_post_image_delegates_to_save_control(fx):
     """tab.save_post_image wire method is removed (clean break); save_image with subtab post_analysis routes to save_post_image internally."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 
     assert "tab.save_post_image" not in METHOD_SPECS
     assert "tab.save_post_image" not in [m for m in METHOD_SPECS]
@@ -585,14 +585,14 @@ def test_save_post_image_delegates_to_save_control(fx):
 
 def test_save_result_delegates_to_save_control(fx):
     """tab.save_result wire method is removed (clean break); use tab.save_data and tab.save_image separately."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 
     assert "tab.save_result" not in METHOD_SPECS
 
 
 def test_save_set_paths_delegates_to_save_control(fx):
     """tab.save_set_paths wire method is removed (no combined setter); use separate save_data/save_image."""
-    from zcu_tools.gui.app.measure.services.remote.method_specs import METHOD_SPECS
+    from zcu_tools.gui.app.measure.remote.method_specs import METHOD_SPECS
 
     assert "tab.save_set_paths" not in METHOD_SPECS
 

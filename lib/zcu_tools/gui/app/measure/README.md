@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-09-27 — cfg editing relocation; session environment naming
+**Last updated:** 2026-09-27 — app-local remote layout
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -19,8 +19,7 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 - `cfg_schemas.py`：main raw/typed cfg normalization與policy facade；全七種module/六種waveform的
   spec walk、missing/nested/reference規則由`experiment.cfg_editing`materializer擁有。
 - `services/`：app service layer。Service 依賴 ports，不直接 import sibling service
-  implementation；package `__init__` 只做 lazy public re-export，讓
-  `services.remote.method_specs` public import path 不載入 Qt-bound service code。
+  implementation；package `__init__` 只做 lazy public re-export。
 - `state.py`：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。`running_tab_id`
   是唯一 run ownership 狀態，tab interaction 的 `is_running` 由它投影。MainWindow
@@ -112,7 +111,9 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   its placeholder. Top-level orchestration invokes behavior-oriented tab methods
   for result presentation, plot hosting, interactive-widget lifecycle, figure
   reads, and persisted panel geometry; the tab does not expose its Qt containers.
-- `services/remote/`：GUI process 內的 NDJSON RPC handler；MCP bridge 不在本 package。
+- `remote/`：與 `ui/` 平級的 GUI-process driving adapter，將 RPC 意圖交給
+  application commands/queries。`remote.method_specs` public import path 不載入
+  Qt-bound service code；MCP bridge 不在本 package。
 - `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
   framework contract 分開命名。
 
@@ -494,8 +495,10 @@ commit explicitly clears canvases when the new State has no figure.
 
 ## Remote / MCP Boundary
 
-`services/remote` is GUI-process policy: method registry, event serialization,
-main-thread dispatch, resource-version guard, editor lifecycle, and diagnostics.
+`remote/` is the GUI-process driving adapter, peer to `ui/` rather than an
+application service. It owns app-specific request coercion and wire projection:
+method registry, event serialization, main-thread dispatch, resource-version
+guard, editor lifecycle, and diagnostics.
 It exposes the same behavior as the Qt UI. Context/value/md/ml RPC handlers use
 the controller-exposed `ContextControlPort` facet; device RPC handlers use
 `DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers

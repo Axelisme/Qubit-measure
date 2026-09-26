@@ -22,7 +22,7 @@ def test_open_returns_editor_id_and_tree(monkeypatch):
     # shape as editor.get / tab.get_cfg); build_settable_tree is patched so
     # this stays a mock-only wire-shape test (deep tree building is covered by
     # test_remote_cfg_set_field against a live session).
-    import zcu_tools.gui.app.measure.services.remote.path_resolver as pr
+    import zcu_tools.gui.app.measure.remote.path_resolver as pr
 
     monkeypatch.setattr(pr, "build_settable_tree", lambda root, **_: {"freq": 0.0})
     ctrl = MagicMock()
@@ -74,7 +74,7 @@ def test_get_wraps_tree(monkeypatch):
     # editor.get returns the session's nested current-value {tree}; the handler
     # reads the draft via get_cfg_editor_draft and wraps build_settable_tree's
     # output. build_settable_tree is patched (mock-only wire-shape test).
-    import zcu_tools.gui.app.measure.services.remote.path_resolver as pr
+    import zcu_tools.gui.app.measure.remote.path_resolver as pr
 
     captured: dict[str, object] = {}
 

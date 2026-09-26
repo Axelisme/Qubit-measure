@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.fluxdep.services.remote.wire_version import (
+from zcu_tools.gui.app.fluxdep.remote.wire_version import (
     GUI_VERSION,
     WIRE_VERSION,
 )

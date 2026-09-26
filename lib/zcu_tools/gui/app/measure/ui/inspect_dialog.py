@@ -33,7 +33,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.session.services.context import MdValueError
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase

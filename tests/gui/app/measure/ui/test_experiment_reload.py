@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.app import _make_empty_ctx
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.remote import (
+from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
     RemoteControlAdapter,
 )
@@ -27,7 +27,7 @@ from zcu_tools.gui.session.services.io_manager import IOManager
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
-from tests.gui.app.measure.services.remote._helpers import (
+from tests.gui.app.measure.remote._helpers import (
     open_client,
     recv_response,
     send,

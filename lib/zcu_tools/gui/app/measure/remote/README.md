@@ -1,6 +1,6 @@
-# `gui.app.measure.services.remote` — measure-gui RemoteControlAdapter
+# `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-27 — session environment naming
+**Last updated:** 2026-09-27 — app-local remote layout
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto

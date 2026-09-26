@@ -13,7 +13,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.services.remote.dispatch import METHOD_REGISTRY
+from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError

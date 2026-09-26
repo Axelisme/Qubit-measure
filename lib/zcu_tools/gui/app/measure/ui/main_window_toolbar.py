@@ -13,7 +13,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.app.measure.services.remote.dialogs import DialogName
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 
 
 @dataclass(frozen=True)

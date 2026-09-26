@@ -21,11 +21,11 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.remote import (
+from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
     RemoteControlAdapter,
 )
-from zcu_tools.gui.app.measure.services.remote.wire_version import (
+from zcu_tools.gui.app.measure.remote.wire_version import (
     GUI_VERSION,
     WIRE_VERSION,
 )

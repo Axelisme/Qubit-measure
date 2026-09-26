@@ -117,8 +117,8 @@ def test_version_table_is_single_shared_source() -> None:
 
 def test_apps_keep_their_own_wire_versions() -> None:
     """The per-app wire/code versions stay in each app's wire_version.py."""
-    from zcu_tools.gui.app.fluxdep.services.remote import wire_version as flux_wv
-    from zcu_tools.gui.app.measure.services.remote import wire_version as main_wv
+    from zcu_tools.gui.app.fluxdep.remote import wire_version as flux_wv
+    from zcu_tools.gui.app.measure.remote import wire_version as main_wv
 
     # Distinct contracts: measure-gui has evolved its wire; fluxdep starts at 1.
     assert main_wv.WIRE_VERSION >= 1
