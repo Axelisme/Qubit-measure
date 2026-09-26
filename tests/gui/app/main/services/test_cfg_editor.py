@@ -121,8 +121,7 @@ def service(ctrl):
         ctrl,
         read_port=ctrl,
         write_port=ctrl,
-        version_bump=ctrl.bump_editor_version,
-        version_drop=ctrl.drop_editor_version,
+        versions=ctrl,
         bus=EventBus(),
     )
 
@@ -781,12 +780,14 @@ def _service_with_version_table(ctrl):
     def _drop(eid: str) -> None:
         table.drop_prefix(f"editor:{eid}")
 
+    versions = MagicMock()
+    versions.bump_editor_version.side_effect = _bump
+    versions.drop_editor_version.side_effect = _drop
     svc = CfgEditorService(
         ctrl,
         read_port=ctrl,
         write_port=ctrl,
-        version_bump=_bump,
-        version_drop=_drop,
+        versions=versions,
         bus=EventBus(),
     )
     return svc, table

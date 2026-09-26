@@ -101,19 +101,29 @@ ChangeListener = Callable[[str, str, ChangePayloadFactory], None]
 _MAX_HEADLESS_EDITORS = 16
 
 
-class CfgEditorHost(MeasureCfgBindingHost, ContextReadPort, ContextWritePort, Protocol):
-    """Composition-root surface for ``CfgEditorService`` — the facets it needs,
-    all provided by the Controller: the reactive env (``_EditorCtrl``), the
-    context read port (``ContextReadPort``, to seed from_name) + context write
-    port (``ContextWritePort``, used at commit), and the editor-version bump. The
-    service itself decomposes this into the narrow dependencies; this
-    composed protocol exists only so ``build_app_services`` can type the single
-    object (the Controller) that happens to satisfy all three.
-    """
+class EditorVersionPort(Protocol):
+    """Resource-version lifecycle for repository-owned editor identities."""
 
     def bump_editor_version(self, editor_id: str) -> None: ...
 
     def drop_editor_version(self, editor_id: str) -> None: ...
+
+
+class CfgEditorHost(
+    MeasureCfgBindingHost,
+    ContextReadPort,
+    ContextWritePort,
+    EditorVersionPort,
+    Protocol,
+):
+    """Composition-root surface for ``CfgEditorService`` — the facets it needs,
+    all provided by the Controller: the reactive env (``_EditorCtrl``), the
+    context read port (``ContextReadPort``, to seed from_name) + context write
+    port (``ContextWritePort``, used at commit), and editor-version lifecycle. The
+    service itself decomposes this into the narrow dependencies; this
+    composed protocol exists only so ``build_app_services`` can type the single
+    object (the Controller) that satisfies these ports.
+    """
 
 
 class CfgEditorError(InvalidInputError):
@@ -270,13 +280,19 @@ class CfgEditorService:
     (narrow port); ``read_port`` (ContextReadPort) reads the current ml to seed
     ``from_name`` sessions; ``write_port`` (ContextWritePort) is the single ml/md
     write authority used at commit (ADR-0006 — the session no longer lowers /
-    registers itself); ``version_bump`` / ``version_drop`` bump / forget the ``editor:<id>`` resource
+    registers itself); ``versions`` bumps / forgets the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a
     stale dependency on a gone session reads version 0). Existing-entry
     ``open(from_name=...)`` sessions also retain the exact source
     ``ModuleLibrary`` identity; ``replace`` fast-fails after a context switch so
     a dirty draft cannot write into a same-named entry in another context.
+
+    ``publish_owner`` receives an isolated schema on seeded-session creation and
+    every active draft change, synchronously on the owner thread. It includes
+    invalid input. Composition routes it into the owning resource's State and
+    revision; a viewer is never needed to publish. Prepared replacements remain
+    unpublished until their owner commits the replacement State.
     """
 
     def __init__(
@@ -284,15 +300,16 @@ class CfgEditorService:
         env_ctrl: MeasureCfgBindingHost,
         read_port: ContextReadPort,
         write_port: ContextWritePort,
-        version_bump: Callable[[str], None],
-        version_drop: Callable[[str], None],
+        versions: EditorVersionPort,
         bus: EventBus,
+        *,
+        publish_owner: Callable[[str, CfgSchema], None] | None = None,
     ) -> None:
         self._bindings = MeasureCfgBindings(env_ctrl)
         self._read = read_port
         self._write = write_port
-        self._version_bump = version_bump
-        self._version_drop = version_drop
+        self._versions = versions
+        self._publish_owner = publish_owner
         self._editors: dict[str, CfgEditorSession] = {}
         self._seq = itertools.count()
         self._listener: ChangeListener | None = None
@@ -406,6 +423,7 @@ class CfgEditorService:
         )
         self._editors[editor_id] = session
         self._attach_change_stream(session)
+        self._publish_owner_snapshot(session)
         if gc:
             self._evict_excess_gc()
         return editor_id, session.current_targets()
@@ -497,7 +515,7 @@ class CfgEditorService:
             session.draft.close()
         finally:
             try:
-                self._version_drop(session.editor_id)
+                self._versions.drop_editor_version(session.editor_id)
             finally:
                 self._emit(
                     session.editor_id, "editor_closed", lambda: {"reason": "reopened"}
@@ -645,9 +663,11 @@ class CfgEditorService:
         editor_id = session.editor_id
 
         def _on_change(*_: object) -> None:
-            # The draft for this session was just written (main thread); bump its
-            # version so editor.commit's guard can detect a concurrent edit.
-            self._version_bump(editor_id)
+            # Prepared and retired drafts must not publish into the active owner.
+            if self._editors.get(editor_id) is not session:
+                return
+            self._publish_owner_snapshot(session)
+            self._versions.bump_editor_version(editor_id)
             self._emit(
                 editor_id,
                 "editor_changed",
@@ -656,6 +676,16 @@ class CfgEditorService:
 
         session.change_cb = _on_change
         session.draft.on_change.connect(_on_change)
+
+    def _publish_owner_snapshot(self, session: CfgEditorSession) -> None:
+        """Publish complete model state synchronously, including invalid input.
+
+        The composition root routes known owners to their State projection.
+        Viewer timers never participate in this write or its resource revision.
+        Replacement activation leaves publication to its atomic owner swap.
+        """
+        if self._publish_owner is not None and session.owner_key is not None:
+            self._publish_owner(session.owner_key, session.draft.snapshot())
 
     def _emit(
         self,
@@ -683,7 +713,7 @@ class CfgEditorService:
         # a later stale dependency on this gone editor reads version 0 and the
         # guard treats it as stale, rather than spuriously matching a retained
         # version. Done whether or not we tear the root down — the session is gone.
-        self._version_drop(editor_id)
+        self._versions.drop_editor_version(editor_id)
         # Notify subscribers the session is gone (after state is consistent).
         self._emit(editor_id, "editor_closed", lambda: {"reason": reason})
 

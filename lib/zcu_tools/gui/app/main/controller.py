@@ -1298,18 +1298,11 @@ class Controller(SessionControllerMixin):
         return self._tab_control.get_tab_snapshot(tab_id)
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        """Auto-commit boundary for tab CfgFormWidget.
+        """Store an explicit tab cfg replacement through TabControl.
 
-        Writes the latest form draft into ``State.cfg_schema`` as the committed
-        truth. Cfg edits do not change ``TabInteractionState`` (run / analyze /
-        save availability), so no ``TAB_INTERACTION_CHANGED`` is emitted here;
-        the form's own ``validity_changed`` signal drives any UI refresh.
-
-        Do not call from dialog / writeback local LiveModel paths — those keep
-        their drafts off of ``State`` until their own Apply boundary.
-
-        Terminal: → ``TabService.update_tab_cfg`` → ``State.update_tab_cfg_schema``,
-        which bumps ``tab:<id>:cfg`` and emits no event.
+        Editor changes already publish synchronously through CfgEditorService;
+        viewers must not call this method to replay a delayed model snapshot.
+        Dialog and writeback drafts stay off tab State until their own Apply.
         """
         self._tab_control.update_tab_cfg(tab_id, schema)
 

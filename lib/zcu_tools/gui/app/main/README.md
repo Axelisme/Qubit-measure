@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-26 — GUI operation and prompt ownership
+**Last updated:** 2026-09-26 — synchronous cfg publication
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -334,6 +334,12 @@ remote tab views, and captured sessions all use the same tab order as the Qt tab
 bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
+
+`CfgEditorService` 在 active draft 變更時同步發布完整 `CfgSchema`，composition 將 tab owner
+投影到 `State.cfg_schema` 並更新整份 cfg 的 resource revision。Invalid raw 同樣發布，不依賴
+viewer 是否 attach 或 Qt timer 是否執行。Widget 只輸入與渲染，不重送 schema 到 State。
+Inspect/writeback owner 不寫 tab cfg；prepared replacement 保留原有 owner State swap 邊界。
+這條 publication 路徑不代表 agent 已有完整 observation，也不代表 Run 已停止 live lowering。
 
 CfgEditor在app seam解碼`ValueRef`，並以typed `CfgEdit` batch依序操作binding target。
 Batch維持fail-fast/non-atomic；只有reference shape edit列出前後path set，成功回final net diff，

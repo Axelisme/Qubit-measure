@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
@@ -273,7 +272,6 @@ class ExpTabWidget(QWidget):
         self._progress_control = ctrl.progress_control
         # editor_id of this tab's shared cfg-editor session
         self._cfg_editor_id: str | None = None
-        self._schema_cb: Callable[[CfgSchema], None] | None = None
         # The action boundary is retained for Reset; button slots close over it.
         self._actions: TabActions | None = None
         # Optional injected Figure->PNG renderer for Data preview (tests)
@@ -978,28 +976,9 @@ class ExpTabWidget(QWidget):
         if self._ctrl.editor_id_for_owner(self.tab_id) != editor_id:
             raise RuntimeError("Cannot attach a retired cfg editor")
         self.cfg_form.detach()
-        if self._schema_cb is not None:
-            self.cfg_form.schema_changed.disconnect(self._schema_cb)
-            self._schema_cb = None
         self._cfg_editor_id = None
         self.cfg_form.attach(self._ctrl.get_cfg_editor_draft(editor_id))
         self._cfg_editor_id = editor_id
-        if self._actions is not None:
-            self._connect_cfg_schema()
-
-    def _connect_cfg_schema(self) -> None:
-        editor_id = self._cfg_editor_id
-        assert editor_id is not None
-
-        def schema_cb(schema: CfgSchema) -> None:
-            if (
-                self._cfg_editor_id == editor_id
-                and self._ctrl.editor_id_for_owner(self.tab_id) == editor_id
-            ):
-                self._ctrl.update_tab_cfg(self.tab_id, schema)
-
-        self._schema_cb = schema_cb
-        self.cfg_form.schema_changed.connect(schema_cb)
 
     def _is_data_visible(self) -> bool:
         return self._left_tabs.currentWidget() is self._save_panel
@@ -1177,7 +1156,6 @@ class ExpTabWidget(QWidget):
             )
 
         self.cfg_form.validity_changed.connect(validity_cb)
-        self._connect_cfg_schema()
 
         self._save_center.bind_data_path_changed(data_path_cb)
         if self._has_analysis:
@@ -1236,9 +1214,6 @@ class ExpTabWidget(QWidget):
         if self._actions is None:
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)
-        if self._schema_cb is not None:
-            self.cfg_form.schema_changed.disconnect(self._schema_cb)
-            self._schema_cb = None
         self._save_center.unbind_data_path_changed(self._data_path_cb)
         if self._has_analysis:
             self._save_center.unbind_analysis_path_changed(self._analysis_image_cb)

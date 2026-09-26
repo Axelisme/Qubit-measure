@@ -38,6 +38,7 @@ from .writeback_control import WritebackControlFacet
 if TYPE_CHECKING:
     from zcu_tools.gui.app.main.registry import Registry
     from zcu_tools.gui.app.main.state import State
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -148,16 +149,22 @@ def build_app_services(
     context = session.context
     device = session.device
     arb_waveform = ArbWaveformService(state)
+
     # cfg_editor owns the per-tab and per-writeback-item cfg models; WritebackService
     # builds/reads/tears those down, so it is built after cfg_editor (single-
     # direction command edge — cfg_editor never calls writeback, ADR-0004).
+    def publish_tab_cfg(owner_key: str, schema: CfgSchema) -> None:
+        # Other editor owners (inspect/writeback) keep their drafts off tab State.
+        if owner_key in state.tabs:
+            state.update_tab_cfg_schema(owner_key, schema)
+
     cfg_editor = CfgEditorService(
         cfg_editor_ctrl,
         read_port=cfg_editor_ctrl,
         write_port=cfg_editor_ctrl,
-        version_bump=cfg_editor_ctrl.bump_editor_version,
-        version_drop=cfg_editor_ctrl.drop_editor_version,
+        versions=cfg_editor_ctrl,
         bus=bus,
+        publish_owner=publish_tab_cfg,
     )
     writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
     # TabService composes the tab render model and needs the writeback query port

@@ -1386,8 +1386,7 @@ def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp)
         ctrl,
         read_port=ctrl,
         write_port=ctrl,
-        version_bump=ctrl.bump_editor_version,
-        version_drop=ctrl.drop_editor_version,
+        versions=ctrl,
         bus=bus,
     )
     ctrl.open_seeded_cfg_editor.side_effect = service.open_seeded
@@ -1624,44 +1623,6 @@ def test_exp_tab_reset_btn_idle_only_enable(qapp):
     # Back to idle: reset_btn re-enabled.
     tab.update_interaction_state(_snapshot("tab-1", is_running=False))
     assert tab.reset_btn.isEnabled() is True
-
-
-def test_exp_tab_reset_does_not_double_connect_schema_changed(qapp):
-    """After reset, editing a field commits exactly once — re-seeding must not
-    duplicate the widget→controller schema_changed binding."""
-    import dataclasses
-
-    from zcu_tools.gui.app.main.ui.main_window import ExpTabWidget
-
-    dialogs = RecordingDialogPresenter(confirm_answers=[True])
-    ctrl = _editor_wiring_ctrl()
-    tab = ExpTabWidget(
-        "tab-1",
-        ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-        dialog_presenter=dialogs,
-    )
-    actions = _RecordingTabActions()
-    snapshot = dataclasses.replace(_snapshot("tab-1"), cfg_schema=_pulse_schema())
-    tab.attach(snapshot, actions)
-
-    reset_schema = _pulse_schema()
-    second_model = _make_pulse_model(ctrl)
-    ctrl.reset_tab_cfg.return_value = reset_schema
-    ctrl.get_cfg_editor_draft.return_value = second_model
-    tab._on_reset_cfg_clicked()
-
-    # Drive a single field edit on the re-seeded model and count commits.
-    ctrl.update_tab_cfg.reset_mock()
-    draft = tab.cfg_form._draft
-    assert draft is not None
-    scalar = draft.root.fields["gain"]
-    scalar.set_value(0.42)
-    qapp.processEvents()
-
-    assert ctrl.update_tab_cfg.call_count == 1
-    committed = ctrl.update_tab_cfg.call_args.args[1]
-    assert committed.value.fields["gain"].value == pytest.approx(0.42)
 
 
 def test_main_window_confirms_and_begins_shutdown_when_operations_active(

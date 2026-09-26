@@ -194,10 +194,10 @@ class TabService:
                 logger.exception("closed-tab draft teardown failed")
 
     def update_tab_cfg(self, tab_id: str, schema: CfgSchema) -> None:
-        """Commit boundary: store the latest draft as the committed cfg.
+        """Store an explicit cfg replacement and advance its resource version.
 
-        Idempotent. Called from ``Controller.update_tab_cfg`` whenever the
-        tab's CfgFormWidget reports a change.
+        Active editor changes publish directly through their composition-injected
+        State sink; the viewer does not commit model changes.
         """
         self._state.update_tab_cfg_schema(tab_id, schema)
 

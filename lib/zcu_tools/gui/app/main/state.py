@@ -137,10 +137,9 @@ _UNSET: object = object()
 class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
     adapter: ExpAdapterProtocol
-    # Committed cfg SSOT for this tab. The tab's CfgFormWidget LiveModel is the
-    # runtime draft; it auto-commits here through Controller.update_tab_cfg on
-    # every change. Run / Save / Session persistence read this field, never
-    # the live form.
+    # The service-owned CfgDraft publishes an isolated snapshot here on every
+    # change, including invalid input. Run / Save / persistence read this field;
+    # widget timers never participate in publication or resource versioning.
     cfg_schema: CfgSchema
 
     # Canonical pane-owned resources.
