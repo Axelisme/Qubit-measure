@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-26 — interactive plugin remote command
+**Last updated:** 2026-09-26 — flux picker click-to-place
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -564,8 +564,10 @@ INTERACTIVE adapters expose `make_interactive_plugin(req)` and
 mounts/unmounts the plugin-owned `InteractiveFrontend` in the Analysis pane.
 Failed finish validation keeps the widget editable; a valid finish unmounts it
 before synchronous result events restore the canonical figure in that pane.
-The frontend owns artists, pointer selection, preview and timers. Its GUI actions commit to the service
-session on valid release, not during drag; external commits cancel preview.
+The frontend owns artists, pointer selection, preview and timers. For measure flux
+picking, the first left click selects a line, pointer movement without a pressed
+button previews locally, and the second valid left click commits against the
+latest session snapshot. Release does not commit; external commits cancel preview.
 The Qt-free plugin can execute commands and finish without a widget, though
 that path does not promise a figure. `tab.interact` runs on the owner loop via the
 same `RunAnalyzeControlFacet` and session: reads project committed state and
