@@ -3156,12 +3156,13 @@ exp_cfg = {
     "sweep": make_sweep(0.01, 50.1, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.t1.T1Cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(
+    exp_cfg, ze.singleshot.t1.T1Cfg, reps=1000, rounds=10,
+    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
+)
 
 sh_t1_exp = ze.singleshot.t1.T1Exp()
-_ = sh_t1_exp.run(
-    soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius, uniform=True
-)
+_ = sh_t1_exp.run(soc, soccfg, cfg, uniform=True)
 ```
 
 ```python
@@ -3203,12 +3204,13 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 20, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneCfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(
+    exp_cfg, ze.singleshot.t1.T1WithToneCfg, reps=1000, rounds=10,
+    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
+)
 
 sh_t1_with_tone_exp = ze.singleshot.t1.T1WithToneExp()
-_ = sh_t1_with_tone_exp.run(
-    soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius, uniform=True
-)
+_ = sh_t1_with_tone_exp.run(soc, soccfg, cfg, uniform=True)
 ```
 
 ```python
@@ -3264,12 +3266,13 @@ exp_cfg = {
         "length": make_sweep(0.01, 15, 501),
     },
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.t1.T1WithToneSweepCfg, reps=1000, rounds=1)
+cfg = ml.make_cfg(
+    exp_cfg, ze.singleshot.t1.T1WithToneSweepCfg, reps=1000, rounds=1,
+    g_center=md.g_center, e_center=md.e_center, radius=md.ge_radius,
+)
 
 sh_t1_with_tone_sweep_exp = ze.singleshot.t1.T1WithToneSweepExp()
-_ = sh_t1_with_tone_sweep_exp.run(
-    soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius
-)
+_ = sh_t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
 ```
 
 ```python

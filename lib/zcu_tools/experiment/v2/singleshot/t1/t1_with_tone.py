@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import field_serializer
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
@@ -89,6 +90,13 @@ class T1WithToneSweepCfg(ConfigBase):
 class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneModuleCfg
     sweep: T1WithToneSweepCfg
+    g_center: complex
+    e_center: complex
+    radius: float
+
+    @field_serializer("g_center", "e_center")
+    def serialize_center(self, value: complex) -> str:
+        return str(value)
 
 
 class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
@@ -305,16 +313,17 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
         soc,
         soccfg,
         cfg: T1WithToneCfg,
-        g_center: complex,
-        e_center: complex,
-        radius: float,
         *,
         uniform: bool = False,
     ) -> T1WithToneResult:
         if uniform:
-            return self._run_uniform(soc, soccfg, cfg, g_center, e_center, radius)
+            return self._run_uniform(
+                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
+            )
         else:
-            return self._run_non_uniform(soc, soccfg, cfg, g_center, e_center, radius)
+            return self._run_non_uniform(
+                soc, soccfg, cfg, cfg.g_center, cfg.e_center, cfg.radius
+            )
 
     def analyze(
         self,

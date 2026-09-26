@@ -51,11 +51,13 @@ from zcu_tools.gui.app.main.adapter import (
 from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CfgSchema,
+    EvalValue,
+    ScalarSpec,
     SweepValue,
     resolved_direct_number,
 )
 
-from ._shared import read_ge_centers, readout_probe_freq, readout_probe_freq_range
+from ._shared import readout_probe_freq, readout_probe_freq_range
 
 SsT1ToneSweepRunResult: TypeAlias = Any  # T1WithToneSweepResult (frozen domain)
 
@@ -137,6 +139,21 @@ class _SsT1ToneSweepBase(
                 ),
             )
             .sweep(outer_key, label=outer_label, default=outer_sweep)
+            .field(
+                "g_center",
+                spec=ScalarSpec("Ground center", complex),
+                default=EvalValue("g_center"),
+            )
+            .field(
+                "e_center",
+                spec=ScalarSpec("Excited center", complex),
+                default=EvalValue("e_center"),
+            )
+            .field(
+                "radius",
+                spec=ScalarSpec("Classification radius", float),
+                default=EvalValue("ge_radius"),
+            )
             .bool("uniform", label="Uniform (linear) sweep", default=True)
             .reps(1000)
             .rounds(10)
@@ -158,15 +175,12 @@ class _SsT1ToneSweepBase(
         return value
 
     def run(self, req: RunRequest, schema: CfgSchema) -> SsT1ToneSweepRunResult:
-        # Override standard run: domain run needs GE centres + uniform kwarg.
+        # Uniform remains an explicit domain run option.
         soc, soccfg = require_soc_handles(req)
         raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
         cfg = self.build_exp_cfg(raw_cfg, req)
-        g_center, e_center, radius = read_ge_centers(req.md)
         uniform = self._uniform(raw_cfg)
-        return T1WithToneSweepExp().run(
-            soc, soccfg, cfg, g_center, e_center, radius, uniform=uniform
-        )
+        return T1WithToneSweepExp().run(soc, soccfg, cfg, uniform=uniform)
 
     def analyze(
         self, req: AnalyzeRequest[SsT1ToneSweepRunResult, NoAnalyzeParams]

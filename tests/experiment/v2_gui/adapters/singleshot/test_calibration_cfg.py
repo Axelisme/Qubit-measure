@@ -9,11 +9,18 @@ from zcu_tools.experiment.utils import make_comment, parse_comment
 from zcu_tools.experiment.v2.runner import ProgramBuilder
 from zcu_tools.experiment.v2.singleshot import ac_stark
 from zcu_tools.experiment.v2.singleshot.mist import freq, power, power_freq
+from zcu_tools.experiment.v2.singleshot.t1 import t1, t1_with_tone, t1_with_tone_sweep
 from zcu_tools.experiment.v2_gui.adapters.singleshot.ac_stark import SsAcStarkAdapter
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.freq import MistFreqAdapter
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power import MistPowerAdapter
 from zcu_tools.experiment.v2_gui.adapters.singleshot.mist.power_freq import (
     MistPowerFreqAdapter,
+)
+from zcu_tools.experiment.v2_gui.adapters.singleshot.t1 import SsT1Adapter
+from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone import SsT1ToneAdapter
+from zcu_tools.experiment.v2_gui.adapters.singleshot.t1_tone_sweep import (
+    SsT1ToneSweepFreqAdapter,
+    SsT1ToneSweepGainAdapter,
 )
 from zcu_tools.gui.app.main.adapter import ExpContext, RunRequest
 from zcu_tools.gui.app.main.cfg_binding import MeasureCfgBindings
@@ -27,8 +34,21 @@ from zcu_tools.meta_tool import MetaDict, ModuleLibrary
         (MistFreqAdapter, freq),
         (MistPowerAdapter, power),
         (MistPowerFreqAdapter, power_freq),
+        (SsT1Adapter, t1),
+        (SsT1ToneAdapter, t1_with_tone),
+        (SsT1ToneSweepGainAdapter, t1_with_tone_sweep),
+        (SsT1ToneSweepFreqAdapter, t1_with_tone_sweep),
     ],
-    ids=["ac-stark", "mist-freq", "mist-power", "mist-power-freq"],
+    ids=[
+        "ac-stark",
+        "mist-freq",
+        "mist-power",
+        "mist-power-freq",
+        "t1",
+        "t1-tone",
+        "t1-tone-gain",
+        "t1-tone-freq",
+    ],
 )
 def calibration(request, monkeypatch):
     adapter_type, module = request.param
@@ -52,12 +72,24 @@ def calibration(request, monkeypatch):
         ExpContext(md=md, ml=ml, soc=None, soccfg=None)
     )
     draft = MeasureCfgBindings(host).new_draft(schema)
+    if adapter_type in (
+        SsT1Adapter,
+        SsT1ToneAdapter,
+        SsT1ToneSweepGainAdapter,
+        SsT1ToneSweepFreqAdapter,
+    ):
+        draft.set_target("uniform", True)
 
     def materialize(raw, cfg_type, *, ml):
         return assemble_experiment_cfg(raw, cfg_type, ml=ml, device_snapshot={})
 
     monkeypatch.setattr(
         "zcu_tools.experiment.v2_gui.adapters.base.make_cfg", materialize
+    )
+    monkeypatch.setattr(
+        ModuleLibrary,
+        "make_cfg",
+        lambda self, raw, cfg_type: materialize(raw, cfg_type, ml=self),
     )
     monkeypatch.setattr(module, "setup_devices", lambda *args, **kwargs: None)
     monkeypatch.setattr(module, "sweep2array", lambda *args, **kwargs: np.array([0.1]))
@@ -68,9 +100,9 @@ def calibration(request, monkeypatch):
     monkeypatch.setattr(
         module,
         "make_plot_frame",
-        lambda *args, **kwargs: (
+        lambda rows, cols, **kwargs: (
             MagicMock(),
-            [[MagicMock(), MagicMock()] for _ in range(3)],
+            [[MagicMock() for _ in range(cols)] for _ in range(rows)],
         ),
         raising=False,
     )
