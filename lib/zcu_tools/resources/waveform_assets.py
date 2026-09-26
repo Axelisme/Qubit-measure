@@ -1,4 +1,4 @@
-"""Arbitrary waveform assets and formula rendering. See resources/README.md."""
+"""Arbitrary waveform assets and formula rendering. See waveform_assets.md."""
 
 from __future__ import annotations
 

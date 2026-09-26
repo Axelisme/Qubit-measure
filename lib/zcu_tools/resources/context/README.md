@@ -128,7 +128,7 @@ exp_dir/
 ## 使用模式（典型 notebook 開頭）
 
 ```python
-from zcu_tools.resources import ContextManager
+from zcu_tools.resources.context import ContextManager
 
 em = ContextManager("Database/chipA/qubitQ1")
 
@@ -147,7 +147,7 @@ cfg = make_cfg(
     ml=ml,
 )
 
-from zcu_tools.resources import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 
 params = QubitParams.for_result_dir("result/chipA/qubitQ1")
 params.ensure_project(ParamsProject("chipA", "qubitQ1"))

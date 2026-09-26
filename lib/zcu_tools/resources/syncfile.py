@@ -1,3 +1,31 @@
+"""mtime-based two-way sync base class for persisted resources.
+
+Instance state:
+
+- ``_path``: backing file path; ``None`` means memory-only.
+- ``_modify_time``: file mtime in nanoseconds at the last load or dump.
+- ``_dirty``: in-memory data has changes not yet written back.
+- ``_readonly``: write-back is forbidden.
+
+``has_persistence`` is the public way to ask whether an object is bound to a
+file; callers outside this module do not read ``_path``.
+
+``sync()`` runs before every decorated read or write:
+
+- memory-only objects return immediately;
+- if the file exists, a dirty writable object dumps to disk, otherwise a file
+  whose mtime is at least ``_modify_time`` is loaded again;
+- if the file does not exist, a writable object dumps to create it.
+
+Memory wins: when ``_dirty`` is set, the in-memory data overwrites the file even
+if the file changed on disk. There is no file lock; two processes writing the
+same file trigger a conflict warning and the local dirty data wins.
+
+``auto_sync("read")`` syncs before the method; ``auto_sync("write")`` syncs
+before and after it. The decorator accepts only ``SyncFile`` instance methods
+and raises ``TypeError`` when the first argument is not a ``SyncFile``.
+"""
+
 from __future__ import annotations
 
 import warnings

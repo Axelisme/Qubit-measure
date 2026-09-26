@@ -3,7 +3,7 @@
 A result scope is the first-level project root for one chip/qubit pair: the
 directory that owns ``params.json`` and contains the ContextManager contexts.
 This module is Qt-free; params.json parsing and migration policy lives in
-``resources.QubitParams``.
+``resources.qubit_params.QubitParams``.
 """
 
 from __future__ import annotations

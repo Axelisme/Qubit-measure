@@ -74,7 +74,7 @@ ADR-0029 的 production seam。GUI/session/notebook adapter 只接這層,不各�
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 
-- 建構: `(params, flux_half, flux_period, flux_bias)`;另可 `FluxoniumPredictor.from_file(result_path, flux_bias)` 經 `resources.QubitParams` 從 `fluxdep_fit` 結果載入，缺少 `fluxdep_fit` 時 raise `ValueError`。
+- 建構: `(params, flux_half, flux_period, flux_bias)`;另可 `FluxoniumPredictor.from_file(result_path, flux_bias)` 經 `resources.qubit_params.QubitParams` 從 `fluxdep_fit` 結果載入，缺少 `fluxdep_fit` 時 raise `ValueError`。
 - 座標轉換: `value_to_flux` / `flux_to_value` 委派 `FluxAffineMap`,使用
   `flux = (value + bias − flux_half)/flux_period + 0.5`。
 - `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。scalar/array 都委派到 `FluxoniumPrediction.predict_frequencies_mhz` 的批次路徑，不保留共享 mutable `Fluxonium` instance；reverse transition 仍回傳帶符號頻差。
