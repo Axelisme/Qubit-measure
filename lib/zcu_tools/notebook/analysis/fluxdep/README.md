@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-08-18 — v2 SampleTable sample-point resolution in visualizer and design consumers
+**Last updated:** 2026-09-26 — notebook line picker remains independent
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 `notebook_md/analysis/fluxdep_fit.md` 使用。
@@ -26,6 +26,8 @@ fluxdep/
 共用的 Flux-Dependence Analysis 選點/filtering/line selection/one-tone peak detection
 規則位於 `zcu_tools.analysis.fluxdep`（ADR-0028）。Notebook 這層保留 fitting/model/visualizer
 與 ipywidgets shell；被抽出的互動與 processing API 透過 thin re-export 或 adapter 呼叫 kernel。
+measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建立 measure 的 service session；
+`InteractiveLines` 保留既有即時拖曳行為。
 
 ## 核心物理模型（`models.py`）
 
@@ -105,7 +107,7 @@ fluxdep/
 | 類別 | 用途 | 輸入 | 輸出 |
 |---|---|---|---|
 | `InteractiveOneTone` | onetone 資料找共振 dip vs flux | `signals, dev_values, freqs, threshold` | `(dev_values, freqs)` 於最大梯度頻率切面 |
-| `InteractiveLines` | 拖曳紅（half flux）/藍（integer flux）線做 mA→Φ 定標；ipywidgets adapter 只處理 UI lifecycle，line folding、mirror-loss、auto-align、swap、magnitude-only 規則由 `TwoLinePicker` kernel 擁有 | `signals, dev_values, freqs, flux_half?, flux_int?` | `(flux_half, flux_int)` |
+| `InteractiveLines` | 拖曳紅（half flux）/藍（integer flux）線做 mA→Φ 定標；ipywidgets adapter 只處理 UI lifecycle，line folding、mirror-loss、auto-align、swap、magnitude-only 的數值規則由 `analysis.fluxdep.line_state` 擁有；`TwoLinePicker` 保留 notebook 的 artist/gesture 行為 | `signals, dev_values, freqs, flux_half?, flux_int?` | `(flux_half, flux_int)` |
 | `InteractiveFindPoints` | 筆刷式遮罩 + 自動 `find_peaks` 從 2D 光譜擷取點 | `signals, dev_values, freqs, threshold, brush_width` | `(fluxs, freqs)` |
 | `InteractiveSelector` | 跨多個 `SpectrumResult` 用筆刷挑選/過濾點 | `spectrums: dict[str, SpectrumResult], selected?, brush_width` | `(fluxs, freqs, mask)` 3-tuple |
 

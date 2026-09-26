@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-24 — writeback Apply placement
+**Last updated:** 2026-09-26 — interactive plugin remote command
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -547,36 +547,35 @@ longer depends on the concrete controller façade. The persistent measure
 shared dialog can refresh cached device values on every reopen without depending
 on the concrete controller.
 
-## Interactive Analysis Seam
+## Interactive analysis
 
-`adapter.types` owns the Qt-free closed control vocabulary
-`InteractiveControl = ButtonControl | ToggleControl` (`ControlKey` as stable
-identity, `label`, typed callback, and for toggles an exact `bool initial`)
-and the `InteractiveSession` Protocol (`controls() -> tuple[InteractiveControl, ...]`,
-pointer hooks, `info_text()` and `finish()`). Concrete sessions such as
-`FluxPickSession` own the domain callback mapping (`Conjugate Line` toggle →
-`TwoLinePicker.set_conjugate`, `Auto Align` → background alignment,
-`Swap Lines` → swap+redraw) in declaration order; they cache the terminal
-`finish()` result and ignore subsequent domain input and late background
-completions. `InteractiveAnalysisWidget` is the generic host: it validates the
-declaration and lowers it to Qt (`ButtonControl` → `QPushButton`,
-`ToggleControl` → `QCheckBox`) without comparing domain keys, applies a
-toggle's `initial` before connecting its signal so construction never fires the
-callback, and reads the surface only once at bind.
+`interactive/` owns the Qt-free `Session` (detached committed snapshots, atomic
+owner-loop commit and subscription), `PluginDefinition`, typed `Action`, and
+validated command declarations. `AnalyzeService` opens and retains one session
+and operation handle per tab; it captures run/context/params at start. Done
+validates the committed state before closing input, then uses the existing
+analysis-result/writeback terminal path. Cancellation, setup failure and result
+failure retire the session and settle that same operation. Neither the service
+nor generic remote dispatch interprets flux-line keys.
 
-Ordering: control surface is bound once; toggle `initial` is set before signal
-connection. Errors: bind validates the whole surface before mounting — empty or
-whitespace-only `key`/`label`, duplicate `key`, unsupported variant,
-non-callable callback, or non-`bool` toggle `initial` Fast Fail with no partial
-mount; construction-time `ButtonControl`/`ToggleControl` invariants also Fast
-Fail; repeat `bind()` Fast Fails. Lifecycle: `Done` closes the input gate
-first — it disables the checkbox, all buttons, the Done button itself and canvas
-pointer forwarding, then invokes `on_done` exactly once; subsequent control or
-pointer events are ignored, and a finished session's late background completion
-does not mutate the picker or result. Variation is closed: new kinds are added
-only for a real need, as a new `InteractiveControl` union member with an
-exhaustive renderer; no generic widget factory, registry, dynamic surface or
-cross-process/serialization representation exists.
+INTERACTIVE adapters expose `make_interactive_plugin(req)` and
+`make_interactive_frontend(plugin, session, env, request_finish, request_cancel)`.
+`RunAnalyzeControlFacet` starts the session before mounting; `MainWindow`
+mounts/unmounts the plugin-owned `InteractiveFrontend` in the Analysis pane.
+Failed finish validation keeps the widget editable; a valid finish unmounts it
+before synchronous result events restore the canonical figure in that pane.
+The frontend owns artists, pointer selection, preview and timers. Its GUI actions commit to the service
+session on valid release, not during drag; external commits cancel preview.
+The Qt-free plugin can execute commands and finish without a widget, though
+that path does not promise a figure. `tab.interact` runs on the owner loop via the
+same `RunAnalyzeControlFacet` and session: reads project committed state and
+plugin-declared commands; writes validate each command's ParamSpec before its
+typed action. The View supplies an optional live PNG and `preview_active` as
+presentation metadata. `done` discards local preview and finishes the existing
+analysis operation. Flux Auto Align uses one plugin-owned single-flight worker
+policy for GUI and remote; terminal callbacks do not recommit. The wire method
+is internal to the GUI process, with no MCP tool in this change. See ADR-0061;
+notebook line pickers keep their existing interaction model.
 
 ## Adapter-Facing Rules
 

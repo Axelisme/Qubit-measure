@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from inspect import signature
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
@@ -13,8 +13,6 @@ from zcu_tools.gui.app.main.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     ExpContext,
-    InteractiveHost,
-    InteractiveSession,
     LoadDataRequest,
     NoAnalyzeParams,
     PostAnalyzeRequest,
@@ -36,11 +34,18 @@ from zcu_tools.gui.app.main.adapter.lowering import (
     schema_to_raw_dict,
     validate_schema,
 )
+from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from zcu_tools.experiment.v2_gui.adapters._support.schema_builder import (
         MeasureCfgDefinition,
+    )
+    from zcu_tools.gui.app.main.ui.interactive_frontend import (
+        InteractiveFrontend,
+        InteractiveFrontendEnv,
     )
 
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list
@@ -138,6 +143,23 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             raise TypeError(f"{cls.__name__} {reason} but implements {name}(); {fix}.")
 
     @classmethod
+    def _validate_interactive_hooks(cls, analysis: AnalysisMode) -> None:
+        if analysis is AnalysisMode.INTERACTIVE:
+            for name in ("make_interactive_plugin", "make_interactive_frontend"):
+                cls._require_method(
+                    name,
+                    "declares analysis=INTERACTIVE",
+                    f"override {name}() or set analysis=AnalysisMode.FIT/NONE",
+                )
+        else:
+            for name in ("make_interactive_plugin", "make_interactive_frontend"):
+                cls._forbid_method(
+                    name,
+                    f"declares analysis={analysis.name}",
+                    f"remove {name}() or set analysis=AnalysisMode.INTERACTIVE",
+                )
+
+    @classmethod
     def _validate_capability_contract(cls) -> None:
         """Fail fast when declared capabilities and implemented hooks disagree."""
         caps = cls.capabilities
@@ -158,17 +180,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
                 "declares analysis=FIT",
                 "override analyze() or set analysis=AnalysisMode.NONE/INTERACTIVE",
             )
-            cls._forbid_method(
-                "setup_interactive_analysis",
-                "declares analysis=FIT",
-                "remove setup_interactive_analysis() or set analysis=AnalysisMode.INTERACTIVE",
-            )
         elif analysis is AnalysisMode.INTERACTIVE:
-            cls._require_method(
-                "setup_interactive_analysis",
-                "declares analysis=INTERACTIVE",
-                "override setup_interactive_analysis() or set analysis=AnalysisMode.FIT/NONE",
-            )
             cls._forbid_method(
                 "analyze",
                 "declares analysis=INTERACTIVE",
@@ -181,11 +193,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
                 "remove analyze() or set analysis=AnalysisMode.FIT",
             )
             cls._forbid_method(
-                "setup_interactive_analysis",
-                "declares analysis=NONE",
-                "remove setup_interactive_analysis() or set analysis=AnalysisMode.INTERACTIVE",
-            )
-            cls._forbid_method(
                 "get_analyze_params",
                 "declares analysis=NONE",
                 "remove get_analyze_params() or set analysis=AnalysisMode.FIT/INTERACTIVE",
@@ -195,6 +202,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
                 f"{cls.__name__} declares unsupported analysis capability {analysis!r}; "
                 "use an AnalysisMode value"
             )
+
+        cls._validate_interactive_hooks(analysis)
 
         if analysis is not AnalysisMode.NONE:
             params_cls = cls.analyze_params_cls()
@@ -345,22 +354,20 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             "override analyze"
         )
 
-    def setup_interactive_analysis(
-        self,
-        req: AnalyzeRequest[T_Result, T_AnalyzeParams],
-        host: InteractiveHost,
-    ) -> InteractiveSession:
-        """Set up an interactive analysis on the host's figure and return the
-        in-progress session (used only by ``analysis=AnalysisMode.INTERACTIVE``).
+    def make_interactive_plugin(
+        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
+    ) -> PluginDefinition[Any, Any]:
+        raise NotImplementedError("override make_interactive_plugin")
 
-        Default raises — only INTERACTIVE adapters override it; FIT/NONE adapters
-        are never routed here (Fast-Fail guard against a forgotten override).
-        """
-        del req, host
-        raise NotImplementedError(
-            f"{type(self).__name__} declares INTERACTIVE analysis but does not "
-            "override setup_interactive_analysis"
-        )
+    def make_interactive_frontend(
+        self,
+        plugin: PluginDefinition[Any, Any],
+        session: Session[Any],
+        env: InteractiveFrontendEnv,
+        request_finish: Callable[[Figure], bool],
+        request_cancel: Callable[[], bool],
+    ) -> InteractiveFrontend:
+        raise NotImplementedError("override make_interactive_frontend")
 
     # -- post-analysis (raising no-op default; override when post_analysis) --
     #

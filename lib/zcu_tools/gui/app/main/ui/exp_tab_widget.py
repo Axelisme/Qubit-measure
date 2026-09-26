@@ -14,6 +14,7 @@ from zcu_tools.gui.app.main.ui.artifact_save_center import (
     ArtifactSaveCenter,
 )
 from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.app.main.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
@@ -868,6 +869,11 @@ class ExpTabWidget(QWidget):
         self._analysis_stack.addWidget(widget)
         self._analysis_stack.setCurrentWidget(widget)
         self._right_stack.setCurrentWidget(self._analysis_stack)
+
+    def interactive_frontend(self) -> InteractiveFrontend | None:
+        """Return only the currently mounted interactive analysis presentation."""
+        current = self._analysis_stack.currentWidget()
+        return current if isinstance(current, InteractiveFrontend) else None
 
     def unmount_interactive_widgets(self, widget_type: type[QWidget]) -> None:
         """Remove interactive widgets of ``widget_type`` and show placeholder in analysis pane."""

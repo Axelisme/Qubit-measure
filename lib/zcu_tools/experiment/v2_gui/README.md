@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui` — measure-gui adapters
 
-**Last updated:** 2026-09-25 — GE fit symmetry and population constraints
+**Last updated:** 2026-09-26 — flux interactive plugin adapters
 
 `experiment/v2_gui/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/main/` 驅動。依賴方向 `experiment/v2_gui/` →
@@ -139,9 +139,12 @@ adapter 必須 override `load()` 或讓預設路徑以明確 `NotImplementedErro
 graceful skip。
 
 `BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
-一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive setup；`analysis=INTERACTIVE`
-必須實作 `setup_interactive_analysis()` 且不得實作 `analyze()`；`analysis=NONE` 不得實作
-analyze hooks。`get_analyze_params()` 只在 analyze-params **無法全 default 建構**（有欄位無 default）
+一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
+`analysis=INTERACTIVE` 必須實作 `make_interactive_plugin()` 與
+`make_interactive_frontend()` 且不得實作 `analyze()`；`analysis=NONE` 不得實作
+analyze hooks。兩個 flux_dep adapters 共用 `_support/flux_pick_plugin.py` 的 state/actions/commands，
+以及 Qt-only `_support/flux_pick_frontend.py` 的 artists 與 preview；service 建立 session，
+adapter 不持有分析 operation 或 writeback draft。`get_analyze_params()` 只在 analyze-params **無法全 default 建構**（有欄位無 default）
 時才必須覆寫；params 每欄位都有 default（含 `NoAnalyzeParams`、及把常數折進欄位 default 的 adapter）時
 沿用 base default（回 `params_cls()`）。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作
 `get_post_analyze_params()` / `post_analyze()`；post-analysis 是第二層 CPU-only 探索/比較視圖，

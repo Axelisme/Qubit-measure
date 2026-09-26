@@ -15,8 +15,6 @@ from .defaults import (
 from .interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
-    FluxPickSession,
-    build_flux_pick_session,
 )
 from .schema_builder import MeasureCfgBuilder, MeasureCfgDefinition, ModuleInit
 from .seeds import (
@@ -71,8 +69,6 @@ __all__ = [
     # interactive flux-pick analysis (shared by onetone/twotone flux_dep)
     "FluxPickParams",
     "FluxPickResult",
-    "FluxPickSession",
-    "build_flux_pick_session",
     # ctx helpers
     "md_get_float",
     "md_has_key",

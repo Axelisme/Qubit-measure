@@ -53,6 +53,7 @@ from .main_window_events import MainWindowEventCoordinator
 from .main_window_toolbar import MainWindowToolbar
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
     from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
 
     from zcu_tools.gui.app.main.controller import Controller
@@ -503,43 +504,56 @@ class MainWindow(QMainWindow):
     def mount_interactive_analysis(
         self,
         tab_id: str,
-        session_factory: Callable[[Any], Any],
-        on_finish: Callable[[Any], None],
+        frontend_factory: Callable[[Any], Any],
     ) -> None:
-        """RenderHost impl: mount an INTERACTIVE adapter's live picker in the tab's
-        plot stack. Build the host widget, hand it to the adapter to set up the
-        session, render the session's actions, and wire Done -> on_finish(session).
-        The View knows nothing of the interaction (lines / flux); it just forwards
-        events and shows session.info_text()."""
-        from zcu_tools.gui.app.main.ui.interactive_analysis import (
-            InteractiveAnalysisWidget,
-        )
+        """Mount the plugin's Qt widget without owning its interaction policy."""
+        from zcu_tools.gui.app.main.ui.interactive_frontend import InteractiveFrontend
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
-            return
+            raise FailedPreconditionError(f"interactive tab {tab_id!r} is not mounted")
         tab_w.prepare_analysis_container()
-        # The Controller satisfies InteractiveHostEnv (run_background via bg's
-        # pool); the widget pulls only that one capability through the port.
-        widget = InteractiveAnalysisWidget(self._ctrl)
-        session = session_factory(widget)  # the widget IS the InteractiveHost
-        widget.bind(session, on_done=lambda: on_finish(session))
-        tab_w.mount_interactive_widget(widget)
+        widget = frontend_factory(self._ctrl)
+        if not isinstance(widget, InteractiveFrontend):
+            raise TypeError("interactive frontend must be an InteractiveFrontend")
+        try:
+            tab_w.mount_interactive_widget(widget)
+        except Exception:
+            widget.teardown()
+            widget.deleteLater()
+            raise
 
-    def unmount_interactive_analysis(self, tab_id: str) -> None:
-        """RenderHost impl: remove the tab's mounted interactive picker (dual of
-        ``mount_interactive_analysis``). The picker widget is added straight to the
-        Analysis stack (it is not a FigureContainer canvas), so pane canvas cleanup
-        cannot reach it — this is the only teardown path for a cancelled interactive
-        analyze. A no-op when no picker is mounted, and idempotent."""
-        from zcu_tools.gui.app.main.ui.interactive_analysis import (
-            InteractiveAnalysisWidget,
-        )
+    def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None:
+        """Read the mounted frontend's figure and local preview metadata."""
+        tab_w = self._tab_widgets.get(tab_id)
+        widget = tab_w.interactive_frontend() if tab_w is not None else None
+        if widget is None:
+            return None
+        return widget.figure, widget.preview_active
+
+    def discard_interactive_preview(self, tab_id: str) -> None:
+        tab_w = self._tab_widgets.get(tab_id)
+        widget = tab_w.interactive_frontend() if tab_w is not None else None
+        if widget is not None:
+            widget.cancel_preview()
+
+    def unmount_interactive_analysis(
+        self, tab_id: str, *, restore_result: bool = False
+    ) -> None:
+        """Stop subscriptions/timers, remove widget, optionally show committed figure."""
+        from zcu_tools.gui.app.main.ui.interactive_frontend import InteractiveFrontend
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        tab_w.unmount_interactive_widgets(InteractiveAnalysisWidget)
+        for widget in tab_w.findChildren(InteractiveFrontend):
+            widget.teardown()
+        tab_w.unmount_interactive_widgets(InteractiveFrontend)
+        if restore_result:
+            result = self._ctrl.get_tab_analyze_result(tab_id)
+            figure = getattr(result, "figure", None)
+            if figure is not None:
+                self.show_analysis_image(tab_id, figure)
 
     def current_left_panel_width(self) -> int:
         """RenderHost impl: the active tab's left-panel width (the single

@@ -93,14 +93,11 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         adapter = None
         if control is not None:
             from zcu_tools.gui.app.main.services.remote import RemoteControlAdapter
-            from zcu_tools.gui.session.adapters.qt_owner_scheduler import (
-                QtOwnerScheduler,
-            )
 
             adapter = RemoteControlAdapter(
                 controller=ctrl,
                 opts=control,
-                owner_scheduler=QtOwnerScheduler(),
+                owner_scheduler=ctrl.owner_scheduler,
                 render_view=window,
             )
             # MainWindow._perform_close stops this before accepting close. The

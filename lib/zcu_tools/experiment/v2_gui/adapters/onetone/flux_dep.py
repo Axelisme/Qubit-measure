@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import ClassVar, TypeAlias
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
+
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment.v2.onetone.flux_dep import (
     FluxDepCfg,
@@ -15,12 +17,17 @@ from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgDefinition,
     ModuleInit,
     Seed,
-    build_flux_pick_session,
     custom,
     flux_range,
     md_get_float,
     md_has_key,
     res_freq_range,
+)
+from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_frontend import (
+    make_flux_pick_frontend,
+)
+from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_plugin import (
+    make_flux_pick_plugin,
 )
 from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
 from zcu_tools.gui.app.main.adapter import (
@@ -29,16 +36,21 @@ from zcu_tools.gui.app.main.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     ExpContext,
-    InteractiveHost,
-    InteractiveSession,
     MetaDictWriteback,
     RunRequest,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.main.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import (
     EvalValue,
 )
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.app.main.ui.interactive_frontend import (
+        InteractiveFrontend,
+        InteractiveFrontendEnv,
+    )
 
 OneToneFluxDepRunResult: TypeAlias = FluxDepResult
 
@@ -160,14 +172,23 @@ class OneToneFluxDepAdapter(
 
     # -- interactive analysis: user picks the half/integer flux lines ----------
 
-    def setup_interactive_analysis(
+    def make_interactive_plugin(
+        self, req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams]
+    ) -> PluginDefinition[Any, Any]:
+        # One-tone resonator spectra have uninformative phase.
+        return make_flux_pick_plugin(req, force_magnitude=True)
+
+    def make_interactive_frontend(
         self,
-        req: AnalyzeRequest[OneToneFluxDepRunResult, FluxPickParams],
-        host: InteractiveHost,
-    ) -> InteractiveSession:
-        # One-tone resonator spectra are magnitude-only (phase is uninformative),
-        # so the projection is fixed True and not surfaced as an analyze param.
-        return build_flux_pick_session(req, host, force_magnitude=True)
+        plugin: PluginDefinition[Any, Any],
+        session: Session[Any],
+        env: InteractiveFrontendEnv,
+        request_finish: Callable[[Figure], bool],
+        request_cancel: Callable[[], bool],
+    ) -> InteractiveFrontend:
+        return make_flux_pick_frontend(
+            plugin, session, env, request_finish, request_cancel
+        )
 
     def get_writeback_items(
         self, req: WritebackRequest[OneToneFluxDepRunResult, FluxPickResult]

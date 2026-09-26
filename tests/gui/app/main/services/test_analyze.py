@@ -20,6 +20,7 @@ from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.main.interactive import Action, PluginDefinition
 from zcu_tools.gui.app.main.services.analyze import AnalyzeService
 from zcu_tools.gui.app.main.services.guard import AnalyzePermit
 from zcu_tools.gui.app.main.state import ExpContext, Session, State
@@ -29,6 +30,7 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -86,9 +88,10 @@ def _make_service(
     bus: EventBus,
     *,
     fail_submit: bool = False,
+    handles: OperationHandles | None = None,
 ) -> tuple[AnalyzeService, _FakeBg]:
     bg = _FakeBg(fail_submit=fail_submit)
-    handles = OperationHandles()
+    handles = handles or OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     writeback = MagicMock()
     writeback.create_draft.return_value = None
@@ -112,7 +115,7 @@ def _make_two_tab_state() -> State:
 # ---------------------------------------------------------------------------
 
 
-def test_start_analyze_submits_to_bg(qapp):  # noqa: ARG001
+def test_start_analyze_submits_to_bg(qapp):
     state = _make_state()
     bus = EventBus()
     svc, bg = _make_service(state, bus)
@@ -123,7 +126,7 @@ def test_start_analyze_submits_to_bg(qapp):  # noqa: ARG001
     assert state.get_tab("tab1").is_analyzing is True
 
 
-def test_start_analyze_emits_interaction_event(qapp):  # noqa: ARG001
+def test_start_analyze_emits_interaction_event(qapp):
     state = _make_state()
     bus = EventBus()
     received: list[TabInteractionFact] = []
@@ -135,7 +138,7 @@ def test_start_analyze_emits_interaction_event(qapp):  # noqa: ARG001
     assert received == [TabInteractionFact.PRIMARY_ANALYZE_STARTED]
 
 
-def test_start_analyze_submit_rejection_emits_restore_fact(qapp):  # noqa: ARG001
+def test_start_analyze_submit_rejection_emits_restore_fact(qapp):
     state = _make_state()
     old_figure = MagicMock()
     old_post_figure = MagicMock()
@@ -157,7 +160,7 @@ def test_start_analyze_submit_rejection_emits_restore_fact(qapp):  # noqa: ARG00
     assert state.get_tab("tab1").is_analyzing is False
 
 
-def test_start_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG001
+def test_start_analyze_work_thunk_captures_figure_container(qapp):
     # The figure_container is captured in the work thunk's closure via
     # ``figure_ambient`` (ADR-0026 §2). Verify submit receives a single thunk
     # (no OffMainScopes arg).
@@ -179,7 +182,7 @@ def test_start_analyze_work_thunk_captures_figure_container(qapp):  # noqa: ARG0
 # ---------------------------------------------------------------------------
 
 
-def test_start_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
+def test_start_analyze_rejects_busy_tab(qapp):
     state = _make_state()
     state.set_tab_running("tab1", True)
     svc, _ = _make_service(state, EventBus())
@@ -198,7 +201,7 @@ def test_start_analyze_rejects_busy_tab(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_on_analyze_finished_updates_state(qapp):  # noqa: ARG001
+def test_on_analyze_finished_updates_state(qapp):
     state = _make_state()
     bus = EventBus()
     svc, bg = _make_service(state, bus)
@@ -235,7 +238,7 @@ def test_on_analyze_finished_updates_state(qapp):  # noqa: ARG001
     assert outcome is not None and outcome.status == "finished"
 
 
-def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
+def test_on_analyze_finished_emits_interaction_event(qapp):
     state = _make_state()
     bus = EventBus()
     received: list[TabInteractionFact] = []
@@ -260,65 +263,179 @@ def test_on_analyze_finished_emits_interaction_event(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_start_interactive_marks_analyzing_without_bg(qapp):  # noqa: ARG001
+def test_framework_session_drives_committed_result_and_one_terminal_operation(qapp):
     state = _make_state()
-    svc, bg = _make_service(state, EventBus())
+    handles = OperationHandles()
+    svc, bg = _make_service(state, EventBus(), handles=handles)
 
-    token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+    def require_pick(position: int) -> None:
+        if position == 0:
+            raise FailedPreconditionError("pick a line")
 
-    assert isinstance(token, int)
+    plugin = PluginDefinition(
+        "pick",
+        0,
+        (),
+        require_pick,
+        lambda position: MagicMock(position=position, figure=None),
+    )
+
+    token = svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+    )
+    active = svc.get_interactive("tab1")
+    assert active is not None and active.plugin is plugin
+    Action[int, int](lambda current, position: position).execute(active.session, 3)
+    assert active.session.snapshot() == 3
+    assert bg.submit_count == 0
+
+    svc.finish_plugin("tab1")
+    result = state.get_tab("tab1").analysis.result
+    assert result is not None
+    assert result.position == 3
+    assert state.get_tab("tab1").is_analyzing is False
+    assert svc.get_interactive("tab1") is None
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+    svc.finish_plugin("tab1")
+    assert state.get_tab("tab1").analysis.result is result
+
+
+def test_unavailable_finish_keeps_session_active_and_cancel_discards_late_done(qapp):
+    state = _make_state()
+    handles = OperationHandles()
+    svc, _ = _make_service(state, EventBus(), handles=handles)
+
+    def require_pick(position: int) -> None:
+        if position == 0:
+            raise FailedPreconditionError("pick a line")
+
+    plugin = PluginDefinition("pick", 0, (), require_pick, lambda position: MagicMock())
+    token = svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+    )
+    active = svc.get_interactive("tab1")
+    assert active is not None
+    with pytest.raises(FailedPreconditionError, match="pick a line"):
+        svc.finish_plugin("tab1")
+    assert svc.get_interactive("tab1") is active
     assert state.get_tab("tab1").is_analyzing is True
-    assert bg.submit_count == 0  # INTERACTIVE never starts a worker (main-thread)
+
+    assert svc.cancel_interactive("tab1") is True
+    svc.finish_plugin("tab1")
+    assert state.get_tab("tab1").analysis.result is None
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "cancelled"
+    with pytest.raises(FailedPreconditionError):
+        active.session.snapshot()
 
 
-def test_start_interactive_rejects_busy_tab(qapp):  # noqa: ARG001
+def test_result_build_failure_settles_failed_without_reopening_input(qapp):
+    state = _make_state()
+    handles = OperationHandles()
+    svc, _ = _make_service(state, EventBus(), handles=handles)
+
+    def fail_result(position: int) -> object:
+        raise RuntimeError("cannot build result")
+
+    plugin = PluginDefinition("pick", 1, (), lambda position: None, fail_result)
+    token = svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+    )
+    active = svc.get_interactive("tab1")
+    assert active is not None
+    svc.finish_plugin("tab1")
+    assert state.get_tab("tab1").is_analyzing is False
+    assert state.get_tab("tab1").analysis.result is None
+    assert svc.get_interactive("tab1") is None
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    with pytest.raises(FailedPreconditionError):
+        active.session.commit(lambda current: 2)
+
+
+def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
+    state = _make_state()
+    previous = MagicMock(figure=MagicMock())
+    state.update_tab_analyze("tab1", previous, previous.figure)
+    handles = OperationHandles()
+    bus = EventBus()
+    svc, _ = _make_service(state, bus, handles=handles)
+    plugin = PluginDefinition(
+        "pick",
+        2,
+        (),
+        lambda _state: None,
+        lambda value: MagicMock(figure=None, value=value),
+    )
+    token = svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+    )
+    active = svc.get_interactive("tab1")
+    assert active is not None
+    writeback = svc._writeback
+    assert isinstance(writeback, MagicMock)
+    writeback.create_draft.side_effect = RuntimeError("writeback boom")
+
+    assert svc.finish_plugin("tab1") is True
+
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert state.get_tab("tab1").analysis.result is previous
+    assert state.get_tab("tab1").analysis.figure is previous.figure
+    assert not state.get_tab("tab1").is_analyzing
+    assert svc.get_interactive("tab1") is None
+    with pytest.raises(FailedPreconditionError):
+        active.session.snapshot()
+
+
+def test_concurrent_plugin_tabs_keep_independent_sessions_and_handles(qapp):
+    state = _make_two_tab_state()
+    handles = OperationHandles()
+    svc, _ = _make_service(state, EventBus(), handles=handles)
+    plugin = PluginDefinition(
+        "pick",
+        0,
+        (),
+        lambda _state: None,
+        lambda position: MagicMock(position=position, figure=None),
+    )
+    owner = ManualOwnerScheduler()
+    first = svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, owner)
+    second = svc.start_plugin(AnalyzePermit(tab_id="tab2"), plugin, owner)
+    tab1 = svc.get_interactive("tab1")
+    tab2 = svc.get_interactive("tab2")
+    assert tab1 is not None and tab2 is not None
+    Action[int, int](lambda _current, position: position).execute(tab1.session, 5)
+    assert tab2.session.snapshot() == 0
+    assert svc.cancel_interactive("tab1") is True
+    first_outcome = handles.poll(first)
+    assert first_outcome is not None and first_outcome.status == "cancelled"
+    assert handles.poll(second) is None
+    assert svc.get_interactive("tab2") is tab2
+    Action[int, int](lambda _current, position: position).execute(tab2.session, 8)
+    assert svc.finish_plugin("tab2") is True
+    result = state.get_tab("tab2").analysis.result
+    assert result is not None and result.position == 8
+    assert state.get_tab("tab1").analysis.result is None
+    second_outcome = handles.poll(second)
+    assert second_outcome is not None and second_outcome.status == "finished"
+
+
+def test_start_plugin_rejects_busy_tab(qapp):
     state = _make_state()
     state.set_tab_running("tab1", True)
     svc, _ = _make_service(state, EventBus())
+    plugin = PluginDefinition("pick", 0, (), lambda _state: None, lambda state: state)
 
-    with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
-        svc.start_interactive(AnalyzePermit(tab_id="tab1"))
-
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert exc_info.value.reason_code == ""
-
-
-def test_finish_interactive_runs_the_fit_terminal_path(qapp):  # noqa: ARG001
-    state = _make_state()
-    bus = EventBus()
-    svc, _ = _make_service(state, bus)
-    svc.start_interactive(AnalyzePermit(tab_id="tab1"))
-
-    fake_result = MagicMock()
-    fake_result.figure = MagicMock()
-    session = MagicMock()
-    session.finish.return_value = fake_result
-
-    finished: list = []
-    bus.subscribe(
-        TabInteractionChangedPayload,
-        lambda payload: (
-            finished.append(
-                (payload.tab_id, state.get_tab(payload.tab_id).analysis.result)
-            )
-            if payload.fact is TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED
-            else None
-        ),
-    )
-
-    svc.finish_interactive("tab1", session)
-
-    session.finish.assert_called_once_with()
-    # Same terminal effects as a FIT result: State updated, analyzing cleared,
-    # lease released, analyze_finished emitted (so the agent's result-poll wakes).
-    assert state.get_tab("tab1").analysis.result is fake_result
-    assert state.get_tab("tab1").is_analyzing is False
-    assert finished == [("tab1", fake_result)]
+    with pytest.raises(FailedPreconditionError, match="busy"):
+        svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler())
+    assert svc.get_interactive("tab1") is None
 
 
 def test_interactive_start_and_finish_keep_captured_operation_origin(
     qapp,
-) -> None:  # noqa: ARG001
+) -> None:
     state = _make_state()
     bus = EventBus()
     svc, _ = _make_service(state, bus)
@@ -327,14 +444,14 @@ def test_interactive_start_and_finish_keep_captured_operation_origin(
         TabInteractionChangedPayload,
         lambda payload, meta: observed.append((payload.fact, meta)),
     )
-    session = MagicMock()
-    result = MagicMock()
-    result.figure = None
-    session.finish.return_value = result
-
+    plugin = PluginDefinition(
+        "pick", 2, (), lambda _state: None, lambda state: MagicMock(figure=None)
+    )
     with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
-        token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
-    svc.finish_interactive("tab1", session)
+        token = svc.start_plugin(
+            AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+        )
+    svc.finish_plugin("tab1")
 
     assert [fact for fact, _meta in observed] == [
         TabInteractionFact.PRIMARY_ANALYZE_STARTED,
@@ -351,13 +468,18 @@ def test_interactive_start_and_finish_keep_captured_operation_origin(
 # ---------------------------------------------------------------------------
 
 
-def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):  # noqa: ARG001
+def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):
     state = _make_state()
     bus = EventBus()
     svc, _ = _make_service(state, bus)
-    handles = svc._handles
-
-    token = svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+    handles = OperationHandles()
+    svc, _ = _make_service(state, bus, handles=handles)
+    plugin = PluginDefinition(
+        "pick", 0, (), lambda _state: None, lambda state: MagicMock(figure=None)
+    )
+    token = svc.start_plugin(
+        AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler()
+    )
     assert state.get_tab("tab1").is_analyzing is True
 
     received: list[TabInteractionFact] = []
@@ -382,7 +504,7 @@ def test_cancel_interactive_clears_analyzing_and_settles_cancelled(qapp):  # noq
     assert failed == []
 
 
-def test_cancel_interactive_no_inflight_is_graceful_noop(qapp):  # noqa: ARG001
+def test_cancel_interactive_no_inflight_is_graceful_noop(qapp):
     state = _make_state()
     svc, _ = _make_service(state, EventBus())
 
@@ -392,7 +514,7 @@ def test_cancel_interactive_no_inflight_is_graceful_noop(qapp):  # noqa: ARG001
     assert svc._handles.live_count() == 0
 
 
-def test_cancel_interactive_does_not_touch_fit_analyze(qapp):  # noqa: ARG001
+def test_cancel_interactive_does_not_touch_fit_analyze(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     handles = svc._handles
@@ -410,34 +532,32 @@ def test_cancel_interactive_does_not_touch_fit_analyze(qapp):  # noqa: ARG001
     assert handles.poll(token) is None  # still live, settles via its own callback
 
 
-def test_cancel_interactive_is_idempotent(qapp):  # noqa: ARG001
+def test_cancel_interactive_is_idempotent(qapp):
     state = _make_state()
     svc, _ = _make_service(state, EventBus())
-    svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+    plugin = PluginDefinition(
+        "pick", 0, (), lambda _state: None, lambda state: MagicMock(figure=None)
+    )
+    svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler())
 
     assert svc.cancel_interactive("tab1") is True
     # A second cancel finds nothing in flight -> graceful no-op.
     assert svc.cancel_interactive("tab1") is False
 
 
-def test_finish_after_cancel_interactive_is_inert(qapp):  # noqa: ARG001
+def test_finish_after_cancel_interactive_is_inert(qapp):
     # Defensive: if a late Done arrives after a cancel, the already-settled token
     # is gone, so finish_interactive must not resurrect the tab into analyzing.
     state = _make_state()
     svc, _ = _make_service(state, EventBus())
-    svc.start_interactive(AnalyzePermit(tab_id="tab1"))
+    plugin = PluginDefinition(
+        "pick", 0, (), lambda _state: None, lambda state: MagicMock(figure=None)
+    )
+    svc.start_plugin(AnalyzePermit(tab_id="tab1"), plugin, ManualOwnerScheduler())
     svc.cancel_interactive("tab1")
-
-    session = MagicMock()
-    result = MagicMock()
-    result.figure = None
-    session.finish.return_value = result
-    svc.finish_interactive("tab1", session)
-
-    # State was updated by the (inert) finish path but the tab is not analyzing and
-    # no second handle leaked.
+    assert svc.finish_plugin("tab1") is False
+    assert state.get_tab("tab1").analysis.result is None
     assert state.get_tab("tab1").is_analyzing is False
-    assert svc._handles.live_count() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +565,7 @@ def test_finish_after_cancel_interactive_is_inert(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_background_analyze_failure_resets_state(qapp):  # noqa: ARG001
+def test_background_analyze_failure_resets_state(qapp):
     state = _make_state()
     bus = EventBus()
     svc, bg = _make_service(state, bus)
@@ -468,7 +588,7 @@ def test_background_analyze_failure_resets_state(qapp):  # noqa: ARG001
     assert outcome is not None and outcome.status == "failed"
 
 
-def test_background_analyze_failure_emits_interaction_event(qapp):  # noqa: ARG001
+def test_background_analyze_failure_emits_interaction_event(qapp):
     state = _make_state()
     bus = EventBus()
     received: list[TabInteractionFact] = []
@@ -490,7 +610,7 @@ def test_background_analyze_failure_emits_interaction_event(qapp):  # noqa: ARG0
 # ---------------------------------------------------------------------------
 
 
-def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
+def test_two_tabs_settle_their_own_tokens(qapp):
     state = _make_two_tab_state()
     svc, bg = _make_service(state, EventBus())
     handles = svc._handles
@@ -542,7 +662,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):  # noqa: ARG001
 # ---------------------------------------------------------------------------
 
 
-def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):  # noqa: ARG001
+def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):
     state = _make_state()
     svc, bg = _make_service(state, EventBus())
     handles = svc._handles

@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.gui.session.ports import ProgressTransport
+    from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.io_manager import IOManager
@@ -115,6 +115,7 @@ def build_app_services(
     notify_info: Callable[[str], None],
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
+    owner_scheduler: OwnerScheduler,
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
 ) -> AppServices:
@@ -187,6 +188,10 @@ def build_app_services(
         analyze=analyze,
         post_analyze=post_analyze,
         render_host=render_host,
+        owner_scheduler=owner_scheduler,
+        run_background=lambda compute, on_done, on_error: background.submit(
+            compute, on_done=on_done, on_error=on_error, run_in_pool=True
+        ),
         access=access,
     )
     operation_control = OperationControlFacet(handles=handles, progress=progress)
