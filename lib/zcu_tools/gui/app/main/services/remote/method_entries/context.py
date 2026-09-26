@@ -64,6 +64,19 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
+        "context.snapshot",
+        "context:_h_context_snapshot",
+        MethodSpec(
+            15.0,
+            "Explicit full read of the active context: {label, md, ml: {modules, "
+            "waveforms}}. md contains every value and ml contains every entry's "
+            "complete cfg, not just their names. May return large or sensitive data; "
+            "use rpc_call only when you need to re-snapshot the whole context "
+            "before a guarded mutation. Unsupported values fail the entire read.",
+        ),
+        agent=AgentMethodPolicy(reveals=("context",)),
+    ),
+    method_entry(
         "context.md_get",
         "context:_h_context_md_get",
         MethodSpec(

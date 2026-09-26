@@ -135,7 +135,9 @@ CATALOG = [
         "guard_deps": [],
         "reveals": [],
         "reveals_without": [],
+        "reveals_when_nonempty": [],
         "refresh_after_write": False,
+        "created_resource": None,
         "operation_key": None,
     },
     {
@@ -152,7 +154,9 @@ CATALOG = [
         "guard_deps": [],
         "reveals": [],
         "reveals_without": [],
+        "reveals_when_nonempty": [],
         "refresh_after_write": False,
+        "created_resource": None,
         "operation_key": None,
     },
 ]
@@ -693,6 +697,33 @@ def test_connect_refuses_second_port_while_launched_gui_is_alive(
             ]
         },
         {"methods": [{**CATALOG[0], "reveals_without": ["prefix"]}]},
+        {
+            "methods": [
+                {
+                    key: value
+                    for key, value in CATALOG[0].items()
+                    if key != "created_resource"
+                }
+            ]
+        },
+        {
+            "methods": [
+                {
+                    key: value
+                    for key, value in CATALOG[0].items()
+                    if key != "reveals_when_nonempty"
+                }
+            ]
+        },
+        {
+            "methods": [
+                {
+                    **CATALOG[0],
+                    "created_resource": "tab:{tab_id!r}",
+                    "refresh_after_write": True,
+                }
+            ]
+        },
     ],
 )
 def test_connect_rejects_malformed_or_duplicate_catalog(

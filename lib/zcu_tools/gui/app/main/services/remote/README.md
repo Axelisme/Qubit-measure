@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-26 — failed-operation cancellation (GUI 89, WIRE 61)
+**Last updated:** 2026-09-26 — explicit full guard reads (GUI 90, WIRE 62)
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
@@ -116,8 +116,11 @@ The launch/connect note reports three numbers:
 - `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
   owned here.
 
-Current measure-gui values are `WIRE_VERSION = 61`, `GUI_VERSION = 89`, and
-`MCP_VERSION = 81` (defined in `zcu_tools.mcp.measure.server`). GUI 89 reports
+Current measure-gui values are `WIRE_VERSION = 62`, `GUI_VERSION = 90`, and
+`MCP_VERSION = 82` (defined in `zcu_tools.mcp.measure.server`). WIRE 62 adds
+`context.snapshot`, conditional full-read policy and certified resource creation
+to the live catalog. GUI 90 declares those policies; MCP 82 consumes them.
+GUI 89 reports
 an already failed operation as `operation_failed` on cancel, rather than
 `finished`; MCP 81 likewise reports failure when the short cancellation wait
 observes a failed outcome. GUI 88 made domain cancel RPCs internal in the MCP
@@ -147,8 +150,17 @@ MCP owns the agent baseline:
   matches that handler's before-version, never from a later version query;
 - successful full reads record pre-read versions only for keys named by their
   `reveals` policy; `reveals_without` excludes those keys when a named optional
-  parameter is present, so a partial or unmatched `prefix` cannot reveal the
-  entire cfg/editor; reads with no `reveals` preserve unrelated observations;
+  parameter is present, and `reveals_when_nonempty` requires named inputs to be
+  true. A partial or unmatched `prefix` cannot reveal the entire cfg/editor;
+  reads with no `reveals` preserve unrelated observations;
+- `tab.snapshot(tab_id)` reveals that tab's existence, `soc.info(include_cfg=true)`
+  reveals the full SoC cfg and explicit `context.snapshot` returns the active label,
+  every serializable md value and every ml entry cfg. Summary reads do not establish
+  these baselines. The full context reply may be large or sensitive and fails
+  rather than claiming a complete snapshot when a value cannot be encoded;
+- a successful `tab.new` owner-thread receipt certifies only the newly created
+  tab's existence at version 1. It does not reveal the tab's cfg, result or
+  analysis state and cannot certify unrelated GUI edits;
 - stale rejection preserves the baseline and becomes a semantic tool error;
   the agent re-snapshots the affected resource before retrying.
 

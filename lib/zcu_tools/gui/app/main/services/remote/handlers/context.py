@@ -1,12 +1,17 @@
 """Context remote handlers."""
 
+# Handlers are resolved from GUI-owned string references in method_entries.
+# pyright: reportUnusedFunction=false
+
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.value_lookup import ValueInfo
+from zcu_tools.utils import format_obj
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -82,6 +87,47 @@ def _h_context_active(
 ) -> Mapping[str, object]:
     del params
     return {"label": adapter.context_control.get_active_context_label()}
+
+
+def _context_json_default(value: object) -> object:
+    if isinstance(value, complex):
+        return {"__complex__": [value.real, value.imag]}
+    raise TypeError(f"unsupported context value: {type(value).__name__}")
+
+
+def _h_context_snapshot(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    ctx = adapter.context_control
+    md = ctx.get_current_md()
+    ml = ctx.get_current_ml()
+    snapshot = {
+        "label": ctx.get_active_context_label(),
+        "md": {key: value for key, value in sorted(md.items())},
+        "ml": {
+            "modules": {
+                name: cfg.to_dict() for name, cfg in sorted(ml.modules.items())
+            },
+            "waveforms": {
+                name: cfg.to_dict() for name, cfg in sorted(ml.waveforms.items())
+            },
+        },
+    }
+    try:
+        # Encode the *whole* snapshot before replying. A partial or lossy read
+        # must never establish a baseline for the entire context resource.
+        return json.loads(
+            json.dumps(
+                format_obj(snapshot), default=_context_json_default, allow_nan=False
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"cannot fully snapshot the active context: {exc}",
+            reason="unserializable_context",
+        ) from exc
 
 
 def _h_context_md_get(

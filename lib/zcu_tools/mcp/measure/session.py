@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
+from string import Formatter
 from typing import Any, Literal, TypedDict, cast
 
 from zcu_tools.mcp.core.bridge import (
@@ -40,12 +41,36 @@ class CatalogEntry(TypedDict):
     guard_deps: tuple[str, ...]
     reveals: tuple[str, ...]
     reveals_without: tuple[str, ...]
+    reveals_when_nonempty: tuple[str, ...]
     refresh_after_write: bool
+    created_resource: str | None
     operation_key: str | None
 
 
 ResolveConnectPortFn = Callable[[MCPBridgeConfig, int | None], int]
 PortIsOpenFn = Callable[[int], bool]
+
+
+def _created_resource_fields(pattern: str) -> tuple[str, ...]:
+    """Only plain returned identifiers can certify an unseen new resource."""
+    try:
+        parts = tuple(Formatter().parse(pattern))
+    except ValueError as exc:
+        raise GuiRpcError(
+            "invalid GUI rpc.catalog created-resource policy",
+            reason="incompatible_wire",
+        ) from exc
+    fields = tuple(field for _, field, _, _ in parts if field is not None)
+    if not fields or any(
+        not field.isidentifier() or spec or conversion
+        for _, field, spec, conversion in parts
+        if field is not None
+    ):
+        raise GuiRpcError(
+            "invalid GUI rpc.catalog created-resource policy",
+            reason="incompatible_wire",
+        )
+    return fields
 
 
 def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
@@ -65,6 +90,7 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
         schema = value.get("params")
         operation_key = value.get("operation_key")
         refresh_after_write = value.get("refresh_after_write")
+        created_resource = value.get("created_resource")
         if (
             not isinstance(method, str)
             or not method
@@ -82,18 +108,30 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             or (exposure == "tool") != bool(tools)
             or (operation_key is not None and not isinstance(operation_key, str))
             or not isinstance(refresh_after_write, bool)
+            or "created_resource" not in value
+            or (
+                created_resource is not None
+                and (
+                    not isinstance(created_resource, str)
+                    or not created_resource
+                    or not refresh_after_write
+                )
+            )
         ):
             raise GuiRpcError(
                 "invalid or duplicate GUI rpc.catalog entry", reason="incompatible_wire"
             )
+        if created_resource is not None:
+            _created_resource_fields(created_resource)
         deps = value.get("guard_deps")
         reveals = value.get("reveals")
         reveals_without = value.get("reveals_without")
+        reveals_when_nonempty = value.get("reveals_when_nonempty")
         if not all(
             isinstance(patterns, list)
             and all(isinstance(pattern, str) and pattern for pattern in patterns)
-            for patterns in (deps, reveals, reveals_without)
-        ) or (reveals_without and not reveals):
+            for patterns in (deps, reveals, reveals_without, reveals_when_nonempty)
+        ) or ((reveals_without or reveals_when_nonempty) and not reveals):
             raise GuiRpcError(
                 "invalid GUI rpc.catalog policy", reason="incompatible_wire"
             )
@@ -107,7 +145,9 @@ def _parse_catalog(raw: object) -> dict[str, CatalogEntry]:
             guard_deps=tuple(cast(list[str], deps)),
             reveals=tuple(cast(list[str], reveals)),
             reveals_without=tuple(cast(list[str], reveals_without)),
+            reveals_when_nonempty=tuple(cast(list[str], reveals_when_nonempty)),
             refresh_after_write=refresh_after_write,
+            created_resource=created_resource,
             operation_key=operation_key,
         )
     return methods
@@ -376,6 +416,7 @@ class MeasureMcpSession:
             entry is None
             or not entry["reveals"]
             or any(name in params for name in entry["reveals_without"])
+            or any(not params.get(name) for name in entry["reveals_when_nonempty"])
         ):
             return None
         versions = self.read_version_table()
@@ -406,6 +447,25 @@ class MeasureMcpSession:
             raise GuiRpcError(
                 "invalid GUI write-version receipt", reason="incompatible_wire"
             )
+        created_resource = entry["created_resource"]
+        if created_resource is not None:
+            fields = _created_resource_fields(created_resource)
+            if any(
+                not isinstance(result.get(field), str) or not result[field]
+                for field in fields
+            ):
+                raise GuiRpcError(
+                    "invalid GUI created-resource identity", reason="incompatible_wire"
+                )
+            created_key = created_resource.format(**result)
+            # A new, never-reused resource is the sole exception to requiring a
+            # prior read: its owner-thread receipt certifies both existence and
+            # identity. It does not reveal any of the tab's other resources.
+            if changes.get(created_key) != [0, 1] or created_key in self._last_seen:
+                raise GuiRpcError(
+                    "invalid GUI created-resource receipt", reason="incompatible_wire"
+                )
+            self._last_seen[created_key] = 1
         for key, (before, after) in changes.items():
             # An unguarded write cannot certify an unseen edit made before it.
             if self._last_seen.get(key) == before:

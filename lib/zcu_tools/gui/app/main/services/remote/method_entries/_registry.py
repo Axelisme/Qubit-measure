@@ -30,8 +30,12 @@ class AgentMethodPolicy:
     reveals: tuple[str, ...] = ()
     # A partial query cannot reveal the entire named resource.
     reveals_without: tuple[str, ...] = ()
+    # Optional full reads reveal only when these named inputs are truthy.
+    reveals_when_nonempty: tuple[str, ...] = ()
     # A successful write reports the versions it changed on the owner thread.
     refresh_after_write: bool = False
+    # A returned identity plus an owner-thread 0→1 receipt certifies creation.
+    created_resource: str | None = None
     operation_key: str | None = None
 
     def __post_init__(self) -> None:
@@ -41,8 +45,12 @@ class AgentMethodPolicy:
             raise ValueError("tool exposure requires tool_names only")
         if len(set(self.tool_names)) != len(self.tool_names):
             raise ValueError("duplicate tool names")
-        if self.reveals_without and not self.reveals:
-            raise ValueError("reveals_without requires revealed resources")
+        if (self.reveals_without or self.reveals_when_nonempty) and not self.reveals:
+            raise ValueError("conditional reveals require revealed resources")
+        if self.created_resource is not None and (
+            not self.created_resource or not self.refresh_after_write
+        ):
+            raise ValueError("created_resource requires a write-version receipt")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +89,9 @@ def build_agent_catalog(
             "guard_deps": list(entry.agent.guard_deps),
             "reveals": list(entry.agent.reveals),
             "reveals_without": list(entry.agent.reveals_without),
+            "reveals_when_nonempty": list(entry.agent.reveals_when_nonempty),
             "refresh_after_write": entry.agent.refresh_after_write,
+            "created_resource": entry.agent.created_resource,
             "operation_key": entry.agent.operation_key,
         }
         for entry in entries

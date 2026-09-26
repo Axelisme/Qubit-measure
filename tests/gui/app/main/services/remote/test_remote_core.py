@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import socket
 import time
+from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from threading import Thread
@@ -38,6 +40,9 @@ from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig, ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -81,7 +86,7 @@ class _Fixture:
             self.registry.register("fake", FakeAdapter)
         self.view = _make_view()
         io_manager = IOManager()
-        io_manager._em = MagicMock()
+        io_manager._em = MagicMock(current_label="ctx001")
         self.bus = EventBus()
         self.ctrl = Controller(
             state=self.state,
@@ -213,6 +218,63 @@ def test_catalog_exposes_live_params_and_policy_on_the_control_socket(fx):
 
         _send(sock, {"id": "bad", "method": "adapter.guide", "params": {}})
         assert _recv_response(sock)["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_context_snapshot_returns_full_active_md_and_ml_over_the_socket(fx):
+    md = MetaDict()
+    md.update({"r_f": 6000.0, "peaks": [1, 2], "phase": 1 + 2j})
+    ml = ModuleLibrary()
+    ml.modules["drive"] = ModuleCfgFactory.from_raw(
+        {
+            "type": "pulse",
+            "ch": 0,
+            "nqz": 1,
+            "freq": 6000.0,
+            "gain": 0.25,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "waveform": {"style": "const", "length": 0.1},
+        }
+    )
+    ml.waveforms["square"] = WaveformCfgFactory.from_raw(
+        {"style": "const", "length": 0.1}
+    )
+    fx.state.set_context(replace(fx.state.exp_context, md=md, ml=ml))
+    sock = _open_client(fx.service.port)
+    try:
+        _send(sock, {"id": "full", "method": "context.snapshot", "params": {}})
+        reply = _recv_response(sock)
+        assert reply["ok"] is True
+        assert reply["result"] == {
+            "label": "ctx001",
+            "md": {
+                "peaks": [1, 2],
+                "phase": {"__complex__": [1.0, 2.0]},
+                "r_f": 6000.0,
+            },
+            "ml": {
+                "modules": {"drive": ml.modules["drive"].to_dict()},
+                "waveforms": {"square": ml.waveforms["square"].to_dict()},
+            },
+        }
+    finally:
+        sock.close()
+
+
+def test_context_snapshot_rejects_opaque_values_instead_of_claiming_full_read(fx):
+    md = MetaDict()
+    md.update({"opaque": object()})
+    fx.state.set_context(replace(fx.state.exp_context, md=md, ml=ModuleLibrary()))
+    sock = _open_client(fx.service.port)
+    try:
+        _send(sock, {"id": "full", "method": "context.snapshot", "params": {}})
+        reply = _recv_response(sock)
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "precondition_failed"
+        assert reply["error"]["reason"] == "unserializable_context"
     finally:
         sock.close()
 
@@ -486,6 +548,237 @@ def test_measure_connect_authenticates_and_reconnects_to_token_gated_gui(
         first.stop()
         if second is not None:
             second.stop()
+
+
+def _prepare_guarded_context(fx: _Fixture, ml: ModuleLibrary | None = None) -> None:
+    fx.state.set_context(
+        replace(
+            fx.state.exp_context,
+            md=MetaDict(),
+            ml=ml if ml is not None else ModuleLibrary(),
+            soccfg=make_mock_soccfg(),
+        )
+    )
+    fx.state.version.bump("context")
+    fx.state.version.bump("soc")
+
+
+def _mcp_client(
+    port: int, tmp_path: Path
+) -> tuple[McpBridge, Callable[[str, dict[str, Any]], dict[str, Any]]]:
+    config = MCPBridgeConfig(
+        tool_prefix="",
+        server_display_name="measure-test",
+        server_instructions="",
+        app_name="gui",
+        default_port=port,
+        mcp_version=82,
+        wire_version=WIRE_VERSION,
+        pid_file=tmp_path / "unused.pid",
+        log_file=tmp_path / "unused.log",
+        run_script_name="run_measure_gui.py",
+    )
+
+    def resolver(config: MCPBridgeConfig, requested: int | None) -> int:
+        return config.default_port if requested is None else requested
+
+    session = MeasureMcpSession(
+        config, resolve_connect_port=resolver, port_is_open=lambda _: True
+    )
+    bridge = McpBridge(config)
+    session.attach_bridge(bridge)
+    tools = build_measure_tools(
+        MeasureToolContext(config, session, resolve_connect_port=resolver)
+    )
+    return bridge, partial(_call_mcp_with_qt, tools)
+
+
+def _await_completed_run(
+    call: Callable[[str, dict[str, Any]], dict[str, Any]], handle: int
+) -> None:
+    assert call("wait", {"op": handle, "timeout": 3})["status"] == "finished"
+
+
+def _edit_context_as_gui(fx: _Fixture, key: str, value: object) -> None:
+    sock = _open_client(fx.service.port)
+    try:
+        _send(
+            sock,
+            {
+                "id": "edit",
+                "method": "context.md_set_attr",
+                "params": {"key": key, "value": value},
+            },
+        )
+        assert _recv_response(sock)["ok"] is True
+    finally:
+        sock.close()
+
+
+def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
+    fx, tmp_path: Path
+) -> None:
+    _prepare_guarded_context(fx)
+    port = fx.service.port
+    bridge, call = _mcp_client(port, tmp_path)
+    try:
+        assert call("connect", {"port": port})["port"] == port
+        tab_id = call(
+            "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
+        )["tab_id"]
+        assert call("rpc_call", {"method": "context.snapshot"})["md"] == {}
+        assert "cfg" in call(
+            "rpc_call", {"method": "soc.info", "params": {"include_cfg": True}}
+        )
+        # The creation receipt establishes tab existence; no tab.snapshot
+        # round-trip is needed before an agent-started run on the new tab.
+        started = call(
+            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
+        )
+        assert started["handle"] > 0
+        _await_completed_run(call, started["handle"])
+    finally:
+        bridge.disconnect()
+
+
+def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")  # Created by GUI before MCP attaches.
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        assert (
+            call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
+                "tabs"
+            ][0]["tab_id"]
+            == tab_id
+        )
+        call("rpc_call", {"method": "context.snapshot"})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        handle = call(
+            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": tab_id}}
+        )["handle"]
+        assert handle > 0
+        _await_completed_run(call, handle)
+    finally:
+        bridge.disconnect()
+
+
+def test_restarted_gui_requires_new_full_reads_before_running(
+    qapp, tmp_path: Path
+) -> None:
+    first = _Fixture()
+    port = first.start()
+    _prepare_guarded_context(first)
+    first_tab = first.ctrl.new_tab("fake")
+    bridge, call = _mcp_client(port, tmp_path)
+    second: _Fixture | None = None
+    try:
+        call("connect", {"port": port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": first_tab}})
+        call("rpc_call", {"method": "context.snapshot"})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        old_handle = call(
+            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": first_tab}}
+        )["handle"]
+        _await_completed_run(call, old_handle)
+
+        first.stop()
+        second = _Fixture(ControlOptions(port=port))
+        assert second.start() == port
+        _prepare_guarded_context(second)
+        second_tab = second.ctrl.new_tab("fake")
+        deadline = time.monotonic() + 2
+        while bridge.is_connected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not bridge.is_connected
+        call("rpc_list", {"domain": "context"})  # Lazily reconnect to the new GUI.
+        with pytest.raises(RuntimeError) as expired:
+            call("wait", {"op": old_handle, "timeout": 0.01})
+        assert getattr(expired.value, "reason", None) == "unknown_op"
+        # The old snapshots must not supply the new GUI's nonzero tab, SoC or
+        # context guard baseline. Explicit reads restore access to this tab.
+        with pytest.raises(RuntimeError) as stale:
+            call(
+                "rpc_call",
+                {"method": "tab.run_start", "params": {"tab_id": second_tab}},
+            )
+        assert getattr(stale.value, "reason", None) == "stale_version"
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": second_tab}})
+        call("rpc_call", {"method": "context.snapshot"})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        new_handle = call(
+            "rpc_call", {"method": "tab.run_start", "params": {"tab_id": second_tab}}
+        )["handle"]
+        assert new_handle > old_handle
+        _await_completed_run(call, new_handle)
+    finally:
+        bridge.disconnect()
+        first.stop()
+        if second is not None:
+            second.stop()
+
+
+def test_load_after_gui_context_edit_requires_a_new_full_read(
+    fx, tmp_path: Path
+) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "context.snapshot"})
+        _edit_context_as_gui(fx, "r_f", 6000.0)
+        args = {
+            "method": "tab.load_data",
+            "params": {"tab_id": tab_id, "data_path": "missing.h5"},
+        }
+        with pytest.raises(RuntimeError) as stale:
+            call("rpc_call", args)
+        assert getattr(stale.value, "reason", None) == "stale_version"
+
+        assert call("rpc_call", {"method": "context.snapshot"})["md"]["r_f"] == 6000.0
+        with pytest.raises(RuntimeError) as missing_file:
+            call("rpc_call", args)
+        assert getattr(missing_file.value, "reason", None) != "stale_version"
+    finally:
+        bridge.disconnect()
+
+
+def test_editor_commit_rejects_unseen_gui_edit_then_accepts_full_read(
+    fx, tmp_path: Path
+) -> None:
+    ml = ModuleLibrary()
+    ml.waveforms["seed"] = WaveformCfgFactory.from_raw(
+        {"style": "const", "length": 0.1}
+    )
+    _prepare_guarded_context(fx, ml)
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        editor_id = call(
+            "rpc_call",
+            {
+                "method": "editor.new",
+                "params": {"item_kind": "waveform", "from_name": "seed"},
+            },
+        )["editor_id"]
+        call("rpc_call", {"method": "editor.get", "params": {"editor_id": editor_id}})
+        call("rpc_call", {"method": "context.snapshot"})
+        _edit_context_as_gui(fx, "r_f", 6000.0)
+        args = {
+            "method": "editor.commit",
+            "params": {"editor_id": editor_id, "name": "copy"},
+        }
+        with pytest.raises(RuntimeError) as stale:
+            call("rpc_call", args)
+        assert getattr(stale.value, "reason", None) == "stale_version"
+        call("rpc_call", {"method": "context.snapshot"})
+        assert call("rpc_call", args) == {}
+        assert ml.waveforms["copy"] == ml.waveforms["seed"]
+    finally:
+        bridge.disconnect()
 
 
 def test_shutdown_closes_clients(fx):

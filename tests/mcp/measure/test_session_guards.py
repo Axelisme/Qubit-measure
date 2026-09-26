@@ -80,6 +80,54 @@ def test_mutations_attach_only_their_observed_dependencies(
     assert send(client, method, params)["expected_versions"] == expected
 
 
+def test_new_tab_receipt_establishes_only_the_created_tab_existence(
+    client: MeasureClient,
+) -> None:
+    client.transport.replies["tab.new"] = {
+        "ok": True,
+        "result": {
+            "tab_id": "new-tab",
+            "__agent_write_versions": {
+                "tab:new-tab": [0, 1],
+                "context": [0, 5],
+            },
+        },
+    }
+    assert client.call(
+        "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
+    ) == {"tab_id": "new-tab"}
+    expected = send(client, "tab.run_start", {"tab_id": "new-tab"})["expected_versions"]
+    assert expected["tab:new-tab"] == 1
+    assert expected["context"] == 0
+
+
+def test_only_explicit_full_tab_and_soc_reads_reveal_their_guard_versions(
+    client: MeasureClient,
+) -> None:
+    set_versions(client, {"tab:t": 3, "soc": 4, "context": 8})
+    client.transport.replies["tab.snapshot"] = {
+        "ok": True,
+        "result": {"tabs": [{"tab_id": "t"}]},
+    }
+    client.transport.replies["soc.info"] = {
+        "ok": True,
+        "result": {"cfg": {"gens": []}, "is_mock": True},
+    }
+    client.call("rpc_call", {"method": "tab.snapshot"})
+    client.call("rpc_call", {"method": "soc.info"})
+    before = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
+    assert before["tab:t"] == 0
+    assert before["soc"] == 0
+    assert before["context"] == 0
+
+    client.call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": "t"}})
+    client.call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+    after = send(client, "tab.run_start", {"tab_id": "t"})["expected_versions"]
+    assert after["tab:t"] == 3
+    assert after["soc"] == 4
+    assert after["context"] == 0
+
+
 def test_unseen_device_membership_is_guarded_at_zero(client: MeasureClient) -> None:
     client.observe_versions({"tab:t:cfg": 1, "tab:t": 1, "soc": 1, "context": 1})
     assert (
@@ -599,6 +647,56 @@ def test_unmapped_read_keeps_unrelated_baseline(
     assert expected["tab:t:cfg"] == 1
     assert expected["soc"] == 0
     assert expected["device:removed"] == 3
+
+
+def test_full_context_read_uses_pre_read_version_and_partial_reads_cannot_advance_it(
+    client: MeasureClient,
+) -> None:
+    set_versions(client, {"context": 7})
+
+    def full_read_then_gui_edit(params: dict[str, Any]) -> dict[str, Any]:
+        set_versions(client, {"context": 8})
+        return {
+            "ok": True,
+            "result": {
+                "label": "ctx",
+                "md": {"r_f": 6000.0},
+                "ml": {"modules": {}, "waveforms": {}},
+            },
+        }
+
+    client.transport.replies["context.snapshot"] = full_read_then_gui_edit
+    client.transport.replies["context.md_get"] = {
+        "ok": True,
+        "result": {"keys": ["r_f", "unread"]},
+    }
+    assert client.call("rpc_call", {"method": "context.snapshot"})["md"] == {
+        "r_f": 6000.0
+    }
+    client.call("rpc_call", {"method": "context.md_get"})
+    guarded = send(client, "tab.load_data", {"tab_id": "t", "data_path": "old.h5"})
+    assert guarded["expected_versions"]["context"] == 7
+
+    client.transport.replies["context.snapshot"] = {
+        "ok": False,
+        "error": {
+            "code": "precondition_failed",
+            "reason": "unserializable_context",
+            "message": "cannot fully snapshot the active context",
+        },
+    }
+    with pytest.raises(RuntimeError):
+        client.call("rpc_call", {"method": "context.snapshot"})
+    retry = send(client, "editor.commit", {"editor_id": "e", "name": "copy"})
+    assert retry["expected_versions"]["context"] == 7
+
+    client.transport.replies["context.snapshot"] = {
+        "ok": True,
+        "result": {"label": "ctx", "md": {"r_f": 6100.0}, "ml": {}},
+    }
+    client.call("rpc_call", {"method": "context.snapshot"})
+    refreshed = send(client, "editor.commit", {"editor_id": "e", "name": "copy"})
+    assert refreshed["expected_versions"]["context"] == 8
 
 
 def test_context_read_keeps_its_baseline_when_context_changes_later(

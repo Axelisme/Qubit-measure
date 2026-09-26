@@ -20,7 +20,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create a new tab for the named adapter. Returns {tab_id}.",
             (_str("adapter_name", "Adapter to instantiate"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
+        agent=AgentMethodPolicy(
+            refresh_after_write=True, created_resource="tab:{tab_id}"
+        ),
     ),
     method_entry(
         "tab.close",
@@ -55,8 +57,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:_h_tab_snapshot",
         MethodSpec(
             5.0,
-            "Tab summary",
+            "Tab summary. Pass tab_id to fully inspect this tab's existence; "
+            "the all-tabs summary is only an index and does not refresh a "
+            "per-tab guard baseline.",
             (_str_opt("tab_id", "Tab to inspect; omit for all tabs"),),
+        ),
+        agent=AgentMethodPolicy(
+            reveals=("tab:{tab_id}",), reveals_when_nonempty=("tab_id",)
         ),
     ),
     method_entry(

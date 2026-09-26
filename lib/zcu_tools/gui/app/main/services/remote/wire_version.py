@@ -100,7 +100,9 @@ from __future__ import annotations
 # its resource; MCP records a conservative pre-read version after successful reads.
 # v61: declared successful writes include owner-thread __agent_write_versions
 # receipts for resources changed by that handler; the MCP strips them from tools.
-WIRE_VERSION = 61
+# v62: context.snapshot fully reads md/ml; the live catalog identifies conditional
+# full reads and newly created resources certified by owner-thread write receipts.
+WIRE_VERSION = 62
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -138,4 +140,5 @@ WIRE_VERSION = 61
 # v87: no-project remote errors point to the current startup.apply RPC entry.
 # v88: route MCP cancellation only through opaque op handles; bound notify.await.
 # v89: report already failed operations as errors when cancellation is requested.
-GUI_VERSION = 89
+# v90: expose explicit context, tab, and SoC guard observations in the live catalog.
+GUI_VERSION = 90
