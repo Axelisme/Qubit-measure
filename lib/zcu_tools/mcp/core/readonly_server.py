@@ -96,7 +96,7 @@ def _make_lifecycle_tools(
         p = int(arguments.get("port", port))
         token: str | None = arguments.get("token")
         auto_connect = bool(arguments.get("auto_connect", True))
-        return bridge.launch(repo_root, p, token, auto_connect)
+        return bridge.launch(repo_root, p, token, auto_connect=auto_connect)
 
     overrides: dict[str, Tool] = {
         f"{prefix}connect": {

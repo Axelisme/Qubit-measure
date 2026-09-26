@@ -36,7 +36,7 @@ from zcu_tools.gui.app.main.services.remote.wire_version import (  # noqa: E402
 from zcu_tools.mcp.core.bridge import (  # noqa: E402
     McpBridge,
     MCPBridgeConfig,
-    _port_is_open,
+    port_is_open,
     resolve_connect_port,
     run_stdio_loop,
 )
@@ -103,7 +103,7 @@ def main() -> None:
     session = MeasureMcpSession(
         _CONFIG,
         resolve_connect_port=resolve_connect_port,
-        port_is_open=_port_is_open,
+        port_is_open=port_is_open,
     )
     bridge = McpBridge(_CONFIG)
     session.attach_bridge(bridge)

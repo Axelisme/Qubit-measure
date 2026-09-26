@@ -7,8 +7,10 @@ import socket
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES, encode_line
@@ -98,6 +100,102 @@ def test_launched_gui_ignores_shared_pid_file(tmp_path: Path) -> None:
     cfg.pid_file.write_text("4242")
     bridge = McpBridge(cfg)
     assert bridge.launched_gui is False
+
+
+@pytest.fixture
+def launch_bridge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[McpBridge, MagicMock, Mock, Mock]:
+    config = _config(tmp_path)
+    script = tmp_path / "script" / config.run_script_name
+    script.parent.mkdir()
+    script.touch()
+    bridge = McpBridge(config)
+    proc = MagicMock(pid=4242, stderr=None)
+    proc.poll.return_value = None
+    probe = Mock(side_effect=[False, True])
+    connect = Mock(return_value="connected")
+    monkeypatch.setattr(
+        "zcu_tools.mcp.core.bridge.subprocess.Popen", Mock(return_value=proc)
+    )
+    monkeypatch.setattr("zcu_tools.mcp.core.bridge.port_is_open", probe)
+    monkeypatch.setattr(bridge, "connect", connect)
+    return bridge, proc, probe, connect
+
+
+@pytest.mark.parametrize("auto_connect", [False, True])
+def test_launch_ready_preserves_connection_choice(
+    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
+    tmp_path: Path,
+    *,
+    auto_connect: bool,
+) -> None:
+    bridge, _, _, connect = launch_bridge
+    result = bridge.launch(tmp_path, 18765, "credential", auto_connect=auto_connect)
+    assert "listening on port 18765" in result
+    assert bridge.launched_gui
+    if auto_connect:
+        connect.assert_called_once_with(18765, "credential")
+    else:
+        connect.assert_not_called()
+
+
+@pytest.mark.parametrize("stderr", [None, b"startup details"])
+def test_launch_reports_early_exit_without_connecting(
+    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
+    tmp_path: Path,
+    stderr: bytes | None,
+) -> None:
+    bridge, proc, _, connect = launch_bridge
+    proc.poll.return_value = 7
+    proc.stderr = BytesIO(stderr) if stderr is not None else None
+    with pytest.raises(RuntimeError, match="returncode=7") as error:
+        bridge.launch(tmp_path, 18765)
+    if stderr is not None:
+        assert "startup details" in str(error.value)
+    assert not bridge.launched_gui
+    connect.assert_not_called()
+
+
+def test_launch_timeout_retains_process_without_claiming_connection(
+    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge, _, _, connect = launch_bridge
+    monkeypatch.setattr(
+        "zcu_tools.mcp.core.bridge.time.monotonic", Mock(side_effect=[0, 16])
+    )
+    result = bridge.launch(tmp_path, 18765)
+    assert "not yet reachable" in result
+    assert bridge.launched_gui
+    connect.assert_not_called()
+
+
+def test_launch_rejects_occupied_port_without_owning_process(
+    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock], tmp_path: Path
+) -> None:
+    bridge, _, probe, connect = launch_bridge
+    probe.side_effect = None
+    probe.return_value = True
+    with pytest.raises(RuntimeError, match="already in use"):
+        bridge.launch(tmp_path, 18765)
+    assert not bridge.launched_gui
+    connect.assert_not_called()
+
+
+def test_launch_tolerates_unwritable_pid_file(
+    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge, _, _, _ = launch_bridge
+    monkeypatch.setattr(
+        Path, "write_text", Mock(side_effect=PermissionError("read only"))
+    )
+    result = bridge.launch(tmp_path, 18765, auto_connect=False)
+    assert "listening on port 18765" in result
+    assert bridge.launched_gui
 
 
 # ---------------------------------------------------------------------------

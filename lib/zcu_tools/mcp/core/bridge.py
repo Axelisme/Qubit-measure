@@ -122,7 +122,7 @@ def resolve_connect_port(config: MCPBridgeConfig, requested: int | None) -> int:
     return config.default_port
 
 
-def _port_is_open(port: int) -> bool:
+def port_is_open(port: int) -> bool:
     try:
         socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
         return True
@@ -429,10 +429,8 @@ class McpBridge:
     # ------------------------------------------------------------------
 
     def _write_pid_file(self, pid: int) -> None:
-        try:
+        with suppress(OSError):
             self.config.pid_file.write_text(str(pid))
-        except OSError:
-            pass
 
     def _read_pid_file(self) -> int | None:
         try:
@@ -604,6 +602,7 @@ class McpBridge:
         repo_root: Path,
         port: int,
         token: str | None = None,
+        *,
         auto_connect: bool = True,
         extra_args: list[str] | None = None,
     ) -> str:
@@ -621,7 +620,7 @@ class McpBridge:
         if not run_gui.exists():
             raise FileNotFoundError(f"{cfg.run_script_name} not found at {run_gui}")
 
-        if _port_is_open(port):
+        if port_is_open(port):
             raise RuntimeError(
                 f"Port {port} is already in use — a GUI is likely already running "
                 f"there. Use {cfg.tool_prefix}connect to attach to it, or launch "
@@ -659,25 +658,7 @@ class McpBridge:
             )
         self._write_pid_file(self._proc.pid)
 
-        deadline = time.monotonic() + 15.0
-        ready = False
-        while time.monotonic() < deadline:
-            rc = self._proc.poll()
-            if rc is not None:
-                stderr = b""
-                if self._proc.stderr is not None:
-                    stderr = self._proc.stderr.read() or b""
-                tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
-                self._proc = None
-                raise RuntimeError(
-                    f"GUI process exited during startup (returncode={rc}) before "
-                    f"port {port} was ready. Last stderr:\n" + "\n".join(tail)
-                )
-            if _port_is_open(port):
-                ready = True
-                break
-            time.sleep(0.3)
-
+        ready = self._wait_for_launch(self._proc, port)
         pid = self._proc.pid
         if not ready:
             return (
@@ -694,6 +675,26 @@ class McpBridge:
                 + log_note
             )
         return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
+
+    def _wait_for_launch(self, proc: subprocess.Popen[bytes], port: int) -> bool:
+        """Wait for readiness, reporting an early process exit with its stderr."""
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            rc = proc.poll()
+            if rc is not None:
+                stderr = b""
+                if proc.stderr is not None:
+                    stderr = proc.stderr.read() or b""
+                tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
+                self._proc = None
+                raise RuntimeError(
+                    f"GUI process exited during startup (returncode={rc}) before "
+                    f"port {port} was ready. Last stderr:\n" + "\n".join(tail)
+                )
+            if port_is_open(port):
+                return True
+            time.sleep(0.3)
+        return False
 
     @property
     def launched_gui(self) -> bool:
@@ -1101,6 +1102,7 @@ __all__ = [
     "generate_tools",
     "generated_rpc_timeout_seconds",
     "make_forwarder",
+    "port_is_open",
     "resolve_connect_port",
     "run_stdio_loop",
 ]
