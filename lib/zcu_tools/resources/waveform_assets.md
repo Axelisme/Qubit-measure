@@ -37,7 +37,7 @@ data = ArbWaveformDatabase.load("my_pulse")
 | `inspect(data_key)` | 載入單筆 asset 並即時計算 duration、sample count、peak Abs、recipe summary |
 | `load(data_key)` / `get(name)` | `load` 取得 `ArbWaveformData`；`get` 給 program 層使用，回傳 `(idata, qdata, time)`，Q channel 全為 0 時 `qdata` 為 `None` |
 | `save(name, idata, time, qdata=None)` | Notebook 用的 raw 寫入；一律覆寫同名 asset，不寫 recipe（`qdata` 省略時存成全 0）。需要 collision 檢查時改用 `import_data(..., overwrite=False)` |
-| `create_from_formula(data_key, recipe, *, overwrite=False)` / `update_formula(data_key, recipe)` | 渲染 formula recipe，並把 arrays 與 recipe 寫進同一個 `.npz`。`create_from_formula` 在 key 已存在且 `overwrite=False` 時拋 `data_key_exists`；`update_formula` 只更新已存在的 asset，不存在時拋 not found。Recipe 只能經這兩個方法保存 |
+| `create_from_formula(data_key, recipe, *, overwrite=False)` / `update_formula(data_key, recipe)` | 渲染 formula recipe，並把 arrays 與 recipe 寫進同一個 `.npz`。`create_from_formula` 在 key 已存在且 `overwrite=False` 時拋 `data_key_exists`；`update_formula` 只更新已存在的 asset，不存在時拋 not found。建立新 recipe 或依 recipe 重新渲染，只能經這兩個方法；`import_file` 例外，會原樣保存來源 `.npz` 已有的 recipe |
 | `import_file(data_key, source_path, *, overwrite=False)` / `import_data(data_key, *, idata, qdata, time, overwrite=False)` | `import_file` 只接受 `.npz`，原檔若含 recipe 會一併保留；`import_data` 接受記憶體中的三條 1D array，不寫 recipe。兩者在 key 已存在且 `overwrite=False` 時拋 `data_key_exists` |
 | `delete(...)` / `rename(...)` | 只操作 asset 檔案，不掃描 `ModuleLibrary` references |
 
