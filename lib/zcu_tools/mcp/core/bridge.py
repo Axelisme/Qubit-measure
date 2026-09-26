@@ -21,11 +21,11 @@ or diagnostics.
     (``coerce_arg`` / ``make_forwarder`` / ``generate_tools``) and run the MCP
     stdio protocol loop (``build_initialize_result`` / ``run_stdio_loop``).
 
-App-specific policy stays in each ``mcp_server.py``: the read-only apps wrap
+App-specific policy stays with each app: the read-only apps wrap
 ``send_rpc_raw`` in a thin error-raising ``send_gui_rpc`` and drop events;
-measure-gui composes ``send_rpc_raw`` with its optimistic-concurrency guard,
-operation tracking, the diagnostic queue (via ``on_event``), and its hand-written
-tools.
+measure-gui's session composes ``send_rpc_raw`` with its optimistic-concurrency
+guard, operation tracking, and hand-written tools. It does not subscribe to push
+events; operation request/reply supplies Stop feedback.
 
 Threading:
   - Main (stdio) thread: reads MCP request lines, dispatches into tool handlers,
@@ -908,10 +908,11 @@ def run_stdio_loop(
       - ``on_start`` runs once after stdin/stdout are reconfigured to UTF-8, before
         the loop (measure-gui attaches its per-session file logging here).
       - ``on_cleanup`` runs once when stdin closes (e.g. stop a server-launched GUI).
-      - ``on_each_reply`` (measure-gui) returns ready-made content blocks to
-        piggyback on every successful tool reply (e.g. drained diagnostics): a list
-        of ``{"type": "text", "text": ...}`` dicts, each appended after the tool's
-        own content. The hook owns the wording (returns ``[]`` for nothing).
+      - ``on_each_reply`` lets an app append ready-made content blocks to each
+        successful tool reply: a list of ``{"type": "text", "text": ...}`` dicts,
+        appended after the tool's own content. The hook owns the wording (returns
+        ``[]`` for nothing). Measure-gui does not register this hook; it reads
+        Stop feedback through operation request/reply instead.
       - ``on_error`` is called from within each ``except`` block with a
         preformatted context message (measure-gui passes ``logger.exception``) so
         the active exception is logged with its traceback.
