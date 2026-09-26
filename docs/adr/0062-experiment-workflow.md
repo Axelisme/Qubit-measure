@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-關聯 [[0026]]（operation 與取消）、[[0027]]（單一實驗資料）、[prediction owner](../../lib/zcu_tools/simulate/fluxonium/README.md)（物理 prediction 能力）、[[0040]]（autofluxdep artifact）、[[0045]]／[[0046]]（通用 cfg 模型與 lowering）。兩套 workflow 的具體節點介面不同，不因共用本篇而相互轉換。
+關聯 [[0026]]（operation 與取消）、[[0063]]（單一實驗資料與 run artifact 的保存權威）、[prediction owner](../../lib/zcu_tools/simulate/fluxonium/README.md)（物理 prediction 能力）、[[0045]]／[[0046]]（通用 cfg 模型與 lowering）。兩套 workflow 的具體節點介面不同，不因共用本篇而相互轉換。
 
 ## 問題與決策
 
@@ -24,7 +24,7 @@ Resolver 支援 `Need.NOW`（只接受當點）及 `Need.LATEST`（允許前點�
 
 Run 開始時，app 以 run-local `ModuleLibrary` 為 enabled Node 建立 `RunCfgSnapshot`，保存 lowered `base_cfg`、generation `knobs` 與 Builder 宣告的 `OverridePlan`。每點由 base 產生 cfg，僅套用 plan 允許的 patch。`all_points` 每點必填；`after_first_point` 第一點沿用 base、後續必填；`fallback` 有 patch 才覆寫。未宣告 path、不存在的 target、違反 mode 或 whole-module replacement 都由 runtime 拒絕。GUI decoration 只向使用者說明範圍，不代替 runtime enforcement。通用 cfg model／renderer 不理解實驗 generation 政策。
 
-App 的 workflow editable cfg、run-start base／plan 與實際 point cfg 是不同的觀測對象。artifact 保存 editable cfg 與 run-start base／plan，不因此保證每點最終 cfg 的完整 provenance，也不聲稱 md、ml、device 在同一原子時刻擷取。資料 commit 與 finalize 規則歸 [[0040]]。
+App 的 workflow editable cfg、run-start base／plan 與實際 point cfg 是不同的觀測對象。artifact 保存 editable cfg 與 run-start base／plan，不因此保證每點最終 cfg 的完整 provenance，也不聲稱 md、ml、device 在同一原子時刻擷取。資料 commit 與 finalize 規則歸 [[0063]]，artifact 細節見 [autofluxdep README](../../lib/zcu_tools/gui/app/autofluxdep/README.md)。
 
 Feedback 是 run-lived 且 placement-scoped 的 capability，不讓同一 Builder 的多個 placement 共用可變 state。其 estimator／controller state 不作為 `Patch` dependency；提供下游消費的實驗結果仍經正式 `provides`／`Patch`。Generic feedback 返回 sample、query age 與 freshness；disabled 或沒有 observation 返回 `None`，未宣告 slot 則失敗。它不決定 fit gate、clamp、fallback target 或 stop。Node 決定如何將 sample 與 domain prior 組合。
 

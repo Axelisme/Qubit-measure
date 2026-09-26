@@ -1,7 +1,7 @@
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
 
 **狀態：** accepted（未實作）
-**關聯：** [[0059]]（RPC channel）、[[0061]]（interactive plugin session）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（Stop feedback）、[[0033]]（刪改名不掃描參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
+**關聯：** [[0059]]（RPC channel）、[[0061]]（interactive plugin session）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0025]]（Stop feedback）、[[0063]]（資產刪改名不級聯更新參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context
 
@@ -150,7 +150,7 @@
 以 cfg 編輯語法修改 library 項目並存檔；任何一步失敗則 library 不變。`save_as` 存為新項目、原項目不動。存檔時 md 表達式求值為數值，library 不保存與 md 的連動。回傳存入的 `{name, cfg}`。
 
 **`ml_rename(name, new_name, kind?)`**、**`ml_delete(name, kind?)`**
-種類由名稱判斷，module 與 waveform 同名時須給 `kind`；名稱衝突時報錯。參照該項目的 cfg 會改為 inline 值（值保留，不再連結 library，[[0033]]），回傳中提示此影響。
+種類由名稱判斷，module 與 waveform 同名時須給 `kind`；名稱衝突時報錯。參照該項目的 cfg 會改為 inline 值（值保留，不再連結 library，[[0063]]），回傳中提示此影響。
 
 ### D. 實驗與 tab
 
