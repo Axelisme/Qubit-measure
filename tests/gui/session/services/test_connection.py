@@ -279,7 +279,7 @@ def test_connect_sync_remote_failure_releases_lease_and_raises(qapp, monkeypatch
     gate = OperationGate(EventBus())
     svc, _bg, _handles = _make_svc(gate=gate)
 
-    import zcu_tools.remote as remote
+    import zcu_tools.qick_remote as remote
 
     def fail(ip: str, port: int) -> None:
         raise ConnectionRefusedError("nope")
@@ -366,7 +366,7 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch):
     runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
     svc = SoCConnectionService(state, bus, gate, handles, runner)
 
-    import zcu_tools.remote as remote
+    import zcu_tools.qick_remote as remote
 
     def fail(ip: str, port: int) -> None:
         raise ConnectionRefusedError("nope")

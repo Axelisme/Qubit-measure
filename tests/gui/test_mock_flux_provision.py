@@ -358,7 +358,7 @@ def test_remote_connect_does_not_provision_fake_flux(fx, monkeypatch):
     fake_soc = MagicMock(name="remote_soc")
     fake_soccfg = MagicMock(name="remote_soccfg")
     monkeypatch.setattr(
-        "zcu_tools.remote.make_soc_proxy",
+        "zcu_tools.qick_remote.make_soc_proxy",
         lambda ip, port: (fake_soc, fake_soccfg),
         raising=False,
     )

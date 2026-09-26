@@ -141,7 +141,7 @@ class SoCConnectionService:
             return make_mock_soc(sim=sim)
         # remote
         try:
-            from zcu_tools.remote import make_soc_proxy
+            from zcu_tools.qick_remote import make_soc_proxy
         except ImportError as exc:
             raise SoCConnectionError(
                 f"Cannot import ZCU client libraries: {exc}. "

@@ -1,6 +1,6 @@
 # ZCU-Tools
 
-**Last updated:** 2026-09-27 — plotting package layout; scripts directory
+**Last updated:** 2026-09-27 — QICK board assets and remote package
 
 ZCU-Tools 是 ZCU216/QICK 平台上的量子量測工具集。工作站端負責 GUI、
 Notebook、MCP automation、資料分析與模擬；ZCU 板端只跑 Pyro server，讓工作站
@@ -36,7 +36,9 @@ uv run --directory <worktree> --no-sync -- python scripts/generate_fluxonium_sam
 ```
 
 板端使用獨立的 PYNQ Python 3.8 環境啟動 `scripts/start_server.py` 或
-`scripts/start_server.ipynb`，不使用工作站的環境。GUI、資料作業與模擬資料庫的
+`scripts/start_server.ipynb`，不使用工作站的環境。板端部署需包含 repo-root
+[`bitfiles/`](bitfiles/README.md) 與 `lib`；`zcu_tools.qick_remote` 提供 QICK Pyro
+連線。板端部署及資產版本相容性待核實，尚未在硬體上測試。GUI、資料作業與模擬資料庫的
 其餘入口、輸入輸出及副作用見 [scripts/README.md](scripts/README.md)；品質工具的
 執行方式見 [tools/README.md](tools/README.md)。
 
@@ -48,6 +50,7 @@ uv run --directory <worktree> --no-sync -- python scripts/generate_fluxonium_sam
 - `zcu_tools.experiment.v2_gui`：把 experiment 包成 measure-gui adapter。
 - `zcu_tools.gui`：Qt GUI framework、shared session core、shared remote transport。
 - `zcu_tools.mcp`：GUI-facing MCP bridge 與 agent-memory server。
+- `zcu_tools.qick_remote`：QICK／SoC Pyro client 與板端 server 支援；板端資產留在 repo-root `bitfiles/`。
 - `zcu_tools.resources`：`ContextManager`、`MetaDict`、`ModuleLibrary`、arbitrary
   waveform asset store。
 - `zcu_tools.device`：儀器 driver 與 `GlobalDeviceManager`。

@@ -56,7 +56,7 @@ ml, md = em.use_flux(label="051115_2.000mA", readonly=True)
 # Connect ZCU216
 
 ```python
-from zcu_tools.remote import make_soc_proxy
+from zcu_tools.qick_remote import make_soc_proxy
 
 soc, soccfg = make_soc_proxy("192.168.10.179", 8887)
 print(soccfg)
