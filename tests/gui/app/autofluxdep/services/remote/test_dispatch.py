@@ -33,7 +33,7 @@ from zcu_tools.gui.app.autofluxdep.state import ProjectInfo
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.session.services.startup import StartupProjectRequest
-from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.utils.datasaver import get_datafolder_path
 
 from ..._helpers import set_node_cfg_knobs

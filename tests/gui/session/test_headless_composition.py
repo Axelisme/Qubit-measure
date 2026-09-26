@@ -71,7 +71,7 @@ def _run_headless_smoke() -> None:
         StartupPrefs,
     )
     from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     owner_id = threading.get_ident()
     owner = ManualOwnerScheduler()

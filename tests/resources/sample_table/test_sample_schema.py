@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.sample_table import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
     FLUX_COLUMN,

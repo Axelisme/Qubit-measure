@@ -1,4 +1,4 @@
-"""IOManager tests (real ExperimentManager).
+"""IOManager tests (real ContextManager).
 
 GlobalDeviceManager registry CRUD coverage lives in
 ``services/test_device_manager.py`` alongside the rest of the device-registry
@@ -110,7 +110,7 @@ def test_iomanager_use_context_updates_md_ml(tmp_path):
     old_ml = base.ml
 
     result_ctx = io.use_context(label, base)
-    # md and ml should come from ExperimentManager, not the old mocks
+    # md and ml should come from ContextManager, not the old mocks
     assert result_ctx.md is not old_md
     assert result_ctx.ml is not old_ml
 

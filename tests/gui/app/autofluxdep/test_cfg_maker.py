@@ -27,7 +27,7 @@ from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder, RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
 from zcu_tools.gui.cfg import CenteredSweepValue, SweepValue
 from zcu_tools.gui.session.types import ExpContext
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 _READOUT = {
     "type": "readout/pulse",
@@ -517,7 +517,7 @@ def test_ro_optimize_make_cfg_lowers_context():
     )
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     ml = ModuleLibrary()
     ml.register_waveform(
@@ -782,7 +782,7 @@ def test_t1_make_cfg_lowers_context():
     from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder, T1CfgTemplate
     from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
     from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     env = RunEnv(
         flux=0.0,
@@ -852,7 +852,7 @@ def test_t1_make_init_result_uses_nonuniform_axis():
 
 def test_t1_make_cfg_can_fix_sweep_range_and_relax_delay():
     from zcu_tools.gui.app.autofluxdep.experiments.t1 import T1Builder
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
     env = RunEnv(
         flux=0.0,

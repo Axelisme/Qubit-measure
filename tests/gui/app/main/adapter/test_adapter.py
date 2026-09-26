@@ -37,7 +37,7 @@ from zcu_tools.gui.cfg import (
     SweepValue,
     make_default_value,
 )
-from zcu_tools.meta_tool import MetaDict
+from zcu_tools.resources.context import MetaDict
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -772,7 +772,7 @@ def _make_concrete_adapter() -> BaseAdapter:
 
 def _make_ctx(**kwargs):
     from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     defaults = dict(
         md=MetaDict(),

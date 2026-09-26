@@ -28,8 +28,8 @@ from zcu_tools.gui.session.value_lookup import (
     ValueKey,
     ValueRegistry,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import ModuleCfgFactory
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def _ctx(

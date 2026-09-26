@@ -37,7 +37,7 @@ RegistryFactory = Callable[
 def _make_empty_ctx() -> ExpContext:
     """Minimal startup context: real empty MetaDict/ModuleLibrary, no file sync."""
     from zcu_tools.gui.app.main.adapter import ExpContext
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     return ExpContext(
         md=MetaDict(),

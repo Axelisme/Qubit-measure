@@ -29,7 +29,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformError,
     FormulaRecipe,

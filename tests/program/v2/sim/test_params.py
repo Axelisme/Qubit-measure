@@ -22,9 +22,9 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.gui.session.types import ExpContext
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs, s21, value_to_flux
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 # ---------------------------------------------------------------------------
 # Minimal valid kwargs reused across tests

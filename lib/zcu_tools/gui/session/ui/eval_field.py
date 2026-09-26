@@ -27,7 +27,7 @@ from zcu_tools.gui.session.expression import (
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import MetaDict
+    from zcu_tools.resources.context import MetaDict
 
 
 class EvalNumericField(QWidget):

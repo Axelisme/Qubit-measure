@@ -45,7 +45,7 @@ from zcu_tools.gui.cfg import (
 from .lowering import schema_to_raw_dict
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 _TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})

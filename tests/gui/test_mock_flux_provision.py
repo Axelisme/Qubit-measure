@@ -34,7 +34,7 @@ from zcu_tools.gui.session.services.mock_flux import (
     FAKE_FLUX_DEVICE_NAME,
     FAKE_FLUX_INITIAL_VALUE,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 # ---------------------------------------------------------------------------
 # Fixture: a real Controller wired to a real bus, starting disconnected.

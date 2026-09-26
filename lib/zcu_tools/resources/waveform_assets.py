@@ -1,3 +1,5 @@
+"""Arbitrary waveform assets and formula rendering. See resources/README.md."""
+
 from __future__ import annotations
 
 import ast
@@ -939,3 +941,21 @@ def _validate_formula_ast(formula: str) -> None:
                     reason="formula_syntax_not_supported",
                     data={"node": "keyword"},
                 )
+
+
+__all__ = [
+    "ARB_WAVEFORM_RENDER_SAMPLES_PER_US",
+    "MAX_ARB_WAVEFORM_SAMPLES",
+    "ArbWaveformData",
+    "ArbWaveformDatabase",
+    "ArbWaveformError",
+    "ArbWaveformInfo",
+    "ArbWaveformListEntry",
+    "ArbWaveformPreview",
+    "FormulaRecipe",
+    "FormulaSegment",
+    "FormulaValidationResult",
+    "prepare_preview_series",
+    "render_formula_recipe",
+    "validate_payload",
+]

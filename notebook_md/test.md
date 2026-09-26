@@ -5,7 +5,7 @@ import os
 %autoreload 2
 from zcu_tools.notebook.utils import gc_collect
 import zcu_tools.experiment.v2 as ze
-from zcu_tools.meta_tool import ModuleLibrary, MetaDict, ExperimentManager
+from zcu_tools.resources.context import ModuleLibrary, MetaDict, ContextManager
 from zcu_tools.utils.datasaver import create_datafolder
 import zcu_tools.program.v2.base as zp2b
 from zcu_tools.debug import debug_scope
@@ -24,7 +24,7 @@ database_path = create_datafolder(
     name=os.path.join(chip_name, qub_name),
 )
 
-em = ExperimentManager(os.path.join(result_dir, "exps"))
+em = ContextManager(os.path.join(result_dir, "exps"))
 ml = ModuleLibrary()
 md = MetaDict()
 ```

@@ -35,7 +35,7 @@ import pandas as pd
 import zcu_tools.notebook.analysis.design as zd
 import zcu_tools.notebook.analysis.plot as zp
 import zcu_tools.simulate.equation as zeq
-from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.notebook.analysis.mist.branch import plot_chi_and_snr_over_photon
 ```
 

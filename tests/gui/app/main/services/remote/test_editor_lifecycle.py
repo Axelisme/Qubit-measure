@@ -22,8 +22,8 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
 from zcu_tools.program.v2 import WaveformCfgFactory
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 pytestmark = pytest.mark.requires_loopback
 

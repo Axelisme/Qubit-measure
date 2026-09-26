@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from zcu_tools.meta_tool.library import (
+from zcu_tools.resources.context.library import (
     ModuleCfgFactory,
     ModuleLibrary,
     WaveformCfgFactory,

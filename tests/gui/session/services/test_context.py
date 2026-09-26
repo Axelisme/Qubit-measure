@@ -14,7 +14,7 @@ from zcu_tools.gui.expected_error import (
 )
 from zcu_tools.gui.session.events import SessionEvent
 from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def test_context_service_has_project():

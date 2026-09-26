@@ -10,20 +10,20 @@ logger = logging.getLogger(__name__)
 from zcu_tools.gui.session.types import ExpContext
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ExperimentManager
+    from zcu_tools.resources.context import ContextManager
 
 
 class IOManager:
-    """Wraps ExperimentManager; returns new ExpContext objects to Controller."""
+    """Wraps ContextManager; returns new ExpContext objects to Controller."""
 
     def __init__(self) -> None:
-        self._em: ExperimentManager | None = None
+        self._em: ContextManager | None = None
 
     def setup(self, result_dir: str) -> None:
-        from zcu_tools.meta_tool import ExperimentManager
+        from zcu_tools.resources.context import ContextManager
 
         logger.info("setup: result_dir=%r", result_dir)
-        self._em = ExperimentManager(Path(result_dir) / "exps")
+        self._em = ContextManager(Path(result_dir) / "exps")
 
     def list_contexts(self) -> list[str]:
         if self._em is None:

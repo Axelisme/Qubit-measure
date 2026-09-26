@@ -1374,7 +1374,7 @@ def test_ml_change_refreshes_attached_draft_and_run_gate_without_main_loop(qapp)
     )
     from zcu_tools.gui.session.events import MlChangedPayload
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-    from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     ctrl = _editor_wiring_ctrl()
     bus = EventBus()

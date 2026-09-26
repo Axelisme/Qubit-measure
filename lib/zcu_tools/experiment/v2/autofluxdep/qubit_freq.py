@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
-from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
@@ -29,6 +28,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
+from zcu_tools.resources.context import ModuleLibrary
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_labber_data, save_labber_data
 from zcu_tools.utils.fitting import fit_qubit_freq

@@ -18,7 +18,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils import format_obj
 
-from .syncfile import SyncFile, auto_sync
+from ..syncfile import SyncFile, auto_sync
 
 
 class ModuleDumper(yaml.SafeDumper):

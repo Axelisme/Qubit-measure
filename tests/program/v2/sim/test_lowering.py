@@ -242,11 +242,11 @@ class TestShapedPulseSegments:
             return idata, None, time
 
         monkeypatch.setattr(
-            "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.inspect",
+            "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.inspect",
             lambda name: Info(),
         )
         monkeypatch.setattr(
-            "zcu_tools.meta_tool.arb_waveform.ArbWaveformDatabase.get", fake_get
+            "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get", fake_get
         )
 
         cfg = PulseCfg(

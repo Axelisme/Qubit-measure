@@ -21,7 +21,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueTypeError,
     name_from_type,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 

@@ -82,7 +82,7 @@ Fast Fail。reference catalog以shape label與optional materialized value精確�
 unsupported與corrupt。widget只attach draft並render `draft.root`，detach不會close
 service-owned draft。
 
-此package不import `gui.app.*`、`experiment.*`、Qt、`meta_tool`、`notebook`或`device`，
+此package不import `gui.app.*`、`experiment.*`、Qt、`resources`、`notebook`或`device`，
 也沒有broad environment object或global resolver registry。scalar option source與reference
 kind都是shared只轉送的opaque string；measure與autofluxdep各自提供
 app-local ports與module shape policy；autofluxdep不經measure lowering/conversion。

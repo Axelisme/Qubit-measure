@@ -87,7 +87,7 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
 `tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/adapters/`
 擁有 adapter 對設定與寫回的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
-接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/meta_tool/`、`tests/analysis/`、
+接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/utils/` 分別擁有其路徑對應模組的測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
 與同名的其他 registry 測試無關。需要定位檔案時以目前目錄及程式 owner 為準。

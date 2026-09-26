@@ -26,7 +26,7 @@ from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_plugin import (
 )
 from zcu_tools.gui.app.main.adapter import AnalyzeRequest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class _DeferredEnv:

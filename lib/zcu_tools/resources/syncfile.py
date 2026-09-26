@@ -100,3 +100,6 @@ class SyncFile(ABC):
                 self.load()
         elif not self._readonly:
             self.dump()
+
+
+__all__ = []

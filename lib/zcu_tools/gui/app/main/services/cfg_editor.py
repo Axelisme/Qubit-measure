@@ -81,7 +81,7 @@ from .ports import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
 logger = logging.getLogger(__name__)
 

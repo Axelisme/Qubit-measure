@@ -10,7 +10,7 @@ from typing import Any, Self
 
 from zcu_tools.utils import format_obj
 
-from .syncfile import SyncFile, auto_sync
+from ..syncfile import SyncFile, auto_sync
 
 _COMPLEX_TAG = "__complex__"
 _STRING_TAG = "__metadict_string__"

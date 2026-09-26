@@ -48,7 +48,7 @@ Notebook 仍可直接呼叫 `zcu_tools.experiment.v2` 與 `zcu_tools.notebook` h
 - `zcu_tools.experiment.v2_gui`：把 experiment 包成 measure-gui adapter。
 - `zcu_tools.gui`：Qt GUI framework、shared session core、shared remote transport。
 - `zcu_tools.mcp`：GUI-facing MCP bridge 與 agent-memory server。
-- `zcu_tools.meta_tool`：`ExperimentManager`、`MetaDict`、`ModuleLibrary`、arbitrary
+- `zcu_tools.resources`：`ContextManager`、`MetaDict`、`ModuleLibrary`、arbitrary
   waveform asset store。
 - `zcu_tools.device`：儀器 driver 與 `GlobalDeviceManager`。
 - `zcu_tools.analysis` / `zcu_tools.notebook.analysis`：GUI-neutral analysis kernel
@@ -62,7 +62,7 @@ Notebook 仍可直接呼叫 `zcu_tools.experiment.v2` 與 `zcu_tools.notebook` h
 - `result/<chip>/<qub>/params.json` 是 project scope 的身分與 handoff 檔。
 - `result/<chip>/<qub>/...` 放分析輸出、圖片、GUI state 與 context-local metadata。
 - `Database/<chip>/<qub>/...` 放 canonical experiment data file。
-- `ModuleLibrary` 與 `MetaDict` 由 `ExperimentManager` 管理；GUI 和 Notebook 共用同一個
+- `ModuleLibrary` 與 `MetaDict` 由 `ContextManager` 管理；GUI 和 Notebook 共用同一個
   project/context 概念。
 
 一般 experiment 與 measure GUI 只載入 canonical HDF5；帶明確 marker 的 autofluxdep

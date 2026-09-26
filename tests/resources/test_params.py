@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 import pytest
-from zcu_tools.meta_tool import (
+from zcu_tools.resources.qubit_params import (
     DispersiveFit,
     FluxDepFit,
     ParamsProject,

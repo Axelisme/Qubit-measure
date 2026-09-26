@@ -10,11 +10,11 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton
 from zcu_tools.gui.app.main.adapter import (
-    WritebackItem,
     AdapterCapabilities,
     AnalysisMode,
     MetaDictWriteback,
     ModuleWriteback,
+    WritebackItem,
 )
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
 from zcu_tools.gui.app.main.state import TabInteractionState
@@ -30,7 +30,7 @@ from zcu_tools.gui.cfg import (
     ReferenceSpec,
     ScalarSpec,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def make_ctrl():
@@ -162,9 +162,11 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget):
     tab.attach(snap, MagicMock())
     # Sole tree — no structure selector, always tree
     import zcu_tools.gui.widgets.cfg as cfg_pkg
+
     assert not hasattr(cfg_pkg, "form_structure")
     try:
         from zcu_tools.gui.widgets.cfg import CfgFormWidget
+
         CfgFormWidget(structure=object())  # type: ignore[call-arg]
         assert False
     except TypeError:
@@ -189,7 +191,7 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget):
     ctrl2 = MagicMock()
     ctrl2.get_bus.return_value = EventBus()
     ctrl2.get_current_md.return_value = __import__(
-        "zcu_tools.meta_tool", fromlist=["MetaDict"]
+        "zcu_tools.resources.context", fromlist=["MetaDict"]
     ).MetaDict()
     ctrl2.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
     w = CfgFormWidget(text_input_enhancer=None)
@@ -252,10 +254,13 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(qapp, exp_tab_wi
     tab._analyze_section._toggle()
     assert tab._analyze_section.is_collapsed() == initially
     # A4 corrected: Analyze appears immediately after params and before Writeback preview, not fixed bar
-    assert not hasattr(tab, "_analysis_action_bar"), "fixed action bar should be removed for A4"
+    assert not hasattr(tab, "_analysis_action_bar"), (
+        "fixed action bar should be removed for A4"
+    )
     # Verify Analyze is inside the scroll area between params and writeback
     # Find scroll area inside analysis panel
     from qtpy.QtWidgets import QScrollArea
+
     scroll = tab._analysis_panel.findChild(QScrollArea)
     assert scroll is not None
     inner = scroll.widget()
@@ -266,6 +271,7 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(qapp, exp_tab_wi
     # Find indices via widget positions
     # The analyze_btn should be descendant of inner, not of a fixed bar
     assert tab.analyze_btn.parent() is not None
+
     # Check that analyze_btn is inside inner (ancestor is inner or its child container)
     def is_descendant(widget, ancestor):
         cur = widget
@@ -274,8 +280,11 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(qapp, exp_tab_wi
                 return True
             cur = cur.parent()
         return False
+
     assert is_descendant(tab.analyze_btn, inner), "Analyze should be inside scroll area"
-    assert not is_descendant(tab.analyze_btn, tab._analysis_panel) or is_descendant(tab.analyze_btn, inner)
+    assert not is_descendant(tab.analyze_btn, tab._analysis_panel) or is_descendant(
+        tab.analyze_btn, inner
+    )
     # Ensure writeback_section is below analyze_btn in layout order
     # We can check that writeback_section is after analyze_btn by checking y positions after layout
     # Simpler: check that analyze_btn's parent widget is placed between sections in the layout sequence
@@ -299,7 +308,9 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(qapp, exp_tab_wi
                 idx_analyze = idx
                 break
         idx_writeback = widgets.index(tab.writeback_section)
-        assert idx_params < idx_analyze < idx_writeback, f"order params {idx_params} analyze {idx_analyze} writeback {idx_writeback}"
+        assert idx_params < idx_analyze < idx_writeback, (
+            f"order params {idx_params} analyze {idx_analyze} writeback {idx_writeback}"
+        )
     except ValueError as e:
         # Fallback: at least check that analyze_btn is between sections via geometry
         assert is_descendant(tab.analyze_btn, inner)

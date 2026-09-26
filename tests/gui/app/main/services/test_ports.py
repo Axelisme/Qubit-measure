@@ -1,6 +1,6 @@
 """Verify application services depend on ports (interfaces), not concrete infra
 (docs/adr/0008 §Driven Adapter): a service runs against an in-memory fake
-implementing the port, with no ExperimentManager / files involved.
+implementing the port, with no ContextManager / files involved.
 
 (Persistence is no longer a store-port: the PersistenceCaretaker is a Driven
 Adapter owning disk I/O directly, and StartupService is stateless against State.
@@ -13,11 +13,11 @@ from __future__ import annotations
 from zcu_tools.gui.app.main.adapter import ExpContext
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.ports import ProjectIOPort
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class _FakeProjectIO:
-    """In-memory ProjectIOPort — no ExperimentManager / files."""
+    """In-memory ProjectIOPort — no ContextManager / files."""
 
     def __init__(self) -> None:
         self._project = False

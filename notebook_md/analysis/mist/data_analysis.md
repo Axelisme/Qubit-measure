@@ -35,7 +35,7 @@ import plotly.graph_objects as go
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
-from zcu_tools.meta_tool import QubitParams
+from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.simulate import mA2flx, flx2mA
 ```
 

@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict
 from zcu_tools.gui.result_scope import ProjectPaths, ResultScope, ResultScopeManager
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, StartupPrefs
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import RememberedDevicePort, StartupContextPort

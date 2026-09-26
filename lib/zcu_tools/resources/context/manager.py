@@ -32,7 +32,7 @@ _UNIT_RANGES: dict[str, tuple[tuple[str, float, float], ...]] = {
 }
 
 
-class ExperimentManager:
+class ContextManager:
     def __init__(self, exp_dir: str | Path) -> None:
         self.exp_dir = Path(exp_dir).resolve()
         self._label: str | None = None

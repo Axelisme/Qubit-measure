@@ -30,7 +30,7 @@ from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._progress_fakes import DirectProgressTransport
 

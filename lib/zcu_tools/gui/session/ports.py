@@ -30,8 +30,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceProtocol
     from zcu_tools.gui.session.types import ExpContext
-    from zcu_tools.meta_tool import ModuleLibrary
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
+    from zcu_tools.resources.context import ModuleLibrary
 
 
 _T = TypeVar("_T")
@@ -240,9 +240,9 @@ class RememberedDevicePort(Protocol):
 class ProjectIOPort(Protocol):
     """Experiment-project file I/O as used by ``ContextService``.
 
-    Implemented by ``IOManager`` (which wraps ``ExperimentManager``). This is the
+    Implemented by ``IOManager`` (which wraps ``ContextManager``). This is the
     file-backed project / flux-context store; the service never touches
-    ``ExperimentManager`` directly.
+    ``ContextManager`` directly.
     """
 
     @property

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from zcu_tools.meta_tool import SampleTable
+from zcu_tools.resources.sample_table import SampleTable
 
 
 def test_sample_table_accepts_path(tmp_path) -> None:

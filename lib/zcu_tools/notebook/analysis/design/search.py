@@ -14,8 +14,8 @@ from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
-from zcu_tools.meta_tool import QubitParams
-from zcu_tools.meta_tool.sample_schema import (
+from zcu_tools.resources.qubit_params import QubitParams
+from zcu_tools.resources.sample_table.schema import (
     SampleFluxFrame,
     resolve_sample_flux,
     validate_sample_table_v2,

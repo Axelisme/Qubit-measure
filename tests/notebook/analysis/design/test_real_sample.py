@@ -13,15 +13,17 @@ import numpy as np
 import pandas as pd
 import pytest
 from plotly.graph_objects import Scatter
-from zcu_tools.meta_tool import (
+from zcu_tools.notebook.analysis.design import search as S
+from zcu_tools.resources.qubit_params import (
     DispersiveFit,
     FluxDepFit,
     ParamsProject,
     QubitParams,
+)
+from zcu_tools.resources.sample_table import (
     SampleFluxFrame,
     SampleTableV2Error,
 )
-from zcu_tools.notebook.analysis.design import search as S
 
 _NOISE_CHANNELS: list[tuple[str, dict[str, object]]] = []
 

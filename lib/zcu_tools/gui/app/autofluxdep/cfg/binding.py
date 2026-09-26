@@ -11,7 +11,7 @@ from zcu_tools.gui.measure_cfg import (
     program_shape_for_input,
 )
 from zcu_tools.gui.session.expression import evaluate_numeric_expr
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from .module_adapter import (
     AUTOFLUX_PROGRAM_MATERIALIZATION_POLICY,

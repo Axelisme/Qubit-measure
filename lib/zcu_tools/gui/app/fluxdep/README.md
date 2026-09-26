@@ -222,7 +222,7 @@ search（`search_in_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 �
   Figure（background heatmap gray_r + simulation lines + 選中點 + r_f/sample_f const-freq 線 +
   dev_value secondary axis）。診斷圖直接用 `search_in_database(plot=True)` 的後端原生 Figure，不重畫。
 - params.json 的 flux_half/int/period 取**第一張已對齊譜**（notebook 單譜語意；多譜同對齊到同 flux 座標）。
-- params.json export 透過 `meta_tool.QubitParams` 寫 `project` 與 `fluxdep_fit`；重寫 fluxdep fit 會更新 `fluxdep_fit.timestamp`，但不刪除獨立的 `dispersive` section。
+- params.json export 透過 `resources.QubitParams` 寫 `project` 與 `fluxdep_fit`；重寫 fluxdep fit 會更新 `fluxdep_fit.timestamp`，但不刪除獨立的 `dispersive` section。
 
 ## Known Limitations
 

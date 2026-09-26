@@ -29,7 +29,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueInfo,
     ValueTypeError,
 )
-from zcu_tools.meta_tool import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 @pytest.fixture()

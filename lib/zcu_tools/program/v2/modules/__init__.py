@@ -6,7 +6,7 @@ import qick.asm_v2 as qick_asm_v2
 from pydantic import BeforeValidator, Field, TypeAdapter
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.resources.context import ModuleLibrary
 
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
