@@ -18,6 +18,7 @@ import os
 
 import numpy as np
 
+from zcu_tools.datafile import load_labber_data
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     SpectrumEntry,
@@ -30,7 +31,6 @@ from zcu_tools.notebook.persistance import (
     load_spectrums,
 )
 from zcu_tools.simulate import value2flux
-from zcu_tools.utils.datasaver import load_labber_data
 
 logger = logging.getLogger(__name__)
 

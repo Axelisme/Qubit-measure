@@ -215,11 +215,11 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
         server_ip: str | None = None,
         port: int = 4999,
     ) -> None:
-        from zcu_tools.experiment.utils import make_comment
-        from zcu_tools.utils.datasaver import (
+        from zcu_tools.datafile import (
             save_labber_data,
             upload_to_server,
         )
+        from zcu_tools.experiment.utils import make_comment
 
         assert result is not None, "no result found"
         spec = self._spec()
@@ -250,8 +250,8 @@ class PersistableExperiment(AbsExperiment[T_Result, T_Config]):
         server_ip: str | None = None,
         port: int = 4999,
     ) -> T_Result:
+        from zcu_tools.datafile import download_from_server, load_labber_data
         from zcu_tools.experiment.utils import parse_comment
-        from zcu_tools.utils.datasaver import download_from_server, load_labber_data
 
         spec = self._spec()
 

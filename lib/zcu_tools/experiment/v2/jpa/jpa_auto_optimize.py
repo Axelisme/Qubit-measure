@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 from pydantic import Field
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.datafile import LabberPayload
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
@@ -48,7 +49,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import LabberPayload
 
 from .jpa_optimizer import JPAOptimizer
 

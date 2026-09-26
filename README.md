@@ -55,7 +55,7 @@ Notebook 仍可直接呼叫 `zcu_tools.experiment.v2` 與 `zcu_tools.notebook` h
   與 notebook-facing workflow。
 - `zcu_tools.simulate.fluxonium`：Fluxonium prediction engine。
 - `zcu_tools.liveplot`：Notebook / experiment runtime live plotting。
-- `zcu_tools.utils.datasaver`：Labber-style HDF5 persistence facade。
+- `zcu_tools.datafile`：Labber-style HDF5 persistence facade。
 
 ## Data Layout
 

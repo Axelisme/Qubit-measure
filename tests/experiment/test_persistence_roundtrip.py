@@ -25,6 +25,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import LabberData, save_labber_data
 from zcu_tools.experiment.axes_spec import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -34,7 +35,6 @@ from zcu_tools.experiment.axes_spec import (
 )
 from zcu_tools.experiment.base import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.utils.datasaver import LabberData, save_labber_data
 
 # --------------------------------------------------------------------------- #
 # Minimal cfg / Result / experiment fixtures matching the AxesSpec contract.
@@ -163,7 +163,7 @@ def test_roundtrip_2d_inner_first(tmp_path: Any) -> None:
 
 def test_save_applies_scale_on_disk(tmp_path: Any) -> None:
     """Disk values carry the SI scale (Hz / s), proving load divides it back."""
-    from zcu_tools.utils.datasaver import load_labber_data
+    from zcu_tools.datafile import load_labber_data
 
     freqs = np.array([4000.0, 4500.0, 5000.0])  # MHz
     lengths = np.array([1.0, 2.0])  # us
@@ -361,7 +361,7 @@ def test_load_rejects_wrong_z_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     monkeypatch.setattr(
-        "zcu_tools.utils.datasaver.load_labber_data",
+        "zcu_tools.datafile.load_labber_data",
         lambda _path: payload,
     )
 

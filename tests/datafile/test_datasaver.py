@@ -1,4 +1,4 @@
-"""Regression tests for datasaver path helpers.
+"""Regression tests for datafile path helpers.
 
 The dict save/load layer (save_data / load_data / save_local_data /
 load_local_data) is gone (ADR-0027); persistence is native labber_io. These
@@ -8,8 +8,8 @@ remove_ext.
 
 from __future__ import annotations
 
-import zcu_tools.utils.datasaver as datasaver
-from zcu_tools.utils.datasaver import (
+import zcu_tools.datafile as datafile
+from zcu_tools.datafile import (
     format_ext,
     remove_ext,
     reserve_labber_filepath,
@@ -76,4 +76,4 @@ def test_reserve_labber_filepath_does_not_increment_year_suffix(tmp_path):
 
 def test_legacy_reservation_alias_is_not_exported():
     legacy_name = "safe" + "_labber_filepath"
-    assert not hasattr(datasaver, legacy_name)
+    assert not hasattr(datafile, legacy_name)

@@ -71,7 +71,7 @@ blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
 
 ## 持久化：PersistableExperiment + AxesSpec（ADR-0027）
 
-實驗量測資料的存取走 **labber_io 原生 axes-list**，而非 datasaver 的 dict 殼。
+實驗量測資料的存取走 **labber_io 原生 axes-list**，而非舊版的 dict 殼。
 
 - **opt-in 基底**：要有持久化的實驗繼承 `PersistableExperiment[T_Result, T_Config]`（而非 `AbsExperiment`），並在類別層宣告 `AXES_SPEC`，即繼承共用的 `save()` / `load()`。未遷移的實驗留在最小的 `AbsExperiment` 上、各自保留不相容的 save/load 簽名。
 - **宣告式 spec**（`experiment/axes_spec.py`）：
@@ -80,7 +80,7 @@ blocks。Backend minimum或covariance無效時fast-fail，public result仍維持
   - `ZSpec(field_name, label, unit, dtype=np.complex128)` — log（z）channel。
 - **inner-first 軸序慣例**：`axes` 以 inner-first 排列，`z.shape == tuple(len(ax) for ax in reversed(axes))`（inner 軸恆為 z 的最後一維）。**`load` 是 `save` 的恒等逆，兩邊都不做 caller-side transpose**。`load()` 只接受 canonical 檔案：axis count/name/unit、z channel name/unit 與 z shape 都必須符合 `AXES_SPEC`。legacy 單檔案的 label/unit 差異不放寬 runtime loader；GUI adapter 也只接受 canonical result，不提供 converter fallback。
 - **單位反轉與 cfg**：`save()` 對每個 axis 乘 `scale` 後寫盤；`load()` 除回 `scale` 並 cast 回 `dtype`，是 `save()` 的逐欄逆運算。cfg snapshot 透過 comment channel 走 `make_comment` / `parse_comment`（`load()` 以 `cfg_type.validate_or_warn` 還原），不佔 axes / z。`save()` 在 `cfg_snapshot` 為 `None` 時拋 `ValueError`。
-- **save path ownership**：`PersistableExperiment.save()` 寫入 caller 傳入的 final path；既有 path 由 datasaver writer fast-fail，不自動 suffix、不提供 overwrite 參數。GUI / runner / notebook 若需要 unique filename，必須在呼叫 `save()` 前用 `reserve_labber_filepath` 或自己的 orchestration policy 決定 final path。
+- **save path ownership**：`PersistableExperiment.save()` 寫入 caller 傳入的 final path；既有 path 由 datafile writer fast-fail，不自動 suffix、不提供 overwrite 參數。GUI / runner / notebook 若需要 unique filename，必須在呼叫 `save()` 前用 `reserve_labber_filepath` 或自己的 orchestration policy 決定 final path。
 - **grouped experiment dataset**：單一 Experiment Result 若含多個 peer Dataset Role，仍只產生一個 grouped `.hdf5` Experiment Data File。canonical one-shot grouped v2 要求所有 roles 共享完全相同的 inner-first axes、shape 與 timestamps，並在 root Labber log 內以平行 scalar channels 表達。`GroupedAxesSpec` / `RoleSpec` 是 experiment 層的 semantic schema：每個 role 宣告 role name、inner-first axes、z/data field mapping、dtype、unit 與 scale；common helper 依 spec 組 `GroupedLabberData` payload、驗證 required roles / axis metadata / z shape、重建 comment/cfg snapshot，再交 typed builder 還原 Result。`RoleSpec` 只描述 mechanical mapping，不攜帶 arbitrary transform callback；需要把多個 role array 合成既有 Result 欄位（例如 auto-optimize 的 `params`）時，在 `GroupedAxesSpec` 的 typed builder 邊界完成。異質 autofluxdep workflow 使用 marker-qualified streaming grouped v1，不進 one-shot v2 saver。
 - **grouped experiment roles**：`CPMG_Exp` 使用 roles `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 roles `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 roles `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` role unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 都只接受 complete grouped HDF5；legacy `.npz` 或 sidecar 不是 runtime 可載入格式；repo 不再提供轉換腳本。
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。

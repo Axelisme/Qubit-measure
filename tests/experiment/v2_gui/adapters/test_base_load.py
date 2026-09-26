@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import save_labber_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2_gui.adapters._support import (
     MeasureCfgBuilder,
@@ -22,7 +23,6 @@ from zcu_tools.gui.app.main.adapter import (
     NoAnalysisResult,
     NoAnalyzeParams,
 )
-from zcu_tools.utils.datasaver import save_labber_data
 
 
 class _Cfg(ExpCfgModel):

@@ -11,6 +11,7 @@ from skopt import Optimizer
 from skopt.space import Real
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -39,7 +40,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
-from zcu_tools.utils.datasaver import LabberPayload
 
 
 @dataclass(frozen=True)
