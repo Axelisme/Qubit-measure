@@ -29,17 +29,13 @@ from zcu_tools.gui.app.main.adapter import (
     ExpContext,
     MetaDictWriteback,
     ParamMeta,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
-    require_soc_handles,
 )
-from zcu_tools.gui.app.main.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
-    CfgSchema,
+    EvalValue,
+    ScalarSpec,
 )
-
-from ._shared import read_ge_centers
 
 # ``LenRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *length* and
 # preserves every raw IQ shot. Analysis derives populations from that canonical
@@ -130,18 +126,25 @@ class SsLenRabiAdapter(
                 ),
             )
             .int("shots", label="Shots", default=1000)
+            .field(
+                "g_center",
+                spec=ScalarSpec("Ground center", complex),
+                default=EvalValue("g_center"),
+            )
+            .field(
+                "e_center",
+                spec=ScalarSpec("Excited center", complex),
+                default=EvalValue("e_center"),
+            )
+            .field(
+                "radius",
+                spec=ScalarSpec("Classification radius", float),
+                default=EvalValue("ge_radius"),
+            )
             .reps(1, locked=True)
             .rounds(1, locked=True)
             .build()
         )
-
-    def run(self, req: RunRequest, schema: CfgSchema) -> SsLenRabiRunResult:
-        # Override standard run: domain run needs the GE classification trio.
-        soc, soccfg = require_soc_handles(req)
-        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
-        cfg = self.build_exp_cfg(raw_cfg, req)
-        g_center, e_center, radius = read_ge_centers(req.md)
-        return LenRabiExp().run(soc, soccfg, cfg, g_center, e_center, radius)
 
     def analyze(
         self, req: AnalyzeRequest[SsLenRabiRunResult, SsLenRabiAnalyzeParams]

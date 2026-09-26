@@ -3103,10 +3103,18 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.03, 0.2, 51),
 }
-cfg = ml.make_cfg(exp_cfg, ze.singleshot.LenRabiCfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(
+    exp_cfg,
+    ze.singleshot.LenRabiCfg,
+    reps=1000,
+    rounds=100,
+    g_center=md.g_center,
+    e_center=md.e_center,
+    radius=md.ge_radius,
+)
 
 sh_lenrabi_exp = ze.singleshot.LenRabiExp()
-_ = sh_lenrabi_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius)
+_ = sh_lenrabi_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
