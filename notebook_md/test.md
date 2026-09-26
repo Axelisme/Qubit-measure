@@ -8,7 +8,7 @@ import zcu_tools.experiment.v2 as ze
 from zcu_tools.meta_tool import ModuleLibrary, MetaDict, ExperimentManager
 from zcu_tools.datafile import create_datafolder
 import zcu_tools.program.v2.base as zp2b
-from zcu_tools.debug import debug_scope
+from zcu_tools.utils.debug import debug_scope
 from zcu_tools.notebook.utils import make_sweep
 ```
 
