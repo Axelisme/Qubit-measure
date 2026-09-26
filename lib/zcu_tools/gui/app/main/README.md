@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-26 — flux picker click-to-place
+**Last updated:** 2026-09-27 — interactive plugin owner
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -576,8 +576,19 @@ typed action. The View supplies an optional live PNG and `preview_active` as
 presentation metadata. `done` discards local preview and finishes the existing
 analysis operation. Flux Auto Align uses one plugin-owned single-flight worker
 policy for GUI and remote; terminal callbacks do not recommit. The wire method
-is internal to the GUI process, with no MCP tool in this change. See ADR-0061;
-notebook line pickers keep their existing interaction model.
+is internal to the GUI process, with no MCP tool in this change. Notebook line pickers keep their existing interaction model. A failed Action does not
+publish partial state; subscriber errors do not undo a committed change. `done`
+is reserved for terminal delivery. A local preview is not committed state, and
+Esc, focus loss, hide, invalid placement or an external commit drop it.
+
+### Arbitrary waveform remote contract
+
+`arb_waveform.set` 成功才回傳 `success=true`、`status` 與 preview figure。
+Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩定 `reason` 的
+`RemoteError`，走失敗的 RPC/tool call，不將 `success=false` 當一般 payload。
+寫入受 `arb_waveforms` resource version 的 expected-version guard 約束；GUI 和 agent
+共用同一資產 owner，遠端只作錯誤和 payload 投影。共同錯誤類別見
+[Remote expected-error ADR](../../../../../docs/adr/0047-typed-expected-error-taxonomy.md)。
 
 ## Adapter-Facing Rules
 

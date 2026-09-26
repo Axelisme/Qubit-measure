@@ -1,8 +1,8 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-09-26 — flux-pick state and shared picker rendering
+**Last updated:** 2026-09-27 — kernel 與 frontend 邊界
 
-本模塊是 Flux-Dependence Analysis 的 notebook-neutral kernel，對應 ADR-0028。它承接 notebook
+本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
 只負責轉譯 UI 事件與渲染容器。
 
@@ -18,5 +18,5 @@
 
 本 kernel 不包含 database search、search 診斷圖、plotly/matplotlib export 圖、params.json export，
 也不負責 GUI/ipywidgets lifecycle。Notebook module 與 Qt interactive widget 透過 re-export 或
-thin adapter 使用本 kernel。measure frontend 以同一份純計算驗證 preview 與 release，
+thin adapter 使用本 kernel。measure frontend 使用相同數值規則驗證本地 preview 與第二次點擊的提交；按鈕 release 不提交。
 committed state 與 operation 的權威由 measure app service 管理，不在本 kernel。

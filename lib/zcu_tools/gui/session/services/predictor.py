@@ -340,7 +340,7 @@ class PredictorService:
 
         Uses FluxoniumPrediction so all transitions share a single diagonalisation
         sweep — O(n_values) eigensolves rather than O(n_transitions * n_values).
-        The value→flux affine is owned by the simulate-layer engine (ADR-0029).
+        The value→flux affine is owned by simulate.fluxonium.prediction.
         """
         predictor = self._state.exp_context.predictor
         if predictor is None:

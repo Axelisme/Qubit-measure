@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。現行局部契約見 [`simulate/fluxonium/README.md`](../../../lib/zcu_tools/simulate/fluxonium/README.md)；以下保留歷史正文。
+
 ---
 status: accepted
 ---

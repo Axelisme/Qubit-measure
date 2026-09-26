@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-09-27 — fitting relocation
+**Last updated:** 2026-09-27 — resonance fitting 契約
 
 ## fitting helpers
 
@@ -44,7 +44,8 @@ Resonance circle fitting 將 electrical-delay 估計拆成兩層。`get_rough_ed
 `find_edelay_branch` 最大化相鄰 unit-phasor coherence，在有限範圍內找 global
 branch，再由 circle loss 做 bounded local refinement。預設搜尋兩個等效平均取樣
 alias periods，caller 可用同 frequency 反單位的 radius 覆寫；另提供 opt-in maximum
-radius，讓 boundary-limited search 以 bounded geometric expansion 恢復；related traces
+radius。搜尋碰到邊界時以二倍半徑擴張，直到找到內部 optimum、達到 cap 或碰到
+candidate resource guard；cap 不縮小初始 radius。Related traces
 可共用一個 branch seed。等距 grid 無法辨識相差 `1/Δf` 的 delay，因此保留 local
 canonical alias；多 trace 的 local aliases 以該週期作 circular aggregation，避免
 在 `±1/(2Δf)` branch cut 做錯誤線性平均；各 trace 局部精修後也會對齊到共用
@@ -64,13 +65,21 @@ slope `exp(g * (f - f_r))` 與 resonance-centered quadratic phase
 term 固定為零且不進 joint-refinement 參數。兩個 option 都停用時保留 sequential
 circle/phase path；任一 option 啟用時以 sequential / rational initializer 進 raw
 complex I/Q joint refinement，plot 的 IQ/circle/phase 使用移除 delay 與已啟用
-background 後的 corrected domain。Magnitude plot 只有在本次啟用 amplitude
-background fitting 時才顯示 background envelope 與 `g`；phase curvature 只在啟用時
-顯示 `c`。
+background 後的 corrected domain。`a0` 是 fitted `f_r` 處的 complex scale；
+`g` 不改變 phase，`c` 在 `f_r` 的 phase 與一階 slope 均為零。
+Optimizer 的 non-finite、active-bound 或失敗結果會 warning 並回退 sequential result。
+Magnitude plot 只在本次啟用 amplitude background fitting 時顯示 envelope 與 `g`。
+Phase curvature 也只在啟用時顯示 `c`；停用時不把固定零值當成擬合結果。
 
 Resonance rational initializer 是 internal helper，不是 public fitting facade，也不估
 absolute electrical-delay branch。Caller 先用 route-scoped delay contract 移除 delay；
 initializer 只在 corrected trace 上提供 degree-1 single-pole 初值，病態或不可信結果會
-warning 並回退 sequential initializer。
+warning 並回退 sequential initializer。它不引入外部 `abcd_rf_fit` delay estimator。
+背景只處理平滑的乘法 amplitude 與以 resonance 為中心的 phase curvature，不把 additive
+leakage、Fano path 或第二個 linear phase 併入 `bg_amp_slope`。後者與 `edelay` 無法獨立辨識。
+
+Hanger complex fit 的 acceptance 與 derived internal quality factor 分開：若 derived inverse loss
+不為正，fit 仍可保留，但 `Qi=None`、`qi_status="model_incompatible"`；physical
+結果回傳 finite `Qi` 和 `qi_status="physical"`。Caller 不把 `None` 格式化為數字。
 
 GE histogram fitting 使用 `p_avg ∈ [0, 1]` 允許兩種 readout-transition 方向，以固定數值方向與多組初值維持 g/e label symmetry。Population 以 total occupancy / conditional fraction 參數化，保證非負且總和不超過一；fixed population 與 covariance 皆轉回公開物理座標。GE 使用 strict optimizer，不沿用通用 fit_func 的初值 fallback；`Align T1` 真正固定 shared length ratio，零 ratio 也是可用的固定模型。

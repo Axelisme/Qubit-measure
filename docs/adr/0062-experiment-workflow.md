@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-關聯 [[0026]]（operation 與取消）、[[0027]]（單一實驗資料）、[[0029]]（物理 prediction 能力）、[[0040]]（autofluxdep artifact）、[[0045]]／[[0046]]（通用 cfg 模型與 lowering）。兩套 workflow 的具體節點介面不同，不因共用本篇而相互轉換。
+關聯 [[0026]]（operation 與取消）、[[0027]]（單一實驗資料）、[prediction owner](../../lib/zcu_tools/simulate/fluxonium/README.md)（物理 prediction 能力）、[[0040]]（autofluxdep artifact）、[[0045]]／[[0046]]（通用 cfg 模型與 lowering）。兩套 workflow 的具體節點介面不同，不因共用本篇而相互轉換。
 
 ## 問題與決策
 
@@ -28,7 +28,7 @@ App 的 workflow editable cfg、run-start base／plan 與實際 point cfg 是不
 
 Feedback 是 run-lived 且 placement-scoped 的 capability，不讓同一 Builder 的多個 placement 共用可變 state。其 estimator／controller state 不作為 `Patch` dependency；提供下游消費的實驗結果仍經正式 `provides`／`Patch`。Generic feedback 返回 sample、query age 與 freshness；disabled 或沒有 observation 返回 `None`，未宣告 slot 則失敗。它不決定 fit gate、clamp、fallback target 或 stop。Node 決定如何將 sample 與 domain prior 組合。
 
-`qubit_freq` 在 run 中保留 raw/base predictor 不變；可信的 physical recovery 如有啟用，只安裝 run／placement-local overlay。Residual correction 由 feedback slot 保存，不修改共用 predictor。這取代了舊篇讓 Node 直接校準 raw predictor 的 hard-bias 描述；物理模型的通用能力仍歸 [[0029]]。Estimator decay 與 node 的混合公式留在 [autofluxdep README](../../lib/zcu_tools/gui/app/autofluxdep/README.md)，不是另一項跨模組決策。
+`qubit_freq` 在 run 中保留 raw/base predictor 不變；可信的 physical recovery 如有啟用，只安裝 run／placement-local overlay。Residual correction 由 feedback slot 保存，不修改共用 predictor。這取代了舊篇讓 Node 直接校準 raw predictor 的 hard-bias 描述；物理模型的通用能力仍歸 [prediction owner](../../lib/zcu_tools/simulate/fluxonium/README.md)。Estimator decay 與 node 的混合公式留在 [autofluxdep README](../../lib/zcu_tools/gui/app/autofluxdep/README.md)，不是另一項跨模組決策。
 
 ## Run 與 operation
 

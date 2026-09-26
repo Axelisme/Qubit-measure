@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。現行局部契約見 [`analysis/fitting/README.md`](../../../lib/zcu_tools/analysis/fitting/README.md) 與 [`experiment/v2_gui/README.md`](../../../lib/zcu_tools/experiment/v2_gui/README.md)；以下保留歷史正文。
+
 # ADR-0054：Resonance fitting 使用 multiplicative amplitude background
 
 **狀態：** accepted

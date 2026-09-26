@@ -5,7 +5,7 @@ Selection order (frontend-agnostic, decoupled from the matplotlib backend name):
 1. A backend explicitly registered for the current task via
    ``set_liveplot_backend`` (ContextVar — the GUI run worker does this).
 2. A process-wide default set via ``set_default_liveplot_backend``.
-3. Fallback: pick by matplotlib backend name (nbagg → Jupyter, else plain).
+3. Fallback: pick by matplotlib backend name (nbagg/widget → Jupyter, else plain).
 
 The GUI is *registered* (1), never detected — so this package has zero GUI
 import and the dependency direction stays gui → liveplot.
