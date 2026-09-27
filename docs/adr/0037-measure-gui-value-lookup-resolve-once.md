@@ -51,8 +51,8 @@ Source references use a sibling concept to `EvalValue`, not an extension of
 - `EvalValue` stores an md expression together with its last resolved result.
   The field resolves it when set and on expression refresh. Cfg lowering
   outputs the stored result when one exists. With an expression resolver,
-  lowering first re-evaluates every expression against the current md and
-  aborts if any evaluation fails; a successful re-evaluation that differs from
+  lowering first re-evaluates every expression against the current md,
+  coerces it to the field type, and aborts if any evaluation or coercion fails; a successful re-evaluation that differs from
   the stored result only logs drift. Without a stored result, lowering outputs
   the resolver's evaluation.
   The earlier wording "a live md expression resolved by cfg lowering" no longer

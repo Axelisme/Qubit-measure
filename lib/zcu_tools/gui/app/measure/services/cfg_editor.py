@@ -34,7 +34,7 @@ The field resolves the expression when it is set and on expression refresh and
 stores the result; lowering at ``commit`` outputs that stored ``resolved``
 number, because ModuleLibrary stores concrete numbers, never md references.
 Lowering still re-evaluates every expression against the current MetaDict
-first and aborts if one fails; a differing result only logs drift, and the
+first, coerces it to the field type, and aborts if either step fails; a differing result only logs drift, and the
 fresh evaluation is output only when no stored result exists. ``value_ref`` tags are different: they are
 resolved once at ``set_field`` time and stored only as ``DirectValue`` snapshots.
 
