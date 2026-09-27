@@ -59,9 +59,6 @@ class IOManager:
         ml, md = self._em.new_flux(
             value=value, clone_from=clone_from, label=label, unit=unit
         )
-        # Flush files so list_contexts() and use_context() can find them immediately.
-        md.dump()
-        ml.dump()
         return dataclasses.replace(base_ctx, md=md, ml=ml)
 
     @property

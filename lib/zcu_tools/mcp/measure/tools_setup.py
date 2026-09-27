@@ -113,12 +113,14 @@ def md_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
                 raise GuiRpcError(
                     "missing GUI MetaDict write receipt", reason="incompatible_wire"
                 )
-        except GuiRpcError as exc:
+        except (GuiRpcError, OSError) as exc:
             raise GuiRpcError(
                 f"md_set failed at {key!r}; confirmed prefix: {applied!r}; {exc}. "
                 "The failing key may also have applied; read md_get before retrying.",
-                reason=exc.reason,
-                code=exc.code,
+                reason=exc.reason
+                if isinstance(exc, GuiRpcError)
+                else "transport_error",
+                code=exc.code if isinstance(exc, GuiRpcError) else None,
             ) from exc
         applied[key] = {"before": reply["before"], "after": reply["after"]}
     return applied

@@ -39,6 +39,7 @@ def _h_context_use(
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
             f"unknown context label: {label!r}; available: {available}",
+            reason="unknown_context",
         )
     ctx.use_context(label)
     active = ctx.get_active_context_label()
@@ -66,11 +67,18 @@ def _h_context_new(
     bind_device = params["bind_device"]
     clone_from = params["clone_from"]
     source = ctx.get_active_context_label() if clone_from == "current" else clone_from
-    ctx.new_context(
-        label=str(label) if label is not None else None,
-        bind_device=str(bind_device) if bind_device is not None else None,
-        clone_from=str(source) if source is not None else None,
-    )
+    try:
+        ctx.new_context(
+            label=str(label) if label is not None else None,
+            bind_device=str(bind_device) if bind_device is not None else None,
+            clone_from=str(source) if source is not None else None,
+        )
+    except FileExistsError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"context label {label!r} already exists; use context_use or provide a different label",
+            reason="context_exists",
+        ) from exc
     # new_context makes the new context active — return its label so the agent
     # knows what was created without a follow-up read.
     label = ctx.get_active_context_label()
@@ -180,7 +188,11 @@ def _h_context_md_get_attr(
     sentinel = object()
     value = md.get(key, sentinel)
     if value is sentinel:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown md key: {key!r}")
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"unknown md key: {key!r}; available: {sorted(map(str, md.keys()))}",
+            reason="unknown_md_key",
+        )
     try:
         return {"key": key, "value": _context_wire_value(value)}
     except (TypeError, ValueError, RecursionError) as exc:

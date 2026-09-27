@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._helpers import Fixture, call, mcp_client, open_client
 
@@ -63,7 +64,71 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         unknown = call(sock, "context.use", {"label": "ghost"})
         assert unknown["ok"] is False
         assert "base" in unknown["error"]["message"]
+        assert unknown["error"]["reason"] == "unknown_context"
+        duplicate = call(
+            sock,
+            "context.new",
+            {"label": "copy", "bind_device": None, "clone_from": None},
+        )
+        assert duplicate["ok"] is False
+        assert duplicate["error"]["code"] == "invalid_params"
+        assert duplicate["error"]["reason"] == "context_exists"
+        assert "different label" in duplicate["error"]["message"]
         assert invoke("contexts", {})["active"] == "base"
+    finally:
+        bridge.disconnect()
+        sock.close()
+        fx.stop()
+
+
+@pytest.mark.uses_wall_clock
+def test_corrupt_context_source_and_occupied_directory_preserve_selection(
+    qapp, tmp_path: Path
+) -> None:
+    fx = Fixture(project_root=str(tmp_path), empty_project=True)
+    fx.start()
+    bridge, invoke = mcp_client(fx.service.port, tmp_path)
+    sock = open_client(fx.service.port)
+    try:
+        invoke("connect", {"port": fx.service.port})
+        invoke("project", {"chip": "chip", "qubit": "q", "resonator": "res"})
+        invoke("context_create", {"label": "source", "clone_from": None})
+        invoke("context_create", {"label": "active", "clone_from": None})
+        exp_dir = Path(invoke("project", {})["result_dir"]) / "exps"
+        occupied = exp_dir / "occupied"
+        occupied.mkdir()
+        user_file = occupied / "user.txt"
+        user_file.write_text("keep me", encoding="utf-8")
+        conflict = call(
+            sock,
+            "context.new",
+            {"label": "occupied", "bind_device": None, "clone_from": None},
+        )
+        assert conflict["ok"] is False
+        assert conflict["error"]["reason"] == "context_exists"
+        assert user_file.read_text(encoding="utf-8") == "keep me"
+        assert call(sock, "context.active", {})["result"]["label"] == "active"
+
+        source = exp_dir / "source" / "module_cfg.yaml"
+        assert source.is_file()
+        source.write_text("modules: [\n", encoding="utf-8")
+
+        with pytest.raises(GuiRpcError):
+            invoke("context_create", {"label": "failed", "clone_from": "source"})
+        assert call(sock, "context.active", {})["result"]["label"] == "active"
+        assert invoke("contexts", {}) == {
+            "active": "active",
+            "labels": ["active", "source"],
+        }
+        assert not (exp_dir / "failed").exists()
+
+        with pytest.raises(GuiRpcError):
+            invoke("context_use", {"label": "source"})
+        assert call(sock, "context.active", {})["result"]["label"] == "active"
+        assert invoke("contexts", {}) == {
+            "active": "active",
+            "labels": ["active", "source"],
+        }
     finally:
         bridge.disconnect()
         sock.close()
