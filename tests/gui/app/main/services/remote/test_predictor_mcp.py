@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.meta_tool import FluxDepFit, ParamsProject, QubitParams
 
 from ._helpers import Fixture, call, mcp_client, open_client
 
@@ -72,6 +73,28 @@ def test_predictor_install_and_multiple_transitions_share_gui_state(
             assert isinstance(freq, (int, float))
             assert freq == pytest.approx(gui["freq_mhz"])
             assert freq > 0
+
+        params_path = tmp_path / "params.json"
+        params = QubitParams(params_path)
+        params.ensure_project(ParamsProject("chip", "qubit"))
+        params.set_fluxdep_fit(
+            FluxDepFit(
+                EJ=4.5,
+                EC=1.2,
+                EL=0.9,
+                flux_half=0.31,
+                flux_int=0.71,
+                flux_period=0.8,
+            )
+        )
+        from_file = invoke(
+            "predictor_load", {"path": str(params_path), "flux_bias": 0.13}
+        )
+        gui_file = call(sock, "predictor.info")["result"]
+        assert from_file["source"] == str(params_path)
+        assert from_file["EJ"] == gui_file["EJ"] == pytest.approx(4.5)
+        assert from_file["flux_bias"] == gui_file["flux_bias"] == pytest.approx(0.13)
+        assert invoke("predictor_info", {}) == from_file
     finally:
         bridge.disconnect()
         sock.close()
@@ -90,6 +113,10 @@ def test_predictor_rejects_ambiguous_load_without_replacing_gui_model(
         invoke("connect", {"port": fx.service.port})
         with pytest.raises((GuiRpcError, ValueError), match="exactly one"):
             invoke("predictor_load", {"path": "unused.json", "model": _MODEL})
+        with pytest.raises((GuiRpcError, ValueError), match="exactly one"):
+            invoke("predictor_load", {})
+        with pytest.raises(GuiRpcError, match="Failed to load predictor"):
+            invoke("predictor_load", {"path": str(tmp_path / "missing.json")})
         assert call(sock, "predictor.info")["result"] == {"loaded": False}
     finally:
         bridge.disconnect()
