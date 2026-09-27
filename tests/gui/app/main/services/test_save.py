@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.tab import (
     TabInteractionChangedPayload,
@@ -223,3 +224,76 @@ def test_on_save_failed_emits_save_failed(qapp) -> None:  # noqa: ARG001
         TabInteractionFact.SAVE_STARTED,
         TabInteractionFact.SAVE_FAILED,
     ]
+
+
+def test_data_save_terminal_reports_actual_path_without_rewriting_draft(
+    qapp, tmp_path: Path
+) -> None:
+    svc, state, bg = _make_service()
+    draft_path = str(tmp_path / "data" / "measurement")
+    state.update_tab_data_path_override("tab", draft_path)
+    state.update_tab_comment("tab", "first")
+
+    actual_path = svc.start_save_data(
+        SavePermit(tab_id="tab"), draft_path, comment="first"
+    )
+    assert state.get_artifact_snapshots("tab")[0].status is SaveStatus.NOT_SAVED
+    bg.submit.call_args.kwargs["on_done"](None)
+
+    saved = state.get_artifact_snapshots("tab")[0]
+    assert saved.kind is ArtifactKind.DATA
+    assert saved.status is SaveStatus.SAVED
+    assert saved.default_path == draft_path
+    assert saved.last_saved_path == actual_path
+    assert actual_path != draft_path
+    state.update_tab_comment("tab", "edited later")
+    changed = state.get_artifact_snapshots("tab")[0]
+    assert changed.status is SaveStatus.UNSAVED_CHANGES
+    assert changed.last_saved_path == actual_path
+
+
+def test_failed_data_save_does_not_erase_prior_success(qapp, tmp_path: Path) -> None:
+    svc, state, bg = _make_service()
+    first = str(tmp_path / "first")
+    state.update_tab_data_path_override("tab", first)
+    previous_path = svc.start_save_data(SavePermit(tab_id="tab"), first)
+    bg.submit.call_args.kwargs["on_done"](None)
+    assert state.get_artifact_snapshots("tab")[0].status is SaveStatus.SAVED
+
+    second = str(tmp_path / "second")
+    state.update_tab_data_path_override("tab", second)
+    svc.start_save_data(SavePermit(tab_id="tab"), second)
+    bg.submit.call_args.kwargs["on_error"](OSError("disk full"))
+
+    artifact = state.get_artifact_snapshots("tab")[0]
+    assert artifact.status is SaveStatus.UNSAVED_CHANGES
+    assert artifact.default_path == second
+    assert artifact.last_saved_path == previous_path
+
+
+def test_image_save_success_and_failure_share_state_without_undoing_data(
+    qapp, tmp_path: Path
+) -> None:
+    svc, state, _ = _make_service()
+    figure = _make_figure()
+    state.update_tab_analyze("tab", object(), figure)
+    image_path = str(tmp_path / "analysis.png")
+    state.update_tab_analysis_image_path_override("tab", image_path)
+
+    svc.save_image_sync(SavePermit(tab_id="tab"), image_path)
+
+    snapshots = {item.kind: item for item in state.get_artifact_snapshots("tab")}
+    assert snapshots[ArtifactKind.DATA].status is SaveStatus.NOT_SAVED
+    assert snapshots[ArtifactKind.ANALYSIS].status is SaveStatus.SAVED
+    assert snapshots[ArtifactKind.ANALYSIS].last_saved_path == image_path
+
+    next_path = str(tmp_path / "next.png")
+    state.update_tab_analysis_image_path_override("tab", next_path)
+    figure.savefig.side_effect = OSError("disk full")
+    with pytest.raises(OSError, match="disk full"):
+        svc.save_image_sync(SavePermit(tab_id="tab"), next_path)
+
+    after_failure = {item.kind: item for item in state.get_artifact_snapshots("tab")}
+    assert after_failure[ArtifactKind.ANALYSIS].status is SaveStatus.UNSAVED_CHANGES
+    assert after_failure[ArtifactKind.ANALYSIS].last_saved_path == image_path
+    assert after_failure[ArtifactKind.DATA].status is SaveStatus.NOT_SAVED
