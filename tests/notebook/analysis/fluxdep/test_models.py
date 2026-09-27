@@ -1,12 +1,14 @@
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import (
+    TransitionDict as PersistenceTransitionDict,
+)
 from zcu_tools.notebook.analysis.fluxdep.models import (
     TransitionDict,
     compile_transitions,
     energy2linearform,
 )
 from zcu_tools.notebook.analysis.fluxdep.njit import energy2linearform_nb
-from zcu_tools.notebook.persistance import TransitionDict as PersistenceTransitionDict
 
 
 def _check_matches(transitions, energies):

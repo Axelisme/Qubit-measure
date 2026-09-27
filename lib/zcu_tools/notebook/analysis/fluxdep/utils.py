@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from numpy.typing import NDArray
 
-from zcu_tools.notebook.persistance import SpectrumResult, TransitionDict
+from zcu_tools.analysis.fluxdep.models import SpectrumResult, TransitionDict
 from zcu_tools.resources.sample_table.schema import (
     SAMPLE_COORDINATE_COLUMNS,
     SampleFluxFrame,

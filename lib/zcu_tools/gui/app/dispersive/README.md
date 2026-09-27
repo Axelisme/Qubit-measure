@@ -1,4 +1,4 @@
-**Last updated:** 2026-09-27 — GUI ADR 繪圖引用更新
+**Last updated:** 2026-09-27 — shared raw spectrum owner
 
 # `zcu_tools.gui.app.dispersive` — dispersive-shift analysis GUI
 
@@ -54,7 +54,7 @@ state/services/UI 與和 `ui/` 平級的 GUI-process remote driving adapter。Im
 - preprocess edelay 用 numba kernel（見「已知坑」段），predict 用 fast dispersive —— 兩個 scqubits/scipy 熱點都繞過了。
 
 ## 單位
-**State / wire 全程 GHz**（g, bare_rf, bare_rf_seed, freqs）；slider UI 顯示 MHz（×1e3 進 / ×1e-3 出）。onetone load 經 `format_rawdata` Hz→GHz（**不走 experiment 層**：`FluxDepExp.load` 回 dataclass、MHz）。
+**State / wire 全程 GHz**（g, bare_rf, bare_rf_seed, freqs）；slider UI 顯示 MHz（×1e3 進 / ×1e-3 出）。onetone load 經 `analysis.spectrum.format_rawdata` Hz→GHz（**不走 experiment 層**：`FluxDepExp.load` 回 dataclass、MHz）。
 
 ## Remote / MCP（read-only，fluxdep 模式）
 agent 只觀測、user 在 GUI 驅動。method set 全純查詢（state.check / project.info / fit_inputs.info / preprocess.status / fit.result{has_result,g,bare_rf,res_dim} / resources.versions），**無 mutating RPC**。`mcp/dispersive/server.py` 是 **thin entrypoint**：填 config + instructions，body（`send_gui_rpc` / 3 lifecycle tools launch/connect/disconnect（**無 stop 曝露**）/ cleanup / `run_stdio_loop`）全交 `mcp/core/readonly_server.build_readonly_server`；read-only tools 從 METHOD_SPECS 自動生成。**event-push 丟棄**（read-only 無診斷流，bridge on_event 不接）。預設 control port **8767**（避開 fluxdep 8766）。當 script 跑：絕對 import（無 parent package）+ lib path inject。**WIRE=4/GUI=6**（EventBus push 含 seq/origin；fit.result 維持無 step）。`project.info` / `resources.versions` 直接註冊 `gui/remote/readonly_handlers.py` 的共用 `h_project_info` / `h_resources_versions`（與 fluxdep 共用，兩 app wire 形態永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project`）。

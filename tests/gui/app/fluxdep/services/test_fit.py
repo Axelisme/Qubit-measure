@@ -14,6 +14,8 @@ import os
 import h5py
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     SearchResult,
@@ -25,7 +27,6 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpectrumEntry,
 )
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import PointsData, SpectrumData, TransitionDict
 
 # --- fixtures --------------------------------------------------------------
 

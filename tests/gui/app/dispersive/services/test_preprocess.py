@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.resonance import HangerModel, fit_edelay
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.dispersive.services._fast_edelay import fast_edelays
 from zcu_tools.gui.app.dispersive.services.preprocess import (
     PreprocessService,
@@ -15,7 +16,6 @@ from zcu_tools.gui.app.dispersive.state import (
     FluxoniumInputs,
     OnetoneEntry,
 )
-from zcu_tools.notebook.persistance import SpectrumData
 
 
 def _synthetic_onetone(n_flux=10, n_freq=60):

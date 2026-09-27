@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.services.alignment import PointsService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.state import (
@@ -11,7 +13,6 @@ from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     SpectrumEntry,
 )
-from zcu_tools.notebook.persistance import PointsData, SpectrumData
 
 
 def _empty_points() -> PointsData:

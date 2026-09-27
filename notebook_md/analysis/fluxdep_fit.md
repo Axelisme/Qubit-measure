@@ -34,7 +34,8 @@ import numpy as np
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 import zcu_tools.notebook.analysis.fluxdep as zf
 from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
-from zcu_tools.notebook.persistance import SpectrumResult
+from zcu_tools.analysis.fluxdep.io import dump_spectrums, load_spectrums
+from zcu_tools.analysis.fluxdep.models import SpectrumResult, TransitionDict
 from zcu_tools.notebook.utils import savefig
 from zcu_tools.simulate import value2flux, flux2value
 import zcu_tools.experiment.v2 as ze
@@ -140,12 +141,12 @@ spectrums.keys()
 
 ```python
 processed_spect_path = f"{result_dir}/data/fluxdep/spectrums.hdf5"
-zp.dump_spectrums(processed_spect_path, spectrums, mode="x")
+dump_spectrums(processed_spect_path, spectrums, mode="x")
 ```
 
 ```python
 processed_spect_path = f"{result_dir}/data/fluxdep/spectrums.hdf5"
-spectrums = zp.load_spectrums(processed_spect_path)
+spectrums = load_spectrums(processed_spect_path)
 spectrums.keys()
 ```
 
@@ -195,7 +196,7 @@ ELb = (0.1, 2.0)
 # Search in Database
 
 ```python
-transitions = zp.TransitionDict(
+transitions = TransitionDict(
     {
         "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
         # "red side": [(0, 1)],
@@ -232,7 +233,7 @@ _, energies = calculate_energy_vs_flux(best_params, t_fluxs, cutoff=40, evals_co
 ```
 
 ```python
-plot_transitions = zp.TransitionDict(
+plot_transitions = TransitionDict(
     {
         **transitions,
         # "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
@@ -284,7 +285,7 @@ _, energies = calculate_energy_vs_flux(sp_params, t_fluxs, cutoff=40, evals_coun
 ```
 
 ```python
-plot_transitions = zp.TransitionDict(
+plot_transitions = TransitionDict(
     {
         **transitions,
         # "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 5)],

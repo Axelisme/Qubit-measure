@@ -10,6 +10,7 @@ QApplication or the socket server.
 from __future__ import annotations
 
 import numpy as np
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.remote.dispatch import (
     _HANDLERS,
@@ -23,7 +24,6 @@ from zcu_tools.gui.app.dispersive.state import (
     PreprocessResult,
 )
 from zcu_tools.gui.project import ProjectInfo
-from zcu_tools.notebook.persistance import SpectrumData
 
 
 class _StubAdapter:

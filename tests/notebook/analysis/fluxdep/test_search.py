@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.notebook.analysis.fluxdep import fitting
 from zcu_tools.notebook.analysis.fluxdep.fitting import (
     fit_spectrum,
@@ -14,7 +15,6 @@ from zcu_tools.notebook.analysis.fluxdep.njit import (
     candidate_breakpoint_search,
     eval_dist_bounded,
 )
-from zcu_tools.notebook.persistance import TransitionDict
 
 from ._synthetic import synth_ABC as _synth
 

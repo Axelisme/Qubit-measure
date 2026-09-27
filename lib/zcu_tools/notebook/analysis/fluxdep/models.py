@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 
 
 def count_max_evals(transitions: TransitionDict) -> int:
