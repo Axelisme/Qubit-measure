@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Collection
-from typing import Protocol, TypeAlias, cast
+from typing import Protocol, TypeAlias
 
 from .model import (
     CenteredSweepSpec,
@@ -202,20 +202,16 @@ def _resolve_sweep_edge(
         _validate_scalar(ScalarSpec(label, float), value, path)
         if value.value is None:
             raise RuntimeError(f"Config field '{path}' ({label}) is incomplete")
-        return float(cast(float, value.value))
+        return float(value.value)
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, EvalValue):
-        return cast(
-            float,
-            _resolve_eval(
-                value,
-                resolve_expression,
-                path=path,
-                label=label,
-                type_=float,
-            ),
+        resolved = _resolve_eval(
+            value, resolve_expression, path=path, label=label, type_=float
         )
+        if isinstance(resolved, complex):
+            raise RuntimeError(f"Config field '{path}' ({label}) must be real")
+        return float(resolved)
     raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
 
 
