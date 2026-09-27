@@ -31,11 +31,13 @@ def test_resolve_bool_field():
 
 @pytest.mark.parametrize("experiment", ["ge", "len_rabi", "amp_rabi"])
 def test_singleshot_initial_state_form_and_wire_contract(experiment: str) -> None:
-    from zcu_tools.experiment.v2_gui.adapters.singleshot.amp_rabi import (
+    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.amp_rabi import (
         SsAmpRabiAnalyzeParams,
     )
-    from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import GEAnalyzeParams
-    from zcu_tools.experiment.v2_gui.adapters.singleshot.len_rabi import (
+    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
+        GEAnalyzeParams,
+    )
+    from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.len_rabi import (
         SsLenRabiAnalyzeParams,
     )
 

@@ -14,7 +14,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import GEPostAnalyzeParams
+from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
+    GEPostAnalyzeParams,
+)
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ._helpers import dispatch_handler as _dispatch

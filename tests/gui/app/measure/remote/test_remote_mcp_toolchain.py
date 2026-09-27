@@ -599,7 +599,7 @@ def test_save_set_paths_delegates_to_save_control(fx):
 
 def _add_fake_tab(fx, tab_id: str) -> None:
     """Register a minimal Session so has_tab(tab_id) is True."""
-    from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
     from zcu_tools.gui.app.measure.state import Session
 
     adapter = FakeAdapter()
@@ -797,7 +797,7 @@ def test_base_adapter_guide_default_is_honest():
     # Every registered adapter defines local guide_text, so the honest default is
     # tested directly on BaseAdapter: an adapter with no guide says so plainly
     # rather than faking content.
-    from zcu_tools.experiment.v2_gui.adapters.fake.stub import FakeAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeAdapter
 
     guide = FakeAdapter.guide()
     assert guide.behavior == "(no guide written yet)"
@@ -809,7 +809,7 @@ def test_every_registered_adapter_has_a_written_guide():
     # A new adapter that forgets guide_text falls back to the honest
     # "(no guide written yet)" default — this test flags that so the gap is
     # caught at review time rather than shipping a blank Guide tab to users.
-    from zcu_tools.experiment.v2_gui.registry import ADAPTERS
+    from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS
 
     missing = [
         name

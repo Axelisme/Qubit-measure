@@ -60,9 +60,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def _build_measure_catalogs():
     """Build measure-gui's experiment catalogs after runtime pre-Qt setup."""
-    from zcu_tools.experiment.v2_gui.catalog_loader import make_catalog_loader
-    from zcu_tools.experiment.v2_gui.registry import register_all
-    from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
+    from zcu_tools.experiment.v2_gui.measure.catalog_loader import make_catalog_loader
+    from zcu_tools.experiment.v2_gui.measure.registry import register_all
+    from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
 
     # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
     # into the GUI framework. The behavior receives a factory, so these imports

@@ -86,7 +86,7 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 ## 現有 owner 導覽
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
-`tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/adapters/`
+`tests/experiment/v2/` 擁有排程與實驗資料流程；`tests/experiment/v2_gui/measure/adapters/`
 擁有 adapter 對設定與寫回的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。
@@ -208,7 +208,7 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 
 ### Experiment v2 GUI adapter tests
 
-`tests/experiment/v2_gui/adapters/_support/test_schema_builder.py`鎖定context-free
+`tests/experiment/v2_gui/measure/adapters/_support/test_schema_builder.py`鎖定context-free
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
 `tests/gui/app/measure/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
@@ -412,7 +412,7 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 ### measure-gui canonical result load 測試
 
 load-result feature 的 targeted tests 分散在對應 ownership：
-`tests/experiment/v2_gui/adapters/test_base_load.py` 鎖 adapter default load contract；
+`tests/experiment/v2_gui/measure/adapters/test_base_load.py` 鎖 adapter default load contract；
 `tests/gui/app/measure/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/app/measure/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
 `tests/gui/app/measure/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。

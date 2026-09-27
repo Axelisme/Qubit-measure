@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.adapters.onetone.freq import (
+from zcu_tools.experiment.v2_gui.measure.adapters.onetone.freq import (
     OneToneFreqAnalyzeParams,
 )
 from zcu_tools.gui.app.measure.remote.handlers.analysis import (

@@ -16,9 +16,9 @@ from qtpy.QtCore import QCoreApplication
 from qtpy.QtWidgets import QLabel, QStackedWidget
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
-from zcu_tools.experiment.v2_gui.adapters._support import FluxPickParams
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.registry import register_all
+from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.measure.registry import register_all
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,

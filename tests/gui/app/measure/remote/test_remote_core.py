@@ -16,8 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
-from zcu_tools.experiment.v2_gui.registry import register_all
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
+from zcu_tools.experiment.v2_gui.measure.registry import register_all
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry

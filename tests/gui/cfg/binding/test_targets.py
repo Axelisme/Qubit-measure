@@ -194,7 +194,7 @@ def test_target_kinds_are_nominal() -> None:
 
 
 def test_all_production_measure_schemas_have_unambiguous_target_grammar() -> None:
-    from zcu_tools.experiment.v2_gui.registry import register_all
+    from zcu_tools.experiment.v2_gui.measure.registry import register_all
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.resources.context import MetaDict, ModuleLibrary

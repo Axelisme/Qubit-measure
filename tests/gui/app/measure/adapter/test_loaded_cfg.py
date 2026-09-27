@@ -4,7 +4,7 @@ import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.onetone.freq import FreqCfg, HomophasalSamplingCfg
-from zcu_tools.experiment.v2_gui.adapters.onetone.freq import OneToneFreqAdapter
+from zcu_tools.experiment.v2_gui.measure.adapters.onetone.freq import OneToneFreqAdapter
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict

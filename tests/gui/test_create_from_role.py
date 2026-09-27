@@ -10,7 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
+from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
 from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry

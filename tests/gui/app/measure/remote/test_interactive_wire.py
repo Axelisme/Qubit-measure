@@ -14,11 +14,11 @@ import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
-from zcu_tools.experiment.v2_gui.adapters._support import FluxPickParams
-from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_frontend import (
+from zcu_tools.experiment.v2_gui.measure.adapters._support import FluxPickParams
+from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend import (
     FluxPickFrontend,
 )
-from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_plugin import (
+from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
     make_flux_pick_plugin,
 )
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
