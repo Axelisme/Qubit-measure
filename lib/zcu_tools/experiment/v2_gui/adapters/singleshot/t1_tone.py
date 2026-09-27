@@ -89,8 +89,10 @@ class SsT1ToneAdapter(
             "calibration fails before hardware. "
             "Optionally reads 'confusion_matrix' to readout-correct populations "
             "at analyze time; 't1_with_tone' or 't1' to seed the sweep stop "
-            "(default 5*t1, fallback 100 us); 'q_f' / 'qub_ch' for the pi "
-            "pulse; 'readout_f' or 'r_f' plus 'res_ch' seed the probe tone; "
+            "(5*t1_with_tone when present, else 5*t1; fallback 500 us); "
+            "'t1' seeds relax delay (5*t1; fallback 100 us); 'q_f' / "
+            "'qub_ch' for the pi pulse; 'readout_f' or 'r_f' plus "
+            "'res_ch' seed the probe tone; "
             "'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout."
         ),
         expects_ml=(

@@ -76,8 +76,8 @@ class SsAmpRabiAdapter(
             "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
             "calibration fails before hardware. These values support live classification; "
             "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_gain' "
-            "to seed the sweep stop (4*pi_gain when calibrated; fallback sweep "
-            "0.03–0.2 us); "
+            "to seed the gain sweep stop (4*pi_gain when calibrated; fallback "
+            "sweep -0.3 to 1.0 a.u.); "
             "'q_f' / 'qub_ch' to seed the qubit-drive defaults."
         ),
         expects_ml=(

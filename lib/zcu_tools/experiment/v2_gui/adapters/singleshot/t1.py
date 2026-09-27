@@ -60,8 +60,9 @@ class SsT1Adapter(
             "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
             "calibration fails before hardware. "
             "Optionally reads 'confusion_matrix' to readout-correct populations "
-            "at analyze time; 't1' to seed the sweep stop (default 5*t1, "
-            "fallback 100 us); 'q_f' / 'qub_ch' for the pi pulse; 'r_f' / "
+            "at analyze time; 't1' to seed the sweep stop (5*t1; "
+            "fallback 500 us) and relax delay (5*t1; fallback 100 us); "
+            "'q_f' / 'qub_ch' for the pi pulse; 'r_f' / "
             "'res_ch' / 'ro_ch' / 'timeFly' for readout."
         ),
         expects_ml=(
@@ -76,7 +77,7 @@ class SsT1Adapter(
         recommended=(
             "Set calibration cfg directly or seed it with 'singleshot/ge'. "
             "A delay sweep reaching ~5*T1 lets the "
-            "decay flatten; with no prior 't1', the sweep spans 0–100 us. "
+            "decay flatten; with no prior 't1', the sweep spans 0–500 us. "
             "Set 'uniform=True' to sweep linearly; leave False to cluster more "
             "points along the expected exponential decay while preserving the "
             "configured start/stop window and point count."
