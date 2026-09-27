@@ -18,6 +18,6 @@ uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
 ## 從哪裡讀起
 
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
-- [領域詞彙](docs/CONTEXT.md) 與 [量測程式](lib/zcu_tools/experiment/v2/README.md)與[GUI](lib/zcu_tools/gui/README.md)的 README 提供實作定位；跨模組決策見 [ADR](docs/adr/README.md)。
+- [領域詞彙](docs/CONTEXT.md) 與 [實驗層](lib/zcu_tools/experiment/README.md)與 [GUI](lib/zcu_tools/gui/README.md)的 README 提供實作定位；跨模組決策見 [ADR](docs/adr/README.md)。
 - [測試目錄與 fixture](tests/README.md) 說明案例歸屬；[程式碼品質](docs/code-quality.md) 說明 review 判準。
 - [品質工具](tools/README.md) 說明 gate、ratchet 與報表的執行及判讀。開發操作與環境仍依 [repo 操作指引](CLAUDE.md)。
