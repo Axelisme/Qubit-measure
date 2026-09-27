@@ -868,7 +868,7 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         # Path/comment read is invariant; let exception propagate (Fast Fail)
-        path = tab_w.get_data_path()
+        path = tab_w.get_data_path() or None
         comment = tab_w.get_comment()
         self._dispatch_artifact_save(
             tab_w,
@@ -913,7 +913,7 @@ class MainWindow(QMainWindow):
             return
         for kind in artifacts:
             if kind == ArtifactKind.DATA:
-                path = tab_w.get_data_path()
+                path = tab_w.get_data_path() or None
                 comment = tab_w.get_comment()
                 ok = self._dispatch_artifact_save(
                     tab_w,

@@ -151,6 +151,14 @@ def test_save_data_applies_explicit_path_and_comment_to_shared_draft() -> None:
     )
 
 
+def test_save_data_rejects_explicit_empty_path_before_reserving_save() -> None:
+    facet, log, _state, _tab, _save, _bus, _notifications = _facet()
+
+    with pytest.raises(FailedPreconditionError, match="empty data path"):
+        facet.save_data("tab-1", data_path="")
+    assert not any(entry.method == "start_save_data" for entry in log.calls)
+
+
 def test_save_data_omissions_inherit_draft_but_explicit_empty_comment_clears_it() -> (
     None
 ):

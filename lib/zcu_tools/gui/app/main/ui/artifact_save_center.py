@@ -437,9 +437,14 @@ class ArtifactSaveCenter(QWidget):
 
     def set_comment_text(self, text: str) -> None:
         if hasattr(self, "_comment_edit"):
-            self._comment_edit.blockSignals(True)
-            self._comment_edit.setPlainText(text)
-            self._comment_edit.blockSignals(False)
+            edit = self._comment_edit
+            if edit.toPlainText() == text:
+                return
+            was_blocked = edit.blockSignals(True)
+            try:
+                edit.setPlainText(text)
+            finally:
+                edit.blockSignals(was_blocked)
 
     # -- narrow binding interface for ExpTabWidget -------------------
 

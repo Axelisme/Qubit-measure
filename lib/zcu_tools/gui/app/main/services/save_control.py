@@ -64,6 +64,8 @@ class SaveControlFacet:
     def save_data(
         self, tab_id: str, data_path: str | None = None, comment: str | None = None
     ) -> str:
+        if data_path is not None and not data_path.strip():
+            raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")
         permit = self._guard.acquire_save_permit(tab_id)
         self._require_tab_idle(tab_id)
         if data_path is not None:
@@ -71,7 +73,7 @@ class SaveControlFacet:
         if comment is not None:
             self._state.update_tab_comment(tab_id, comment)
         resolved = self._tab.get_tab_data_path(tab_id)
-        if resolved is None:
+        if not resolved:
             raise FailedPreconditionError(f"Tab {tab_id!r} has no data path configured")
         draft_comment = self._state.get_tab(tab_id).save.comment
         return self._save.start_save_data(permit, resolved, comment=draft_comment)

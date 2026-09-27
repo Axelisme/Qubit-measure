@@ -6,17 +6,28 @@ Validates S1-S3 acceptance via production ExpTabWidget / MainWindow seams.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
-from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTextEdit
+from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+from zcu_tools.gui.app.main.adapter import (
+    AdapterCapabilities,
+    AnalysisMode,
+    ContextReadiness,
+    ExpContext,
+)
 from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind, SaveStatus
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.main.registry import Registry
 from zcu_tools.gui.app.main.services import PersistedStartup, TabSnapshot
-from zcu_tools.gui.app.main.state import TabInteractionState
+from zcu_tools.gui.app.main.services.save_control import SaveControlFacet
+from zcu_tools.gui.app.main.services.tab import TabService
+from zcu_tools.gui.app.main.state import State, TabInteractionState
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from tests.gui.app.main.ui._artifact_snapshots import with_artifacts
@@ -924,6 +935,139 @@ def test_comment_edit_updates_shared_draft_without_touching_paths(
     ctrl.update_tab_post_analysis_image_path.assert_not_called()
     tab.deleteLater()
     _require_qapp().processEvents()
+
+
+def _live_save_ui(tmp_path: Path):
+    from zcu_tools.gui.app.main.ui.main_window import MainWindow
+
+    state = State(
+        ExpContext(
+            md=MagicMock(),
+            ml=MagicMock(),
+            soc=MagicMock(),
+            soccfg=MagicMock(),
+            result_dir=str(tmp_path / "result"),
+            database_path=str(tmp_path / "database"),
+            active_label="ctx001",
+            readiness=ContextReadiness.ACTIVE,
+        )
+    )
+    registry = Registry()
+    registry.register("fake", FakeAdapter)
+    tabs = TabService(state, registry, MagicMock())
+    tab_id = tabs.new_tab("fake")
+    state.update_tab_result(tab_id, object())
+    save = MagicMock()
+    save.start_save_data.return_value = "saved"
+    ctrl = _mock_ctrl()
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.has_tab.side_effect = state.has_tab
+    ctrl.get_tab_snapshot.side_effect = tabs.get_snapshot
+    ctrl.update_tab_data_path.side_effect = tabs.update_tab_data_path_override
+    ctrl.save_control = SaveControlFacet(
+        state=state,
+        bus=ctrl.get_bus(),
+        guard=MagicMock(),
+        tab=tabs,
+        save=save,
+        notify_info=MagicMock(),
+    )
+    ctrl.save_data.side_effect = ctrl.save_control.save_data
+    window = MainWindow(ctrl)
+    window.add_tab_widget(tab_id, "fake")
+    return window, state, tabs, save, tab_id
+
+
+def test_live_comment_typing_preserves_undo_through_state_projection(
+    exp_tab_factory, qapp, tmp_path: Path
+) -> None:
+    from qtpy.QtCore import QEvent, Qt
+    from qtpy.QtGui import QKeyEvent
+
+    window, state, tabs, _save, tab_id = _live_save_ui(tmp_path)
+    try:
+        state.update_tab_comment(tab_id, "original")
+        assert tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.NOT_SAVED
+        state.get_tab(tab_id).artifacts.started(ArtifactKind.DATA)
+        default = tabs.get_tab_data_path(tab_id)
+        assert default is not None
+        state.get_tab(tab_id).artifacts.succeeded(ArtifactKind.DATA, default)
+        assert tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.SAVED
+        window.refresh_tab_interaction(tab_id)
+        center = window.findChild(ArtifactSaveCenter)
+        assert center is not None
+        editor = center.findChild(QTextEdit)
+        assert editor is not None
+        editor.setFocus()
+        cursor = editor.textCursor()
+        cursor.setPosition(4)
+        editor.setTextCursor(cursor)
+        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            qapp.sendEvent(
+                editor,
+                QKeyEvent(
+                    event_type,
+                    Qt.Key.Key_Exclam,
+                    Qt.KeyboardModifier.NoModifier,
+                    "!",
+                ),
+            )
+        qapp.processEvents()
+        assert editor.toPlainText() == "orig!inal"
+        assert state.get_tab(tab_id).save.comment == "orig!inal"
+        assert (
+            tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.UNSAVED_CHANGES
+        )
+        assert editor.textCursor().position() == 5
+        document = editor.document()
+        assert document is not None and document.isUndoAvailable()
+        window.refresh_tab_interaction(tab_id)
+        assert editor.textCursor().position() == 5
+        editor.undo()
+        qapp.processEvents()
+        assert state.get_tab(tab_id).save.comment == "original"
+        assert tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.SAVED
+        state.update_tab_comment(tab_id, "external edit")
+        window.refresh_tab_interaction(tab_id)
+        assert editor.toPlainText() == "external edit"
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("button", ["single", "all"])
+def test_cleared_gui_data_path_saves_to_state_default(
+    exp_tab_factory, qapp, tmp_path: Path, button: str
+) -> None:
+    window, state, tabs, save, tab_id = _live_save_ui(tmp_path)
+    try:
+        default = tabs.get_tab_data_path(tab_id)
+        assert default is not None and default.startswith(str(tmp_path / "database"))
+        center = window.findChild(ArtifactSaveCenter)
+        assert center is not None
+        data_edit = next(
+            edit for edit in center.findChildren(QLineEdit) if edit.text() == default
+        )
+        data_edit.clear()
+        qapp.processEvents()
+        assert center.get_data_path() == ""
+        assert state.get_tab(tab_id).save.data_path_override is None
+        target = (
+            center.save_button(ArtifactKind.DATA)
+            if button == "single"
+            else center.save_all_button
+        )
+        assert target.isEnabled()
+        target.click()
+        assert save.start_save_data.call_args.args[1] == default
+        assert state.get_tab(tab_id).save.data_path_override is None
+        state.get_tab(tab_id).artifacts.started(ArtifactKind.DATA)
+        state.get_tab(tab_id).artifacts.succeeded(ArtifactKind.DATA, default)
+        window.refresh_tab_interaction(tab_id)
+        assert center.status_text(ArtifactKind.DATA) == "✓ SAVED"
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
 
 
 # ---------------------------------------------------------------------------
