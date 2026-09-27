@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Literal, cast
 
@@ -368,6 +368,10 @@ class SweepField(CfgField):
             )
         self._apply_value(SweepEditor.canonicalize(value))
 
+    def set_agent_value(self, request: Mapping[str, object]) -> SweepValue:
+        """Resolve and validate a whole-sweep request before one committed update."""
+        raise NotImplementedError("whole-sweep field edit is not implemented")
+
     def set_text(self, edge: Literal["expts", "step"], text: str) -> None:
         self._require_open()
         if edge == "expts":
@@ -516,6 +520,10 @@ class CenteredSweepField(CfgField):
         canonical = CenteredSweepEditor.canonicalize(value)
         self._validate_value(canonical)
         self._apply_value(canonical)
+
+    def set_agent_value(self, request: Mapping[str, object]) -> CenteredSweepValue:
+        """Resolve and validate a centered sweep before one committed update."""
+        raise NotImplementedError("centered whole-sweep edit is not implemented")
 
     def set_text(self, edge: Literal["span", "expts", "step"], text: str) -> None:
         self._require_open()

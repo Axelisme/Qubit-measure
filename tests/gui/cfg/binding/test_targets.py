@@ -134,6 +134,32 @@ def test_agent_whole_sweep_is_normalized_without_changing_gui_leaf_grammar() -> 
     draft.close()
 
 
+def test_agent_expression_endpoint_and_step_use_resolved_bounds_before_commit() -> None:
+    ports = BindingPorts()
+    ports.expressions["md_x"] = 2.0
+    spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
+    draft = CfgDraft(
+        CfgSchema(spec, make_default_value(spec)),
+        evaluate_expression=ports.evaluate,
+        provide_options=ports.provide,
+        references=ports,
+    )
+    sweep = draft.root.fields["sweep"]
+    assert isinstance(sweep, SweepField)
+    actual = sweep.set_agent_value(
+        {"start": EvalValue("md_x"), "stop": 8.0, "step": 2.0}
+    )
+    assert isinstance(actual.start, EvalValue)
+    assert actual.start.resolved == 2.0
+    assert actual.expts == 4 and actual.step == pytest.approx(2.0)
+    assert draft.resolve_agent_target("sweep").get_value() == actual
+    before = draft.snapshot().value
+    with pytest.raises((SettablePathError, TypeError, ValueError)):
+        sweep.set_agent_value({"start": EvalValue("missing"), "stop": 8.0, "step": 2.0})
+    assert draft.snapshot().value == before
+    draft.close()
+
+
 def test_sweep_target_observes_unfinished_text_and_typed_edit_recovers() -> None:
     draft = _mixed_draft()
     sweep = draft.root.fields["sweep"]
