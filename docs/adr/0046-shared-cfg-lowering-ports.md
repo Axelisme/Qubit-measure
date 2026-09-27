@@ -49,7 +49,7 @@ library ref每個 validation/lowering stage都即時呼叫 resolver，不快取�
 維持 missing error，同名 key重現時重新 relink。resolver只決定 live key與 concrete shape，
 lowered內容仍取 embedded snapshot。app-owned conversion exception不包裝。
 
-`gui.cfg` 不 import `gui.app.*`、`experiment.*`、`meta_tool.*`、Qt、`notebook`或`device`，
+`gui.cfg` 不 import `gui.app.*`、`experiment.*`、`resources.*`、Qt、`notebook`或`device`，
 也不提供 `LoweringEnv`、process-global resolver registry或 environment lookup。
 
 measure adapter保留 `validate_schema(schema, ml)` 與

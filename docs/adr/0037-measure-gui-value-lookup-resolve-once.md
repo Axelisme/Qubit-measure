@@ -24,7 +24,7 @@ measure-gui provides a read-only value lookup in the session layer.
   key as a typed scalar.
 - `ValueRegistry` is the registration interface: only the session composition
   root and source owners mutate it.
-- `ExpContext` may carry the read-only lookup facade so adapter default
+- `SessionEnv` may carry the read-only lookup facade so adapter default
   generation can use it without receiving app services or mutable registries.
 - Provider registration is owner-scoped. Owners can atomically replace all their
   providers or unregister as a group when a predictor reloads, a device changes,
@@ -72,7 +72,7 @@ Source references use a sibling concept to `EvalValue`, not an extension of
   once and replaces the token with the current value formatted as text. Plain
   strings in the wire contract are not globally interpreted.
 - Adapter definition may use the typed `value_source(...)` Seed; role-default
-  seeds may use `Source(...)`. Both resolve through `ExpContext.values` only when
+  seeds may use `Source(...)`. Both resolve through `SessionEnv.values` only when
   `MeasureCfgDefinition.instantiate(ctx)` creates a fresh cfg, then store ordinary
   direct values in the value tree. Restore與使用者編輯不保留或重跑lazy source。
 

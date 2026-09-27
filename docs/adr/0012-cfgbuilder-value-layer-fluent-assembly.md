@@ -42,7 +42,7 @@ def cfg_definition(cls) -> MeasureCfgDefinition:
     )
 ```
 
-`MeasureCfgBuilder` 不接收 `ExpContext`。它按呼叫順序保存 immutable ordered declarations，並在
+`MeasureCfgBuilder` 不接收 `SessionEnv`。它按呼叫順序保存 immutable ordered declarations，並在
 `build()` 時固定 static spec。`MeasureCfgDefinition.instantiate(ctx)` 只能解析 fresh default，不能
 增減 field、改型別、label、order 或 lock；materialized spec 必須精確等於 definition spec，否則
 Fast Fail。
@@ -92,7 +92,7 @@ builder只消費這份資料，不掃描任意 library name，也不複製 role 
 
 `zcu_tools.gui.cfg.CfgSchemaAssembler` 同步宣告 paired Spec/Value tree，負責 duplicate/parent conflict、
 default wrapping、choice binding、locked alignment、deep-copy snapshot與 one-shot build。它不認識
-`ExpContext`、Seed、role、MetaDict、ModuleLibrary、logical key或 generation policy（[[0045]]）。
+`SessionEnv`、Seed、role、MetaDict、ModuleLibrary、logical key或 generation policy（[[0045]]）。
 
 measure definition在 instantiate 後把 resolved defaults交給 assembler；autoflux
 `NodeSchemaBuilder`也使用同一 mechanics，但保留自己的 logical path、generation與section label policy。
