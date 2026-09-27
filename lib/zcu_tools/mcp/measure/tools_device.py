@@ -22,20 +22,27 @@ def devices(
             {
                 "name": item["name"],
                 "type": item["type_name"],
-                "connected": item["status"] == "connected",
+                "connected": item["status"] in ("connected", "setting_up"),
             }
             for item in ctx.session.read_internal("device.list", {})["devices"]
         ]
 
     snapshot = ctx.session.read_internal("device.snapshot", {"name": name})["snapshot"]
-    connected = snapshot["status"] == "connected"
+    status = snapshot["status"]
+    connected = status in ("connected", "setting_up")
     return {
         "name": snapshot["name"],
         "type": snapshot["type_name"],
         "address": snapshot["address"],
         "connected": connected,
         "error": snapshot["error"],
-        "fields": _live_fields(ctx, name) if connected else [],
+        "fields": (
+            _live_fields(ctx, name)
+            if status == "connected"
+            else snapshot["fields"]
+            if status == "setting_up"
+            else []
+        ),
     }
 
 
@@ -137,7 +144,7 @@ def device_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, 
 DEVICE_TOOLS: dict[str, dict[str, Any]] = {
     "devices": {
         "handler": devices,
-        "description": "List devices by name/type/connected, or read one device with its address, error and live field choices.",
+        "description": "List devices by name/type/connected, or read one device with its address, error and field choices. A setting_up device remains connected; detail reports its State-cached fields without polling hardware while the ramp runs.",
         "inputSchema": {
             "type": "object",
             "properties": {"name": {"type": "string", "minLength": 1}},

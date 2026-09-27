@@ -116,6 +116,7 @@ def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> N
     invoke("device_connect", {"name": "ramp", "type": "FakeDevice", "address": "none"})
     op = None
     try:
+        before = invoke("devices", {"name": "ramp"})
         running = invoke(
             "device_set",
             {"name": "ramp", "values": {"value": 0.25, "rampstep": 0.00001}},
@@ -124,6 +125,16 @@ def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> N
         op = running["op"]
         assert isinstance(op, int) and op > 0
         assert invoke("wait", {"op": op, "timeout": 0})["status"] == "running"
+        cached = call(sock, "device.snapshot", {"name": "ramp"})["result"]["snapshot"]
+        assert cached["status"] == "setting_up"
+        assert cached["info"] is not None
+        assert invoke("devices", {}) == [
+            {"name": "ramp", "type": "FakeDevice", "connected": True}
+        ]
+        detail = invoke("devices", {"name": "ramp"})
+        assert detail["connected"] is True
+        assert detail["fields"] == before["fields"]
+        assert cached["fields"] == before["fields"]
         cancelled = invoke("cancel", {"op": op})
         assert cancelled["status"] in ("cancelled", "cancelling")
         assert invoke("wait", {"op": op, "timeout": 3})["status"] == "cancelled"
