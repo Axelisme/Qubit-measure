@@ -5,7 +5,63 @@ from typing import Any
 
 import pytest
 
-from ._support import MeasureClient, make_client
+from ._support import MeasureClient, RpcResponder, WireTransport, make_client
+
+
+class DisconnectAfterProbe(WireTransport):
+    """Close the old GUI immediately after a connection-status probe."""
+
+    def __init__(self, responder: RpcResponder) -> None:
+        self.disconnect_after_probe = False
+        super().__init__(responder)
+
+    @property
+    def is_open(self) -> bool:
+        was_open = self._open
+        if self.disconnect_after_probe:
+            self.disconnect_after_probe = False
+            self._open = False
+        return was_open
+
+    @is_open.setter
+    def is_open(self, value: bool) -> None:
+        self._open = value
+
+
+def _restartable_operation_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[MeasureClient, DisconnectAfterProbe, WireTransport, int]:
+    def gui_reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        replies = {
+            "state.has_project": {"value": False},
+            "state.has_active_context": {"value": False},
+            "state.has_soc": {"value": False},
+            "context.active": {"label": None},
+            "device.list": {"devices": []},
+            "predictor.info": {"loaded": False},
+            "tab.snapshot": {"tabs": []},
+            "operation.active": {
+                "operations": [{"op": 1, "tab": "gui-tab", "kind": "run"}]
+            },
+        }
+        return replies[method]
+
+    client = make_client(tmp_path, gui_reply, port_is_open=lambda port: True)
+    first = DisconnectAfterProbe(gui_reply)
+    second = WireTransport(gui_reply)
+    for transport in (first, second):
+        transport.replies["rpc.catalog"] = client.transport.replies["rpc.catalog"]
+    client.transport = first
+    client.context.bridge.set_transport(None)
+    transports = iter((first, second))
+
+    def connect(port: int, token: str | None = None) -> str:
+        client.context.bridge.set_transport(next(transports))
+        return "connected"
+
+    monkeypatch.setattr(client.context.bridge, "connect", connect)
+    old_handle = client.call("connect", {"port": 9912})["status"]["running"][0]["op"]
+    return client, first, second, old_handle
 
 
 def discover_operation(client: MeasureClient, gui_id: int) -> int:
@@ -201,6 +257,54 @@ def test_reconnect_never_reuses_an_exposed_handle_for_the_same_gui_id(
         for method, params in second.sent
         if method in ("operation.await", "operation.cancel")
     ] == [1, 1]
+
+
+@pytest.mark.parametrize("tool", ("wait", "cancel"))
+def test_old_operation_handle_never_targets_reused_id_after_lookup_disconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str
+) -> None:
+    client, first, second, old_handle = _restartable_operation_client(
+        tmp_path, monkeypatch
+    )
+    second.replies["operation.await"] = {
+        "ok": True,
+        "result": {"reason": "completed", "status": "finished"},
+    }
+    second.replies["operation.cancel"] = {"ok": True, "result": {"status": "finished"}}
+
+    first.disconnect_after_probe = True
+    with pytest.raises(RuntimeError, match="unknown|expired|not connected"):
+        client.call(tool, {"op": old_handle})
+    assert not any(
+        method in ("operation.await", "operation.cancel") for method, _ in second.sent
+    ), second.sent
+    assert client.call("status", {})["running"][0]["op"] != old_handle
+
+
+def test_wait_does_not_read_reused_id_progress_after_gui_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, first, second, old_handle = _restartable_operation_client(
+        tmp_path, monkeypatch
+    )
+
+    def timeout_then_disconnect(params: dict[str, Any]) -> dict[str, Any]:
+        first.close()
+        return {"ok": True, "result": {"reason": "timeout"}}
+
+    first.replies["operation.await"] = timeout_then_disconnect
+    second.replies["operation.progress"] = {
+        "ok": True,
+        "result": {"active": True, "bars": [{"percent": 90.0}]},
+    }
+
+    with pytest.raises(RuntimeError, match="unknown|expired|not connected"):
+        client.call("wait", {"op": old_handle, "timeout": 0})
+    assert not any(method == "operation.progress" for method, _ in second.sent), (
+        second.sent
+    )
+    assert any(method == "operation.await" for method, _ in first.sent)
+    assert client.call("status", {})["running"][0]["op"] != old_handle
 
 
 def test_started_operation_and_gui_status_share_one_agent_handle(

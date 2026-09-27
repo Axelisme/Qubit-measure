@@ -363,13 +363,21 @@ class MeasureMcpSession:
             token=self._auth_token,
         )
 
-    def read_internal(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    def read_internal(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        operation_handle: int | None = None,
+    ) -> dict[str, Any]:
         """Read a known GUI orientation method without exporting it to rpc_call.
 
-        The caller names only shipped read operations. No MCP method or guard
-        registry is maintained for these GUI-owned internal reads.
+        The caller names shipped GUI methods, including operation control. No MCP
+        method or guard registry is maintained for these GUI-owned calls.
         """
         self.ensure_connected()
+        if operation_handle is not None:
+            params = self._params_for_operation(params, operation_handle)
         entry = self._catalog.get(method)
         observed = self._read_revealed_versions(entry, params)
         reply = self.bridge.send_rpc_raw(method, params, 6.0)
@@ -486,9 +494,12 @@ class MeasureMcpSession:
         timeout_seconds: float | None = None,
         *,
         rpc_only: bool = False,
+        operation_handle: int | None = None,
     ) -> dict[str, Any]:
         """One guarded send; transport failure never retries an ambiguous mutation."""
         self.ensure_connected()
+        if operation_handle is not None:
+            params = self._params_for_operation(params, operation_handle)
         entry = self._catalog.get(method)
         if entry is None:
             raise GuiRpcError(f"unknown GUI method {method!r}", reason="unknown_method")
@@ -557,12 +568,15 @@ class MeasureMcpSession:
             self._gui_operations[gui_id] = handle
         return handle
 
-    def gui_operation_id(self, handle: int) -> int:
-        """Reject handles from an earlier GUI before sending wait or cancel."""
-        self.ensure_connected()
+    def _params_for_operation(
+        self, params: dict[str, Any], handle: int
+    ) -> dict[str, Any]:
+        """Resolve the handle on the selected GUI before sending, without reconnecting."""
+        if "operation_id" in params:
+            raise ValueError("pass an operation handle, not a GUI operation id")
         for gui_id, exposed in self._gui_operations.items():
             if exposed == handle:
-                return gui_id
+                return {**params, "operation_id": gui_id}
         raise GuiRpcError("unknown or expired operation", reason="unknown_op")
 
     def operation_handle_for_key(self, key: str) -> int | None:

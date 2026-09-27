@@ -25,6 +25,8 @@ class MeasureToolContext:
         method: str,
         params: dict[str, Any],
         timeout_seconds: float | None = None,
+        *,
+        operation_handle: int | None = None,
     ) -> dict[str, Any]:
         """Send a known GUI method using its live timeout unless overridden."""
         if timeout_seconds is None:
@@ -37,4 +39,6 @@ class MeasureToolContext:
                     f"unknown GUI method {method!r}", reason="unknown_method"
                 )
             timeout_seconds = entry["timeout_seconds"] + 1.0
-        return self.session.send_gui_rpc(method, params, timeout_seconds)
+        return self.session.send_gui_rpc(
+            method, params, timeout_seconds, operation_handle=operation_handle
+        )
