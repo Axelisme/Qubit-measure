@@ -75,6 +75,9 @@ class RecordingHost:
     def remove_tab_widget(self, tab_id: str) -> None:
         self._log.add("host", "remove_tab_widget", tab_id)
 
+    def select_tab_widget(self, tab_id: str) -> None:
+        self._log.add("host", "select_tab_widget", tab_id)
+
     def has_tab_widget(self, tab_id: str) -> bool:
         self._log.add("host", "has_tab_widget", tab_id)
         return tab_id in self.tab_ids

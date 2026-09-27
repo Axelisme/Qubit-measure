@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.main.events.tab import (
+    TabActivatedPayload,
     TabAddedPayload,
     TabClosedPayload,
     TabContentChangedPayload,
@@ -37,6 +38,7 @@ class MainWindowEventHost(Protocol):
 
     def add_tab_widget(self, tab_id: str, adapter_name: str) -> None: ...
     def remove_tab_widget(self, tab_id: str) -> None: ...
+    def select_tab_widget(self, tab_id: str) -> None: ...
     def has_tab_widget(self, tab_id: str) -> bool: ...
     def view_tab_ids(self) -> list[str]: ...
 
@@ -245,6 +247,7 @@ class MainWindowEventCoordinator:
         self._subs.subscribe(bus, ContextSwitchedPayload, self._on_context_switched)
         self._subs.subscribe(bus, TabAddedPayload, self._on_tab_added)
         self._subs.subscribe(bus, TabClosedPayload, self._on_tab_closed)
+        self._subs.subscribe(bus, TabActivatedPayload, self._on_tab_activated)
         self._subs.subscribe(
             bus, TabContentChangedPayload, self._on_tab_content_changed
         )
@@ -297,6 +300,9 @@ class MainWindowEventCoordinator:
 
     def _on_tab_added(self, payload: TabAddedPayload) -> None:
         self._host.add_tab_widget(payload.tab_id, payload.adapter_name)
+
+    def _on_tab_activated(self, payload: TabActivatedPayload) -> None:
+        self._host.select_tab_widget(payload.tab_id)
 
     def _on_tab_closed(self, payload: TabClosedPayload) -> None:
         self._host.remove_tab_widget(payload.tab_id)

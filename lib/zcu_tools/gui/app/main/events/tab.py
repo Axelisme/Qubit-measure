@@ -18,6 +18,7 @@ class TabEvent(str, Enum):
     """Tab-lifecycle event names (wire names are the enum values)."""
 
     TAB_ADDED = "tab_added"
+    TAB_ACTIVATED = "tab_activated"
     TAB_CLOSED = "tab_closed"
     TAB_CONTENT_CHANGED = "tab_content_changed"
     TAB_INTERACTION_CHANGED = "tab_interaction_changed"
@@ -76,6 +77,14 @@ class TabClosedPayload(_TabPayload):
     """Payload for TAB_CLOSED."""
 
     EVENT: ClassVar[TabEvent] = TabEvent.TAB_CLOSED
+    tab_id: str
+
+
+@dataclass(frozen=True)
+class TabActivatedPayload(_TabPayload):
+    """Payload for an active tab change."""
+
+    EVENT: ClassVar[TabEvent] = TabEvent.TAB_ACTIVATED
     tab_id: str
 
 
