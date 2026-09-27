@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.main` — measure-gui
 
-**Last updated:** 2026-09-26 — frozen Run inputs
+**Last updated:** 2026-09-28 — State-owned artifact lifecycle
 
 `gui.app.main` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -76,17 +76,13 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
   presentation without selecting a subtab; Analysis remains an explicit user
   selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
-  action row放在`Measurement data`card之前，同時擁有capability-driven artifact rows、
-  high-contrast status rendering and the tab-local status lifecycle derived from
-  result availability, path/comment edits and true terminal save outcomes (not
-  persisted across process), with figure-gated save enablement while status still
-  tracks result lifecycle. The center owns the saveability decision and the ordered
-  Save All sequence (analysis→post→data with Fast Fail, never rolling back prior
-  successes); tracker/invariant failures Fast Fail and operational failures are
-  presented centrally, and async data completion is routed to the center. The center
-  also owns the tab-local unsaved-data decision; `MainWindow` consults it before
-  user-triggered tab/app closes, combines app-close data-loss and active-operation
-  risks into one confirmation, and keeps programmatic RPC shutdown non-interactive.
+  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現各artifact的
+  status、saveability與草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
+  `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
+  Save All依analysis→post→data順序執行並Fast Fail，不回滾已完成的存檔。
+  GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前
+  查詢其投影，並將app關閉的資料流失與active-operation風險合併確認。
+  Programmatic RPC shutdown不彈互動式確認。
   Save All updates that center in place: terminal status updates do not replace the Data
   pane or its widgets, and the data-path editor retains focus, cursor and selection.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure

@@ -10,11 +10,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.app.main.adapter import AnalysisMode
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
 from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.main.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.main.services.load import LoadDataError
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
-from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactKind
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 
 _SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
@@ -852,24 +852,15 @@ class MainWindow(QMainWindow):
     def _dispatch_artifact_save(
         self, tab_w: ExpTabWidget, kind: ArtifactKind, save_call: Callable[[], object]
     ) -> bool:
-        """One artifact's lifecycle: notify start, controller call, sync success/failure.
-
-        Tracker/invariant failures propagate (Fast Fail). Operational/file failures
-        are presented via dialog and return False for Fast Fail; no silent suppression.
-        For image artifacts, sync success is promoted immediately; data async
-        success arrives via :meth:`handle_save_data_finished`.
-        """
-        tab_w.notify_save_started(kind)
+        """Present operational errors; render the State-owned terminal outcome."""
         try:
             save_call()
         except (ExpectedError, OSError, ValueError) as exc:
-            tab_w.notify_save_failed(kind)
+            self.refresh_tab_interaction(tab_w.tab_id)
             self._present_save_error(kind, exc)
             return False
-        else:
-            if kind in (ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS):
-                tab_w.notify_save_succeeded(kind)
-            return True
+        self.refresh_tab_interaction(tab_w.tab_id)
+        return True
 
     def _on_save_data_clicked(self, tab_id: str) -> None:
         logger.info("_on_save_data_clicked: tab_id=%r", tab_id)
@@ -948,10 +939,7 @@ class MainWindow(QMainWindow):
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         tab_id = payload.tab_id
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        tab_w.handle_save_data_finished(payload)
+        self.refresh_tab_interaction(tab_id)
 
     # ------------------------------------------------------------------
     # Dialog API — single entry point shared by UI clicks and remote control

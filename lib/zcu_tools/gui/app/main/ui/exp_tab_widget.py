@@ -7,11 +7,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from zcu_tools.gui.app.main.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
-from zcu_tools.gui.app.main.ui.artifact_save_center import (
-    ArtifactKind,
-    ArtifactSaveCenter,
-)
+from zcu_tools.gui.app.main.artifact_tracker import ArtifactKind
+from zcu_tools.gui.app.main.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.main.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
@@ -73,7 +70,6 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.app.main.adapter import WritebackItem
     from zcu_tools.gui.app.main.controller import Controller
-    from zcu_tools.gui.app.main.events.completion import SaveDataFinishedPayload
     from zcu_tools.gui.app.main.services import TabSnapshot
 
 
@@ -456,6 +452,7 @@ class ExpTabWidget(QWidget):
 
         # ── Tab: Data (always) — save center ──────────────────────
         self._save_center = ArtifactSaveCenter(self.tab_id, capabilities)
+        self._save_center.bind_comment_changed(self._on_comment_changed)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
         save_scroll.setWidget(self._save_center)
@@ -788,21 +785,11 @@ class ExpTabWidget(QWidget):
     def get_comment(self) -> str:
         return self._save_center.get_comment()
 
-    # -- Data save center status delegation (S3) ------------------
-
-    def notify_save_started(self, kind: ArtifactKind) -> None:
-        """Capture pending signature for ``kind``."""
-        self._save_center.notify_save_started(kind)
-
-    def notify_save_succeeded(self, kind: ArtifactKind) -> None:
-        self._save_center.notify_save_succeeded(kind)
-
-    def notify_save_failed(self, kind: ArtifactKind) -> None:
-        self._save_center.notify_save_failed(kind)
-
-    def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
-        """Apply async data terminal outcome (error None => success)."""
-        self._save_center.handle_data_finished(payload.error)
+    def _on_comment_changed(self, text: str) -> None:
+        if self._actions is None:
+            return
+        self._ctrl.save_control.set_comment(self.tab_id, text)
+        self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
 
     def has_unsaved_data(self) -> bool:
         """Return True if this tab contains unsaved measurement data."""
@@ -1129,7 +1116,12 @@ class ExpTabWidget(QWidget):
             self.post_writeback_widget.setEnabled(
                 idle and state.has_context and state.has_post_analyze_result
             )
-        # Data save center owns all save-row enablement and status.
+        # The center renders the shared draft and State-owned artifact status.
+        if snapshot.save is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no save pane"
+            )
+        self._save_center.set_comment_text(snapshot.save.comment)
         self._save_center.update_interaction(snapshot)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
@@ -1142,18 +1134,21 @@ class ExpTabWidget(QWidget):
         def data_path_cb(_text: str) -> None:
             data_path = self.get_data_path()
             self._ctrl.update_tab_data_path(tab_id, data_path if data_path else None)
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
         def analysis_image_cb(_text: str) -> None:
             image_path = self.get_image_path()
             self._ctrl.update_tab_analysis_image_path(
                 tab_id, image_path if image_path else None
             )
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
         def post_image_cb(_text: str) -> None:
             image_path = self.get_post_image_path()
             self._ctrl.update_tab_post_analysis_image_path(
                 tab_id, image_path if image_path else None
             )
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
 
         self.cfg_form.validity_changed.connect(validity_cb)
 
