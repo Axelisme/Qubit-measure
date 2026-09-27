@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.device_errors import DeviceRegistrationError
+
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.gui.session.services.device import DeviceService
@@ -68,8 +71,18 @@ class ContextControlFacet:
         label: str | None = None,
     ) -> None:
         if bind_device is not None:
-            unit = self._device.get_device_unit_strict(bind_device)
+            try:
+                unit = self._device.get_device_unit_strict(bind_device)
+            except DeviceRegistrationError as exc:
+                raise InvalidInputError(
+                    str(exc), reason_code="invalid_bind_device"
+                ) from exc
             value = self._device.get_device_value_for_new_context(bind_device)
+            if value is None:
+                raise FailedPreconditionError(
+                    f"device {bind_device!r} has no current numeric value",
+                    reason_code="missing_device_value",
+                )
         else:
             unit, value = "none", None
         self._context.new_context(
