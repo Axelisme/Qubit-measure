@@ -20,11 +20,11 @@ from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm
 
-from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2linearform
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
-from .models import compile_transitions, count_max_evals, energy2linearform
+from .models import compile_transitions, count_max_evals
 
 
 @lru_cache(maxsize=4)

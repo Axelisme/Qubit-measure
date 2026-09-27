@@ -3,10 +3,12 @@ import pytest
 from zcu_tools.analysis.fluxdep.models import (
     TransitionDict as AnalysisTransitionDict,
 )
+from zcu_tools.analysis.fluxdep.models import (
+    energy2linearform,
+)
 from zcu_tools.notebook.analysis.fluxdep.models import (
     TransitionDict,
     compile_transitions,
-    energy2linearform,
 )
 from zcu_tools.notebook.analysis.fluxdep.njit import energy2linearform_nb
 
