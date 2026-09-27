@@ -1,6 +1,6 @@
 # `gui.app.main.services.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-09-27，MCP 85 / GUI 95 / WIRE 63
+**Last updated:** 2026-09-27，MCP 86 / GUI 96 / WIRE 64（predictor calibration）
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto

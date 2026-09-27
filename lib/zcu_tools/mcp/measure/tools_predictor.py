@@ -87,6 +87,13 @@ def predict(ctx: MeasureToolContext, arguments: dict[str, Any]) -> list[dict[str
     ]
 
 
+def predictor_calibrate(
+    ctx: MeasureToolContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Calibrate the installed GUI predictor from one measured frequency."""
+    raise NotImplementedError("predictor_calibrate dispatch is not implemented")
+
+
 PREDICTOR_TOOLS: dict[str, dict[str, Any]] = {
     "predictor_info": {
         "handler": predictor_info,
@@ -103,6 +110,19 @@ PREDICTOR_TOOLS: dict[str, dict[str, Any]] = {
                 "model": _MODEL,
                 "flux_bias": {"type": "number", "default": 0.0},
             },
+        },
+    },
+    "predictor_calibrate": {
+        "handler": predictor_calibrate,
+        "description": "Calibrate the GUI predictor flux bias from one measured transition frequency in MHz at a native-unit device value; returns before/after bias.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "number"},
+                "freq_mhz": {"type": "number"},
+                "transition": {**_TRANSITION, "default": [0, 1]},
+            },
+            "required": ["value", "freq_mhz"],
         },
     },
     "predict": {

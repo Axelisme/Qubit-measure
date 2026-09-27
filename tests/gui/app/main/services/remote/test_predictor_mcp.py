@@ -74,6 +74,22 @@ def test_predictor_install_and_multiple_transitions_share_gui_state(
             assert freq == pytest.approx(gui["freq_mhz"])
             assert freq > 0
 
+        measured = call(
+            sock,
+            "predictor.predict",
+            {"device_value": 0.18, "from_level": 0, "to_level": 1},
+        )["result"]["freq_mhz"]
+        calibrated = invoke(
+            "predictor_calibrate", {"value": 0.15, "freq_mhz": measured}
+        )
+        assert calibrated["flux_bias_before"] == pytest.approx(0.0)
+        assert calibrated["flux_bias_after"] == pytest.approx(
+            call(sock, "predictor.info")["result"]["flux_bias"]
+        )
+        assert calibrated["flux_bias_after"] != pytest.approx(0.0)
+        at_point = _prediction_rows(invoke("predict", {"value": 0.15}))
+        assert at_point[0]["freq_mhz"] == pytest.approx(measured, rel=1e-5)
+
         params_path = tmp_path / "params.json"
         params = QubitParams(params_path)
         params.ensure_project(ParamsProject("chip", "qubit"))
