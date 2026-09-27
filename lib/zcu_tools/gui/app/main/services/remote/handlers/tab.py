@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from ._common import render_view
 
 
-def _h_tab_new(
+def h_tab_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["adapter_name"])
@@ -24,7 +24,7 @@ def _h_tab_new(
     return {"tab_id": tab_id}
 
 
-def _h_tab_close(
+def h_tab_close(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -34,7 +34,7 @@ def _h_tab_close(
     return {"ok": True}
 
 
-def _h_tab_set_active(
+def h_tab_set_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
@@ -44,7 +44,7 @@ def _h_tab_set_active(
     return {"ok": True}
 
 
-def _h_tab_list_all(
+def h_tab_list_all(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -98,7 +98,7 @@ def _tab_snapshot_wire(adapter: RemoteControlAdapter, tab_id: str) -> dict[str, 
     }
 
 
-def _h_tab_snapshot(
+def h_tab_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Always returns {tabs: [...]} (a single tab_id yields a one-element list);
@@ -125,7 +125,7 @@ def _save_paths_wire(paths) -> dict[str, str | None] | None:
     }
 
 
-def _h_tab_get_cfg(
+def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from ..cfg_observation import build_cfg_observation
@@ -147,7 +147,7 @@ def _h_tab_get_cfg(
     return {"tree": build_cfg_observation(draft, prefix=prefix)}
 
 
-def _h_tab_set_cfg(
+def h_tab_set_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])

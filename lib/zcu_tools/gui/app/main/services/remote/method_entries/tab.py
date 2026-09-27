@@ -15,7 +15,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.new",
-        "tab:_h_tab_new",
+        "tab:h_tab_new",
         MethodSpec(
             10.0,
             "Create a new tab for the named adapter. Returns {tab_id}.",
@@ -27,13 +27,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.close",
-        "tab:_h_tab_close",
+        "tab:h_tab_close",
         MethodSpec(5.0, "Close a tab. Returns {ok: true}.", (_str("tab_id"),)),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "tab.set_active",
-        "tab:_h_tab_set_active",
+        "tab:h_tab_set_active",
         MethodSpec(
             5.0,
             "Activate a tab. VIEW-ONLY: this changes which tab the user sees, NOT your "
@@ -43,7 +43,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.list_all",
-        "tab:_h_tab_list_all",
+        "tab:h_tab_list_all",
         MethodSpec(
             5.0,
             "List all open tabs. Returns {tabs, active_tab_id, running_tab_id}: tabs "
@@ -55,7 +55,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.snapshot",
-        "tab:_h_tab_snapshot",
+        "tab:h_tab_snapshot",
         MethodSpec(
             5.0,
             "Tab summary. Pass tab_id to fully inspect this tab's existence; "
@@ -69,7 +69,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.get_cfg",
-        "tab:_h_tab_get_cfg",
+        "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
             CFG_OBSERVATION_DESCRIPTION,
@@ -88,7 +88,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.set_cfg",
-        "tab:_h_tab_set_cfg",
+        "tab:h_tab_set_cfg",
         MethodSpec(
             5.0,
             "Batch-set canonical cfg paths on a tab in order (fail-fast, non-atomic). "

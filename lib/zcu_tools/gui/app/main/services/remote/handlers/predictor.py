@@ -9,10 +9,10 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 # The method-entry registry imports this callable by name at runtime.
-__all__ = ["_h_predictor_calibrate"]
+__all__ = ["h_predictor_calibrate"]
 
 
-def _h_predictor_load(
+def h_predictor_load(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.predictor import LoadPredictorRequest
@@ -31,7 +31,7 @@ def _h_predictor_load(
     return {"loaded": True, **info}
 
 
-def _h_predictor_set_model_params(
+def h_predictor_set_model_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
@@ -53,7 +53,7 @@ def _h_predictor_set_model_params(
     return {"loaded": True, **info}
 
 
-def _h_predictor_clear(
+def h_predictor_clear(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -61,7 +61,7 @@ def _h_predictor_clear(
     return {"loaded": False}
 
 
-def _h_predictor_predict(
+def h_predictor_predict(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.predictor import PredictFreqRequest
@@ -75,7 +75,7 @@ def _h_predictor_predict(
     return {"freq_mhz": freq}
 
 
-def _h_predictor_calibrate(
+def h_predictor_calibrate(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
@@ -103,7 +103,7 @@ def _h_predictor_calibrate(
     }
 
 
-def _h_predictor_info(
+def h_predictor_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params

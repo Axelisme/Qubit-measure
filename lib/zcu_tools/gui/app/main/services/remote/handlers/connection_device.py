@@ -56,7 +56,7 @@ def coerce_disconnect_device_request(
     )
 
 
-def _h_soc_connect(
+def h_soc_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # Synchronous connect: runs on the Qt main thread (the IO worker blocks on the
@@ -75,7 +75,7 @@ def _h_soc_connect(
     return {"soc": {"description": info["description"], "is_mock": info["is_mock"]}}
 
 
-def _h_startup_apply(
+def h_startup_apply(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from zcu_tools.gui.session.services.startup import StartupProjectRequest
@@ -113,7 +113,7 @@ def _h_startup_apply(
     return adapter.ctrl.apply_startup_project(req)
 
 
-def _h_device_connect(
+def h_device_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_connect_device_request(params)
@@ -122,7 +122,7 @@ def _h_device_connect(
     return {"operation_id": operation_id}
 
 
-def _h_device_disconnect(
+def h_device_disconnect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     req = coerce_disconnect_device_request(params)
@@ -131,7 +131,7 @@ def _h_device_disconnect(
     return {"operation_id": operation_id}
 
 
-def _h_device_reconnect(
+def h_device_reconnect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -142,7 +142,7 @@ def _h_device_reconnect(
     return {"operation_id": operation_id}
 
 
-def _h_device_forget(
+def h_device_forget(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -153,7 +153,7 @@ def _h_device_forget(
     return {"forgotten": name}
 
 
-def _h_device_setup(
+def h_device_setup(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -222,7 +222,7 @@ def _device_fields(info: BaseDeviceInfo) -> list[dict[str, object]]:
     return fields
 
 
-def _h_device_setup_spec(
+def h_device_setup_spec(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -235,7 +235,7 @@ def _h_device_setup_spec(
     return {"fields": _device_fields(info)}
 
 
-def _h_device_cancel_operation(
+def h_device_cancel_operation(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
@@ -246,7 +246,7 @@ def _h_device_cancel_operation(
     return {"ok": True, "cancelled": True}
 
 
-def _h_device_active_operations(
+def h_device_active_operations(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -271,7 +271,7 @@ def _h_device_active_operations(
     }
 
 
-def _h_device_list(
+def h_device_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
@@ -289,7 +289,7 @@ def _h_device_list(
     return {"devices": devices}
 
 
-def _h_device_snapshot(
+def h_device_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])

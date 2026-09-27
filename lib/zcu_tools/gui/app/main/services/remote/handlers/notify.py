@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _h_notify_open(
+def h_notify_open(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     message = str(params["message"])
@@ -24,7 +24,7 @@ def _h_notify_open(
     return {"token": token}
 
 
-def _h_notify_await(
+def h_notify_await(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     # off_main_thread handler: blocks the IO worker on the thread-safe

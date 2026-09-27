@@ -16,7 +16,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "soc.connect",
-        "connection_device:_h_soc_connect",
+        "connection_device:h_soc_connect",
         MethodSpec(
             # Synchronous connect (runs on the main thread; the IO worker blocks on it).
             # Bounded by make_soc_proxy's 1s COMMTIMEOUT for a remote board (mock is
@@ -38,7 +38,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "startup.apply",
-        "connection_device:_h_startup_apply",
+        "connection_device:h_startup_apply",
         MethodSpec(
             30.0,
             "Atomically update project chip / qubit / resonator names; omitted names "
@@ -64,7 +64,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.connect",
-        "connection_device:_h_device_connect",
+        "connection_device:h_device_connect",
         MethodSpec(
             30.0,
             "Connect a hardware device by driver type, friendly name, and address. "
@@ -91,7 +91,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.disconnect",
-        "connection_device:_h_device_disconnect",
+        "connection_device:h_device_disconnect",
         MethodSpec(
             30.0,
             "Disconnect a registered device by name via rpc_call. The call starts "
@@ -113,7 +113,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.reconnect",
-        "connection_device:_h_device_reconnect",
+        "connection_device:h_device_reconnect",
         MethodSpec(
             30.0,
             "Reconnect a remembered (memory-only) device by name, reusing its stored "
@@ -128,7 +128,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.forget",
-        "connection_device:_h_device_forget",
+        "connection_device:h_device_forget",
         MethodSpec(
             5.0,
             "Forget a memory-only device (synchronous). Echoes {forgotten: name}.",
@@ -138,7 +138,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.setup",
-        "connection_device:_h_device_setup",
+        "connection_device:h_device_setup",
         MethodSpec(
             30.0,
             "Apply 'updates' to a connected device by name via rpc_call. "
@@ -153,7 +153,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.setup_spec",
-        "connection_device:_h_device_setup_spec",
+        "connection_device:h_device_setup_spec",
         MethodSpec(
             5.0,
             "List the fields accepted by device.setup's 'updates' for a connected "
@@ -167,7 +167,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.cancel_operation",
-        "connection_device:_h_device_cancel_operation",
+        "connection_device:h_device_cancel_operation",
         MethodSpec(
             5.0,
             "Request cancellation of the named device's in-flight operation. Returns "
@@ -180,7 +180,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.active_operations",
-        "connection_device:_h_device_active_operations",
+        "connection_device:h_device_active_operations",
         MethodSpec(
             5.0,
             "List EVERY in-flight device operation (connect / disconnect / apply run "
@@ -193,7 +193,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.list",
-        "connection_device:_h_device_list",
+        "connection_device:h_device_list",
         MethodSpec(
             5.0,
             "List registered devices with their current lifecycle status: "
@@ -207,7 +207,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "device.snapshot",
-        "connection_device:_h_device_snapshot",
+        "connection_device:h_device_snapshot",
         MethodSpec(
             5.0,
             "Read one device's full cached snapshot — the richest single-device read: "

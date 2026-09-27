@@ -15,7 +15,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "tab.writeback_preview",
-        "writeback:_h_tab_writeback_preview",
+        "writeback:h_tab_writeback_preview",
         MethodSpec(
             5.0,
             "List a pane's persistent writeback draft (pure read — not a dry-run; the "
@@ -37,7 +37,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.writeback_set",
-        "writeback:_h_tab_writeback_set",
+        "writeback:h_tab_writeback_set",
         MethodSpec(
             5.0,
             "Edit a pane's persistent writeback item by id — the single writeback "
@@ -93,7 +93,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "tab.writeback_apply",
-        "writeback:_h_tab_writeback_apply",
+        "writeback:h_tab_writeback_apply",
         MethodSpec(
             10.0,
             "Apply a pane's persistent writeback draft as-is (edit it first via "

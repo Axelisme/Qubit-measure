@@ -15,7 +15,7 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "predictor.load",
-        "predictor:_h_predictor_load",
+        "predictor:h_predictor_load",
         MethodSpec(
             30.0,
             "Install a FluxoniumPredictor from a params.json file (its fluxdep_fit "
@@ -30,7 +30,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.set_model_params",
-        "predictor:_h_predictor_set_model_params",
+        "predictor:h_predictor_set_model_params",
         MethodSpec(
             10.0,
             "Build+install a FluxoniumPredictor directly from typed model params "
@@ -55,7 +55,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.clear",
-        "predictor:_h_predictor_clear",
+        "predictor:h_predictor_clear",
         MethodSpec(
             5.0,
             "Unload the current predictor (idempotent — succeeds with no predictor "
@@ -65,7 +65,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.predict",
-        "predictor:_h_predictor_predict",
+        "predictor:h_predictor_predict",
         MethodSpec(
             10.0,
             "Predict a transition frequency at a device-value setpoint. Returns "
@@ -85,7 +85,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.calibrate",
-        "predictor:_h_predictor_calibrate",
+        "predictor:h_predictor_calibrate",
         MethodSpec(
             30.0,
             "Calibrate the installed predictor flux_bias from one measured transition "
@@ -103,7 +103,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     method_entry(
         "predictor.info",
-        "predictor:_h_predictor_info",
+        "predictor:h_predictor_info",
         MethodSpec(
             5.0,
             "Read the current predictor's installed model. Returns {loaded: false} "

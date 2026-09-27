@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _h_editor_new(
+def h_editor_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from ..cfg_observation import build_cfg_observation
@@ -26,7 +26,7 @@ def _h_editor_new(
     return {"editor_id": editor_id, "tree": build_cfg_observation(draft)}
 
 
-def _h_editor_set_field(
+def h_editor_set_field(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     editor_id = str(params["editor_id"])
@@ -44,7 +44,7 @@ def _h_editor_set_field(
     return adapter.ctrl.cfg_editor_set_field(editor_id, path, value).to_wire()
 
 
-def _h_editor_get(
+def h_editor_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     from ..cfg_observation import build_cfg_observation
@@ -57,7 +57,7 @@ def _h_editor_get(
     return {"tree": build_cfg_observation(draft, prefix=prefix)}
 
 
-def _h_editor_commit(
+def h_editor_commit(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     editor_id = str(params["editor_id"])
@@ -66,7 +66,7 @@ def _h_editor_commit(
     return {}
 
 
-def _h_editor_discard(
+def h_editor_discard(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     editor_id = str(params["editor_id"])
