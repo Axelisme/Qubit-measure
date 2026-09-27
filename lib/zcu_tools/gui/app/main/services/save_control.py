@@ -23,7 +23,7 @@ class SaveControlPort(Protocol):
     def has_tab(self, tab_id: str) -> bool: ...
 
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str = ""
+        self, tab_id: str, data_path: str | None = None, comment: str | None = None
     ) -> str: ...
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str: ...
@@ -57,14 +57,19 @@ class SaveControlFacet:
         return self._state.has_tab(tab_id)
 
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str = ""
+        self, tab_id: str, data_path: str | None = None, comment: str | None = None
     ) -> str:
         permit = self._guard.acquire_save_permit(tab_id)
         self._require_tab_idle(tab_id)
-        resolved = data_path or self._tab.get_tab_data_path(tab_id)
+        if data_path is not None:
+            self._tab.update_tab_data_path_override(tab_id, data_path)
+        if comment is not None:
+            self._state.update_tab_comment(tab_id, comment)
+        resolved = self._tab.get_tab_data_path(tab_id)
         if resolved is None:
             raise FailedPreconditionError(f"Tab {tab_id!r} has no data path configured")
-        return self._save.start_save_data(permit, resolved, comment=comment)
+        draft_comment = self._state.get_tab(tab_id).save.comment
+        return self._save.start_save_data(permit, resolved, comment=draft_comment)
 
     def save_image(self, tab_id: str, image_path: str | None = None) -> str:
         permit = self._guard.acquire_save_permit(tab_id)

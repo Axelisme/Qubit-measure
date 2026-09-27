@@ -91,7 +91,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:_h_tab_save_data",
         MethodSpec(
             30.0,
-            "Save data file (tab-only).",
+            "Save data file (tab-only). Explicit data_path/comment update the GUI Save "
+            "draft before saving; omitted values keep the existing draft.",
             (
                 _str("tab_id"),
                 _str_opt("data_path", "Override data path"),

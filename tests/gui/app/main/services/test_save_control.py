@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -14,6 +15,15 @@ from tests.gui._control_fakes import CallLog, call
 class RecordingState:
     def __init__(self, log: CallLog) -> None:
         self._log = log
+        self.comment = "existing draft"
+
+    def get_tab(self, tab_id: str) -> SimpleNamespace:
+        self._log.add("state", "get_tab", tab_id)
+        return SimpleNamespace(save=SimpleNamespace(comment=self.comment))
+
+    def update_tab_comment(self, tab_id: str, comment: str) -> None:
+        self._log.add("state", "update_tab_comment", tab_id, comment)
+        self.comment = comment
 
     def has_tab(self, tab_id: str) -> bool:
         self._log.add("state", "has_tab", tab_id)
@@ -43,6 +53,10 @@ class RecordingTab:
     def get_tab_data_path(self, tab_id: str) -> str | None:
         self._log.add("tab", "get_tab_data_path", tab_id)
         return self.data_path
+
+    def update_tab_data_path_override(self, tab_id: str, path: str) -> None:
+        self._log.add("tab", "update_tab_data_path_override", tab_id, path)
+        self.data_path = path
 
     def get_tab_analysis_image_path(self, tab_id: str) -> str | None:
         self._log.add("tab", "get_tab_analysis_image_path", tab_id)
@@ -119,24 +133,46 @@ def test_has_tab_reads_state() -> None:
     assert log.calls == [call("state", "has_tab", "tab-1")]
 
 
-def test_save_data_uses_explicit_path_without_resolving_defaults() -> None:
-    facet, log, _state, _tab, _save, _bus, _notifications = _facet()
+def test_save_data_applies_explicit_path_and_comment_to_shared_draft() -> None:
+    facet, log, state, tab, _save, _bus, _notifications = _facet()
 
     assert facet.save_data("tab-1", "explicit.h5", comment="note") == (
         "written:explicit.h5"
     )
+    assert tab.data_path == "explicit.h5"
+    assert state.comment == "note"
+    assert (
+        call("tab", "update_tab_data_path_override", "tab-1", "explicit.h5")
+        in log.calls
+    )
+    assert call("state", "update_tab_comment", "tab-1", "note") in log.calls
+    assert log.calls[-1] == call(
+        "save", "start_save_data", "permit:tab-1", "explicit.h5", comment="note"
+    )
 
-    assert log.calls == [
-        call("guard", "acquire_save_permit", "tab-1"),
-        call("state", "is_tab_busy", "tab-1"),
-        call(
-            "save",
-            "start_save_data",
-            "permit:tab-1",
-            "explicit.h5",
-            comment="note",
-        ),
-    ]
+
+def test_save_data_omissions_inherit_draft_but_explicit_empty_comment_clears_it() -> (
+    None
+):
+    facet, log, state, tab, _save, _bus, _notifications = _facet()
+
+    assert facet.save_data("tab-1") == "written:default.h5"
+    assert log.calls[-1] == call(
+        "save",
+        "start_save_data",
+        "permit:tab-1",
+        "default.h5",
+        comment="existing draft",
+    )
+    assert state.comment == "existing draft"
+    assert tab.data_path == "default.h5"
+    assert not any(entry.method == "update_tab_comment" for entry in log.calls)
+
+    assert facet.save_data("tab-1", comment="") == "written:default.h5"
+    assert state.comment == ""
+    assert log.calls[-1] == call(
+        "save", "start_save_data", "permit:tab-1", "default.h5", comment=""
+    )
 
 
 def test_save_image_uses_default_path_and_notifies() -> None:

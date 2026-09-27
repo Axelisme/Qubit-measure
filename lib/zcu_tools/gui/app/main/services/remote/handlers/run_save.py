@@ -71,9 +71,11 @@ def _h_tab_save_data(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     data_path = params["data_path"]
-    comment = str(params["comment"])
+    comment = params["comment"]
     written = adapter.save_control.save_data(
-        tab_id, str(data_path) if data_path is not None else None, comment=comment
+        tab_id,
+        str(data_path) if data_path is not None else None,
+        comment=str(comment) if comment is not None else None,
     )
     # The save runs async, but the resolved path (.hdf5 + uniqueness suffix) is
     # known synchronously — return it so the caller need not recover it from a

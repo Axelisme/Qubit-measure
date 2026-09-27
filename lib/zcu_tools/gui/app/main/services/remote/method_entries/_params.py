@@ -77,5 +77,8 @@ def _bool_default(name: str, default: bool, desc: str = "") -> ParamSpec:
 
 def _comment() -> ParamSpec:
     return ParamSpec(
-        "comment", JsonType.STRING, required=False, default="", description="Comment"
+        "comment",
+        JsonType.STRING,
+        required=False,
+        description="Omit to use the current GUI Save comment draft",
     )

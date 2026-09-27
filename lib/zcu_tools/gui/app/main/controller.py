@@ -942,7 +942,7 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str = ""
+        self, tab_id: str, data_path: str | None = None, comment: str | None = None
     ) -> str:
         return self._save_control.save_data(tab_id, data_path, comment=comment)
 
