@@ -77,12 +77,28 @@ def md_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
 
 def soc_info(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read the GUI's connection and hardware projection."""
-    raise NotImplementedError("03 soc_info tool has no implementation yet")
+    connected = bool(ctx.session.read_internal("state.has_soc", {})["value"])
+    if not connected:
+        return {
+            "connected": False,
+            "address": None,
+            "port": None,
+            "description": None,
+            "is_mock": False,
+        }
+    info = ctx.session.read_internal(
+        "soc.info", {"include_cfg": arguments.get("include_cfg", False)}
+    )
+    return {"connected": True, **info}
 
 
 def soc_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Synchronously connect the GUI to a remote board and read its info."""
-    raise NotImplementedError("03 soc_connect tool has no implementation yet")
+    ctx.send_gui_rpc(
+        "soc.connect",
+        {"kind": "remote", "ip": arguments["address"], "port": arguments["port"]},
+    )
+    return soc_info(ctx, {"include_cfg": False})
 
 
 def md_set(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:

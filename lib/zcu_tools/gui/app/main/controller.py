@@ -636,27 +636,15 @@ class Controller(SessionControllerMixin):
         return self._soc_svc.has_soc()
 
     def get_soc_info(self, include_cfg: bool = False) -> dict[str, object]:
-        """Hardware summary of the connected SoC (QICK soccfg): a compact
-        per-channel description (generator/readout type, converter port, sample
-        rate, max pulse/buffer length) + ``is_mock``. The structured cfg (the full
-        ~2 KB QICK config) is only computed and included when ``include_cfg`` is
-        true — the common reader (overview assembly) needs only is_mock, so the
-        cfg deserialization is opt-in rather than paid on every call.
-        Raises if no SoC is connected (→ precondition_failed)."""
-        from zcu_tools.program import describe_soc
+        """Read the connected board's GUI-owned compact or full hardware view."""
+        from .services.soc_view import project_soc_info
 
-        soccfg = self._soc_svc.get_soccfg()
-        if soccfg is None:
-            raise FailedPreconditionError("No SoC connected")
-        info: dict[str, object] = {
-            "description": describe_soc(soccfg),
-            "is_mock": self._soc_svc.is_mock_soc(),
-        }
-        if include_cfg:
-            import json
-
-            info["cfg"] = json.loads(soccfg.dump_cfg())
-        return info
+        return project_soc_info(
+            self._soc_svc.get_soccfg(),
+            is_mock=self._soc_svc.is_mock_soc(),
+            endpoint=self._soc_svc.connected_endpoint(),
+            include_cfg=include_cfg,
+        )
 
     def resources_versions(self) -> dict[str, int]:
         """Full resource-version snapshot (the resources.versions RPC payload)."""

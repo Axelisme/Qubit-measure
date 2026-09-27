@@ -258,6 +258,54 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     assert not svc.is_connect_active()
 
 
+def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
+    qapp, monkeypatch
+):
+    import zcu_tools.remote as remote
+    from zcu_tools.program.v2.mocksoc import make_mock_soc
+
+    svc, _bg, _handles = _make_svc()
+    svc.connect_sync(ConnectMockRequest())
+    assert svc.is_mock_soc()
+    assert svc.connected_endpoint() == {"address": None, "port": None}
+
+    def proxy(ip: str, port: int):
+        assert (ip, port) == ("192.0.2.1", 8888)
+        return make_mock_soc()
+
+    monkeypatch.setattr(remote, "make_soc_proxy", proxy)
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    assert not svc.is_mock_soc()
+    assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
+
+    def fail(ip: str, port: int):
+        raise ConnectionRefusedError("offline")
+
+    monkeypatch.setattr(remote, "make_soc_proxy", fail)
+    with pytest.raises(ConnectionRefusedError, match="offline"):
+        svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
+    assert svc.has_soc()
+    assert not svc.is_mock_soc()
+    assert svc.connected_endpoint() == {"address": "192.0.2.1", "port": 8888}
+
+
+def test_gui_async_remote_connect_updates_the_successful_endpoint(qapp, monkeypatch):
+    import zcu_tools.remote as remote
+    from zcu_tools.program.v2.mocksoc import make_mock_soc
+
+    def proxy(ip: str, port: int):
+        assert (ip, port) == ("192.0.2.3", 8000)
+        return make_mock_soc()
+
+    monkeypatch.setattr(remote, "make_soc_proxy", proxy)
+    svc, background, _handles = _make_svc()
+    svc.start_connect(ConnectRemoteRequest(ip="192.0.2.3", port=8000))
+    assert svc.connected_endpoint() == {"address": None, "port": None}
+    background.deliver_result()
+    assert svc.has_soc()
+    assert svc.connected_endpoint() == {"address": "192.0.2.3", "port": 8000}
+
+
 def test_connect_sync_rejects_concurrent_calls(qapp):
     """connect_sync holds the same SOC_CONNECT lease as the async path, so a
     concurrent connect (or the GUI button) fast-fails."""
