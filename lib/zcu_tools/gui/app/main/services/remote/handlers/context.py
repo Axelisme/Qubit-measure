@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from zcu_tools.gui.measure_cfg import PROGRAM_SHAPES
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
@@ -202,21 +203,58 @@ def _h_value_read(
 def _h_context_ml_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    if params.get("name") is not None:
-        raise NotImplementedError("named ModuleLibrary read pending 06 writer")
     ml = adapter.context_control.get_current_ml()
-    # Each stored cfg is a pydantic discriminated-union value: modules tag on
-    # 'type' (e.g. 'pulse', 'reset/bath'), waveforms on 'style' (e.g. 'gauss').
-    # Surface the discriminator so the agent can tell entry kinds apart without
-    # opening each one via rpc_call on editor.new(item_kind=..., from_name=...).
+    raw_name = params.get("name")
+    raw_kind = params.get("kind")
+    if raw_kind is not None and raw_kind not in ("module", "waveform"):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "kind must be 'module' or 'waveform'"
+        )
+    if raw_name is not None:
+        if not isinstance(raw_name, str) or not raw_name:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, "name must be nonempty")
+        matches = [
+            kind
+            for kind, collection in (("module", ml.modules), ("waveform", ml.waveforms))
+            if raw_name in collection
+        ]
+        if not matches:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"unknown library name {raw_name!r}; available modules: "
+                f"{sorted(ml.modules)}, waveforms: {sorted(ml.waveforms)}",
+            )
+        if raw_kind is None and len(matches) > 1:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"ambiguous library name {raw_name!r}; supply kind='module' or 'waveform'",
+            )
+        if raw_kind is not None and raw_kind not in matches:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"no {raw_kind} named {raw_name!r}; available kinds: {matches}",
+            )
+        kind = raw_kind or matches[0]
+        cfg = ml.modules[raw_name] if kind == "module" else ml.waveforms[raw_name]
+        return {"name": raw_name, "kind": kind, "cfg": cfg.to_dict()}
+
+    # Descriptions belong to the GUI's live shape catalog, not an MCP copy.
     return {
         "modules": [
-            {"name": name, "kind": getattr(ml.modules[name], "type")}
-            for name in sorted(ml.modules.keys())
+            {
+                "name": name,
+                "kind": cfg.type,
+                "description": PROGRAM_SHAPES.module(cfg.type).label,
+            }
+            for name, cfg in sorted(ml.modules.items())
         ],
         "waveforms": [
-            {"name": name, "style": getattr(ml.waveforms[name], "style")}
-            for name in sorted(ml.waveforms.keys())
+            {
+                "name": name,
+                "style": cfg.style,
+                "description": PROGRAM_SHAPES.waveform(cfg.style).label,
+            }
+            for name, cfg in sorted(ml.waveforms.items())
         ],
     }
 

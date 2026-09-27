@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 _NAME = {"type": "string", "minLength": 1}
@@ -21,24 +22,117 @@ _EDITS = {
 
 def ml_get(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Read the library index or one stored cfg without changing the library."""
-    raise NotImplementedError
+    return ctx.send_gui_rpc("context.ml_get", arguments)
 
 
 def ml_roles(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> list[dict[str, Any]]:
     """List live GUI role templates for ModuleLibrary creation."""
-    raise NotImplementedError
+    del arguments
+    roles = ctx.send_gui_rpc("context.ml_list_roles", {})["roles"]
+    return [
+        {
+            "role_id": role["role_id"],
+            "label": role["label"],
+            "kind": role["item_kind"],
+            "default_name": role["default_name"],
+        }
+        for role in roles
+    ]
 
 
 def ml_create(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Create from a role's md-backed defaults and return the stored cfg."""
-    raise NotImplementedError
+    role_id = arguments["role_id"]
+    roles = ml_roles(ctx, {})
+    role = next((entry for entry in roles if entry["role_id"] == role_id), None)
+    if role is None:
+        raise ValueError(
+            f"unknown role_id {role_id!r}; available: "
+            f"{[entry['role_id'] for entry in roles]}"
+        )
+    name = arguments.get("name", role["default_name"])
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"role {role_id!r} has no default name; supply name")
+    ctx.send_gui_rpc("context.ml_create_from_role", {"role_id": role_id, "name": name})
+    return ml_get(ctx, {"name": name, "kind": role["kind"]})
+
+
+def _entry_kind(index: dict[str, Any], name: str, requested: Any) -> str:
+    matches = [
+        kind
+        for kind, key in (("module", "modules"), ("waveform", "waveforms"))
+        if any(entry["name"] == name for entry in index[key])
+    ]
+    if not matches:
+        raise ValueError(
+            f"unknown library name {name!r}; available modules: "
+            f"{[entry['name'] for entry in index['modules']]}, waveforms: "
+            f"{[entry['name'] for entry in index['waveforms']]}"
+        )
+    if requested is None and len(matches) > 1:
+        raise ValueError(
+            f"ambiguous library name {name!r}; supply kind='module' or 'waveform'"
+        )
+    if requested is not None and requested not in matches:
+        raise ValueError(f"no {requested!r} named {name!r}; available kinds: {matches}")
+    return requested or matches[0]
 
 
 def ml_edit(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Edit a disposable draft; commit only after every edit succeeds."""
-    raise NotImplementedError
+    name = arguments["name"]
+    index = ml_get(ctx, {})
+    kind = _entry_kind(index, name, arguments.get("kind"))
+    destination = arguments.get("save_as", name)
+    if "save_as" in arguments:
+        collection = index["modules" if kind == "module" else "waveforms"]
+        if any(entry["name"] == destination for entry in collection):
+            raise ValueError(
+                f"save_as name {destination!r} already exists as {kind}; "
+                "choose a new name"
+            )
+    # editor.commit depends on a full context observation. A summary index is
+    # not a guard baseline; the snapshot also refuses incomplete context data.
+    ctx.session.read_internal("context.snapshot", {})
+    editor_id = ctx.send_gui_rpc("editor.new", {"item_kind": kind, "from_name": name})[
+        "editor_id"
+    ]
+    commit_attempted = False
+    try:
+        result = ctx.send_gui_rpc(
+            "editor.set_fields", {"editor_id": editor_id, "edits": arguments["edits"]}
+        )
+        if not result["valid"]:
+            raise ValueError("edited library draft is invalid; no changes committed")
+        # The batch bumps the draft version; a full read reveals that version
+        # for the guarded commit without weakening the GUI's stale check.
+        ctx.session.read_internal("editor.get", {"editor_id": editor_id})
+        commit_attempted = True
+        ctx.send_gui_rpc("editor.commit", {"editor_id": editor_id, "name": destination})
+    except Exception as error:
+        # A transport failure at commit is ambiguous: it may have written the
+        # entry. Do not issue another mutating RPC in that state.
+        if (
+            commit_attempted
+            and isinstance(error, GuiRpcError)
+            and error.reason in ("gui_transport_timeout", "gui_handler_timeout")
+        ):
+            raise
+        try:
+            ctx.send_gui_rpc("editor.discard", {"editor_id": editor_id})
+        except Exception as cleanup_error:
+            raise GuiRpcError(
+                f"library edit failed: {error}; discarding draft "
+                f"{editor_id!r} also failed: {cleanup_error}",
+                reason="cleanup_failed",
+            ) from cleanup_error
+        raise
+    return {
+        "name": destination,
+        "cfg": ml_get(ctx, {"name": destination, "kind": kind})["cfg"],
+    }
 
 
 ML_TOOLS: dict[str, dict[str, Any]] = {
