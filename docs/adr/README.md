@@ -8,7 +8,7 @@
 
 - [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任；尚未落實的核准目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
 - [0001 — Permit / Lease typed guard](0001-permit-lease-typed-guard.md)：measure typed Permit 的局部 guard 契約仍有效；跨 owner 分界由 0066 承接。
-- [0002 — Version table + async handle + off-main handler](0002-version-table-async-handle-off-main.md)：資源版本 guard 與 RPC off-main handler 的局部／Remote 契約仍有效；operation handle 分界由 0066 承接。
+- [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：資源版本 guard 與 RPC off-main handler 的局部／Remote 契約仍有效；operation handle 分界由 0066 承接。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。
 
 ## GUI Service Architecture

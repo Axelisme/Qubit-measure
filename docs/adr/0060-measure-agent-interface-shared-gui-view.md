@@ -1,7 +1,7 @@
 # ADR-0060：measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
 
 **狀態：** accepted（未實作）
-**關聯：** [[0059]]（RPC channel）、[[0067]]（interactive plugin session）；[[0002]]（version guard / operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0066]]（Stop feedback）、[[0063]]（資產刪改名不級聯更新參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
+**關聯：** [[0059]]（RPC channel）、[[0067]]（interactive plugin session）；[[0002]]（version guard）、[[0066]]（operation handle）、[[0008]]（CfgEditor session）、[[0013]]（remote adapter 為第二個 View）、[[0066]]（Stop feedback）、[[0063]]（資產刪改名不級聯更新參照）、[[0047]]（expected-error taxonomy）、[[0050]]（canonical cfg binding paths）。
 
 ## Context
 
