@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
             tab_w.focus_result_panel()
 
     # ------------------------------------------------------------------
-    # Docked feedback panel (ADR-0025 C3)
+    # Docked feedback panel (ADR-0066)
     # ------------------------------------------------------------------
 
     def refresh_feedback_widget(self) -> None:

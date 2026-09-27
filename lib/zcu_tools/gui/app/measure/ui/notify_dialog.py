@@ -2,7 +2,7 @@
 
 The agent calls gui_prompt_user(message, timeout); the dispatch layer opens
 this dialog on the main thread via MainWindow.open_notify_prompt. The dialog
-is the timeout SSOT (ADR-0025 §dialog-timeout): a QTimer fires here and calls
+is the timeout SSOT (ADR-0066): a QTimer fires here and calls
 ctrl.timeout_notify so the notify channel records Timeout rather than relying
 on the consumer's backstop to time out independently.
 
@@ -82,7 +82,7 @@ class NotifyUserDialog(QDialog):
         dismiss_btn.clicked.connect(self._on_dismiss)
         layout.addWidget(btn_box)
 
-        # QTimer is the timeout SSOT (ADR-0025): fires after `timeout` seconds
+        # QTimer is the timeout SSOT (ADR-0066): fires after `timeout` seconds
         # and calls ctrl.timeout_notify so the channel records Timeout, not Dismiss.
         # singleShot → fires once; timeout is in milliseconds.
         self._timer: QTimer = QTimer(self)

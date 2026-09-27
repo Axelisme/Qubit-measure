@@ -17,16 +17,16 @@ def _await_operation_by_handle(
     ctx: MeasureToolContext, operation_id: int | None, what: str, timeout: float
 ) -> dict[str, Any]:
     """Block on a wire ``operation_id`` until it settles, or ``timeout`` s elapse;
-    semantic result. The op-agnostic core of the generic gui_op_wait (ADR-0026 §8).
+    semantic result. The op-agnostic core of the generic gui_op_wait (ADR-0060).
 
     Returns ``{status, waited_seconds[, message[, feedback]]}``:
     - 'finished': settled OK.
     - 'cancelled': user/agent cancelled the op. ``feedback`` carries the Stop
       reason when "Send & Stop" was used; absent on a plain cancel. NOT a raise
-      (ADR-0025 §cancelled-wire — cancelled is a normal terminal outcome, not a
+      (ADR-0066 — cancelled is a normal terminal outcome, not a
       crash; the agent reads feedback and re-plans).
     - 'user_feedback': a user-feedback string arrived before the op settled
-      (ADR-0025). ``feedback`` carries the text; ``reason`` is 'user_feedback'.
+      (ADR-0066). ``feedback`` carries the text; ``reason`` is 'user_feedback'.
       The operation is still running; the agent holds the handle and can re-await
       or cancel via the op-specific cancel tool.
     - 'timed_out': still running after the bounded wait — NOT a crash, no raise.
@@ -57,7 +57,7 @@ def _await_operation_by_handle(
                 "message": f"{what} still in progress after {timeout}s.",
             }
         raise  # genuine failure — surfaces to the agent as an error
-    # Unwrap the structured reason from the wire payload (ADR-0025).
+    # Unwrap the structured reason from the wire payload (ADR-0066).
     reason = res.get("reason", "completed")
     waited = round(time.monotonic() - start, 3)
     if reason == "user_feedback":
@@ -76,7 +76,7 @@ def _await_operation_by_handle(
     status = res.get("status", "finished")
     if status == "cancelled":
         # Structured cancellation: return status + optional Stop reason. Not a
-        # raise — cancelled is a normal terminal outcome (ADR-0025 §cancelled-wire).
+        # raise — cancelled is a normal terminal outcome (ADR-0066).
         out: dict[str, Any] = {
             "status": "cancelled",
             "waited_seconds": waited,
@@ -123,7 +123,7 @@ def _poll_operation_by_handle(
     ctx: MeasureToolContext, operation_id: int | None, what: str
 ) -> dict[str, Any]:
     """Non-blocking status of a wire ``operation_id`` (no event needed). The
-    op-agnostic core of the generic gui_op_poll (ADR-0026 §8).
+    op-agnostic core of the generic gui_op_poll (ADR-0060).
 
     DRAINS every currently-buffered user-feedback Message (zero-timeout awaits in
     a loop) and returns them as a ``feedback`` list, then maps the FINAL outcome
@@ -243,7 +243,7 @@ def _with_feedback(reply: dict[str, Any], drained: list[str]) -> dict[str, Any]:
 def tool_gui_op_poll(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    """Non-blocking status of any in-flight operation, by ``handle`` (ADR-0026 §8).
+    """Non-blocking status of any in-flight operation, by ``handle`` (ADR-0066).
 
     ``handle`` is the opaque token a START tool (gui_tab_run_start /
     gui_tab_analyze_start / gui_tab_post_analyze_start / gui_device_*) returned in
@@ -268,7 +268,7 @@ def tool_gui_op_poll(
 def tool_gui_op_wait(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    """Block until any in-flight operation settles, by ``handle`` (ADR-0026 §8).
+    """Block until any in-flight operation settles, by ``handle`` (ADR-0066).
 
     ``handle`` is the opaque token a START tool returned. Blocks up to ``timeout``
     seconds. Returns {status, waited_seconds[, feedback]}: finished | cancelled

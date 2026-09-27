@@ -39,9 +39,9 @@ if TYPE_CHECKING:
 
 class RunService:
     """Encapsulates execution of an experiment adapter via BackgroundRunner
-    (OffMain-thread strategy with figure/progress/cancel scopes — ADR-0019).
+    (OffMain-thread strategy with figure/progress/cancel scopes — ADR-0066).
 
-    Uses OperationRunner (ADR-0026 §1) for the lifecycle mechanism; domain
+    Uses OperationRunner (ADR-0066) for the lifecycle mechanism; domain
     policy (cancel-partial interpretation, State writes, facts) is inline here.
     """
 
@@ -62,7 +62,7 @@ class RunService:
         self._handles = handles
         self._writeback = writeback
         # active_token is set by begin() and cleared on the terminal path so the
-        # controller can cancel_run() and await the outcome (ADR-0019).
+        # controller can cancel_run() and await the outcome (ADR-0066).
         self._active_token: int | None = None
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:
@@ -109,7 +109,7 @@ class RunService:
             stop_event.set()
 
         def work(factory: Any) -> Any:
-            # Run is the OffMain-thread strategy with all three scopes (ADR-0026 §2):
+            # Run is the OffMain-thread strategy with all three scopes (ADR-0066):
             # figure routing+liveplot (figure_ambient, app layer), progress
             # (progress_ambient, session layer), and cancel (Schedule StopSignal
             # plus device setup cancel scope).
@@ -123,7 +123,7 @@ class RunService:
 
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # Interpret bg outcome: we own stop_event, so we decide cancelled vs
-            # finished/failed (ADR-0019). Mirrors the old _on_bg_done/_on_bg_error
+            # finished/failed (ADR-0066). Mirrors the old _on_bg_done/_on_bg_error
             # → _on_run_finished/_on_run_cancelled/_on_run_failed logic exactly.
             if bg.ok:
                 if cancel_requested.is_set() or stop_event.is_set():
@@ -206,7 +206,7 @@ class RunService:
             raise
 
         # POST-BEGIN: tab is marked running and started events are emitted only
-        # after begin() succeeds (a begin-raise means no worker started — ADR-0026).
+        # after begin() succeeds (a begin-raise means no worker started — ADR-0066).
         self._active_token = token
         self._state.set_tab_running(tab_id, True)
         with self._bus.origin(self._handles.event_origin(token)):
@@ -224,7 +224,7 @@ class RunService:
         Returns True when a live run token existed and was signalled (the request
         was issued), False when no run was in flight (a graceful no-op). This is
         NOT a claim that the worker has stopped: the worker self-judges 'cancelled'
-        and emits its terminal asynchronously (ADR-0019) — the true terminal is
+        and emits its terminal asynchronously (ADR-0066) — the true terminal is
         observed via gui_op_wait/poll on the run handle.
         """
         logger.info("cancel_run")

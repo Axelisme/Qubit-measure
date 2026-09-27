@@ -39,7 +39,7 @@ def tool_gui_debug_operations(
     """Dump the mcp-side per-key operation-handle cache (DEV).
 
     The ONLY source is the session's semantic-key -> latest operation_id projection
-    (ADR-0026 §8). It is NO LONGER on the wait/poll path (the agent drives
+    (ADR-0066). It is NO LONGER on the wait/poll path (the agent drives
     gui_op_poll / gui_op_wait with the handle a START reply gave it); surfacing it
     here answers "what handle did the last run/analyze/setup on this tab/device
     get". 'latest wins' and entries are NEVER removed — a stale key for a completed

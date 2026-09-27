@@ -65,8 +65,8 @@ class AppServices:
     A single OperationGate (Exclusion) is shared across run / connection / device
     so hardware exclusion is global; a single OperationHandles (the async
     Handle / Cancel facet) is shared across those plus analyze (handle-only, no
-    exclusion) so operation_id / await / cancel are uniform (ADR-0019).
-    A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0026 §1)
+    exclusion) so operation_id / await / cancel are uniform (ADR-0066).
+    A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0066)
     is shared by run / analyze / post-analyze / device-setup operations.
     """
 
@@ -131,7 +131,7 @@ def build_app_services(
     handles = OperationHandles()
     background = BackgroundRunner()
     progress = ProgressService(progress_transport)
-    # OperationRunner: the kind-agnostic lifecycle mechanism (ADR-0026 §1).
+    # OperationRunner: the kind-agnostic lifecycle mechanism (ADR-0066).
     # Shared by run / FIT-analyze / post-analyze / device ops. Interactive analyze
     # does not use runner (main-thread-user-paced, stage2c_spec.md).
     runner = OperationRunner(operation_gate, handles, progress, background, bus)
@@ -245,7 +245,7 @@ def build_app_services(
         run=run,
         analyze=analyze,
         # Second analysis layer (post_analysis cap) — handle-only off-main worker,
-        # same runner/handles as the primary analyze (ADR-0019, ADR-0026 §1).
+        # same runner/handles as the primary analyze (ADR-0066).
         post_analyze=post_analyze,
         save=save,
         save_control=save_control,

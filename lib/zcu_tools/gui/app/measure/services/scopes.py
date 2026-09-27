@@ -1,4 +1,4 @@
-"""App-layer ambient scope helper: figure routing + liveplot backend (ADR-0026 §2).
+"""App-layer ambient scope helper: figure routing + liveplot backend (ADR-0066).
 
 ``figure_ambient`` installs the matplotlib routing ContextVar *and* the
 ``QtLivePlotBackend`` for the duration of a worker thunk.  Both are co-dependent
@@ -7,7 +7,7 @@ as a single facet driven by ``figure_container``.
 
 Kept in the app layer because ``QtLivePlotBackend`` is Qt-specific.  Session
 services must NOT import this module — use ``gui.session.scopes.progress_ambient``
-instead (ADR-0026 §2 layer split).
+instead (ADR-0066 layer split).
 
 ``QtLivePlotBackend`` is imported lazily (inside the context manager) to keep
 module-load time free of pyplot, preserving the gui import-clean invariant

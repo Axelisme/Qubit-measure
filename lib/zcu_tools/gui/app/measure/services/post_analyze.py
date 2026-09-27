@@ -40,7 +40,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
     Runs a tab's ``adapter.post_analyze`` off the main thread on top of the
     primary analyze result, then records the result + figure into ``State`` on
     the main thread (the State main-thread invariant). Like FIT analyze, it takes
-    a handle only (no exclusion, ADR-0019): post-analysis is a pure CPU recompute
+    a handle only (no exclusion, ADR-0066): post-analysis is a pure CPU recompute
     that never conflicts with hardware. The handle lifecycle + failure path live in
     the shared :class:`_StagedAnalyzeService` base.
 
@@ -111,7 +111,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
         )
 
         def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
-            # Post-analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0026 §2).
+            # Post-analyze uses only figure_ambient (no pbar or cancellation scope — ADR-0066).
             with figure_ambient(figure_container):
                 return adapter.post_analyze(req)
 

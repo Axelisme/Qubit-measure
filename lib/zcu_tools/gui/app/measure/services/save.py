@@ -38,7 +38,7 @@ class SaveService:
 
     def _start_save(self, tab_id: str, req: SaveDataRequest) -> None:
         """Save the data file off-main (OffMain fire-forget strategy, no scopes,
-        no handle — ADR-0019): adapter.save returns None, so on_done just flips
+        no handle — ADR-0066): adapter.save returns None, so on_done just flips
         the saving flag. The data path is already known synchronously by the
         caller; the worker only writes."""
         adapter = self._state.get_tab(tab_id).adapter

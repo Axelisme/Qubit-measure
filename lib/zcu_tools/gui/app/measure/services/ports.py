@@ -297,7 +297,7 @@ class CfgEditorPort(Protocol):
 
 @runtime_checkable
 class TabResultWritePort(Protocol):
-    """The narrow State-write contract a run policy depends on (ADR-0026 §3).
+    """The narrow State-write contract a run policy depends on (ADR-0066).
 
     Run's lifecycle writes only these three tab-result mutations; depending on
     this port instead of the concrete ``State`` keeps the policy bound to a
@@ -314,7 +314,7 @@ class TabResultWritePort(Protocol):
 @runtime_checkable
 class TabAnalyzeWritePort(Protocol):
     """The narrow State-write contract an analyze / post-analyze policy depends
-    on (ADR-0026 §3). Same rationale as ``TabResultWritePort``; ``State`` is the
+    on (ADR-0066). Same rationale as ``TabResultWritePort``; ``State`` is the
     only implementer. Result replacement methods return detached resources for
     post-commit draft cleanup."""
 

@@ -1,4 +1,4 @@
-"""Session-layer ambient scope helpers (ADR-0026 §2).
+"""Session-layer ambient scope helpers (ADR-0066).
 
 ``progress_ambient`` is the only helper here: it carries the pbar ContextVar
 into a worker thread. It is session-layer (no Qt, no figure routing) so both

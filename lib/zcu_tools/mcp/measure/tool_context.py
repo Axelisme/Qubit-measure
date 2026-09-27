@@ -101,7 +101,7 @@ def _start_op_with_short_wait(
     - settles in time -> ``{status:'finished', handle, **product()}`` so the caller
       sees the op's resulting state immediately (device snapshot / tab snapshot);
     - still running -> ``{status:'pending', handle, message:<hint>}`` so the caller
-      can poll/wait the handle via gui_op_poll / gui_op_wait (ADR-0026 §8).
+      can poll/wait the handle via gui_op_poll / gui_op_wait (ADR-0060).
       operation.await still raises on failure/cancel.
 
     The reply always carries ``handle`` (pending AND finished) when a handle was

@@ -1,3 +1,5 @@
+> 狀態：已退役（2026-09-27）。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替。以下保留歷史正文。
+
 # ADR-0023 — Cooperative interrupt：user feedback 喚醒 pending wait
 
 > **狀態：已被 [[0025]] 取代。** 本案的「feedback inbox 作 `await_outcome` 第二喚醒源」屬「多 channel + 時序敏感 combine」形狀，會生 race（Send & Stop 的 post→cancel ordering、無 `stop_event` 的 interactive 結構洞）。[[0025]] 改以**單一 per-interaction 有序事件 channel** 取代，race/deadlock by construction 消除。下文為原始記錄。

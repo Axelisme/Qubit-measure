@@ -555,7 +555,7 @@ class ExpTabWidget(QWidget):
             raise RuntimeError(f"tab {self.tab_id!r} does not support post-analysis")
 
     # ------------------------------------------------------------------
-    # Docked feedback panel host (ADR-0025 C3)
+    # Docked feedback panel host (ADR-0066)
     # ------------------------------------------------------------------
 
     def mount_feedback_panel(self, panel: QWidget) -> None:
