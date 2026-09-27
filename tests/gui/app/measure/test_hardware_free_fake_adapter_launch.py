@@ -21,8 +21,8 @@ def hw_fixture(qapp, tmp_path):
     """Real Controller + MainWindow via shipped composition, no hardware."""
     from unittest.mock import MagicMock
 
-    from zcu_tools.experiment.v2_gui.registry import register_all
-    from zcu_tools.experiment.v2_gui.role_registry import register_all_roles
+    from zcu_tools.experiment.v2_gui.measure.registry import register_all
+    from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
     from zcu_tools.gui.app.measure.app import _build_window, _make_empty_ctx
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
@@ -68,7 +68,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     ctrl, window = hw_fixture
 
     # Verify fake/freq is available and hardware-free
-    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
 
     caps = FakeFreqAdapter.capabilities
     assert caps.requires_soc is False

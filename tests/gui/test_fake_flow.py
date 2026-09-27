@@ -5,8 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
-from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter, FakeAnalyzeParams
-from zcu_tools.experiment.v2_gui.registry import ADAPTERS, register_all
+from zcu_tools.experiment.v2_gui.measure.adapters.fake import (
+    FakeAdapter,
+    FakeAnalyzeParams,
+)
+from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS, register_all
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     RunRequest,
@@ -75,7 +78,7 @@ def test_registry_register_all_and_create():
     register_all(reg)
     assert reg.has("fake/freq")
     adapter = reg.create("fake/freq")
-    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
 
     assert isinstance(adapter, FakeFreqAdapter)
 

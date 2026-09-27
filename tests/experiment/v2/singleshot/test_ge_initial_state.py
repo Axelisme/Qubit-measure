@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
 from zcu_tools.experiment.v2.singleshot.ge import GE_Exp, GE_Result
-from zcu_tools.experiment.v2_gui.adapters.singleshot.ge import (
+from zcu_tools.experiment.v2_gui.measure.adapters.singleshot.ge import (
     GEAdapter,
     GEAnalyzeParams,
     GEPostAnalyzeParams,

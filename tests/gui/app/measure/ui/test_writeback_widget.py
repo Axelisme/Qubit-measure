@@ -13,7 +13,7 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QTableWidget,
 )
-from zcu_tools.experiment.v2_gui.adapters.fake.freq import (
+from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import (
     FakeFreqAdapter,
     FakeFreqAnalyzeParams,
     FakeFreqRunResult,

@@ -1,0 +1,527 @@
+from __future__ import annotations
+
+import os
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Sequence
+from inspect import signature
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
+
+from zcu_tools.experiment.cfg_assembler import make_cfg
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AdapterGuide,
+    AnalysisMode,
+    AnalyzeRequest,
+    LoadDataRequest,
+    NoAnalyzeParams,
+    PostAnalyzeRequest,
+    PostAnalyzeResultBase,
+    PostWritebackRequest,
+    RunRequest,
+    SaveDataRequest,
+    SavePaths,
+    SessionEnv,
+    T_AnalyzeParams,
+    T_AnalyzeResult,
+    T_Cfg,
+    T_PostAnalyzeResult,
+    T_Result,
+    WritebackItem,
+    WritebackRequest,
+    require_soc_handles,
+)
+from zcu_tools.gui.app.measure.adapter.lowering import (
+    schema_to_raw_dict,
+    validate_schema,
+)
+from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
+from zcu_tools.gui.cfg import CfgSchema
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
+    from zcu_tools.experiment.v2_gui.measure.adapters._support.schema_builder import (
+        MeasureCfgDefinition,
+    )
+    from zcu_tools.gui.app.measure.ui.interactive_frontend import (
+        InteractiveFrontend,
+        InteractiveFrontendEnv,
+    )
+
+# Index of T_AnalyzeParams in BaseAdapter's generic parameter list
+# (Cfg, Result, AnalyzeResult, AnalyzeParams).
+_ANALYZE_PARAMS_GENERIC_INDEX = 3
+_NO_GUIDE = AdapterGuide(
+    behavior="(no guide written yet)",
+    expects_md="",
+    expects_ml="",
+    typical_writeback="",
+    recommended="",
+)
+
+
+def _analyze_params_generic_arg(cls: type) -> type:
+    """Recover an adapter's analyze-params type from its declared 4th generic arg.
+
+    Used when ``get_analyze_params`` is not overridden (its annotation is the
+    unbound TypeVar): the concrete type is whatever the adapter wrote as
+    ``BaseAdapter[..., AnalyzeParams]``. Falls back to ``NoAnalyzeParams`` when the
+    arg is absent (PEP 696 default — adapters that omit the last two generic args)
+    or not a plain class (e.g. still a TypeVar).
+    """
+    import typing
+
+    for base in getattr(cls, "__orig_bases__", ()):
+        args = typing.get_args(base)
+        if len(args) > _ANALYZE_PARAMS_GENERIC_INDEX:
+            arg = args[_ANALYZE_PARAMS_GENERIC_INDEX]
+            if isinstance(arg, type):
+                return arg
+    return NoAnalyzeParams
+
+
+def _can_construct_without_args(cls: type[Any]) -> bool:
+    try:
+        signature(cls).bind()
+    except TypeError:
+        return False
+    except ValueError:
+        return True
+    return True
+
+
+class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
+    """Shared implementation for experiment adapters.
+
+    Concrete adapters subclass this and fill in the experiment-specific knowledge
+    (``cfg_definition``, ``build_exp_cfg``, ``make_filename_stem``
+    and — when the experiment supports analysis — ``get_analyze_params``/``analyze``).
+    Everything else (definition instantiation, run delegation, save-path policy,
+    save) is provided here once.
+
+    The class is generic over the four experiment types. Adapters without analysis
+    omit the last two parameters (PEP 696 defaults fill in ``NoAnalysisResult`` /
+    ``NoAnalyzeParams``) and inherit the raising no-op analysis below; they declare
+    ``capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`` so the
+    framework never routes analysis to them.
+
+    Structurally satisfies ``zcu_tools.gui.app.measure.adapter.ExpAdapterProtocol``; the GUI
+    holds adapters only through that generic-free Protocol.
+    """
+
+    exp_cls: ClassVar[type[Any]]
+    # Most registered adapters use the canonical PersistableExperiment loader;
+    # concrete no-load adapters declare ``load_data=False`` explicitly.
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
+    guide_text: ClassVar[AdapterGuide] = _NO_GUIDE
+
+    # Experiment cfg dataclass used by the default build_exp_cfg. Adapters whose
+    # raw → cfg mapping is the common "flat dict through make_cfg" shape just
+    # set this and inherit build_exp_cfg. Adapters with a bespoke mapping (e.g.
+    # extra kwargs, hand-built cfg) override build_exp_cfg and leave this None.
+    ExpCfg_cls: ClassVar[Any] = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._validate_capability_contract()
+
+    @classmethod
+    def _is_method_implemented(cls, name: str) -> bool:
+        return getattr(cls, name) is not getattr(BaseAdapter, name)
+
+    @classmethod
+    def _require_method(cls, name: str, reason: str, fix: str) -> None:
+        if not cls._is_method_implemented(name):
+            raise TypeError(
+                f"{cls.__name__} {reason} but does not implement {name}(); {fix}."
+            )
+
+    @classmethod
+    def _forbid_method(cls, name: str, reason: str, fix: str) -> None:
+        if cls._is_method_implemented(name):
+            raise TypeError(f"{cls.__name__} {reason} but implements {name}(); {fix}.")
+
+    @classmethod
+    def _validate_interactive_hooks(cls, analysis: AnalysisMode) -> None:
+        if analysis is AnalysisMode.INTERACTIVE:
+            for name in ("make_interactive_plugin", "make_interactive_frontend"):
+                cls._require_method(
+                    name,
+                    "declares analysis=INTERACTIVE",
+                    f"override {name}() or set analysis=AnalysisMode.FIT/NONE",
+                )
+        else:
+            for name in ("make_interactive_plugin", "make_interactive_frontend"):
+                cls._forbid_method(
+                    name,
+                    f"declares analysis={analysis.name}",
+                    f"remove {name}() or set analysis=AnalysisMode.INTERACTIVE",
+                )
+
+    @classmethod
+    def _validate_capability_contract(cls) -> None:
+        """Fail fast when declared capabilities and implemented hooks disagree."""
+        caps = cls.capabilities
+        if not isinstance(caps, AdapterCapabilities):
+            raise TypeError(
+                f"{cls.__name__}.capabilities must be an AdapterCapabilities instance"
+            )
+        if not isinstance(caps.load_data, bool):
+            raise TypeError(
+                f"{cls.__name__}.capabilities.load_data must be bool, "
+                f"got {type(caps.load_data).__name__}"
+            )
+        analysis = caps.analysis
+
+        if analysis is AnalysisMode.FIT:
+            cls._require_method(
+                "analyze",
+                "declares analysis=FIT",
+                "override analyze() or set analysis=AnalysisMode.NONE/INTERACTIVE",
+            )
+        elif analysis is AnalysisMode.INTERACTIVE:
+            cls._forbid_method(
+                "analyze",
+                "declares analysis=INTERACTIVE",
+                "remove analyze() or set analysis=AnalysisMode.FIT",
+            )
+        elif analysis is AnalysisMode.NONE:
+            cls._forbid_method(
+                "analyze",
+                "declares analysis=NONE",
+                "remove analyze() or set analysis=AnalysisMode.FIT",
+            )
+            cls._forbid_method(
+                "get_analyze_params",
+                "declares analysis=NONE",
+                "remove get_analyze_params() or set analysis=AnalysisMode.FIT/INTERACTIVE",
+            )
+        else:
+            raise TypeError(
+                f"{cls.__name__} declares unsupported analysis capability {analysis!r}; "
+                "use an AnalysisMode value"
+            )
+
+        cls._validate_interactive_hooks(analysis)
+
+        if analysis is not AnalysisMode.NONE:
+            params_cls = cls.analyze_params_cls()
+            if not _can_construct_without_args(params_cls):
+                cls._require_method(
+                    "get_analyze_params",
+                    f"declares analysis={analysis.name} with params "
+                    f"{params_cls.__name__} that require values",
+                    "override get_analyze_params() or give every param field a default",
+                )
+
+        if caps.post_analysis:
+            if analysis is not AnalysisMode.FIT:
+                raise TypeError(
+                    f"{cls.__name__} declares post_analysis=True with analysis={analysis.name}; "
+                    "post_analysis requires analysis=AnalysisMode.FIT"
+                )
+            cls._require_method(
+                "get_post_analyze_params",
+                "declares post_analysis=True",
+                "override get_post_analyze_params() or set post_analysis=False",
+            )
+            cls._require_method(
+                "post_analyze",
+                "declares post_analysis=True",
+                "override post_analyze() or set post_analysis=False",
+            )
+        else:
+            cls._forbid_method(
+                "get_post_analyze_params",
+                "declares post_analysis=False",
+                "remove get_post_analyze_params() or set post_analysis=True",
+            )
+            cls._forbid_method(
+                "post_analyze",
+                "declares post_analysis=False",
+                "remove post_analyze() or set post_analysis=True",
+            )
+            cls._forbid_method(
+                "get_post_writeback_items",
+                "declares post_analysis=False",
+                "remove get_post_writeback_items() or set post_analysis=True",
+            )
+
+        # Loading is a capability gate, not a runtime probe. A concrete adapter
+        # may provide its own loader, or it may opt into BaseAdapter.load when the
+        # experiment class can be constructed without arguments and exposes a
+        # canonical callable loader. A disabled capability must not hide an
+        # accidental adapter override.
+        if caps.load_data:
+            if not cls._is_method_implemented("load"):
+                exp_cls = getattr(cls, "exp_cls", None)
+                has_canonical_loader = isinstance(exp_cls, type) and (
+                    _can_construct_without_args(exp_cls)
+                    and callable(getattr(exp_cls, "load", None))
+                )
+                if not has_canonical_loader:
+                    raise TypeError(
+                        f"{cls.__name__} declares load_data=True but has neither "
+                        "a concrete load() override nor a no-argument exp_cls with "
+                        "a callable canonical loader"
+                    )
+        else:
+            cls._forbid_method(
+                "load",
+                "declares load_data=False",
+                "remove load() or set load_data=True",
+            )
+
+    # -- experiment-specific contract (subclass must fill) -----------------
+
+    @classmethod
+    @abstractmethod
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        """Return the context-free cfg shape and deferred fresh-value recipes."""
+
+    @classmethod
+    def guide(cls) -> AdapterGuide:
+        """Static human-facing orientation guide.
+
+        Concrete adapters keep the guide prose local as ``guide_text``. The
+        method remains the framework-facing protocol entry point so GUI/MCP
+        consumers do not need to know how each adapter stores its prose.
+
+        Honest default: an adapter that has not written prose says so plainly
+        (Fast-Fail spirit — surface the gap, do not fake content).
+        """
+        return cls.guide_text
+
+    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T_Cfg:
+        """Build experiment config from the flat GUI raw dict.
+
+        Default delegates to ``make_cfg(raw_cfg, ExpCfg_cls, ml=req.ml)``. An adapter must
+        either set the ``ExpCfg_cls`` ClassVar or override this; the raise is a
+        Fast-Fail guard against forgetting both (mirrors the analysis no-ops).
+        """
+        if self.ExpCfg_cls is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} must set ExpCfg_cls or override build_exp_cfg"
+            )
+        return make_cfg(raw_cfg, self.ExpCfg_cls, ml=req.ml)
+
+    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+        """Pure run preflight for adapter-specific constraints.
+
+        GuardService calls this before opening an async run handle. The default is
+        intentionally empty because most adapters have no constraints beyond
+        lowering + model construction; adapters that need SoC-dependent checks
+        override it and must not touch devices or mutate cfg/state.
+        """
+        del req, raw_cfg
+
+    @abstractmethod
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
+        """Return the filename stem used by the default save path template."""
+
+    # -- analysis (raising no-op default; override when analysis != NONE) --
+
+    def get_analyze_params(self, result: T_Result, ctx: SessionEnv) -> T_AnalyzeParams:
+        """Build the analyze parameter instance presented to the user.
+
+        An adapter whose analyze-params are all-default-constructible (including
+        ``NoAnalyzeParams``) inherits this default, which returns ``params_cls()``.
+        An adapter whose params need values (a field without a default) must override;
+        otherwise this Fast-Fails — a forgotten override, not a normal code path.
+        Adapters with ``analysis=AnalysisMode.NONE`` are never routed here.
+        """
+        del result, ctx
+        params_cls = type(self).analyze_params_cls()
+        if _can_construct_without_args(params_cls):
+            return params_cls()  # type: ignore[return-value]
+        raise NotImplementedError(
+            f"{type(self).__name__} declares analysis with params "
+            f"{params_cls.__name__} that need values, but does not override "
+            "get_analyze_params"
+        )
+
+    def analyze(
+        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
+    ) -> T_AnalyzeResult:
+        """Run analysis on a completed run result.
+
+        Default raises — see ``get_analyze_params`` for the rationale.
+        """
+        del req
+        raise NotImplementedError(
+            f"{type(self).__name__} declares analysis support but does not "
+            "override analyze"
+        )
+
+    def make_interactive_plugin(
+        self, req: AnalyzeRequest[T_Result, T_AnalyzeParams]
+    ) -> PluginDefinition[Any, Any]:
+        raise NotImplementedError("override make_interactive_plugin")
+
+    def make_interactive_frontend(
+        self,
+        plugin: PluginDefinition[Any, Any],
+        session: Session[Any],
+        env: InteractiveFrontendEnv,
+        request_finish: Callable[[Figure], bool],
+        request_cancel: Callable[[], bool],
+    ) -> InteractiveFrontend:
+        raise NotImplementedError("override make_interactive_frontend")
+
+    # -- post-analysis (raising no-op default; override when post_analysis) --
+    #
+    # Mirrors the primary analyze chain's param mechanism (dataclass + ParamMeta,
+    # reflected by ``analyze_params_cls`` → describe/reconstruct), NOT a CfgSchema:
+    # the post-analysis params flow through the exact same form/RPC plumbing as
+    # the primary analyze params.
+
+    @classmethod
+    def post_analyze_params_cls(cls) -> type:
+        """Return the post-analysis param dataclass type (static, no instance).
+
+        Reflected from the concrete ``get_post_analyze_params`` return annotation,
+        mirroring ``analyze_params_cls``. Falls back to ``NoAnalyzeParams`` when
+        the return is not annotated.
+        """
+        import typing
+
+        try:
+            hints = typing.get_type_hints(cls.get_post_analyze_params)
+        except Exception:
+            return NoAnalyzeParams
+        return hints.get("return", NoAnalyzeParams)
+
+    def get_post_analyze_params(
+        self, analyze_result: T_AnalyzeResult, ctx: SessionEnv
+    ) -> Any:
+        """Build the post-analysis param instance presented to the user.
+
+        Default raises — an adapter declaring ``capabilities.post_analysis`` must
+        override this (Fast-Fail guard; adapters without post-analysis are never
+        routed here). Mirrors ``get_analyze_params`` but receives the primary
+        analyze result (the post params may seed from the primary fit).
+        """
+        del analyze_result, ctx
+        raise NotImplementedError(
+            f"{type(self).__name__} declares post-analysis support but does not "
+            "override get_post_analyze_params"
+        )
+
+    def post_analyze(
+        self,
+        req: PostAnalyzeRequest[T_Result, T_AnalyzeResult, Any],
+    ) -> PostAnalyzeResultBase:
+        """Run a second analysis on top of the primary analyze result.
+
+        Default raises — see ``get_post_analyze_params`` for the rationale. The
+        request carries both the raw ``run_result`` and the primary
+        ``analyze_result`` so the post-analysis can refine/recompute from either.
+        """
+        del req
+        raise NotImplementedError(
+            f"{type(self).__name__} declares post-analysis support but does not "
+            "override post_analyze"
+        )
+
+    # -- shared implementation (provided once) -----------------------------
+
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+        """Instantiate and validate a fresh cfg from the context-free definition."""
+        schema = type(self).cfg_definition().instantiate(ctx)
+        validate_schema(schema, ctx.ml)
+        return schema
+
+    @classmethod
+    def analyze_params_cls(cls) -> type:
+        """Return the analyze-params dataclass type (static, no instance/result).
+
+        Reflected from the concrete ``get_analyze_params`` return annotation, so
+        agents can query the param schema without running an experiment. An adapter
+        with tunable params overrides ``get_analyze_params`` with a concrete return
+        annotation, which is read here directly. An adapter with no params does NOT
+        override it (no boilerplate); its base annotation is the unbound
+        ``T_AnalyzeParams`` TypeVar, so the type is instead recovered from the 4th
+        generic arg (``BaseAdapter[..., NoAnalyzeParams]``), falling back to
+        ``NoAnalyzeParams`` when absent (PEP 696 default) or unreadable.
+        """
+        import typing
+
+        try:
+            hints = typing.get_type_hints(cls.get_analyze_params)
+        except Exception:
+            return _analyze_params_generic_arg(cls)
+        ret = hints.get("return", T_AnalyzeParams)
+        if isinstance(ret, typing.TypeVar):
+            # The default (un-overridden) get_analyze_params — recover the concrete
+            # type from the class's declared 4th generic arg instead.
+            return _analyze_params_generic_arg(cls)
+        return ret
+
+    def run(self, req: RunRequest, schema: CfgSchema) -> T_Result:
+        raw_cfg = schema_to_raw_dict(schema, req.md, req.ml)
+        cfg = self.build_exp_cfg(raw_cfg, req)
+        if self.capabilities.requires_soc:
+            soc, soccfg = require_soc_handles(req)
+            return self.exp_cls().run(soc, soccfg, cfg)
+        return self.exp_cls().run(req.soc, req.soccfg, cfg)
+
+    def load(self, req: LoadDataRequest) -> T_Result:
+        if not _can_construct_without_args(self.exp_cls):
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support loading canonical result files"
+            )
+        exp = self.exp_cls()
+        load = getattr(exp, "load", None)
+        if not callable(load):
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support loading canonical result files"
+            )
+        return cast(T_Result, load(filepath=req.data_path))
+
+    def get_writeback_items(
+        self, req: WritebackRequest[T_Result, T_AnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        del req
+        return []
+
+    def get_post_writeback_items(
+        self,
+        req: PostWritebackRequest[T_Result, T_AnalyzeResult, T_PostAnalyzeResult],
+    ) -> Sequence[WritebackItem]:
+        """Return optional proposals owned by a post-analysis pane.
+
+        The default keeps post-analysis useful without a writeback surface. The
+        workflow owns primary/post semantics; WritebackService only receives the
+        returned items and never sees this request or a stage selector.
+        """
+        del req
+        return []
+
+    def make_default_save_paths(self, ctx: SessionEnv) -> SavePaths:
+        """Default save path policy shared by most adapters."""
+        if not ctx.database_path:
+            raise RuntimeError("SessionEnv.database_path is required for save paths")
+        if not ctx.result_dir:
+            raise RuntimeError("SessionEnv.result_dir is required for save paths")
+        if not ctx.active_label:
+            raise RuntimeError("SessionEnv.active_label is required for save paths")
+
+        stem = self.make_filename_stem(ctx)
+        # ctx.database_path is already the dated data folder
+        # (Database/chip/qub/YYYY/MM/Data_MMDD; derive_project_paths owns the date),
+        # so join the filename directly — do NOT re-append the date here.
+        data_dir = ctx.database_path
+        image_dir = os.path.join(ctx.result_dir, "exps", ctx.active_label, "image")
+        # Data filename carries the flux label (single_qubit.md:
+        # '{stem}@{em.label}') so the same experiment at different flux points
+        # stays distinct within a day's data folder.
+        return SavePaths(
+            data_path=os.path.join(data_dir, f"{stem}@{ctx.active_label}"),
+            image_path=os.path.join(image_dir, f"{stem}.png"),
+        )
+
+    def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
+        return self.make_default_save_paths(ctx)
+
+    def save(self, req: SaveDataRequest[T_Result]) -> None:
+        self.exp_cls().save(filepath=req.data_path, result=req.run_result)

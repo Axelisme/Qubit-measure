@@ -75,7 +75,7 @@ class _LiveFixture(Fixture):
 
     def __init__(self) -> None:
         super().__init__()
-        from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+        from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
         from zcu_tools.gui.app.measure.state import Session
 
         cfg = FakeAdapter().make_default_cfg(self.state.session_env)
@@ -608,7 +608,7 @@ def test_tab_get_cfg_unknown_tab_rejected(lf):
 
 def test_tab_get_cfg_form_not_populated_rejected(qapp):  # noqa: ARG001
     """A tab with no cfg-editor session yet → precondition_failed."""
-    from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake import FakeAdapter
     from zcu_tools.gui.app.measure.state import Session
 
     f = Fixture()
@@ -815,7 +815,7 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):  # noqa: ARG001
 
 
 def _fakefreq_root():
-    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -875,7 +875,7 @@ def test_moduleref_tagged_key_passes_through(qapp):  # noqa: ARG001
 
 
 def _fluxdep_root(device_names: list[str]):
-    from zcu_tools.experiment.v2_gui.adapters.onetone.flux_dep import (
+    from zcu_tools.experiment.v2_gui.measure.adapters.onetone.flux_dep import (
         OneToneFluxDepAdapter,
     )
     from zcu_tools.gui.app.measure.adapter import SessionEnv

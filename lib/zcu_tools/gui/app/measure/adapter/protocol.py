@@ -37,7 +37,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     This Protocol lists *only* the members the framework actually calls; it
     carries no generics and no implementation. The shared default behaviour
     (build_exp_cfg delegation, save-path policy, no-op analysis, …) lives in
-    ``zcu_tools.experiment.v2_gui.adapters.base.BaseAdapter``, which adapters
+    ``zcu_tools.experiment.v2_gui.measure.adapters.base.BaseAdapter``, which adapters
     inherit and which satisfies this Protocol structurally.
 
     Keeping the framework side generic-free is deliberate: the GUI handles

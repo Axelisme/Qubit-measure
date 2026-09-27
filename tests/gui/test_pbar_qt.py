@@ -266,7 +266,7 @@ def test_progress_stack_skips_unchanged_bar_properties(qapp):
 def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.experiment.v2_gui.adapters.fake.freq import FakeFreqAdapter
+    from zcu_tools.experiment.v2_gui.measure.adapters.fake.freq import FakeFreqAdapter
     from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
     from zcu_tools.progress_bar.interface import use_pbar_factory
     from zcu_tools.resources.context import MetaDict, ModuleLibrary

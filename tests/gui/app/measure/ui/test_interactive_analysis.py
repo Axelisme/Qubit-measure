@@ -18,10 +18,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QStackedWidget,
     QWidget,
 )
-from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_frontend import (
+from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_frontend import (
     FluxPickFrontend,
 )
-from zcu_tools.experiment.v2_gui.adapters._support.flux_pick_plugin import (
+from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin import (
     make_flux_pick_plugin,
 )
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest

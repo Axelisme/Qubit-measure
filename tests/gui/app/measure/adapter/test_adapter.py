@@ -6,11 +6,11 @@ from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-from zcu_tools.experiment.v2_gui.adapters._support import (
+from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_tools.experiment.v2_gui.adapters.base import BaseAdapter
+from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -898,7 +898,8 @@ def test_base_adapter_build_exp_cfg_delegates_to_make_cfg():
     req = MagicMock()
     sentinel = object()
     with patch(
-        "zcu_tools.experiment.v2_gui.adapters.base.make_cfg", return_value=sentinel
+        "zcu_tools.experiment.v2_gui.measure.adapters.base.make_cfg",
+        return_value=sentinel,
     ) as make_cfg:
         out = _Adapter().build_exp_cfg({"reps": 1}, req)
     make_cfg.assert_called_once_with({"reps": 1}, _Cfg, ml=req.ml)
