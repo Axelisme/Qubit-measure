@@ -5,10 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.main.services.ports import CfgEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+# The method registry resolves handlers by name at runtime.
+__all__ = ["_h_editor_set_fields"]
 
 
 def _h_editor_new(
@@ -42,6 +46,32 @@ def _h_editor_set_field(
             f"tab {owner!r} is currently running; cancel the run before editing cfg",
         )
     return adapter.ctrl.cfg_editor_set_field(editor_id, path, value).to_wire()
+
+
+def _h_editor_set_fields(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    editor_id = str(params["editor_id"])
+    owner = adapter.ctrl.owner_of_editor(editor_id)
+    if owner is not None and adapter.ctrl.get_running_tab_id() == owner:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            f"tab {owner!r} is currently running; cancel the run before editing cfg",
+        )
+    raw_edits = params["edits"]
+    if not isinstance(raw_edits, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'edits' must be a list")
+    edits: list[CfgEdit] = []
+    for i, edit in enumerate(raw_edits):
+        if not isinstance(edit, dict) or "path" not in edit or "value" not in edit:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"edits[{i}] must have 'path' and 'value'",
+            )
+        edits.append(CfgEdit(str(edit["path"]), edit["value"]))
+    return adapter.ctrl.cfg_editor_set_fields(
+        editor_id, edits, agent_edit=True
+    ).to_wire()
 
 
 def _h_editor_get(

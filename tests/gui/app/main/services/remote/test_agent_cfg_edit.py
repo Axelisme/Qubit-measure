@@ -154,6 +154,45 @@ def test_tab_edit_mcp_failure_preserves_successful_prefix(mcp_tab):
     assert inputs["expts"]["resolved"] == 4
 
 
+def test_library_editor_batch_uses_shared_agent_sweep_and_preserves_prefix(live_tab):
+    fixture, tab_id = live_tab
+    editor_id = fixture.ctrl.editor_id_for_owner(tab_id)
+    assert editor_id is not None
+    sock = open_client(fixture.service.port)
+    try:
+        result = call(
+            sock,
+            "editor.set_fields",
+            {
+                "editor_id": editor_id,
+                "edits": [
+                    {"path": "sweep", "value": {"start": 2.0, "stop": 8.0, "step": 2.2}}
+                ],
+            },
+        )
+        assert result["ok"] is True
+        assert result["result"]["actual"]["sweep"]["expts"] == 4
+        rejected = call(
+            sock,
+            "editor.set_fields",
+            {
+                "editor_id": editor_id,
+                "edits": [
+                    {"path": "gain", "value": 0.25},
+                    {"path": "sweep", "value": {"start": 3.0, "stop": 9.0}},
+                ],
+            },
+        )
+        assert rejected["ok"] is False
+        assert rejected["error"]["reason"] == "invalid_settable_path"
+        assert "'sweep' failed after 1 applied" in rejected["error"]["message"]
+        tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
+        assert tree["children"]["gain"]["input"]["resolved"] == pytest.approx(0.25)
+        assert tree["children"]["sweep"]["inputs"]["expts"]["resolved"] == 4
+    finally:
+        sock.close()
+
+
 def test_agent_edit_normalizes_whole_sweep_in_the_shared_tab_draft(live_tab):
     fixture, tab_id = live_tab
     sock = open_client(fixture.service.port)

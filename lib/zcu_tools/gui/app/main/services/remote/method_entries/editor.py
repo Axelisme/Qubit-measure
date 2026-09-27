@@ -71,6 +71,22 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
+        "editor.set_fields",
+        "editor:_h_editor_set_fields",
+        MethodSpec(
+            5.0,
+            "Apply ordered agent cfg edits to one existing editor draft. 'edits' "
+            "is [{path, value}] with canonical scalar/reference paths or a whole "
+            "sweep object at its parent path; GUI editor.set_field still uses leaf "
+            "sweep controls. On error stop without undoing the successful prefix "
+            "and name the failed path/applied count. Returns "
+            "{valid, removed, added, applied, actual}; 'actual' contains "
+            "normalized sweeps. This does not commit the ModuleLibrary item.",
+            (_str("editor_id"), _json("edits", "Ordered {path, value} edits")),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
         "editor.get",
         "editor:_h_editor_get",
         MethodSpec(
