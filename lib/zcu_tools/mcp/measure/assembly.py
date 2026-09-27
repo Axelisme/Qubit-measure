@@ -5,6 +5,7 @@ from zcu_tools.mcp.core.call_log import wrap_handler
 from zcu_tools.mcp.measure import (
     tools_cfg,
     tools_lifecycle,
+    tools_ml,
     tools_operation,
     tools_rpc,
     tools_screenshot,
@@ -22,6 +23,7 @@ def build_measure_tools(context: MeasureToolContext) -> ToolTable:
         tools_rpc.build_rpc_tools(context),
         tools_tab.build_tab_read_tools(context),
         tools_cfg.build_cfg_tools(context),
+        tools_ml.build_ml_tools(context),
         tools_screenshot.build_screenshot_tools(context),
     ):
         for name, entry in source.items():

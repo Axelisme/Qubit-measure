@@ -202,7 +202,8 @@ def _h_value_read(
 def _h_context_ml_get(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    del params
+    if params.get("name") is not None:
+        raise NotImplementedError("named ModuleLibrary read pending 06 writer")
     ml = adapter.context_control.get_current_ml()
     # Each stored cfg is a pydantic discriminated-union value: modules tag on
     # 'type' (e.g. 'pulse', 'reset/bath'), waveforms on 'style' (e.g. 'gauss').

@@ -105,7 +105,8 @@ from __future__ import annotations
 # v63: cfg reads return complete typed model observations, including locked
 # fields and cached raw/resolved/error state, instead of settable-only values.
 # v64: editor.set_fields adds ordered agent whole-sweep draft edits.
-WIRE_VERSION = 64
+# v65: context.ml_get accepts optional named/kind cfg reads and index descriptions.
+WIRE_VERSION = 65
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -148,4 +149,5 @@ WIRE_VERSION = 64
 # v92: return bounded errors for unencodable replies; disconnect on failed delivery.
 # v95: bound per-client outbound bytes, including the in-flight frame.
 # v96: editor.set_fields delegates to the shared cfg editor aggregate.
-GUI_VERSION = 96
+# v97: project one stored ModuleLibrary entry without an editor session.
+GUI_VERSION = 97

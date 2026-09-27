@@ -123,12 +123,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:_h_context_ml_get",
         MethodSpec(
             5.0,
-            "List ModuleLibrary entries with their discriminator: returns "
-            "{modules: [{name, kind}], waveforms: [{name, style}]}, sorted by name. "
-            "'kind' is the module type tag (e.g. 'pulse', 'reset/bath'); 'style' is the "
-            "waveform style (e.g. 'gauss', 'const'). Read one entry's full cfg with "
-            "rpc_call on editor.new(item_kind, from_name); discard that editor "
-            "when done reading its returned tree.",
+            "List ModuleLibrary modules/waveforms as {modules, waveforms}, each "
+            "entry carrying name, discriminator kind/style and description. "
+            "With name, return {name, kind: 'module'|'waveform', cfg} for the "
+            "named stored cfg without opening an editor. Require kind if the "
+            "same name exists in both collections; unknown names fail with "
+            "available options.",
+            (
+                _str_opt("name", "Entry to read; omit for the index"),
+                _str_opt("kind", "module or waveform when names collide"),
+            ),
         ),
     ),
     method_entry(

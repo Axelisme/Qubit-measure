@@ -23,6 +23,7 @@ from zcu_tools.experiment.v2_gui.registry import register_all
 from zcu_tools.gui.app.main.adapter import ContextReadiness, ExpContext
 from zcu_tools.gui.app.main.controller import Controller
 from zcu_tools.gui.app.main.registry import Registry
+from zcu_tools.gui.app.main.role_catalog import RoleCatalog
 from zcu_tools.gui.app.main.services.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.main.services.remote.dialogs import DialogName
 from zcu_tools.gui.app.main.services.remote.wire_version import WIRE_VERSION
@@ -104,6 +105,7 @@ class Fixture:
         project_root: str | None = None,
         *,
         active_label: str | None = None,
+        role_catalog: RoleCatalog | None = None,
     ) -> None:
         self.state = State(make_ctx())
         self.registry = Registry()
@@ -123,6 +125,7 @@ class Fixture:
             io_manager=io_manager,
             view=self.view,
             bus=self.bus,
+            role_catalog=role_catalog,
             project_root=project_root,
         )
         if opts is None:
