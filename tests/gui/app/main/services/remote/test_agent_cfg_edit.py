@@ -5,6 +5,14 @@ from __future__ import annotations
 import pytest
 from zcu_tools.experiment.v2_gui.adapters.fake import FakeAdapter
 from zcu_tools.gui.app.main.state import Session
+from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CfgSchema,
+    CfgSectionSpec,
+    ReferenceSpec,
+    ScalarSpec,
+    make_default_value,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._helpers import Fixture, call, mcp_client, open_client
@@ -36,6 +44,63 @@ def mcp_tab(live_tab, tmp_path, monkeypatch):
     finally:
         bridge.disconnect()
         sock.close()
+
+
+def test_tab_get_mcp_projects_gui_types_choices_and_locks_without_focusing(
+    qapp, tmp_path, monkeypatch
+):
+    fixture = Fixture()
+    spec = CfgSectionSpec(
+        fields={
+            "axis": CenteredSweepSpec(center_editable=False, locked_center=0.0),
+            "nqz": ScalarSpec("Nyquist zone", int, choices=[1, 2]),
+            "drive": ReferenceSpec(
+                "module",
+                [
+                    CfgSectionSpec(
+                        label="Pulse", fields={"gain": ScalarSpec("Gain", float)}
+                    )
+                ],
+                optional=True,
+            ),
+        }
+    )
+    cfg = CfgSchema(spec, make_default_value(spec))
+    tab_id = "tab-agent-cfg-read"
+    fixture.state.add_tab(
+        tab_id, Session(adapter_name="fake", adapter=FakeAdapter(), cfg_schema=cfg)
+    )
+    fixture.ctrl.open_seeded_cfg_editor(cfg, gc=False, owner_key=tab_id)
+    fixture.start()
+    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
+    bridge, invoke = mcp_client(fixture.service.port, tmp_path)
+    sock = open_client(fixture.service.port)
+    try:
+        invoke("connect", {"port": fixture.service.port})
+        before = call(sock, "tab.list_all")
+        result = invoke("tab_get", {"tab": tab_id, "include": ["cfg"]})
+        children = result["cfg"]["children"]
+        assert children["axis"]["kind"] == "centered_sweep"
+        assert children["axis"]["locked_center"] == 0.0
+        assert children["axis"]["center_editable"] is False
+        assert children["nqz"]["kind"] == "scalar"
+        assert children["nqz"]["type"] == "int"
+        assert children["nqz"]["choices"] == [1, 2]
+        assert children["drive"]["kind"] == "reference"
+        assert children["drive"]["choices"] == ["Pulse"]
+        assert result.get("partial") is None
+        assert (
+            result["cfg"]
+            == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["tree"]
+        )
+        assert (
+            call(sock, "tab.list_all")["result"]["active_tab_id"]
+            == before["result"]["active_tab_id"]
+        )
+    finally:
+        bridge.disconnect()
+        sock.close()
+        fixture.stop()
 
 
 def test_tab_edit_mcp_normalizes_sweep_on_live_gui_draft(mcp_tab):

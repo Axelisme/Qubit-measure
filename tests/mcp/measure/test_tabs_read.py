@@ -266,7 +266,9 @@ def test_tab_get_analyze_params_includes_definitions_and_current_values(
     assert not any(method == "tab.set_active" for method, _ in client.transport.sent)
 
 
-def test_tab_get_marks_only_unfinished_cfg_and_artifact_owners(tmp_path: Path) -> None:
+def test_tab_get_keeps_complete_cfg_and_marks_unfinished_artifact_owner(
+    tmp_path: Path,
+) -> None:
     def reply(method: str, params: dict[str, Any]) -> dict[str, Any]:
         assert params == {"tab_id": "old-tab"}
         if method == "tab.snapshot":
@@ -297,7 +299,6 @@ def test_tab_get_marks_only_unfinished_cfg_and_artifact_owners(tmp_path: Path) -
         "default_path": "data.h5",
     }
     assert result["partial"] == {
-        "cfg": "06-cfg-library owns aggregate type/choice/lock projection",
         "artifacts": "09-save-lifecycle owns status/last_saved_path",
     }
 
